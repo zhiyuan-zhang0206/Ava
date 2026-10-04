@@ -83,6 +83,7 @@ from agent.turn.runloop import (
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
+from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
@@ -103,7 +104,11 @@ from services.agent_host.admission import TurnAdmission
 from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase, recover_database
 from services.agent_host.dispatcher import PendingInboundWake
-from services.agent_host.force_termination import force_termination_outcome, force_termination_stop
+from services.agent_host.force_termination import (
+    force_termination_outcome,
+    force_termination_stop,
+    kill_terminating_agent_shells,
+)
 from services.agent_host.pending_wakes import scan_rows
 from services.agent_host.runtime import (
     HostStats,
@@ -124,34 +129,6 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 # unreachable the release would otherwise wait out the control pool's acquire
 # timeout (30 s). A release that cannot land leaves the leases to expire by TTL.
 _RELEASE_OWNER_TIMEOUT_S = 3.0
-
-
-def kill_terminating_agent_shells(agent_id: int) -> None:
-    """Kill every shell session a terminating agent owns on this machine.
-
-    The at-exit half of `kill_all_shell_sessions`, bound into
-    `apply_hosted_lifecycle` (right before a graceful termination commits) and
-    into the force settlements (`base.agents.incarnation.hosted_force`: the sweep once a force
-    is observed quiescent, live or at boot). Never raises: a failed kill must
-    not turn a termination into a crashed turn, so it is logged at ERROR and
-    the termination still applies.
-    """
-    from ops.cluster_status import kill_agent_shells
-
-    try:
-        killed = kill_agent_shells(agent_id)
-    except Exception:  # logged at ERROR; the termination must still apply
-        logger.opt(exception=True).error(
-            "terminate could not kill every shell session of agent {agent_id}",
-            agent_id=agent_id,
-        )
-        return
-    logger.info(
-        "terminate killed {count} shell session(s) of agent {agent_id}: {killed}",
-        agent_id=agent_id,
-        count=len(killed),
-        killed=killed,
-    )
 
 
 class AgentHost:
@@ -192,6 +169,7 @@ class AgentHost:
         self._in_flight: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
+        self.database_waits = DatabaseWaits()
         self.stats = HostStats()
 
     async def run_turn(self, agent_id: int) -> None:
@@ -750,6 +728,7 @@ class AgentHost:
                     checkpointer=self._checkpointer,
                     graph=self._graph,
                     incarnation=incarnation,
+                    database_waits=self.database_waits,
                 )
             except Exception as exc:
                 ended = await force_termination_outcome(exc, self._control_pool, agent_id)

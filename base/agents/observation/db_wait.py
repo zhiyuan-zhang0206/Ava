@@ -49,65 +49,67 @@ class DatabaseWait:
         self.handoff_at = time.monotonic()
 
 
-_WAITING: dict[int, DatabaseWait] = {}
+class DatabaseWaits:
+    """The live database-wait evidence of one agent host, keyed by agent id."""
 
+    def __init__(self) -> None:
+        self._waiting: dict[int, DatabaseWait] = {}
 
-@contextmanager
-def database_wait(incarnation: RuntimeIncarnation) -> Generator[DatabaseWait]:
-    """Keep evidence only for this exact live recovery task and incarnation."""
-    task = asyncio.current_task()
-    previous = _WAITING.get(incarnation.agent_id)
-    if task is None or (
-        previous is not None
-        and (
-            previous.task is not task
-            or previous.incarnation != incarnation
-            or previous.handoff_at is None
-        )
-    ):
-        raise RuntimeError("database recovery requires one original task per agent")
-    entry = previous or DatabaseWait(incarnation, task)
-    entry.handoff_at = None
-    _WAITING[incarnation.agent_id] = entry
-    if previous is None:
+    @contextmanager
+    def wait(self, incarnation: RuntimeIncarnation) -> Generator[DatabaseWait]:
+        """Keep evidence only for this exact live recovery task and incarnation."""
+        task = asyncio.current_task()
+        previous = self._waiting.get(incarnation.agent_id)
+        if task is None or (
+            previous is not None
+            and (
+                previous.task is not task
+                or previous.incarnation != incarnation
+                or previous.handoff_at is None
+            )
+        ):
+            raise RuntimeError("database recovery requires one original task per agent")
+        entry = previous or DatabaseWait(incarnation, task)
+        entry.handoff_at = None
+        self._waiting[incarnation.agent_id] = entry
+        if previous is None:
 
-        def cleanup(_task: asyncio.Task[Any]) -> None:
-            if _WAITING.get(incarnation.agent_id) is entry:
-                del _WAITING[incarnation.agent_id]
+            def cleanup(_task: asyncio.Task[Any]) -> None:
+                if self._waiting.get(incarnation.agent_id) is entry:
+                    del self._waiting[incarnation.agent_id]
 
-        task.add_done_callback(cleanup)
-    try:
-        yield entry
-    finally:
-        if entry.handoff_at is None and _WAITING.get(incarnation.agent_id) is entry:
-            del _WAITING[incarnation.agent_id]
+            task.add_done_callback(cleanup)
+        try:
+            yield entry
+        finally:
+            if entry.handoff_at is None and self._waiting.get(incarnation.agent_id) is entry:
+                del self._waiting[incarnation.agent_id]
 
-
-def database_wait_snapshot(
-    agent_id: int, *, last_progress: float | None = None
-) -> DatabaseWaitProof | None:
-    """Read without extending evidence; a stuck or ended task loses its grace."""
-    entry = _WAITING.get(agent_id)
-    if (
-        entry is None
-        or entry.task.done()
-        or entry.task.cancelling()
-        or time.monotonic() >= entry.deadline
-    ):
-        return None
-    if (
-        entry.handoff_at is not None
-        and last_progress is not None
-        and last_progress > entry.handoff_at
-    ):
-        del _WAITING[agent_id]
-        return None
-    return {
-        "generation": str(entry.incarnation.generation),
-        "owner": str(entry.incarnation.owner),
-        "observed_at": entry.observed_at,
-        "expires_at": entry.expires_at,
-    }
+    def snapshot(
+        self, agent_id: int, *, last_progress: float | None = None
+    ) -> DatabaseWaitProof | None:
+        """Read without extending evidence; a stuck or ended task loses its grace."""
+        entry = self._waiting.get(agent_id)
+        if (
+            entry is None
+            or entry.task.done()
+            or entry.task.cancelling()
+            or time.monotonic() >= entry.deadline
+        ):
+            return None
+        if (
+            entry.handoff_at is not None
+            and last_progress is not None
+            and last_progress > entry.handoff_at
+        ):
+            del self._waiting[agent_id]
+            return None
+        return {
+            "generation": str(entry.incarnation.generation),
+            "owner": str(entry.incarnation.owner),
+            "observed_at": entry.observed_at,
+            "expires_at": entry.expires_at,
+        }
 
 
 def database_wait_matches(proof: object, generation: UUID | None, owner: UUID | None) -> bool:

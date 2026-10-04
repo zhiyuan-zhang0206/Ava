@@ -34,7 +34,7 @@ def scratch_tmpfs(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     Teardown force-stops anything still running under the root and deletes
     it, so a failing test cannot leak a cluster."""
     root = Path(tempfile.mkdtemp(prefix="ava-pglog-", dir="/tmp"))
-    monkeypatch.setattr(pg_throwaway_base, "_tmpfs_base", str(root))
+    monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
     # Pin the other throwaway roots the same way (the sweep runs over all of them):
     # the disk fallback at this scratch dir and the override cleared, so a host's
     # configured base cannot redirect an instance out from under the teardown.

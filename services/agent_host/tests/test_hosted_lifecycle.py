@@ -28,7 +28,8 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
-from services.agent_host.host import AgentHost, kill_terminating_agent_shells
+from services.agent_host.force_termination import kill_terminating_agent_shells
+from services.agent_host.host import AgentHost
 
 
 def _graph_blocked_until_released(

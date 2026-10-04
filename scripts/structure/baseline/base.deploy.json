@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "base/deploy/git/source_tree_guard.py::import-time-call:base.deploy.git.source_tree_guard._validate_whitelist": 1,
     "base/deploy/maintenance/admission.py::contextvar:_authorized_start": 1
   },
   "files": {

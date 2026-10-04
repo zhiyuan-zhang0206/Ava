@@ -1,6 +1,5 @@
 {
   "patch_targets": {
-    "tests/test_helperproc.py::base.sessions.backend._backend": 2,
     "tests/test_helperproc.py::base.sessions.helper_chain_guard._read_ppid": 5,
     "tests/test_helperproc.py::base.sessions.helperproc._process_for_record": 1,
     "tests/test_helperproc.py::base.sessions.helperproc._process_is_live": 1,

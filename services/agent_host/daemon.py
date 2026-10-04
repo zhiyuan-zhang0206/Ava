@@ -63,6 +63,7 @@ from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from base import paths
 from base.agents.incarnation.exec_request_evidence import disposition_hint
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
+from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -83,7 +84,8 @@ from base.packages.plugins.extensions import ExtensionRegistry
 from base.sessions.helper_chain_guard import parent_chain_intact
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
-from services.agent_host.host import AgentHost, kill_terminating_agent_shells
+from services.agent_host.force_termination import kill_terminating_agent_shells
+from services.agent_host.host import AgentHost
 from services.agent_host.pooled_checkpoint import PooledPostgresSaver
 from services.agent_host.pools import build_control_pool, build_shared_pool
 from services.agent_host.stdout_log import _rotate_stdout_log_forever
@@ -175,15 +177,14 @@ async def _publish_turn_progress_heartbeat(
     bus: EventBus,
     machine: str,
     active_agents: Collection[int],
+    database_waits: DatabaseWaits,
 ) -> None:
     """Best-effort Redis snapshot for the gateway's out-of-process breaker."""
-    from base.agents.observation.db_wait import database_wait_snapshot
-
     snapshots = {}
     for agent_id in sorted(active_agents):
         snapshot = turn_progress_snapshot(agent_id)
         if snapshot is not None:
-            waiting = database_wait_snapshot(agent_id, last_progress=snapshot["last_marks"][-1])
+            waiting = database_waits.snapshot(agent_id, last_progress=snapshot["last_marks"][-1])
             snapshots[str(agent_id)] = {
                 **snapshot,
                 **({"db_wait": waiting} if waiting is not None else {}),
@@ -252,7 +253,9 @@ async def _beat_forever(
                 _log.warning("[agent-host] ownership renewal timed out")
             except Exception:
                 _log.exception("[agent-host] ownership renewal failed — retrying next beat")
-        await _publish_turn_progress_heartbeat(bus, machine, scheduler.active_agents)
+        await _publish_turn_progress_heartbeat(
+            bus, machine, scheduler.active_agents, host.database_waits
+        )
         _report_long_admission_waits(host)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
@@ -519,6 +522,7 @@ async def run() -> None:
                     bus,
                     scheduler,
                     pending_scan=host.pending_inbound_wakes,
+                    database_waits=host.database_waits,
                     stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
                     recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
                     recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,

@@ -34,7 +34,7 @@ def foreground_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Use short socket paths and restrict every sweep to this test's instances."""
     with tempfile.TemporaryDirectory(prefix="ava-fg-", dir="/tmp") as directory:
         root = Path(directory)
-        monkeypatch.setattr(pg_throwaway_base, "_tmpfs_base", str(root))
+        monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
         monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
         monkeypatch.setattr(settings.data_plane, "pg_throwaway_base", "")
         try:
