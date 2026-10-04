@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 import psutil
 
@@ -24,7 +25,7 @@ def _read_ppid(pid: int) -> int | None:
     """The ppid of `pid`, or None when the chain cannot be followed further.
 
     None means the process is gone or not visible — a broken link, never a
-    match. A module seam: tests replace it to feed a synthetic chain.
+    match.
     """
     try:
         return psutil.Process(pid).ppid()
@@ -32,7 +33,7 @@ def _read_ppid(pid: int) -> int | None:
         return None
 
 
-def parent_chain_intact() -> bool:
+def parent_chain_intact(read_ppid: Callable[[int], int | None] = _read_ppid) -> bool:
     """Whether this process is still anchored to the helper that spawned it.
 
     Processes not spawned by the helper carry no marker and are left alone.
@@ -42,6 +43,7 @@ def parent_chain_intact() -> bool:
     helper spawned, and every descendant of it (the root supervisor, a
     child daemon) — within `_MAX_ANCESTOR_HOPS` ppid hops; a link that
     cannot be read (an intermediate process is gone) breaks the chain.
+    `read_ppid` is the link reader; tests pass one that feeds a synthetic chain.
     """
     raw_helper_pid = inherited_process_env().get(_HELPER_PID_ENV)
     if raw_helper_pid is None:
@@ -52,13 +54,13 @@ def parent_chain_intact() -> bool:
         return False
     if helper_pid <= 0:
         return False
-    return _helper_on_ancestor_chain(helper_pid)
+    return _helper_on_ancestor_chain(helper_pid, read_ppid)
 
 
-def _helper_on_ancestor_chain(helper_pid: int) -> bool:
+def _helper_on_ancestor_chain(helper_pid: int, read_ppid: Callable[[int], int | None]) -> bool:
     pid = os.getpid()
     for _ in range(_MAX_ANCESTOR_HOPS):
-        ppid = _read_ppid(pid)
+        ppid = read_ppid(pid)
         if ppid is None:
             return False
         if ppid == helper_pid:

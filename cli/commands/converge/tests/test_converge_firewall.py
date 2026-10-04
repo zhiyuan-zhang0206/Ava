@@ -5,14 +5,17 @@ What is asserted here is the step's two jobs on top of it — picking the right 
 of serving binaries per capability, and reporting rather than raising.
 
 **Nothing here mutates a real firewall.** The step attempts an unprivileged
-mutation first and falls back to `sudo -n`, but every test stubs the mutation seam
-(`base.host.macos_firewall._sudo_mutate` / `run_bounded`), so what is asserted is
-output and decision-making, never ALF state.
+mutation first and falls back to `sudo -n`, but every test stubs the process runner the
+mutation goes through (`base.host.macos_firewall.run_bounded`), so what is asserted
+is output and decision-making, never ALF state.
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -115,7 +118,7 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
     _stub_audit(monkeypatch, FirewallAudit(verdict, "detail"))
     _stub_rules(monkeypatch, {})  # host-independent: CI has no socketfilterfw
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())
-    _stub_sudo_mutate(monkeypatch, False)
+    _stub_mutation_result(monkeypatch, False)
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
     assert capsys.readouterr().err == ""
 
@@ -124,8 +127,24 @@ def _stub_rules(monkeypatch: pytest.MonkeyPatch, rules: dict[str, bool]) -> None
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: rules)
 
 
-def _stub_sudo_mutate(monkeypatch: pytest.MonkeyPatch, ok: bool) -> None:
-    monkeypatch.setattr(fw, "_sudo_mutate", lambda _verb, _path: ok)  # pyright: ignore[reportUnknownArgumentType]
+def _stub_mutation(monkeypatch: pytest.MonkeyPatch, mutate: Callable[[str, str], bool]) -> None:
+    """Route every `socketfilterfw <verb> <path>` mutation (direct or via `sudo -n`) to `mutate`."""
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0 if mutate(command[-2], command[-1]) else 1)
+
+    monkeypatch.setattr(fw, "run_bounded", run)
+
+
+def _stub_mutation_result(monkeypatch: pytest.MonkeyPatch, ok: bool) -> None:
+    _stub_mutation(monkeypatch, lambda _verb, _path: ok)
+
+
+def _skip_verify_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(time, "sleep", no_sleep)
 
 
 def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
@@ -187,8 +206,8 @@ def test_grant_installed_repairs_silently(
         persisted = True  # the fake daemon accepts the mutation
         return True
 
-    monkeypatch.setattr(fw, "_sudo_mutate", mutate)
-    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
+    _stub_mutation(monkeypatch, mutate)
+    _skip_verify_waits(monkeypatch)
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, frozenset({"gateway"})))
     err = capsys.readouterr().err
@@ -208,7 +227,7 @@ def test_stale_rules_are_pruned_when_grant_installed(
         "stale_manifest_rules",
         lambda _rules: (Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),),  # pyright: ignore[reportUnknownArgumentType]
     )
-    _stub_sudo_mutate(monkeypatch, True)
+    _stub_mutation_result(monkeypatch, True)
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
     err = capsys.readouterr().err
     assert "removed 1 stale allow rules" in err
@@ -237,7 +256,7 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: dict(state))
     monkeypatch.setattr(fw, "manifest_paths", lambda: (missing,))
     monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: (stale,))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
+    _skip_verify_waits(monkeypatch)
     order: list[tuple[str, str]] = []
 
     def mutate(verb: str, path: str) -> bool:
@@ -250,7 +269,7 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
             state[path] = True
         return True
 
-    monkeypatch.setattr(fw, "_sudo_mutate", mutate)
+    _stub_mutation(monkeypatch, mutate)
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
     assert order[0] == ("--remove", str(stale))  # prune frees the identifier first
     err = capsys.readouterr().err
@@ -281,7 +300,7 @@ def test_unconfigured_unit_audits_the_interpreter(
     )
     _stub_rules(monkeypatch, {})
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())
-    _stub_sudo_mutate(monkeypatch, False)
+    _stub_mutation_result(monkeypatch, False)
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, None))
     assert seen == [frozenset()]
 
