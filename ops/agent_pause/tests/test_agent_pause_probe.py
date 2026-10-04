@@ -159,6 +159,37 @@ def test_host_running_stays_loud_when_the_process_scan_is_unreadable(
     assert len(calls) == 2
 
 
+def test_host_running_retries_the_scan_once_past_a_leaked_system_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """psutil 7.2.2 surfaced the same mid-iteration read failure as a raw
+    SystemError (the 2026-09-18 flake's sibling); the retry covers it and the
+    real answer still lands (task #4964)."""
+    _stub_backend(monkeypatch, has_session=False)
+    _pin_pidfiles(monkeypatch, tmp_path)
+    monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
+    calls: list[int] = []
+
+    class _UnrecordedHost:
+        def __init__(self) -> None:
+            self.info = {"pid": 4242, "cmdline": ["python", "-m", "services.agent_host.daemon"]}
+
+        def environ(self) -> dict[str, str]:
+            return {"AVA_HOME": str(tmp_path)}
+
+    def process_iter(attrs: list[str]) -> Iterator[object]:
+        del attrs
+        calls.append(1)
+        if len(calls) == 1:
+            raise SystemError("psutil: cmdline read failed mid-iteration")
+        return iter([_UnrecordedHost()])
+
+    monkeypatch.setattr("psutil.process_iter", process_iter)
+    with pytest.raises(RuntimeError, match="still running without its service record"):
+        probe.host_running()
+    assert len(calls) == 2
+
+
 # ─── ops_quiescent: the mode-aware "is ops running" gate (task #3370) ──────────
 
 

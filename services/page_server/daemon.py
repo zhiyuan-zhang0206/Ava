@@ -284,12 +284,17 @@ def _probe_port(host: str, port: int) -> str | None:
 def _page_server_occupants() -> dict[int, tuple[int, str | None]]:
     """Map each local page-server port to its process and cluster home."""
     found: dict[int, tuple[int, str | None]] = {}
-    for proc in psutil.process_iter(["pid", "cmdline"]):
+    for proc in psutil.process_iter():
         try:
-            raw_cmdline = proc.info.get("cmdline")
+            raw_cmdline = proc.cmdline()
             cmdline = [str(part) for part in raw_cmdline] if raw_cmdline else []
-            pid = int(proc.info["pid"])
-        except (psutil.Error, OSError, TypeError, ValueError):
+            pid = int(proc.pid)
+        except (psutil.Error, OSError, SystemError, TypeError, ValueError):
+            # One unreadable process must not end the scan: psutil 7.2.2 on
+            # macOS raised SystemError reading some cmdlines, and as an attrs
+            # read inside process_iter itself it escaped this handler and
+            # aborted the whole poll round — that round's stale cleanup and
+            # relaunch were skipped (task #4964).
             continue
         rendered = " ".join(cmdline)
         if _PAGE_SERVER_MODULE not in rendered:

@@ -586,23 +586,24 @@ def _reap_stale_daemons(project_root: Path | None) -> None:
         str(project_root) if project_root is not None else str(Path(__file__).resolve().parents[2])
     )
     reaped = 0
-    for proc in psutil.process_iter(["pid", "cmdline"]):
+    for proc in psutil.process_iter():
         try:
             if proc.pid == me:
                 continue
-            cmdline = proc.info["cmdline"] or []
+            cmdline = proc.cmdline() or []
             if not _is_daemon_cmdline(cmdline):
                 continue
-            try:
-                cwd = proc.cwd()
-                env_home = proc.environ().get("AVA_HOME", "")
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
+            cwd = proc.cwd()
+            env_home = proc.environ().get("AVA_HOME", "")
             if not ((root and cwd == root) or env_home == home):
                 continue
             proc.kill()
             reaped += 1
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except (psutil.Error, OSError, SystemError):
+            # One unreadable process skips, never the reap: psutil 7.2.2 on
+            # macOS raised SystemError reading some cmdlines, and as an attrs
+            # read inside process_iter it aborted the whole pass — ghosts of
+            # earlier respawn storms then survived (task #4964).
             continue
     if reaped:
         logger.warning(

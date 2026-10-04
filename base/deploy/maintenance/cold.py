@@ -6,7 +6,7 @@ must agree before cold preparation can retain that idle intent.
 """
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import psutil
 import psycopg
@@ -83,8 +83,15 @@ def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> 
 
 def _require_no_consumer_process() -> None:
     home = ava_home().resolve()
-    for process in psutil.process_iter(["pid", "cmdline"]):
-        argv = cast(list[str], process.info["cmdline"] or [])
+    for process in psutil.process_iter():
+        try:
+            argv = process.cmdline() or []
+        except (psutil.Error, OSError, SystemError):
+            # An argv this scan cannot read names no consumer: skip the process
+            # the way psutil's ad_value=None already skipped AccessDenied, and
+            # keep scanning — a read failure must not abort the check (task
+            # #4964).
+            continue
         if not any(
             argv[i] == "-m" and argv[i + 1] in _CONSUMER_MODULES for i in range(len(argv) - 1)
         ):

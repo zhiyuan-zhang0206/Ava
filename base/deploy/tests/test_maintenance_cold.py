@@ -1,5 +1,6 @@
 """Cold hosted metadata is preserved only behind an absent-host proof."""
 
+from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
@@ -93,3 +94,44 @@ def test_expired_host_lease_does_not_prove_normal_shutdown(
             acquired_at=WHEN,
             host_absent=True,
         )
+
+
+def test_consumer_scan_skips_a_process_whose_cmdline_read_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cmdline read that raises (psutil 7.2.2 on macOS raised SystemError
+    mid-iteration) skips that process, not the check: a readable consumer
+    still refuses cold preparation (task #4964)."""
+    from base.deploy.maintenance import cold
+
+    class _ReadFails:
+        """Unreadable through both the attrs shape and the direct read, so a
+        regression to `process_iter(attrs)` stays caught."""
+
+        pid = 424242
+
+        @property
+        def info(self) -> dict[str, object]:
+            raise SystemError("psutil: cmdline read failed mid-iteration")
+
+        def cmdline(self) -> list[str]:
+            raise SystemError("psutil: cmdline read failed mid-iteration")
+
+    class _Consumer:
+        pid = 5005
+
+        def cmdline(self) -> list[str]:
+            return ["python", "-m", "services.agent_host.daemon"]
+
+        def environ(self) -> dict[str, str]:
+            return {}
+
+    procs: list[object] = [_ReadFails(), _Consumer()]
+
+    def process_iter(*args: object, **kwargs: object) -> Iterator[object]:
+        del args, kwargs
+        return iter(procs)
+
+    monkeypatch.setattr(cold.psutil, "process_iter", process_iter)
+    with pytest.raises(RuntimeError, match="native consumer still exists during cold prepare"):
+        cold._require_no_consumer_process()
