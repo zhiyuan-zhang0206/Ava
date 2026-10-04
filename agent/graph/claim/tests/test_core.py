@@ -17,6 +17,7 @@ import pytest
 import ava
 from base.config import set_field, settings
 from tests.fixtures.model_catalog import AddModels
+from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.units import spawn_agent
 
 
@@ -78,7 +79,7 @@ class TestTerminate:
         """terminate self-inserts a kind='terminate' source='self' into its own agent.
         source='self' lets the claim dispatch produce the "by yourself" marker (distinguishing from external
         user / agent:N triggered "by {source}", precisely expressing "suicide" semantics)."""
-        ava.agent_identity._agent_id = spawn_agent()  # self identity
+        pin_agent(spawn_agent())  # self identity
         with pytest.raises(ava.self.AgentTermination):
             ava.self.terminate()
         assert _inbound_rows(db_conn, ava.self.AGENT_ID) == [("", "terminate", "self")]
@@ -90,7 +91,7 @@ class TestRestart:
     ) -> None:
         """restart self-inserts a kind='restart' source='self' into its own agent.
         The restarter daemon will handle the respawn (this test only verifies the SDK-side write is correct)."""
-        ava.agent_identity._agent_id = spawn_agent()  # self identity
+        pin_agent(spawn_agent())  # self identity
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart()
         assert _inbound_rows(db_conn, ava.self.AGENT_ID) == [("", "restart", "self")]
@@ -103,7 +104,7 @@ class TestRestart:
         Validation + INSERT path exercised, validate_config_overlay passes then payload serialized
         into inbound_messages.payload.
         """
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart(config_overlay={"auto_compact_fraction": 0.7})
         with db_conn.cursor() as cur:
@@ -129,7 +130,7 @@ class TestRestart:
         diff (not the merged result) so the restart_completed marker shows the
         right diff text.
         """
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         # Pre-seed an existing overlay key directly in the column.
         with db_conn.cursor() as cur:
             cur.execute(
@@ -166,7 +167,7 @@ class TestRestart:
         self, db_conn: psycopg.Connection, monkeypatch
     ) -> None:
         """Non-per_agent field → InvalidConfigOverlay; does **not** deliver inbound, process does not exit."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with pytest.raises(ava.self.InvalidConfigOverlay, match=r"typo|per_agent"):  # type: ignore[attr-defined]
             ava.self.restart(config_overlay={"definitely_not_a_field": 1})
         # No inbound delivered (process will not exit)
@@ -183,7 +184,7 @@ class TestRestart:
         self, db_conn: psycopg.Connection, monkeypatch
     ) -> None:
         """A model typo is rejected before either persistent restart side effect."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
@@ -232,7 +233,7 @@ class TestRestart:
                 )
             }
         )
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart(config_overlay={"llm_model": model})
         with db_conn.cursor() as cur:
@@ -260,7 +261,7 @@ class TestPauseHeartbeat:
     ) -> None:
         """pause_heartbeat updates the window, records the pause trail, and
         emits the heartbeat_paused event used by the inspector's Last Pause."""
-        ava.agent_identity._agent_id = spawn_agent()  # self identity
+        pin_agent(spawn_agent())  # self identity
         ava.self.pause_heartbeat(1800)
         from base import telemetry
 
@@ -313,7 +314,7 @@ class TestPauseHeartbeat:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, bad: float
     ) -> None:
         """Invalid duration must not write or emit a heartbeat pause event."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         from base import telemetry
 
         def _unexpected_emit(_category: str, event_name: str, **_kwargs: object) -> None:
@@ -341,7 +342,7 @@ class TestPauseHeartbeat:
         original_limit = settings.agent.heartbeat_pause_max_seconds
         set_field("heartbeat_pause_max_seconds", 3600.0)
         try:
-            ava.agent_identity._agent_id = spawn_agent()
+            pin_agent(spawn_agent())
             ava.self.pause_heartbeat(3600)
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -362,7 +363,7 @@ class TestPauseHeartbeat:
         original_limit = settings.agent.heartbeat_pause_max_seconds
         set_field("heartbeat_pause_max_seconds", 172800.0)
         try:
-            ava.agent_identity._agent_id = spawn_agent()
+            pin_agent(spawn_agent())
             ava.self.pause_heartbeat(172800)
         finally:
             set_field("heartbeat_pause_max_seconds", original_limit)

@@ -34,6 +34,7 @@ from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.daemon import _cancel_turn_route
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
+from tests.fixtures.pin_agent import exec_context as ctx_of
 
 
 def _allow_model_config(
@@ -204,7 +205,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
                     if work_kind == "reader"
                     else f"while not Path({str(release_file)!r}).exists(): time.sleep(0.01)\n"
                 ),
-                agent_id,
+                ctx_of(agent_id),
                 asyncio.Event(),
                 20,
                 exec_dir=tmp_path,
@@ -737,8 +738,9 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     monkeypatch.setattr(ExecProcessDomain, "close_confirmed", failed_close)
     scope = HostedTurnResources()
     with bind_hosted_resources(scope):
+        ctx = ctx_of(agent_id)
         outcome, _ = await _run_in_subprocess(
-            database, "print('resource-proof')", agent_id, asyncio.Event(), 10, exec_dir=tmp_path
+            database, "print('resource-proof')", ctx, asyncio.Event(), 10, exec_dir=tmp_path
         )
         assert isinstance(outcome, _ExecCrashed)
         assert "teardown failure" in outcome.output

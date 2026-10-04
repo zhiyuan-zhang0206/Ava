@@ -12,6 +12,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 import ava
 from base.agents.lifecycle import SystemHalt
 from base.events.live.tests.fakes import patch_sync_redis
+from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.units import spawn_agent
 
 
@@ -31,7 +32,7 @@ def test_compact_survives_publish_failure(
 ) -> None:
     """A throwing redis on the CompactRequest publish must not stop compact from
     committing its compact_summary inbound and raising SystemHalt."""
-    ava.agent_identity._agent_id = spawn_agent()  # self identity
+    pin_agent(spawn_agent())  # self identity
 
     # Only the CompactRequest publish (EventBus.publish_best_effort_sync → sync_redis) is
     # broken; the self-inbound wake uses ava.REDIS directly and is already
@@ -54,7 +55,7 @@ def test_compact_records_its_audit_fact_with_the_summary_inbound(
     db_conn: psycopg.Connection,
 ) -> None:
     agent_id = spawn_agent()
-    ava.agent_identity._agent_id = agent_id
+    pin_agent(agent_id)
 
     with pytest.raises(SystemHalt):
         ava.self.compact("Requests: (none)\nProgress: done\n")
@@ -71,7 +72,7 @@ def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent_id = spawn_agent()
-    ava.agent_identity._agent_id = agent_id
+    pin_agent(agent_id)
 
     def refuse(_conn: object, _event: object) -> None:
         raise RuntimeError("audit write failed")

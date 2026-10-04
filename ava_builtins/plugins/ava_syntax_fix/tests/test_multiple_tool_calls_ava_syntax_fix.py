@@ -15,6 +15,7 @@ from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -60,6 +61,7 @@ def _runtime() -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )
 

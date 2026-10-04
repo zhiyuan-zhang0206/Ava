@@ -35,6 +35,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from tests.fixtures.pin_agent import exec_context
 
 # Fixed test identity — the child never dials a real DB/Redis here.
 _AGENT_ID = 424242
@@ -89,7 +90,13 @@ def _spawn(
     if corrupt_request:
         request_path.write_text("corrupt request body", encoding="utf-8")
     else:
-        write_request(request_path, code=code, agent_id=_AGENT_ID, timeout_s=60.0, state=None)
+        write_request(
+            request_path,
+            code=code,
+            context=exec_context(_AGENT_ID).describe(),
+            timeout_s=60.0,
+            state=None,
+        )
     env = os.environ.copy()
     env.update(
         {

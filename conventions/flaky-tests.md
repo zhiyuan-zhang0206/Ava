@@ -283,7 +283,7 @@ candidate generation, and the PNG-only mutation rule.
 module attributes, cwd and signal handlers. Undo a change through the tool that
 records it (`monkeypatch`, `patch.dict`, a `finally`). The agent identity is the
 exception: a root fixture (`identity_restore`) puts it back after every test, so
-`ava.agent_identity._agent_id = ...` needs no undo.
+`pin_agent(...)` needs no undo.
 
 **Signature.** A test fails only in some shard compositions and always in the
 worker of an earlier test; it reads a key or attribute it never set;

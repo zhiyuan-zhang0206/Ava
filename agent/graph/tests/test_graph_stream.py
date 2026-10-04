@@ -27,6 +27,7 @@ from agent.graph import LlmLedger, exec_node, llm_node
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
@@ -55,6 +56,7 @@ def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        identity=AgentIdentity(agent_id=7, owns_loop=True),
     )
     return Runtime(context=ctx)
 
@@ -139,6 +141,7 @@ async def test_llm_node_stamps_last_active_at_with_text(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        identity=AgentIdentity(agent_id=7, owns_loop=True),
     )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(
@@ -184,6 +187,7 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         agent=AgentSlices.resolve(),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        identity=AgentIdentity(agent_id=7, owns_loop=True),
     )
     state = AgentState(messages=[HumanMessage(content="run it")], halted=False)
     await llm_node(

@@ -173,9 +173,9 @@ def _validate_spawn_args(
         raise ValueError(
             f"spawner has agent: prefix but the id part is not a valid agent id: "
             f"{spawner!r}. This is often caused by an un-bootstrapped process "
-            f"(ava.agent_identity.establish never called) — the process's own agent id "
-            f"was None, producing 'agent:None'. Fix the caller to establish "
-            f"identity before spawning."
+            f"(no AvaContext carrying an agent id was bound) — the process's own agent id "
+            f"was None, producing 'agent:None'. Fix the caller to bind "
+            f"an identity before spawning."
         )
 
 

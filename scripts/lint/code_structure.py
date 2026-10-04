@@ -203,6 +203,10 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # signatures for static checkers without putting them back on the import
         # path (task #3585).
         "agent/graph/__init__.py",
+        # The exec child builds an `AvaContext` from its request envelope: the handle types
+        # (psycopg pool, redis bus, chat model) are annotation-only fields it never holds, and
+        # importing them would put the whole DB / LM stack on its boot path.
+        "base/agents/context/__init__.py",
         # LM provider registration surface: the chat-model stack is a heavy
         # import on the exec-child boot path, which never uses the type
         # (annotation-only references; task #3633).

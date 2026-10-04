@@ -1,17 +1,19 @@
 """Agent identity for host turns, exec children and launched scripts.
 
-The agent host binds a turn contextvar (`base/native_process/turn_identity.py`) around
-execution. It never establishes one process-wide agent id for its many agents.
-A disposable exec child or launched script may call `establish` once, and
-shell-launched children can derive the same identity from AVA_AGENT_ID.
-Reads resolve an explicitly borrowed external identity first (with lease
-validation), then the turn contextvar, then the process slot or child env.
+The identity of a process is the `AgentIdentity` of the `AvaContext` it is bound to
+(`ava.sdk_surface.process_context`); this module reads it and holds no state. The agent host binds a turn contextvar
+(`base/native_process/turn_identity.py`) around execution and never establishes one process-wide
+agent id for its many agents. The exec child binds a context built from its request envelope, a
+script an agent launched derives one from AVA_AGENT_ID, and an external controller binds one
+carrying its lease.
+Reads resolve an explicitly borrowed external identity first (with lease validation), then the
+turn contextvar, then the bound context.
 
 The canonical identity is framework-internal; `ava.self.AGENT_ID` re-exports
 it. Disabling the agent-facing `self` namespace does not remove identity from
 framework callers. `owns_loop` authorizes lifecycle self-actions in a turn or
-its exec child; background scripts establish with owns_loop=False so they
-cannot compact or restart the agent whose identity they carry.
+its exec child; background scripts carry it False so they cannot compact or restart the agent
+whose identity they carry.
 
 This module carries no agent-facing help surface. Cluster configuration and
 credentials remain separate from the agent identity.
@@ -19,88 +21,21 @@ credentials remain separate from the agent identity.
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable
-
+from ava.sdk_surface import process_context
+from base.agents.context.identity import AgentIdentity
 from base.native_process.turn_identity import current_turn_agent_id
 
-# This process's agent id — the single framework-internal source of truth, set
-# once by `establish`. `None` (not `0`) is the pre-bootstrap placeholder: a real
-# agent id is always >= 1 (auto-assigned, 1-based), so `0` sits inside the
-# legal-looking id space and a DB-direct write that read it before bootstrap
-# would land a positive-looking `agent_id=0` ghost row; `None` is outside the id
-# space, so the same premature write hits a NOT NULL `agent_id` column and raises
-# at the source instead.
-_agent_id: int | None = None
 
-# Mutable per-process flag (lowercase on purpose — runtime state, not a
-# constant): True for the host/exec execution path. Default True so host
-# turns and the test harness —
-# neither of which goes through a launched-script bootstrap — keep the unguarded
-# behavior; a launched script flips it False via `establish(..., owns_loop=False)`,
-# the one context where the lifecycle self-actions must refuse.
-_owns_loop: bool = True
-
-# The provenance principal this process acts as — the string stamped as
-# `spawner` / message `source` on work it originates (e.g. `schedule:7`). `None`
-# means "no non-agent principal set": provenance then derives from the agent id
-# (`agent:<id>`). A non-agent process (a gateway-hosted schedule) that has no
-# agent id calls `establish_actor` to set this so `ava.agents.*` can attribute
-# its spawns/messages without a malformed `agent:None`.
-_actor: str | None = None
-
-# An explicitly attached external controller revalidates its borrowed identity
-# at every SDK read. Unset in native runtimes and ordinary launched children.
-_external_identity: Callable[[], int] | None = None
-# Observational provenance only; never grants authority or replaces lease validation.
-_external_agent_id: int | None = None
+def _bound() -> AgentIdentity | None:
+    """The identity of the bound context, or None when no context is bound."""
+    context = process_context.peek()
+    return None if context is None else context.identity
 
 
 def validate_external_identity() -> int | None:
     """Recheck an attached lease; no-op for the existing native runtime paths."""
-    return _external_identity() if _external_identity is not None else None
-
-
-def establish(agent_id: int, *, owns_loop: bool) -> None:
-    """Bind this process's identity. Sets the framework-internal agent id (read
-    via `agent_id()`, re-exported to the agent as `ava.self.AGENT_ID`) and
-    records whether this process owns the agent turn loop. Called once at
-    process startup."""
-    global _agent_id, _owns_loop  # noqa: PLW0603 — single per-process bootstrap slot
-    _agent_id = agent_id
-    _owns_loop = owns_loop
-
-
-def establish_actor(actor: str) -> None:
-    """Bind a non-agent provenance principal for this process (e.g.
-    `"schedule:7"`). Sets the actor string that `require_actor` / `default_actor`
-    return, so `ava.agents.spawn / send_message / resurrect` attribute this
-    process's work to a named principal that is not an agent. Called once at
-    startup by a gateway-hosted schedule's runner, which has no agent id."""
-    global _actor  # noqa: PLW0603 — single per-process bootstrap slot
-    _actor = actor
-
-
-def _try_establish_from_env() -> None:
-    """If no agent identity is established, try to read ``AVA_AGENT_ID`` from
-    the environment and establish one with ``owns_loop=False``.
-
-    The session env allowlist deliberately does NOT carry ``AVA_AGENT_ID``
-    (agent-scope, Task #856 / audit F-s3-4) — so this path fires only in a
-    process whose launcher set the var some other way: a watcher / schedule
-    child, whose generated bootstrap inlines it (`ava.watcher._build_boot`),
-    or a test harness. A bare ``python x.py`` in a persistent shell session
-    has no identity and reports it as such. ``owns_loop=False`` means
-    lifecycle self-actions (``ava.self.compact/terminate/restart``)
-    are refused — only the real agent process owns the turn loop.
-    """
-    global _agent_id, _owns_loop  # noqa: PLW0603
-    if _agent_id is not None:
-        return
-    env_id = os.environ.get("AVA_AGENT_ID")
-    if env_id is not None:
-        _agent_id = int(env_id)
-        _owns_loop = False
+    identity = _bound()
+    return identity.lease.validate() if identity is not None and identity.lease else None
 
 
 def is_launched_child() -> bool:
@@ -108,9 +43,9 @@ def is_launched_child() -> bool:
     schedule child that carries the agent's `AVA_AGENT_ID` in its environment
     but does not own the turn loop. False in the agent process itself
     (`owns_loop` is True) and in gateway / cli / ad-hoc processes (no
-    `AVA_AGENT_ID`, so no identity establishes).
+    `AVA_AGENT_ID`, so no context binds).
 
-    Establishes from the environment first (so a fresh child that has not
+    Binds the context from the environment first (so a fresh child that has not
     touched `agent_identity` yet reports correctly), then reports the launched-child
     signal. This gates the lazy plugin-namespace load in `ava.__getattr__`: only
     such a child self-loads plugins on first unknown-attribute access — so a bare
@@ -120,18 +55,17 @@ def is_launched_child() -> bool:
     context is the hosted runner itself — never a launched child."""
     if current_turn_agent_id() is not None:
         return False
-    _try_establish_from_env()
-    return _agent_id is not None and not _owns_loop
+    identity = _bound()
+    return identity is not None and identity.agent_id is not None and not identity.owns_loop
 
 
 def agent_id() -> int | None:
     """Resolve the agent id used to attribute this process's work.
 
     A validated borrowed identity takes precedence, followed by the hosted turn
-    context, the process identity bound by `establish`, and `AVA_AGENT_ID` from
-    the environment. An invalid borrowed lease raises instead of falling back.
-    Returns `None` when no source provides an identity; callers that tolerate
-    this pre-bootstrap state must check for it explicitly.
+    context and the bound context's identity. An invalid borrowed lease raises
+    instead of falling back. Returns `None` when no source provides an identity;
+    callers that tolerate this pre-bootstrap state must check for it explicitly.
     """
     external = validate_external_identity()
     if external is not None:
@@ -139,44 +73,38 @@ def agent_id() -> int | None:
     turn = current_turn_agent_id()
     if turn is not None:
         return turn
-    _try_establish_from_env()
-    return _agent_id
+    identity = _bound()
+    return None if identity is None else identity.agent_id
 
 
 def require_agent_id() -> int:
-    """Return this process's agent id, or raise if never established.
+    """Return this process's agent id, or raise if it has none.
 
     Use this at every call site that stamps the agent id into durable data
     (spawner / message source / etc.) — it fails fast instead of letting
     ``None`` leak into the database as the malformed string ``"agent:None"``.
 
     Raises:
-        RuntimeError: ``establish`` was never called and ``AVA_AGENT_ID`` is
-        not set in the environment.
+        RuntimeError: no context carrying an agent id is bound and
+        ``AVA_AGENT_ID`` is not set in the environment.
     """
-    external = validate_external_identity()
-    if external is not None:
-        return external
-    turn = current_turn_agent_id()
-    if turn is not None:
-        return turn
-    _try_establish_from_env()
-    if _agent_id is None:
+    resolved = agent_id()
+    if resolved is None:
         raise RuntimeError(
             "this process has no established agent identity — "
             "ava.agents.spawn / send_message / get_last_message require "
             "a bootstrapped agent process, or AVA_AGENT_ID in the environment "
             "of a shell session launched by one"
         )
-    return _agent_id
+    return resolved
 
 
 def require_actor() -> str:
     """Return this process's asserted provenance, validating a borrowed lease first.
 
     A borrowed `agent:<id>` identity takes precedence, followed by a hosted turn,
-    an explicit external tool profile, a non-agent actor from `establish_actor`,
-    and the process or environment agent identity. An invalid borrowed lease
+    an explicit external tool profile, a non-agent actor of the bound context,
+    and its agent identity. An invalid borrowed lease
     raises instead of falling back. These provenance channels do not replace
     the gateway's credential checks.
 
@@ -199,16 +127,16 @@ def require_actor() -> str:
     external = external_caller()
     if external is not None:
         return external.source()
-    _try_establish_from_env()
-    if _actor is not None:
-        return _actor
-    if _agent_id is None:
+    identity = _bound()
+    if identity is not None and identity.actor is not None:
+        return identity.actor
+    if identity is None or identity.agent_id is None:
         raise RuntimeError(
             "this process has no established actor or agent identity — "
             "ava.agents.spawn / send_message / resurrect need one "
-            "(a bootstrapped agent process, or establish_actor for a system principal)"
+            "(a bootstrapped agent process, or a context with an actor for a system principal)"
         )
-    return f"agent:{_agent_id}"
+    return f"agent:{identity.agent_id}"
 
 
 def default_actor() -> str:
@@ -229,10 +157,10 @@ def default_actor() -> str:
     external = external_caller()
     if external is not None:
         return external.source()
-    _try_establish_from_env()
-    if _actor is not None:
-        return _actor
-    return f"agent:{_agent_id}"
+    identity = _bound()
+    if identity is not None and identity.actor is not None:
+        return identity.actor
+    return f"agent:{None if identity is None else identity.agent_id}"
 
 
 def assert_self_action(action: str) -> None:
@@ -251,12 +179,13 @@ def assert_self_action(action: str) -> None:
         # A hosted turn context: the runner drives this agent's loop, so the
         # turn is the loop owner by construction.
         return
-    if not _owns_loop:
+    identity = _bound()
+    if identity is not None and not identity.owns_loop:
         raise RuntimeError(
             f"ava.self.{action}() can only be called from inside an agent process, "
             f"not from a background script launched by one"
         )
-    if _agent_id is None:
+    if identity is None or identity.agent_id is None:
         raise RuntimeError(
             f"ava.self.{action}() needs an established agent identity; this process "
             f"never ran the agent bootstrap (agent id is unset)"

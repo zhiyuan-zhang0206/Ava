@@ -63,3 +63,5 @@ bridge was kept; what was loose was who could touch it.
 - Plugins outside the repo: the hooks of `claude_usage`, `codex_usage` and `deepseek_balance`
   (macmini, ubuntu, wsl) import no `ava` and use neither the handle nor `ava.state`; `ava_grok` has
   no hook. None needs migrating.
+
+- Forward: `decisions/2026-10-04-ava-state-and-context.md` completes the split: `ava.state` stays the graph state's bridge for what persists, and the non-persistent dependencies and identity of an exec child become `ava.context`, the Runtime context's projection.

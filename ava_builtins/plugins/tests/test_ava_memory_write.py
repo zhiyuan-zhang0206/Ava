@@ -17,6 +17,7 @@ import ava
 from agent.state import build_agent_state
 from ava.sdk_surface import install
 from base.packages.plugins.extensions import ExtensionRegistry
+from tests.fixtures.pin_agent import pin_agent
 
 
 @pytest.fixture
@@ -24,7 +25,6 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[A
     """Install the ava_memory SDK surface against isolated stores."""
     import base.cluster.machine
     import base.paths
-    from ava import agent_identity
 
     workspace = tmp_path / "workspace"
     pool = tmp_path / "pool"
@@ -45,8 +45,7 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[A
     monkeypatch.setattr(base.paths, "workspace_dir", isolated_workspace)
     monkeypatch.setattr(base.paths, "memory_dir", isolated_pool)
     monkeypatch.setattr(base.cluster.machine, "machine_name", isolated_machine_name)
-    monkeypatch.setattr(agent_identity, "_agent_id", 17)
-
+    pin_agent(17)
     from ava_builtins.plugins.ava_memory import plugin
 
     install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
@@ -528,7 +527,6 @@ def test_plugin_loads_and_writes_without_fcntl(
 
     import base.cluster.machine
     import base.paths
-    from ava import agent_identity
 
     workspace = tmp_path / "workspace"
     pool = tmp_path / "pool"
@@ -546,8 +544,7 @@ def test_plugin_loads_and_writes_without_fcntl(
     monkeypatch.setattr(base.paths, "workspace_dir", isolated_workspace)
     monkeypatch.setattr(base.paths, "memory_dir", isolated_pool)
     monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: "memory-host")
-    monkeypatch.setattr(agent_identity, "_agent_id", 17)
-
+    pin_agent(17)
     # The guard is import-time: re-import the plugin face and its sdk while `import fcntl` raises.
     for name in list(sys.modules):
         if name.startswith("ava_builtins.plugins.ava_memory"):

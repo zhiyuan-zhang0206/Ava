@@ -23,7 +23,8 @@ The close-time pipeline and OTLP worker barriers are bounded: a timeout leaves
 the JSONL mirror and its delivery diagnostic intact rather than silently blocking
 or claiming an export that did not finish.
 
-`ava.agent_identity.validate_external_identity` checks the lease, the caller's presence in
+The borrowed identity rides the process's bound `AvaContext` (`identity.lease`, bound by `bind_process`
+and put back at detach). `ava.agent_identity.validate_external_identity` checks the lease, the caller's presence in
 the recorded controller tree, and the state version on SDK
 identity paths, including provenance and MCP requests. `PluginStateHandle.read` and
 `update` perform the same check; the raw `ava.state` slot remains a local snapshot rather

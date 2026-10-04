@@ -15,6 +15,7 @@ from base.agents.incarnation.resources import IncarnationResources, decode_resou
 from base.agents.incarnation.tests.test_resources import _admitted
 from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.fixtures.pin_agent import exec_context
 
 
 async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
@@ -33,7 +34,7 @@ async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
     result, payload = await _run_in_subprocess(
         database,
         "print('owned-runtime-proof')",
-        target.agent_id,
+        exec_context(target.agent_id),
         asyncio.Event(),
         30,
         exec_dir=tmp_path,
@@ -78,7 +79,7 @@ async def test_managed_exec_streams_output_and_keepalive_before_completion(
         _run_in_subprocess(
             database,
             "import time; print('managed-first', flush=True); time.sleep(1.4)",
-            target.agent_id,
+            exec_context(target.agent_id),
             asyncio.Event(),
             30,
             publisher,
@@ -122,7 +123,7 @@ async def test_execution_domain_cancellation_consumes_exact_owner_receipt(
         _run_in_subprocess(
             database,
             "import time; print('managed-started', flush=True); time.sleep(60)",
-            target.agent_id,
+            exec_context(target.agent_id),
             asyncio.Event(),
             30,
             exec_dir=tmp_path,
@@ -192,7 +193,7 @@ async def test_execution_domain_cancellation_waits_for_inflight_registration(
         _run_in_subprocess(
             database,
             "raise AssertionError('host cancellation must win before user code')",
-            target.agent_id,
+            exec_context(target.agent_id),
             asyncio.Event(),
             30,
             exec_dir=tmp_path,

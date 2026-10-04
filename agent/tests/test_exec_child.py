@@ -29,6 +29,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from tests.fixtures.pin_agent import exec_context
 
 # Fixed test identity — the child never dials a real DB/Redis here.
 _AGENT_ID = 424242
@@ -73,13 +74,15 @@ def _spawn(
     birth_config: dict[str, object] | None = None,
     write_request_file: bool = True,
     launcher_env: dict[str, str] | None = None,
+    context: dict[str, Any] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Write a request, run the real child, return (proc, request, result)."""
     exec_dir = tmp_path / "exec"
     request_path = make_request_path(exec_dir, agent_id=_AGENT_ID)
     result_path = make_result_path(exec_dir, agent_id=_AGENT_ID)
     if write_request_file:
-        write_request(request_path, code=code, agent_id=_AGENT_ID, timeout_s=timeout_s, state=state)
+        desc = context or exec_context(_AGENT_ID).describe()
+        write_request(request_path, code=code, context=desc, timeout_s=timeout_s, state=state)
     proc = subprocess.run(
         [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
         capture_output=True,
@@ -109,6 +112,24 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert payload.state_update is None
     assert payload.attachments == []
     assert payload.sdk_calls == []  # ran, executed no SDK calls
+
+
+def test_child_context_matches_the_hosts_context(tmp_path: Path) -> None:
+    """The child rebuilds the host's context from the envelope, and agent code (a thread pool
+    included) reads the identity the host's `AvaContext` carries as `ava.context`."""
+    host = exec_context(_AGENT_ID, actor="schedule:3")
+    code = (
+        "import json\nfrom concurrent.futures import ThreadPoolExecutor\nimport ava\n"
+        "who = ava.context.identity\n"
+        "with ThreadPoolExecutor(2) as pool:\n"
+        "    seen = list(pool.map(lambda _: ava.context.identity.agent_id, range(3)))\n"
+        "print(json.dumps([who.agent_id, who.owns_loop, who.actor, who.lease is None, seen]))\n"
+    )
+    proc, _request, result = _spawn(tmp_path, code, context=host.describe())
+    assert proc.returncode == 0, proc.stderr
+    assert read_result(result).kind == "done"
+    seen = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert seen == [_AGENT_ID, True, "schedule:3", True, [_AGENT_ID] * 3]
 
 
 def test_child_sdk_call_tally_reports_real_executions(tmp_path: Path) -> None:
@@ -470,7 +491,7 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     write_request(
         request_path,
         code="import time\nprint('before sleep', flush=True)\ntime.sleep(60)",
-        agent_id=_AGENT_ID,
+        context=exec_context(_AGENT_ID).describe(),
         timeout_s=60.0,
         state=None,
     )
@@ -515,7 +536,9 @@ def test_child_installs_signal_handlers_before_reading_request(
     def fake_read_request(_path: Path) -> RequestPayload:
         handler = signal.getsignal(signal.SIGTERM)
         assert getattr(handler, "__name__", None) == "_raise_timeout_error"
-        return RequestPayload(code="pass", agent_id=None, timeout_s=0.0, state=None)
+        return RequestPayload(
+            code="pass", context=exec_context(None).describe(), timeout_s=0.0, state=None
+        )
 
     def fake_apply_scope(
         _birth: dict[str, object] | None,
@@ -623,7 +646,9 @@ def test_child_overlay_phases_framework_then_plugin(
     events: list[str] = []
 
     def fake_read_request(_path: Path) -> RequestPayload:
-        return RequestPayload(code="pass", agent_id=None, timeout_s=0.0, state=None)
+        return RequestPayload(
+            code="pass", context=exec_context(None).describe(), timeout_s=0.0, state=None
+        )
 
     def fake_init_logger(_agent_id: int | None) -> None:
         return None

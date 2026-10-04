@@ -13,6 +13,7 @@ from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus
 from gateway.tests.test_agents_sdk import _sdk_via_inprocess_gateway as _sdk_via_inprocess_gateway
 from gateway.tests.test_agents_sdk import _spawn_agent
+from tests.fixtures.pin_agent import pin_agent
 
 
 class TestGetNeighbors:
@@ -300,7 +301,7 @@ class TestListAgents:
         assert row.spawner == "agent:8"
 
     def test_agent_row_keeps_domain_fields(self, db_conn: psycopg.Connection) -> None:
-        ava.agent_identity._agent_id = _spawn_agent()
+        pin_agent(_spawn_agent())
         agent_id = ava.agents.spawn()
         db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
         db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))

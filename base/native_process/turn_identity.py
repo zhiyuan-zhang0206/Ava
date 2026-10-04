@@ -2,14 +2,15 @@
 
 Phase 1 of `future/infra/agent-runner-as-server.md`: in the hosted runner many
 agents' turns share one process, so the two process-level identity channels —
-`ava.agent_identity._agent_id` (set once by the agent bootstrap) and the `AVA_AGENT_ID`
+the identity of the bound `AvaContext` (`ava.sdk_surface.process_context`, bound once by the
+agent bootstrap) and the `AVA_AGENT_ID`
 environment variable (set once for launched children) — cannot distinguish
 which agent's turn is executing. This module holds the third, innermost
 channel: a contextvar the hosted dispatcher binds before creating an agent's
 turn task. `asyncio.create_task` copies the creating context, and LangGraph
 node tasks copy the loop-level context, so one bind at task creation covers
-every node of the turn; the exec child re-establishes its identity from its
-own boot (agent id carried in the request env) — it cannot inherit the
+every node of the turn; the exec child binds its own context from its
+request envelope (the description of the host's context) — it cannot inherit the
 parent's contextvar — so agent code in the child sees the same identity.
 
 Resolution order everywhere identity is read:

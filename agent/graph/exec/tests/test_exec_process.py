@@ -39,6 +39,7 @@ from base.native_process.ownership import OwnedProcess
 from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 from base.sessions.posixproc import _group_empty
 from tests.e2e._proc import kill_group_or_prove_already_gone
+from tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 
@@ -536,7 +537,11 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
     async def run() -> None:
         with bind_hosted_resources(scope):
             outcome, _ = await _subprocess._run_legacy_subprocess(
-                "private reader fixture", None, asyncio.Event(), 20, exec_dir=tmp_path / "exec"
+                "private reader fixture",
+                exec_context(None),
+                asyncio.Event(),
+                20,
+                exec_dir=tmp_path / "exec",
             )
         assert isinstance(outcome, _ExecCrashed)
         assert isinstance(outcome.exc, ExecTeardownError)

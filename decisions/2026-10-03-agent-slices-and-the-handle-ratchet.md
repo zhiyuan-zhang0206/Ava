@@ -131,3 +131,5 @@ checked differentially over 864 policy-level and 68 real-node scenarios with no 
   and the difference only changes how often the throttle writes.
 - One difference from the old retry: LangGraph annotated a failing exception with a note naming the
   task, and the loop does not.
+
+- Forward: `decisions/2026-10-04-ava-state-and-context.md` makes `base.agents.context` light to import (handle types annotation-only), because the exec child now builds an `AvaContext`; the rejected-alternative note that its package pulls psycopg, redis and the live-events stack no longer holds.

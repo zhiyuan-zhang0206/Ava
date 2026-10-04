@@ -39,6 +39,7 @@ from typing import Any
 
 import ava
 from ava import agent_identity
+from ava.sdk_surface import process_context
 from base.telemetry import report_sink_failure
 
 # A recorder marks itself with a reference to itself. `is_recorder` tests that identity, so
@@ -75,14 +76,16 @@ def _caller() -> Generator[None, None, None]:
 
     identity = {}
     try:
-        agent_identity._try_establish_from_env()
-        borrowed = agent_identity._external_agent_id
+        bound = process_context.peek()
+        own = None if bound is None else bound.identity
+        borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
         turn = agent_identity.current_turn_agent_id()
         agent_id = borrowed if borrowed is not None else turn
-        if agent_id is None:
-            agent_id = agent_identity._agent_id
+        if agent_id is None and own is not None:
+            agent_id = own.agent_id
         external = external_caller()
-        source = f"agent:{agent_id}" if agent_id else (agent_identity._actor or "system")
+        actor = own.actor if own is not None else None
+        source = f"agent:{agent_id}" if agent_id else (actor or "system")
         if external and borrowed is None and turn is None:
             source = external.source()
         identity = {

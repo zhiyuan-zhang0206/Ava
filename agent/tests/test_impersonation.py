@@ -29,6 +29,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
+from tests.fixtures.pin_agent import exec_context
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -195,7 +196,7 @@ def test_exec_envelope_carries_parent_incarnation(
     tmp_path: Path, incarnation: RuntimeIncarnation
 ) -> None:
     path = tmp_path / "request.json"
-    write_request(path, code="pass", agent_id=42, timeout_s=10, state={})
+    write_request(path, code="pass", context=exec_context(42).describe(), timeout_s=10, state={})
     assert read_request(path).incarnation == incarnation
 
 

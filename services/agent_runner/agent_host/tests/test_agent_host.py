@@ -637,9 +637,9 @@ class TestConcurrentAgentIsolation:
         pass by running to completion before the other starts — which is exactly
         how a process-per-agent assumption would sneak through.
         """
-        # Ids 11/22, never 1: tests/fixtures/env_bootstrap.py pins the session-global process
-        # slot `ava.agent_identity._agent_id = 1` as a placeholder, so an agent numbered 1
-        # would read back correctly even if the turn bind did nothing at all.
+        # Ids 11/22, never 1: tests/fixtures/env_bootstrap.py binds a placeholder context as
+        # agent 1 (`pin_agent(1)`), so an agent numbered 1 would read back correctly even if
+        # the turn bind did nothing at all.
         rows = {
             11: _Row(overlay={"llm_model": "model-for-11", "marker": "plug-for-11"}),
             22: _Row(overlay={"llm_model": "model-for-22", "marker": "plug-for-22"}),

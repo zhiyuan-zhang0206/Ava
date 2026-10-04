@@ -157,7 +157,7 @@ _ALLOWED_FILES = frozenset(
         "base/native_process/os_platform.py",  # launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity
         "base/host/system/probes.py",  # display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not ava runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators
         "ava/watcher.py",  # _spawn() bootstrap code uses os.environ.get in a string literal for the child process bootstrap
-        "ava/agent_identity.py",  # _try_establish_from_env() reads os.environ["AVA_AGENT_ID"] as a lazy fallback; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent
+        "ava/sdk_surface/process_context.py",  # _launched_child_context() reads os.environ["AVA_AGENT_ID"] as a lazy fallback; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent
         "cli/commands/agents/impersonation.py",  # AVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity
         "base/native_process/ownership.py",  # process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config
         "ava/attachment_transport.py",  # attach() reads the one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; it is not Settings config and only an exec child receives it

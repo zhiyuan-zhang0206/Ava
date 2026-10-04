@@ -16,6 +16,7 @@ from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -64,6 +65,7 @@ async def test_calls_execute_separately_without_rewriting_assistant(
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )
     command = await _run_calls(
@@ -103,6 +105,7 @@ def _runtime() -> Runtime[AvaContext]:
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            identity=AgentIdentity(agent_id=7, owns_loop=True),
         )
     )
 

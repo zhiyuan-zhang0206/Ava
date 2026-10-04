@@ -21,6 +21,7 @@ import psutil
 from agent.graph.exec._result import _ExecCrashed, _ExecResult
 from agent.graph.exec._stream import ExecOutputChunkPublisher, StreamingTextIO
 from agent.graph.exec.protocol import KILL_GRACE_S, ResultPayload, write_request
+from base.agents.context import AvaContext
 from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
@@ -112,6 +113,7 @@ class _OwnedRun:
         db: Database,
         target: RuntimeIncarnation,
         code: str,
+        context: AvaContext,
         cancel_event: asyncio.Event,
         timeout: float,
         chunk_publisher: ExecOutputChunkPublisher | None,
@@ -133,7 +135,7 @@ class _OwnedRun:
         self.context_path = directory / "owner.json"
         deadline = datetime.now(UTC) + timedelta(seconds=timeout)
         write_request(
-            self.request, code=code, agent_id=target.agent_id, timeout_s=timeout, state=state
+            self.request, code=code, context=context.describe(), timeout_s=timeout, state=state
         )
         self.allocation = ExecAllocation(
             request=self.request_id,
@@ -427,6 +429,7 @@ async def run_owned(
     db: Database,
     target: RuntimeIncarnation,
     code: str,
+    context: AvaContext,
     cancel_event: asyncio.Event,
     timeout: float,
     chunk_publisher: ExecOutputChunkPublisher | None,
@@ -440,7 +443,15 @@ async def run_owned(
     from agent.graph.exec._subprocess import _drain_output
 
     owned = _OwnedRun(
-        db, target, code, cancel_event, timeout, chunk_publisher, state=state, exec_dir=exec_dir
+        db,
+        target,
+        code,
+        context,
+        cancel_event,
+        timeout,
+        chunk_publisher,
+        state=state,
+        exec_dir=exec_dir,
     )
 
     def attached_completion() -> asyncio.Task[OwnerClosed]:

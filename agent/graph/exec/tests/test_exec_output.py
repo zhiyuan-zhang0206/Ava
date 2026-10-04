@@ -17,6 +17,7 @@ import pytest
 
 from agent.graph.exec.output import wrap_code_output
 from base.clock.tests.fakes import fix_now_timestamp
+from tests.fixtures.pin_agent import pin_agent
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
@@ -92,10 +93,9 @@ def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
 ):
     """Exceeds exec_output_max_chars → keep head + tail, cut middle, full output written to tmp file and path reported.
     Head carries help() overview / overview, tail carries error / result, both ends must survive."""
-    import ava
     from agent.graph.exec import output
 
-    monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
+    pin_agent(7)
     monkeypatch.setattr(output, "_overflow_dir", lambda: tmp_path / "overflow")
 
     limit = 1000
@@ -122,10 +122,9 @@ def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """Same agent repeatedly overflows keeps only recent N, prevents workspace infinite pile-up."""
-    import ava
     from agent.graph.exec import output
 
-    monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
+    pin_agent(7)
     monkeypatch.setattr(output, "_overflow_dir", lambda: tmp_path / "overflow")
     monkeypatch.setattr(output, "_OVERFLOW_KEEP", 3)
 

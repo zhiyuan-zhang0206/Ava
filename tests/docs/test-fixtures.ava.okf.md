@@ -18,7 +18,7 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
 ### Plugin roster and load order
 - `env_bootstrap` — import-time environment isolation and the session-wide runtime pins; loads **first**
 - `leak_guard` — names the test that leaves process-global state different (environment, module attributes, cwd, signal handlers); loads **second**, so its fixture sets up first and compares last, after every function-scoped fixture's undo. Warn by default; findings reach CI through the shard JUnit reports: [[test-leak-guard.ava.okf.md]]
-- `identity_restore` — puts the agent-identity slots (`ava.agent_identity._agent_id` and its siblings, the turn contextvar) back after every test, so the hundreds of tests that assign `_agent_id` bare need no undo; loads **third**, right after the guard: [[test-leak-guard.ava.okf.md]]
+- `identity_restore` — puts the bound `AvaContext` (the process context variable) and the turn contextvar back after every test, so the hundreds of tests that call `pin_agent(...)` (`tests/fixtures/pin_agent.py`) need no undo; loads **third**, right after the guard: [[test-leak-guard.ava.okf.md]]
 - `plugin_registrations` — per-test reset of plugin registrations
 - `provisioning` — throwaway pg/redis, `_clean_state`, the DB connection fixtures, and the session hooks (full-run guard, non-test-database refusal, leaked OS-job / runaway-memory / home cleanup)
 - `guards` — autouse host guards and the `_stub_everywhere` helper
