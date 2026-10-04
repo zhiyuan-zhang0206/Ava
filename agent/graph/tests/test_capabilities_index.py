@@ -329,7 +329,11 @@ def test_runtime_removed_surface_renders_nothing(
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
     monkeypatch.delattr(ava, "mcps", raising=False)
-    monkeypatch.setattr(sdk_disable, "applied_disable_entries", {"mcps"})
+
+    def applied_entries() -> frozenset[str]:
+        return frozenset({"mcps"})
+
+    monkeypatch.setattr(sdk_disable, "applied_entries", applied_entries)
 
     text = capabilities_section(AgentSlices.resolve())
     assert "- `ava.skills.alpha` — Alpha desc" in text
@@ -344,7 +348,11 @@ def test_applied_disable_registry_marks_runtime_removed_path(
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
 
     monkeypatch.delattr(ava.agents, "get_last_message", raising=False)
-    monkeypatch.setattr(sdk_disable, "applied_disable_entries", {"agents.get_last_message"})
+
+    def applied_entries() -> frozenset[str]:
+        return frozenset({"agents.get_last_message"})
+
+    monkeypatch.setattr(sdk_disable, "applied_entries", applied_entries)
     assert (
         _disabled_by_sdk_config("agents.get_last_message", AgentSlices.resolve().prompt.sdk_disable)
         is True

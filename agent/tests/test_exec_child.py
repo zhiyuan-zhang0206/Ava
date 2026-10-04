@@ -635,9 +635,12 @@ def test_child_overlay_phases_framework_then_plugin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`_run` applies the maps in the agent process's own boot order: framework
-    scope (with the sdk_disable re-apply) BEFORE plugins load, plugin scope
-    after. A single framework-only pass (the PR1 shape) silently dropped
-    plugin-scope overlay fields — this locks the sequencing."""
+    scope BEFORE plugins load, plugin scope after. A single framework-only pass
+    (the PR1 shape) silently dropped plugin-scope overlay fields — this locks the
+    sequencing. The per-agent sdk_disable additions apply additively on the
+    INSTALLED surface (after the load: the installation records its applied set),
+    right before the eval-isolation boundary, which works on the live surface for
+    the same reason."""
     from agent import exec_child
     from agent.graph.exec import protocol
     from agent.graph.exec.protocol import RequestPayload, ResultPayload
@@ -709,9 +712,9 @@ def test_child_overlay_phases_framework_then_plugin(
 
     assert events == [
         "apply:framework",
-        "sdk_disable",
         "plugins",
         "apply:plugin",
+        "sdk_disable",
         "eval_isolation",
     ]
 

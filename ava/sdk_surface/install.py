@@ -8,14 +8,26 @@ the primitives in `plugins.py` / `wraps.py` / `skill_sources.py` / `config_regis
 attribute access on the singleton `ava` module, so the module itself is the one thing that cannot be
 passed around as a value — the write to it is concentrated here, once per process.
 
+`install` produces one **`Installation`**: the admitted registry, the expansions, the wrap layers, the
+skill providers, the metering ledger, the applied SDK-disable entries, the faces flag, and the undos —
+frozen, so nothing outside it is written after plugin load. The holder is a single slot on the `ava`
+module (`__plugin_installation__`); a change (an additive SDK-disable entry, a scoped skill root, the
+agent-runtime faces loading) builds a new value and swaps the holder. `uninstall` reverses the surface
+and empties the slot.
+
+Before any plugin applies, the env's `AVA_SDK_DISABLE` entries are applied (so a disabled plugin
+namespace is refused, exactly as it was when the env was applied at `import ava`); later additions
+(per-agent config overlay, the eval-isolation boundary) apply additively on the installed value
+(`sdk_disable.apply_sdk_disable`). After the last plugin the SDK-usage recorder is installed over the
+final surface, so it sits outermost of any wrap layer (one count per agent call); `uninstall` removes
+it first for the same reason.
+
 Per plugin the order is: namespaces, members (a member may hang on the plugin's own namespace),
 expansions, wraps (a wrap target may be a namespace or member just added, or another plugin's),
 skill sources, flags, config. A plugin whose declaration cannot be applied (a conflicting or
 disabled namespace name, a wrap target that does not resolve, a flag or config that does not
 validate or bind) is **rolled back whole** — its already-applied pieces undone, in reverse — reported
-as a plugin load failure, and left out of the registry `install` returns. After the last plugin the
-SDK-usage recorder is installed over the final surface, so it sits outermost of any wrap layer (one
-count per agent call); `uninstall` removes it first for the same reason.
+as a plugin load failure, and left out of the registry `install` returns.
 
 `install` refuses to run twice: the one installation must be `uninstall`ed before the next, which is
 what a reload is (a new registry, a new install). Nothing here triggers a reload at runtime; the host
@@ -24,41 +36,96 @@ loads once per process and a changed plugin set takes effect on the next host st
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
-from . import ava_module, skill_sources, wraps
+from . import ava_module, wraps
 from . import plugins as _plugins
-from .turn_state import TurnState
+from .wraps import WrapLayer
+
+_SkillProvider = Callable[[], list[Path]]
 
 
-@dataclass
+@dataclass(frozen=True)
 class Installation:
-    """What the installed registry put into the process, and how to take it back."""
+    """What the installed registry put into the process, and how to take it back.
+
+    Frozen: a change builds a new value and swaps the holder (`_SLOT`) — see the
+    module docstring. `wrap_layers` and the provider tuple are snapshots taken when
+    the installation was built; the undos still close over the builders that filled
+    them (they are only ever run once, on the way out)."""
 
     registry: ExtensionRegistry
     expansions: tuple[str, ...]
-    undo: list[Callable[[], None]] = field(default_factory=list)
-    turn_state: TurnState = field(default_factory=TurnState)
+    wrap_layers: Mapping[str, tuple[WrapLayer, ...]]
+    skill_providers: tuple[_SkillProvider, ...]
+    metered: tuple[tuple[Any, str], ...]
+    disabled: frozenset[str]
+    faces: bool
+    undo: tuple[Callable[[], None], ...]
 
 
 # The installation is recorded on the `ava` module object itself — the one process-wide thing it
-# describes — rather than in a module global of its own.
+# describes — rather than in a module global of its own. Between values the slot carries `_LOADING`:
+# set while a load is in flight (the re-entrancy guard), left behind when a load was attempted and
+# failed so the process does not retry it (the old `_plugins_loaded` latch's second job).
 _SLOT = "__plugin_installation__"
+
+
+class _Loading:
+    """Slot marker: a load is in progress, or one was attempted and failed in this process."""
+
+
+_LOADING = _Loading()
+
+
+def _slot() -> Any:
+    return getattr(ava_module(), _SLOT, None)
 
 
 def installed() -> Installation | None:
     """The current installation, or None before `install` / after `uninstall`."""
-    return getattr(ava_module(), _SLOT, None)
+    value = _slot()
+    return value if isinstance(value, Installation) else None
 
 
-def turn_state() -> TurnState | None:
-    """The installation's turn-state slot, or None when nothing is installed."""
+def load_attempted() -> bool:
+    """Whether a load is in flight or was attempted and failed in this process (no retry)."""
+    return _slot() is _LOADING
+
+
+def mark_load_attempt() -> None:
+    """Occupy the slot while `ensure_plugins_loaded` loads (a no-op when already occupied)."""
+    if _slot() is None:
+        setattr(ava_module(), _SLOT, _LOADING)
+
+
+def clear_load_attempt() -> None:
+    """Release the slot after a deferred load (the loader module was still importing)."""
+    if _slot() is _LOADING:
+        setattr(ava_module(), _SLOT, None)
+
+
+def mark_faces_loaded() -> None:
+    """Record that the registry's agent-runtime faces loaded: build a new value, swap the holder."""
     current = installed()
-    return None if current is None else current.turn_state
+    if current is None or current.faces:
+        return
+    setattr(ava_module(), _SLOT, replace(current, faces=True))
+
+
+def record_disabled(disabled: frozenset[str]) -> None:
+    """Record newly applied SDK-disable entries: build a new value, swap the holder."""
+    current = installed()
+    if current is None:
+        raise RuntimeError("no SDK installation to record disable entries on")
+    setattr(ava_module(), _SLOT, replace(current, disabled=disabled))
 
 
 def expansions() -> tuple[str, ...]:
@@ -68,37 +135,122 @@ def expansions() -> tuple[str, ...]:
     return () if current is None else current.expansions
 
 
+def _provider_remover(
+    providers: list[_SkillProvider], provider: _SkillProvider
+) -> Callable[[], None]:
+    def undo() -> None:
+        providers.remove(provider)
+
+    return undo
+
+
+def _provider_mount(provider: _SkillProvider) -> Installation:
+    """The minimal installation a scoped skill root carries when nothing is installed.
+
+    The ops runner scopes a project skill root around one request without running a
+    plugin load (its process has no installation of its own); the value still needs a
+    home because there is one holder for the process's SDK configuration."""
+    return Installation(
+        registry=ExtensionRegistry(),
+        expansions=(),
+        wrap_layers=MappingProxyType({}),
+        skill_providers=(provider,),
+        metered=(),
+        disabled=frozenset(),
+        faces=False,
+        undo=(),
+    )
+
+
+def mount_skill_provider(provider: _SkillProvider) -> Callable[[], None]:
+    """Extend this process's skill-root providers by one; returns the undo.
+
+    For a framework caller that needs a request-scoped skill root (the ops runner's
+    per-agent command view): build a new installation value with the provider appended
+    and swap the holder; the undo removes exactly that provider and puts the holder
+    back. With no installation at all, a minimal provider-only value is mounted.
+    """
+    prior = _slot()
+    mounted = (
+        replace(prior, skill_providers=(*prior.skill_providers, provider))
+        if isinstance(prior, Installation)
+        else _provider_mount(provider)
+    )
+    setattr(ava_module(), _SLOT, mounted)
+
+    def undo() -> None:
+        current = _slot()
+        if current is mounted:
+            setattr(ava_module(), _SLOT, prior)
+            return
+        # An interleaved mount/unmount changed the value under us: remove exactly this
+        # provider from whatever is current, and clear the holder if nothing is left.
+        if isinstance(current, Installation):
+            remaining = tuple(p for p in current.skill_providers if p is not provider)
+            if not remaining and _is_bare_provider_mount(current):
+                setattr(ava_module(), _SLOT, None)
+            else:
+                setattr(ava_module(), _SLOT, replace(current, skill_providers=remaining))
+
+    return undo
+
+
+def _is_bare_provider_mount(installation: Installation) -> bool:
+    """Whether the value carries nothing but skill providers (a scoped mount's shell)."""
+    return (
+        not installation.registry.plugins
+        and not installation.expansions
+        and not installation.wrap_layers
+        and not installation.metered
+        and not installation.disabled
+        and not installation.faces
+        and not installation.undo
+    )
+
+
 def _apply(
     plugin: str,
     contributions: PluginContributions,
+    build: _Build,
     namespaces: dict[str, str],
-    undo: list[Callable[[], None]],
 ) -> list[str]:
-    """Apply one plugin's SDK declaration; each applied piece appends its undo. Returns the plugin's
-    expansion paths. Raises on the first piece that cannot be applied."""
+    """Apply one plugin's SDK declaration into `build`; each applied piece appends its undo.
+    Returns the plugin's expansion paths. Raises on the first piece that cannot be applied."""
     from base.packages.plugins import config_registration, flags
 
     promoted: list[str] = []
     for ns in contributions.sdk_namespaces:
-        undo.append(_plugins.install_namespace(plugin, ns.name, ns.module, namespaces))
+        build.undo.append(_plugins.install_namespace(plugin, ns.name, ns.module, namespaces))
         namespaces[ns.name] = plugin
         if ns.expand:
             _plugins.check_expansion(ns.name)
             promoted.append(ns.name)
     for member in contributions.sdk_members:
-        undo.append(_plugins.install_member(plugin, member.namespace, member.name, member.fn))
+        build.undo.append(_plugins.install_member(plugin, member.namespace, member.name, member.fn))
     for path in contributions.sdk_expansions:
         _plugins.check_expansion(path)
         promoted.append(path)
     for wrap in contributions.sdk_wraps:
-        undo.append(wraps.apply_wrap(wrap.target, wrap.wrapper, plugin))
+        build.undo.append(wraps.apply_wrap(wrap.target, wrap.wrapper, plugin, build.layers))
     for provider in contributions.skill_sources:
-        undo.append(skill_sources.add(provider))
+        build.providers.append(provider)
+        build.undo.append(_provider_remover(build.providers, provider))
     if contributions.flags:
-        undo.append(flags.declare_flags(plugin, contributions.flags))
+        build.undo.append(flags.declare_flags(plugin, contributions.flags))
     if contributions.config is not None:
-        undo.append(config_registration.bind_plugin_config(plugin, contributions.config))
+        build.undo.append(config_registration.bind_plugin_config(plugin, contributions.config))
     return promoted
+
+
+@dataclass
+class _Build:
+    """The mutable ledger `install` fills while it applies plugins; frozen into the Installation."""
+
+    namespaces: dict[str, str] = field(default_factory=dict)
+    layers: dict[str, list[WrapLayer]] = field(default_factory=dict)
+    providers: list[_SkillProvider] = field(default_factory=list)
+    expansions: list[str] = field(default_factory=list)
+    undo: list[Callable[[], None]] = field(default_factory=list)
 
 
 def _run(undo: list[Callable[[], None]], report: load_report.Reporter | None = None) -> None:
@@ -123,39 +275,62 @@ def install(
         raise RuntimeError(
             "the SDK surface is already installed; uninstall() it before installing another registry"
         )
-    from . import metering
+    from . import metering, sdk_disable
 
-    undo: list[Callable[[], None]] = []
+    prior = _slot()
+    setattr(ava_module(), _SLOT, _LOADING)
+    build = _Build()
     admitted: list[tuple[str, PluginContributions]] = []
-    promoted: list[str] = []
-    namespaces: dict[str, str] = {}
-    for plugin, contributions in registry.plugins:
-        applied: list[Callable[[], None]] = []
-        claimed = dict(namespaces)
-        try:
-            paths = _apply(plugin, contributions, claimed, applied)
-        except Exception as exc:
-            _run(applied, report)
-            load_report.reporter(report)(plugin, exc)
-            continue
-        namespaces = claimed
-        undo.extend(applied)
-        promoted.extend(paths)
-        admitted.append((plugin, contributions))
-    admitted_registry = ExtensionRegistry(tuple(admitted))
-    metering.install()
-    setattr(ava_module(), _SLOT, Installation(admitted_registry, tuple(promoted), undo))
-    return admitted_registry
+    disabled = sdk_disable.env_entries()
+    try:
+        if disabled:
+            # Apply the env entries before any plugin: a disabled plugin namespace is
+            # refused by install_namespace (same as when the env was applied at import).
+            sdk_disable.apply_entries(disabled)
+        for plugin, contributions in registry.plugins:
+            mark = len(build.undo)
+            claimed = dict(build.namespaces)
+            try:
+                paths = _apply(plugin, contributions, build, claimed)
+            except Exception as exc:
+                _run(build.undo[mark:], report)
+                del build.undo[mark:]
+                load_report.reporter(report)(plugin, exc)
+                continue
+            build.namespaces = claimed
+            build.expansions.extend(paths)
+            admitted.append((plugin, contributions))
+        metered = metering.install()
+    except BaseException:
+        _run(build.undo, report)
+        setattr(ava_module(), _SLOT, prior)
+        raise
+    installation = Installation(
+        registry=ExtensionRegistry(tuple(admitted)),
+        expansions=tuple(build.expansions),
+        wrap_layers=MappingProxyType(
+            {target: tuple(layers) for target, layers in build.layers.items()}
+        ),
+        skill_providers=tuple(build.providers),
+        metered=metered,
+        disabled=frozenset(disabled),
+        faces=False,
+        undo=tuple(build.undo),
+    )
+    setattr(ava_module(), _SLOT, installation)
+    return installation.registry
 
 
 def uninstall() -> None:
     """Take the installed SDK surface back out of the process (a no-op when none is installed)."""
     from . import metering
 
-    # The recorder sits outermost over plugin wraps, so it comes off first.
-    metering.uninstall()
     installation = installed()
+    # The recorder sits outermost over plugin wraps, so it comes off first.
+    metering.uninstall(() if installation is None else installation.metered)
     if installation is None:
+        # A `_LOADING` marker is not an installation: leave it in place (a load may be
+        # in flight; a failed attempt stays un-retried), a fresh install overwrites it.
         return
     setattr(ava_module(), _SLOT, None)
-    _run(installation.undo)
+    _run(list(installation.undo))

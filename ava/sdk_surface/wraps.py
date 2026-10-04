@@ -12,9 +12,11 @@ plugin declares a wrap in its `contribute()`:
     def contribute() -> PluginContributions:
         return PluginContributions(sdk_wraps=(SdkWrap("files.write", audit_writes),))
 
-`ava.sdk_surface.install` applies it through `apply_wrap(target, wrapper, plugin)`, which installs
-`wrapper` around the callable at the dotted `ava` path `target` (`"files.read"`,
-`"shell.run"`, `"agents.spawn"`, `"understand"`) and returns the undo. The curated
+`ava.sdk_surface.install` applies it through `apply_wrap(target, wrapper, plugin, layers)`, which
+installs `wrapper` around the callable at the dotted `ava` path `target` (`"files.read"`,
+`"shell.run"`, `"agents.spawn"`, `"understand"`) and returns the undo. `layers` is the
+install's build ledger (`{target: [WrapLayer, ...]}`, registration order); it is frozen
+into the `Installation` at the end of the build, and `stack` / `wrappers` read it back. The curated
 `ava.extend` surface keeps the introspection (`stack`, `wrappers`). The wrapper's first parameter receives the current callable
 (`inner`) — the original, or the previous plugin's wrap when several layers
 stack — and the wrapper decides whether, when, and how many times to call it.
@@ -62,7 +64,7 @@ from __future__ import annotations
 import functools
 import inspect
 import sys
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -93,10 +95,6 @@ class WrapLayer:
     plugin: str
     wrapper: Callable[..., Any]
     chained: Callable[..., Any]
-
-
-# target -> layers in registration (= plugin load) order, innermost first.
-_LAYERS: dict[str, list[WrapLayer]] = {}
 
 
 def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
@@ -189,10 +187,18 @@ def _base_callable(current: Callable[..., Any]) -> Callable[..., Any]:
     return current
 
 
-def apply_wrap(target: str, wrapper: Callable[..., Any], plugin: str) -> Callable[[], None]:
+def apply_wrap(
+    target: str,
+    wrapper: Callable[..., Any],
+    plugin: str,
+    layers: dict[str, list[WrapLayer]],
+) -> Callable[[], None]:
     """Install `wrapper` around the `ava` callable at dotted `target`; returns the undo.
 
-    `target` is a path under `ava` — `"files.read"`, `"shell.run"`,
+    `layers` is the caller's ledger (`{target: [WrapLayer, ...]}`, registration order):
+    `ava.sdk_surface.install` passes its build ledger, which the installation then
+    carries; the undo removes the layer from the same ledger and restores the
+    callable. `target` is a path under `ava` — `"files.read"`, `"shell.run"`,
     `"agents.spawn"`, `"understand"`. `wrapper(inner, *args, **kwargs)` is called
     in place of the target; `inner` is the current callable (the original, or the
     previous layer when plugins stack) and the wrapper decides whether / when /
@@ -247,13 +253,13 @@ def apply_wrap(target: str, wrapper: Callable[..., Any], plugin: str) -> Callabl
     setattr(parent, attr, chained)
 
     layer = WrapLayer(target=target, plugin=plugin, wrapper=wrapper, chained=chained)
-    layers = _LAYERS.setdefault(target, [])
-    layers.append(layer)
+    target_layers = layers.setdefault(target, [])
+    target_layers.append(layer)
 
     def undo() -> None:
-        layers.remove(layer)
-        if not layers:
-            del _LAYERS[target]
+        target_layers.remove(layer)
+        if not target_layers:
+            del layers[target]
         try:
             parent_now, attr_now = _locate(target)
         except AttributeError:
@@ -266,17 +272,28 @@ def apply_wrap(target: str, wrapper: Callable[..., Any], plugin: str) -> Callabl
     return undo
 
 
+def _installed_layers() -> Mapping[str, tuple[WrapLayer, ...]]:
+    """The current installation's wrap layers (empty when nothing is installed)."""
+    from . import install as _install
+
+    current = _install.installed()
+    return {} if current is None else current.wrap_layers
+
+
 def stack(target: str) -> list[tuple[str, Callable[..., Any]]]:
     """The wrap layers on `target`, innermost first (= registration / load order).
 
-    Each entry is `(plugin, wrapper)`. Empty list when nothing wrapped `target`.
-    Answers "who changed `ava.<target>` on this machine" as one call.
+    Each entry is `(plugin, wrapper)`. Empty list when nothing wrapped `target` (or
+    nothing is installed). Answers "who changed `ava.<target>` on this machine" as one call.
     """
-    return [(layer.plugin, layer.wrapper) for layer in _LAYERS.get(target, [])]
+    return [(layer.plugin, layer.wrapper) for layer in _installed_layers().get(target, ())]
 
 
 def wrappers() -> dict[str, list[tuple[str, Callable[..., Any]]]]:
     """Every wrapped target -> its `stack(target)`. The whole-machine wrap map,
     the runtime answer to "what did plugins inject" that plugin-injection docs
     are generated from instead of hand-maintained."""
-    return {target: stack(target) for target in _LAYERS}
+    return {
+        target: [(layer.plugin, layer.wrapper) for layer in layers]
+        for target, layers in _installed_layers().items()
+    }

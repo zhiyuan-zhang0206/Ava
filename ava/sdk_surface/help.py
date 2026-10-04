@@ -9,7 +9,6 @@ ava.help(...)` is unchanged. Children discovery lives in
 imports help).
 """
 
-import contextvars
 import dataclasses as _dataclasses
 import enum as _enum
 import inspect
@@ -31,16 +30,62 @@ from .discovery import (
 )
 
 
-def help(*targets: Any) -> None:
-    """Print docs for SDK targets, e.g. `ava.help(ava.shell)`."""
-    import ava as _ava
+@_dataclasses.dataclass(frozen=True)
+class _Render:
+    """The render parameters `help()` passes down the pipeline.
 
+    - compact_classes: render classes as name + docstring + field annotations,
+      skipping methods and nested classes (`_format_class_stub`); fields stay so
+      the agent sees attribute names, and the full contract (methods) is one
+      `help(ava.X.ClassName)` away. The system prompt builder sets this for its
+      expand section; on-demand `help(ava.X)` keeps the full form.
+    - hidden_members: dotted `ava` paths that must not render (e.g.
+      ``ava.self.attach`` for a text-only model, user ruling 2026-08-28). The
+      member stays in the surface list (plugin members, SDK-disable, doc linting
+      all keep working) but never renders.
+    """
+
+    compact_classes: bool = False
+    hidden_members: frozenset[str] = frozenset()
+
+
+_DEFAULT_RENDER = _Render()
+
+
+def help(
+    *targets: Any,
+    compact_classes: bool = False,
+    hidden_members: frozenset[str] | None = None,
+) -> None:
+    """Print docs for SDK targets, e.g. `ava.help(ava.shell)`.
+
+    Render parameters are arguments, never ambient state: `compact_classes` and
+    `hidden_members` are passed down this call's render. When `hidden_members` is
+    omitted, a process bound to a context (the exec child, a script an agent
+    launched, an external attachment) uses its own media gating
+    (`attachment_transport.own_media_gated_members()`, computed on the spot) —
+    interactive `help()` in a text-only agent's child omits e.g. `ava.self.attach`
+    (user ruling 2026-08-28). With no context bound the default is no filtering,
+    and a framework caller with its own filter (the system prompt builders) passes
+    it explicitly.
+    """
+    import ava as _ava
+    from ava.sdk_surface import process_context
+
+    if hidden_members is None:
+        if process_context.peek() is None:
+            hidden_members = frozenset()
+        else:
+            from ava.attachment_transport import own_media_gated_members
+
+            hidden_members = own_media_gated_members()
+    render = _Render(compact_classes=compact_classes, hidden_members=hidden_members)
     if not targets:
         targets = (_ava,)
     for i, target in enumerate(targets):
         if i > 0:
             print()
-        _print_target(target)
+        _print_target(target, render)
 
 
 def is_ava_target(obj: Any) -> bool:
@@ -94,17 +139,17 @@ class HelpRouter:
 # see in source — same shape as training distribution.
 
 
-def _print_target(target: Any) -> None:
+def _print_target(target: Any, render: _Render = _DEFAULT_RENDER) -> None:
     fqn = _resolve_fqn(target)
     heading = f"{'#' * _heading_depth(fqn)} {fqn}"
-    body = _target_body(target, fqn)
+    body = _target_body(target, fqn, render)
     if body:
         print(f"{heading}\n\n{body}")
     else:
         print(heading)
 
 
-def _target_body(target: Any, fqn: str) -> str:
+def _target_body(target: Any, fqn: str, render: _Render = _DEFAULT_RENDER) -> str:
     """Render the body under the heading for a help() target."""
     if _is_container(target):
         # A top-level module target (the root `ava`, heading depth 1) shows its
@@ -113,7 +158,7 @@ def _target_body(target: Any, fqn: str) -> str:
         # Skill proxies/namespaces always show their own doc (which carries
         # the path + full body), regardless of depth.
         include_doc = (_heading_depth(fqn) == 1) or _is_skill_object(target)
-        return _format_module_stub(target, include_own_doc=include_doc)
+        return _format_module_stub(target, include_own_doc=include_doc, render=render)
     if _is_element(target):
         # The FQN tail is the `def name` identifier — if target is a
         # plugin-wrapped function, its `__name__` may still be the wrapper's
@@ -216,7 +261,9 @@ def _find_agent_visible_binding(mod: Any, mod_name: str, target: Any) -> str | N
     return None
 
 
-def _format_module_stub(mod: Any, *, include_own_doc: bool = True) -> str:
+def _format_module_stub(
+    mod: Any, *, include_own_doc: bool = True, render: _Render = _DEFAULT_RENDER
+) -> str:
     # Module → Python source stub: optional own docstring + each child as a
     # source-form entry. Children dispatch by kind:
     #   - function   → `def name(sig): "..."`
@@ -238,12 +285,12 @@ def _format_module_stub(mod: Any, *, include_own_doc: bool = True) -> str:
             pieces.append(doc)
         else:
             pieces.append(_format_docstring(doc, indent=""))
-    for name, child in _skill_aware_children(mod):
-        pieces.append(_format_child(name, child))
+    for name, child in _skill_aware_children(mod, render):
+        pieces.append(_format_child(name, child, render))
     return "\n\n".join(pieces)
 
 
-def _skill_aware_children(mod: Any) -> list[tuple[str, Any]]:
+def _skill_aware_children(mod: Any, render: _Render = _DEFAULT_RENDER) -> list[tuple[str, Any]]:
     """`_children(mod)`, with a skills container's walk kept index-safe.
 
     Listing the children of `ava.skills` (or of a skill namespace node) resolves
@@ -257,13 +304,17 @@ def _skill_aware_children(mod: Any) -> list[tuple[str, Any]]:
     The module is looked up through `globals()` rather than the bound name:
     `AVA_SDK_DISABLE=skills` deletes that global, and help() must keep rendering
     every other namespace on a cluster that runs without the skills surface."""
-    return _children(mod)
+    return _children(mod, hidden_members=render.hidden_members)
 
 
-def _format_child(name: str, child: Any) -> str:
+def _format_child(name: str, child: Any, render: _Render = _DEFAULT_RENDER) -> str:
     formatter = _child_formatter(child)
     if formatter is None:
         return f"# {name}: {type(child).__name__}"
+    if formatter is _format_class_stub:
+        # The class formatter is the one that reads the render parameters
+        # (compact classes; the recursion into nested members).
+        return _format_class_stub(name, child, render)
     return formatter(name, child)
 
 
@@ -375,17 +426,7 @@ def _format_multiline_const_block(name: str, base: type, value: str, doc: str | 
     return f"{doc}\n{block}" if doc else block
 
 
-# Context variable: when True, _format_class_stub renders class name +
-# docstring + field annotations + enum values, but skips methods and nested
-# classes. Fields stay so the agent still sees attribute names; the full
-# contract (methods) is one help(ava.X.ClassName) away. Set by the system
-# prompt builder; on-demand help(ava.X) is unaffected.
-compact_classes: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "ava_compact_classes", default=False
-)
-
-
-def _format_class_stub(name: str, cls: type[Any]) -> str:
+def _format_class_stub(name: str, cls: type[Any], render: _Render = _DEFAULT_RENDER) -> str:
     # Class child: `class name(Bases):` + indented docstring + indented members
     # (fields as `name: type`, methods as `def name(sig): doc`), the same
     # expansion functions get. Bases are shown (minus object) so an exception's
@@ -400,7 +441,7 @@ def _format_class_stub(name: str, cls: type[Any]) -> str:
     else:
         # Compact mode keeps field annotations (_Constant children) so the
         # agent sees attribute names, but drops methods and nested classes.
-        parts.extend(_format_class_members(cls))
+        parts.extend(_format_class_members(cls, render))
     if not parts:
         return f"{head} ..."
     return f"{head}\n" + "\n".join(parts)
@@ -431,15 +472,14 @@ def _is_synthesized_dataclass_doc(name: str, cls: type, own_doc: Any) -> bool:
     return bool(own_doc) and _dataclasses.is_dataclass(cls) and own_doc.startswith(f"{name}(")
 
 
-def _format_class_members(cls: type) -> list[str]:
+def _format_class_members(cls: type, render: _Render = _DEFAULT_RENDER) -> list[str]:
     """Indented member entries of a class, honoring compact mode: field
     annotations (_Constant children) stay, methods and nested classes drop."""
-    compact = compact_classes.get()
     parts: list[str] = []
     for child_name, child in _children(cls):
-        if compact and not isinstance(child, _Constant):
+        if render.compact_classes and not isinstance(child, _Constant):
             continue
-        parts.append(_indent(_format_child(child_name, child), "    "))
+        parts.append(_indent(_format_child(child_name, child, render), "    "))
     return parts
 
 

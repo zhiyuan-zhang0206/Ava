@@ -9,7 +9,6 @@ entry re-exports the names tests and framework code reach as `ava.<name>`.
 """
 
 import ast as _ast
-import contextvars
 import inspect
 from dataclasses import dataclass
 from functools import cache
@@ -17,15 +16,6 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from .const import is_documented_const
-
-# Render-time member hiding for help() — see `_module_children`. A caller that
-# knows a member is unavailable for the current agent (e.g. `ava.self.attach`
-# on a text-only model, user ruling 2026-08-28) sets this for the render
-# scope; scoped by contextvar so concurrent renders (hosted mode) never see
-# another agent's filter.
-hidden_surface_members: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
-    "ava_hidden_surface_members", default=None
-)
 
 # ── Kind predicates ────────────────────────────────────────────────────────
 
@@ -64,9 +54,15 @@ def _is_namespace(obj: Any) -> bool:
 # ── Children discovery ─────────────────────────────────────────────────────
 
 
-def _children(container: Any) -> list[tuple[str, Any]]:
+def _children(
+    container: Any, *, hidden_members: frozenset[str] = frozenset()
+) -> list[tuple[str, Any]]:
+    """Children of a container. `hidden_members` (dotted `ava` paths, e.g.
+    ``ava.self.attach``) drops those members from a module/namespace render — a
+    render parameter, passed down by `help()`; classes and plain namespaces are
+    not filtered."""
     if inspect.ismodule(container):
-        return _sorted_children(_module_children(container))
+        return _sorted_children(_module_children(container, hidden_members=hidden_members))
     if inspect.isclass(container):
         # Class members keep definition order — field order is part of the
         # contract (dataclass rows render in their declared order).
@@ -146,24 +142,26 @@ def agent_visible_names(container: Any) -> list[str]:
     return []
 
 
-def _module_children(mod: Any) -> list[tuple[str, Any]]:
+def _module_children(
+    mod: Any, *, hidden_members: frozenset[str] = frozenset()
+) -> list[tuple[str, Any]]:
     """`__all_for_ava__` whitelist preferred — required for declared plugin
     namespaces (`SdkNamespace`) (SimpleNamespace doesn't satisfy the `dir()` fallback's
     module-prefix check). PEP 224 attribute docstrings discovered alongside via
     AST; any non-callable/non-class/non-module attr is wrapped as `_Constant` so
     the renderer can show `## NAME: type` instead of falling back to the
-    underlying class's docstring."""
+    underlying class's docstring. `hidden_members` is the render caller's filter
+    (dotted paths, e.g. ``ava.self.attach``)."""
     annotations = _module_attribute_annotations(mod)
     docs = _module_attribute_docs(mod)
     surface = _static_agent_surface(mod)
     if surface is not None:
-        hidden = hidden_surface_members.get()
-        if hidden:
-            # Dotted member paths (``ava.self.attach``) set by the render
+        if hidden_members:
+            # Dotted member paths (``ava.self.attach``) passed by the render
             # caller — the member stays in the surface list (plugin members,
             # SDK-disable, doc linting all keep working) but never renders.
             prefix = f"{mod.__name__}."
-            surface = [name for name in surface if f"{prefix}{name}" not in hidden]
+            surface = [name for name in surface if f"{prefix}{name}" not in hidden_members]
         return [
             (name, child)
             for name in surface

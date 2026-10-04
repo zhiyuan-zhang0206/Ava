@@ -75,13 +75,13 @@ def _restore_metering() -> Iterator[None]:
     """Per-test isolation for the process-global `ava` singleton's metering state:
     whatever a test wrapped, the next test sees the bare callables again.
 
-    `agent.extensions.load_extensions()` calls `ava.sdk_surface.metering.install()` as
-    a side effect, which replaces every public `ava.*` callable — plus the
-    `ava.mcps._call_raw` MCP funnel — with a recording proxy, and nothing ever put
-    them back. `load_extensions()` is reached directly *and* lazily, via
-    `ava/__init__.py:ensure_plugins_loaded` on an `ava.*` miss, so merely touching
-    the namespace permanently swapped out the callables every later test in that
-    xdist worker would see.
+    `agent.extensions.load_extensions()` installs the SDK-usage recorder as part of
+    the SDK installation (`ava.sdk_surface.install`), which replaces every public
+    `ava.*` callable — plus the `ava.mcps._call_raw` MCP funnel — with a recording
+    proxy, and nothing ever put them back. `load_extensions()` is reached directly
+    *and* lazily, via `ava/__init__.py:ensure_plugins_loaded` on an `ava.*` miss, so
+    merely touching the namespace permanently swapped out the callables every later
+    test in that xdist worker would see.
 
     That is invisible in isolation and only appears when the polluting test lands in
     the same worker — nondeterministic under `-n`, since `--dist load` distributes
@@ -90,14 +90,19 @@ def _restore_metering() -> Iterator[None]:
     queue's bisect blamed whichever innocent PR shared the batch (issue #83, after
     #82 fixed that one test's symptom by taking its own baseline).
 
-    Free for the tests that never metered: `uninstall()` returns at once when nothing
-    is installed; the import runs only once `ava` is loaded (a rename fails loudly).
+    Restores from the installation that holds the recorder ledger; a test that
+    installs the recorders directly restores its own (``install()`` returns the
+    ledger). Free for the tests that never metered: with nothing installed there is
+    no ledger and nothing runs; the import runs only once `ava` is loaded (a rename
+    fails loudly).
     """
     yield
     if "ava" in sys.modules:
-        from ava.sdk_surface import metering
+        from ava.sdk_surface import install, metering
 
-        metering.uninstall()
+        current = install.installed()
+        if current is not None and current.metered:
+            metering.uninstall(current.metered)
 
 
 @pytest.fixture(autouse=True)

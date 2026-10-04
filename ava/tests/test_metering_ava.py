@@ -1,4 +1,5 @@
-"""SDK metering at the `ava` root: the MCP call funnel and the SDK events a plain import installs."""
+"""SDK metering at the `ava` root: the MCP call funnel and the SDK events a launched child's
+import installs (through its plugin load)."""
 
 from __future__ import annotations
 
@@ -12,19 +13,19 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     calls are metered, and restore it on teardown."""
     import ava.mcps
 
-    # `ava` is a process-global singleton and `load_extensions` installs the
-    # recorders as a side effect, so any earlier test in this xdist worker that
-    # loaded plugins leaves the funnel already wrapped — install() then correctly
-    # no-ops and the wrap assertion below reads as a failure. Which tests share a
-    # worker is not deterministic under `-n`, so take a clean baseline first.
-    metering.uninstall()
+    # `ava` is a process-global singleton and a plugin load installs the recorders
+    # as part of the SDK installation, so any earlier test in this xdist worker
+    # that loaded plugins and left the installation behind would leave the funnel
+    # already wrapped — install() then correctly no-ops and the wrap assertion
+    # below reads as a failure. The shared guards (`tests/fixtures/`) uninstall an
+    # installation a test left behind, so the baseline here is bare.
     before = ava.mcps._call_raw
-    metering.install()
+    ledger = metering.install()
     try:
         assert ava.mcps._call_raw is not before
         assert metering.is_recorder(ava.mcps._call_raw)
     finally:
-        metering.uninstall()
+        metering.uninstall(ledger)
     assert ava.mcps._call_raw is before
 
 

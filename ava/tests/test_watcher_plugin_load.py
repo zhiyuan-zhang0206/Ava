@@ -99,8 +99,9 @@ def test_bare_shell_child_eager_loads_plugins(tmp_path: Path) -> None:
     script = home / "bare.py"
     script.write_text(
         "import ava, pathlib\n"
+        "from ava.sdk_surface import install as _sdk_install\n"
         f"pathlib.Path({str(marker)!r}).write_text("
-        "f'{ava._plugins_loaded}:{ava.probe.ok()}')\n"
+        "f'{_sdk_install.installed() is not None}:{ava.probe.ok()}')\n"
     )
     env = {
         **os.environ,
@@ -133,7 +134,8 @@ def test_bare_process_without_agent_id_stays_fail_fast(tmp_path: Path) -> None:
     script = home / "bare.py"
     script.write_text(
         "import ava\n"
-        "assert ava._plugins_loaded is False\n"
+        "from ava.sdk_surface import install as _sdk_install\n"
+        "assert _sdk_install.installed() is None\n"
         "try:\n"
         "    ava.probe\n"
         "except AttributeError:\n"
