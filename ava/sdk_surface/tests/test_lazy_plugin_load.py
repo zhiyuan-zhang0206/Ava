@@ -5,7 +5,7 @@ bare `python x.py` in a persistent shell session) self-loads plugin namespaces
 on the first unknown `ava.X`; gateway / cli / the agent process itself keep the
 fail-fast AttributeError.
 
-These lock the gating matrix + the once-latch so a future edit can't silently
+These lock the gating matrix + the once-per-process load (the installation slot) so a future edit can't silently
 (a) start loading plugins in the gateway / cli, (b) re-run load_extensions in
 the agent process (which would uninstall and reinstall the whole SDK surface under it), or (c) turn a dunder probe
 into a plugin load.
@@ -31,16 +31,18 @@ from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
-def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    # Each test drives _plugins_loaded + agent identity explicitly; snapshot-restore
-    # so nothing leaks between tests. Any SDK surface already installed in this process
-    # (ava.memory, ava.tasks, ava.cwd ...) is taken out for the test and put back after, so the
-    # lazy loads below start from a surface with no plugin namespaces and never wipe the others.
-    monkeypatch.setattr(ava, "_plugins_loaded", False)
+def _reset() -> Iterator[None]:
+    # Each test drives the installation slot + agent identity explicitly;
+    # snapshot-restore so nothing leaks between tests. Any SDK surface already
+    # installed in this process (ava.memory, ava.tasks, ava.cwd ...) is taken out
+    # for the test and put back after, so the lazy loads below start from a surface
+    # with no plugin namespaces and never wipe the others.
     prior = install.installed()
     install.uninstall()
+    install.clear_load_attempt()  # a failed attempt from an earlier test is not ours
     yield
     install.uninstall()
+    install.clear_load_attempt()
     if prior is not None:
         install.install(prior.registry)
 
@@ -91,7 +93,7 @@ def test_lazy_load_fires_in_launched_child(monkeypatch: pytest.MonkeyPatch) -> N
         ava.lazytasks.ping() == "pong"
     )  # first access triggers the load  # type: ignore[attr-defined]
     assert calls == [1]
-    assert ava._plugins_loaded is True
+    assert install.installed() is not None
 
 
 def test_lazy_load_latches_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,13 +155,13 @@ def test_db_url_forward_wins_over_lazy_load(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _spy_loader(monkeypatch, register=None)
+    calls = _spy_loader(monkeypatch, register="lazytasks")
 
     ava.ensure_plugins_loaded()
     ava.ensure_plugins_loaded()
 
-    assert calls == [1]  # latched: loads at most once per process
-    assert ava._plugins_loaded is True
+    assert calls == [1]  # loads at most once per process
+    assert install.installed() is not None
 
 
 def test_ensure_plugins_loaded_contains_a_failing_load_chain(
@@ -176,14 +178,19 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
     from agent import extensions
     from base.packages.plugins.enable_config import DuplicatePlugin
 
+    calls: list[int] = []
+
     def boom(*, surface: bool = False) -> None:
+        calls.append(1)
         raise DuplicatePlugin("plugin 'x' exists in both builtin and external roots")
 
     monkeypatch.setattr(extensions, "load_extensions", boom)
 
     ava.ensure_plugins_loaded()  # must not raise
+    ava.ensure_plugins_loaded()  # ... and the failed attempt is not retried
 
-    assert ava._plugins_loaded is True
+    assert calls == [1]
+    assert install.load_attempted()  # the slot keeps the attempted-and-failed load
     report = next(r for r in loguru_records if "failed in this launched child" in r["message"])
     assert report["exception"] is not None  # the traceback rides the record (#4979)
     assert report["exception"].type is DuplicatePlugin
@@ -220,7 +227,7 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
 
     ava.ensure_plugins_loaded()  # must not raise
 
-    assert ava._plugins_loaded is False  # deferred, not latched
+    assert install.installed() is None and not install.load_attempted()  # deferred, not latched
     assert calls == []
     assert "plugin load failed" not in capsys.readouterr().err
     assert not any("failed in this launched child" in r["message"] for r in loguru_records)
@@ -232,7 +239,7 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     ava.ensure_plugins_loaded()
 
     assert calls == [1]
-    assert ava._plugins_loaded is True
+    assert install.load_attempted()  # the retry ran the loader; it is not deferred again
 
 
 def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
@@ -271,7 +278,7 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
     with pytest.raises(AttributeError):
         _ = ava.deferrednsp  # type: ignore[attr-defined]
     assert calls == []
-    assert ava._plugins_loaded is False
+    assert install.installed() is None and not install.load_attempted()
     assert "plugin load failed" not in capsys.readouterr().err
 
     monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
@@ -279,7 +286,7 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
 
     assert ava.deferrednsp.ping() == "pong"  # type: ignore[attr-defined]
     assert calls == [1]
-    assert ava._plugins_loaded is True
+    assert install.installed() is not None
 
 
 def _spy_member_loader(

@@ -151,8 +151,8 @@ def install_namespace(
             f"ava.{name} already exists (framework-builtin submodule or top-level attribute); "
             f"plugin {plugin!r} cannot override."
         )
-    # AVA_SDK_DISABLE may have replaced the sys.modules entry with a disabled-module sentinel before the
-    # install (the env is applied at `import ava`). The install must NOT clobber the sentinel — it is the
+    # AVA_SDK_DISABLE may have replaced the sys.modules entry with a disabled-module sentinel before this
+    # plugin applies (install() applies the env entries before any plugin). The install must NOT clobber the sentinel — it is the
     # legible "disabled" error surface the disable machinery put there, and a disabled name is
     # framework-owned (not overridable), so fail loud with the same conflict class.
     if isinstance(_sys.modules.get(f"ava.{name}"), _DisabledSDKModule):

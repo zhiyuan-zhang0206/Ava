@@ -29,7 +29,6 @@ from ava.sdk_surface.help import (
     _format_docstring,
     _format_documented_const_stub,
     _format_signature,
-    compact_classes,
 )
 
 
@@ -51,11 +50,11 @@ def _fake_module(source: str, name: str = "fakemod") -> types.ModuleType:
     return mod
 
 
-def _render(target: object | list[object]) -> str:
+def _render(target: object | list[object], *, compact_classes: bool = False) -> str:
     targets = target if isinstance(target, list) else [target]
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        ava.help(*targets)
+        ava.help(*targets, compact_classes=compact_classes)
     return buf.getvalue()
 
 
@@ -283,11 +282,7 @@ def test_class_child_compact_keeps_fields_drops_methods_and_nested() -> None:
         ''',
         name="t_class_compact",
     )
-    token = compact_classes.set(True)
-    try:
-        out = _render(mod)
-    finally:
-        compact_classes.reset(token)
+    out = _render(mod, compact_classes=True)
     assert "class Widget:" in out
     assert '"""A widget."""' in out
     # fields kept
@@ -316,11 +311,7 @@ def test_class_child_compact_keeps_enum_members() -> None:
         ''',
         name="t_enum_compact",
     )
-    token = compact_classes.set(True)
-    try:
-        out = _render(mod)
-    finally:
-        compact_classes.reset(token)
+    out = _render(mod, compact_classes=True)
     assert "class Status(StrEnum):" in out
     assert "ON = 'on'" in out
     assert "OFF = 'off'" in out

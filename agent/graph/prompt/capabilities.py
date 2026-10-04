@@ -37,8 +37,8 @@ def _disabled_by_sdk_config(path: str, sdk_disable_config: Sequence[str]) -> boo
     Two disable sources, one rendering rule. `sdk_disable_config` (the agent's
     `Prompt.sdk_disable`) carries the env (`AVA_SDK_DISABLE`) and per-agent overlay entries; the
     eval-isolation boundary (`_apply_per_agent_eval_isolation`) records surfaces
-    removed at runtime by `sdk_disable.apply_sdk_disable` in
-    `sdk_disable.applied_disable_entries` without touching settings. Only configured
+    removed at runtime by `sdk_disable.apply_sdk_disable` on the installation
+    (`sdk_disable.applied_entries()`) without touching settings. Only configured
     entries and registry-recorded runtime removals count as disabled; an
     unresolved path that appears in neither source remains eligible for the
     expansion resolver's diagnostic warning."""
@@ -47,8 +47,7 @@ def _disabled_by_sdk_config(path: str, sdk_disable_config: Sequence[str]) -> boo
     from ava.sdk_surface import sdk_disable
 
     return any(
-        path == entry or path.startswith(entry + ".")
-        for entry in sdk_disable.applied_disable_entries
+        path == entry or path.startswith(entry + ".") for entry in sdk_disable.applied_entries()
     )
 
 

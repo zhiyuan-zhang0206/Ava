@@ -503,8 +503,6 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     code, write the result envelope."""
     child = _import_runtime(boot_started_at)
     from agent.graph.exec.protocol import ResultPayload, read_request, write_result
-    from ava.attachment_transport import own_media_gated_members
-    from ava.sdk_surface.discovery import hidden_surface_members
 
     _line_buffered_output()
     _install_signal_handlers()
@@ -518,23 +516,24 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
     # plugins load (apply_config_overlay needs _PLUGIN_CONFIGS bound first).
-    if _apply_overlay_scope(birth, overlay, scope="framework"):
-        # Per-agent sdk_disable additions ride the overlay; re-apply on top of
-        # the env baseline (idempotent — only new entries take effect).
-        from agent.process_boot import _apply_per_agent_sdk_disable
-
-        _apply_per_agent_sdk_disable()
-    # A text-only agent gets no attach contract anywhere in its SDK docs —
-    # including interactive `ava.help(ava.self)` (user ruling 2026-08-28).
-    # Set for the child's whole lifetime; the token is deliberately held.
-    hidden_surface_members.set(own_media_gated_members())
+    framework_overlay_applied = _apply_overlay_scope(birth, overlay, scope="framework")
     # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
     # same explicit load a watcher child runs. Idempotent, surface-only: a
     # request carrying a state snapshot arms a lazy slot whose first use
     # upgrades to the agent-runtime faces (state fields feed the state schema)
     # — the child start stays off the agent runtime either way (task #3633).
+    # The install applies the env baseline AVA_SDK_DISABLE as part of the load.
     child.ava.ensure_plugins_loaded()
     _apply_overlay_scope(birth, overlay, scope="plugin")
+    if framework_overlay_applied:
+        # Per-agent sdk_disable additions ride the overlay; they apply additively
+        # on top of the installed surface (delta — only new entries take effect).
+        from agent.process_boot import _apply_per_agent_sdk_disable
+
+        _apply_per_agent_sdk_disable()
+    # A text-only agent gets no attach contract anywhere in its SDK docs,
+    # including interactive `ava.help(ava.self)` (user ruling 2026-08-28): the
+    # renderer computes the child's media gating itself, per call.
     from agent.process_boot import _apply_per_agent_eval_isolation
 
     _apply_per_agent_eval_isolation()
