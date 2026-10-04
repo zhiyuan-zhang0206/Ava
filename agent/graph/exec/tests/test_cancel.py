@@ -34,7 +34,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import exec_node, llm_node
+from agent.graph import LlmLedger, exec_node, llm_node
 from agent.graph.exec.node import (
     _ExecCancelled,
     _ExecCrashed,
@@ -134,7 +134,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.1))
     runtime = _make_runtime(llm=fake_llm, event_publisher=pub)
-    result = await llm_node(state, runtime, _CONFIG)
+    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
 
     assert isinstance(result, Command)
@@ -190,7 +190,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.1))
     runtime = _make_runtime(llm=fake_llm, event_publisher=pub)
-    result = await llm_node(state, runtime, _CONFIG)
+    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
 
     assert isinstance(result, Command)
@@ -221,7 +221,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.05))
     runtime = _make_runtime(llm=fake_llm, event_publisher=pub)
-    result = await llm_node(state, runtime, _CONFIG)
+    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
     assert _has_cancelled_event(pub, agent_id=7)
 
@@ -255,7 +255,7 @@ async def test_llm_node_cancel_event_race_normal_completion(
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
 
     runtime = _make_runtime(llm=fake_llm)
-    result = await llm_node(state, runtime, _CONFIG)
+    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
 
     assert isinstance(result, Command)
     assert result.update["messages"][0].content == "print('hi')"  # pyright: ignore[reportUnknownMemberType]
