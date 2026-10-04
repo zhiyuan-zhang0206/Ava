@@ -17,7 +17,7 @@ import json
 import logging
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -166,6 +166,14 @@ def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
     return loaded
 
 
+async def _contained(work: Awaitable[None], what: str) -> None:
+    """Run one daemon-long loop so a failure ends that loop alone, logged, never the daemon."""
+    try:
+        await work
+    except Exception:
+        _log.exception("im_bridge: %s failed", what)
+
+
 async def _liveness_loop(liveness: Liveness) -> None:
     """Beat the healthz liveness while the daemon serves.
 
@@ -260,8 +268,6 @@ async def run() -> None:
     if not adapters:
         _log.warning("im_bridge: no adapters loaded — nothing to serve")
 
-    liveness_task: asyncio.Task[None] | None = None
-    notice_task: asyncio.Task[None] | None = None
     try:
         # Drain anything the previous process outboxed when the gateway was
         # down (Task #1032: user messages must not drop across restarts).
@@ -270,19 +276,17 @@ async def run() -> None:
         # are memory-only and a restart drops them (Task #804: agent replies
         # silently stopped reaching Telegram after the 04:32 restart).
         await core.restore_subscriptions()
-        liveness_task = asyncio.create_task(_liveness_loop(liveness))
-        notice_task = asyncio.create_task(_notice_loop(core))
-        tasks = [asyncio.create_task(a.start()) for a in adapters]
-        await asyncio.gather(*tasks)
-        # Every adapter's start() returns once its connection loop is launched
-        # (long polls / ws threads run in the background). The daemon now stays
-        # alive forever; SIGTERM/SIGINT unwinds through the finally below.
-        await asyncio.Event().wait()
+        # One TaskGroup owns the heartbeat and the notice poll; leaving the
+        # block (SIGTERM/SIGINT cancels it) cancels both before the finally.
+        async with asyncio.TaskGroup() as loops:
+            loops.create_task(_contained(_liveness_loop(liveness), "liveness loop"))
+            loops.create_task(_contained(_notice_loop(core), "notice loop"))
+            await asyncio.gather(*(a.start() for a in adapters))
+            # Every adapter's start() returns once its connection loop is launched
+            # (long polls / ws threads run in the background). The daemon now stays
+            # alive forever; SIGTERM/SIGINT unwinds through the finally below.
+            await asyncio.Event().wait()
     finally:
-        if liveness_task is not None:
-            liveness_task.cancel()
-        if notice_task is not None:
-            notice_task.cancel()
         for a in adapters:
             with suppress(Exception):
                 await a.stop()

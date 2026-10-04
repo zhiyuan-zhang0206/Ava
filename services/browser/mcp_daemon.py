@@ -68,9 +68,7 @@ from services.browser import page_lifecycle
 from services.browser.gateway_session import (
     GatewaySession,
     _navigates_to_gateway,
-    _spawn_inject,
-    _spawn_verify,
-    _start_session_maintenance,
+    stop_on_signals,
 )
 from services.browser.mcp_upstream import (
     _await_stop_or_timeout,
@@ -78,6 +76,7 @@ from services.browser.mcp_upstream import (
     _bounded_stack_close,
     _create_upstream,
     _StoppingError,
+    contained,
 )
 from services.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
@@ -332,7 +331,7 @@ class ChromeMcpDaemon:
                 # whole coverage of the TTL registry).
                 self.pages.register_created_page(_selected_id(result), self.generation)
                 if verify_after:
-                    _spawn_verify(self.gateway)
+                    self.gateway.spawn_verify()
             return result, (_selected_id(result) or None)
         return _no_page_result(), None
 
@@ -352,7 +351,7 @@ class ChromeMcpDaemon:
 
         result = await self._call(name, args)
         if verify_after and not result.is_error:
-            _spawn_verify(self.gateway)
+            self.gateway.spawn_verify()
         if not result.is_error:
             if name == "new_page":
                 # Page created -> TTL slot (see `page_lifecycle`); a listing
@@ -494,13 +493,14 @@ def _write(writer: asyncio.StreamWriter, obj: Response) -> None:
 
 async def _await_death_or_stop(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> None:
     """Wait for daemon.dead or stop signal, cleaning up tasks on exit."""
-    dead_task = asyncio.create_task(daemon.dead.wait())
-    stop_task = asyncio.create_task(stop.wait())
-    try:
-        await asyncio.wait({stop_task, dead_task}, return_when=asyncio.FIRST_COMPLETED)
-    finally:
-        dead_task.cancel()
-        stop_task.cancel()
+    async with asyncio.TaskGroup() as waiters:
+        dead_task = waiters.create_task(daemon.dead.wait())
+        stop_task = waiters.create_task(stop.wait())
+        try:
+            await asyncio.wait({stop_task, dead_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            dead_task.cancel()
+            stop_task.cancel()
 
 
 async def _upstream_watchdog(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> None:
@@ -546,7 +546,7 @@ async def _socket_in_use(path: Path) -> bool:
     return True
 
 
-async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps the loop at 51 statements
+async def run() -> None:  # noqa: PLR0915 — the single-instance guard and the reconnect loop keep run at 55 statements
     """Start the browser-mcp daemon.
 
     Listens on the shared Unix socket and auto-reconnects the upstream
@@ -582,103 +582,98 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
     logger.info(f"[browser-mcp] listening on {sock} (upstream {browser_url})")
 
     # Composition root of the shared page/session state: built once, handed to
-    # every ChromeMcpDaemon so it survives upstream reconnects.
+    # every ChromeMcpDaemon so it survives upstream reconnects. One TaskGroup owns
+    # the daemon-long tasks (the session refresh loop and the gateway session's
+    # fire-and-forget one-shots); the shutdown path cancels them before it closes.
     pages = PageRegistry()
-    gateway = GatewaySession()
-    stop, session_task = await _start_session_maintenance(gateway)
-
-    # Tracks the current upstream stack so we can close it before reconnecting.
-    current_stack: AsyncExitStack | None = None
-    reconnect_delay = _RECONNECT_INITIAL_DELAY_S
-    # Hoisted out of the loop so the shutdown path can cancel them (P3: the
-    # stop path used to leave the watchdog running until its own next tick).
-    watchdog_task: asyncio.Task[None] | None = None
-    reaper_task: asyncio.Task[None] | None = None
-
-    try:
-        while not stop.is_set():
-            try:
-                session, stack = await _create_upstream(browser_url, stop)
-            except _StoppingError:
-                break
-            except Exception as e:
-                logger.error(
-                    f"[browser-mcp] upstream creation failed: {e}; "
-                    f"retrying in {reconnect_delay:.1f}s"
-                )
-                await _await_stop_or_timeout(stop, reconnect_delay)
-                if stop.is_set():
+    stop = stop_on_signals()
+    async with asyncio.TaskGroup() as tasks:
+        gateway = GatewaySession(tasks)
+        session_task = tasks.create_task(
+            contained(gateway.refresh_loop(stop), "gateway session refresh")
+        )
+        # Tracks the current upstream stack so we can close it before reconnecting.
+        current_stack: AsyncExitStack | None = None
+        reconnect_delay = _RECONNECT_INITIAL_DELAY_S
+        try:
+            while not stop.is_set():
+                try:
+                    session, stack = await _create_upstream(browser_url, stop)
+                except _StoppingError:
                     break
-                reconnect_delay = min(reconnect_delay * 2, _RECONNECT_MAX_DELAY_S)
-                continue
+                except Exception as e:
+                    logger.error(
+                        f"[browser-mcp] upstream creation failed: {e}; "
+                        f"retrying in {reconnect_delay:.1f}s"
+                    )
+                    await _await_stop_or_timeout(stop, reconnect_delay)
+                    if stop.is_set():
+                        break
+                    reconnect_delay = min(reconnect_delay * 2, _RECONNECT_MAX_DELAY_S)
+                    continue
 
-            # Successfully connected — swap in the new daemon and stack.
-            if current_stack is not None:
-                await _bounded_stack_close(current_stack, "previous upstream stack close")
-            current_stack = stack
-            daemon_ref[0] = ChromeMcpDaemon(session, pages, gateway)
-            watchdog_task = asyncio.create_task(_upstream_watchdog(daemon_ref[0], stop))
-            reaper_task = asyncio.create_task(dead_page_reaper(daemon_ref[0], stop))
-            reconnect_delay = _RECONNECT_INITIAL_DELAY_S
-            logger.info(f"[browser-mcp] upstream connected, gen {daemon_ref[0].generation}")
+                # Successfully connected — swap in the new daemon and stack.
+                if current_stack is not None:
+                    await _bounded_stack_close(current_stack, "previous upstream stack close")
+                current_stack = stack
+                daemon = ChromeMcpDaemon(session, pages, gateway)
+                daemon_ref[0] = daemon
+                reconnect_delay = _RECONNECT_INITIAL_DELAY_S
+                logger.info(f"[browser-mcp] upstream connected, gen {daemon.generation}")
 
-            # Chrome is confirmed up here — inject the gateway session cookie
-            # right away (the periodic loop covers expiry; this covers the
-            # fresh-profile cold start and the post-restart gap without
-            # waiting for the next tick).
-            _spawn_inject(gateway)
+                await _serve_generation(daemon, stop, gateway)
 
-            # Wait for upstream death or stop signal.
-            await _await_death_or_stop(daemon_ref[0], stop)
+                if daemon.dead.is_set():
+                    logger.error("[browser-mcp] upstream session died; reconnecting...")
+                    daemon_ref[0] = None
+                    # Close the dead upstream stack NOW — its npx/node children
+                    # used to linger until the next successful reconnect (audit
+                    # round 2, P2), holding resources for the whole backoff window.
+                    # The close is bounded: a child that ignores termination must
+                    # not wedge the reconnect loop (2026-09-09 #2043).
+                    # current_stack is non-None here by construction: this branch
+                    # sits after a successful _create_upstream (which assigns it);
+                    # the None reset makes the next loop iteration's assignment the
+                    # only path that matters (pyright: comparison is always true).
+                    await _bounded_stack_close(current_stack, "dead upstream stack close")
+                    current_stack = None
+        finally:
+            logger.info("[browser-mcp] shutting down")
+            session_task.cancel()
+            gateway.cancel_one_shots()
+            # Two bounded steps, so the daemon may keep closing for up to
+            # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
+            # is derived from that total.
+            await _bounded_stack_close(current_stack, "upstream stack close during shutdown")
+            server.close()
+            await _bounded(server.wait_closed(), "server close")
+            with suppress(OSError):
+                sock.unlink()
 
-            if daemon_ref[0].dead.is_set():
-                logger.error("[browser-mcp] upstream session died; reconnecting...")
-                watchdog_task.cancel()
-                with suppress(BaseException):
-                    await watchdog_task
-                watchdog_task = None
-                reaper_task.cancel()
-                with suppress(BaseException):
-                    await reaper_task
-                reaper_task = None
-                daemon_ref[0] = None
-                # Close the dead upstream stack NOW — its npx/node children
-                # used to linger until the next successful reconnect (audit
-                # round 2, P2), holding resources for the whole backoff window.
-                # The close is bounded: a child that ignores termination must
-                # not wedge the reconnect loop (2026-09-09 #2043).
-                # current_stack is non-None here by construction: this branch
-                # sits after a successful _create_upstream (which assigns it);
-                # the None reset makes the next loop iteration's assignment the
-                # only path that matters (pyright: comparison is always true).
-                await _bounded_stack_close(current_stack, "dead upstream stack close")
-                current_stack = None
-    finally:
-        logger.info("[browser-mcp] shutting down")
-        if watchdog_task is not None:
-            watchdog_task.cancel()
-            with suppress(BaseException):
-                await watchdog_task
-        if reaper_task is not None:
-            reaper_task.cancel()
-            with suppress(BaseException):
-                await reaper_task
-        session_task.cancel()
-        # CancelledError is a BaseException, not an Exception: suppressing
-        # only Exception here let a cancelled session loop escape the finally
-        # and skip every remaining cleanup step — upstream stack, server, and
-        # socket close (2026-09-09 #2043: SIGTERM left a live daemon that
-        # blocked `cluster update` for the whole 300s stop budget).
-        with suppress(BaseException):
-            await session_task
-        # Two bounded steps, so the daemon may keep closing for up to
-        # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
-        # is derived from that total.
-        await _bounded_stack_close(current_stack, "upstream stack close during shutdown")
-        server.close()
-        await _bounded(server.wait_closed(), "server close")
-        with suppress(OSError):
-            sock.unlink()
+
+async def _serve_generation(
+    daemon: ChromeMcpDaemon, stop: asyncio.Event, gateway: GatewaySession
+) -> None:
+    """Serve one upstream connection until it dies or the stop event fires.
+
+    The upstream watchdog and the dead-page reaper run per connection, so they live
+    in a group that closes with it.
+    """
+    async with asyncio.TaskGroup() as helpers:
+        watchdog = helpers.create_task(
+            contained(_upstream_watchdog(daemon, stop), "upstream watchdog")
+        )
+        reaper = helpers.create_task(contained(dead_page_reaper(daemon, stop), "dead-page reaper"))
+        # Chrome is confirmed up here — inject the gateway session cookie
+        # right away (the periodic loop covers expiry; this covers the
+        # fresh-profile cold start and the post-restart gap without
+        # waiting for the next tick).
+        gateway.spawn_inject()
+        try:
+            await _await_death_or_stop(daemon, stop)
+        finally:
+            watchdog.cancel()
+            reaper.cancel()
 
 
 def main() -> None:

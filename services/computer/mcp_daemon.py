@@ -550,15 +550,24 @@ async def _socket_in_use(path: Path) -> bool:
 async def _serve_client(
     daemon: ComputerMcpDaemon, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
-    """Run one client connection (the tracked task's coroutine)."""
-    await daemon.handle(reader, writer)
+    """Run one client connection (the tracked task's coroutine).
+
+    A client's failure ends its connection, never the daemon the clients' group lives in.
+    """
+    try:
+        await daemon.handle(reader, writer)
+    except Exception:
+        logger.exception("[computer-mcp] client handler failed")
 
 
 def _tracked_client(
-    daemon: ComputerMcpDaemon, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    daemon: ComputerMcpDaemon,
+    clients: asyncio.TaskGroup,
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
 ) -> asyncio.Task[None]:
     """Spawn the per-connection handler as a tracked task (cancellable at shutdown)."""
-    task = asyncio.create_task(_serve_client(daemon, reader, writer))
+    task = clients.create_task(_serve_client(daemon, reader, writer))
     daemon._clients.add(task)
     task.add_done_callback(daemon._clients.discard)
     return task
@@ -577,30 +586,36 @@ async def run(sock: str | None = None) -> None:
         raise SystemExit(1)
     with suppress(OSError):
         path.unlink()
-    server = await asyncio.start_unix_server(
-        lambda r, w: _tracked_client(daemon, r, w), path=str(path), limit=_LINE_LIMIT
-    )
-    logger.info(f"[computer-mcp] listening on {path}")
-    watchdog = _guard_loop_liveness(asyncio.get_running_loop(), config.computer_use_loop_stall_s)
-    stop = asyncio.Event()
-
-    def _stop() -> None:
-        stop.set()
-
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        with suppress(NotImplementedError):
-            asyncio.get_running_loop().add_signal_handler(sig, _stop)
-    try:
-        await stop.wait()
-    finally:
-        watchdog.stop()
-        server.close()
-        await _bounded_cleanup(
-            server, daemon._clients, drain_s=config.computer_use_shutdown_drain_s
+    # The group owns every client handler; the shutdown path cancels them before it closes.
+    async with asyncio.TaskGroup() as clients:
+        server = await asyncio.start_unix_server(
+            lambda r, w: _tracked_client(daemon, clients, r, w),
+            path=str(path),
+            limit=_LINE_LIMIT,
         )
-        with suppress(OSError):
-            path.unlink()
-        logger.info("[computer-mcp] shutting down")
+        logger.info(f"[computer-mcp] listening on {path}")
+        watchdog = _guard_loop_liveness(
+            asyncio.get_running_loop(), config.computer_use_loop_stall_s
+        )
+        stop = asyncio.Event()
+
+        def _stop() -> None:
+            stop.set()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            with suppress(NotImplementedError):
+                asyncio.get_running_loop().add_signal_handler(sig, _stop)
+        try:
+            await stop.wait()
+        finally:
+            watchdog.stop()
+            server.close()
+            await _bounded_cleanup(
+                server, daemon._clients, drain_s=config.computer_use_shutdown_drain_s
+            )
+            with suppress(OSError):
+                path.unlink()
+            logger.info("[computer-mcp] shutting down")
 
 
 def main() -> None:
