@@ -20,7 +20,7 @@ The auth mode for remote (`url`) MCP servers that require OAuth rather than stat
 5. Refresh tokens renew transparently (`grant_types` include `refresh_token`); stored tokens are reused across daemon restarts
 
 ## Concurrency
-One in-flight flow per server, guarded by a module-level `asyncio.Lock` (`_oauth_locks`): concurrent connections for the same server wait on the lock and proceed with the cached client once tokens land; a failed flow releases the lock and surfaces the error.
+One in-flight flow per server, guarded by a per-server `asyncio.Lock` in the daemon's shared state (`_Scope.oauth_locks`, built once by `run_daemon`): concurrent connections for the same server wait on the lock and proceed with the cached client once tokens land; a failed flow releases the lock and surfaces the error.
 
 ## Timeouts
 An OAuth connect envelope is 600 s (`_OAUTH_FLOW_TIMEOUT_S`) — the user has to click through a browser — versus the normal `sandbox.mcp_connect_timeout_seconds` for stdio/static-auth. An in-flight authorization must not be cut off by the request path's own timeout.

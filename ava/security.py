@@ -173,9 +173,8 @@ def take_findings() -> list[SecurityFindingEntry]:
     means each finding is delivered exactly once — there is no file to
     truncate.
     """
-    global _pending_findings  # noqa: PLW0603 — drain-and-reset is the contract
-    out = _pending_findings
-    _pending_findings = []
+    out = list(_pending_findings)
+    _pending_findings.clear()
     return out
 
 
