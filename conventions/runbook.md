@@ -844,7 +844,7 @@ The Codex launcher in `ava-use-other-agents` owns one canonical
 session per `(cluster, workspace, tool)`. Check it before starting work:
 
 ```bash
-python ava_builtins/skills/ava-use-other-agents/scripts/spawn_codex.py \
+python ava_builtins/skills/coordination/ava-use-other-agents/scripts/spawn_codex.py \
   /absolute/workspace \
   --tasks-file /absolute/workspace/tasks.md \
   --work-file /absolute/workspace/work.md \
@@ -876,7 +876,7 @@ the normal lifecycle boundary. Cancel only the generation printed by the
 launcher or `--status`:
 
 ```bash
-python ava_builtins/skills/ava-use-other-agents/scripts/spawn_codex.py \
+python ava_builtins/skills/coordination/ava-use-other-agents/scripts/spawn_codex.py \
   /absolute/workspace \
   --tasks-file /absolute/workspace/tasks.md \
   --work-file /absolute/workspace/work.md \

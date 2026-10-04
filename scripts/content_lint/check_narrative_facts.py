@@ -59,13 +59,13 @@ def check_skill_catalog() -> list[str]:
         if name in ("comms", "ops_lifecycle", "orchestration", "self_improvement", "web_media"):
             continue  # group nodes, not skills
         if not (
-            (ROOT / f"ava_builtins/skills/{name}").is_dir()
+            any(d.is_dir() for d in (ROOT / "ava_builtins/skills").glob(f"*/{name}"))
             or (ROOT / f"ava_builtins/plugins/{name}").is_dir()
             or (ROOT / f"ava_builtins/skills/{name}.ava.okf.md").is_file()
         ):
             problems.append(
                 f"okf/skills/skills.ava.okf.md lists skill `{name}` but no "
-                f"ava_builtins/skills/{name}/ or ava_builtins/plugins/{name}/ exists — "
+                f"ava_builtins/skills/<group>/{name}/ or ava_builtins/plugins/{name}/ exists — "
                 f"removed skill still in the catalog?"
             )
     return problems

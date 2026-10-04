@@ -12,7 +12,9 @@ import pytest
 
 from ava.shell.coding_tools import _claude_checks, _first_run, claude
 
-_SKILL_DIR = Path(__file__).parents[4] / "ava_builtins" / "skills" / "ava-use-other-agents"
+_SKILL_DIR = (
+    Path(__file__).parents[4] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
+)
 
 
 def test_claude_command_uses_home_fallback_when_session_path_has_no_claude(

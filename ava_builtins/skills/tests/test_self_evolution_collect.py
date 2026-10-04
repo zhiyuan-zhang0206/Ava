@@ -27,7 +27,7 @@ from tests.skills import load_skill_script
 @pytest.fixture(scope="module")
 def collect_mod() -> Any:
     """The collection logic module, loaded by path (kebab-case skill dirs never import)."""
-    return load_skill_script("ava-self-evolution", "scripts", "collect.py")
+    return load_skill_script("platform", "ava-self-evolution", "scripts", "collect.py")
 
 
 def _insert_agent(cur: psycopg.Cursor, agent_id: int) -> None:

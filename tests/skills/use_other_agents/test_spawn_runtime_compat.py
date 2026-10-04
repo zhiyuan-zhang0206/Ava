@@ -9,7 +9,9 @@ from types import ModuleType
 
 import pytest
 
-_SKILL_DIR = Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents"
+_SKILL_DIR = (
+    Path(__file__).parents[3] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
+)
 
 
 def _script(tool: str) -> ModuleType:

@@ -84,40 +84,40 @@ def test_only_ava_builtins_is_in_scope() -> None:
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent))\n",
-            "ava_builtins/skills/gmail/scripts/feed.py",
+            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
         # Own directory, os.path style (the exact pattern
         # lint_no_script_sibling_imports.py documents).
         (
             "import sys, os\nsys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\n",
-            "ava_builtins/skills/ava-self-evolution/scripts/daily_scan.py",
+            "ava_builtins/skills/platform/ava-self-evolution/scripts/daily_scan.py",
         ),
         # .append(...) is equally recognized, not just .insert(0, ...).
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.append(str(Path(__file__).resolve().parent))\n",
-            "ava_builtins/skills/gmail/scripts/feed.py",
+            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
         # A sibling sub-skill's scripts/ dir, pathlib style with a `/` tail —
         # still inside the same top-level skill (web-ai).
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'scripts'))\n",
-            "ava_builtins/skills/web-ai/console/scripts/ask.py",
+            "ava_builtins/skills/integrations/web-ai/console/scripts/ask.py",
         ),
         # Same, os.path.join style.
         (
             "import sys, os\n"
             "sys.path.insert(0, os.path.join("
             "os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts'))\n",
-            "ava_builtins/skills/web-ai/console/scripts/ask.py",
+            "ava_builtins/skills/integrations/web-ai/console/scripts/ask.py",
         ),
         # The skill's own root directory (two hops up from scripts/) is still
         # inside the skill.
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent))\n",
-            "ava_builtins/skills/gmail/scripts/feed.py",
+            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
     ],
 )
@@ -133,13 +133,13 @@ def test_the_within_skill_file_guard_is_not_a_site(source: str, rel_path: str) -
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent "
             "/ 'audio-transcribe' / 'scripts'))\n",
-            "ava_builtins/skills/web-sources/youtube/scripts/feed.py",
+            "ava_builtins/skills/integrations/web-sources/youtube/scripts/feed.py",
         ),
         # Escapes to ava_builtins/skills/ itself — not any one skill.
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))\n",
-            "ava_builtins/skills/gmail/scripts/feed.py",
+            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
         # A __file__-derived guard is never in scope outside skills/ at all.
         (
@@ -152,13 +152,13 @@ def test_the_within_skill_file_guard_is_not_a_site(source: str, rel_path: str) -
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.extend([str(Path(__file__).resolve().parent)])\n",
-            "ava_builtins/skills/gmail/scripts/feed.py",
+            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
         # insert() at a non-zero index is not the recognized guard shape.
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(1, str(Path(__file__).resolve().parent))\n",
-            "ava_builtins/skills/gmail/scripts/feed.py",
+            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
     ],
 )
@@ -172,8 +172,10 @@ def test_a_file_loader_is_still_a_site_even_with_an_in_skill_file_derived_argume
         "importlib.util.spec_from_file_location("
         "'m', str(Path(__file__).resolve().parent / 'x.py'))\n"
     )
-    assert _sites(source, "ava_builtins/skills/gmail/scripts/feed.py") == {
-        "ava_builtins/skills/gmail/scripts/feed.py::importlib.util.spec_from_file_location": [3]
+    assert _sites(source, "ava_builtins/skills/integrations/gmail/scripts/feed.py") == {
+        "ava_builtins/skills/integrations/gmail/scripts/feed.py::importlib.util.spec_from_file_location": [
+            3
+        ]
     }
 
 

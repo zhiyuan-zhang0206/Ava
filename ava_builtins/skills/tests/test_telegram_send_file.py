@@ -24,6 +24,7 @@ _PATH = (
     Path(__file__).parents[3]
     / "ava_builtins"
     / "skills"
+    / "integrations"
     / "telegram-send-file"
     / "scripts"
     / "send_file.py"

@@ -16,7 +16,7 @@ import pytest
 
 from tests.skills import load_skill_script
 
-T = load_skill_script("audio-transcribe", "scripts", "transcribe.py")
+T = load_skill_script("integrations", "audio-transcribe", "scripts", "transcribe.py")
 
 
 def _cp(cmd: list[str], stdout: str = "") -> subprocess.CompletedProcess[str]:

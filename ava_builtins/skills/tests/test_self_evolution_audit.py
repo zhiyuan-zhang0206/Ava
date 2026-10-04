@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tests.skills import load_skill_script
 
-_audit_mod = load_skill_script("ava-self-evolution", "scripts", "audit.py")
+_audit_mod = load_skill_script("platform", "ava-self-evolution", "scripts", "audit.py")
 
 
 def _audit_module():
