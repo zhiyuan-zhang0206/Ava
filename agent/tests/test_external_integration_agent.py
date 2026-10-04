@@ -36,7 +36,7 @@ class IntegrationPlugin(BaseModel):
 
 @pytest.fixture
 def native_checkpoint(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
     registry = ExtensionRegistry(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
@@ -45,8 +45,8 @@ def native_checkpoint(
     monkeypatch.setattr("agent.extensions.registry.build_registry", lambda: registry)
     monkeypatch.setattr(agent_identity, "_external_identity", None)
     monkeypatch.setattr(agent_identity, "_agent_id", None)
-    monkeypatch.setattr(ava, "state", None)
-    monkeypatch.setattr(ava, "state_update", None)
+    ava.unbind_exec_turn()
+    request.addfinalizer(ava.unbind_exec_turn)
 
     def loader_stub(**_kwargs: object) -> None:
         """Accept the `surface` kwarg attach passes (ignored)."""

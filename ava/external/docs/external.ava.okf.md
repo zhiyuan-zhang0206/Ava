@@ -26,8 +26,8 @@ or claiming an export that did not finish.
 `ava.agent_identity.validate_external_identity` checks the lease, the caller's presence in
 the recorded controller tree, and the state version on SDK
 identity paths, including provenance and MCP requests. `PluginStateHandle.read` and
-`update` perform the same check; raw `ava.state` remains a local snapshot rather
-than a lease-aware proxy. Native runtime identity paths remain unchanged
+`update` perform the same check; the raw `ava.state` slot remains a local snapshot rather
+than a lease-aware proxy (an attachment binds it, and detach unbinds it; an exec turn cannot attach). Native runtime identity paths remain unchanged
 when no external attachment exists. The attachment temporarily overrides an
 external caller profile so peer operations carry `agent:N`, then restores the
 ordinary profile when closed.

@@ -97,7 +97,7 @@ class SecurityFindingEntry(BaseModel):
 # ── exec-child findings buffer ───────────────────────────────────────────
 # scan_content() findings accumulate in this process-global list while agent
 # SDK code runs inside an exec child — a fresh process per execute_code, the
-# only place `ava.state` is set. The child drains the list with take_findings()
+# only place the turn's state slot is bound (`ava.in_exec_turn()`). The child drains the list with take_findings()
 # into its result envelope; the exec node re-validates each entry and injects it
 # as a SECURITY system note in the same exec's messages delta, after the
 # exec-result ToolMessage (the tool_use -> tool_result adjacency invariant
@@ -116,7 +116,7 @@ def _in_exec_turn() -> bool:
     finding can be delivered (there is a messages delta to inject into)."""
     import ava  # lazy: same-layer, avoids import cycle at module load
 
-    return ava.state is not None
+    return ava.in_exec_turn()
 
 
 def _record_finding(source: str, triggers: list[str]) -> None:

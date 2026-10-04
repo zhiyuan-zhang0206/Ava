@@ -76,7 +76,7 @@ _files_resolve = _ava_files_mod.resolve
 # materializes (task #3633 leg-2: a stateful child's slot is lazy). This
 # stand-in exists so the surface's call sites (`ava.cwd.get`/`set`, the read
 # wrap's injection path, the project-skill source below) always hold a handle
-# object. With a live slot (`ava.state` is not None), the slot exposes
+# object. With a live slot (`ava.in_exec_turn()`), the slot exposes
 # `materialize()` — the framework contract on the lazy slot: calling it loads
 # the face (which rebinds `state_handle` on this module) and the call then
 # delegates to the real handle. The rebind replaces the module attribute only,
@@ -119,9 +119,8 @@ class _UnboundStateHandle:
 
         if current is not self:
             return getattr(current, method)(*args)
-        state = ava.state
-        if state is not None:
-            materialize = getattr(state, "materialize", None)
+        if ava.in_exec_turn():
+            materialize = getattr(ava.state, "materialize", None)
             if materialize is not None:
                 materialize()
                 from .plugin import state_handle as current
@@ -140,11 +139,9 @@ state_handle: _UnboundStateHandle = _UnboundStateHandle()
 # scan runs on every lookup AND once at the system-prompt build, where state
 # is not yet bound (cwd still default) — there we contribute nothing.
 def _project_skill_source() -> list[Path]:
-    try:
-        cwd = Path(state_handle.read().cwd)
-    except ava.PluginStateOutsideTurnError:
+    if not ava.in_exec_turn():
         return []
-    return project_skill_roots(cwd)
+    return project_skill_roots(Path(state_handle.read().cwd))
 
 
 # ── wrap ava.files.read ───────────────────────────────────────────────────
@@ -268,7 +265,7 @@ def _wrapped_read(
 
     # Fast-path: when called outside a turn (test / dev REPL), pass through
     # to the wrapped read — no path rewriting, no injection.
-    if ava.state is None:
+    if not ava.in_exec_turn():
         return inner(path, start, end, limit=limit, with_line_numbers=with_line_numbers)
 
     # 1. Resolve path against plugin cwd
@@ -285,8 +282,10 @@ def _wrapped_read(
     # has been replaced by a summary and needs to be re-surfaced to the agent.
     # compact is a built-in BaseAgentState sub-state (always present), so read
     # it directly — a missing value is a real bug, not a default-to-0 case.
+    from agent.state import compact_version
+
     current = state_handle.read()
-    compact_v: int = ava.state.compact.version
+    compact_v = compact_version()
     if compact_v > current.last_seen_compact:
         injected: set[str] = set()
         hashes: set[str] = set()
@@ -340,7 +339,7 @@ def _wrapped_shell_run(
     """
     # Same by-design fast-path as _wrapped_read: outside a turn (test / dev
     # REPL), pass through; do not depend on plugin cwd state.
-    if ava.state is None or cwd is not None:
+    if not ava.in_exec_turn() or cwd is not None:
         return inner(cmd, cwd=cwd, timeout=timeout)
     return inner(cmd, cwd=str(_code_namespace.get()), timeout=timeout)
 
@@ -351,12 +350,12 @@ def _wrapped_shell_run(
 # `ava.cwd.set("<repo>")` every file op follows the tracked cwd instead of
 # staying pinned to the workspace.
 # Uniform wrap: when a turn is active, fast-path cwd resolution matches
-# _wrapped_read; outside a turn (ava.state is None) pass through to the
+# _wrapped_read; outside a turn (`ava.in_exec_turn()` is False) pass through to the
 # original function.
 def _resolve_for_cwd(path: str | Path) -> Path:
     """Resolve path against plugin cwd; outside a turn defer to the SDK core
     resolution (workspace, or HOME before an identity is bound)."""
-    if ava.state is None:
+    if not ava.in_exec_turn():
         return _files_resolve(str(path))
     p = Path(path).expanduser()
     cwd = _code_namespace.get()
@@ -405,7 +404,7 @@ def _wrapped_glob(inner: Callable[..., list[Path]], pattern: str = "*") -> list[
     # glob is not a simple path — the pattern may contain ** / * wildcards.
     # Resolve cwd base first, concatenate the pattern (preserving wildcard
     # semantics), then call the wrapped glob with the normalized pattern.
-    if ava.state is None:
+    if not ava.in_exec_turn():
         return inner(pattern)
     p_pattern = Path(pattern).expanduser()
     if p_pattern.is_absolute():

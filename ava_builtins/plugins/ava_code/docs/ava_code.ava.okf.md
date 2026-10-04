@@ -53,7 +53,7 @@ inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
 - Oversized context files (over `settings.sandbox.exec_output_max_chars`) are injected truncated head+tail with the full text archived to the workspace `.exec_output/` ring — the same overflow logic as exec output (`truncate_both_ends`); the archive path is reported in the note
 - Deduplication: `injected_paths` + `injected_hashes` (content hash, prevents same content different path from being re-injected); after compact, reset lazily by `compact.version` (built-in `CompactState` sub-state) to resurface
 - Primary path priority: system prompt directs agent to first `ava.files.read("AGENTS.md")`; when going via that primary path, content is already in the return value, just marked, not re-injected
-- The after_exec hook keeps only the cwd-change note and the project-skills note (summaries of plugin state, not content discovered during exec)
+- The after_exec hook keeps only the cwd-change note and the project-skills note (summaries of plugin state, not content discovered during exec). It runs in the agent host, so it reads the graph `state` it is handed through `state_handle.view(state)` and returns `state_handle.delta({...})`; it consumes `cwd_note` (clears it) and injects the project-skills listing once per compaction
 
 ### Plugin state declaration
 
@@ -61,6 +61,8 @@ inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
 state_handle = PluginStateHandle(AvaCodeState, "ava_code")
 # declared in contribute(): state=(AvaCodeState,)
 ```
+
+`AvaCodeState` lives in `_state.py` and the system-prompt sections in `_prompt_sections.py`: both import `ava`, which `agent_runtime.py` (hooks and `contribute()`) does not.
 
 - `AvaCodeState` besides `cwd: str` (default = agent workspace or `$HOME`) declares the base `messages` channel (exact `BaseAgentState` annotation — the in-memory delivery channel for context notes) and holds context injection dedup state (`injected_paths` / `injected_hashes` / `last_seen_compact`) and note injection state (`cwd_note` / `project_skills_note` / `project_skills_seen_compact`)
 - `cwd` is read/written via `ava.cwd.get() / set()` and is purely logical LangGraph state: `set()` never mutates the parent or disposable child's OS cwd

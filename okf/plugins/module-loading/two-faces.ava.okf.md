@@ -16,7 +16,7 @@ run agent-authored code — its imports must stay off the agent runtime (no
 `agent/tests/test_lazy_child_imports.py` locks this in clean subprocesses).
 `agent_runtime.py` is the optional **face** carrying the agent-side
 registrations (state fields, graph hooks) and its `contribute()` declaration
-(system-prompt sections, context notes — `build_registry()` reads it; no import side effect).
+(system-prompt sections, context notes — `build_registry()` reads it; no import side effect). The face and every module that defines a graph hook import no `ava` (hooks run in the host on the graph state; `scripts/lint/plugins/no_ava_in_hooks.py`) — a face that needs the SDK for a prompt section or a state default keeps that code in a sibling module.
 
 Which faces load is the caller's choice:
 - `load_extensions(surface=True)` — surfaces only, no reset. The child's

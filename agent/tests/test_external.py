@@ -55,7 +55,7 @@ class ExampleState(state_module.BaseAgentState):
 
 @pytest.fixture
 def attached_runtime(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> tuple[dict[str, Any], Any, list[dict[str, Any]]]:
     lease: dict[str, Any] = {
         "id": "lease",
@@ -74,8 +74,8 @@ def attached_runtime(
     monkeypatch.setattr(agent_identity, "_external_identity", None)
     monkeypatch.setattr(agent_identity, "_agent_id", None)
     monkeypatch.setattr(agent_identity, "_owns_loop", True)
-    monkeypatch.setattr(ava, "state", None)
-    monkeypatch.setattr(ava, "state_update", None)
+    ava.unbind_exec_turn()
+    request.addfinalizer(ava.unbind_exec_turn)
 
     def loader_stub(**_kwargs: object) -> None:
         """Accept the `surface` kwarg attach passes (ignored)."""
@@ -142,7 +142,7 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
     assert agent_identity._external_identity is None
     assert agent_identity._external_agent_id is None
     assert agent_identity.require_actor() == "external_agent:codex"
-    assert ava.state is None
+    assert not ava.in_exec_turn()
 
 
 def test_legacy_attachment_never_opens_an_event_receipt(
@@ -247,23 +247,28 @@ def _invalidate_lease(lease: dict[str, Any], invalidated: str) -> str:
     return "another attachment"
 
 
-def _assert_prior_binding_restored(prior_state: ExampleState, prior_update: dict[str, Any]) -> None:
-    assert ava.state is prior_state
-    assert ava.state_update is prior_update
+def _assert_detached() -> None:
+    """After a detach the process holds no exec slot and no attached config."""
+    assert not ava.in_exec_turn()
     assert external.attached_config() is None
 
 
+def test_attach_refuses_inside_an_exec_turn(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    ava.state = ExampleState(sample__seen={"prior"})
+    with pytest.raises(RuntimeError, match="exec turn cannot attach"):
+        external.attach("lease")
+    assert agent_identity._external_identity is None
+
+
 @pytest.mark.parametrize("invalidated", ["expiry", "state_version"])
-def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
+def test_failed_context_entry_detaches_and_allows_next_attachment(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
     invalidated: str,
 ) -> None:
     lease, _, staged = attached_runtime
-    prior_state = ExampleState(sample__seen={"prior"})
-    prior_update = {"sample__seen": {"pending-before-attachment"}}
-    monkeypatch.setattr(ava, "state", prior_state)
-    monkeypatch.setattr(ava, "state_update", prior_update)
     attachment = external.attach("lease")
     state_module.PluginStateHandle(ExamplePlugin, "sample").update({"seen": {"unflushed"}})
     reason = _invalidate_lease(lease, invalidated)
@@ -271,7 +276,7 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
         pytest.fail("an invalid attachment entered its context")
     assert agent_identity._external_identity is None
     assert agent_identity._external_agent_id is None
-    _assert_prior_binding_restored(prior_state, prior_update)
+    _assert_detached()
     assert not staged
     attachment.close()  # Already detached; must not retry the failed lease or flush.
 
@@ -286,7 +291,7 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
     with external.attach("next"):
         assert agent_identity._external_agent_id == 405
         assert ava.self.AGENT_ID == 405
-    _assert_prior_binding_restored(prior_state, prior_update)
+    _assert_detached()
 
 
 def test_concurrent_constructor_fails_before_lease_lookup(
@@ -330,16 +335,12 @@ def test_concurrent_constructor_fails_before_lease_lookup(
 
 
 @pytest.mark.parametrize("failure_at", ["lease", "snapshot"])
-def test_constructor_failure_restores_binding_and_allows_next_attachment(
+def test_constructor_failure_detaches_and_allows_next_attachment(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
     failure_at: str,
 ) -> None:
     _, _, staged = attached_runtime
-    prior_state = ExampleState(sample__seen={"prior"})
-    prior_update = {"sample__seen": {"pending-before-attachment"}}
-    monkeypatch.setattr(ava, "state", prior_state)
-    monkeypatch.setattr(ava, "state_update", prior_update)
 
     def fail(_db: object, *_args: Any) -> Any:
         raise RuntimeError("constructor interrupted")
@@ -353,9 +354,7 @@ def test_constructor_failure_restores_binding_and_allows_next_attachment(
             external.attach("lease")
     assert agent_identity._external_identity is None
     assert agent_identity._external_agent_id is None
-    assert ava.state is prior_state
-    assert ava.state_update is prior_update
-    assert external.attached_config() is None
+    _assert_detached()
     assert not staged
     with external.attach("lease"):
         assert agent_identity._external_agent_id == 405

@@ -1,4 +1,4 @@
-"""`scripts/lint/no_plugin_wrap.py` — a typo'd explicit target must fail the gate.
+"""`scripts/lint/plugins/no_plugin_wrap.py` — a typo'd explicit target must fail the gate.
 
 An explicit path argument that does not exist used to scan nothing and exit 0;
 it must now report the missing target on stderr and exit 1.
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import no_plugin_wrap as gate
+from scripts.lint.plugins import no_plugin_wrap as gate
 
 
 def test_directory_with_unreadable_member_is_skipped(
