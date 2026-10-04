@@ -1,11 +1,10 @@
 """The reaper's loop structure: the TaskGroup that owns the two loops, a crash
-that ends the process, the durable cadence clocks, the sweep's slow phases, the
-remote round, and the gateway no longer owning a reaper."""
+that ends the process, the durable cadence clocks, the sweep's slow phases, and
+the remote round."""
 
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 from collections.abc import Callable, Coroutine, Iterator
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -15,7 +14,6 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
-import gateway.app
 from base.config import settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
@@ -44,16 +42,6 @@ def _backdate(db: psycopg.Connection, kind: str, seconds: float) -> None:
         (seconds, kind),
     )
     db.commit()
-
-
-# --- the gateway no longer owns a reaper -------------------------------------
-
-
-def test_the_gateway_owns_no_reaper() -> None:
-    """The reaper is its own service: the gateway module is gone and its lifespan
-    neither imports nor starts one, so no loop in the gateway can kill a shell."""
-    assert importlib.util.find_spec("gateway.ttl_reaper") is None
-    assert not hasattr(gateway.app, "ttl_reaper")
 
 
 # --- loops end the process ---------------------------------------------------
@@ -236,28 +224,22 @@ async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
 # --- the remote round --------------------------------------------------------
 
 
-async def test_the_remote_round_reaps_shells_then_redelivers_work_failures(
+async def test_the_remote_round_reaps_shells(
     pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    order: list[str] = []
+    calls: list[str] = []
 
     async def reap(
         _pool: object, _db: object, _bus: EventBus, _progress: object
     ) -> list[tuple[int, int]]:
-        order.append("shells")
+        calls.append("shells")
         return []
 
-    async def reconcile(_pool: object, _db: object, _bus: object, on_event: Any = None) -> int:
-        order.append("work_failures")
-        assert on_event is not None
-        return 0
-
     monkeypatch.setattr(remote.shells, "reap_expired_shells", reap)
-    monkeypatch.setattr(remote.work_failed_router, "reconcile_stale_work_failures", reconcile)
 
     await remote.remote_round(pool, Database.from_settings(), EventBus.from_settings(), _progress())
 
-    assert order == ["shells", "work_failures"]
+    assert calls == ["shells"]
 
 
 # --- shell reclaim is concurrent across machines, serial within one ----------

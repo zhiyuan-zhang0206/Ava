@@ -14,7 +14,7 @@ mounted in `gateway/app.py`: `router`, `lifecycle`, `state`, `timeline`,
   - `timeline.py`          — checkpoint-backed conversation timeline with compact-history paging
   - `notices.py`           — `ava.ui.notify()` notices: feeds, replies, resolution
   - `forward.py`           — cross-machine forwarding of lifecycle + spawn to the owning runner
-  - `delivery.py`          — shared chat-inbound delivery (also used by tasks, uploads, work_failed,
+  - `delivery.py`          — shared chat-inbound delivery (also used by tasks, uploads,
                               the MCP endpoint and the completion digest)
   - `inbound_provenance.py` — verified request state -> inbound audit facts
   - `eval_guard.py`        — result-read boundary for evaluation-isolated callers
