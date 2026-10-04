@@ -117,14 +117,19 @@ class Cluster:
             return 0
         status, phase, failures = host["hold"]
         hold = json.dumps(
-            {"status": status, "maintenance": phase and {"phase": phase, "failures": failures}}
+            {
+                "hold": {
+                    "status": status,
+                    "maintenance": phase and {"phase": phase, "failures": failures},
+                }
+            }
         )
         if '"head=$(git rev-parse HEAD)"' in command:
             for key in ("head", "dirty", "hook", "active"):
                 emit(f"{key}={host[key]}")
             emit(f"hold={hold}")
             return 0
-        if command.endswith("maintenance status'"):
+        if command.endswith("status --json'"):
             emit(hold)
             return 0
         if "machine_name()" in command:
@@ -564,8 +569,8 @@ def test_the_log_carries_no_secret(
 
 
 _HOLD_WITH_BACKSLASHES = (
-    '{"status": "paused", "maintenance": {"phase": "stopped", '
-    '"failures": {"argv": "[\\"sh\\", \\"-c\\", \\"\\\\$HOME\\\\n\\"]"}}}'
+    '{"hold": {"status": "paused", "maintenance": {"phase": "stopped", '
+    '"failures": {"argv": "[\\"sh\\", \\"-c\\", \\"\\\\$HOME\\\\n\\"]"}}}}'
 )
 
 

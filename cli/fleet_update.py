@@ -29,12 +29,12 @@ _REPO = Path(__file__).resolve().parents[1]
 _HOME = 'H="$HOME/.ava"; S="$H/source"; cd "$S" || exit 1'
 _AVA = 'AVA_HOME="$H" "$S/.venv/bin/ava"'
 _PYTHON = f'{_HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
-_STATUS = f"{_HOME}; {_AVA} maintenance status"
+_STATUS = f"{_HOME}; {_AVA} status --json"
 _FREE = ("inactive", "resumed")  # maintenance statuses with no hold
 _POLL_S = 5  # roster re-read interval
 _STOP_HINT = (
-    '\nOn that host retry "ava stop -y --timeout 600", confirm maintenance status is '
-    "paused/stopped, then rerun `down`."
+    '\nOn that host retry "ava stop -y --timeout 600", confirm the maintenance hold is '
+    "paused/stopped (`ava status`), then rerun `down`."
 )
 # Reports a dirty tree, never cleans it: untracked files are the operator's to move.
 _CLEAN = (
@@ -49,7 +49,7 @@ printf '%s\\n' "head=$(git rev-parse HEAD)"
 printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
-printf '%s\\n' "hold=$({_AVA} maintenance status 2>/dev/null | grep '^{{' | tail -n 1)\""""
+printf '%s\\n' "hold=$({_AVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
 # Early converge passes left these 0555; `uv sync` cannot write through them.
 _VENV_DIRS = (
     "find .venv/bin .venv/lib -maxdepth 3 -type d \\( -path .venv/bin "
@@ -135,8 +135,9 @@ def ssh(alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
 
 def _hold(text: str) -> tuple[str, str | None, dict[str, str]]:
     data = json.loads([line for line in text.splitlines() if line.startswith("{")][-1])
-    held = data["maintenance"]
-    return (data["status"], held["phase"], held["failures"]) if held else (data["status"], None, {})
+    hold = data["hold"]
+    held = hold["maintenance"]
+    return (hold["status"], held["phase"], held["failures"]) if held else (hold["status"], None, {})
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -181,7 +182,7 @@ class Session:
 
 
 def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
-    hold = facts["hold"] or '{"status": "unreadable", "maintenance": null}'
+    hold = facts["hold"] or '{"hold": {"status": "unreadable", "maintenance": null}}'
     status, phase, failures = _hold(hold)
     reasons: list[str] = []
     if facts["dirty"] != "0":

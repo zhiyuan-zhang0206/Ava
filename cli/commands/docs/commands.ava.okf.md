@@ -74,9 +74,8 @@ native job, executable, socket and stopped-root custody are checked before
 native helper exit and removal of its definition. Start recreates that definition.
 Root owns Gate and native LGTM application services. `_pause_resume`
 releases normal startup admission only after readiness.
-`cli/parsers/maintenance.py` retains explicit intermediate steps through
-`cli/commands/lifecycle/maintenance.py` and `_maintenance_probe`.
-They reuse the [durable maintenance journal](../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
+The hold journal is read through `ava status` and ended by `ava start`
+(`lifecycle/hold_report.py`, `lifecycle/_failed_receipts.py`). They reuse the [durable maintenance journal](../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../../conventions/graceful-maintenance.md).
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,

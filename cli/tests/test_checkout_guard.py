@@ -81,7 +81,7 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
     [
         # Commands that only read are refused like the rest.
         ["status"],
-        ["maintenance", "status"],
+        ["status", "--json"],
         ["cluster", "status"],
         ["agents", "ls"],
         ["config", "get", "AVA_TIMEZONE"],
@@ -91,7 +91,6 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         ["stop"],
         ["restart"],
         ["converge"],
-        ["maintenance", "stop"],
         ["cluster", "destroy"],
         ["cluster", "db-authority", "issue-unit"],
         ["config", "set", "A=B"],

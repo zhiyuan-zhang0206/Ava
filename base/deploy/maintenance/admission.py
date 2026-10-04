@@ -27,7 +27,7 @@ _authorized_start: ContextVar[tuple[str, datetime] | None] = ContextVar(
 def snapshot() -> pause_owner.PauseOwnerSnapshot | None:
     current = pause_owner.read()
     if current.status == "invalid":
-        raise RuntimeError("unreadable pause owner; refusing new work until repaired")
+        raise RuntimeError("unreadable pause owner; refusing new work until it is removed")
     if current.status == "paused" and current.maintenance is not None:
         return current
     return None
@@ -44,7 +44,7 @@ def business_paused() -> bool:
     database posture projection or cached read cannot prolong a completed resume.
     Drained local agents do not imply remote continuations have finished their
     SDK calls, so only the following stop/start phases close business requests.
-    Unknown or incomplete pause records keep them closed until explicit repair.
+    Unknown or incomplete pause records keep them closed until the journal is removed by hand.
     """
     try:
         current = pause_owner.read()
@@ -232,41 +232,27 @@ def record_undelivered(agent_id: int, category: str) -> None:
     )
 
 
-def repair(
-    holder: str, acquired_at: datetime, record: dict[str, str]
-) -> pause_owner.PauseOwnerSnapshot:
-    """Sanctioned release of latched blocking failures, audited in the journal.
+def clear_failures() -> dict[int, str]:
+    """Drop every blocking failure receipt from the held journal; the receipts cleared.
 
-    The operator fixed the root cause; this moves `failures` verbatim into
-    `repaired` (the CAS "before" side) together with the operator-identity
-    `record`, leaving the hold resumable through the ordinary release path.
-    A hold that already drained is repairable too -- a failure latched after
-    the cohort landed has no other sanctioned exit.
-    Undelivered receipts are never cleared — they never block. The caller is
-    responsible for the host-quiescence and reachability proofs.
+    `ava start` calls this once it has re-delivered each failed continuation
+    (`cli.commands.lifecycle._failed_receipts`), so the hold can release. The
+    clear is a compare-and-swap on the journal: a turn that lands another failure
+    in between is cleared with the rest, or leaves a failure that keeps the hold
+    for the next `ava start`. Undelivered receipts are never touched; they never
+    block.
     """
-    from base.deploy.maintenance.state import validate_repair_record
+    cleared: dict[int, str] = {}
 
-    validated = validate_repair_record(record)
-    current = require_operation(holder, acquired_at)
-    assert current.maintenance is not None  # noqa: S101
-    hold = current.maintenance
-    if not hold.failures:
-        raise RuntimeError(
-            "no failed receipts to repair; `ava maintenance cancel` abandons a failure-free drain"
-        )
-    if hold.phase not in ("preparing", "draining", "drained"):
-        raise RuntimeError(
-            "repair cannot bypass a started stop; re-run `ava stop`, or `ava start` "
-            "to bring the unit back and release the hold"
-        )
-    updated = replace(
-        hold,
-        failures={},
-        repaired={**hold.repaired, **hold.failures},
-        repair_record=validated,
-    )
-    return pause_owner.change_maintenance(holder, acquired_at, hold, updated)
+    def update(hold: MaintenanceHold) -> MaintenanceHold | None:
+        if not hold.failures:
+            return None
+        cleared.clear()
+        cleared.update(hold.failures)
+        return replace(hold, failures={})
+
+    _change_with_retry(update)
+    return cleared
 
 
 def set_phase(holder: str, acquired_at: datetime, phase: str) -> pause_owner.PauseOwnerSnapshot:

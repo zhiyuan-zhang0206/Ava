@@ -75,9 +75,8 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if current.maintenance is not None and current.maintenance.failures:
         return (
-            "cannot resume failed continuation/flush receipts; fix the root cause, "
-            f"then ava maintenance repair --operation {current.holder} "
-            f"--acquired-at {current.acquired_at.isoformat()}"
+            "cannot resume failed continuation/flush receipts; run `ava start`, which "
+            "re-delivers them before it releases the hold"
         )
     from base.deploy.lifecycle import start_serving
 

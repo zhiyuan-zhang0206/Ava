@@ -39,3 +39,7 @@ through stop and repair, and raw-journal triage. This change does not alter
 lease renewal or compaction admission. Whether repeatedly interrupted agents
 need compaction admitted before ordinary turns remains a separate design
 question; context size alone does not establish lease expiry.
+
+Forward link (2026-10-04): `repair` and its host-absence probe are gone with `ava maintenance`; `ava
+start` settles failed receipts without asking the host. See
+[delete-ava-maintenance](2026-10-04-delete-ava-maintenance.md).
