@@ -7,6 +7,10 @@ GUI-session LaunchAgent: helper signing needs the login keychain); check holds
 and the listed machines' roster rows; smoke-test each listed agent-runner; refresh skills; then check
 for drift (the gateway's in-store schedule scripts, every host's plugins), which fails `up` last.
 After a failure, fix the cause and rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
+
+The window is quiet because `down` opens one Grafana silence over every alert rule before the first
+stop (`--silence-hours`, default 4) and `up` expires it once it completes (cli/fleet_alert_silence.py).
+A failed `up` leaves the silence to its expiry, so the cluster stays quiet while the cause is fixed.
 """
 
 from __future__ import annotations
@@ -248,6 +252,24 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     )
 
 
+def _silence_program() -> str:
+    """The silence program's source, shipped to the gateway on stdin."""
+    return Path(__file__).with_name("fleet_alert_silence.py").read_text()
+
+
+def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "") -> None:
+    """Open or expire the window's alert silence on the gateway; a failure warns, never stops the half.
+
+    The program runs on the host that holds Grafana's admin password and reports `SILENCE ...`
+    lines; a window without a silence is noisy, not unsafe."""
+    hours = getattr(args, "silence_hours", 0)
+    tail = f" --hours {hours:g} --comment {shlex.quote(comment)}" if verb == "open" else ""
+    out = s.run(args.gateway, f"{_PYTHON} - {verb}{tail}", stdin=_silence_program())
+    for line in out.splitlines():
+        if line.startswith(("SILENCE failed", "SILENCE skipped")):
+            s.say(f"WARNING: alert silence not {verb}: {line.removeprefix('SILENCE ')}")
+
+
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
@@ -258,6 +280,9 @@ def down(s: Session, args: argparse.Namespace) -> None:
     for alias in everyone:  # before any stop: a missing NEW must not strand a stopped cluster
         s.run(alias, f'{_HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
     _stored_schedules(s, args, new)
+    _silence(
+        s, args, "open", f"fleet update to {new[:12]}: planned outage; `up` expires this silence"
+    )
     for alias in [*args.runner, args.gateway]:
         try:
             s.run(alias, f"{_HOME}; {_AVA} stop -y --timeout {args.stop_timeout}")
@@ -399,6 +424,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
         s.run(args.gateway, f"{program} smoke MACHINE {args.smoke_timeout}  # each agent-runner")
         _refresh(s, args)
         _drift_checks(s, args)
+        _silence(s, args, "close")
         return
     rows, commit = _roster(s, args, program)
     for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
@@ -406,6 +432,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
         s.run(args.gateway, smoke, stdin=_GATEWAY_PROGRAM)
     _refresh(s, args)
     _drift_checks(s, args)  # last, so a false red never skips the smoke or the refresh
+    _silence(s, args, "close")
     s.say(f"up complete: every listed machine runs {commit[:12]}")
 
 
@@ -422,6 +449,12 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--new", required=True, help="commit to switch every host to")
             p.add_argument("--allow-python-change", action="store_true")
             p.add_argument("--stop-timeout", type=int, default=600)
+            p.add_argument(
+                "--silence-hours",
+                type=float,
+                default=4.0,
+                help="expiry of the alert silence opened for the window (`up` expires it sooner)",
+            )
             p.add_argument(
                 "--allow-red-schedules",
                 action="store_true",
