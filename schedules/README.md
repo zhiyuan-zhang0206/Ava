@@ -127,7 +127,9 @@ template into a running cluster without a restart of the manager, run
   checkout's code before stopping anything, and `up` runs it again on the gateway. Exit codes: 0 clean / 1 red / 2 tool error. Run it on the
   host that runs the schedules, or from a dev worktree to check the same table
   against in-development code. `--check-file PATH` checks one script file
-  instead of the table (the falsification hook); a non-clean sweep posts one
+  instead of the table (the falsification hook); `--rows-file PATH` sweeps a
+  JSON dump of the table (`[[id, name, script], ...]`) with no database access and
+  no alert; a non-clean sweep of the live table posts one
   alert through `/api/alerts` (`--no-notify` suppresses that for a dry run).
 - Deploy a one-off schedule with:
 
