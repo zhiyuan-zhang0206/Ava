@@ -12,8 +12,8 @@ import pytest
 
 from cli.commands.lifecycle import root_driver
 from ops.roster.service_spec import _AGENT_RUNNER, ServiceSpec
-from services.ava_root.manifest import load_manifests
-from services.ava_root_glue.manifests import generate
+from services.supervision.ava_root.manifest import load_manifests
+from services.supervision.ava_root_glue.manifests import generate
 
 
 def test_root_manifest_projects_runner_url_for_agent_profile(
@@ -21,14 +21,14 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
 ) -> None:
     agent = ServiceSpec(
         session="agent-host",
-        cmd=".venv/bin/python -m services.agent_host.daemon",
+        cmd=".venv/bin/python -m services.agent_runner.agent_host.daemon",
         capabilities=_AGENT_RUNNER,
         requires_db=True,
         profile="agent",
     )
     ops = ServiceSpec(
         session="ops",
-        cmd=".venv/bin/python -m services.agent_ops",
+        cmd=".venv/bin/python -m services.agent_runner.agent_ops",
         capabilities=_AGENT_RUNNER,
         requires_db=True,
     )

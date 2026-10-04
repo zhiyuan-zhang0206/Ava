@@ -91,7 +91,7 @@ def test_closure_follows_new_and_moved_definitions_without_name_collisions(tmp_p
         ),
         "gateway/schemas/__init__.py": "from gateway.schemas.probe import WireModel\n",
         "gateway/schemas/probe.py": "class WireModel: pass\n",
-        "services/im_bridge/types.py": "class WireModel: pass\n",
+        "services/entrypoints/im_bridge/types.py": "class WireModel: pass\n",
         "base/new_model.py": "class NewModel: pass\n",
     }
     for name, content in files.items():

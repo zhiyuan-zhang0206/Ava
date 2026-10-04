@@ -586,7 +586,7 @@ def pty_sessions_proc() -> Iterator[None]:
         Path(__file__).resolve().parents[2] / "tmp" / "e2e-logs" / f"pty-sessions-{os.getpid()}.log"
     )
     with managed_proc(
-        [sys.executable, "-m", "services.pty_sessions.daemon"],
+        [sys.executable, "-m", "services.agent_runner.pty_sessions.daemon"],
         env=os.environ.copy(),
         label="pty-sessions",
         log_path=str(log_path),

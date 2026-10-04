@@ -10,9 +10,9 @@ Package door — no imports, no re-exports; callers import the public modules:
     checkpoint in both directions.
   - `progress.py`         — the in-process per-agent turn-progress clock the
     hosted stall guard and dispatcher read, plus the admission-wait registry.
-    A dependency-free leaf: the graph nodes mark it, `services/agent_host`
+    A dependency-free leaf: the graph nodes mark it, `services/agent_runner/agent_host`
     reads it.
 
-The hosted runner (`services/agent_host`) drives all three; see the
+The hosted runner (`services/agent_runner/agent_host`) drives all three; see the
 `services must not import the agent kernel` contract in pyproject.toml.
 """

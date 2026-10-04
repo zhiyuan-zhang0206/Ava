@@ -46,7 +46,7 @@ tags:
   and restore-drill operations. `status` lists blocked kinds and quarantine
   (exit 1 while any kind is blocked); `retire` re-proves group closure of each
   blocked operation, and `--confirm` quarantines the proven ones
-  ([[services/backup_scheduler/docs/operation-custody.ava.okf.md|Operation custody]]).
+  ([[services/backup/scheduler/docs/operation-custody.ava.okf.md|Operation custody]]).
 - `ava backup walg check|run|drill|restore|status`: the WAL-G physical backup. `check` is the
   pre-flight: it proves the pinned binary, the configuration and key, and a
   put/list/get/delete round trip under the bucket prefix (exit 1 on the first failing
@@ -57,8 +57,8 @@ tags:
   empty directory with a scratch Postgres and never touches the home's data directory.
   `status` prints the configuration, key fingerprint, archiver facts and the
   last tick and drill and never fails
-  ([[services/gateway_side/walg/docs/walg.ava.okf.md|WAL-G]],
-  [[services/gateway_side/walg/docs/walg-restore.ava.okf.md|restore and drill]]).
+  ([[services/backup/walg/docs/walg.ava.okf.md|WAL-G]],
+  [[services/backup/walg/docs/walg-restore.ava.okf.md|restore and drill]]).
 - `ava mcp ...`: isolated environments at `$AVA_HOME/mcps/`
   ([[ava/mcps/docs/mcps.ava.okf.md|MCP]]).
 - `ava plugins ...`

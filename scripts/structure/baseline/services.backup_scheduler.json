@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "services/backup_scheduler/operation/custody.py::ambient-container:_HELD": 1
-  }
-}

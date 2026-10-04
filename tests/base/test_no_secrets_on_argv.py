@@ -218,8 +218,8 @@ def test_schedule_launch(
     socket, the command is typed into the session's shell, and no argv of the service
     or the shell tree carries a secret; the shell's environment holds the schedule
     id and none of the secrets."""
-    from services.schedule_manager import manager as sm
-    from services.schedule_manager.manager import ScheduleManager
+    from services.wake.schedule_manager import manager as sm
+    from services.wake.schedule_manager.manager import ScheduleManager
 
     # The runner is a stub that records its own environment, then stays up: the real
     # runner would need a database and exit within the test.

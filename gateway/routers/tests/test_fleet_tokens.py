@@ -15,7 +15,7 @@ import psycopg
 import pytest
 
 from gateway.routers._fleet_tokens import agent_tokens
-from services.events_maintenance import rollup, token_totals
+from services.upkeep.events_maintenance import rollup, token_totals
 
 _NOW = datetime(2026, 6, 30, 15, 30, tzinfo=UTC)
 

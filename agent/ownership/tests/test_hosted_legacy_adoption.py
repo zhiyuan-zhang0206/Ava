@@ -223,7 +223,7 @@ async def test_legacy_null_row_refuses_while_same_home_host_daemon_lives(
     agent_id, prior = _seed(db_conn)
     successor_owner = uuid4()
     with _look_alike(
-        ["-m", "services.agent_host.daemon"], {"AVA_HOME": str(ava_home())}
+        ["-m", "services.agent_runner.agent_host.daemon"], {"AVA_HOME": str(ava_home())}
     ) as daemon_pid:
         _wait_until(
             lambda: daemon_pid in _evidence(agent_id).live_hosts,
@@ -269,7 +269,8 @@ async def test_legacy_null_row_ignores_a_foreign_home_host_daemon(
     """A co-located unit's daemon is not evidence about this home."""
     agent_id, _prior = _seed(db_conn)
     with _look_alike(
-        ["-m", "services.agent_host.daemon"], {"AVA_HOME": str(tmp_path / "other-home")}
+        ["-m", "services.agent_runner.agent_host.daemon"],
+        {"AVA_HOME": str(tmp_path / "other-home")},
     ) as daemon_pid:
         assert daemon_pid not in _evidence(agent_id).live_hosts
         assert await _admit(aops_pool, agent_id, uuid4()) is not None

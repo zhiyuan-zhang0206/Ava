@@ -34,7 +34,7 @@ import pytest
 from base.config import ensure_eager, settings
 from base.native_process.exec_domain import ExecProcessDomain
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
-from services.backup_scheduler import daemon, worker
+from services.backup.scheduler import daemon, worker
 from tests.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
@@ -71,8 +71,8 @@ def _block(root: Path, mode: str) -> None:
 
 def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
     """Run the real scheduled preparation with one blocking pipeline stage."""
-    from services import backup
-    from services.gateway_side.backup import offsite
+    from services.backup import dump as backup
+    from services.backup.artifact import offsite
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         size_path = kwargs["size_path"]
@@ -396,7 +396,7 @@ def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     # The exit bound only matters relative to the stop budget it protects:
     # assert the relationship, not just the number.
     assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
-    child = spawn_child(tmp_path, module="services.backup_scheduler.daemon", label="pg-backup")
+    child = spawn_child(tmp_path, module="services.backup.scheduler.daemon", label="pg-backup")
     try:
         child.terminate()
         child.wait_bounded_exit(what="wedged executor job")

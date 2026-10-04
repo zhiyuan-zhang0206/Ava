@@ -1,0 +1,8 @@
+{
+  "ambient_state": {
+    "services/backup/scheduler/operation/custody.py::ambient-container:_HELD": 1
+  },
+  "files": {
+    "services/backup/tests/test_backup.py": 902
+  }
+}

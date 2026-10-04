@@ -32,13 +32,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # name -> (modules the entry imports, AVA_PROCESS_PROFILE the roster sets)
 ENTRIES: dict[str, tuple[tuple[str, ...], str]] = {
-    "heartbeat": (("services.heartbeat.daemon",), "gateway"),
-    "memory-indexer": (("services.memory_indexer.daemon",), "gateway"),
-    "memory-search": (("services.memory_search.daemon",), "gateway"),
+    "heartbeat": (("services.wake.heartbeat.daemon",), "gateway"),
+    "memory-indexer": (("services.derived.memory_indexer.daemon",), "gateway"),
+    "memory-search": (("services.derived.memory_search.daemon",), "gateway"),
     "gateway": (("gateway._server", "gateway.app"), "gateway"),
-    "ops": (("services.agent_ops.daemon",), "runner"),
-    "browser-mcp": (("services.browser.mcp_daemon",), "runner"),
-    "agent-host": (("services.agent_host.daemon",), "agent"),
+    "ops": (("services.agent_runner.agent_ops.daemon",), "runner"),
+    "browser-mcp": (("services.desktop.browser.mcp_daemon",), "runner"),
+    "agent-host": (("services.agent_runner.agent_host.daemon",), "agent"),
 }
 
 # Records, at the first import of httpx, the repo frames that asked for it.

@@ -25,10 +25,10 @@ tags:
 | **E2E tests** | `tests/e2e/` | full-stack end-to-end tests |
 | **Data factories** | `tests/factories/` | test data construction tools |
 
-`tests/e2e/_layout_assertions.py` is the shared real-browser structural layer for
+`tests/e2e/visual/_layout_assertions.py` is the shared real-browser structural layer for
 document overflow, viewport containment, center-point occlusion, nonempty blocks,
 settle-before-capture, and the bounded wait that absorbs asynchronously mounted
-panels before declared minimum visible counts are probed. It also carries the
+panels before declared minimum visible counts are probed. It carries the
 stubbed Home page the shell-geometry suites drive — a fake EventSource, `/api/**`
 JSON stubs, and the shared context/open/settle helpers. Both the layout-invariant
 suite and the post-deploy visual gate consume it so their definitions cannot drift.

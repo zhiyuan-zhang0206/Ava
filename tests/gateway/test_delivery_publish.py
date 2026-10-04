@@ -243,7 +243,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
 ) -> None:
     """Suppression gates automatic resurrection, never durable delivery."""
     from ops import cluster_rpc
-    from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+    from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:

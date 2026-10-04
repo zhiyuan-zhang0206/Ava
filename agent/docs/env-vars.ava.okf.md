@@ -47,7 +47,7 @@ Cluster identity is **path-only** (`base/cluster/`, #629/#633): there is no `AVA
 ### DB
 | Variable | Set at | Purpose |
 |------|--------|------|
-| `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS` | `settings.db_notify_wait_timeout_seconds` (`services/agent_host/daemon.py`) | Host subscription read timeout and durable pending-work scan interval |
+| `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS` | `settings.db_notify_wait_timeout_seconds` (`services/agent_runner/agent_host/daemon.py`) | Host subscription read timeout and durable pending-work scan interval |
 
 ## Propagation Chain
 

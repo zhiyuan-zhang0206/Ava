@@ -256,7 +256,7 @@ repos:
         entry: .venv/bin/python scripts/content_lint/lint_no_tailnet.py --only
         language: system
 
-      # The root supervisor's own code (services/ava_root/) must stay free of
+      # The root supervisor's own code (services/supervision/ava_root/) must stay free of
       # permission-domain and macOS-specific symbols — the privileged helper
       # program is a separate codebase by design (ruling 2026-09-12), and this
       # lint is the machine-checkable half of that constraint. A line that
@@ -266,7 +266,7 @@ repos:
         name: lint ava-root scope (no permission-domain symbols)
         entry: .venv/bin/python scripts/lint/ava_root_scope.py
         language: system
-        files: ^(services/ava_root/(?!(?:.*/)?tests/)|scripts/lint/ava_root_scope\.py$|scripts/lint/tests/test_lint_ava_root_scope\.py$)
+        files: ^(services/supervision/ava_root/(?!(?:.*/)?tests/)|scripts/lint/ava_root_scope\.py$|scripts/lint/tests/test_lint_ava_root_scope\.py$)
         pass_filenames: false
 
       # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
@@ -396,7 +396,7 @@ repos:
         name: lint-doc-roster
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_roster.py
-        files: ^(cli/commands/_repo\.py|conventions/runbook\.md|scripts/content_lint/lint_doc_roster\.py|services/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
+        files: ^(cli/commands/_repo\.py|conventions/runbook\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
         pass_filenames: false
 
       # Every `ava.<name>` reference in the procedural docs — conventions and
@@ -447,7 +447,7 @@ repos:
         name: check narrative facts (skill catalog / IM commands / IM channels match code)
         language: system
         entry: .venv/bin/python scripts/content_lint/check_narrative_facts.py
-        files: (\.md$|^scripts/content_lint/check_narrative_facts\.py$|^services/im_bridge/)
+        files: (\.md$|^scripts/content_lint/check_narrative_facts\.py$|^services/entrypoints/im_bridge/)
         pass_filenames: false
 
       # The flake8-bandit typed-exception switch needed by S110 also affects

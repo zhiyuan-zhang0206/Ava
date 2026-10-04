@@ -15,7 +15,7 @@ tags:
 [[../liveness.ava.okf.md|Liveness]] excludes matching but unreaped zombie PIDs.
 
 Every agent interactive shell and watcher runs in the machine's `pty-sessions`
-service (`services/pty_sessions/`), an ordinary roster process (both the
+service (`services/agent_runner/pty_sessions/`), an ordinary roster process (both the
 gateway and the agent-runner capability, no database, gated out only where
 there are no Unix sockets). It holds each session's pty master and an in-memory
 session table; `base/sessions/backend.PtySessionBackend` is its client, and the
@@ -47,7 +47,7 @@ Client side, in this package:
 - `screen.py` — the pyte wrapper: incremental UTF-8 decode, raw ring buffer,
   screen-parity capture rendering.
 
-Service side, in `services/pty_sessions/`: `service.py` (the session table, the
+Service side, in `services/agent_runner/pty_sessions/`: `service.py` (the session table, the
 request handlers, the event loop), `session.py` (one session: the `pty.fork()`
 login shell, its screen, ring and transcript, its kill), `ledger.py` (the crash
 ledger and its sweep), `daemon.py` (the entry point and instance lock),

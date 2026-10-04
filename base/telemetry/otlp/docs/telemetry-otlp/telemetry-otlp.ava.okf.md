@@ -105,7 +105,7 @@ single-box hosts collapse to the local receiver even when their secret is set.
   `cli/commands/observability/otel_collector.py` converge. Converge and
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
   the credential-free (peer, monitoring role) Postgres receiver. Root health: `ops/spec.py`
-  (`ava-otel-collector`) + `services/healthchecks/otel_collector.py`.
+  (`ava-otel-collector`) + `services/supervision/healthchecks/otel_collector.py`.
 - `base/telemetry/tracing.py` + `cli/commands/observability/trace.py` + `cli/parsers/host.py` — the
   mirror `ava trace ship` replays, and the ship command.
 

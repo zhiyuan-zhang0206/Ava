@@ -5,7 +5,7 @@ Cross-machine dialing in a split cluster has exactly two facts to get right:
 call. This document is the single written contract for both. Code that
 advertises an endpoint, dials a remote endpoint, or verifies a credential
 references this file (see `base/cluster/machines.py`, `cli/commands/observability/otel_collector.py`,
-`gateway/routers/pages.py`, `services/heartbeat/station_probe.py`).
+`gateway/routers/pages.py`, `services/wake/heartbeat/station_probe.py`).
 
 ## Endpoint advertisement
 
@@ -101,7 +101,7 @@ changes only when the human secret rotates.
   `bearertokenauth/cluster` extension; the remote relay exporters
   (`otlphttp/tempo|loki|prometheus` pointing at a remote station ingress)
   attach the same header.
-- **Probe contract** (remote station health, `services/heartbeat/station_probe.py`):
+- **Probe contract** (remote station health, `services/wake/heartbeat/station_probe.py`):
   `POST <advertised station url>/v1/traces` with an empty
   `ExportTraceServiceRequest` and the telemetry token; any 2xx = alive. The
   probe dials the **advertised** address (rule 1), never a bare connect.

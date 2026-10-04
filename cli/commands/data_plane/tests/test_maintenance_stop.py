@@ -29,7 +29,7 @@ from cli.commands.lifecycle.tests.stop_support import Launcher, PtyServiceProces
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
-from services.pty_sessions import ledger
+from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped.pty_shells import new as new_session
 
 

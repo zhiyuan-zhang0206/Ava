@@ -443,7 +443,7 @@ describe("HomePage top-level render", () => {
       expect(classes).toContain(c);
     }
     // Three viewport tiers are the engine-test contract (asserted for real in
-    // tests/e2e/test_layout_invariants.py); keep them pinned here so the
+    // tests/e2e/visual/test_layout_invariants.py); keep them pinned here so the
     // shared checklist cannot drift.
     expect(LAYOUT_VIEWPORT_TIERS).toEqual([320, 390, 768]);
   });

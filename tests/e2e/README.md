@@ -17,10 +17,10 @@ uv sync
 .venv/bin/playwright install chromium
 
 # Run one scenario file (the whole directory is CI's e2e job, never a local run)
-.venv/bin/pytest tests/e2e/test_message_flow.py -v
+.venv/bin/pytest tests/e2e/flow/test_message_flow.py -v
 
 # See the real browser (development debugging)
-HEADED=1 .venv/bin/pytest tests/e2e/test_message_flow.py -v
+HEADED=1 .venv/bin/pytest tests/e2e/flow/test_message_flow.py -v
 ```
 
 On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
@@ -78,16 +78,16 @@ multi-chunk.
 
 | File | scenario | What it validates |
 |---|---|---|
-| `test_self_terminate.py` | `lifecycle_terminate` | `ava.self.terminate` → status='terminated' + inbound source='self' |
-| `test_self_restart.py` | `lifecycle_restart` | `ava.self.restart` → restarter respawn → new PID + status back to idling |
-| `test_self_resurrect.py` | `lifecycle_resurrect` | after `terminate`, `POST /resurrect` → fresh process + 'resurrect' inbound |
-| `test_fork_identity.py` | `fork_identity` | `POST /api/agents` fork_from=source+prompt → forked agent (new id) first claim batch contains [fork marker, prompt], reply `FORK_OK` proves context contains both |
-| `test_message_flow.py` | `message_flow` | **Panoramic Case 1 (#1018)** — one user message → reasoning + code tool call + real exec + reply; REST timeline fan-out (reasoning/code/output/chat), reply rendered in browser via SSE, zero unrecognized-marker alarms + zero `[timeline] unrecognized` console warnings |
-| `test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — UI-triggered force compact (POST /api/agents/{id}/compact) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
-| `test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |
+| `lifecycle/test_self_terminate.py` | `lifecycle_terminate` | `ava.self.terminate` → status='terminated' + inbound source='self' |
+| `lifecycle/test_self_restart.py` | `lifecycle_restart` | `ava.self.restart` → restarter respawn → new PID + status back to idling |
+| `lifecycle/test_self_resurrect.py` | `lifecycle_resurrect` | after `terminate`, `POST /resurrect` → fresh process + 'resurrect' inbound |
+| `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/agents` fork_from=source+prompt → forked agent (new id) first claim batch contains [fork marker, prompt], reply `FORK_OK` proves context contains both |
+| `flow/test_message_flow.py` | `message_flow` | **Panoramic Case 1 (#1018)** — one user message → reasoning + code tool call + real exec + reply; REST timeline fan-out (reasoning/code/output/chat), reply rendered in browser via SSE, zero unrecognized-marker alarms + zero `[timeline] unrecognized` console warnings |
+| `flow/test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — UI-triggered force compact (POST /api/agents/{id}/compact) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
+| `flow/test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |
 | `state/test_shell_history_state.py` | `shell_history` | **task #4585** — browser back/forward between `/?agent_id=N` and `/shell/N/S` restores each container's scroll position (per history entry) with no blank / invalid-params frame on either return, and the shell poll + manual refresh stay alive |
 
-`tests/e2e/state/` groups the browser scroll/navigation-state scenarios — `test_load_older_anchor.py`, `test_parked_compact_switch_back.py`, `test_shell_history_state.py` — split out of the top level to stay under the `tests/e2e` direct-entry budget in `scripts/structure/baseline/tests.e2e.json`.
+The test files sit in subdirectories by domain, which also keeps `tests/e2e` under its direct-entry budget: `flow/` (full-turn panoramic cases), `lifecycle/` (restart, resurrect, terminate, fork, impersonation), `state/` (browser scroll and navigation state), `visual/` (layout, accessibility and snapshot tests with their `_layout_assertions.py`, `_visual_snapshot.py` helpers and the `__snapshots__/` goldens). The shared helpers (`_db.py`, `_env.py`, `_ports.py`, `_proc.py`, `_settings.py`, `_truncate.py`) and `conftest.py` stay at the top level, so the package-scoped fixtures cover every subdirectory.
 
 **Differences between fork scenario and lifecycle**: fork creates a **new agent_id** (not reused).
 `build()` distinguishes source / forked process by whether there is a `kind='fork'` inbound for
@@ -108,13 +108,13 @@ restarter / `resurrect_agent` INSERT of these rows is the only definitive marker
 
 ## Visual regression
 
-- `test_visual_regression.py` — three full-page snapshots (home, fleet,
-  mobile) against `tests/e2e/__snapshots__/test_visual_regression/`, compared
+- `visual/test_visual_regression.py` — three full-page snapshots (home, fleet,
+  mobile) against `tests/e2e/visual/__snapshots__/test_visual_regression/`, compared
   with the browser-native pixel diff (0.1% ratio, channel delta 16).
-- `test_preview_visual_gate.py` — the five-surface post-deploy matrix (same
+- `visual/test_preview_visual_gate.py` — the five-surface post-deploy matrix (same
   shared engine as the deployment gate: `scripts/post_deploy_visual/matrix.py`)
   against the committed goldens under
-  `tests/e2e/__snapshots__/preview-gate/`. Blocking on every PR. Goldens are
+  `tests/e2e/visual/__snapshots__/preview-gate/`. Blocking on every PR. Goldens are
   minted and refreshed only on the ubuntu CI runner via the
   visual-baselines workflow (`workflow_dispatch` on the PR head) — generation
   and comparison share one rendering environment; a structurally broken run

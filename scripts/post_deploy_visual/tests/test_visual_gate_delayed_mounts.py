@@ -22,7 +22,7 @@ from scripts.post_deploy_visual.matrix import (
     structural_minimum_counts,
 )
 from scripts.post_deploy_visual.policy import STRUCTURAL_SPECS
-from tests.e2e._layout_assertions import (
+from tests.e2e.visual._layout_assertions import (
     structural_failures,
     wait_for_minimum_visible_counts,
 )

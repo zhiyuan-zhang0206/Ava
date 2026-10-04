@@ -97,7 +97,7 @@ adapter's `send_to_owner` (Telegram owner chat / WeChat account user /
 Feishu's last p2p sender; a channel without a resolvable chat is skipped).
 Format: a severity-headed template + summary + generatorURL +
 `→ <fleet UI>/insights/alerts` (recovery swaps the head for the resolved
-variant). Templates live in `services/im_bridge/copy.py` — the single source
+variant). Templates live in `services/entrypoints/im_bridge/copy.py` — the single source
 of user-visible IM copy (governance ruling 2026-08-08) — with zh/en variants
 (the zh head carries the Chinese firing/resolved words, the en head `⚠️ ALERT [...]`); the language follows `user_settings`
 `display.language` (default zh, user ruling 2026-08-13), resolved by

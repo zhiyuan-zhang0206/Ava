@@ -55,7 +55,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # The skills router (#3267) reads install_registry.resolved_policy(),
             # which resolves per-package update defaults from settings.packages.
             "packages",
-            # The WAL-G archive helpers (services/gateway_side/walg) read the one
+            # The WAL-G archive helpers (services/backup/walg) read the one
             # AVA_WALG_CONFIG_FILE switch from settings.walg.
             "walg",
         }

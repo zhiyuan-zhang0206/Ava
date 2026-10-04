@@ -85,8 +85,8 @@ lifecycle; those items wait for it to land and are then designed on its code.
    uses, or that holds none of the code it tests): it needs `place()` and the import-linter
    contracts, so it is a separate check, not a hook; today three package tests would fail it
    (`scripts/tests/test_tools_scratch_home.py`, and two under
-   `services/gateway_side/backup/tests/` that use both the loose `services/backup.py` and
-   `services.gateway_side`); (b) the `path_scopes.toml` files (read by `tests/fixtures/path_scopes.py`) still give autouse
+   `services/backup/artifact/tests/` that use both the loose `services/backup/dump.py` and
+   `services.backup.artifact`); (b) the `path_scopes.toml` files (read by `tests/fixtures/path_scopes.py`) still give autouse
    isolation fixtures by directory, so a test moved into a directory whose file does not name it
    loses them (the lint's message says so; `tests/ci/test_path_scopes.py` catches a listed directory left
    without tests, not a test moved out of a listed directory or placed in an unlisted one); (c) whether a frozen or registered

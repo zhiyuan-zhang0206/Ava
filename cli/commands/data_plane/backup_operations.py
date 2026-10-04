@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import sys
 
-from services.backup_scheduler.operation.custody import (
+from services.backup.scheduler.operation.custody import (
     OperationKind,
     blocked_operations,
     quarantine_entries,
     retire_blocked,
 )
-from services.backup_scheduler.worker import dump_kind, restore_drill_kind
+from services.backup.scheduler.worker import dump_kind, restore_drill_kind
 
 
 def _operation_kinds() -> list[OperationKind]:

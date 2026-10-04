@@ -1,0 +1,331 @@
+"""Memory search API endpoint tests — the HTTP contract NumPyBackend dials.
+
+FastAPI TestClient against the real app + store (no socket), so the wire
+contract is pinned: request/response shapes, status codes, and the
+persist-before-ack guarantee.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+from fastapi.testclient import TestClient
+
+from services.derived.memory_search.app import build_app
+from services.derived.memory_search.store import MemoryStore
+
+_DIM = 8
+_FP = "test:gemini:dim=8"
+_MAX_BATCH_ROWS = 6
+
+
+def _vec(seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    return rng.standard_normal(_DIM).astype(np.float32)
+
+
+def _store(tmp_path: Path) -> MemoryStore:
+    return MemoryStore(tmp_path / "vectors.npz", dim=_DIM, fingerprint=_FP)
+
+
+def _client(tmp_path: Path) -> TestClient:
+    return TestClient(build_app(_store(tmp_path), _MAX_BATCH_ROWS))
+
+
+def _upsert_body(path: str, seed: int, *, mtime: float = 1.0) -> dict[str, object]:
+    return {
+        "path": path,
+        "mtime": mtime,
+        "content_hash": f"hash-{seed}",
+        "kind": "body",
+        "chunk_idx": 0,
+        "vector": _vec(seed).tolist(),
+    }
+
+
+def test_healthz(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        assert client.get("/healthz").json() == {"status": "ok"}
+
+
+def test_upsert_delete_meta_roundtrip(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        assert (
+            client.post(
+                "/upsert",
+                json={
+                    "path": "/a.md",
+                    "mtime": 1.0,
+                    "content_hash": "ha",
+                    "kind": "body",
+                    "chunk_idx": 0,
+                    "vector": _vec(0).tolist(),
+                },
+            ).status_code
+            == 200
+        )
+        assert client.get("/meta").json() == {"/a.md": [1.0, "ha", _FP]}
+        assert client.post("/delete", json={"path": "/a.md"}).status_code == 200
+        assert client.get("/meta").json() == {}
+
+
+def test_delete_stale_batch_removes_tail_and_persists(tmp_path: Path) -> None:
+    """The /delete_stale_batch endpoint removes tail rows (issue #1946) and
+    persists before ack."""
+    with _client(tmp_path) as client:
+        for idx in range(3):
+            client.post(
+                "/upsert",
+                json=_upsert_body("/a.md", idx, mtime=1.0) | {"chunk_idx": idx},
+            )
+        assert client.get("/stats").json()["rows"] == 3
+        resp = client.post(
+            "/delete_stale_batch",
+            json={"entries": [{"path": "/a.md", "kind_limits": {"body": 1}}]},
+        )
+        assert resp.status_code == 200
+        assert client.get("/stats").json()["rows"] == 1
+        assert client.get("/meta").json() == {"/a.md": [1.0, "hash-0", _FP]}
+
+        # Persistence: a fresh store over the same npz sees the same rows.
+        from services.derived.memory_search.store import MemoryStore as _Store
+
+        reloaded = _Store(tmp_path / "vectors.npz", dim=_DIM, fingerprint=_FP)
+        reloaded.load()
+        assert len(reloaded) == 1
+
+
+def test_search_returns_ordered_paths(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        ones = np.ones(_DIM, dtype=np.float32)
+        for path, vector in [("/a.md", ones), ("/b.md", -ones)]:
+            assert (
+                client.post(
+                    "/upsert",
+                    json={
+                        "path": path,
+                        "mtime": 1.0,
+                        "content_hash": "h",
+                        "kind": "body",
+                        "chunk_idx": 0,
+                        "vector": vector.tolist(),
+                    },
+                ).status_code
+                == 200
+            )
+        body = client.post("/search", json={"vector": ones.tolist(), "k": 5}).json()
+        assert body == {"paths": ["/a.md", "/b.md"]}
+
+
+def test_upsert_persists_before_ack(tmp_path: Path) -> None:
+    """A row acked by the API must survive a store rebuild from disk."""
+    with _client(tmp_path) as client:
+        ones = np.ones(_DIM, dtype=np.float32)
+        assert (
+            client.post(
+                "/upsert",
+                json={
+                    "path": "/a.md",
+                    "mtime": 1.0,
+                    "content_hash": "ha",
+                    "kind": "body",
+                    "chunk_idx": 0,
+                    "vector": ones.tolist(),
+                },
+            ).status_code
+            == 200
+        )
+    fresh = _store(tmp_path)
+    fresh.load()
+    assert fresh.all_meta() == {"/a.md": (1.0, "ha", _FP)}
+    assert fresh.search_topk(ones, k=5) == ["/a.md"]
+
+
+def test_upsert_batch_persists_all_rows_before_ack(tmp_path: Path) -> None:
+    rows = [_upsert_body("/batch-a.md", 0), _upsert_body("/batch-b.md", 1)]
+    with _client(tmp_path) as client:
+        assert client.post("/upsert_batch", json={"rows": rows}).json() == {"status": "ok"}
+
+    fresh = _store(tmp_path)
+    fresh.load()
+    assert fresh.all_meta() == {
+        "/batch-a.md": (1.0, "hash-0", _FP),
+        "/batch-b.md": (1.0, "hash-1", _FP),
+    }
+    assert len(fresh) == 2
+
+
+def test_upsert_batch_matches_sequential_endpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import services.derived.memory_search.store as store_module
+
+    ticks = iter([0.0, 1.0] * 4)
+
+    class _FakeTime:
+        @staticmethod
+        def perf_counter() -> float:
+            return next(ticks)
+
+    monkeypatch.setattr(store_module, "time", _FakeTime)
+    rows = [_upsert_body("/a.md", 0), _upsert_body("/b.md", 1), _upsert_body("/c.md", 2)]
+    with _client(tmp_path / "sequential") as sequential, _client(tmp_path / "batched") as batched:
+        for row in rows:
+            assert sequential.post("/upsert", json=row).status_code == 200
+        assert batched.post("/upsert_batch", json={"rows": rows}).status_code == 200
+
+        assert batched.get("/meta").json() == sequential.get("/meta").json()
+        query = {"vector": _vec(0).tolist(), "k": 10}
+        assert (
+            batched.post("/search", json=query).json()
+            == sequential.post("/search", json=query).json()
+        )
+        assert batched.get("/stats").json() == sequential.get("/stats").json()
+
+
+def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    save_calls: list[None] = []
+    original_save = store.save
+
+    def _save() -> None:
+        save_calls.append(None)
+        original_save()
+
+    monkeypatch.setattr(store, "save", _save)
+    rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(5)]
+    with TestClient(build_app(store, _MAX_BATCH_ROWS)) as client:
+        assert client.post("/upsert_batch", json={"rows": rows}).status_code == 200
+        assert len(save_calls) == 1
+        for row in rows:
+            assert client.post("/upsert", json=row).status_code == 200
+        assert len(save_calls) == 1 + len(rows)
+
+
+def test_batch_rows_cap_is_the_one_the_app_was_built_with(tmp_path: Path) -> None:
+    """The wire batch bound is cluster config handed to `build_app` by the daemon (task
+    #3696): a shorter cap rejects a batch the default cap accepts, on both batch endpoints."""
+    rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(3)]
+    entries = [{"path": row["path"], "kind_limits": {}} for row in rows]
+    with TestClient(build_app(_store(tmp_path), 2)) as small:
+        assert small.post("/upsert_batch", json={"rows": rows}).status_code == 422
+        assert small.post("/delete_stale_batch", json={"entries": entries}).status_code == 422
+    with TestClient(build_app(_store(tmp_path), 3)) as exact:
+        assert exact.post("/upsert_batch", json={"rows": rows}).status_code == 200
+        assert exact.post("/delete_stale_batch", json={"entries": entries}).status_code == 200
+
+
+def test_upsert_batch_rejects_empty_oversized_and_wrong_dim(tmp_path: Path) -> None:
+    row = _upsert_body("/a.md", 0)
+    bad_dim = {**row, "vector": [0.0] * (_DIM - 1)}
+    with _client(tmp_path) as client:
+        assert client.post("/upsert_batch", json={"rows": []}).status_code == 422
+        assert (
+            client.post("/upsert_batch", json={"rows": [row] * (_MAX_BATCH_ROWS + 1)}).status_code
+            == 422
+        )
+        response = client.post("/upsert_batch", json={"rows": [row, bad_dim]})
+        assert response.status_code == 422
+        assert response.json()["detail"] == f"embedding shape ({_DIM - 1},) != ({_DIM},)"
+
+
+def test_stats_empty_fresh_store(tmp_path: Path) -> None:
+    """/stats on a never-saved store: zero rows, no save duration yet."""
+    with _client(tmp_path) as client:
+        assert client.get("/stats").json() == {"rows": 0, "last_save_seconds": None}
+
+
+def test_stats_after_upsert(tmp_path: Path) -> None:
+    """/stats mirrors the store's absolute state after a persist: row count
+    up, last save duration a non-negative float."""
+    with _client(tmp_path) as client:
+        for path, seed in [("/a.md", 0), ("/b.md", 1)]:
+            assert (
+                client.post(
+                    "/upsert",
+                    json={
+                        "path": path,
+                        "mtime": 1.0,
+                        "content_hash": "h",
+                        "kind": "body",
+                        "chunk_idx": 0,
+                        "vector": _vec(seed).tolist(),
+                    },
+                ).status_code
+                == 200
+            )
+        body = client.get("/stats").json()
+        assert body["rows"] == 2
+        assert isinstance(body["last_save_seconds"], float)
+        assert body["last_save_seconds"] >= 0.0
+        assert client.post("/delete", json={"path": "/a.md"}).status_code == 200
+        assert client.get("/stats").json()["rows"] == 1
+
+
+def test_emit_memory_search_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 60s flusher's emit step: one `memory_search_stats` telemetry
+    event; `last_save_seconds` rides along only once a save has happened."""
+    import services.derived.memory_search.app as app_module
+
+    emitted: list[tuple[str, str, dict[str, object]]] = []
+
+    def _fake_emit(
+        category: str, event_name: str, *, attributes: dict[str, object] | None = None
+    ) -> None:
+        emitted.append((category, event_name, attributes or {}))
+
+    monkeypatch.setattr(app_module.telemetry, "emit", _fake_emit)
+
+    app_module.emit_memory_search_stats(5, None)
+    app_module.emit_memory_search_stats(5, 0.25)
+    assert emitted == [
+        ("telemetry", "memory_search_stats", {"rows": 5}),
+        ("telemetry", "memory_search_stats", {"rows": 5, "last_save_seconds": 0.25}),
+    ]
+
+
+def test_upsert_rejects_wrong_dim_vector(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        resp = client.post(
+            "/upsert",
+            json={
+                "path": "/a.md",
+                "mtime": 1.0,
+                "content_hash": "h",
+                "kind": "body",
+                "chunk_idx": 0,
+                "vector": [0.0] * 7,
+            },
+        )
+        assert resp.status_code == 422
+
+
+def test_upsert_rejects_oversized_vector(tmp_path: Path) -> None:
+    """A vector longer than the provider dim is rejected by the model bound before numpy
+    ever allocates (loopback hardening — the wire models carry size caps)."""
+    with _client(tmp_path) as client:
+        resp = client.post(
+            "/upsert",
+            json={
+                "path": "/a.md",
+                "mtime": 1.0,
+                "content_hash": "h",
+                "kind": "body",
+                "chunk_idx": 0,
+                "vector": [0.0] * (_DIM + 1),
+            },
+        )
+        assert resp.status_code == 422
+
+
+def test_search_rejects_oversized_vector_and_bad_k(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        assert (
+            client.post("/search", json={"vector": [0.0] * (_DIM + 1), "k": 5}).status_code == 422
+        )
+        assert client.post("/search", json={"vector": [0.0] * _DIM, "k": 0}).status_code == 422
+        assert client.post("/search", json={"vector": [0.0] * _DIM, "k": 1001}).status_code == 422

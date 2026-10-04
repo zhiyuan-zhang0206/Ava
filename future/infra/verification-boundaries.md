@@ -389,14 +389,14 @@ Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them by hand (k
    `uv sync --frozen`. A full start also needs `redis@8.2`, `pgbouncer`, `pgvector` and Node
    22 (design).
 2. **Identity.** With the same code the start path uses,
-   `services.permissions_helper.lifecycle.ensure_signing_cert()` imports the self-signed
+   `services.desktop.permissions_helper.lifecycle.ensure_signing_cert()` imports the self-signed
    identity with `-T /usr/bin/codesign -A`.
 3. **Key access: the one step the start path does not do.** On a headless guest the first
    `lifecycle.converge()` fails in the signing probe: signing with the new identity blocks on
    an interactive dialog nobody can answer, the probe times out after 20 seconds and
    converge raises `PermissionsHelperSigningUnavailableError`. The keychain is not locked;
    what blocks is the private key's partition list, which the import leaves short of
-   `codesign`. Set it once, with the remedy `services/permissions_helper/lifecycle.py` names:
+   `codesign`. Set it once, with the remedy `services/desktop/permissions_helper/lifecycle.py` names:
 
    ```
    security set-key-partition-list -S apple-tool:,apple: -s \
@@ -418,7 +418,7 @@ artifact under `~/.ava/helper` and its LaunchAgent stay in it (route R1 below).
 
 1. Boot the golden image with graphics (`tart run`, no `--no-graphics`). At start the helper
    registers itself in both lists (`registerPermissions` in
-   `services/permissions_helper/helper/main.swift`), so both entries already exist and need
+   `services/desktop/permissions_helper/helper/main.swift`), so both entries already exist and need
    only a toggle.
 2. System Settings > Privacy & Security > Screen & System Audio Recording: turn on
    AvaPermissionsHelper. Accessibility: turn on AvaPermissionsHelper. Authenticate with the

@@ -9,7 +9,7 @@ tags: []
 
 Platform-marked shell and watcher completions resolve at the `POST /api/agents/{id}/messages` delivery boundary against the target agent's live `completion_notice_policy`. `all` is the default and preserves direct per-completion notices. `failures` suppresses only zero-exit completions. `hourly` records every completion in `completion_notice_events`, immediately delivers failures and missed watchers, and has the gateway lifespan's sole periodic loop send one source-marked `system:completion-digest` message per completed UTC hour.
 
-The hourly digests are delivered by the completion-digest loop of the heartbeat service (`services/heartbeat/completion_digest.py`, every 60 s; the delivery key makes a crash between delivery and mark exactly once). Digest rows remain available for a seven-day canary inspection window, then that same loop prunes them. The event table is the authoritative platform-side raw-completion count source. The effective policy resolves per agent from its `completion_notice_policy` overlay over the cluster default.
+The hourly digests are delivered by the completion-digest loop of the heartbeat service (`services/wake/heartbeat/completion_digest.py`, every 60 s; the delivery key makes a crash between delivery and mark exactly once). Digest rows remain available for a seven-day canary inspection window, then that same loop prunes them. The event table is the authoritative platform-side raw-completion count source. The effective policy resolves per agent from its `completion_notice_policy` overlay over the cluster default.
 
 ## Canary injection and readback
 

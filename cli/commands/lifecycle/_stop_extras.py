@@ -13,7 +13,7 @@ def stop_permissions_helper(*, force: bool = False, timeout_s: float = 30.0) -> 
     from base.config import settings
     from base.native_process.os_platform import IS_MACOS
     from base.paths import ava_home
-    from services.permissions_helper.launchd_job import unregister_helper
+    from services.desktop.permissions_helper.launchd_job import unregister_helper
 
     if IS_MACOS:
         unregister_helper(

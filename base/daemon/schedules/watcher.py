@@ -239,7 +239,7 @@ def session_deadline(
     watcher session's shell TTL IS its target deadline). `ava.watcher._spawn`
     calls this once, at spawn, to fold the deadline into the session's shell
     TTL — the only place it is derived any more: the TTL reaper
-    (`services/ttl_reaper/shells.py`) reclaims every session, watcher or not, purely
+    (`services/upkeep/ttl_reaper/shells.py`) reclaims every session, watcher or not, purely
     from its `agent_shell_ttls` deadline and no longer reads this function or
     any watcher-specific data:
 

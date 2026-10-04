@@ -2,7 +2,7 @@
 progress".
 
 `NO_PROGRESS_TIMEOUT_S` is that single definition. Its consumers share it rather
-than calibrate their own: the ops daemon's wedge bound (`services.agent_ops.health`);
+than calibrate their own: the ops daemon's wedge bound (`services.agent_runner.agent_ops.health`);
 the schedule-stall alert (`base.deploy.timing`) is ordered above it. Two clocks
 that disagree about "stopped making progress" are two chances to declare a host
 dead while it is working, or alive while it is not.
@@ -28,7 +28,7 @@ from __future__ import annotations
 NO_PROGRESS_TIMEOUT_S = 900.0
 
 # How often the agent host renews its hosted agents' leases: the one ownership
-# beat of `services/agent_host/daemon.py` (`_beat_forever`), which sleeps exactly
+# beat of `services/agent_runner/agent_host/daemon.py` (`_beat_forever`), which sleeps exactly
 # this long between renewals and uses this constant as its step, so the lattice
 # checks the beat that actually runs.
 AGENT_LEASE_RENEW_INTERVAL_S = 15.0

@@ -119,7 +119,7 @@ def _port_is_bindable(host: str, port: int) -> bool:
     """Whether a page server could bind (host, port) right now.
 
     A throwaway bind probe with SO_REUSEADDR set, mirroring the page server
-    itself (services/page_server/server.py) — a TIME_WAIT remnant of an
+    itself (services/agent_runner/page_server/server.py) — a TIME_WAIT remnant of an
     exited server must not read as occupied.
     """
     with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as probe:
@@ -155,7 +155,7 @@ class PageHost:
     def _answers_as_page_server(self, port: int) -> bool:
         """Whether (host, port) answers /health like this platform's page servers.
 
-        A page server answers `ok:<token>` (services/page_server/server.py); any
+        A page server answers `ok:<token>` (services/agent_runner/page_server/server.py); any
         other occupant — a dev server, a database, a foreign HTTP service —
         answers differently or not at all.
         """

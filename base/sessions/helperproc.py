@@ -124,7 +124,7 @@ def spawn_via_helper(
     """
     # Resolve the upper-layer wire adapter lazily. The lifecycle policy stays
     # in shared while the signed helper's transport client remains a service.
-    client = cast("_HelperClient", import_module("services.permissions_helper.client"))
+    client = cast("_HelperClient", import_module("services.desktop.permissions_helper.client"))
 
     try:
         result = client.spawn_process(

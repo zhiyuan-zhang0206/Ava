@@ -73,13 +73,13 @@ class DbPoolAcquireSlow(TypedDict):
 
 
 class HeartbeatNudged(TypedDict):
-    """`heartbeat_nudged` payload — services/heartbeat/daemon.py."""
+    """`heartbeat_nudged` payload — services/wake/heartbeat/daemon.py."""
 
     idle_minutes: int
 
 
 class HeartbeatBackoffRaised(TypedDict):
-    """`heartbeat_backoff_raised` payload — services/heartbeat/daemon.py.
+    """`heartbeat_backoff_raised` payload — services/wake/heartbeat/daemon.py.
 
     Emitted when N consecutive no-op nudges raise an agent's platform-side
     nudge-backoff level (B7).
@@ -90,7 +90,7 @@ class HeartbeatBackoffRaised(TypedDict):
 
 
 class MachineProbeFailed(TypedDict):
-    """`machine_probe_failed` payload — services/heartbeat/liveness.py.
+    """`machine_probe_failed` payload — services/wake/heartbeat/liveness.py.
 
     One event per liveness pass (~60s) in which an unpaused agent-runner's
     status_probe failed; `consecutive_failures` is the persisted run length
@@ -103,7 +103,7 @@ class MachineProbeFailed(TypedDict):
 
 
 class HeartbeatBackoffReset(TypedDict):
-    """`heartbeat_backoff_reset` payload — services/heartbeat/daemon.py.
+    """`heartbeat_backoff_reset` payload — services/wake/heartbeat/daemon.py.
 
     Emitted when a real inbound or an agent pause resets the level to 0 (B7).
     """
@@ -204,28 +204,28 @@ EVENTS: dict[str, EventSpec] = {
         "heartbeat reminder",
         payload=HeartbeatNudged,
         tier="noise",
-        site="services/heartbeat/daemon.py:_alert_idle",
+        site="services/wake/heartbeat/daemon.py:_alert_idle",
     ),
     "heartbeat_backoff_raised": telemetry_event(
         "heartbeat_backoff_raised",
         "no-op nudge backoff level raised",
         payload=HeartbeatBackoffRaised,
         tier="noise",
-        site="services/heartbeat/daemon.py:_raise_backoff_level (positional emit)",
+        site="services/wake/heartbeat/daemon.py:_raise_backoff_level (positional emit)",
     ),
     "heartbeat_backoff_reset": telemetry_event(
         "heartbeat_backoff_reset",
         "nudge backoff reset by real inbound or pause",
         payload=HeartbeatBackoffReset,
         tier="noise",
-        site="services/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)",
+        site="services/wake/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)",
     ),
     "machine_probe_failed": telemetry_event(
         "machine_probe_failed",
         "agent-runner machine unreachable — one event per failed liveness probe",
         payload=MachineProbeFailed,
         tier="anomaly",
-        site="services/heartbeat/liveness.py:_record_probe (positional emit)",
+        site="services/wake/heartbeat/liveness.py:_record_probe (positional emit)",
     ),
     "dangling_tool_pairing_repaired": telemetry_event(
         "dangling_tool_pairing_repaired", "dangling tool pairing repaired", tier="anomaly"

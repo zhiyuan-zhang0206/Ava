@@ -28,7 +28,7 @@ from scripts.post_deploy_visual.policy import (
     unexpected_pixel_surfaces,
     validate_wave_id,
 )
-from tests.e2e._layout_assertions import structural_failures, wait_for_layout_settled
+from tests.e2e.visual._layout_assertions import structural_failures, wait_for_layout_settled
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IGNORE_REGISTRY_PATH = (

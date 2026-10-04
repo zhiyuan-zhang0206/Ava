@@ -72,7 +72,7 @@ For an operator investigating an artifact, the transform it performs is:
 scratch_dir=$(mktemp -d)
 chmod 700 "$scratch_dir"
 key_file="$scratch_dir/backup.key"
-.venv/bin/python -c 'from services.gateway_side.backup.passphrase import logical_backup_passphrase; print(logical_backup_passphrase())' > "$key_file"
+.venv/bin/python -c 'from services.backup.artifact.passphrase import logical_backup_passphrase; print(logical_backup_passphrase())' > "$key_file"
 chmod 600 "$key_file"
 openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile "$key_file" -in /absolute/path/to/<db>-<utc>.dump.enc -out "$scratch_dir/backup.dump"
 chmod 600 "$scratch_dir/backup.dump"
@@ -81,7 +81,7 @@ chmod 600 "$scratch_dir/backup.dump"
 ```
 
 The key file holds the logical-backup passphrase from its one resolution
-(`services/gateway_side/backup/passphrase.py`, the same one every backup and
+(`services/backup/artifact/passphrase.py`, the same one every backup and
 restore uses): the pinned `$AVA_HOME/backups/logical-backup.passphrase`. A
 gateway birth mints it; a home born earlier carries `sha256(secret)`, pinned
 once. It never changes with the cluster secret and is never
@@ -114,7 +114,7 @@ checkpoint conversation must be proved.
 
 After local encryption succeeds and before local pruning, the gateway publishes
 the `.dump.enc` artifact to Aliyun OSS under the `ava-logical/` namespace
-(`services/gateway_side/backup/offsite.py`). It needs
+(`services/backup/artifact/offsite.py`). It needs
 `AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
 `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` (set through `ava config set`); a home
 without all three skips the leg with one INFO log line. The publish is
@@ -126,7 +126,7 @@ local copy remains the primary. Success is judged by the destination, not by
 silence: the log line `[backup] off-site published
 ava-logical/<name> (size=..., pin=..., checksum=md5:...)` and the object itself,
 its size equal to the local `.dump.enc`. To publish one existing artifact by
-hand: `python -m services.backup --publish-offsite /abs/path/<name>.dump.enc`
+hand: `python -m services.backup.dump --publish-offsite /abs/path/<name>.dump.enc`
 (`--offsite-root PREFIX` publishes under another prefix, for a scratch
 check). Only encrypted artifacts reach the bucket, so its access model does
 not expose database contents. Nothing here deletes a remote object; remote expiry

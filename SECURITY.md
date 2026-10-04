@@ -39,7 +39,7 @@ content stays at trust tier `unreviewed` until a person runs `ava skill trust`.
 Beyond `execute_code`, several daemons hold capabilities a same-user process
 could abuse, and none of them is individually authenticated (audit round-2
 up-security-trust): the **permissions helper** Unix socket
-(`services/permissions_helper/`) is owner-connect-only but has no token
+(`services/desktop/permissions_helper/`) is owner-connect-only but has no token
 handshake — it holds the macOS Screen Recording + Accessibility grants and
 can capture the screen and inject clicks/keys; the **managed Chrome** CDP
 port (`--remote-debugging-port`) is unauthenticated by design and the bridge

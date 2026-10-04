@@ -52,11 +52,11 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/agent/test_lifecycle_finalizers.py": (
         "integration",
-        "dead-letter cleanup must not overwrite a durable lifecycle command: the agent finalizer and the delivery watchdog share the row: spans agent, base, services.delivery_watchdog, no one of which may import all the others",
+        "dead-letter cleanup must not overwrite a durable lifecycle command: the agent finalizer and the delivery watchdog share the row: spans agent, base, services.wake.delivery_watchdog, no one of which may import all the others",
     ),
     "tests/agent/test_maintenance.py": (
         "integration",
-        "maintenance drain over real ownership/claim rows and the compiled graph, driven through the cli and the agent host: spans agent, base, cli, services.agent_host, no one of which may import all the others",
+        "maintenance drain over real ownership/claim rows and the compiled graph, driven through the cli and the agent host: spans agent, base, cli, services.agent_runner.agent_host, no one of which may import all the others",
     ),
     "tests/agent/test_maintenance_legacy_cold.py": (
         "integration",
@@ -104,7 +104,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/base/test_no_secrets_on_argv.py": (
         "integration",
-        "one guard over every launch path (cli, schedule manager, sdk) for secrets on a command line: spans ava, base, cli, services.schedule_manager, no one of which may import all the others",
+        "one guard over every launch path (cli, schedule manager, sdk) for secrets on a command line: spans ava, base, cli, services.wake.schedule_manager, no one of which may import all the others",
     ),
     "tests/base/test_poll_until.py": (
         "contract",
@@ -132,7 +132,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/base/test_shutdown.py": (
         "integration",
-        "signal registration proven against real supervised daemons of agent host, agent ops and ava-root: spans base, services.agent_host, services.agent_ops, services.ava_root, no one of which may import all the others",
+        "signal registration proven against real supervised daemons of agent host, agent ops and ava-root: spans base, services.agent_runner.agent_host, services.agent_runner.agent_ops, services.supervision.ava_root, no one of which may import all the others",
     ),
     "tests/base/test_ui_contributions_contract.py": (
         "contract",
@@ -140,7 +140,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/base/test_uvicorn_stdlib_intercept.py": (
         "integration",
-        "stdlib logging of a real uvicorn server reaches the base handler through the gateway and the memory-search service: spans base, gateway, services.memory_search, no one of which may import all the others",
+        "stdlib logging of a real uvicorn server reaches the base handler through the gateway and the memory-search service: spans base, gateway, services.derived.memory_search, no one of which may import all the others",
     ),
     "tests/ci/test_backend_test_gate.py": (
         "contract",
@@ -228,11 +228,11 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/cli/test_pgbouncer_config.py": (
         "integration",
-        "cli config generation and the direct-connection exemption of the backup service: spans base, cli, services.backup, no one of which may import all the others",
+        "cli config generation and the direct-connection exemption of the backup service: spans base, cli, services.backup.dump, no one of which may import all the others",
     ),
     "tests/cli/test_pgbouncer_wire.py": (
         "integration",
-        "a real PgBouncer in front of a throwaway Postgres, exercised through the cli, the gateway and the ttl reaper: spans base, cli, gateway, services.ttl_reaper, no one of which may import all the others",
+        "a real PgBouncer in front of a throwaway Postgres, exercised through the cli, the gateway and the ttl reaper: spans base, cli, gateway, services.upkeep.ttl_reaper, no one of which may import all the others",
     ),
     "tests/gateway/test_alerts_api.py": (
         "integration",
@@ -244,15 +244,15 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/gateway/test_cluster_endpoints.py": (
         "integration",
-        "/api/cluster/* endpoints over ops cluster state and the delivery watchdog: spans base, gateway, ops, services.delivery_watchdog, no one of which may import all the others",
+        "/api/cluster/* endpoints over ops cluster state and the delivery watchdog: spans base, gateway, ops, services.wake.delivery_watchdog, no one of which may import all the others",
     ),
     "tests/gateway/test_delivery_publish.py": (
         "integration",
-        "gateway chat delivery against the delivery watchdog's transaction and event ordering: spans base, gateway, services.delivery_watchdog, no one of which may import all the others",
+        "gateway chat delivery against the delivery watchdog's transaction and event ordering: spans base, gateway, services.wake.delivery_watchdog, no one of which may import all the others",
     ),
     "tests/gateway/test_labels.py": (
         "integration",
-        "thread-label endpoint and the labeler service share the same rows: spans base, gateway, services.labeler, no one of which may import all the others",
+        "thread-label endpoint and the labeler service share the same rows: spans base, gateway, services.derived.labeler, no one of which may import all the others",
     ),
     "tests/gateway/test_okf_graph_contract.py": (
         "contract",
@@ -272,15 +272,15 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/integration/test_impersonation_notifications.py": (
         "integration",
-        "lease reminders and termination notices across agent, ops, cli and the delivery watchdog: spans agent, base, cli, ops, services.delivery_watchdog, no one of which may import all the others",
+        "lease reminders and termination notices across agent, ops, cli and the delivery watchdog: spans agent, base, cli, ops, services.wake.delivery_watchdog, no one of which may import all the others",
     ),
     "tests/lifecycle/db_authority/test_api_tokens.py": (
         "integration",
-        "the machine API token acceptance matrix across the cli, the gateway, ops and agent ops: spans base, cli, gateway, ops, services.agent_ops, no one of which may import all the others",
+        "the machine API token acceptance matrix across the cli, the gateway, ops and agent ops: spans base, cli, gateway, ops, services.agent_runner.agent_ops, no one of which may import all the others",
     ),
     "tests/lifecycle/db_authority/test_backup_owner.py": (
         "integration",
-        "logical backup maintenance on an authenticated home across the cli, the backup scheduler and scripts: spans base, cli, scripts, services.backup_scheduler, no one of which may import all the others",
+        "logical backup maintenance on an authenticated home across the cli, the backup scheduler and scripts: spans base, cli, scripts, services.backup.scheduler, no one of which may import all the others",
     ),
     "tests/ops/test_agent_wake_hosted.py": (
         "integration",
@@ -380,7 +380,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/scripts/test_rotate_cluster_secret.py": (
         "integration",
-        "the rotation script keeps the backup passphrase pinned across the backup service and the gateway side: spans scripts, services.backup, services.gateway_side, no one of which may import all the others",
+        "the rotation script keeps the backup passphrase pinned across the backup service and its artifact layer: spans scripts, services.backup.dump, services.backup.artifact, no one of which may import all the others",
     ),
     "tests/scripts/test_test_selector_contract.py": (
         "contract",
@@ -404,23 +404,23 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/services/test_ava_root_glue_manifests.py": (
         "integration",
-        "the ava-root manifest generation from the roster across gateway, ops, browser and ava-root: spans base, gateway, ops, services.ava_root, services.ava_root_glue, services.browser, no one of which may import all the others",
+        "the ava-root manifest generation from the roster across gateway, ops, browser and ava-root: spans base, gateway, ops, services.supervision.ava_root, services.supervision.ava_root_glue, services.desktop.browser, no one of which may import all the others",
     ),
     "tests/services/test_backup_recovery_contract.py": (
         "contract",
-        "asserts the conversation-recovery sources named by services/backup.py, the checkpoint module and db/schema.sql are checkpoint tables, not the events archive",
+        "asserts the conversation-recovery sources named by services/backup/dump.py, the checkpoint module and db/schema.sql are checkpoint tables, not the events archive",
     ),
     "tests/services/test_backup_scheduler_shutdown.py": (
         "integration",
-        "real signal stop of a scheduler blocked in an ops job: spans base, ops, services.backup_scheduler, no one of which may import all the others",
+        "real signal stop of a scheduler blocked in an ops job: spans base, ops, services.backup.scheduler, no one of which may import all the others",
     ),
     "tests/services/test_gate_root.py": (
         "integration",
-        "the gate as a native ava-root child with ops and the healthchecks service: spans base, ops, services.ava_root, services.healthchecks, no one of which may import all the others",
+        "the gate as a native ava-root child with ops and the healthchecks service: spans base, ops, services.supervision.ava_root, services.supervision.healthchecks, no one of which may import all the others",
     ),
     "tests/services/test_hosted_db_wait_liveness.py": (
         "integration",
-        "agent-host DB waits against the delivery watchdog's stale scan and force: spans agent, base, services.agent_host, services.delivery_watchdog, no one of which may import all the others",
+        "agent-host DB waits against the delivery watchdog's stale scan and force: spans agent, base, services.agent_runner.agent_host, services.wake.delivery_watchdog, no one of which may import all the others",
     ),
     "tests/services/test_maintenance_readiness.py": (
         "integration",
@@ -484,7 +484,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/test_helperproc.py": (
         "integration",
-        "permissions-helper process sessions routed through the agent host: spans base, services.agent_host, services.permissions_helper, no one of which may import all the others",
+        "permissions-helper process sessions routed through the agent host: spans base, services.agent_runner.agent_host, services.desktop.permissions_helper, no one of which may import all the others",
     ),
     "tests/test_home_isolation.py": (
         "contract",
@@ -516,10 +516,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/test_pool_keepalives.py": (
         "integration",
-        "every long-lived pool of the gateway and agent ops carries the base keepalive kwargs: spans base, gateway, services.agent_ops, no one of which may import all the others",
+        "every long-lived pool of the gateway and agent ops carries the base keepalive kwargs: spans base, gateway, services.agent_runner.agent_ops, no one of which may import all the others",
     ),
     "tests/test_visual_snapshot.py": (
         "contract",
-        "tests the visual snapshot helper, tests/e2e/_visual_snapshot.py",
+        "tests the visual snapshot helper, tests/e2e/visual/_visual_snapshot.py",
     ),
 }

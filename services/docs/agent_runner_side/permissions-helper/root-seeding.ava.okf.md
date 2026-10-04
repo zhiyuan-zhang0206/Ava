@@ -11,7 +11,7 @@ Ordinary macOS start persists a private, fsynced seed containing the exact root
 argv, working directory, run directory, log paths, and launch environment before
 calling `root_seed`. The helper launches root as its direct child using
 `posix_spawn` and `SETSID | CLOEXEC`; the session boundary leaves ppid unchanged.
-Linux does not use this helper: [[services/ava_root/docs/ava_root.ava.okf.md]].
+Linux does not use this helper: [[services/supervision/ava_root/docs/ava_root.ava.okf.md]].
 
 The helper's LaunchAgent fixes `AVA_PERMISSIONS_HELPER_ROOT_SEED` to this home's
 seed. After helper restart, a valid seed may resume an unexpectedly lost root.

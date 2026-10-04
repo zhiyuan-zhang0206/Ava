@@ -8,11 +8,11 @@ automatic SIGKILL deadline. Registered in base/deploy/timing.py::CLOCKS.
 from __future__ import annotations
 
 # How long a cancelled turn gets to unwind before the host reports it as
-# uncancellable and stops waiting (services/agent_host/dispatcher.py).
+# uncancellable and stops waiting (services/agent_runner/agent_host/dispatcher.py).
 CANCEL_UNWIND_TIMEOUT_S = 5.0
 
 # Ceiling on reading the stuck agents' activity clocks to enrich that report
-# (services/agent_host/dispatcher.py). Small on purpose: diagnostic enrichment
+# (services/agent_runner/agent_host/dispatcher.py). Small on purpose: diagnostic enrichment
 # of a report already worth emitting without it, and the DB may be exactly what
 # a wedged turn is stuck on.
 CLOCK_READ_TIMEOUT_S = 2.0

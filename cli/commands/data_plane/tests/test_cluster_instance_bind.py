@@ -605,8 +605,8 @@ def test_start_pg_adds_no_archive_arguments_while_wal_g_is_off(
 def test_start_pg_launches_with_the_archive_arguments_when_wal_g_is_on(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from services.gateway_side.walg.archive import archive_pg_args
-    from services.gateway_side.walg.tests.support import make_sandbox
+    from services.backup.walg.archive import archive_pg_args
+    from services.backup.walg.tests.support import make_sandbox
 
     make_sandbox(tmp_path, monkeypatch)
     warned: list[bool] = []

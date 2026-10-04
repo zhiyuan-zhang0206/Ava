@@ -38,7 +38,7 @@ helper with a fresh code identity would otherwise raise TCC dialogs on an unatte
 
 Exit 0 = every phase passed. Evidence (ps/logs/status snapshots) is retained
 under the workdir; pass --cleanup to remove it. Run with the repository venv,
-on macOS, from a checkout that contains services/ava_root (dev/CI only).
+on macOS, from a checkout that contains services/supervision/ava_root (dev/CI only).
 """
 
 # The package facade: callers keep using `two_section_chain_smoke.<name>` (the

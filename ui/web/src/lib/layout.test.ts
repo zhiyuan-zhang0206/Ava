@@ -1,6 +1,6 @@
 // LAYOUT_INVARIANTS integrity — the shared checklist between the jsdom
 // class-contract layer (page.test.tsx, fleet tests) and the real-engine
-// Playwright layer (tests/e2e/test_layout_invariants.py). A broken list
+// Playwright layer (tests/e2e/visual/test_layout_invariants.py). A broken list
 // (duplicate id, unknown page, wrong tier set) must fail here, fast, in the
 // ms-level jsdom suite — not 40 minutes into an e2e run.
 import { describe, expect, it } from "vitest";

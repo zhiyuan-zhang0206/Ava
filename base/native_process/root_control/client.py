@@ -1,6 +1,6 @@
 """A blocking client for the K1 control plane.
 
-The server (`services.ava_root.server`) is asyncio; this client is a plain
+The server (`services.supervision.ava_root.server`) is asyncio; this client is a plain
 blocking Unix socket — call sites (tooling, gates, tests) are
 synchronous, and one request/response pair per connection is all the protocol
 needs. Transport failures raise RootClientError; business

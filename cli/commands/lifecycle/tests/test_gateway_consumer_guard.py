@@ -44,16 +44,16 @@ os.environ["AVA_CONFIG_FETCH"] = (
 # Gateway-side source roots — daemons that run under the gateway profile.
 _GATEWAY_SOURCE_ROOTS = (
     "gateway/",
-    "services/im_bridge/",
-    "services/heartbeat/",
-    "services/labeler/",
-    "services/events_maintenance/",
-    "services/memory_indexer/",
-    "services/memory_search/",
-    "services/delivery_watchdog/",
+    "services/entrypoints/im_bridge/",
+    "services/wake/heartbeat/",
+    "services/derived/labeler/",
+    "services/upkeep/events_maintenance/",
+    "services/derived/memory_indexer/",
+    "services/derived/memory_search/",
+    "services/wake/delivery_watchdog/",
     "services/frontend/",
-    "services/gateway_side/backup/",
-    "services/gateway_side/walg/",
+    "services/backup/artifact/",
+    "services/backup/walg/",
 )
 
 
@@ -432,14 +432,14 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
 _KIND_ROOTS: dict[str, tuple[str, ...]] = {
     "gateway": (
         "gateway/",
-        "services/im_bridge/",
-        "services/heartbeat/",
-        "services/labeler/",
-        "services/events_maintenance/",
-        "services/memory_indexer/",
-        "services/delivery_watchdog/",
-        "services/gateway_side/backup/",
-        "services/gateway_side/walg/",
+        "services/entrypoints/im_bridge/",
+        "services/wake/heartbeat/",
+        "services/derived/labeler/",
+        "services/upkeep/events_maintenance/",
+        "services/derived/memory_indexer/",
+        "services/wake/delivery_watchdog/",
+        "services/backup/artifact/",
+        "services/backup/walg/",
     ),
     "agent": (
         "agent/",
@@ -450,17 +450,17 @@ _KIND_ROOTS: dict[str, tuple[str, ...]] = {
         # from the roots it was invisible to the matrix: the healthcheck's
         # `runner` launch profile crashed at import (settings.agent read) and
         # CI could not see it (2026-08-30 soak startup).
-        "services/agent_host/",
+        "services/agent_runner/agent_host/",
     ),
     "runner": (
         "ops/",
-        "services/agent_ops/",
+        "services/agent_runner/agent_ops/",
         "services/watchdog/",
-        "services/browser/",
-        "services/gate/",
-        "services/permissions_helper/",
-        "services/computer/",
-        "services/healthchecks/",
+        "services/desktop/browser/",
+        "services/entrypoints/gate/",
+        "services/desktop/permissions_helper/",
+        "services/desktop/computer/",
+        "services/supervision/healthchecks/",
     ),
 }
 
@@ -518,7 +518,7 @@ def _closure_domains(closure: set[Path]) -> set[str]:
 
 def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hosted agent-host daemon consumes the agent domain set (it runs the
-    agent kernel in-process, and services/agent_host/ is in the agent kind's
+    agent kernel in-process, and services/agent_runner/agent_host/ is in the agent kind's
     roots above). The root launcher, its only launch path, must therefore
     start it with the `agent` profile — a `runner` profile crashed it at import
     (2026-08-30 soak startup), and a marker-less launch (full construction)

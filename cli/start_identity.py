@@ -197,7 +197,7 @@ def _publish_claim(home: Path, data: dict[str, Any]) -> None:
         if data["record"] is not None:
             # A gateway's logical backups are encrypted under a passphrase minted
             # here, independent of its cluster secret (an empty one included).
-            from services.gateway_side.backup import passphrase
+            from services.backup.artifact import passphrase
 
             passphrase.ensure_minted(home)
         upsert_env(home / ".env", data["env"])

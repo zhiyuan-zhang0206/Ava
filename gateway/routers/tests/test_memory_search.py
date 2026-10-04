@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from services.memory_indexer.embeddings.base import EmbeddingAPIError
+from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
 
 @pytest.fixture(autouse=True)
@@ -62,8 +62,8 @@ class TestPrimaryPath:
         (tmp_path / "bar.md").write_text("y")
 
         # stub embedder/backend to avoid real Gemini / backend calls
-        import services.memory_indexer.backends.factory as _factory
-        import services.memory_indexer.embeddings.factory as _embedding_factory
+        import services.derived.memory_indexer.backends.factory as _factory
+        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
 
@@ -127,8 +127,8 @@ title: No Description
         )
         (tmp_path / "no_frontmatter.md").write_text("# Just a heading\n\nNo YAML.")
 
-        import services.memory_indexer.backends.factory as _factory
-        import services.memory_indexer.embeddings.factory as _embedding_factory
+        import services.derived.memory_indexer.backends.factory as _factory
+        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
 
@@ -167,7 +167,7 @@ title: No Description
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """embedder API failure → IndexerUnavailable (wire 503)."""
-        import services.memory_indexer.embeddings.factory as _embedding_factory
+        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         class _BoomProvider:
             dim = 768
@@ -201,7 +201,7 @@ title: No Description
         cacert. The backend phase below already caught broadly; this makes the
         two symmetric.
         """
-        import services.memory_indexer.embeddings.factory as _embedding_factory
+        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         class _BoomProvider:
             dim = 768
@@ -222,8 +222,8 @@ title: No Description
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """backend raises (e.g. connect refused) → IndexerUnavailable (wire 503)."""
-        import services.memory_indexer.backends.factory as _factory
-        import services.memory_indexer.embeddings.factory as _embedding_factory
+        import services.derived.memory_indexer.backends.factory as _factory
+        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
 
@@ -888,8 +888,8 @@ class TestEventLoopIsolation:
         import time
 
         import gateway.routers.memory as _gw_memory
-        import services.memory_indexer.backends.factory as _factory
-        import services.memory_indexer.embeddings.factory as _embedding_factory
+        import services.derived.memory_indexer.backends.factory as _factory
+        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
         (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n")
@@ -972,8 +972,8 @@ def _stub_search_backend(
     Returns the fresh per-test semaphore so tests can assert on permit state.
     """
     import gateway.routers.memory as _gw_memory
-    import services.memory_indexer.backends.factory as _factory
-    import services.memory_indexer.embeddings.factory as _embedding_factory
+    import services.derived.memory_indexer.backends.factory as _factory
+    import services.derived.memory_indexer.embeddings.factory as _embedding_factory
     from base.config import settings
 
     monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
@@ -1066,7 +1066,7 @@ class TestWedgedBackendReleasesPermits:
         permit — a deadline covering only one phase would leave the other able to
         pin the endpoint the same way.
         """
-        import services.memory_indexer.embeddings.factory as _embedding_factory
+        import services.derived.memory_indexer.embeddings.factory as _embedding_factory
 
         class _StuckProvider:
             dim = 768
@@ -1100,7 +1100,7 @@ class TestWedgedBackendReleasesPermits:
         a suspended coroutine lives on no thread, so faulthandler cannot see
         which await it stopped at.
         """
-        import services.memory_indexer.backends.factory as _factory
+        import services.derived.memory_indexer.backends.factory as _factory
 
         sem = _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
 
@@ -1135,7 +1135,7 @@ class TestWedgedBackendReleasesPermits:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Enough wedged requests to pin every permit, then a healthy one."""
-        import services.memory_indexer.backends.factory as _factory
+        import services.derived.memory_indexer.backends.factory as _factory
 
         _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
 

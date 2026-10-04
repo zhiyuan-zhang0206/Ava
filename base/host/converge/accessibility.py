@@ -3,7 +3,7 @@
 The measurement itself is NOT here: the signed permissions helper is the
 process that posts synthetic input and reads the accessibility tree, so its
 Accessibility grant is the only one that matters. The helper reports that fact
-through ``services.permissions_helper.client.check_accessibility``. A probe in
+through ``services.desktop.permissions_helper.client.check_accessibility``. A probe in
 the calling process would instead report the inherited grant of whatever
 started that process, which is a different fact entirely.
 

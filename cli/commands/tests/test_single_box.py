@@ -36,7 +36,7 @@ from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
-from services.gateway_side.backup import passphrase
+from services.backup.artifact import passphrase
 from tests._containers import _free_port
 
 pytestmark = pytest.mark.skipif(

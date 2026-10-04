@@ -18,7 +18,7 @@ proxy.
 
 Agent launch and lifecycle operations run asynchronously. Blocking maintenance,
 configuration, inventory and shell operations run through
-`services/agent_ops/dispatch_sync.py:dispatch_sync` on the daemon's worker pool.
+`services/agent_runner/agent_ops/dispatch_sync.py:dispatch_sync` on the daemon's worker pool.
 Each handler validates its request model and serializes its result model as JSON.
 Configuration and inventory writes retain their shared read-modify-write lock.
 

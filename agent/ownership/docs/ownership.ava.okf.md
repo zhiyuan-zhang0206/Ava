@@ -17,7 +17,7 @@ task even when its host retains ownership. `renew_hosted_owner()` refreshes only
 the current host owner's rows; `release_hosted_owner()` and
 `settle_hosted_runtime()` match the original incarnation. Restart releases it for
 a new generation. A fresh foreign owner blocks admission and stale-row recovery.
-A stopping host's release is bounded (`services/agent_host/host.py`,
+A stopping host's release is bounded (`services/agent_runner/agent_host/host.py`,
 `_RELEASE_OWNER_TIMEOUT_S`) so the whole stop fits ava-root's TERM window; with
 the database unreachable it fails and the leases expire by TTL.
 
@@ -35,7 +35,7 @@ without requiring an independently resident agent process.
 - `agent/ownership/corpse_reap.py` — crash-dead row termination + recovery wake
 - `agent/ownership/inbound.py` — the owner lock every inbound queue mutation takes
 - `agent/ownership/lifecycle_intent.py` — the durable lifecycle command pointer
-- `services/agent_host/daemon.py` — owner health beat
+- `services/agent_runner/agent_host/daemon.py` — owner health beat
 - `base/native_process/runtime_incarnation.py` — context-bound execution identity
 
 Related: [[../../startup/docs/admission.ava.okf.md]] and [[../../docs/lifecycle.ava.okf.md]].

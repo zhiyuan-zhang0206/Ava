@@ -10,8 +10,8 @@ from base.config import settings
 from cli.commands.converge import host as converge_host
 from cli.commands.converge import walg as converge_walg_module
 from cli.commands.converge.spec import ConvergeCtx
-from services.gateway_side.walg import config as walg_config
-from services.gateway_side.walg.tests.support import Sandbox, make_sandbox, valid_config
+from services.backup.walg import config as walg_config
+from services.backup.walg.tests.support import Sandbox, make_sandbox, valid_config
 
 
 @pytest.fixture

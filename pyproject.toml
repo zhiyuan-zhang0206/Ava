@@ -150,10 +150,10 @@ dev = [
 # base).
 #
 # `services` is deliberately NOT a layer: gateway imports some of its packages
-# (`services.memory_indexer`, `services.heartbeat`), so it does not sit above
-# gateway, and `services.agent_host` is the one daemon intentionally above the
+# (`services.derived.memory_indexer`, `services.wake.heartbeat`), so it does not sit above
+# gateway, and `services.agent_runner.agent_host` is the one daemon intentionally above the
 # agent kernel. The clean spine stays in its own layers contract;
-# `services.agent_host` has a separate submodule contract for that reason.
+# `services.agent_runner.agent_host` has a separate submodule contract for that reason.
 # `plugins` is left ungoverned (the built-in ava_compact is intentionally
 # coupled to the agent kernel, so agent <-> plugins is cyclic by design).
 [tool.importlinter]
@@ -174,17 +174,17 @@ layers = [
 # in-process. State that exceptional direction explicitly, rather than letting
 # its narrow whitelist below make the broader services package look unlayered.
 [[tool.importlinter.contracts]]
-name = "Hosted agent runner (base < ava < agent < services.agent_host)"
+name = "Hosted agent runner (base < ava < agent < services.agent_runner.agent_host)"
 type = "layers"
 layers = [
-    "services.agent_host",
+    "services.agent_runner.agent_host",
     "agent",
     "ava",
     "base",
 ]
 
 # A supervision daemon never imports the kernel, so a daemon's crash surface
-# stays its own. `services.agent_host` is the single deliberate exception: the
+# stays its own. `services.agent_runner.agent_host` is the single deliberate exception: the
 # hosted agent-runner (future/infra/agent-runner-as-server.md) exists precisely
 # to run agents' turns INSIDE a supervised daemon, so being the kernel is its
 # job description rather than a coupling that crept in. Scoped to that one
@@ -202,56 +202,56 @@ forbidden_modules = ["agent"]
 # that stops matching fails the run too — the list cannot rot in either
 # direction, and its diff is the review signal.
 ignore_imports = [
-    "services.agent_host.* -> agent.process_boot",
+    "services.agent_runner.agent_host.* -> agent.process_boot",
     # agent/turn/progress.py is a dependency-free leaf: the hosted runner's
     # stall guard (host.py) and its scan (dispatcher.py) both read the same
     # per-agent monotonic clock, and the graph kernel marks it (the same
     # one-way direction: agent -> nothing).
-    "services.agent_host.* -> agent.turn.progress",
-    "services.agent_host.* -> agent.turn.runloop",
-    "services.agent_host.* -> agent.db",
-    "services.agent_host.* -> agent.graph",
+    "services.agent_runner.agent_host.* -> agent.turn.progress",
+    "services.agent_runner.agent_host.* -> agent.turn.runloop",
+    "services.agent_runner.agent_host.* -> agent.db",
+    "services.agent_runner.agent_host.* -> agent.graph",
     # The daemon is the composition root that builds the plugin `ExtensionRegistry` once the graph
     # (and with it every agent_runtime face) is loaded, and hands it to `AgentHost`.
-    "services.agent_host.daemon -> agent.extensions",
+    "services.agent_runner.agent_host.daemon -> agent.extensions",
     # The host catches native fatal errors to persist the halted/circuit state
     # and flush its checkpoint before settling the turn. Import only the taxonomy leaf.
-    "services.agent_host.host -> agent.graph.llm_errors",
+    "services.agent_runner.agent_host.host -> agent.graph.llm_errors",
     # Compaction exhaustion is another expected native turn abort, handled by the host.
-    "services.agent_host.host -> agent.hooks.compact",
+    "services.agent_runner.agent_host.host -> agent.hooks.compact",
     # The host owns the final durable checkpoint/trace link and the node-log tail.
-    "services.agent_host.host -> agent.turn.trace_checkpoint",
-    "services.agent_host.host -> agent.graph.node_log",
+    "services.agent_runner.agent_host.host -> agent.turn.trace_checkpoint",
+    "services.agent_runner.agent_host.host -> agent.graph.node_log",
     # Database recovery retains and repairs the original fenced continuation.
-    "services.agent_host.db_recovery -> agent.impersonation",
-    "services.agent_host.db_recovery -> agent.ownership.inbound",
+    "services.agent_runner.agent_host.db_recovery -> agent.impersonation",
+    "services.agent_runner.agent_host.db_recovery -> agent.ownership.inbound",
     # The settlement boundary catches the inbound-owner fence's refusal at a
     # settled abort, so a replaced runtime makes the reconcile pass a logged
     # no-op instead of a second turn failure.
-    "services.agent_host.settlement -> agent.ownership.inbound",
-    "services.agent_host.* -> agent.ownership.hosted",
+    "services.agent_runner.agent_host.settlement -> agent.ownership.inbound",
+    "services.agent_runner.agent_host.* -> agent.ownership.hosted",
     # The corpse reaper is the other half of the hosted ownership machinery
     # (split out of agent.ownership.hosted at its 800-line budget ceiling):
     # the host's beat runs the grace reap, and the settlement boundary runs
     # the prompt reap of a corpse that re-crashed under its own mark.
-    "services.agent_host.* -> agent.ownership.corpse_reap",
+    "services.agent_runner.agent_host.* -> agent.ownership.corpse_reap",
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.
-    "services.agent_host.host -> agent.impersonation",
-    "services.agent_host.* -> agent.startup",
-    "services.agent_host.* -> agent.state",
+    "services.agent_runner.agent_host.host -> agent.impersonation",
+    "services.agent_runner.agent_host.* -> agent.startup",
+    "services.agent_runner.agent_host.* -> agent.state",
     # The hierarchy worker's build child binds the agent's own tool schema
     # (`execute_code`) onto generation requests, so their leading bytes match
     # the agent's own calls — the prefix-cache parity task #4674 exists to
     # restore. `agent.llm` is a dependency-free schema leaf (langchain only),
     # and the alternative — a second copy of the schema under services — is
     # exactly the drift class this ratchet cannot catch.
-    "services.hierarchy_worker.execute -> agent.llm",
+    "services.derived.hierarchy_worker.execute -> agent.llm",
 ]
 
 # The one reverse edge base must never grow: `base` is the bottom layer,
 # and `services` sits above it (daemons that import gateway). The alerts
-# module used to import services.im_bridge.copy for its IM templates — moved
+# module used to import services.entrypoints.im_bridge.copy for its IM templates — moved
 # down to base/telemetry/alerts_copy.py (tech audit 2026-08-24 P1); this contract
 # locks the direction so no new base -> services edge can creep back in.
 [[tool.importlinter.contracts]]
@@ -368,7 +368,7 @@ check-typed-exception = true
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+"contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_runner/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
 
 [tool.ruff.lint.per-file-ignores]
 # `tests/*` is the top-level tests directory; `**/tests/*` every package's own
@@ -434,8 +434,8 @@ check-typed-exception = true
 # ops CLI runs cron / curl — all hardcoded commands + static args;
 # S603 (subprocess untrusted input) is meaningless.
 "cli/commands/*.py" = ["S603"]
-"services/permissions_helper/tests/test_helper_retirement.py" = ["S603"]
-"services/healthchecks/*.py" = ["S603"]
+"services/desktop/permissions_helper/tests/test_helper_retirement.py" = ["S603"]
+"services/supervision/healthchecks/*.py" = ["S603"]
 # ava_syntax_fix uses fullwidth chars in docstrings as examples of what the fixer targets,
 # and carries Chinese notes from data analysis of real error corpora.
 "ava_builtins/plugins/ava_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
@@ -453,9 +453,9 @@ check-typed-exception = true
 "gateway/mcp_server/endpoint.py" = ["TID251"]
 "ava/sdk_surface/help.py" = ["TID251"]
 "ava/sdk_surface/discovery.py" = ["TID251"]
-"services/agent_host/runtime.py" = ["TID251"]
+"services/agent_runner/agent_host/runtime.py" = ["TID251"]
 # An operator CLI: its report on stdout is the contract.
-"services/memory_indexer/memory_search_reconcile.py" = ["T201"]
+"services/derived/memory_indexer/memory_search_reconcile.py" = ["T201"]
 # tests may import contextvars to exercise the propagation contracts
 "ava/tests/test_turn_identity_ava.py" = ["TID251"]
 "agent/graph/tests/test_turn_scoped_retry.py" = ["TID251"]
@@ -1092,132 +1092,107 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/agent_host/tests"
+root = "services/agent_runner/agent_host/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/agent_ops/tests"
+root = "services/agent_runner/agent_ops/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/ava_root/tests"
+root = "services/agent_runner/page_server/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/ava_root_glue/tests"
+root = "services/agent_runner/pty_sessions/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/backup_scheduler/operation/tests"
+root = "services/backup/artifact/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/backup_scheduler/tests"
+root = "services/backup/scheduler/operation/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/browser/tests"
+root = "services/backup/scheduler/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/computer/tests"
+root = "services/backup/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/delivery_watchdog/tests"
+root = "services/backup/walg/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/events_maintenance/tests"
+root = "services/derived/hierarchy_worker/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/gate/tests"
+root = "services/derived/labeler/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/gateway_side/backup/tests"
+root = "services/derived/memory_indexer/backends/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/gateway_side/walg/tests"
+root = "services/derived/memory_indexer/embeddings/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/healthchecks/tests"
+root = "services/derived/memory_indexer/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/heartbeat/tests"
+root = "services/derived/memory_search/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/hierarchy_worker/tests"
+root = "services/desktop/browser/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/im_bridge/adapters/tests"
+root = "services/desktop/computer/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/im_bridge/tests"
+root = "services/desktop/permissions_helper/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/labeler/tests"
+root = "services/entrypoints/gate/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/memory_indexer/backends/tests"
+root = "services/entrypoints/im_bridge/adapters/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/memory_indexer/embeddings/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/memory_indexer/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/memory_search/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/page_server/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/permissions_helper/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/pty_sessions/tests"
+root = "services/entrypoints/im_bridge/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1227,7 +1202,17 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/schedule_manager/tests"
+root = "services/supervision/ava_root/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/ava_root_glue/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/healthchecks/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1237,7 +1222,27 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/ttl_reaper/tests"
+root = "services/upkeep/events_maintenance/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/upkeep/ttl_reaper/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/wake/delivery_watchdog/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/wake/heartbeat/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/wake/schedule_manager/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

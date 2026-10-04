@@ -36,7 +36,7 @@ from scripts.post_deploy_visual.policy import (
     classify_stable_diff,
     route_for_surface,
 )
-from tests.e2e._layout_assertions import (
+from tests.e2e.visual._layout_assertions import (
     LayoutFailure,
     structural_failures,
     wait_for_layout_settled,

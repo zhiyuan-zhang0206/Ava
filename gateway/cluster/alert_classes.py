@@ -6,7 +6,7 @@ groups an event stream: `GET /api/stats/alert-classes` lists each
 last occurrence and the dismissal that cancels it, and `.../samples` opens one class to its
 newest events. Dismissing and reopening go through `/api/event-resolutions`
 (`gateway/events/resolutions.py`); the dismissal match is the events-maintenance daemon's
-(`services.events_maintenance.resolution.matching_dismissal`), so a class reads as dismissed
+(`services.upkeep.events_maintenance.resolution.matching_dismissal`), so a class reads as dismissed
 here exactly when the unresolved gauges stop counting it.
 """
 
@@ -28,7 +28,7 @@ from gateway.cluster.schemas import (
     AlertLevel,
 )
 from gateway.schemas.stats import StatsWindowHours, window_delta
-from services.events_maintenance import resolution
+from services.upkeep.events_maintenance import resolution
 
 router = APIRouter()
 

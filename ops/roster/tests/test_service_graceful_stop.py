@@ -218,7 +218,7 @@ def test_exec_into_passes_through_a_command_that_execs_itself():
 def test_frontend_service_command_is_exec_safe():
     """The single frontend command source hands the shell's pid to the serve
     stage — the exec rule every service spec satisfies. The watchdog respawn
-    (services/healthchecks/frontend.py) builds this same string, so one check
+    (services/supervision/healthchecks/frontend.py) builds this same string, so one check
     covers both launch paths; the 2026-08-27 drift (a respawn command without
     `exec`) was exactly what the validator rejected, leaving a dead frontend
     unable to self-heal."""

@@ -18,9 +18,9 @@ A gateway daemon with six jobs on four resident loops under one `TaskGroup` (use
 - [[process-lifecycle.ava.okf.md]] — resurrect semantics the retry re-runs
 
 ## Entry Points
-- `services/delivery_watchdog/daemon.py` — `.venv/bin/python -m services.delivery_watchdog.daemon`
-- `services/delivery_watchdog/resurrect_retry.py`, `stall_recovery.py`, `turn_liveness.py` — jobs 3, 6 and 5 as sequential loops; `rounds.py` — the shared round runner and bounded fan-out; `attempts.py` — durable per-agent cooldown clocks (`delivery_watchdog_attempts`)
-- `services/delivery_watchdog/dead_letter.py` — job 4's stale-inbound dead-letter sweeps (split out at the line budget; re-exported by `daemon.py`)
+- `services/wake/delivery_watchdog/daemon.py` — `.venv/bin/python -m services.wake.delivery_watchdog.daemon`
+- `services/wake/delivery_watchdog/resurrect_retry.py`, `stall_recovery.py`, `turn_liveness.py` — jobs 3, 6 and 5 as sequential loops; `rounds.py` — the shared round runner and bounded fan-out; `attempts.py` — durable per-agent cooldown clocks (`delivery_watchdog_attempts`)
+- `services/wake/delivery_watchdog/dead_letter.py` — job 4's stale-inbound dead-letter sweeps (split out at the line budget; re-exported by `daemon.py`)
 - Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
 
 ## Notes

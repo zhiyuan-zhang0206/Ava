@@ -8,7 +8,7 @@ tags:
 
 # Telemetry Events Replay
 
-`services/events_maintenance/telemetry_replay.py`. The emitter appends a telemetry and log
+`services/upkeep/events_maintenance/telemetry_replay.py`. The emitter appends a telemetry and log
 batch's persisted events (`is_persisted`: `EventSpec.persist`, any warning-or-higher level, any unregistered name) to `telemetry_events` and writes the local JSONL mirror first (`base/telemetry/event_store.py`);
 this pass repairs what the table missed: a database that did not answer, and the daemons that hold
 no database login (gate, memory search, the browser daemons).

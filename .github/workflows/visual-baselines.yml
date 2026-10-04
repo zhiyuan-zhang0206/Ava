@@ -139,7 +139,7 @@ jobs:
         id: preview-check
         run: |
           set +e
-          uv run pytest tests/e2e/test_preview_visual_gate.py -q
+          uv run pytest tests/e2e/visual/test_preview_visual_gate.py -q
           EXIT_CODE="$?"
           set -e
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
@@ -151,7 +151,7 @@ jobs:
         if: >-
           github.event_name == 'workflow_dispatch' ||
           steps.preview-check.outputs.exit_code == '1'
-        run: PREVIEW_GATE_REFRESH=1 uv run pytest tests/e2e/test_preview_visual_gate.py -q
+        run: PREVIEW_GATE_REFRESH=1 uv run pytest tests/e2e/visual/test_preview_visual_gate.py -q
 
       - name: Detect regenerated PNGs
         if: >-
@@ -162,7 +162,7 @@ jobs:
         run: |
           # git status (not diff): the first mint introduces the golden set as
           # untracked files, invisible to git diff.
-          if [ -z "$(git status --porcelain=v1 -z --untracked-files=all -- tests/e2e/__snapshots__/)" ]; then
+          if [ -z "$(git status --porcelain=v1 -z --untracked-files=all -- tests/e2e/visual/__snapshots__/)" ]; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -183,7 +183,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: regenerated-visual-baselines
-          path: tests/e2e/__snapshots__/
+          path: tests/e2e/visual/__snapshots__/
           if-no-files-found: error
           retention-days: 1
 
@@ -230,7 +230,7 @@ jobs:
           fi
           for REFERENCE in "${REFERENCES[@]}"; do
             SOURCE="$ARTIFACT_ROOT/$REFERENCE"
-            TARGET="tests/e2e/__snapshots__/$REFERENCE"
+            TARGET="tests/e2e/visual/__snapshots__/$REFERENCE"
             if [ ! -f "$SOURCE" ] || [ -L "$SOURCE" ]; then
               echo "Missing regular baseline artifact: $REFERENCE" >&2
               exit 1
@@ -247,9 +247,9 @@ jobs:
             echo "Missing regular preview-gate meta.json artifact." >&2
             exit 1
           fi
-          mkdir -p "tests/e2e/__snapshots__/$PREVIEW_CAPTURES"
-          cp "$ARTIFACT_ROOT/$PREVIEW_CAPTURES"/*-golden-[12].png "tests/e2e/__snapshots__/$PREVIEW_CAPTURES/"
-          cp "$ARTIFACT_ROOT/preview-gate/meta.json" "tests/e2e/__snapshots__/preview-gate/meta.json"
+          mkdir -p "tests/e2e/visual/__snapshots__/$PREVIEW_CAPTURES"
+          cp "$ARTIFACT_ROOT/$PREVIEW_CAPTURES"/*-golden-[12].png "tests/e2e/visual/__snapshots__/$PREVIEW_CAPTURES/"
+          cp "$ARTIFACT_ROOT/preview-gate/meta.json" "tests/e2e/visual/__snapshots__/preview-gate/meta.json"
 
       - name: Commit and push to the dispatched PR head
         if: github.event_name == 'workflow_dispatch'
@@ -258,7 +258,7 @@ jobs:
         run: |
           git config user.name 'ava-visual-baselines-bot'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add tests/e2e/__snapshots__/
+          git add tests/e2e/visual/__snapshots__/
           git commit \
             -m '[Ava-5814] test(e2e): refresh visual baselines' \
             -m 'Co-authored-by: Ava #5814'
@@ -297,7 +297,7 @@ jobs:
           REMOTE_SHA="$(git ls-remote --heads origin "refs/heads/$BRANCH" | awk '{print $1}')"
           git config user.name 'ava-visual-baselines-bot'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add tests/e2e/__snapshots__/
+          git add tests/e2e/visual/__snapshots__/
           git commit \
             -m '[Ava-5814] test(e2e): refresh visual baselines' \
             -m 'Co-authored-by: Ava #5814'
@@ -337,14 +337,14 @@ jobs:
           ## File tree
 
           ```text
-          tests/e2e/__snapshots__/
+          tests/e2e/visual/__snapshots__/
           EOF
           mapfile -t CHANGED_REFERENCES < <(
-            git diff --name-only HEAD^ HEAD -- tests/e2e/__snapshots__/
+            git diff --name-only HEAD^ HEAD -- tests/e2e/visual/__snapshots__/
           )
           for INDEX in "${!CHANGED_REFERENCES[@]}"; do
             REFERENCE="${CHANGED_REFERENCES[$INDEX]}"
-            RELATIVE="${REFERENCE#tests/e2e/__snapshots__/}"
+            RELATIVE="${REFERENCE#tests/e2e/visual/__snapshots__/}"
             CONNECTOR='├──'
             if [ "$INDEX" -eq "$((${#CHANGED_REFERENCES[@]} - 1))" ]; then
               CONNECTOR='└──'

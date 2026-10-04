@@ -41,5 +41,5 @@ not blocked.
 Execution paths that could block unboundedly are also bounded directly where
 identified: OCR subprocess runs (the swiftc build and the recognition) go
 through `base.host.proc.run_bounded`, whose timeout kills the whole process
-tree and bounds its own post-kill drain (`services/computer/ocr.py`). The
+tree and bounds its own post-kill drain (`services/desktop/computer/ocr.py`). The
 watchdog remains the guarantee — either serving, or gone.

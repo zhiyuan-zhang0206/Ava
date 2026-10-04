@@ -5,7 +5,7 @@ from __future__ import annotations
 from base.cluster.machine import MachineRoles
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge.spec import ConvergeCtx
-from services.healthchecks.lgtm import is_lgtm_host, lgtm_host_marker, probe_backend
+from services.supervision.healthchecks.lgtm import is_lgtm_host, lgtm_host_marker, probe_backend
 
 
 def roles_declare_station(roles: MachineRoles | None) -> bool:

@@ -26,7 +26,7 @@ _CONSUMER_MODULES = frozenset(
         "agent.exec_child",
         "agent.exec_owner_child",
         "agent.exec_domain_owner",
-        "services.agent_host.daemon",
+        "services.agent_runner.agent_host.daemon",
     }
 )
 

@@ -86,7 +86,7 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 
 - Gate is an ordinary gateway service selected into the root manifest. Planned
   root downtime includes its entry port; it has no separate OS job or detached
-  launcher. See [[services/gate/docs/gate.ava.okf.md|Fleet UI Gate]].
+  launcher. See [[services/entrypoints/gate/docs/gate.ava.okf.md|Fleet UI Gate]].
 
 - `agents/timeline.py` exposes the existing timeline API as `ava agents timeline`
   and its exact `context` alias. `agents/impersonation.py` manages explicit external

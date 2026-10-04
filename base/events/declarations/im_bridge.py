@@ -8,7 +8,7 @@ from base.events.vocabulary import EventSpec, telemetry_event
 
 
 class ImPushFailed(TypedDict):
-    """`im_push_failed` payload — services/im_bridge/push_watchdog.py.
+    """`im_push_failed` payload — services/entrypoints/im_bridge/push_watchdog.py.
 
     One event per outbound send whose single retry also failed. `failures` is
     the adapter's consecutive-failure count (weixin: the iLink context_token
@@ -19,7 +19,7 @@ class ImPushFailed(TypedDict):
 
 
 class ImFeishuOwnerSeedFailed(TypedDict):
-    """`im_feishu_owner_seed_failed` payload — services/im_bridge/adapters/feishu.py.
+    """`im_feishu_owner_seed_failed` payload — services/entrypoints/im_bridge/adapters/feishu.py.
 
     Boot could not restore the feishu owner chat from the persisted switch
     state: `no_source` (no feishu chat recorded) or `ambiguous` (`chats` > 1);

@@ -79,7 +79,7 @@ def ensure_walg_job(_ctx: ConvergeCtx) -> None:
     home (`owns_os_jobs`), and registration is a no-op where
     `AVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
     from base.host.system.walg_job import register_walg_job, unregister_walg_job
-    from services.gateway_side.walg.config import enabled
+    from services.backup.walg.config import enabled
 
     if enabled():
         register_walg_job()

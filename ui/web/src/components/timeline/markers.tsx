@@ -160,7 +160,7 @@ function UnknownMarkerChip({ source, payload }: { source: string | null; payload
   console.warn("[timeline] unrecognized system_marker, frontend not adapted", { source, payload });
   return (
     // data-testid="marker-unrecognized": the stable hook the panoramic e2e
-    // cases assert against (tests/e2e/test_*_flow.py) — absence of this node
+    // cases assert against (tests/e2e/flow/test_*_flow.py) — absence of this node
     // = the #1017 alarm class did not render.
     <div
       data-testid="marker-unrecognized"

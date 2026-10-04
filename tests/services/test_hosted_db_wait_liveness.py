@@ -23,12 +23,16 @@ from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.native_process.turn_identity import bind_turn_identity
-from services.agent_host import daemon, db_recovery
-from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake, TurnScheduler
-from services.agent_host.host import AgentHost
-from services.agent_host.tests.test_hosted_db_recovery import _admit, _graph
-from services.delivery_watchdog import turn_liveness
-from services.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
+from services.agent_runner.agent_host import daemon, db_recovery
+from services.agent_runner.agent_host.dispatcher import (
+    InboundWakeDispatcher,
+    PendingInboundWake,
+    TurnScheduler,
+)
+from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.test_hosted_db_recovery import _admit, _graph
+from services.wake.delivery_watchdog import turn_liveness
+from services.wake.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
 
 
 @pytest.fixture(autouse=True)

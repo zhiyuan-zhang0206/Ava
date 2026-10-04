@@ -70,7 +70,8 @@ def _find_unrecorded_agent_host(home: Path) -> bool:
     for process in processes:
         argv = cast(list[str], process.info["cmdline"] or [])
         if not any(
-            argv[i : i + 2] == ["-m", "services.agent_host.daemon"] for i in range(len(argv) - 1)
+            argv[i : i + 2] == ["-m", "services.agent_runner.agent_host.daemon"]
+            for i in range(len(argv) - 1)
         ):
             continue
         try:

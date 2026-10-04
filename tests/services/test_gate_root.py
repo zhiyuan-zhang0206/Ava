@@ -21,12 +21,12 @@ from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.native_process.root_control.client import owned_process
 from ops.roster import build_services
-from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
-from services.ava_root.server import ControlServer
-from services.ava_root.supervisor import Supervisor, SupervisorConfig
-from services.gate.tests.test_gate import _FakeApp, _FakeGateway, _request, _Servers
-from services.gate.tests.test_gate import servers as servers
-from services.healthchecks import gate
+from services.entrypoints.gate.tests.test_gate import _FakeApp, _FakeGateway, _request, _Servers
+from services.entrypoints.gate.tests.test_gate import servers as servers
+from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.supervision.ava_root.server import ControlServer
+from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.healthchecks import gate
 
 
 async def _ready(probe: Callable[[], DaemonProbe]) -> DaemonProbe:
@@ -54,7 +54,7 @@ async def test_gate_native_child_readiness_restart_and_stop(
     assert not spec.requires_db
     unit = UnitManifest(
         "gate",
-        (sys.executable, "-m", "services.gate.daemon", "--port", str(port)),
+        (sys.executable, "-m", "services.entrypoints.gate.daemon", "--port", str(port)),
         RestartPolicy.ALWAYS,
         "root",
         (("AVA_TELEMETRY_OTLP_ENABLED", "false"),),

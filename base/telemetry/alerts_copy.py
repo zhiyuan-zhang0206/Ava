@@ -1,9 +1,9 @@
 """Alert-push IM copy — the user-visible alert templates (single source).
 
-The alert push templates were moved here from ``services/im_bridge/copy.py``
+The alert push templates were moved here from ``services/entrypoints/im_bridge/copy.py``
 (2026-08-25, tech-audit P1): ``base.telemetry.alerts`` — the alert-ingest core — must
 not import up into ``services``, and the templates are its own IM copy, so
-they live in a ``base`` leaf module and ``services/im_bridge/copy.py``
+they live in a ``base`` leaf module and ``services/entrypoints/im_bridge/copy.py``
 re-exports them for its own consumers. The "one voice for IM copy" governance
 (ruling 2026-08-08) is preserved: one definition, re-exported, never
 duplicated.

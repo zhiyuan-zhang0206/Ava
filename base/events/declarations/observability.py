@@ -175,7 +175,7 @@ EVENTS: dict[str, EventSpec] = {
         "Loki write-path probe failed",
         payload=LokiWritePathProbeFailed,
         tier="anomaly",
-        site="services/healthchecks/lgtm.py write-path probe",
+        site="services/supervision/healthchecks/lgtm.py write-path probe",
     ),
     "loki_write_path_probe_throttled": telemetry_event(
         "loki_write_path_probe_throttled",
@@ -227,7 +227,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site=(
             "Class-resolution markers select their name from the event level at "
-            "runtime; services/events_maintenance/resolution.py emits the reopen "
+            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
             "markers and resolution_status, while the gateway emits resolved ones."
         ),
     ),
@@ -238,7 +238,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site=(
             "Class-resolution markers select their name from the event level at "
-            "runtime; services/events_maintenance/resolution.py emits the reopen "
+            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
             "markers and resolution_status, while the gateway emits resolved ones."
         ),
     ),
@@ -249,7 +249,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site=(
             "Class-resolution markers select their name from the event level at "
-            "runtime; services/events_maintenance/resolution.py emits the reopen "
+            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
             "markers and resolution_status, while the gateway emits resolved ones."
         ),
     ),
@@ -260,7 +260,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site=(
             "Class-resolution markers select their name from the event level at "
-            "runtime; services/events_maintenance/resolution.py emits the reopen "
+            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
             "markers and resolution_status, while the gateway emits resolved ones."
         ),
     ),
@@ -271,7 +271,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site=(
             "Class-resolution markers select their name from the event level at "
-            "runtime; services/events_maintenance/resolution.py emits the reopen "
+            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
             "markers and resolution_status, while the gateway emits resolved ones."
         ),
     ),
@@ -279,7 +279,7 @@ EVENTS: dict[str, EventSpec] = {
         "checkpoint_table_sizes",
         "checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run)",
         payload=CheckpointTableSizes,
-        site="services/events_maintenance/blob_vacuum.py telemetry.emit (positional)",
+        site="services/upkeep/events_maintenance/blob_vacuum.py telemetry.emit (positional)",
     ),
     "audit_write_failed": telemetry_event(
         "audit_write_failed",

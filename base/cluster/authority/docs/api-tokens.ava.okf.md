@@ -16,7 +16,7 @@ on the gateway.
 |---|---|
 | gateway middleware, `/api/bootstrap`, alert webhooks | the human secret, or the ACTIVE generation's gateway or runner token (never a pending one; `acceptance`, cached per ledger identity; `gateway.auth.request_principal.cluster_credential` records `cluster_bearer` or `machine_token:<class>`) |
 | `/api/auth/login` | the human secret, or the active runner token (the managed browser's cookie); the session is bound to that credential and ends when the credential stops being accepted or the human secret rotates (`gateway.auth.request_principal.session_mints`) |
-| a unit's `/ops` (`services/agent_ops/_boot._ops_acceptance`) | digests of its generation's gateway and runner tokens: a remote unit's capability carries the gateway digest, never the gateway token |
+| a unit's `/ops` (`services/agent_runner/agent_ops/_boot._ops_acceptance`) | digests of its generation's gateway and runner tokens: a remote unit's capability carries the gateway digest, never the gateway token |
 
 The gateway re-reads its acceptance on every request; a unit's `/ops` reads it
 once, at daemon boot, which holds because nothing changes the accepted tokens
@@ -37,7 +37,7 @@ human secret), so it changes only when that secret rotates; remote units
 receive it in their capability.
 
 The human-bearer rotation (`scripts/data_plane_ops/rotate_cluster_secret.py`) keeps the
-logical-backup passphrase pinned (`services/gateway_side/backup/passphrase.py`:
+logical-backup passphrase pinned (`services/backup/artifact/passphrase.py`:
 minted at birth, `sha256(secret)` for a home born earlier), then changes the
 secret; remote units then need new bundles for the new telemetry
 token.

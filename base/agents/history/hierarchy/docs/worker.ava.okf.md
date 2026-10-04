@@ -9,7 +9,7 @@ tags:
 
 # The Hierarchy Worker (task #3704 P2b)
 
-`services/hierarchy_worker/` is the compact-driven builder. It runs as a
+`services/derived/hierarchy_worker/` is the compact-driven builder. It runs as a
 gateway-hosted built-in schedule (`schedules/hierarchy-worker-schedule.py`,
 built-in `hierarchy-worker`, product class, enabled by default): one cron
 slot a minute calls a tick, which claims and drains due build jobs — each in

@@ -15,7 +15,7 @@ Chrome, and npx). The converge browser step uses the settings-free twin
 `AVA_CHROME_BINARY` override because Settings cannot be built on a fresh host.
 
 On macOS, these static prongs are necessary but not sufficient at daemon launch.
-`services/browser/macos_readiness.py` additionally waits for the current service
+`services/desktop/browser/macos_readiness.py` additionally waits for the current service
 account to be the console GUI user, to have a `launchctl gui/<uid>` namespace,
 and for its login Keychain to answer a read-only readiness query. The browser
 session stays alive while waiting, and the healthcheck reports **DEGRADED**

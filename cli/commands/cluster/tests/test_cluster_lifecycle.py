@@ -54,7 +54,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, roles: list[str]) -> P
     monkeypatch.setattr("cli.start_identity.read_intent", read_intent)
     monkeypatch.setattr(lifecycle, "_stop_cluster", stop)
     monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", unregister_jobs)
-    monkeypatch.setattr("services.permissions_helper.launchd_job.unregister_helper", helper)
+    monkeypatch.setattr("services.desktop.permissions_helper.launchd_job.unregister_helper", helper)
     return home
 
 
@@ -90,7 +90,7 @@ def test_destroy_checks_helper_before_detaching(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from base.config import settings
-    from services.permissions_helper import launchd_job
+    from services.desktop.permissions_helper import launchd_job
 
     seen: list[Path] = []
 
@@ -198,7 +198,9 @@ def test_the_default_home_can_be_destroyed(
     monkeypatch.setattr("cli.start_identity.read_intent", _gateway_intent)
     monkeypatch.setattr(lifecycle, "_stop_cluster", _nothing_to_stop)
     monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", _no_jobs)
-    monkeypatch.setattr("services.permissions_helper.launchd_job.unregister_helper", _no_helper)
+    monkeypatch.setattr(
+        "services.desktop.permissions_helper.launchd_job.unregister_helper", _no_helper
+    )
     _at_a_terminal(monkeypatch, str(prod))
 
     assert lifecycle.cmd_cluster_destroy() == 0
@@ -210,7 +212,7 @@ def test_stop_failure_leaves_home_attached_and_never_unloads_helper(
 ) -> None:
     monkeypatch.setattr(lifecycle, "_stop_cluster", lambda: 4)
     unload = Mock()
-    monkeypatch.setattr("services.permissions_helper.launchd_job.unregister_helper", unload)
+    monkeypatch.setattr("services.desktop.permissions_helper.launchd_job.unregister_helper", unload)
     _at_a_terminal(monkeypatch, str(home))
 
     assert lifecycle.cmd_cluster_destroy() == 4
@@ -228,7 +230,9 @@ def test_ambiguous_cleanup_leaves_home_attached(
     if stage == "jobs":
         monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", fail)
     else:
-        monkeypatch.setattr("services.permissions_helper.launchd_job.unregister_helper", fail)
+        monkeypatch.setattr(
+            "services.desktop.permissions_helper.launchd_job.unregister_helper", fail
+        )
     _at_a_terminal(monkeypatch, str(home))
 
     assert lifecycle.cmd_cluster_destroy() == 1
@@ -287,7 +291,7 @@ def test_interrupted_cleanup_retries_to_completion(
 ) -> None:
     """A cleanup that could not finish leaves the home attached with its destroy
     intent retained; running destroy again completes it."""
-    target = "services.permissions_helper.launchd_job.unregister_helper"
+    target = "services.desktop.permissions_helper.launchd_job.unregister_helper"
 
     def interrupted(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("interrupted detach")

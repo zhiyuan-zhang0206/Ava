@@ -187,7 +187,7 @@ def _otel_collector_gate_reason() -> str | None:
 
     This is the roster sibling of ``ensure_otel_collector_step`` in
     ``cli/commands/observability/otel_collector.py`` and ``_collector_serves_this_home`` in
-    ``services/healthchecks/otel_collector.py``. All three share
+    ``services/supervision/healthchecks/otel_collector.py``. All three share
     ``collector_allowed_for_home`` (marker OR station capability OR explicit
     ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``ava start``,
     ``ava status``, the root, rollout readiness, and cluster health probe agree
@@ -271,7 +271,7 @@ def _core_gate_reason(session: str) -> str | None:
     if session == "computer-mcp":
         return _computer_mcp_gate_reason()
     if session in {"loki", "prometheus", "grafana"}:
-        from services.healthchecks.lgtm import is_lgtm_host
+        from services.supervision.healthchecks.lgtm import is_lgtm_host
 
         return None if is_lgtm_host() else "this home is not an observability station"
     if session == "otel-collector":

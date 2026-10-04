@@ -75,7 +75,7 @@ class TestProvision:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, automatic: bool
     ) -> None:
         from base.config import settings
-        from services.schedule_manager import daemon
+        from services.wake.schedule_manager import daemon
 
         monkeypatch.setattr(settings.gateway, "provision_builtin_schedules", automatic)
         assert _names(db_conn) == set()

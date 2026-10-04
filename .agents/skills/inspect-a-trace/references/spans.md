@@ -5,7 +5,7 @@ langgraph node path, and the shape of each LLM call. Come here once you already
 have a `trace_id`.
 
 **Check the trace's scope first.** The root span (`base/telemetry/tracing.py:turn_span`)
-wraps one graph invocation in `services/agent_host/host.py`. The host admits
+wraps one graph invocation in `services/agent_runner/agent_host/host.py`. The host admits
 work before invoking the graph, so an idle agent has no parked graph invocation.
 The claim node returns at idle; waiting for a Redis wake happens in the host
 scheduler outside the turn span.

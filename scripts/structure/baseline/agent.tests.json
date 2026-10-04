@@ -1,5 +1,4 @@
 {
-  "complexity": {},
   "files": {
     "agent/tests/test_compact.py": 1142,
     "agent/tests/test_impersonation.py": 842,

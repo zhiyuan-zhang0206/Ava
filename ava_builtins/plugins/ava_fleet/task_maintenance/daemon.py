@@ -526,7 +526,7 @@ async def _dispatch_loop(
             _log.exception("[task-maintenance] poll iteration failed")
         # Sleep OUTSIDE the try: a transient failure waits a full interval
         # before retrying instead of hot-looping against Postgres (same
-        # discipline as services/events_maintenance/daemon.py — audit
+        # discipline as services/upkeep/events_maintenance/daemon.py — audit
         # round 2, P1: the sleep used to sit inside the try, so a
         # non-ProgrammingError exception skipped it and the loop spun).
         await _sleep_with_liveness(liveness, interval)

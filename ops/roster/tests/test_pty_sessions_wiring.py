@@ -2,7 +2,7 @@
 
 Every agent shell lives in one ordinary roster process per machine. The behavior
 (a session outliving its clients, the closure, the sweep) is covered by
-services/pty_sessions/tests; this file pins the declaration: its capabilities, that
+services/agent_runner/pty_sessions/tests; this file pins the declaration: its capabilities, that
 it needs no database, its ownership probe, its gate, and the SIGTERM budget root
 derives its stop window from.
 """
@@ -13,7 +13,7 @@ import pytest
 
 from ops import roster, spec
 from ops.roster import service_spec
-from services.pty_sessions import shutdown_budget
+from services.agent_runner.pty_sessions import shutdown_budget
 
 
 def _spec() -> service_spec.ServiceSpec:
@@ -42,7 +42,7 @@ def test_the_ownership_probe_is_bound_to_the_roots_generation() -> None:
     declared = _spec()
     assert declared.identity_probe is not None
     assert declared.curl_url is None and declared.tcp_port is None, "a Unix endpoint binds its peer"
-    assert declared.cmd == ".venv/bin/python -m services.pty_sessions.daemon"
+    assert declared.cmd == ".venv/bin/python -m services.agent_runner.pty_sessions.daemon"
 
 
 def test_the_stop_window_covers_the_services_own_closure() -> None:

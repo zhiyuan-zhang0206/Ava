@@ -25,7 +25,7 @@ supplies the package doors and the shrink-only baseline practice the enforcement
   resolves them, with the plugin pins, into the agent's `AgentSlices` each turn; only
   the turn identity is still bound in a ContextVar.
 - **`AvaContext`** (`base/agents/context/__init__.py`) is LangGraph's per-run context. The
-  host builds one per turn in `services/agent_host/host.py` with the handles (model,
+  host builds one per turn in `services/agent_runner/agent_host/host.py` with the handles (model,
   event publisher, database pool, `Database`, `EventBus`) and the agent's resolved
   `AgentSlices` (`base/host/env/agent_slices.py`); graph code reads
   `runtime.context.agent`.
@@ -241,15 +241,15 @@ Batches so far: the IM bridge daemon, then the events-maintenance and labeler da
 ### IM bridge
 
 The IM bridge daemon: three slices, 21 fields read across eight modules, all in one
-process (the gateway-side `services.im_bridge.daemon`), none read by another package.
+process (the gateway-side `services.entrypoints.im_bridge.daemon`), none read by another package.
 
 - `ImBridgeConfig` (retry delays, push backoff, SSE timeout, timeline and replay windows,
   notice limits, disabled adapters), `TelegramCredentialsConfig` and
   `FeishuCredentialsConfig` (credentials and poll timing, plus the replay window the
-  Feishu cursor needs) live in `services/im_bridge/config.py`. Field names are the flat
+  Feishu cursor needs) live in `services/entrypoints/im_bridge/config.py`. Field names are the flat
   registry names. Secrets sit in their own slices, so the Telegram token is not in the
   bridge core's type.
-- `services/im_bridge/daemon.py` is the composition root and the only module there that
+- `services/entrypoints/im_bridge/daemon.py` is the composition root and the only module there that
   reads `settings`. Its `im_bridge_config()`, `telegram_config()`, `feishu_config()` and
   `gateway_client()` build the objects; `run()` hands `IMBridgeCore(config, gateway)` its
   slice and its gateway client, and `_load_adapters` hands each adapter the slice it
@@ -257,7 +257,7 @@ process (the gateway-side `services.im_bridge.daemon`), none read by another pac
   as arguments from the root; the secret is not part of any slice.
 - The adapter fallbacks that swallowed a missing `settings.feishu` domain are gone: a
   slice is always complete.
-- Tests build slices with `services/im_bridge/tests/slices.py` (the daemon's builders plus
+- Tests build slices with `services/entrypoints/im_bridge/tests/slices.py` (the daemon's builders plus
   `dataclasses.replace`) instead of patching `settings`; `test_im_bridge_daemon.py` pins
   that each slice field equals the live flat field of the same name and that `run()` and
   `_load_adapters` hand the slices down.
@@ -270,10 +270,10 @@ process (the gateway-side `services.im_bridge.daemon`), none read by another pac
 
 Two more gateway-side daemons, one root each, no reader outside the package.
 
-- `EventsMaintenanceConfig` (`services/events_maintenance/config.py`): the nine
+- `EventsMaintenanceConfig` (`services/upkeep/events_maintenance/config.py`): the nine
   `events_*` daemon fields, plus `telemetry_loki_url` and `timezone`, which other
   components read too and so appear in this slice as well. `LabelerConfig`
-  (`services/labeler/config.py`): `labeler_model`, `labeler_max_chars`.
+  (`services/derived/labeler/config.py`): `labeler_model`, `labeler_max_chars`.
 - Each `daemon.py` builds its slice (`events_maintenance_config()`, `labeler_config()`)
   and passes it down: loops, `compute_rollup`, `recover_observations`/`replay_loki`,
   `run_resolution_slice`, `run_blob_vacuum(timezone=)`, `generate_label_async`. The
@@ -283,22 +283,22 @@ Two more gateway-side daemons, one root each, no reader outside the package.
 - Tests use `tests/slices.py` of each package; a `test_*_config.py` per package pins
   that every slice field equals the live flat field and that `run()` hands the same
   slice to the loops.
-- Left for later: `services/backup_scheduler` (`backup_hour` is also read by
-  `services/backup.py` and `base/host/system/walg_job.py`), and `memory_indexer` (read by ops and the CLI).
+- Left for later: `services/backup/scheduler` (`backup_hour` is also read by
+  `services/backup/dump.py` and `base/host/system/walg_job.py`), and `memory_indexer` (read by ops and the CLI).
 
 ### Computer use, page server, memory search and hierarchy worker
 
 Four more daemons, one slice each, each package declaring itself sliced:
 
-- `ComputerUseConfig` (`services/computer`, root `mcp_daemon.py`): lease, queue timeout and
+- `ComputerUseConfig` (`services/desktop/computer`, root `mcp_daemon.py`): lease, queue timeout and
   session idle, taken by `ComputerMcpDaemon`.
-- `PageServerConfig` (`services/page_server`, root `daemon.py`): the poll interval and the
+- `PageServerConfig` (`services/agent_runner/page_server`, root `daemon.py`): the poll interval and the
   live-event channel, threaded through the reconcile pass to the PageClosed publication.
-- `MemorySearchConfig` (`services/memory_search`, root `daemon.py`): pidfile, data directory,
+- `MemorySearchConfig` (`services/derived/memory_search`, root `daemon.py`): pidfile, data directory,
   port and the batch bound `build_app` takes. The embedding provider still comes from the
   memory-indexer factory, which three consumers share (gateway router, bring-up, this
   daemon) and which waits for the shared-kernel batch.
-- `HierarchyWorkerConfig` (`services/hierarchy_worker`, root `roots.py`): the 17 `hierarchy_*`
+- `HierarchyWorkerConfig` (`services/derived/hierarchy_worker`, root `roots.py`): the 17 `hierarchy_*`
   daemon fields and the generation model. The package has two processes, the schedule host
   and the build child, so the root is its own module: `hierarchy_worker_config()` and
   `prepare()` live there, the scan, runner and job execution take the slice. The big test
@@ -412,7 +412,7 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   reports.
 - **Cost of splitting into services: onboarding.** Adding a service today means
   editing `ops/roster/__init__.py`, `base/host/env/port_table.py` and
-  `base/cluster/ports.py`, plus a health-check module under `services/healthchecks/`
+  `base/cluster/ports.py`, plus a health-check module under `services/supervision/healthchecks/`
   with its documentation and tests. A declarative roster could remove most of that
   boilerplate; it is not designed.
 - **Plugins outside the repository.** A plugin installed outside the repository that

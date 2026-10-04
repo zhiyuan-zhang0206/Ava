@@ -14,11 +14,11 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 
 ## Core Responsibilities
 - **Inbound HTTP endpoint**: binds `0.0.0.0:<ops_port>`, serves `POST /ops`; `GET /healthz` (watchdog health check) on the same port, via localhost without auth. The health envelope reports active-op age and informational worker saturation; an operation held longer than 20 minutes (the no-progress bound plus margin) returns 503 so the watchdog restarts the daemon.
-- **Bearer-authenticated when configured** (`services/agent_ops/_boot._ops_acceptance`): every `/ops` carries a machine API token of this unit's write generation — the gateway's gateway-class token, or a runner-class token from the unit's own processes — verified against digests only (a remote unit's capability carries the gateway token's digest, never the token or the human secret); a single-machine gateway dials its own `/ops` the same way. An open cluster (empty secret; a capability without API admission) is the deliberate no-auth, loopback-only posture. The acceptance set is read once, at daemon boot: a revoked generation stays refused only because its one revocation path, the release fence, runs with root and the ops daemon already stopped ([[base/cluster/authority/docs/api-tokens.ava.okf.md|API tokens]]).
+- **Bearer-authenticated when configured** (`services/agent_runner/agent_ops/_boot._ops_acceptance`): every `/ops` carries a machine API token of this unit's write generation — the gateway's gateway-class token, or a runner-class token from the unit's own processes — verified against digests only (a remote unit's capability carries the gateway token's digest, never the token or the human secret); a single-machine gateway dials its own `/ops` the same way. An open cluster (empty secret; a capability without API admission) is the deliberate no-auth, loopback-only posture. The acceptance set is read once, at daemon boot: a revoked generation stays refused only because its one revocation path, the release fence, runs with root and the ops daemon already stopped ([[base/cluster/authority/docs/api-tokens.ava.okf.md|API tokens]]).
 - **In-process execution**: each request calls ops functions inside the daemon, no extra spawn; bounded concurrency semaphore (`ops_concurrency`) + shared DB pool.
 - **Off the event loop**: agent launch and lifecycle operations run on the loop;
   synchronous arms run in the daemon's worker pool through
-  `services/agent_ops/dispatch_sync.py:dispatch_sync`. Blocking filesystem work
+  `services/agent_runner/agent_ops/dispatch_sync.py:dispatch_sync`. Blocking filesystem work
   leaves health and the generation-checked hold release reachable.
   Configuration and inventory read-modify-write operations share a thread lock.
 - **Admission**: only the current `OpKind` vocabulary reaches maintenance
@@ -46,15 +46,15 @@ is specified in [[services/docs/agent_runner_side/agent_ops/agent-ops/wire-layer
 
 ## Resident Loops
 
-The ops server and the **delivery-outbox redelivery loop** (`services/agent_ops/outbox_flusher.py`) run under one `TaskGroup` in `_main`: a loop that raises cancels the server and ends the process, and the supervisor restarts the unit. The loop re-commits this machine's `$AVA_HOME/state/delivery-outbox/` records (chat sends that exhausted their retries) through the canonical chat-inbound path, one round per `AVA_DELIVERY_OUTBOX_FLUSH_INTERVAL_SECONDS`, skipping rounds while the unit is quiesced. Record state (attempts, backoff position, abandonment) lives in the record file, so a restart resumes every cooldown. The loop reports progress per record to `/healthz` (`loops.delivery-outbox`); a pass that handles no record for four flush intervals plus a minute reads as wedged.
+The ops server and the **delivery-outbox redelivery loop** (`services/agent_runner/agent_ops/outbox_flusher.py`) run under one `TaskGroup` in `_main`: a loop that raises cancels the server and ends the process, and the supervisor restarts the unit. The loop re-commits this machine's `$AVA_HOME/state/delivery-outbox/` records (chat sends that exhausted their retries) through the canonical chat-inbound path, one round per `AVA_DELIVERY_OUTBOX_FLUSH_INTERVAL_SECONDS`, skipping rounds while the unit is quiesced. Record state (attempts, backoff position, abandonment) lives in the record file, so a restart resumes every cooldown. The loop reports progress per record to `/healthz` (`loops.delivery-outbox`); a pass that handles no record for four flush intervals plus a minute reads as wedged.
 
 ## Key Dependencies
 - [[gateway-cli.ava.okf.md]] — Gateway issues ops commands to agent-runner via this service
-- [[services/ava_root_glue/docs/ava_root_glue.ava.okf.md]] — keeps alive every 60s (HTTP `/healthz`)
+- [[services/supervision/ava_root_glue/docs/ava_root_glue.ava.okf.md]] — keeps alive every 60s (HTTP `/healthz`)
 - [[db.ava.okf.md]] — ops directly reads/writes the cluster DB in-process
 
 ## Entry Points
-- `services/agent_ops/daemon.py` — `.venv/bin/python -m services.agent_ops.daemon`
+- `services/agent_runner/agent_ops/daemon.py` — `.venv/bin/python -m services.agent_runner.agent_ops.daemon`
 - `ops/rpc_schemas/__init__.py` — `OpEnvelope`/`OpResponse`/`OpKind` + per-kind payload/result models
 
 ## Notes

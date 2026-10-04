@@ -1,6 +1,6 @@
 """The settings-read rule: a sliced package reads no process-global `settings`.
 
-A package that owns configuration slices (`services/im_bridge/config.py`) receives
+A package that owns configuration slices (`services/entrypoints/im_bridge/config.py`) receives
 them through constructors; only its composition root reads `settings` and builds
 them. Governed packages and their roots are the closed `SLICED_PACKAGES` list in
 `allowlist.py`. In any other non-test module of a governed package, importing

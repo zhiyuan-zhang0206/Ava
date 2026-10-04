@@ -8,10 +8,10 @@ from pathlib import Path
 
 from base.cluster.dataplane import walg_binary
 from base.db import Database
-from services.gateway_side.walg import check, probe, state, tick
-from services.gateway_side.walg import config as walg_config
-from services.gateway_side.walg.archive import expected_archive
-from services.gateway_side.walg.restore import RecoveryTarget, RestoreError, restored_instance
+from services.backup.walg import check, probe, state, tick
+from services.backup.walg import config as walg_config
+from services.backup.walg.archive import expected_archive
+from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_instance
 
 
 def cmd_walg_check() -> int:

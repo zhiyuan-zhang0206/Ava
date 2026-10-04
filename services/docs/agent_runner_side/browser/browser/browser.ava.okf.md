@@ -26,22 +26,22 @@ See [[services/docs/agent_runner_side/browser/browser/gating.ava.okf.md]].
 
 ## Key Dependencies
 - [[ava/mcps/docs/mcps.ava.okf.md]] — `chrome-devtools-mcp` is the upstream
-- [[services/ava_root_glue/docs/ava_root_glue.ava.okf.md]] — keeps alive via `healthchecks/browser.py` (identity-verified CDP **and** ava-browser session liveness — CDP alone can tell neither a supervised Chrome from an orphan holding the port, nor ours from another unit's) and `healthchecks/browser_mcp.py` (Unix socket ping)
+- [[services/supervision/ava_root_glue/docs/ava_root_glue.ava.okf.md]] — keeps alive via `healthchecks/browser.py` (identity-verified CDP **and** ava-browser session liveness — CDP alone can tell neither a supervised Chrome from an orphan holding the port, nor ours from another unit's) and `healthchecks/browser_mcp.py` (Unix socket ping)
 
 ## Entry Points
-- `services/browser/daemon.py` — Chrome launch (`AVA_BROWSER_ENABLED` **defaults to True**; `browser_incapability()` auto-gates machines lacking display/Chrome/npx)
-- `services/browser/mcp_daemon.py` — shared MCP upstream
-- `services/browser/mcp_wrapper.py` — per-agent MCP bridge
-- `services/browser/mcp_socket_bridge.py` — socket client shared by browser and computer wrappers
-- `services/browser/protocol.py` — line-protocol types shared by three processes
-- `services/browser/orphan.py` — identify + reap a Chrome on this cluster's profile that left the session tree (called from `_do_stop(keep_browser=False)`)
-- `services/browser/probe.py` — is the Chrome on this cluster's CDP port OURS (`DaemonProbe` verdict); the roster's `ServiceSpec.identity_probe` and `healthchecks/browser.py` both run it
+- `services/desktop/browser/daemon.py` — Chrome launch (`AVA_BROWSER_ENABLED` **defaults to True**; `browser_incapability()` auto-gates machines lacking display/Chrome/npx)
+- `services/desktop/browser/mcp_daemon.py` — shared MCP upstream
+- `services/desktop/browser/mcp_wrapper.py` — per-agent MCP bridge
+- `services/desktop/browser/mcp_socket_bridge.py` — socket client shared by browser and computer wrappers
+- `services/desktop/browser/protocol.py` — line-protocol types shared by three processes
+- `services/desktop/browser/orphan.py` — identify + reap a Chrome on this cluster's profile that left the session tree (called from `_do_stop(keep_browser=False)`)
+- `services/desktop/browser/probe.py` — is the Chrome on this cluster's CDP port OURS (`DaemonProbe` verdict); the roster's `ServiceSpec.identity_probe` and `healthchecks/browser.py` both run it
 
 ## Notes
 - **The profile is also how a probe knows the browser is ours**: CDP exposes no field we control — measured, `/json/version` carries only browser/protocol/UA/V8/WebKit strings plus a per-launch websocket uuid, and `DevToolsActivePort` is written only when the port is auto-assigned — so `probe.py` reuses `orphan.py`'s `--user-data-dir` token and adds the half a profile match alone cannot give: the identified Chrome must hold the LISTEN socket on the CDP port. Existing is not owning; on a box with two localhost namespaces (WSL2) our Chrome can be alive with a dead DevTools endpoint while a relayed one answers. The probe asks the question in BOTH directions — the walk direction above, plus a listener-first direction that reads the global TCP table for the pid owning the LISTEN socket and asks whether THAT pid is ours (by the walk, or by its own argv). Either may win; the listener-first arm exists because the walk direction alone has blind spots (an unreadable argv, a failed socket read) that would misread our own listener as a foreign occupant.
 - **An unsupervised Chrome of ours heals itself**: whenever the `ava-browser` session is gone — probe ALIVE (an unsupervised Chrome holding the port) or probe DOWN (possibly a wedged orphan still holding it, serving an invalid `/json/version` body) — the healthcheck no longer just names the operator remedy (`ava stop` + `ava start`) every 60s — it performs it: sweep the orphan via `orphan.reap_cluster_chrome` (identity-verified by profile) and respawn the session in the same round. The machine-1 1,094-ERRORs/day shape closes within one round instead of waiting for a human; the 2026-09-09 macmini swap-pressure outage (daemon killed, orphan Chrome answering 200 with an empty body for ~8 minutes) is the DOWN half of the same shape.
-- **The healthcheck's ERROR lines are episode-gated**: one line per failure episode + a 6h reminder; quiet rounds log DEBUG ([[services/healthchecks/docs/terminal-verdict/terminal-verdict.ava.okf.md]]).
+- **The healthcheck's ERROR lines are episode-gated**: one line per failure episode + a 6h reminder; quiet rounds log DEBUG ([[services/supervision/healthchecks/docs/terminal-verdict/terminal-verdict.ava.okf.md]]).
 - **A teardown reaches Chrome by profile, not by process tree**: killing the `ava-browser` session cannot reach a Chrome that left the tree on a `SingletonLock` handoff, so `ava stop` / `ava cluster destroy` additionally name Chrome by this cluster's own `--user-data-dir` and kill it. Identification, the argument it cannot select the operator's browser, scope and ordering: [[services/docs/agent_runner_side/browser/browser-teardown.ava.okf.md]]
 - `AVA_BROWSER_ENABLED` **defaults to True** (not opt-in) — auto-detects host capability (display + Chrome + npx); if unavailable, `browser_incapability()` automatically skips (`base/host/system/probes.py:123`; applied as a service gate in `ops/spec.py`)
 - Chrome profile is persistent, retaining login state
-- **no data plane**: neither daemon opens a Postgres connection at boot or at runtime (their whole data plane is CDP + the Unix socket), so both specs declare `requires_db=False` and the watchdog keeps reviving them through a DB outage or a schema mismatch — a DB-scoped round block holds back only the DB's users ([[services/ava_root_glue/docs/ava_root_glue.ava.okf.md]])
+- **no data plane**: neither daemon opens a Postgres connection at boot or at runtime (their whole data plane is CDP + the Unix socket), so both specs declare `requires_db=False` and the watchdog keeps reviving them through a DB outage or a schema mismatch — a DB-scoped round block holds back only the DB's users ([[services/supervision/ava_root_glue/docs/ava_root_glue.ava.okf.md]])

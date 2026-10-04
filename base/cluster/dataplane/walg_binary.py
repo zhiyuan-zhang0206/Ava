@@ -1,6 +1,6 @@
 """The pinned WAL-G binary, installed at one stable path under `$AVA_HOME/runtime/walg/`.
 
-WAL-G is the physical-backup engine (`services/gateway_side/walg/`). Like the
+WAL-G is the physical-backup engine (`services/backup/walg/`). Like the
 vendored Postgres in `runtime_binaries`, Ava fetches it itself: a SHA-256-pinned
 GitHub release asset, verified before it can replace anything. The path is
 version-free (`wal-g`), so Postgres' `archive_command` can name it once and an

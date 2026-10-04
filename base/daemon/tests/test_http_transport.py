@@ -27,7 +27,7 @@ sys.path.insert(0, sys.argv[1])
 class Deny(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
         if fullname.startswith(('base.config', 'base.host.env.bootstrap', 'plugins',
-                                'services.agent_ops.daemon')):
+                                'services.agent_runner.agent_ops.daemon')):
             raise AssertionError(fullname)
 sys.meta_path.insert(0, Deny())
 import base.daemon.http_transport

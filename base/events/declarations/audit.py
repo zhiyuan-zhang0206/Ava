@@ -16,7 +16,7 @@ StatusChange = TypedDict("StatusChange", {"from": str, "to": str})
 
 
 class ComputerAction(TypedDict):
-    """`computer_action` payload — services/computer/mcp_daemon.py.
+    """`computer_action` payload — services/desktop/computer/mcp_daemon.py.
 
     One row per executed-or-refused desktop action. The daily quota reads
     exactly this event name (count by agent_id since local midnight), so the
@@ -34,7 +34,7 @@ class ComputerAction(TypedDict):
 
 
 class ComputerSessionStart(TypedDict):
-    """`computer_session_start` payload — services/computer/task_sessions.py.
+    """`computer_session_start` payload — services/desktop/computer/task_sessions.py.
 
     The envelope opening for a task's desktop actions: the first call carrying
     a task_id emits this; the matching end follows when the task goes idle.
@@ -46,7 +46,7 @@ class ComputerSessionStart(TypedDict):
 
 
 class ComputerSessionEnd(TypedDict):
-    """`computer_session_end` payload — services/computer/task_sessions.py.
+    """`computer_session_end` payload — services/desktop/computer/task_sessions.py.
 
     The envelope closing: emitted lazily when a task_id sees no action for the
     idle threshold (outcome=idle_timeout), on the next audited call.

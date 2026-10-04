@@ -50,4 +50,4 @@ This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 | ava-root unit stop | `group_empty` and `group_members`, after the unit leader is reaped |
 
 Consumers: [[base/agents/incarnation/docs/incarnation-resources.ava.okf.md|exec incarnation resources]],
-[[services/backup_scheduler/docs/operation-custody.ava.okf.md|backup operation custody]].
+[[services/backup/scheduler/docs/operation-custody.ava.okf.md|backup operation custody]].

@@ -4,7 +4,7 @@
       "command": ".venv/bin/python",
       "args": [
         "-m",
-        "services.computer.mcp_wrapper"
+        "services.desktop.computer.mcp_wrapper"
       ],
       "requires": {
         "display": true,

@@ -42,8 +42,8 @@ or a blocked graph invocation.
 - `agent/db/__init__.py:claim_inbound_batch` — acquires the pool and row locks with bounded
   waits. Timeout rolls back; a later host wake or scan retries pending work.
 - `agent/db/__init__.py:has_pending_interrupt` — read-only interrupt detection.
-- `services/agent_host/daemon.py` — shared pool, checkpointer and wake lifecycle.
-- `services/agent_host/host.py` — per-agent admission and checkpoint settlement.
+- `services/agent_runner/agent_host/daemon.py` — shared pool, checkpointer and wake lifecycle.
+- `services/agent_runner/agent_host/host.py` — per-agent admission and checkpoint settlement.
 
 ## Key Dependencies
 

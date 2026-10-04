@@ -15,7 +15,7 @@
 - `reconcile_open_pages` — probe every open page's server and restore it
   (re-serve dead serve_dir pages, close dead no-dir pages); runs at boot and
   on heartbeat. The periodic scan of busy agents' pages (task #2260) is a loop
-  of the page-server service (`services/page_server/dead_pages.py`)
+  of the page-server service (`services/agent_runner/page_server/dead_pages.py`)
 - `_close_dead_show_pages` — close dead no-serve_dir rows in one
   transaction with a re-serve notice to the agent (deduped per 6h)
 

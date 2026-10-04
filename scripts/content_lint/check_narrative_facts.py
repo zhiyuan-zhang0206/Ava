@@ -10,11 +10,11 @@ extracted from the code and asserted against the doc that owns the fact:
      functional-group rows must resolve under ava_builtins/skills/ or
      ava_builtins/plugins/ (catches a removed skill still listed — the
      2026-08-03 telegram residual class).
-  B. IM command set — every `/command` route in services/im_bridge/core.py
+  B. IM command set — every `/command` route in services/entrypoints/im_bridge/core.py
      must appear in the "Command set" line of
      services/docs/gateway_side/im_bridge.ava.okf.md (catches the 8/2-8/6 drift
      class: /spawn /commands /notice shipped, doc listed four commands).
-  C. IM channels    — every adapter in services/im_bridge/adapters/ must be
+  C. IM channels    — every adapter in services/entrypoints/im_bridge/adapters/ must be
      mentioned in im_bridge.ava.okf.md (channel aliases: weixin/wechat,
      feishu/lark). Catches "three channels" narrative after convergence.
 
@@ -72,7 +72,7 @@ def check_skill_catalog() -> list[str]:
 
 
 def check_im_command_set() -> list[str]:
-    core = (ROOT / "services/im_bridge/core.py").read_text(errors="replace")
+    core = (ROOT / "services/entrypoints/im_bridge/core.py").read_text(errors="replace")
     cmds = sorted(
         set(re.findall(r'cmd == "/([a-z]+)"', core) + re.findall(r'startswith\("/([a-z]+)"', core))
     )
@@ -82,13 +82,13 @@ def check_im_command_set() -> list[str]:
     missing = [c for c in cmds if f"/{c}" not in cmd_line]
     return [
         f"{doc_path} Command set line lacks shipped command /{c} "
-        f"(present in services/im_bridge/core.py) — narrative drift"
+        f"(present in services/entrypoints/im_bridge/core.py) — narrative drift"
         for c in missing
     ]
 
 
 def check_im_channels() -> list[str]:
-    adapters_dir = ROOT / "services/im_bridge/adapters"
+    adapters_dir = ROOT / "services/entrypoints/im_bridge/adapters"
     doc = (ROOT / "services/docs/gateway_side/im_bridge.ava.okf.md").read_text(errors="replace")
     lower = doc.lower()
     problems = []

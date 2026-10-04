@@ -2,7 +2,7 @@
 
 Locks the alert-push governance contract: the user-visible alert templates
 live in base/telemetry/alerts_copy.py (no head/trigger/jump-link literals in
-base/telemetry/alerts.py; services/im_bridge/copy.py re-exports them), the template
+base/telemetry/alerts.py; services/entrypoints/im_bridge/copy.py re-exports them), the template
 language follows user_settings ``display.language`` ("zh" | "en", default
 "zh"), and only template/framework copy is translated — alert
 labels/annotations data passes through verbatim.

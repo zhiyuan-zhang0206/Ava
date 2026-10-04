@@ -54,7 +54,7 @@ def _reap_cluster_chrome() -> None:
     Normal stop waits for Chrome to exit without escalating signals. After a `SingletonLock` handoff Chrome is no longer a
     descendant of the `ava-browser` session, so killing that session leaves it
     running on the cluster's CDP port and the next launch's port guard refuses;
-    `services/browser/orphan.py` names it by the cluster's own `--user-data-dir`
+    `services/desktop/browser/orphan.py` names it by the cluster's own `--user-data-dir`
     and argues why that can never select a Chrome that is not ours.
 
     Silent when there is nothing to reap (the common case): the session kill above
@@ -63,7 +63,7 @@ def _reap_cluster_chrome() -> None:
     tear the rest of the cluster down, and the pre-existing manual kill remains
     the operator's fallback.
     """
-    from services.browser.orphan import reap_cluster_chrome
+    from services.desktop.browser.orphan import reap_cluster_chrome
 
     try:
         pids = reap_cluster_chrome()
@@ -198,7 +198,7 @@ def _force_stop(
     # Chrome still running on THIS cluster's profile. The session kill above
     # cannot reach a Chrome that left the tree on a `SingletonLock` handoff, and
     # such a Chrome holds the cluster's CDP port against the next launch
-    # (services/browser/orphan.py carries the identification argument). Placed
+    # (services/desktop/browser/orphan.py carries the identification argument). Placed
     # after step 1 on purpose: the watchdog is dead by now, so nothing relaunches
     # Chrome onto the port we just cleared.
     if not keep_browser:

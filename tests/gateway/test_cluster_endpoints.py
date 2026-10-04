@@ -1104,7 +1104,7 @@ class TestMachinePauseResume:
         from psycopg_pool import ConnectionPool
 
         from base.config import settings
-        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+        from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
             assert select_terminated_owners_with_pending(cast(ConnectionPool, pool), 86400.0) == []

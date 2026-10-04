@@ -1,6 +1,6 @@
 // The frontend server must never be directly reachable off-box.
 //
-// The fleet UI gate (services/gate) owns the entry port and proxies the
+// The fleet UI gate (services/entrypoints/gate) owns the entry port and proxies the
 // Next.js app over loopback; the gateway CORS allowlist trusts only the entry
 // origin. If the app bound all interfaces (`-H ::`), a browser dialing the
 // app port directly would land on an origin outside the CORS allowlist —

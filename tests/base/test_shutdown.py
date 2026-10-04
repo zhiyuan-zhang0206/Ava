@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 from base.daemon import shutdown
-from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
-from services.ava_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 from tests.base.poll_until import poll_until
 
 
@@ -166,7 +166,7 @@ async def run():
         Path({marker!r}).write_text("clean")
 
 if {ops!r}:
-    from services.agent_ops import daemon
+    from services.agent_runner.agent_ops import daemon
     daemon.init_gateway_process = lambda **kwargs: None
     daemon._main = run
     daemon.main()
@@ -211,7 +211,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, {repo!r})
 from base.daemon.shutdown import install_graceful_shutdown
-from services.agent_host import daemon
+from services.agent_runner.agent_host import daemon
 install_graceful_shutdown("private-plugin-restart-test")
 fingerprints = iter(["before", "after"])
 daemon._plugins_fingerprint = lambda: next(fingerprints)

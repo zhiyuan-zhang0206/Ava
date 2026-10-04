@@ -517,7 +517,7 @@ _KIND_EXTENSIONS = {
 # site. `None` would mark a field whose emit sites pass BOTH ints and floats
 # (first-value-wins per process); the three fields below are all cast to int at
 # their emit sites (task #4011), so every entry pins a single kind.
-#   delivery_stalled.age_s: `round(age_s)` (services/delivery_watchdog) —
+#   delivery_stalled.age_s: `round(age_s)` (services/wake/delivery_watchdog) —
 #     `_bucket` never observed (0/72h).
 #   shell_ttl_renewed.ttl_s: whole-second `ttl` (ava/shell/sessions) —
 #     `_bucket` dead since >72h (32 older samples only).

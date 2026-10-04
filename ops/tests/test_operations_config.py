@@ -1,7 +1,7 @@
 """`config_read_op` and `config_write_op` — host-side config RPC operations.
 
 Also covers `_dispatch` routing for the config_read / config_write op kinds
-in `services/agent_ops/daemon.py`.
+in `services/agent_runner/agent_ops/daemon.py`.
 
 Tests run entirely in-process; no DB required (config_read_op and
 config_write_op only touch this machine's .env + settings metadata).

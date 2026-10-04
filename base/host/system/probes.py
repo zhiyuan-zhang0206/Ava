@@ -152,7 +152,7 @@ def gui_login_user() -> str | None:
     """The account owning the GUI console session (macOS), or None.
 
     ``/dev/console`` belongs to the user physically attached to the GUI — the
-    same check ``services.browser.macos_readiness`` runs before trusting a
+    same check ``services.desktop.browser.macos_readiness`` runs before trusting a
     GUI-domain verdict. None off macOS and when the answer is unavailable."""
     if sys.platform != "darwin":
         return None
@@ -169,7 +169,7 @@ def browser_incapability() -> str | None:
     at launch -- so each reason names the fix, not just the missing prong.
 
     ``browser_capable()`` (the bool gate) and
-    ``services.browser.daemon.assert_browser_capable()`` (the raising preflight)
+    ``services.desktop.browser.daemon.assert_browser_capable()`` (the raising preflight)
     both derive from this, so the capability logic lives in exactly one place.
     """
     if not display_available():
@@ -222,8 +222,8 @@ def browser_mcp_incapability() -> str | None:
     browser-mcp fronts the headed browser, so it needs every prong
     ``browser_incapability()`` checks PLUS an AF_UNIX transport: the daemon
     listens with ``asyncio.start_unix_server`` and each agent's wrapper dials it
-    with ``asyncio.open_unix_connection`` (``services/browser/mcp_daemon.py``,
-    ``services/browser/mcp_wrapper.py``). The AF_UNIX prong is checked first:
+    with ``asyncio.open_unix_connection`` (``services/desktop/browser/mcp_daemon.py``,
+    ``services/desktop/browser/mcp_wrapper.py``). The AF_UNIX prong is checked first:
     on a host that lacks it, no amount of Chrome or npx makes the service
     runnable.
     """

@@ -1,0 +1,7 @@
+{
+  "files": {
+    "services/desktop/browser/tests/test_browser_mcp_daemon.py": 1511,
+    "services/desktop/computer/tests/test_computer_mcp_daemon.py": 1201,
+    "services/desktop/permissions_helper/tests/test_permissions_helper.py": 2033
+  }
+}

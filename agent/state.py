@@ -772,7 +772,7 @@ def checkpoint_msgpack_allowlist(
     class and would otherwise be blocked (degraded to a plain dict) the moment
     the allowlist replaces the permissive default.
 
-    Consumers: `services/agent_host/daemon.py::_build_checkpointer` (shared host saver) and
+    Consumers: `services/agent_runner/agent_host/daemon.py::_build_checkpointer` (shared host saver) and
     any embedding checkpoint saver.
     """
     entries: set[tuple[str, str]] = set(STATIC_CHECKPOINT_MSGPACK_TYPES)

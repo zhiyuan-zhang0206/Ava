@@ -1,7 +1,7 @@
 """Wire format of the pty-sessions service: one JSON object per line.
 
 A request is ``{"id": <int>, "method": <str>, ...fields}``; the response echoes
-the ``id`` so the shared ownership probe (``services.healthchecks.owned_service``)
+the ``id`` so the shared ownership probe (``services.supervision.healthchecks.owned_service``)
 and every client can pair them: ``{"id", "ok", "code", "data", "error"}``.
 Codes: 0 success, 1 operational error, 2 bad request, 3 no such session.
 

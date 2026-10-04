@@ -30,7 +30,7 @@ from ops.roster.healthz import (
     healthz_url,
 )
 from ops.roster.service_spec import ServiceSpec
-from services.ava_root_glue import manifests as gen
+from services.supervision.ava_root_glue import manifests as gen
 
 _REPO = Path(__file__).resolve().parents[3]
 _PYTHON_M = ".venv/bin/python -m "
@@ -84,7 +84,7 @@ def test_the_factory_passes_the_optional_declarations_through() -> None:
 
     spec = healthz_daemon(
         "labeler",
-        module="services.labeler.daemon",
+        module="services.derived.labeler.daemon",
         capabilities=_GATEWAY,
         requires_db=False,
         gate=gate,

@@ -3,7 +3,7 @@
 > Status (2026-06-08): the one live item carried out of the now-archived
 > agent-runner bring-up follow-ups (item #5).
 >
-> **Update 2026-06-09: the local leg landed.** `services/backup.py` runs a
+> **Update 2026-06-09: the local leg landed.** `services/backup/dump.py` runs a
 > daily `pg_dump --format=custom` on the gateway host via the watchdog tick
 > (03:00 local, `$AVA_HOME/backups/db/`, `BACKUP_KEEP=1` — retention was cut
 > from 3 to 1 in #832 when daily dumps filled the Mac mini's disk) — see `.agents/skills/operating-ava-cluster/references/db-restore.md`. The old R2-era `scripts/pg_backup.sh` was removed
@@ -60,14 +60,14 @@
 
 > **Update 2026-10-01:** the daily logical backup no longer depends on the
 > physical PITR stack. The off-site leg is OSS-only
-> (`services/gateway_side/backup/offsite.py`; the destination is the
+> (`services/backup/artifact/offsite.py`; the destination is the
 > `AVA_BACKUP_OFFSITE_*` keys, and a home without them skips the leg with one
 > INFO line). The managed-name grammar
-> (`services/gateway_side/backup/names.py`) is `<db>-<UTC stamp>.dump.enc`: the
+> (`services/backup/artifact/names.py`) is `<db>-<UTC stamp>.dump.enc`: the
 > `.pre-update` and `.pitr-activation-*` kinds and the pre-cutover wall-clock
 > stamp have no writer and are no longer managed, so prune keeps the newest
 > `backup_keep` dumps. Operation custody moved to
-> `services/backup_scheduler/operation/` and `ava backup operations` is the
+> `services/backup/scheduler/operation/` and `ava backup operations` is the
 > custody verb. The in-process pre-activation snapshot is gone.
 
 > **Update 2026-10-02:** the self-written physical PITR stack is deleted
@@ -87,7 +87,7 @@ document may promise point-in-time recovery.
 
 1. **Off-site encrypted copy — delivered.** After encryption and before local
    pruning, the gateway publishes the artifact to OSS
-   (`services/gateway_side/backup/offsite.py`) as `ava-logical/<name>`; the
+   (`services/backup/artifact/offsite.py`) as `ava-logical/<name>`; the
    store-verified ACK (pin_token, size, checksum) is the identity. The publish
    is if-absent and immutable; a missing/unconfigured store is skipped with one
    INFO line, and a failed publish warns without discarding the local backup,
