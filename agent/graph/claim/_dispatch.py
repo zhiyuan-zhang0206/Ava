@@ -610,7 +610,7 @@ async def _dispatch_item(
         if item.id == latest_resurrect_id:
             await _handle_resurrect(item, st)
     elif kind == InboundKind.FORK:
-        await _handle_fork(agent_id, item, st, state, ctx.require_agent(), ctx.extensions)
+        await _handle_fork(agent_id, item, st, state, ctx.require_agent(), ctx.plugin_registry())
     elif kind == InboundKind.REMINDER:
         # Lease-expiry reminders are dismissed in the lease's release/expiry
         # transaction, so one reaching the claim node means that invariant

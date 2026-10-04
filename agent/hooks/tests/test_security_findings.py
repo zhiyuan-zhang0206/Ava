@@ -24,6 +24,7 @@ from agent.hooks.security import _deliver_security_findings
 from agent.state import AgentState, build_agent_state
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag, read_ava_kwargs
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.config import settings
@@ -125,6 +126,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            identity=AgentIdentity(agent_id=1042, owns_loop=True),
         )
     )
     code = (

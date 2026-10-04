@@ -14,10 +14,9 @@ from typing import Any
 import psycopg
 import pytest
 
-import ava
-import ava.agent_identity
 from ava_builtins.plugins.ava_fleet import task_registry
 from base.telemetry import Event
+from tests.fixtures.pin_agent import pin_agent
 
 
 def _seed_agent(db: psycopg.Connection) -> int:
@@ -36,12 +35,8 @@ def _seed_agent(db: psycopg.Connection) -> int:
 @pytest.fixture
 def agent_id(db_conn: psycopg.Connection) -> Iterator[int]:
     aid = _seed_agent(db_conn)
-    original = ava.agent_identity._agent_id
-    ava.agent_identity._agent_id = aid
-    try:
-        yield aid
-    finally:
-        ava.agent_identity._agent_id = original
+    pin_agent(aid)
+    yield aid
 
 
 @pytest.fixture

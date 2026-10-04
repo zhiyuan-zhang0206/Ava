@@ -81,6 +81,7 @@ from agent.turn.runloop import (
 )
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.relay_supervision import RelaySupervision
@@ -626,6 +627,7 @@ class AgentHost:
             turn_progress=self.turn_progress,
             relays=self.relays,
             recall_log_key=self._recall_log_key,
+            identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             # The dispatcher owns subscriptions; an empty claim ends this task.
         )
         try:

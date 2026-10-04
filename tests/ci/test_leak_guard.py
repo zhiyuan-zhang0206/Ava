@@ -214,20 +214,11 @@ def test_the_guard_sets_up_before_every_other_function_scoped_autouse_fixture(
     assert all(names.index("_leak_guard") < names.index(other) for other in others)
 
 
-@pytest.mark.parametrize(("module", "attrs"), identity_restore.IDENTITY_SLOTS)
-def test_every_restored_identity_slot_still_exists(module: str, attrs: tuple[str, ...]) -> None:
-    """A rename shows up here, not as an error in the setup of every test."""
-    loaded = importlib.import_module(module)
-    assert [a for a in attrs if a not in vars(loaded)] == []
-
-
-def test_every_state_slot_of_agent_identity_is_restored() -> None:
-    """A slot added to the module without joining the table would leak again, unnamed.
-
-    The module annotates each of its process-global slots (`_agent_id: int | None = None`).
-    """
-    restored = dict(identity_restore.IDENTITY_SLOTS)["ava.agent_identity"]
-    assert set(importlib.import_module("ava.agent_identity").__annotations__) == set(restored)
+def test_agent_identity_holds_no_process_global_slot() -> None:
+    """The identity is the bound context's, restored through its context variable. A slot added
+    to the module would leak again, unnamed: the module annotates each process-global slot it
+    holds, and it holds none."""
+    assert importlib.import_module("ava.agent_identity").__annotations__ == {}
 
 
 @pytest.mark.parametrize(("module", "name"), identity_restore.IDENTITY_CONTEXTVARS)

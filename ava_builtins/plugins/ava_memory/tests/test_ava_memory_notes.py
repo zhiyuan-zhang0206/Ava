@@ -14,6 +14,7 @@ import pytest
 from agent.graph.prompt.context_notes import FRAMEWORK_NOTES, context_notes
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
@@ -288,7 +289,6 @@ def test_memory_index_note_is_suppressed_for_eval_isolation(
 def test_personal_index_uses_hosted_turn_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from ava import agent_identity
     from ava_builtins.plugins.ava_memory import notes
     from base.config import settings
     from base.native_process.turn_identity import bind_turn_identity
@@ -296,7 +296,7 @@ def test_personal_index_uses_hosted_turn_identity(
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
 
-    monkeypatch.setattr(agent_identity, "_agent_id", 17)
+    pin_agent(17)
     monkeypatch.setattr(notes, "workspace_dir", workspace)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)
     index = tmp_path / "29" / "memory" / "MEMORY.md"
@@ -314,14 +314,13 @@ def test_personal_index_uses_hosted_turn_identity(
 def test_personal_index_skips_unestablished_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from ava import agent_identity
     from ava_builtins.plugins.ava_memory import notes
     from base.config import settings
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
 
-    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     monkeypatch.setattr(notes, "workspace_dir", workspace)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)

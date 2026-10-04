@@ -25,6 +25,7 @@ from base.agents.incarnation.exec_owner_protocol import (
     validate_native_ready,
 )
 from base.agents.incarnation.resources import ExecAllocation, ResourceProcess
+from tests.fixtures.pin_agent import exec_context
 
 
 def _context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
@@ -33,7 +34,7 @@ def _context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
     write_request(
         request,
         code="raise AssertionError('must not execute without permit')",
-        agent_id=agent_id,
+        context=exec_context(agent_id).describe(),
         timeout_s=20,
         state=None,
     )
@@ -145,7 +146,7 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
     write_request(
         context.request_path,
         code="import sys; assert sys.dont_write_bytecode",
-        agent_id=1,
+        context=exec_context(1).describe(),
         timeout_s=20,
         state=None,
     )
@@ -329,7 +330,13 @@ def test_real_host_death_closes_active_managed_child(
         f"Path({str(active)!r}).write_text(str(os.getpid()))\n"
         "time.sleep(60)\n"
     )
-    write_request(context.request_path, code=code, agent_id=1, timeout_s=20, state=None)
+    write_request(
+        context.request_path,
+        code=code,
+        context=exec_context(1).describe(),
+        timeout_s=20,
+        state=None,
+    )
     context = context.model_copy(
         update={
             "allocation": context.allocation.model_copy(

@@ -145,3 +145,5 @@ boot imports a plugin once, through `load_extensions`; `ava plugins update` take
 `default_config.py` declaration.
 
 - Superseded in part by `decisions/2026-10-04-model-catalog-is-a-value.md`: the model catalog is now an immutable value built by the provider loader.
+
+- Forward: `decisions/2026-10-04-ava-state-and-context.md` makes `AvaContext.extensions` optional (`None`, read through `plugin_registry()`) instead of defaulting to `EMPTY`, so the context imports without the plugin-extension stack.

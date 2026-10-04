@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.db import Database
+from tests.fixtures.pin_agent import exec_context
 
 
 async def test_real_missing_executable_is_not_an_unresolved_child(
@@ -21,7 +22,7 @@ async def test_real_missing_executable_is_not_an_unresolved_child(
         outcome, _ = await _run_in_subprocess(
             database,
             "raise AssertionError('must never execute')",
-            None,
+            exec_context(None),
             asyncio.Event(),
             2,
             exec_dir=tmp_path,

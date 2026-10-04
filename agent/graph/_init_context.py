@@ -92,7 +92,7 @@ async def init_context_node(
         notes = (
             []
             if runtime.context.ops_pool is None
-            else context_notes(runtime.context.extensions, runtime.context.require_agent())
+            else context_notes(runtime.context.plugin_registry(), runtime.context.require_agent())
         )
         logger.info(
             "[init-context] establishing: {} note(s) + {} tail message(s), resume={}",
@@ -114,7 +114,7 @@ async def init_context_node(
                 "messages": [
                     SystemMessage(
                         content=build_system_prompt(
-                            runtime.context.extensions, runtime.context.require_agent()
+                            runtime.context.plugin_registry(), runtime.context.require_agent()
                         )
                     ),
                     *notes,

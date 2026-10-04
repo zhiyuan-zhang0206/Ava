@@ -7,8 +7,7 @@ from typing import Any
 
 import pytest
 
-import ava
-import ava.agent_identity
+from tests.fixtures.pin_agent import pin_agent
 
 
 class TestMemoryEntries:
@@ -40,7 +39,7 @@ class TestMemoryEntries:
         from base.paths import workspace_dir
 
         root = workspace_dir(900001) / "memory"
-        monkeypatch.setattr(ava.agent_identity, "_agent_id", 900001)
+        pin_agent(900001)
         monkeypatch.setattr(
             memory_plugin,
             "_entry_path",

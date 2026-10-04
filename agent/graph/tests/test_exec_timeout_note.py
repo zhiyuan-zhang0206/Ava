@@ -17,13 +17,14 @@ from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
 def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """The note opts out without an established process identity, like every
     other framework note; give it one so the content is what is under test."""
-    monkeypatch.setattr("ava.agent_identity._agent_id", 7)
+    pin_agent(7)
 
 
 def test_declares_the_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,7 +39,7 @@ def test_declares_the_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ava.agent_identity._agent_id", None)
+    pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     assert exec_timeout_note(AgentSlices.resolve()) is None
 
@@ -47,7 +48,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     """The hosted runner pins the identity in a turn contextvar and leaves the
     process slot None; the note must resolve through `ava.agent_identity.agent_id()`
     (task #3939)."""
-    monkeypatch.setattr("ava.agent_identity._agent_id", None)
+    pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
     with bind_turn_identity(29):

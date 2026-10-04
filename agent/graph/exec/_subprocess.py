@@ -43,6 +43,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from base.agents.context import AvaContext
 from base.db import Database
 from base.deploy.release import editable_install
 from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
@@ -318,10 +319,10 @@ async def _finish_failed_run(
 
 
 def _write_request_failure(
-    path: Path, code: str, agent_id: int | None, timeout: float, state: dict[str, Any] | None
+    path: Path, code: str, context: AvaContext, timeout: float, state: dict[str, Any] | None
 ) -> _ExecCrashed | None:
     try:
-        write_request(path, code=code, agent_id=agent_id, timeout_s=timeout, state=state)
+        write_request(path, code=code, context=context.describe(), timeout_s=timeout, state=state)
     except BaseException as exc:
         return _ExecCrashed(output=f"exec subprocess request could not be written: {exc}", exc=exc)
     return None
@@ -388,7 +389,7 @@ def _retain_late_reader_completion(
 async def _run_in_subprocess(
     db: Database,
     code: str,
-    agent_id: int | None,
+    context: AvaContext,
     cancel_event: asyncio.Event,
     timeout: float,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
@@ -405,12 +406,13 @@ async def _run_in_subprocess(
         return guard_failure, None
     from agent.graph.exec._owned_run import managed_target, run_owned
 
-    target = await asyncio.to_thread(managed_target, db, agent_id)
+    target = await asyncio.to_thread(managed_target, db, context.require_identity().agent_id)
     if target is not None:
         return await run_owned(
             db,
             target,
             code,
+            context,
             cancel_event,
             timeout,
             chunk_publisher,
@@ -421,7 +423,7 @@ async def _run_in_subprocess(
         )
     return await _run_legacy_subprocess(
         code,
-        agent_id,
+        context,
         cancel_event,
         timeout,
         chunk_publisher,
@@ -434,7 +436,7 @@ async def _run_in_subprocess(
 
 async def _run_legacy_subprocess(
     code: str,
-    agent_id: int | None,
+    context: AvaContext,
     cancel_event: asyncio.Event,
     timeout: float,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
@@ -455,12 +457,13 @@ async def _run_legacy_subprocess(
     The child's outcome kinds map onto the result with the parent's flags
     authoritative.
     """
+    agent_id = context.require_identity().agent_id
     if exec_dir is None:
         exec_dir = exec_run_dir()
     request_path = make_request_path(exec_dir, agent_id)
     result_path = make_result_path(exec_dir, agent_id)
 
-    request_error = _write_request_failure(request_path, code, agent_id, timeout, state)
+    request_error = _write_request_failure(request_path, code, context, timeout, state)
     if request_error is not None:
         return request_error, None
 

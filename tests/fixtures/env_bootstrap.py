@@ -440,7 +440,6 @@ _assert_env_precedes_project_imports()
 
 # ava / base.config read AVA_DB_URL + AVA_HOME at import — must come after the
 # env block above, which is what the assertion just enforced.
-import ava
 from base.config import set_field, settings
 from base.daemon.health import _HEALTH_PORT_OVERRIDES
 from base.host.env.port_table import FIXED_PORTS
@@ -504,13 +503,14 @@ _prewarm_full_settings()
 # ids are no longer reset between tests (see `_clean_state` — no RESTART IDENTITY),
 # so the first spawn is NOT guaranteed to be id 1. Any test that exercises
 # `ava.self.*` / `ava.agents.*` re-pins this to the id it actually created via
-# `ava.agent_identity._agent_id = spawn_agent()` (the pattern used across tests/ava/*); the
+# `pin_agent(spawn_agent())` (`tests/fixtures/identity_restore.py`); the
 # `identity_restore` plugin puts it back after the test. Do not rely on "the first spawn is 1" —
 # capture the returned id.
-ava.agent_identity._agent_id = 1
-ava.agent_identity._owns_loop = True
+from tests.fixtures.pin_agent import pin_agent
+
+pin_agent(1)
 # Remove AVA_AGENT_ID propagated from the agent process — any test that
-# temporarily clears _agent_id would re-establish from this env var with
+# temporarily unbinds the context would re-derive one from this env var with
 # owns_loop=False, corrupting subsequent tests.
 os.environ.pop("AVA_AGENT_ID", None)
 

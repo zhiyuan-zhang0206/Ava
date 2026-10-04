@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 import ava
 from agent import state as state_module
 from agent.extensions import registry as registry_module
-from ava import agent_identity, external
+from ava import external
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
@@ -24,6 +24,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -39,8 +40,7 @@ class IntegrationPlugin(BaseModel):
 def native_checkpoint(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
-    monkeypatch.setattr(agent_identity, "_external_identity", None)
-    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    pin_no_identity()
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)
 
@@ -102,8 +102,7 @@ def test_external_memory_write_uses_borrowed_identity(
 
     owner, _ = native_checkpoint
     stale_id = owner.agent_id + 1000
-    monkeypatch.setattr(agent_identity, "_agent_id", stale_id if stale_process_identity else None)
-    monkeypatch.setattr(agent_identity, "_owns_loop", False)
+    pin_agent(stale_id if stale_process_identity else None, owns_loop=False)
     monkeypatch.setitem(vars(ava), "memory", memory_sdk)
     monkeypatch.setattr(paths, "workspace_dir", workspace)
     monkeypatch.setattr(paths, "memory_dir", lambda: tmp_path / "shared")
@@ -153,8 +152,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         return tmp_path / str(agent_id)
 
     owner, _ = native_checkpoint
-    monkeypatch.setattr(agent_identity, "_agent_id", owner.agent_id + 1000)
-    monkeypatch.setattr(agent_identity, "_owns_loop", False)
+    pin_agent(owner.agent_id + 1000, owns_loop=False)
     monkeypatch.setattr(paths, "workspace_dir", workspace)
     monkeypatch.setattr(notes, "workspace_dir", workspace)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)

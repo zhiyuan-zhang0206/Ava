@@ -212,3 +212,5 @@ Rulings that fix the boundary of the rule:
   service costs a supervised process and onboarding work; both are open in the
   plan.
 - The throttle and dedupe entries (14) stay frozen as deliberate residue.
+
+- Forward: `decisions/2026-10-04-ava-state-and-context.md` makes one ContextVar a sanctioned exception to ruling 1: the exec child has no LangGraph runtime to carry the per-run context, so the process's `AvaContext` is read through a single ContextVar (`ava.sdk_surface.process_context`), the way `get_runtime()` does it.

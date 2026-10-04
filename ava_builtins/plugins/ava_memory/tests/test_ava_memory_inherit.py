@@ -23,6 +23,7 @@ from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import ava_home
+from tests.fixtures.pin_agent import pin_agent
 
 OPEN = inherit.INHERITABLE_OPEN
 CLOSE = inherit.INHERITABLE_CLOSE
@@ -240,7 +241,7 @@ def test_chain_read_failure_degrades_and_is_not_cached(chain: _FakeChain) -> Non
 def test_chain_is_read_at_each_establishment(
     chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("ava.agent_identity._agent_id", 1)
+    pin_agent(1)
     _write_entry(600351, "rules", _wrap("fresh block"))
     chain.rows = [_local_row(600351)]
     assert inherit.inherited_memory_note(AgentSlices.resolve()) is not None

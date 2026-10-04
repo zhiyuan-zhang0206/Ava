@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 import ava
+from tests.fixtures.pin_agent import pin_agent
 
 
 def _inbound_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
@@ -33,7 +34,7 @@ def _spawn_self(monkeypatch: pytest.MonkeyPatch) -> int:
     subprocess.
     """
     aid = ava.agents.spawn()
-    monkeypatch.setattr(ava.agent_identity, "_agent_id", aid)
+    pin_agent(aid)
     return aid
 
 

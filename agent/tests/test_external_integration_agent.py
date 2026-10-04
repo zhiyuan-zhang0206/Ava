@@ -23,6 +23,7 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from tests.fixtures.pin_agent import pin_agent
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -43,8 +44,7 @@ def native_checkpoint(
     )
     # The attachment builds its state class from the registry of the plugins loaded into the process.
     monkeypatch.setattr("agent.extensions.registry.build_registry", lambda: registry)
-    monkeypatch.setattr(agent_identity, "_external_identity", None)
-    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    pin_agent(None, owns_loop=True)
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)
 

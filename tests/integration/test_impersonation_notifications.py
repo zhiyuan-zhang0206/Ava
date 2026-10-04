@@ -19,6 +19,7 @@ from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.messages.caller_identity import CallerIdentity
@@ -235,6 +236,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
             agent=AgentSlices.resolve(),
             db=Database.from_settings(),
             bus=EventBus.from_settings(),
+            identity=AgentIdentity(agent_id=owner.agent_id, owns_loop=True),
         )
     )
     await _terminate_native(db_conn, aops_pool, owner, session, runtime, mode)

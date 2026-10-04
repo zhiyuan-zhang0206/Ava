@@ -94,7 +94,15 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(tmp_path: Path) -> None
         "  'shared_config_mods': cfgmods}, sort_keys=True))\n"
     )
     request.write_text(
-        json.dumps({"v": 1, "code": code, "agent_id": None, "timeout_s": 30.0}),
+        json.dumps(
+            {
+                "v": 1,
+                "code": code,
+                "agent_id": None,
+                "context": {"identity": {"agent_id": None, "owns_loop": True, "actor": None}},
+                "timeout_s": 30.0,
+            }
+        ),
         encoding="utf-8",
     )
     driver = (

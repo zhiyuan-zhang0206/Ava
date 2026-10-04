@@ -25,8 +25,11 @@ files + signals:
   process group;
   a watchdog `os._exit(124)` bounds this child's life if the parent dies first.
 
-Identity: `ava.agent_identity.establish(agent_id, owns_loop=True)` — owns_loop stays
-True so `ava.self.terminate/restart/compact` keep working exactly as they do
+Context: the request envelope carries the description of the host's `AvaContext`
+(`AvaContext.describe`); the child builds its own instance from it
+(`AvaContext.from_description`) and binds it for the process (`ava.sdk_surface.process_context.bind_process`), so
+agent code reads it as `ava.context`. The identity carries owns_loop=True, so
+`ava.self.terminate/restart/compact` keep working exactly as they do
 in the agent process (their inbound INSERTs go to the same database over
 `ava.DB`); the resulting `LifecycleExit` is caught here and reported as a
 lifecycle outcome. The parent reconstructs the exception from the name
@@ -96,10 +99,6 @@ class _Sdk(Protocol):
     def ensure_plugins_loaded(self, *, surface: bool = True) -> None: ...
 
 
-class _AgentIdentity(Protocol):
-    def establish(self, agent_id: int, *, owns_loop: bool) -> None: ...
-
-
 @dataclass(frozen=True)
 class _ChildContext:
     """What this one exec child holds for the run: the SDK modules it bound after boot, and
@@ -111,16 +110,14 @@ class _ChildContext:
     """
 
     ava: _Sdk
-    agent_identity: _AgentIdentity
     boot_started_at: float
 
 
 def _import_runtime(boot_started_at: float) -> _ChildContext:
     """Load the SDK only after `main` can turn a boot failure into a result."""
     import ava
-    from ava import agent_identity
 
-    return _ChildContext(ava=ava, agent_identity=agent_identity, boot_started_at=boot_started_at)
+    return _ChildContext(ava=ava, boot_started_at=boot_started_at)
 
 
 def _line_buffered_output() -> None:
@@ -483,6 +480,25 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
             _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
+def _bind_identity(request: RequestPayload) -> None:
+    """Bind this child's `AvaContext`, built from the host's description, and the logger and
+    incarnation of the agent it acts as."""
+    from ava.sdk_surface import process_context
+    from base.agents.context import AvaContext
+
+    process_context.bind_process(AvaContext.from_description(request.context))
+    if request.agent_id is None:
+        return
+    if request.incarnation is not None:
+        from base.native_process.runtime_incarnation import bind_child_incarnation
+
+        bind_child_incarnation(request.incarnation)
+    _init_logger(request.agent_id)
+    # No eager OTLP warmup: the backend comes up lazily on the first export
+    # (`_ensure()` in base/telemetry/otlp/telemetry_otlp.py), so a zero-record
+    # child never imports the OTel SDK at all (task #3816 M3).
+
+
 def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
@@ -499,16 +515,7 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     payload = ResultPayload(kind="done")
 
     birth, overlay = _pop_overlay_env()
-    if request.agent_id is not None:
-        child.agent_identity.establish(request.agent_id, owns_loop=True)
-        if request.incarnation is not None:
-            from base.native_process.runtime_incarnation import bind_child_incarnation
-
-            bind_child_incarnation(request.incarnation)
-        _init_logger(request.agent_id)
-        # No eager OTLP warmup: the backend comes up lazily on the first export
-        # (`_ensure()` in base/telemetry/otlp/telemetry_otlp.py), so a zero-record
-        # child never imports the OTel SDK at all (task #3816 M3).
+    _bind_identity(request)
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
     # plugins load (apply_config_overlay needs _PLUGIN_CONFIGS bound first).

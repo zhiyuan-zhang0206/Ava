@@ -16,27 +16,26 @@ import pytest
 
 from ava import agent_identity
 from base.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
 def _reset_process_slots(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate the process bootstrap slots and the env identity per test."""
-    monkeypatch.setattr(agent_identity, "_agent_id", None)
-    monkeypatch.setattr(agent_identity, "_owns_loop", True)
-    monkeypatch.setattr(agent_identity, "_actor", None)
+    pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
 
 class TestBootLayering:
     def test_process_mode_unchanged(self) -> None:
-        agent_identity.establish(11, owns_loop=True)
+        pin_agent(11, owns_loop=True)
         assert agent_identity.agent_id() == 11
         assert agent_identity.require_agent_id() == 11
         assert agent_identity.require_actor() == "agent:11"
         agent_identity.assert_self_action("restart")  # does not raise
 
     def test_turn_binding_wins_over_process_slot(self) -> None:
-        agent_identity.establish(11, owns_loop=True)
+        pin_agent(11, owns_loop=True)
         with bind_turn_identity(22):
             assert agent_identity.agent_id() == 22
             assert agent_identity.require_agent_id() == 22
@@ -65,7 +64,7 @@ class TestBootLayering:
             agent_identity.assert_self_action("restart")  # the host owns the turn loop
 
     def test_explicit_actor_still_wins_without_turn_context(self) -> None:
-        agent_identity.establish_actor("schedule:7")
+        pin_agent(None, actor="schedule:7")
         assert agent_identity.require_actor() == "schedule:7"
         with bind_turn_identity(9):
             # A turn context is more specific than the process actor: work done

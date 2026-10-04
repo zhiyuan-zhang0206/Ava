@@ -17,13 +17,14 @@ from agent.graph.prompt.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE,
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
 def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """The note opts out without an established process identity, like every
     other framework note; give it one so the content is what is under test."""
-    monkeypatch.setattr("ava.agent_identity._agent_id", 7)
+    pin_agent(7)
 
 
 def _content(monkeypatch: pytest.MonkeyPatch, tz: str) -> str:
@@ -72,7 +73,7 @@ def test_sits_in_the_stable_cache_band(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot renders and the dev REPL have no identity; the note declines
     rather than producing a head fragment out of context."""
-    monkeypatch.setattr("ava.agent_identity._agent_id", None)
+    pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     assert timezone_note(AgentSlices.resolve()) is None
 
@@ -84,7 +85,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     directly silently dropped this note from every hosted head)."""
     from base.native_process.turn_identity import bind_turn_identity
 
-    monkeypatch.setattr("ava.agent_identity._agent_id", None)
+    pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
 

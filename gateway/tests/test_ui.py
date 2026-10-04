@@ -29,6 +29,7 @@ from ava.gateway_client.transport import use_client
 from ava.ui import InvalidPageName, PageClosed
 from base.cluster.machine import reachable_host, reset_identity, set_identity
 from gateway.app import app
+from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.units import spawn_agent
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
@@ -130,7 +131,7 @@ def _free_port() -> int:
 
 class TestShow:
     def test_show_registers_page(self, db_conn: psycopg.Connection) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         page = ava.ui.show("cleanup", 13580, title="Picker")
         assert page.name == "cleanup"
         assert page.port == 13580
@@ -147,7 +148,7 @@ class TestShow:
     def test_show_same_name_auto_closes_previous(self, db_conn: psycopg.Connection) -> None:
         """Single page per agent: re-showing auto-closes the old page. The
         agent's own row is never a port conflict for itself, even unchanged."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         ava.ui.show("p1", 13581)
         ava.ui.show("p2", 13581)
         db_conn.rollback()
@@ -158,7 +159,7 @@ class TestShow:
 
     def test_show_custom_port(self, db_conn: psycopg.Connection) -> None:
         """The caller's explicit port is what lands in the registry and the page."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         page = ava.ui.show("custom", 13579, title="Custom")
         assert page.port == 13579
         assert (
@@ -171,7 +172,7 @@ class TestShow:
         ]
 
     def test_show_invalid_name_raises(self) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with pytest.raises(InvalidPageName):
             ava.ui.show("bad/name", 13582)
         with pytest.raises(InvalidPageName):
@@ -180,7 +181,7 @@ class TestShow:
     def test_show_requires_explicit_port(self) -> None:
         """No per-agent reserved port: a missing port is rejected, with the
         rule spelled out, instead of falling back to a computed value."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with pytest.raises(TypeError, match="port"):
             ava.ui.show("page")  # pyright: ignore[reportCallIssue]
         with pytest.raises(TypeError, match="port is required"):
@@ -188,14 +189,14 @@ class TestShow:
 
     def test_show_rejects_out_of_range_port(self) -> None:
         """Privileged and out-of-range ports fail at the SDK boundary."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with pytest.raises(ValueError, match="out of range"):
             ava.ui.show("page", 80)
         with pytest.raises(ValueError, match="out of range"):
             ava.ui.show("page", 65536)
 
     def test_show_passes_integer_ttl_to_gateway(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         captured: dict[str, object] = {}
 
         def _register(agent_id: int, **kwargs: object) -> dict[str, object]:
@@ -213,7 +214,7 @@ class TestShow:
         assert captured["ttl_seconds"] == 12
 
     def test_show_without_ttl_omits_gateway_field(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         captured: dict[str, object] = {}
 
         def _register(_agent_id: int, **kwargs: object) -> dict[str, object]:
@@ -234,7 +235,7 @@ class TestShow:
 @pytest.mark.parametrize("ttl", [0.0, -1.0, math.inf, math.nan])
 @pytest.mark.parametrize("api", ["show", "serve"])
 def test_page_apis_reject_invalid_ttl(api: str, ttl: float, tmp_path: Path) -> None:
-    ava.agent_identity._agent_id = spawn_agent()
+    pin_agent(spawn_agent())
     call = getattr(ava.ui, api)
     args = (str(tmp_path), "page", 13584)
     if api == "show":
@@ -245,14 +246,14 @@ def test_page_apis_reject_invalid_ttl(api: str, ttl: float, tmp_path: Path) -> N
 
 class TestClose:
     def test_close_marks_closed(self, db_conn: psycopg.Connection) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         ava.ui.show("p", 13583)
         ava.ui.close("p")
         db_conn.rollback()
         assert _open_pages(db_conn, ava.agent_identity.require_agent_id()) == []
 
     def test_close_missing_raises_page_closed(self) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with pytest.raises(PageClosed):
             ava.ui.close("never-registered")
 
@@ -271,7 +272,7 @@ class TestServe:
         reset_identity()
 
     def test_serve_registers_serve_dir(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         (tmp_path / "index.html").write_text("<h1>served</h1>", encoding="utf-8")
         with _StubPageServer("127.0.0.1") as stub:
             page = ava.ui.serve(str(tmp_path), "srv", port=stub.port, title="Served")
@@ -283,7 +284,7 @@ class TestServe:
         ]
 
     def test_serve_passes_ttl(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         captured: dict[str, object] = {}
         _use_page_host(monkeypatch, bindable=lambda *_a: True, health=lambda *_a: "ok:stub")
 
@@ -305,7 +306,7 @@ class TestServe:
         self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         """serve() polls until the daemon's server answers (stub starts late)."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with _StubPageServer("127.0.0.1") as stub:
             page = ava.ui.serve(str(tmp_path), "late", port=stub.port)
@@ -318,7 +319,7 @@ class TestServe:
         window (the page row stays registered; the daemon keeps retrying)."""
         import ava.ui as ui_mod
 
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         _use_page_host(monkeypatch, ready_timeout_s=0.5)
         free = _free_port()
@@ -333,7 +334,7 @@ class TestServe:
     def test_serve_requires_explicit_port(self, tmp_path: Path) -> None:
         """No per-agent reserved port: a missing port is rejected before any
         gateway or filesystem work, with the rule spelled out."""
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         with pytest.raises(TypeError, match="port"):
             ava.ui.serve(str(tmp_path), "page")  # pyright: ignore[reportCallIssue]
         with pytest.raises(TypeError, match="port is required"):
@@ -346,7 +347,7 @@ class TestServe:
         registered — the daemon can never displace it."""
         import ava.ui as ui_mod
 
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with (
             _SilentServer("127.0.0.1") as silent,
@@ -363,7 +364,7 @@ class TestServe:
         same foreign occupant — refused, not silently registered."""
         import ava.ui as ui_mod
 
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with (
             _StubPageServer("127.0.0.1", health=None) as foreign,
@@ -381,9 +382,9 @@ class TestServe:
         import ava.ui as ui_mod
 
         owner = spawn_agent()
-        ava.agent_identity._agent_id = owner
+        pin_agent(owner)
         ava.ui.show("held", 13586)
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with pytest.raises(ui_mod.PageError, match="already used by page 'held' of agent"):
             ava.ui.serve(str(tmp_path), "clash", port=13586)
@@ -400,11 +401,11 @@ class TestServe:
 
         owner = spawn_agent()
         other = spawn_agent()
-        ava.agent_identity._agent_id = owner
+        pin_agent(owner)
         ava.ui.show("mine", 13587)
-        ava.agent_identity._agent_id = other
+        pin_agent(other)
         ava.ui.show("theirs", 13588)
-        ava.agent_identity._agent_id = owner
+        pin_agent(owner)
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with pytest.raises(ui_mod.PageError, match="already used by page 'theirs'"):
             ava.ui.serve(str(tmp_path), "new", port=13588)
@@ -420,7 +421,7 @@ class TestServe:
         registry check owns that call, and the OS probe must not block it."""
         import ava.ui as ui_mod
 
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         _use_page_host(monkeypatch, ready_timeout_s=0.5)
         with _SilentServer("127.0.0.1") as silent:
@@ -442,7 +443,7 @@ class TestServe:
         assert ui_mod._SERVE_READY_TIMEOUT_S >= 60.0
 
     def test_serve_same_name_replaces(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
-        ava.agent_identity._agent_id = spawn_agent()
+        pin_agent(spawn_agent())
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with _StubPageServer("127.0.0.1") as stub:
             ava.ui.serve(str(tmp_path), "once", port=stub.port)

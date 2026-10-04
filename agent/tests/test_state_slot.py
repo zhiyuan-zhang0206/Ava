@@ -53,6 +53,7 @@ from agent.state import (
     build_agent_state,
 )
 from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -450,6 +451,7 @@ def _make_runtime_and_config(
         agent=AgentSlices.resolve(pins),
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
+        identity=AgentIdentity(agent_id=42, owns_loop=True),
     )
     runtime = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}

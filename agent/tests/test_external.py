@@ -16,14 +16,16 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
-from ava import agent_identity, external, gateway_client
+from ava import _settings, agent_identity, external, gateway_client
 from ava._settings import agent_setting
 from ava.external import state
 from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
+from ava.sdk_surface import process_context
 from base import telemetry
 from base.db import Database
 from base.telemetry import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp
+from tests.fixtures.pin_agent import pin_agent
 
 # Load-proof handshake windows: close()'s telemetry tail can take seconds on a
 # loaded runner, so a fixed 2s window read a slow close as a revoked call
@@ -71,9 +73,7 @@ def attached_runtime(
     }
     staged: list[dict[str, Any]] = []
     snapshot = ExampleState(sample__seen={"native"})
-    monkeypatch.setattr(agent_identity, "_external_identity", None)
-    monkeypatch.setattr(agent_identity, "_agent_id", None)
-    monkeypatch.setattr(agent_identity, "_owns_loop", True)
+    pin_agent(None, owns_loop=True)
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)
 
@@ -133,14 +133,13 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
 ) -> None:
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     with external.attach("lease"):
-        assert agent_identity._external_agent_id == 405
+        assert _borrowed_agent_id() == 405
         assert ava.self.AGENT_ID == 405
         assert agent_identity.require_agent_id() == 405
         assert agent_identity.require_actor() == "agent:405"
         assert agent_identity.default_actor() == "agent:405"
         assert agent_setting("llm_model") == "external-test"
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
     assert agent_identity.require_actor() == "external_agent:codex"
     assert not ava.in_exec_turn()
 
@@ -181,8 +180,7 @@ def test_expiry_blocks_identity_and_plugin_state_before_new_effects(
             read()
     with pytest.raises(RuntimeError, match="expired"):
         attachment.close()
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
     assert not staged
 
 
@@ -234,8 +232,7 @@ def test_stale_attachment_refuses_sdk_identity_and_removes_identity_on_close(
         agent_identity.require_actor()
     with pytest.raises(RuntimeError, match="another attachment"):
         attachment.close()
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
 
 
 def _invalidate_lease(lease: dict[str, Any], invalidated: str) -> str:
@@ -247,10 +244,17 @@ def _invalidate_lease(lease: dict[str, Any], invalidated: str) -> str:
     return "another attachment"
 
 
+def _borrowed_agent_id() -> int | None:
+    """The agent id the process's bound context borrows through an attachment, if any."""
+    context = process_context.peek()
+    lease = None if context is None or context.identity is None else context.identity.lease
+    return None if lease is None else lease.agent_id
+
+
 def _assert_detached() -> None:
     """After a detach the process holds no exec slot and no attached config."""
     assert not ava.in_exec_turn()
-    assert external.attached_config() is None
+    assert _settings._attached() is None
 
 
 def test_attach_refuses_inside_an_exec_turn(
@@ -259,7 +263,7 @@ def test_attach_refuses_inside_an_exec_turn(
     ava.state = ExampleState(sample__seen={"prior"})
     with pytest.raises(RuntimeError, match="exec turn cannot attach"):
         external.attach("lease")
-    assert agent_identity._external_identity is None
+    assert _borrowed_agent_id() is None
 
 
 @pytest.mark.parametrize("invalidated", ["expiry", "state_version"])
@@ -274,8 +278,7 @@ def test_failed_context_entry_detaches_and_allows_next_attachment(
     reason = _invalidate_lease(lease, invalidated)
     with pytest.raises(RuntimeError, match=reason), attachment:
         pytest.fail("an invalid attachment entered its context")
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
     _assert_detached()
     assert not staged
     attachment.close()  # Already detached; must not retry the failed lease or flush.
@@ -289,7 +292,7 @@ def test_failed_context_entry_detaches_and_allows_next_attachment(
 
     monkeypatch.setattr(external.control, "require_active", require_next)
     with external.attach("next"):
-        assert agent_identity._external_agent_id == 405
+        assert _borrowed_agent_id() == 405
         assert ava.self.AGENT_ID == 405
     _assert_detached()
 
@@ -311,7 +314,7 @@ def test_concurrent_constructor_fails_before_lease_lookup(
 
     def attach_in_worker() -> None:
         with external.attach("lease"):
-            assert agent_identity._external_agent_id == 405
+            assert _borrowed_agent_id() == 405
             assert ava.self.AGENT_ID == 405
 
     monkeypatch.setattr(external.control, "require_active", blocked_require)
@@ -327,10 +330,9 @@ def test_concurrent_constructor_fails_before_lease_lookup(
         finally:
             continue_lookup.set()
             first.result(timeout=5)
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
     with external.attach("lease"):
-        assert agent_identity._external_agent_id == 405
+        assert _borrowed_agent_id() == 405
         assert ava.self.AGENT_ID == 405
 
 
@@ -352,12 +354,11 @@ def test_constructor_failure_detaches_and_allows_next_attachment(
             failure_patch.setattr(external, "load_snapshot", fail)
         with pytest.raises(RuntimeError, match="constructor interrupted"):
             external.attach("lease")
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
     _assert_detached()
     assert not staged
     with external.attach("lease"):
-        assert agent_identity._external_agent_id == 405
+        assert _borrowed_agent_id() == 405
         assert ava.self.AGENT_ID == 405
 
 
@@ -368,7 +369,7 @@ def test_repeated_close_cannot_release_another_attachment(
     first.close()
     with external.attach("lease"):
         first.close()
-        assert agent_identity._external_agent_id == 405
+        assert _borrowed_agent_id() == 405
         assert ava.self.AGENT_ID == 405
         with pytest.raises(RuntimeError, match="already has an external attachment"):
             external.attach("lease")
@@ -467,8 +468,7 @@ def test_close_delivers_telemetry_when_plugin_flush_fails(
         attachment.close()
 
     assert delivered == [True]
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
 
 
 def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
@@ -609,8 +609,7 @@ def test_attach_rejects_other_machine_without_binding_identity(
     lease["machine"] = "another-runner"
     with pytest.raises(RuntimeError, match="agent machine"):
         external.attach("lease")
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
 
 
 def test_delta_codec_preserves_sets_and_message_objects(
@@ -698,6 +697,5 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
     with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
         attachment.close()
     assert not staged
-    assert agent_identity._external_identity is None
-    assert agent_identity._external_agent_id is None
+    assert _borrowed_agent_id() is None
     assert snapshot.messages == [HumanMessage(content="Native history", id="native")]

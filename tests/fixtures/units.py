@@ -20,10 +20,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-import ava
 from base.db import Database
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.events.live.bus import EventBus
+from tests.fixtures.pin_agent import pin_agent
 
 # ── Two-unit fixtures: model "a gateway unit" and "a runner unit" explicitly ──
 #
@@ -219,15 +219,15 @@ def workspace(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """This test's agent workspace dir (the relative-path base of ava.files /
     ava.shell.run / ava.understand path mode), under the per-test unit home.
 
-    Pins the agent id explicitly via monkeypatch instead of relying on the
-    session-global `ava.agent_identity._agent_id = 1` staying unmutated across test
-    ordering (a leak through that global is exactly what the `_isolated_agent`
-    monkeypatch fix in tests/path_scoped/ava_tests.py guards against). The dir is NOT
+    Pins the agent id explicitly instead of relying on the session default context
+    (`pin_agent(1)` in env_bootstrap) staying unmutated across test
+    ordering (a leak through it is exactly what the `_isolated_agent`
+    fix in tests/path_scoped/ava_tests.py guards against). The dir is NOT
     pre-created — `workspace_dir` mkdirs on first resolution, and several
     tests assert exactly that; pre-create with `.mkdir(parents=True)` when a
     test seeds files into it.
     """
-    monkeypatch.setattr(ava.agent_identity, "_agent_id", 1)
+    pin_agent(1)
     return unit_home / "workspaces" / "1"
 
 
