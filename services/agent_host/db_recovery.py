@@ -21,7 +21,7 @@ from base.agents.history.delta_read_compat import (
     RecoveryReconstructionScope,
     recovery_reconstruction_scope,
 )
-from base.agents.observation.db_wait import DatabaseWait, database_wait
+from base.agents.observation.db_wait import DatabaseWait, DatabaseWaits
 from base.config import settings
 from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import AGENT_LEASE_TTL_S
@@ -110,7 +110,7 @@ async def _run_bounded_stage(
     under the shared 120s `database_phase()` bound.
 
     Renewal happens only when this original task/incarnation actually enters a
-    stage — heartbeat snapshot reads (`database_wait_snapshot`) never renew —
+    stage — heartbeat snapshot reads (`DatabaseWaits.snapshot`) never renew —
     and every renew keeps the same finite proof TTL. A stage that overruns its
     bound raises `PoolTimeout` (from `database_phase`), which the recovery loop
     already retries on its backoff ladder; external cancellation stays
@@ -190,6 +190,7 @@ async def recover_database(
     checkpointer: AsyncPostgresSaver,
     graph: CompiledStateGraph[Any, Any, Any, Any],
     incarnation: RuntimeIncarnation,
+    database_waits: DatabaseWaits,
 ) -> None:
     """Recover inside the original single-flight task, without an inbound wake.
 
@@ -219,7 +220,7 @@ async def recover_database(
     logger.warning("host turn waiting for checkpoint recovery", agent_id=incarnation.agent_id)
     with (
         recovery_reconstruction_scope(checkpointer, str(incarnation.agent_id)) as reconstruction,
-        database_wait(incarnation) as waiting,
+        database_waits.wait(incarnation) as waiting,
     ):
         while True:
             started = time.monotonic()

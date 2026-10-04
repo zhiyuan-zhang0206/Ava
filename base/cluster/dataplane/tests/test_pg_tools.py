@@ -92,7 +92,7 @@ def scratch_pg_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     instance root must be short; teardown force-stops and deletes anything left
     under it."""
     root = Path(tempfile.mkdtemp(prefix="ava-pg-env-", dir="/tmp"))
-    monkeypatch.setattr(pg_throwaway_base, "_tmpfs_base", str(root))
+    monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
     monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
     monkeypatch.setattr(settings.data_plane, "pg_throwaway_base", "")
     yield root

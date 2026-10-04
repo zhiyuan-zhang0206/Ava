@@ -19,7 +19,9 @@ is on the `import ava` path, which stays driver-free (task #3816).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from urllib.parse import urlsplit, urlunsplit
 
 from base.log import logger
@@ -286,7 +288,7 @@ def drop_database(
 # migrations. Never bump this baseline: future versions belong in the manifest
 # below and must name their mirroring Ava migration.
 CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION = 9
-CHECKPOINT_SCHEMA_AVA_MIGRATIONS: dict[int, str] = {}
+CHECKPOINT_SCHEMA_AVA_MIGRATIONS: Mapping[int, str] = MappingProxyType({})
 
 
 class CheckpointSchemaError(RuntimeError):

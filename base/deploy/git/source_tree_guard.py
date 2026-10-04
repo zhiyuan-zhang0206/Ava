@@ -83,7 +83,7 @@ _WHITELIST_CATCHALL_PROBES = ("guard-must-not-be-whitelisted.txt", "guard-must-n
 
 
 def _validate_whitelist(patterns: tuple[str, ...]) -> None:
-    """Fail fast on a misconfigured whitelist (called at import).
+    """Refuse a misconfigured whitelist (a test runs it over `SOURCE_TREE_WHITELIST`).
 
     Two misconfigurations make the guard a silent no-op on one side or a
     false-alarm machine on the other, and without a loud check neither is
@@ -106,9 +106,6 @@ def _validate_whitelist(patterns: tuple[str, ...]) -> None:
                     f"SOURCE_TREE_WHITELIST pattern {pattern!r} would whitelist arbitrary "
                     "paths (the guard would never detect anything)"
                 )
-
-
-_validate_whitelist(SOURCE_TREE_WHITELIST)
 
 
 def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:

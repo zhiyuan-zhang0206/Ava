@@ -290,11 +290,8 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(ci, "_ensure_redis_acl", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(port_preflight, "bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "print", lambda *_a, **_k: None, raising=False)  # pyright: ignore[reportUnknownArgumentType]
-    # `_redis_server_bin` resolves through `brew_prefix`, which is `@cache`d for
-    # the process lifetime — routing it through the faked `subprocess.run` above
-    # would permanently poison that cache with "PONG" (brew's stdout stand-in)
-    # for every other test in this worker, real infra tests included. Stub the
-    # resolved path directly so `brew_prefix` is never called here at all.
+    # `_redis_server_bin` resolves through `brew_prefix`, which shells out to `brew`; the faked
+    # `subprocess.run` above would answer it with "PONG". Stub the resolved path directly.
     monkeypatch.setattr(
         ci,
         "_redis_server_bin",

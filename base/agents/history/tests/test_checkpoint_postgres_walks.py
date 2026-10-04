@@ -164,15 +164,14 @@ def test_walk_patch_rejects_changed_signature(monkeypatch: pytest.MonkeyPatch) -
 
     changed.__module__ = "langgraph.checkpoint.postgres.base"
     changed.__qualname__ = "BasePostgresSaver._try_advance_walks"
-    monkeypatch.setattr(checkpoint_postgres_walks, "_installed_descriptor", [])
     monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", staticmethod(changed))
     with pytest.raises(RuntimeError, match="signature or identity changed"):
         checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch()
 
 
 def test_walk_patch_rejects_foreign_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", staticmethod(lambda: None))
-    with pytest.raises(RuntimeError, match="replaced outside Ava"):
+    monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", lambda: None)
+    with pytest.raises(TypeError, match="replaced outside Ava"):
         checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch()
 
 

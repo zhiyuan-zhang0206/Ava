@@ -448,9 +448,6 @@ class PtySessionBackend(SessionBackend):
         return logs_dir() / f"{name}.out.log"
 
 
-_backend: SessionBackend | None = None
-
-
 def helper_spawn_enabled() -> bool:
     """Whether macOS process creation must route through the permissions helper.
 
@@ -472,40 +469,32 @@ def helper_spawn_enabled() -> bool:
 
 
 def get_backend() -> SessionBackend:
-    """Return the platform-appropriate ``SessionBackend`` singleton.
+    """Return the platform-appropriate ``SessionBackend`` for services/daemons.
 
     This is the **service/daemon** backend — every long-running service session
     (`ava start` launches, pause/unpause) lives here: the helper-backed
     supervisor on opted-in macOS hosts, the native supervisor on other POSIX
-    hosts. Agent
+    hosts. Both are stateless handles over the supervisor's on-disk records, so a
+    fresh one per call is the same backend. Agent
     *processes* do NOT call this function directly: `native_proc()` routes them
     to the same selected process supervisor. Agent shells / watchers use the
     PTY backend (`get_shell_backend()`).
     """
-    global _backend  # noqa: PLW0603
-    if _backend is None:
-        if helper_spawn_enabled():
-            from base.sessions.helperproc import HelperProcSessionBackend
+    if helper_spawn_enabled():
+        from base.sessions.helperproc import HelperProcSessionBackend
 
-            _backend = HelperProcSessionBackend()
-        else:
-            _backend = PosixProcSessionBackend()
-    return _backend
-
-
-_shell_backend: SessionBackend | None = None
+        return HelperProcSessionBackend()
+    return PosixProcSessionBackend()
 
 
 def get_shell_backend() -> SessionBackend:
     """Return the backend for AGENT interactive shells and watchers —
-    ``PtySessionBackend`` (the pty-sessions service); distinct from ``get_backend()``
-    (service/daemon sessions). ``ava.shell.sessions`` and
-    watcher sessions use this PTY backend — never the service backend.
+    ``PtySessionBackend`` (the pty-sessions service, stateless: every call dials
+    it); distinct from ``get_backend()`` (service/daemon sessions).
+    ``ava.shell.sessions`` and watcher sessions use this PTY backend — never the
+    service backend.
     """
-    global _shell_backend  # noqa: PLW0603
-    if _shell_backend is None:
-        _shell_backend = PtySessionBackend()
-    return _shell_backend
+    return PtySessionBackend()
 
 
 def native_proc() -> NativeProcessSupervisor:

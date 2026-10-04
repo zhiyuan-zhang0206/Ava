@@ -36,23 +36,16 @@ from pathlib import Path
 
 from base.log import logger
 
-# Platform default base for throwaway data dirs: /dev/shm on Linux (RAM), else
-# the OS temp dir (mac has no /dev/shm; its SSD-backed $TMPDIR is fast enough).
-# A module attribute read at call time — tests pin it per test, and an operator
-# can monkeypatch it in-process.
-_tmpfs_base: str | None = None
-if Path("/dev/shm").is_dir():  # noqa: S108 — deliberate tmpfs for throwaway cluster data
-    _tmpfs_base = "/dev/shm"  # noqa: S108
-# Windows: use %TEMP% (no /dev/shm equivalent)
-elif sys.platform == "win32":
-    _tmpfs_base = tempfile.gettempdir()
-
 
 def default_base() -> Path:
-    """The platform default base for throwaway data dirs — `/dev/shm` on Linux, the
-    OS temp dir elsewhere. Read live so a per-test monkeypatched `_tmpfs_base` and
-    the platform default both apply to each call."""
-    return Path(_tmpfs_base or tempfile.gettempdir())
+    """The platform default base for throwaway data dirs: `/dev/shm` on Linux (RAM, so
+    scratch clusters get tmpfs speed), else the OS temp dir (macOS has no /dev/shm; its
+    SSD-backed `$TMPDIR` is fast enough; Windows uses `%TEMP%`). Read from the host at
+    each call; tests replace this function."""
+    shm = Path("/dev/shm")  # noqa: S108 — deliberate tmpfs for throwaway cluster data
+    if sys.platform != "win32" and shm.is_dir():
+        return shm
+    return Path(tempfile.gettempdir())
 
 
 def disk_fallback_base() -> Path:

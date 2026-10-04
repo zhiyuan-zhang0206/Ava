@@ -24,6 +24,7 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.observation import db_wait
+from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
@@ -233,7 +234,11 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
     monkeypatch.setattr(db_recovery, "repair_dangling_tool_use_at_startup", flaky_repair)
     with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
         await db_recovery.recover_database(
-            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+            pool=aops_pool,
+            graph=graph,
+            checkpointer=saver,
+            incarnation=incarnation,
+            database_waits=DatabaseWaits(),
         )
     assert repairs == 2
     assert flushes == (2 if write_before_retry else 1)

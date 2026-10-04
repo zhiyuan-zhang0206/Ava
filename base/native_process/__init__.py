@@ -22,9 +22,9 @@ only independent observations compare through process_birth_key.
 
 from __future__ import annotations
 
-import subprocess
+import ctypes
+import ctypes.util
 import sys
-from functools import cache
 from pathlib import Path
 from uuid import UUID
 
@@ -44,19 +44,30 @@ def pid_starttime_ticks(pid: int) -> int | None:
         return None
 
 
-@cache
+def _darwin_boot_session_uuid() -> str:
+    """The `kern.bootsessionuuid` sysctl, read in-process (a microsecond call, not a spawn)."""
+    name = b"kern.bootsessionuuid"
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    size = ctypes.c_size_t(0)
+    if libc.sysctlbyname(name, None, ctypes.byref(size), None, 0) != 0:
+        raise OSError(ctypes.get_errno(), f"sysctl {name.decode()} failed")
+    buffer = ctypes.create_string_buffer(size.value)
+    if libc.sysctlbyname(name, buffer, ctypes.byref(size), None, 0) != 0:
+        raise OSError(ctypes.get_errno(), f"sysctl {name.decode()} failed")
+    return buffer.value.decode()
+
+
 def native_boot_id() -> str | None:
     """Bind durable POSIX process custody to one native boot, without Settings.
 
     A running observer cannot survive reboot, so its boot scope is immutable.
     Missing or malformed POSIX evidence refuses; it is never a legacy default.
+    Read afresh on every call: both sources are cheap, so no process holds a copy.
     """
     if sys.platform == "linux":
         value = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     elif sys.platform == "darwin":
-        value = subprocess.check_output(
-            ["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"], text=True, timeout=5
-        ).strip()
+        value = _darwin_boot_session_uuid()
     else:
         raise RuntimeError(f"unsupported native boot identity platform: {sys.platform}")
     return str(UUID(value))
