@@ -9,7 +9,6 @@ events render through the same filter).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 import uuid
@@ -567,7 +566,8 @@ class IMBridgeCore(SpawnMenuMixin):
         self, key: tuple[str, str], state: ChatState, *, catch_up: bool = False
     ) -> None:
         # Escalate INFO->WARNING after 12 consecutive reconnect failures
-        # (~1 min at the 5s retry): one drop per gateway restart is expected.
+        # (~1 min at the 5s retry): one drop per gateway restart is expected,
+        # and is reported once, at its first failure.
         _sse_reconnect_warn_after = 12
         failures = 0
         # quiesce-exempt: an SSE reconnect loop against the gateway; a cursor is written only when an event arrives
@@ -590,11 +590,15 @@ class IMBridgeCore(SpawnMenuMixin):
                 # stdlib %-style (a loguru '{}' placeholder here used to raise
                 # TypeError inside this except block, which the surrounding try
                 # does not catch — the reconnect loop and with it all pushes
-                # died, Task #1032). suppress: a logging bug must never kill
-                # the loop.
-                with contextlib.suppress(Exception):
-                    level = _log.warning if failures >= _sse_reconnect_warn_after else _log.info
-                    level("sse loop error, reconnecting in 5s (x%d)", failures, exc_info=True)
+                # died, Task #1032). The first failure of a streak is reported
+                # at WARNING with its traceback; the retries that follow are
+                # INFO until the streak is long enough to escalate again.
+                if failures == 1 or failures >= _sse_reconnect_warn_after:
+                    _log.warning(
+                        "sse loop error, reconnecting in 5s (x%d)", failures, exc_info=True
+                    )
+                else:
+                    _log.info("sse loop error, reconnecting in 5s (x%d)", failures)
                 await asyncio.sleep(5)
 
     async def _push_snapshot(

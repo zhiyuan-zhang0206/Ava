@@ -47,13 +47,18 @@ def _show_qr(qrcode_value: str, qrcode_url: str) -> None:
     logger.info("Scan the QR code below with WeChat: {}", qrcode_url or qrcode_value)
     try:
         import qrcode  # optional dependency
-
+    except ImportError:
+        logger.info("(terminal QR rendering unavailable — open the link above to scan)")
+        return
+    try:
         qr = qrcode.QRCode()
         qr.add_data(qrcode_url or qrcode_value)
         qr.make(fit=True)
         qr.print_ascii(invert=True)
     except Exception:
-        logger.info("(terminal QR rendering unavailable — open the link above to scan)")
+        logger.opt(exception=True).warning(
+            "weixin: terminal QR rendering failed — open the link above to scan"
+        )
 
 
 async def _refresh_qr(

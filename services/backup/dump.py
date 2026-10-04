@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import cast
 from zoneinfo import ZoneInfo
 
+import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from base.clock import Clock
@@ -450,7 +451,8 @@ def _db_size_breakdown(db: Database, db_url: str | None = None) -> str:
                        COALESCE(pg_total_relation_size(to_regclass('public.checkpoint_writes')), 0)
                 """
             ).fetchone()
-    except Exception:
+    except psycopg.Error:
+        _log.warning("[backup] db size breakdown unavailable", exc_info=True)
         return "unavailable"
     assert row is not None  # noqa: S101 — aggregate over fixed tables always returns one row
     total, blobs, checkpoints, writes = (int(v) for v in row)

@@ -88,7 +88,7 @@ async def _request_harvest(
                     db, bus, agent_id, stalled_inbound_id=inbound_id
                 )
         except Exception:
-            _log.info(
+            _log.warning(
                 "[delivery] stalled crash-marked recovery request failed for agent %s",
                 agent_id,
                 exc_info=True,

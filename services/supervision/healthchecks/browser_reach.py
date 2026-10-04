@@ -14,11 +14,11 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
-from contextlib import suppress
 from typing import Any, NamedTuple, cast
 
 import websockets
 
+from base.log import logger
 from services.desktop.browser.probe import cdp_url
 
 
@@ -110,8 +110,13 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
             return _CanaryResult("skip", f"unexpected evaluate payload: {value!r}")
         finally:
             # The canary must never become a new occupant.
-            with suppress(Exception):
+            try:
                 await _cdp_call(browser_ws, ids, "Target.closeTarget", {"targetId": target_id}, 2.0)
+            except (websockets.WebSocketException, OSError, RuntimeError, ValueError):
+                logger.opt(exception=True).warning(
+                    "[browser-reach] could not close the canary tab {}; it stays open in Chrome",
+                    target_id,
+                )
 
 
 def canary(port: int, url: str, timeout_s: float) -> _CanaryResult:

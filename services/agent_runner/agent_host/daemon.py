@@ -177,8 +177,12 @@ async def _publish_turn_progress_heartbeat(
     machine: str,
     active_agents: Collection[int],
     database_waits: DatabaseWaits,
-) -> None:
-    """Best-effort Redis snapshot for the gateway's out-of-process breaker."""
+) -> bool:
+    """Best-effort Redis snapshot for the gateway's out-of-process breaker.
+
+    Returns whether the publish landed; the caller logs the failing/recovered
+    transitions once instead of once per beat.
+    """
     snapshots = {}
     for agent_id in sorted(active_agents):
         snapshot = turn_progress_snapshot(agent_id)
@@ -200,9 +204,16 @@ async def _publish_turn_progress_heartbeat(
             "[agent-host] turn-progress heartbeat publish exceeded %.1fs",
             _TURN_PROGRESS_PUBLISH_TIMEOUT_S,
         )
+        return False
     except Exception:
-        # Defensive evidence only: a Redis outage must not stall renewal.
-        _log.debug("[agent-host] turn-progress heartbeat publish failed", exc_info=True)
+        # A Redis outage must not stall renewal, so it is reported, not raised.
+        _log.warning(
+            "[agent-host] turn-progress heartbeat publish failed — the gateway's "
+            "breaker sees stale progress until it recovers",
+            exc_info=True,
+        )
+        return False
+    return True
 
 
 def _report_long_admission_waits(host: AgentHost) -> None:
@@ -237,6 +248,7 @@ async def _beat_forever(
 ) -> None:
     """Liveness and ownership renewal, independent of the idle dispatcher.
     beat() precedes DB renewal — process health must not depend on the DB."""
+    heartbeat_ok = True
     while True:
         _require_helper_parent_chain()
         liveness.beat()
@@ -252,9 +264,12 @@ async def _beat_forever(
                 _log.warning("[agent-host] ownership renewal timed out")
             except Exception:
                 _log.exception("[agent-host] ownership renewal failed — retrying next beat")
-        await _publish_turn_progress_heartbeat(
+        published = await _publish_turn_progress_heartbeat(
             bus, machine, scheduler.active_agents, host.database_waits
         )
+        if published and not heartbeat_ok:
+            _log.warning("[agent-host] turn-progress heartbeat publish recovered")
+        heartbeat_ok = published
         _report_long_admission_waits(host)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 

@@ -3,6 +3,7 @@
 import re
 import urllib.request
 from dataclasses import dataclass
+from http.client import HTTPException
 
 from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
 from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
@@ -65,7 +66,7 @@ def _is_alive() -> bool:
         )
         with urllib.request.urlopen(req, timeout=2.0):  # noqa: S310 — same probe
             return True
-    except Exception:
+    except (OSError, HTTPException):
         return False
 
 
@@ -129,7 +130,7 @@ def _queue_pressure() -> CollectorPressure | None:
     try:
         with urllib.request.urlopen(_metrics_url(), timeout=2.0) as response:  # noqa: S310 — fixed loopback probe
             payload = response.read().decode("utf-8", errors="replace")
-    except Exception:
+    except (OSError, HTTPException):
         return None
     capacities: dict[str, float] = {}
     sizes: dict[str, float] = {}

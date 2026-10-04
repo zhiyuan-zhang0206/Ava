@@ -15,8 +15,9 @@ import base.db
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
+from ops.cluster_rpc import ClusterOpUnreachable
 from services.wake.heartbeat import daemon as heartbeat_daemon
-from services.wake.heartbeat.liveness import run_liveness_pass
+from services.wake.heartbeat.liveness import _probe_machine, run_liveness_pass
 
 
 @pytest.fixture
@@ -57,7 +58,7 @@ class _Probe:
         self.calls.append(target_machine)
         answer = self.answers.get(target_machine)
         if answer is None:
-            raise ConnectionError("unreachable")
+            raise ClusterOpUnreachable("unreachable")
         return answer
 
 
@@ -267,3 +268,11 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
         )
 
     assert events == ["pass", "sleep", "pass", "sleep"]  # no hot loop on a failing pass
+
+
+def test_an_unexpected_probe_error_is_not_counted_as_an_unreachable_host() -> None:
+    async def probe(**_kw: object) -> dict[str, Any]:
+        raise RuntimeError("bug in the probe")
+
+    with pytest.raises(RuntimeError, match="bug in the probe"):
+        asyncio.run(_probe_machine("runner-1", probe))
