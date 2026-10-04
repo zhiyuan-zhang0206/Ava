@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -43,10 +44,15 @@ def _grafana_distribution() -> tuple[Path, Path]:
     return Path(binary), Path(home)
 
 
+_COMPOSE_DEFAULT = re.compile(r"\$\{[A-Z_]+:-([^}]*)\}")
+
+
 def _grafana_environment() -> dict[str, str]:
     compose: dict[str, Any] = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
     raw: dict[str, object] = compose["services"]["grafana"]["environment"]
-    environment = {str(key): str(value) for key, value in raw.items()}
+    # Compose interpolates `${NAME:-default}` before Grafana sees the value; with nothing set the
+    # default is what the container gets (the Telegram contact point needs a non-empty token).
+    environment = {str(key): _COMPOSE_DEFAULT.sub(r"\1", str(value)) for key, value in raw.items()}
     for line in RUNTIME_ENV_PATH.read_text(encoding="utf-8").splitlines():
         if line and not line.startswith("#"):
             key, value = line.split("=", 1)

@@ -1262,7 +1262,8 @@ itself (its own public key in its own `authorized_keys`):
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
   scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
   crash-loop after `up` until fixed). A host that has not fetched NEW (a dry run does
-  not fetch) is reported as not checked. Then it runs `ava stop -y --timeout 600` on each runner and
+  not fetch) is reported as not checked. Then, before the first stop, it opens the window's
+  alert silence (below). Then it runs `ava stop -y --timeout 600` on each runner and
   then the gateway (each must leave phase `stopped` with no failures), then on
   every host checks out NEW detached, repairs legacy read-only venv
   directories, runs `uv sync --frozen` and requires a clean tree.
@@ -1295,7 +1296,20 @@ itself (its own public key in its own `authorized_keys`):
   above) and `ava plugins verify` on every listed host (each enabled plugin loads as an
   agent boot loads it; the loader skips a broken plugin, so this is what turns that into
   a failure — 2026-10-03: out-of-repo plugins calling deleted hook APIs). They come
-  last so a red never skips the smoke or the refresh.
+  last so a red never skips the smoke or the refresh. Only after they pass does `up`
+  expire the window's alert silence.
+- The window is quiet through one Grafana silence, not through any gate in the services:
+  `down` has the gateway host create a silence in the co-located Grafana's Alertmanager
+  (`createdBy` `ava-fleet-update`, matcher `alertname=~".+"` except the disk alerts (`metric="host_disk"`, `attributes_check="disk_usage"`: a filling disk still pages) — comment naming NEW, expiry
+  `--silence-hours`, default 4) before anything stops, and `up` expires it after the drift
+  checks. A silenced rule keeps evaluating, so a condition that outlives the window notifies
+  when the silence ends. A rerun of `down` extends the silence it owns; a failed `up`
+  leaves it to its expiry (the cluster stays quiet while you fix the cause); `down --dry-run`
+  only prints the command. The program (`cli/fleet_alert_silence.py`) ships on stdin, so the
+  first update carrying it already has it; a host without `GRAFANA_ADMIN_PASSWORD`, or a
+  Grafana that does not answer, prints a `WARNING: alert silence not open/close` line and
+  the half goes on (a window without a silence is noisy, not unsafe). Expire a stuck silence
+  by hand in Grafana (Alerting > Silences) or with `python - close` from that file.
 - The first failure stops a half and nothing rolls back: fix the cause and
   rerun the whole half, which is idempotent. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to
@@ -2022,8 +2036,10 @@ Grafana run as native processes on Darwin arm64 and Linux amd64, owned by
 remain 3100/9090/3003 plus Loki gRPC 9095. See [native lifecycle](../cli/commands/observability/docs/lgtm.ava.okf.md). Tempo is remote, selected by the host-scope
 `AVA_TELEMETRY_TEMPO_ENDPOINT` setting. No
 service lifecycle depends on a container backend. The backend feeds Grafana and its alerting
-(Grafana's embedded Alertmanager → the gateway webhook) and the backfill scripts' live Loki
-read; no gateway read path or events-maintenance pass depends on it. It is a **host
+(Grafana's embedded Alertmanager → the gateway webhook; `attributes_check="gateway_liveness"` alerts and the health probe's dead-man rule also go
+straight to Telegram through Grafana's native notifier, with the bot token and owner chat id
+converge renders from the telegram settings, because the webhook cannot report a down gateway)
+and the backfill scripts' live Loki read; no gateway read path or events-maintenance pass depends on it. It is a **host
 singleton** owned by the lifecycle on exactly one home per host — the
 observability station. Provider identity is either the operator-created
 `$AVA_HOME/lgtm-host` marker file (in practice prod `~/.ava`;

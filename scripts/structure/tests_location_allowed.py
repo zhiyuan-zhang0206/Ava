@@ -342,6 +342,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "validates deploy/lgtm/config/grafana/provisioning/alerting/rules.yml",
     ),
+    "tests/scripts/test_alert_notification_policy.py": (
+        "contract",
+        "validates the notification policy of deploy/lgtm/config/grafana/provisioning/alerting/contact.yml",
+    ),
     "tests/scripts/test_alert_rules_backup_custody.py": (
         "contract",
         "validates the backup-custody rules of deploy/lgtm/config/grafana/provisioning/alerting/rules.yml",

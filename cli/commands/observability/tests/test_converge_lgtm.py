@@ -334,6 +334,34 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
     assert f'cat "{credential_file}"' not in run_script
 
 
+def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = Path(__file__).resolve().parents[4]
+    home = tmp_path / "home"
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(
+        "base.config.settings.telegram.telegram_bot_token", "fake-bot-token-for-test"
+    )
+    monkeypatch.setattr("base.config.settings.telegram.telegram_owner_id", 42)
+
+    lgtm_native.ensure_lgtm_native(repo, home, services=frozenset(lgtm_native.BACKENDS))
+
+    env_file = home / "lgtm/native/grafana/telegram.env"
+    assert env_file.read_text(encoding="utf-8") == (
+        "export AVA_ALERTS_TELEGRAM_BOT_TOKEN=fake-bot-token-for-test\nexport AVA_ALERTS_TELEGRAM_CHAT_ID=42\n"
+    )
+    assert env_file.stat().st_mode & 0o777 == 0o600
+    run_script = (home / "lgtm/native/grafana/run.sh").read_text(encoding="utf-8")
+    assert f'. "{env_file}"' in run_script
+    # A bot that is later removed takes its credential file with it.
+    monkeypatch.setattr("base.config.settings.telegram.telegram_bot_token", "")
+    lgtm_native.ensure_lgtm_native(repo, home, services=frozenset(lgtm_native.BACKENDS))
+    assert not env_file.exists()
+    assert 'AVA_ALERTS_TELEGRAM_BOT_TOKEN:-unconfigured}"' in run_script
+
+
 @pytest.mark.parametrize(
     ("query_url", "intake_endpoint", "warns"),
     [
