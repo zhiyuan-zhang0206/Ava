@@ -2,7 +2,8 @@
 differences behind a common interface, following the ``base/sessions/backend.py``
 provider pattern.
 
-Module-level ``get_backend()`` returns the platform-appropriate singleton.
+Module-level ``get_backend()`` returns the platform-appropriate backend
+(stateless, built per call).
 Callers use the same ``PlatformBackend`` protocol regardless of platform;
 the backend is selected by ``IS_MACOS`` in ``base.native_process.os_platform``.
 
@@ -467,17 +468,12 @@ class LinuxPlatformBackend(PlatformBackend):
 
 
 # ---------------------------------------------------------------------------
-# Singleton access
+# Platform selection
 # ---------------------------------------------------------------------------
-
-_backend: PlatformBackend | None = None
 
 
 def get_backend() -> PlatformBackend:
-    """Return the platform-appropriate ``PlatformBackend`` singleton."""
-    global _backend  # noqa: PLW0603
-    if _backend is None:
-        if not (IS_MACOS or IS_LINUX):
-            raise RuntimeError("unsupported host platform for OS jobs")
-        _backend = MacPlatformBackend() if IS_MACOS else LinuxPlatformBackend()
-    return _backend
+    """Return the platform-appropriate ``PlatformBackend`` (stateless: built per call)."""
+    if not (IS_MACOS or IS_LINUX):
+        raise RuntimeError("unsupported host platform for OS jobs")
+    return MacPlatformBackend() if IS_MACOS else LinuxPlatformBackend()

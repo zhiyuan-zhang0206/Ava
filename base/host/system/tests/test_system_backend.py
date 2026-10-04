@@ -1,4 +1,4 @@
-"""Tests for base.host.system.backend — singleton dispatch + capability queries."""
+"""Tests for base.host.system.backend — platform dispatch + capability queries."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ def test_get_backend_returns_correct_type() -> None:
 def test_unsupported_host_does_not_select_linux_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backend_module, "IS_MACOS", False)
     monkeypatch.setattr(backend_module, "IS_LINUX", False, raising=False)
-    monkeypatch.setattr(backend_module, "_backend", None)
     with pytest.raises(RuntimeError, match="unsupported host platform"):
         backend_module.get_backend()
 
@@ -60,11 +59,9 @@ def test_linux_capability_queries() -> None:
     assert backend.npm_shell_flag() is False
 
 
-def test_singleton_returns_same_instance() -> None:
-    """get_backend() is a singleton — same instance every call."""
-    b1 = get_backend()
-    b2 = get_backend()
-    assert b1 is b2
+def test_backend_type_is_stable_across_calls() -> None:
+    """get_backend() selects the same platform backend class on every call."""
+    assert type(get_backend()) is type(get_backend())
 
 
 def test_venv_python_path() -> None:

@@ -45,7 +45,10 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     def no_path_tool(_name: str) -> None:
         return None
 
-    monkeypatch.setattr(pg_runtime.get_backend(), "pg_binary_path", installed_tool)
+    def as_method(_self: object, name: str) -> Path:
+        return installed_tool(name)
+
+    monkeypatch.setattr(type(pg_runtime.get_backend()), "pg_binary_path", as_method)
     monkeypatch.setattr(pg_runtime.shutil, "which", no_path_tool)
 
     def forbid_download() -> Path:
@@ -106,7 +109,10 @@ def test_mixed_installations_fail_before_data_mutation(
     def mixed_tool(name: str) -> Path:
         return other / name if name == "pg_ctl" else installed / name
 
-    monkeypatch.setattr(pg_runtime.get_backend(), "pg_binary_path", mixed_tool)
+    def as_method(_self: object, name: str) -> Path:
+        return mixed_tool(name)
+
+    monkeypatch.setattr(type(pg_runtime.get_backend()), "pg_binary_path", as_method)
     with pytest.raises(RuntimeError, match="does not belong"):
         pg_runtime.ensure_pg_runtime()
 
