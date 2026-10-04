@@ -1,0 +1,11 @@
+-- Contract work_failed_events (expand-contract: the code removals shipped
+-- first). POST /api/work-failed and the ttl_reaper redelivery phase were
+-- removed in #4208 (398b557486): nothing writes or reads the table. The
+-- operator dumped it before this migration runs (0 rows in production; the
+-- schema snapshot is kept in the operator's workspace); the rows are not
+-- carried anywhere.
+--
+-- Registered for the DB track by decisions/2026-10-03-deletion-sweep.md
+-- (addendum, the work-failed ingest webhook); the table's entry leaves
+-- tests/fixtures/provisioning.py in this same change.
+DROP TABLE IF EXISTS work_failed_events;
