@@ -223,7 +223,9 @@ repos:
       # silently drops every argument; stdlib `logging` formats with `%`, so
       # `_log.info("x {}", v)` (a `logging.getLogger(...)` logger) raises
       # TypeError at emit and the line is lost. The two are told apart by where
-      # each name comes from, not by file. Deliberate literals opt out with
+      # each name comes from, not by file. loguru also has no `exc_info=`
+      # parameter — the kwarg silently drops the traceback (use
+      # `.opt(exception=True)`), flagged too. Deliberate literals opt out with
       # `# log-format-ok: <reason>`; see scripts/lint/loguru_format.py header.
       - id: lint-loguru-format
         name: lint log format (loguru takes {}, stdlib logging takes %s)

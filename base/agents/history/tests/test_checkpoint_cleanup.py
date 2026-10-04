@@ -28,6 +28,7 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint_cleanup import (
+    _enqueue_failed,
     count_checkpoints,
     mark_compact_boundary,
     trim_checkpoints,
@@ -587,3 +588,21 @@ async def test_tail_edit_keeps_the_replaced_copy_in_writes(
         blobs = [bytes(r[0]) for r in await cur.fetchall()]
     assert any(b"reply 1 original" in blob for blob in blobs)  # replaced copy kept
     assert any(b"reply 1 edited" in blob for blob in blobs)  # replacement present
+
+
+def test_enqueue_failure_log_keeps_the_traceback(
+    loguru_records: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The best-effort enqueue-failure warning keeps its cause (task #4979)."""
+
+    def _broken(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("telemetry queue down")
+
+    monkeypatch.setattr("base.telemetry.emit", _broken)
+    _enqueue_failed(42, RuntimeError("enqueue refused"))
+
+    record = next(
+        r for r in loguru_records if "enqueue-failure event could not be emitted" in r["message"]
+    )
+    assert record["exception"] is not None
+    assert record["exception"].type is RuntimeError

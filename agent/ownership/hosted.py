@@ -734,12 +734,11 @@ async def settle_and_stamp_turn(
         try:
             stamp = await stamp_turn_fatal(pool, incarnation)
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "corpse marker stamp failed — the row stays alive-"
                 "looking until a later stamp or a completed turn",
                 event="corpse_stamp_failed",
                 agent_id=incarnation.agent_id,
-                exc_info=True,
             )
     settled = False
     if not exited:

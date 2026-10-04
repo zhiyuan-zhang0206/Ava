@@ -34,11 +34,10 @@ def report_plugin_load_failure(name: str, exc: BaseException) -> None:
     from base.log import logger
     from base.telemetry import emit
 
-    logger.error(
+    logger.opt(exception=exc).error(
         "[plugins] plugin {} failed to load — skipped (fail-soft); "
         "the remaining plugins still load",
         name,
-        exc_info=exc,
     )
     with contextlib.suppress(Exception):
         emit(
