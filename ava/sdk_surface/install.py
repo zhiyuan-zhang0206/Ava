@@ -32,6 +32,7 @@ from base.packages.plugins.extensions import ExtensionRegistry, PluginContributi
 
 from . import ava_module, skill_sources, wraps
 from . import plugins as _plugins
+from .turn_state import TurnState
 
 
 @dataclass
@@ -41,6 +42,7 @@ class Installation:
     registry: ExtensionRegistry
     expansions: tuple[str, ...]
     undo: list[Callable[[], None]] = field(default_factory=list)
+    turn_state: TurnState = field(default_factory=TurnState)
 
 
 # The installation is recorded on the `ava` module object itself — the one process-wide thing it
@@ -51,6 +53,12 @@ _SLOT = "__plugin_installation__"
 def installed() -> Installation | None:
     """The current installation, or None before `install` / after `uninstall`."""
     return getattr(ava_module(), _SLOT, None)
+
+
+def turn_state() -> TurnState | None:
+    """The installation's turn-state slot, or None when nothing is installed."""
+    current = installed()
+    return None if current is None else current.turn_state
 
 
 def expansions() -> tuple[str, ...]:
