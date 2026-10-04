@@ -199,6 +199,7 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
             checkpointer=saver,
             incarnation=incarnation,
             database_waits=DatabaseWaits(),
+            peek_lock=asyncio.Lock(),
         )
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
     assert await saver.aget_tuple(config) == checkpoint
@@ -238,6 +239,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
                     checkpointer=saver,
                     incarnation=incarnation,
                     database_waits=DatabaseWaits(),
+                    peek_lock=asyncio.Lock(),
                 )
             )
         await asyncio.sleep(0.06)
@@ -261,6 +263,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
             checkpointer=saver,
             incarnation=incarnation,
             database_waits=DatabaseWaits(),
+            peek_lock=asyncio.Lock(),
         )
     resumed = admission.require_operation("outage", acquired)
     assert resumed.maintenance is not None and not resumed.maintenance.drained
@@ -298,6 +301,7 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
                         checkpointer=saver,
                         incarnation=incarnation,
                         database_waits=DatabaseWaits(),
+                        peek_lock=asyncio.Lock(),
                     )
                 )
             try:
@@ -364,6 +368,7 @@ async def test_repair_timeout_retries_and_remains_cancellable(
                 checkpointer=saver,
                 incarnation=incarnation,
                 database_waits=DatabaseWaits(),
+                peek_lock=asyncio.Lock(),
             )
         )
     try:
@@ -545,6 +550,7 @@ async def test_healthy_stages_each_get_their_own_deadline(
                     graph=graph,
                     incarnation=incarnation,
                     database_waits=DatabaseWaits(),
+                    peek_lock=asyncio.Lock(),
                 ),
                 15,
             )
@@ -628,6 +634,7 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
             checkpointer=saver,
             incarnation=incarnation,
             database_waits=waits,
+            peek_lock=asyncio.Lock(),
         )
     assert attempts == backoff.await_count == 2
     assert waits.snapshot(incarnation.agent_id) is None
@@ -689,6 +696,7 @@ async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
             checkpointer=saver,
             incarnation=incarnation,
             database_waits=DatabaseWaits(),
+            peek_lock=asyncio.Lock(),
         )
     warnings = [
         c for c in log.warning.call_args_list if c.args[0] == "host checkpoint recovery prolonged"
@@ -738,6 +746,7 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
             checkpointer=saver,
             incarnation=incarnation,
             database_waits=waits,
+            peek_lock=asyncio.Lock(),
         )
     assert backoff.await_count == failures
     assert waits.snapshot(incarnation.agent_id) is not None

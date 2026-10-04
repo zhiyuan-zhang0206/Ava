@@ -486,7 +486,11 @@ async def run() -> None:
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long
         # a stuck agent has really been silent.
-        scheduler = TurnScheduler(host.run_turn, activity_clock=host.last_active_at)
+        scheduler = TurnScheduler(
+            host.run_turn,
+            activity_clock=host.last_active_at,
+            config_fingerprint=host.turn_fingerprints.get,
+        )
         beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine, bus))
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))

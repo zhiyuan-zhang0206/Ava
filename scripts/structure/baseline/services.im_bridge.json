@@ -6,8 +6,7 @@
     "services/im_bridge/adapters/weixin.py::asyncio-task:WeixinAdapter.start": 1,
     "services/im_bridge/core.py::asyncio-task:IMBridgeCore._ensure_subscription": 1,
     "services/im_bridge/core.py::asyncio-task:IMBridgeCore._start_typing": 1,
-    "services/im_bridge/core.py::asyncio-task:IMBridgeCore.ensure_outbox_replay": 1,
-    "services/im_bridge/daemon.py::asyncio-task:run": 3
+    "services/im_bridge/core.py::asyncio-task:IMBridgeCore.ensure_outbox_replay": 1
   },
   "files": {
     "services/im_bridge/adapters/tests/test_feishu_adapter.py": 1255,

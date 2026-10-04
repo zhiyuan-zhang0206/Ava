@@ -1,5 +1,1 @@
-{
-  "ambient_state": {
-    "services/memory_search/app.py::asyncio-task:build_app.lifespan": 1
-  }
-}
+{}

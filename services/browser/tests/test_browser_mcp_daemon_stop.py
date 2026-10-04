@@ -407,22 +407,15 @@ async def _run_with_fakes(
 
     monkeypatch.setattr(daemon_mod, "_create_upstream", fake_create_upstream)
 
-    async def never() -> None:
+    async def never(*_a: object, **_k: object) -> None:
         await asyncio.Event().wait()
 
-    session_task = asyncio.create_task(never())
-
-    async def fake_start_maintenance(
-        _gateway: Any,
-    ) -> tuple[asyncio.Event, asyncio.Task[None]]:
-        return stop, session_task
-
-    monkeypatch.setattr(daemon_mod, "_start_session_maintenance", fake_start_maintenance)
-
-    def no_inject(_gateway: Any) -> None:
+    def no_inject(_gateway: object) -> None:
         return None
 
-    monkeypatch.setattr(daemon_mod, "_spawn_inject", no_inject)
+    monkeypatch.setattr(daemon_mod, "stop_on_signals", lambda: stop)
+    monkeypatch.setattr(daemon_mod.GatewaySession, "refresh_loop", never)
+    monkeypatch.setattr(daemon_mod.GatewaySession, "spawn_inject", no_inject)
 
     task = asyncio.create_task(run())
     await asyncio.sleep(0.3)  # let run() connect and start the watchdog/reaper
