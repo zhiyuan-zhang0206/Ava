@@ -66,6 +66,9 @@ services:
       # Alerting webhook token (contact.yml $__env expansion). Value comes
       # from deploy/lgtm/.env (gitignored) — never commit it.
       AVA_ALERTS_WEBHOOK_TOKEN: "${AVA_ALERTS_WEBHOOK_TOKEN:-}"
+      # Direct Telegram contact point (contact.yml): inert placeholders when unset.
+      AVA_ALERTS_TELEGRAM_BOT_TOKEN: "${AVA_ALERTS_TELEGRAM_BOT_TOKEN:-unconfigured}"
+      AVA_ALERTS_TELEGRAM_CHAT_ID: "${AVA_ALERTS_TELEGRAM_CHAT_ID:-0}"
       # Read-only Postgres password for the grafana_ro datasource role
       # (datasources.yml $GRAFANA_PG_PASSWORD). From .env (gitignored).
       GRAFANA_PG_PASSWORD: "${GRAFANA_PG_PASSWORD:-}"

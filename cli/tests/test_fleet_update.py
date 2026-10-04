@@ -58,6 +58,10 @@ class Cluster:
         self.roster_lag = 0  # roster reads that still show every machine offline (heartbeat)
         self.roster_reads = 0
         self.now = 0.0  # a fake clock: `fleet_update.time` is patched to this object
+        self.silence_open = False  # the gateway Grafana's deploy-window silence
+        self.silence_hours = 0.0
+        self.silence_comment = ""
+        self.silence_reply: str | None = None  # a canned `SILENCE ...` line instead of success
 
     def monotonic(self) -> float:
         return self.now
@@ -139,6 +143,8 @@ class Cluster:
             assert stdin == fleet_update._GATEWAY_PROGRAM
             emit(self._roster_json())
             return 0
+        if stdin == fleet_update._silence_program():
+            return self._silence(alias, command, emit)
         if "verify" in command:
             return self._verify(alias, command, emit)
         kinds = {
@@ -154,6 +160,25 @@ class Cluster:
         if kind == "refresh":
             emit("  summary: applied 2, conflict 1")
         return self._effect(kind, alias, host, command)
+
+    def _silence(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
+        """The gateway-side silence program: `python - open --hours H --comment C` / `python - close`."""
+        assert alias == "gw", "the silence is Grafana's: it runs on the gateway host"
+        script = shlex.split(command)[2]  # the host's login shell runs it as `bash -lc <script>`
+        verb, *rest = shlex.split(script.partition('/bin/python" - ')[2])
+        self.effects.append((f"silence-{verb}", alias))
+        if self.silence_reply is not None:
+            emit(self.silence_reply)
+            return 0
+        if verb == "open":
+            self.silence_hours = float(rest[rest.index("--hours") + 1])
+            self.silence_comment = rest[rest.index("--comment") + 1]
+            self.silence_open = True
+            emit("SILENCE opened id=s1 until=later")
+        else:
+            self.silence_open = False
+            emit("SILENCE closed 1")
+        return 0
 
     def _verify(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
         """The drift checks: NEW's verify before any stop, then `schedules verify` / `plugins verify`."""
@@ -212,7 +237,7 @@ def test_runners_stop_first_and_start_last(env: tuple[Cluster, Callable[..., int
     cluster, run = env
     assert run("down") == 0
     assert run("up") == 0
-    kinds = [kind for kind, _ in cluster.effects]
+    kinds = [kind for kind, _ in cluster.effects if not kind.startswith("silence-")]
     assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
     assert kinds.index("stop") > kinds.index("fetch") and kinds.index("switch") > max(
         i for i, k in enumerate(kinds) if k == "stop"
@@ -398,7 +423,10 @@ def test_the_first_failure_stops_the_half(
     cluster, run = env
     cluster.fail[("stop", "mac")] = 1
     assert run("down") == 1
-    assert [k for k, _ in cluster.effects if k not in ("fetch", "pre-verify")] == ["stop"]
+    assert [k for k, _ in cluster.effects if k not in ("fetch", "pre-verify")] == [
+        "silence-open",
+        "stop",
+    ]
     assert _STOP_RETRY in capsys.readouterr().out
 
 
@@ -649,3 +677,62 @@ def _run_locally(shell: str, command: str, stdin: str | None, emit: Callable[[st
     for line in done.stdout.splitlines():
         emit(line)
     return done.returncode
+
+
+def test_the_window_is_one_silence_opened_before_the_first_stop_and_closed_after_up(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    assert run("down", "--silence-hours", "3") == 0
+    kinds = [kind for kind, _ in cluster.effects]
+    assert kinds.index("silence-open") < kinds.index("stop")
+    assert cluster.silence_open and cluster.silence_hours == 3.0
+    assert cluster.new[:12] in cluster.silence_comment
+    assert run("up") == 0
+    assert not cluster.silence_open
+    assert [k for k, _ in cluster.effects if k.startswith("silence-")] == [
+        "silence-open",
+        "silence-close",
+    ]
+    assert cluster.effects[-1] == ("silence-close", "gw")
+
+
+def test_a_failed_up_leaves_the_silence_to_its_expiry(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.fail[("schedules-verify", "gw")] = 1
+    assert run("up") == 1
+    assert cluster.silence_open
+    assert "silence-close" not in {k for k, _ in cluster.effects}
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "SILENCE failed: GET /api/x: URLError",
+        "SILENCE skipped: no Grafana admin credential is configured",
+    ],
+)
+def test_a_silence_that_cannot_open_warns_and_the_update_goes_on(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], reply: str
+) -> None:
+    cluster, run = env
+    cluster.silence_reply = reply
+    assert run("down") == 0
+    assert (
+        f"WARNING: alert silence not open: {reply.removeprefix('SILENCE ')}"
+        in capsys.readouterr().out
+    )
+    assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
+
+
+def test_the_dry_run_lists_the_silence_without_opening_it(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down", "--dry-run") == 0
+    assert " - open --hours 4 --comment " in capsys.readouterr().out
+    assert not cluster.silence_open
+    assert [k for k, _ in cluster.effects if k.startswith("silence-")] == []

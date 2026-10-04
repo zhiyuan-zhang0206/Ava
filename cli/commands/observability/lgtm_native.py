@@ -436,6 +436,27 @@ def _render_grafana_admin_password(native_dir: Path) -> None:
     _write_if_changed(credential_file, credential.get_secret_value() + "\n", mode=0o600)
 
 
+def _render_grafana_telegram_env(native_dir: Path) -> None:
+    """Render the direct Telegram contact point's bot token and chat id when this home has a bot.
+
+    The gateway's own alert path (webhook -> ingest -> im_bridge) cannot report that the
+    gateway is down; Grafana's Telegram notifier does not depend on it. Without a bot the file is
+    removed and run.sh falls back to inert placeholders."""
+    from base.config import settings
+
+    token = settings.telegram.telegram_bot_token
+    owner = settings.telegram.telegram_owner_id
+    env_file = native_dir / "grafana/telegram.env"
+    if not token or not owner:
+        env_file.unlink(missing_ok=True)
+        return
+    content = (
+        f"export AVA_ALERTS_TELEGRAM_BOT_TOKEN={shlex.quote(token)}\n"
+        f"export AVA_ALERTS_TELEGRAM_CHAT_ID={owner}\n"
+    )
+    _write_if_changed(env_file, content, mode=0o600)
+
+
 def ensure_lgtm_native(repo: Path, ava_home: Path, *, services: frozenset[str]) -> None:
     """Prepare selected pinned binaries and config; lifecycle belongs to ava-root."""
     if not services or services - set(BACKENDS):
@@ -467,6 +488,7 @@ def ensure_lgtm_native(repo: Path, ava_home: Path, *, services: frozenset[str]) 
     _render_configs(repo, native_dir, ava_home)
     if "grafana" in services:
         _render_grafana_admin_password(native_dir)
+        _render_grafana_telegram_env(native_dir)
     if "loki" in services:
         _verify_loki(ava_home)
 
