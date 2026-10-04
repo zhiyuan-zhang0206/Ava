@@ -52,14 +52,16 @@ class DomainCloseOwner:
         self._domain = domain
         self._close_lock = threading.Lock()
         self._closed = False
-        self._requested = asyncio.Event()
+        # A future, not an Event: `asyncio.wait` races it against the root exit directly.
+        self._requested: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self.task = asyncio.create_task(
             self._close_after_exit_or_request(root_exit_task),
             name=f"exec-domain-close-{domain.proc.pid}",
         )
 
     def request(self) -> None:
-        self._requested.set()
+        if not self._requested.done():
+            self._requested.set_result(None)
 
     @property
     def pid(self) -> int:
@@ -94,16 +96,7 @@ class DomainCloseOwner:
         await asyncio.shield(self.task)
 
     async def _close_after_exit_or_request(self, root_exit_task: asyncio.Task[None]) -> None:
-        request_task = asyncio.create_task(
-            self._requested.wait(), name=f"exec-domain-stop-request-{self._domain.proc.pid}"
-        )
-        try:
-            await asyncio.wait({root_exit_task, request_task}, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            if not request_task.done():
-                request_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await request_task
+        await asyncio.wait({root_exit_task, self._requested}, return_when=asyncio.FIRST_COMPLETED)
         # Native close and bounded member observation run outside the agent loop.
         await asyncio.to_thread(self.close_now)
 

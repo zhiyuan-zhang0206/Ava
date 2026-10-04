@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph.interrupt import subscribe_interrupt
+from agent.graph.llm_errors import LlmLedger
 from base.agents.messages.inbound import InterruptReason
 from base.cluster.machine import machine_name
 from base.db import Database, create_agent
@@ -443,7 +444,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
         )
     )
     invocation = asyncio.create_task(
-        llm_node(state, runtime, {"configurable": {"thread_id": str(tid)}})
+        llm_node(state, runtime, {"configurable": {"thread_id": str(tid)}}, ledger=LlmLedger())
     )
     try:
         await asyncio.wait_for(started.wait(), timeout=3)
@@ -558,7 +559,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
         )
     )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)
-    compacted = await llm_node(state, runtime, config)
+    compacted = await llm_node(state, runtime, config, ledger=LlmLedger())
     assert compacted.goto == "init_context"
     state = apply(state, compacted)
     state.context_reset.tail[0].additional_kwargs["ava_msg_type"] = marker
@@ -590,7 +591,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     state = apply(state, resumed)
     assert not auto_compact_will_fire(state, runtime.context.require_agent())
     assert await _compact_reminder(state, runtime, config) is None
-    generated = await llm_node(state, runtime, config)
+    generated = await llm_node(state, runtime, config, ledger=LlmLedger())
     assert generated.goto == "after_exec"
     state = apply(state, generated)
     assert state.messages[-1].content == "resumed ordinary work"

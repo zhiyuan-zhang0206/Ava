@@ -22,6 +22,7 @@ from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm._retry import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
+from agent.graph.llm_errors import LlmLedger
 from agent.tests._fakes import make_fake_ops_pool
 
 
@@ -56,6 +57,7 @@ async def test_turn_end_ok_false_record_carries_exception(
             runtime=_runtime_with_redis(),
             config=_config_with_thread(),
             attempt=Attempt(1, time.time()),
+            ledger=LlmLedger(),
         )
 
     turn_end_records = [r for r in loguru_records if r["extra"].get("event") == "turn_end"]  # pyright: ignore[reportUnknownMemberType]
@@ -85,7 +87,10 @@ async def test_turn_end_ok_true_record_no_exception(
     monkeypatch.setattr("agent.graph.llm.node._llm_node_impl", _ok)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await llm_node(
-        state=MagicMock(), runtime=_runtime_with_redis(), config=_config_with_thread()
+        state=MagicMock(),
+        runtime=_runtime_with_redis(),
+        config=_config_with_thread(),
+        ledger=LlmLedger(),
     )
     assert result is sentinel
 

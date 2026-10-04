@@ -36,10 +36,8 @@ from dataclasses import dataclass
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
+    LlmLedger,
     LLMStreamStallPairError,
-    _record_stall_pair_streak,
-    _reset_stall_pair_streak,
-    _stall_pair_streak,
 )
 from agent.hooks.compact import CompactionFailedError
 from base.config import settings
@@ -85,10 +83,12 @@ def delayed_stall_sleep(streak: int) -> float:
     return jittered(base, span=base * settings.lm.llm_stall_retry_jitter_fraction, mode="random")
 
 
-def retry_wait(exc: Exception, attempts: int, *, model: str, agent_id: int) -> float | None:
+def retry_wait(
+    exc: Exception, attempts: int, *, model: str, agent_id: int, ledger: LlmLedger
+) -> float | None:
     """Seconds to sleep before the next try after the `attempts`-th failed one; None ends the node.
 
-    `attempts` counts failed tries (1 after the first failure).
+    `attempts` counts failed tries (1 after the first failure); `ledger` holds the stall-pair streak.
     """
     if isinstance(exc, _NEVER_RETRIED):
         return None
@@ -98,11 +98,11 @@ def retry_wait(exc: Exception, attempts: int, *, model: str, agent_id: int) -> f
     max_pairs = settings.lm.llm_stall_retry_max_consecutive
     if isinstance(exc, LLMStreamStallPairError) and max_pairs > 0:
         thread = str(agent_id)
-        streak = _stall_pair_streak(thread) + 1
+        streak = ledger.stall_pair_streak(thread) + 1
         if streak > max_pairs:
-            _reset_stall_pair_streak(thread)
+            ledger.reset_stall_pair_streak(thread)
             return None
-        _record_stall_pair_streak(thread, streak)
+        ledger.record_stall_pair_streak(thread, streak)
         # Headroom: the shared attempts gate must not pre-empt the streak cap when transient
         # failures earlier in the same sequence consumed part of the transient count.
         if attempts >= max_attempts + max_pairs:

@@ -392,7 +392,7 @@ import ava
 from agent import exec_child
 from agent.graph.exec.protocol import read_request
 
-exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
+child = exec_child._import_runtime(0.0)  # the child boot's step that binds the SDK (mirrors `_run`)
 
 
 def _snap(tag):
@@ -416,7 +416,7 @@ def _snap(tag):
 payload = read_request(Path({req!r}))
 ava.ensure_plugins_loaded()
 boot = _snap("boot")
-exec_child._build_state_slot(payload)
+exec_child._build_state_slot(child, payload)
 armed = _snap("armed")
 ava.state.materialize()
 touched = _snap("touched")
@@ -451,10 +451,10 @@ import ava
 from agent import exec_child
 from agent.graph.exec.protocol import read_request
 
-exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
+child = exec_child._import_runtime(0.0)  # the child boot's step that binds the SDK (mirrors `_run`)
 payload = read_request(Path({req!r}))
 ava.ensure_plugins_loaded()
-exec_child._build_state_slot(payload)
+exec_child._build_state_slot(child, payload)
 
 out = {{}}
 try:
@@ -505,10 +505,10 @@ import ava
 from agent import exec_child
 from agent.graph.exec.protocol import read_request
 
-exec_child._import_runtime()
+child = exec_child._import_runtime(0.0)
 payload = read_request(Path({req!r}))
 ava.ensure_plugins_loaded()
-exec_child._build_state_slot(payload)
+exec_child._build_state_slot(child, payload)
 
 ava_code = sys.modules["ava_builtins.plugins.ava_code.plugin"]
 holder = ava_code.state_handle  # the surface stand-in, bound before any state use
