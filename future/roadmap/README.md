@@ -120,7 +120,7 @@ The benchmark's §3 reduction verdicts were largely right; the earlier worry tha
 alignment pass — under Ava's architecture, "expressible by clean composition of
 existing primitives" *is* done, not a gap (e.g. lifecycle hooks = subscribe a
 Redis listener / watcher peer to an already-emitted event; goal mode = the
-shipped `ava_builtins/skills/ava-goal`; sub-agent result hand-off = a message plus the shared
+shipped `ava_builtins/skills/coordination/ava-goal`; sub-agent result hand-off = a message plus the shared
 filesystem). The genuine roadmap is therefore small: the items above, not the
 33-dimension matrix. Of the two real UI/infra gaps the benchmark surfaced, the
 agent dashboard has since shipped as `/fleet` (only its batch-control layer is

@@ -398,9 +398,9 @@ check-typed-exception = true
 # their content had there, so the move itself does not force an unrelated
 # style/complexity cleanup onto code nobody otherwise touched. Additive to the
 # base scripts/*.py entry above, not a replacement.
-"ava_builtins/skills/ava-dynamic-workflow/scripts/*.py" = ["DTZ005", "N806"]
-"ava_builtins/skills/ava-self-evolution/scripts/*.py" = ["S112", "RUF059", "PLR0915", "PLW0603"]
-"ava_builtins/skills/ava-use-other-agents/scripts/*.py" = ["PLR0915"]
+"ava_builtins/skills/coordination/ava-dynamic-workflow/scripts/*.py" = ["DTZ005", "N806"]
+"ava_builtins/skills/platform/ava-self-evolution/scripts/*.py" = ["S112", "RUF059", "PLR0915", "PLW0603"]
+"ava_builtins/skills/coordination/ava-use-other-agents/scripts/*.py" = ["PLR0915"]
 # A skill's references/ holds genuine reference material — mostly prose, but
 # occasionally a Python snippet the agent reads and adapts rather than runs in
 # place (e.g. ava-dynamic-workflow's orchestrator templates, string-patched
@@ -557,8 +557,8 @@ source = ["agent", "ava", "cli", "gateway", "base", "ui", "ops", "services", "av
 omit = [
     "*/__main__.py",
     "*/tests/*",
-    "ava_builtins/skills/*/scripts/*",
-    "ava_builtins/skills/*/references/*",
+    "ava_builtins/skills/*/*/scripts/*",
+    "ava_builtins/skills/*/*/references/*",
 ]
 
 [tool.coverage.report]
@@ -627,7 +627,7 @@ exclude = [
     # (e.g. `ava.self.log`) absent from a bare `import ava`. Mirrors the ruff
     # per-file-ignores for the same paths. scripts/ is NOT excluded: it holds
     # the skill's real, maintained CLI entry points, and those are checked.
-    "ava_builtins/skills/*/references",
+    "ava_builtins/skills/*/*/references",
     "ava_builtins/plugins/*/skills/**/reference",
 ]
 # Libraries with incomplete third-party stubs — temporarily lenient.
@@ -1366,12 +1366,12 @@ reportUnknownArgumentType = "error"
 # is always on pyright's implicit search path); only the parent-reaching case
 # needs extraPaths.
 [[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/web-ai"
-extraPaths = ["ava_builtins/skills/web-ai/scripts"]
+root = "ava_builtins/skills/integrations/web-ai"
+extraPaths = ["ava_builtins/skills/integrations/web-ai/scripts"]
 
 [[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/web-sources"
-extraPaths = ["ava_builtins/skills/web-sources/scripts"]
+root = "ava_builtins/skills/integrations/web-sources"
+extraPaths = ["ava_builtins/skills/integrations/web-sources/scripts"]
 
 [tool.mutmut]
 # Mutation testing exploratory config (mutmut).

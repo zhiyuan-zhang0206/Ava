@@ -18,6 +18,7 @@ REF_DIR = (
     Path(__file__).resolve().parents[3]
     / "ava_builtins"
     / "skills"
+    / "platform"
     / "ava-self-evolution"
     / "reference"
 )

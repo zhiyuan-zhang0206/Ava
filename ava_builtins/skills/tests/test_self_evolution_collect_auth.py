@@ -45,7 +45,7 @@ class _RecordingClient:
 
 @pytest.fixture
 def collect_mod() -> Any:
-    return load_skill_script("ava-self-evolution", "scripts", "collect.py")
+    return load_skill_script("platform", "ava-self-evolution", "scripts", "collect.py")
 
 
 def _agent_process(monkeypatch: pytest.MonkeyPatch, *, delivered: str | None) -> _RecordingClient:

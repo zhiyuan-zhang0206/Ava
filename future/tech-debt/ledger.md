@@ -1,6 +1,6 @@
 # Tech-debt ledger
 
-> Living tech-debt ledger, maintained by the sweeper engine (`ava_builtins/skills/sweeper/`)
+> Living tech-debt ledger, maintained by the sweeper engine (`ava_builtins/skills/practice/sweeper/`)
 > driven by this repo's debt classes (`.agents/skills/ava-sweeper/`).
 > The single "what debt is open now" view. Forward-looking (what we intend to
 > fix) → lives in `future/`. Entries are agent + human maintained: humans

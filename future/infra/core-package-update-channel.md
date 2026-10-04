@@ -412,8 +412,8 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 
 ## Appendix B — worked example (the P1 acceptance narrative)
 
-1. An agent edits `ava_builtins/skills/ava-workflow/...` in a worktree; PR merges to main at 14:03.
-2. 14:15 (next tick), each machine with the core channel ON runs `ava packages refresh`: `ls-remote` shows a new head; fetch (objects only); `git diff --name-only <applied_rev> <head> -- ava_builtins/skills/ava-workflow` → hits; archive-extract to staging; scan passes (builtin content); the local copy check passes.
+1. An agent edits `ava_builtins/skills/practice/ava-workflow/...` in a worktree; PR merges to main at 14:03.
+2. 14:15 (next tick), each machine with the core channel ON runs `ava packages refresh`: `ls-remote` shows a new head; fetch (objects only); `git diff --name-only <applied_rev> <head> -- ava_builtins/skills/practice/ava-workflow` → hits; archive-extract to staging; scan passes (builtin content); the local copy check passes.
 3. Staged swap lands the new `$AVA_HOME/skills/ava-workflow/`; registry records `applied_rev = <merge sha>`, `last_result = applied`.
 4. No process was restarted; the next agent that opens the skill reads the new text; the capabilities index of live agents names the change on its next rebuild (existing before_llm hook).
 5. `ava packages status` shows: `ava-workflow  core  auto  rev abc1234  applied 14:15`.

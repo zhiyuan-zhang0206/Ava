@@ -39,9 +39,11 @@ from base.paths import workspace_dir
 from base.sessions.coding_session_owner import CodingSessionKey, CodingSessionOwner
 
 _REPO = Path(__file__).parents[2]
-_DYNAMIC_WORKFLOW_SCRIPTS = _REPO / "ava_builtins" / "skills" / "ava-dynamic-workflow" / "scripts"
+_DYNAMIC_WORKFLOW_SCRIPTS = (
+    _REPO / "ava_builtins" / "skills" / "coordination" / "ava-dynamic-workflow" / "scripts"
+)
 _DYNAMIC_WORKFLOW_REFERENCES = (
-    _REPO / "ava_builtins" / "skills" / "ava-dynamic-workflow" / "references"
+    _REPO / "ava_builtins" / "skills" / "coordination" / "ava-dynamic-workflow" / "references"
 )
 
 
@@ -55,8 +57,8 @@ def _load(name: str, path: Path) -> ModuleType:
 
 
 _WATCH_IDLE_PATHS = {
-    "ava-watcher": _REPO / "ava_builtins/skills/ava-watcher/scripts/watch_idle.py",
-    "ava-goal": _REPO / "ava_builtins/skills/ava-goal/scripts/watch_idle.py",
+    "ava-watcher": _REPO / "ava_builtins/skills/coordination/ava-watcher/scripts/watch_idle.py",
+    "ava-goal": _REPO / "ava_builtins/skills/coordination/ava-goal/scripts/watch_idle.py",
     "ava-fleet": _REPO / "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py",
 }
 watch_idle_modules = [
@@ -65,7 +67,7 @@ watch_idle_modules = [
 ]
 watch_work = _load(
     "watch_work_retry_under_test",
-    _REPO / "ava_builtins/skills/ava-use-other-agents/scripts/watch_work.py",
+    _REPO / "ava_builtins/skills/coordination/ava-use-other-agents/scripts/watch_work.py",
 )
 gather_files = _load(
     "gather_files_under_test",

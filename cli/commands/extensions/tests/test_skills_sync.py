@@ -71,6 +71,28 @@ def test_second_converge_is_noop(unit_home: Path, fake_repo: Path) -> None:
     assert reg.load().model_dump_json() == first  # updated_at untouched on no-op
 
 
+def test_grouped_repo_skill_converges_flat_and_keeps_its_identity(
+    unit_home: Path, fake_repo: Path
+) -> None:
+    """A skill that moves into a source-tree group (a folder with no SKILL.md of its
+    own) keeps its load-dir name, registry row and copy; only `origin_path` follows."""
+    converge_skills(fake_repo, unit_home)
+    old_hash = _entry("goal").content_hash
+    skills = fake_repo / "ava_builtins" / "skills"
+    (skills / "coordination").mkdir()
+    (skills / "goal").rename(skills / "coordination" / "goal")
+
+    result = converge_skills(fake_repo, unit_home)
+
+    assert result.copied == [] and result.removed == [] and result.warnings == []
+    assert "goal" in result.unchanged
+    assert (unit_home / "skills" / "goal" / "SKILL.md").is_file()
+    assert not (unit_home / "skills" / "coordination").exists()
+    goal = _entry("goal")
+    assert goal.content_hash == old_hash
+    assert goal.origin_path == str(skills / "coordination" / "goal")
+
+
 # ─── source updates / user edits ───────────────────────────────────────────
 
 
