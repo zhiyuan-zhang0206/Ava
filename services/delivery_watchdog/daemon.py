@@ -34,10 +34,8 @@ the process and the supervisor restarts it.
    (a row that flips pending -> claimed -> pending alerts again) and persisted
    (Task #945), so a daemon restart re-seeds from `delivery_watchdog_alerted`
    instead of re-reporting every still-stalled inbound (the 5,184-event burst,
-   2026-08-06 audit). Alerting holds back while a deploy window is open and
-   through the settle window after it closes (or after a boot / stop-window
-   resume): the resume's claim tail reads as "stalled" for its first minutes
-   but loses no wake.
+   2026-08-06 audit). The event is the whole signal: Grafana Alerting decides
+   whether and when it notifies.
 
 `running` owners are never dispatched or alerted: a chat queued behind a long
 in-flight turn is normal — the claim's turn-end SELECT picks it up.
@@ -108,7 +106,6 @@ from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.log import init_gateway_process
-from ops.deploy_window import deploy_in_flight
 from services.delivery_watchdog import (
     dispatch_guard,
     resurrect_retry,
@@ -147,11 +144,6 @@ def _pidfile() -> Path:
 _SCAN_LIVENESS_TIMEOUT_S = 60.0
 # Connections the four loops' concurrent statements can hold at once.
 _POOL_MAX_SIZE = 4
-# Deploy-window recheck cadence of the scan loop's alert gate: `deploy_in_flight`
-# reads the cohort's posture rows (a few reads per call) and the window moves at
-# fleet pace, so the gate tolerates a minute-stale read — a stale read can only
-# extend the suppression, and the window itself stays the operator's signal.
-_DEPLOY_WINDOW_RECHECK_S = 60.0
 
 
 def select_stale_pending(
@@ -395,59 +387,6 @@ def _maybe_sweep_stale_inbounds(
     return now_mono
 
 
-class _DeployWindowGate:
-    """The scan loop's stall-alert gate: an open deploy window — rechecked on
-    its own cadence — and the settle window after it closes hold stall alerts
-    back.
-
-    Alerts start held back, because a daemon (re)start is lifecycle-adjacent,
-    and a stop-window resume re-enters the same fresh state. `deploy_in_flight`
-    reads the cohort's posture rows (a few reads per call) while the window
-    moves at fleet pace, so the gate re-reads it at most every
-    `_DEPLOY_WINDOW_RECHECK_S`; a stale read can only extend the suppression.
-    The wake re-dispatch and the dead-letter sweeps never consult this gate —
-    they are what drains the queue once the window closes."""
-
-    def __init__(self, grace_s: float) -> None:
-        self._grace_s = grace_s
-        self._grace_until: float | None = time.monotonic() + grace_s
-        self._checked_at = 0.0
-        self._window_open = False
-
-    def observe_stop_window(self) -> None:
-        """One quiesced tick: nothing scans inside the stop window, and the
-        resume re-enters through a fresh read and a fresh settle window."""
-        self._checked_at = 0.0
-        self._grace_until = time.monotonic() + self._grace_s
-
-    async def observe(self, db: Database, now_mono: float) -> None:
-        """Re-read the deploy window when its cadence is due."""
-        if now_mono - self._checked_at < _DEPLOY_WINDOW_RECHECK_S:
-            return
-        self._checked_at = now_mono
-        window = await asyncio.to_thread(deploy_in_flight, db)
-        if window:
-            if not self._window_open:
-                _log.debug(
-                    "[delivery] stall alerts held: a deploy window is open (%s)", window.detail
-                )
-            self._window_open = True
-            self._grace_until = None
-        elif self._window_open:
-            self._window_open = False
-            self._grace_until = now_mono + self._grace_s
-            _log.debug(
-                "[delivery] stall alerts held for the %.0fs settle window after the deploy window",
-                self._grace_s,
-            )
-
-    def alerting(self, now_mono: float) -> bool:
-        """Whether the stall-alert half may run at `now_mono`."""
-        if self._window_open:
-            return False
-        return self._grace_until is None or now_mono >= self._grace_until
-
-
 def _stall_alert_tick(pool: ConnectionPool, threshold_s: float, ticks: int) -> tuple[int, int]:
     """One stall-alert half of a scan tick: reload the persisted alerted set,
     alert the rows it does not cover, persist the delta (INSERT new, DELETE
@@ -497,13 +436,6 @@ async def _scan_loop(
     into dead letters. The three RPC-driven recovery jobs run as their own
     loops beside this one (`run`).
 
-    Stall alerting waits while `_DeployWindowGate` holds — an open deploy
-    window, or the settle window after it closes / after a boot / after a
-    stop-window resume: the resume's claim tail reads as "stalled" for its
-    first minutes (the 2026-10-03/04 post-ready batches all claimed within
-    +228s of ready), and no wake is lost. The wake re-dispatch and the
-    dead-letter sweeps keep running throughout.
-
     The once-per-row alert set lives in `delivery_watchdog_alerted` — the
     table is the single truth (Task #945); each tick reloads it, so memory
     holds only a per-tick working copy and a daemon restart never re-reports
@@ -514,14 +446,13 @@ async def _scan_loop(
     dispatch_backoff_steps = settings.daemon.delivery_watchdog_dispatch_backoff_steps_s
     host_staleness = settings.daemon.delivery_watchdog_host_staleness_seconds
     alert_threshold = settings.daemon.delivery_watchdog_threshold_seconds
-    alert_grace = settings.daemon.delivery_watchdog_alert_grace_seconds
     stale_claimed_threshold = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
     stale_claimed_idling_threshold = (
         settings.daemon.delivery_watchdog_stale_claimed_idling_threshold_seconds
     )
     _log.info(
         "[delivery] watchdog started, pid=%s, interval=%.1fs, dispatch_threshold=%.1fs, "
-        "host_staleness=%.0fs, alert_threshold=%.0fs, alert_grace=%.0fs, "
+        "host_staleness=%.0fs, alert_threshold=%.0fs, "
         "stale_claimed_threshold=%.0fs, stale_claimed_idling_threshold=%.0fs, "
         "alert set table-backed (reload per tick)",
         os.getpid(),
@@ -529,21 +460,16 @@ async def _scan_loop(
         dispatch_threshold,
         host_staleness,
         alert_threshold,
-        alert_grace,
         stale_claimed_threshold,
         stale_claimed_idling_threshold,
     )
     ticks = 0
     last_claimed_sweep = 0.0
-    gate = _DeployWindowGate(alert_grace)
     while True:
         try:
             await round_loop.sleep_with_progress(progress, interval)
             if admission.quiesced():
-                gate.observe_stop_window()
                 continue
-            now_mono = time.monotonic()
-            await gate.observe(db, now_mono)
             dispatched = dispatch_wakes(
                 pool,
                 db,
@@ -553,10 +479,7 @@ async def _scan_loop(
                 dispatch_backoff_steps,
                 host_staleness,
             )
-            if gate.alerting(now_mono):
-                newly_alerted, ticks = _stall_alert_tick(pool, alert_threshold, ticks)
-            else:
-                newly_alerted = 0
+            newly_alerted, ticks = _stall_alert_tick(pool, alert_threshold, ticks)
             last_claimed_sweep = _maybe_sweep_stale_inbounds(
                 pool,
                 stale_claimed_threshold,

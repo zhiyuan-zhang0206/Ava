@@ -10,16 +10,13 @@ from __future__ import annotations
 import asyncio
 import shutil
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from base.config import settings
 from base.daemon.health import DaemonProbe
-from base.db import Database
 from base.native_process.os_platform import IS_MACOS
 from base.native_process.ownership import OwnedProcess
-from base.telemetry.station_endpoint import StationTarget
 from services.ava_root_glue.diagnostics import Diagnostic
 
 
@@ -164,13 +161,12 @@ def browser_reach() -> DaemonProbe:
 
 
 class StationProbe:
-    """Gateway-only remote protocol observation and its existing alert reporter."""
+    """Gateway-only remote protocol observation."""
 
     def __init__(self) -> None:
         from services.heartbeat import station_probe
 
         self._module = station_probe
-        self._target: StationTarget | None = None
 
     def probe(self) -> DaemonProbe:
         if not settings.data_plane.cluster_secret:
@@ -178,17 +174,9 @@ class StationProbe:
         target = self._module.resolve_target()
         if target is None:
             return DaemonProbe.unavailable("configured station target could not be resolved")
-        self._target = target
         if self._module._station_answers(target.url):
             return DaemonProbe.up("remote station authenticated OTLP request accepted")
         return DaemonProbe.down("remote station OTLP ingress failed")
-
-    def report(self, result: DaemonProbe) -> None:
-        if self._target is None:
-            raise RuntimeError("station report has no observed target")
-        self._module._alert_edges(
-            Database.from_settings(), self._target, ok=result.alive, now=datetime.now(UTC)
-        )
 
 
 def lgtm_write_path() -> DaemonProbe:
@@ -254,20 +242,8 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
 
     checks: list[Diagnostic] = []
     if IS_MACOS:
-        checks.append(
-            Diagnostic(
-                "brew-pin",
-                brew_pins,
-                failure_threshold=settings.services.brew_pin_probe_failure_threshold,
-            )
-        )
-    checks.append(
-        Diagnostic(
-            "venv",
-            venv,
-            failure_threshold=settings.services.venv_probe_failure_threshold,
-        )
-    )
+        checks.append(Diagnostic("brew-pin", brew_pins))
+    checks.append(Diagnostic("venv", venv))
     if IS_MACOS:
         from services.healthchecks.permissions_helper import probe
 
@@ -279,7 +255,7 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
                 checks.append(Diagnostic("pgbouncer", pgbouncer))
         if settings.observability.observability_url.strip():
             station = StationProbe()
-            checks.append(Diagnostic("observatory-station", station.probe, report=station.report))
+            checks.append(Diagnostic("observatory-station", station.probe))
     if "browser" in requested:
         checks.append(
             Diagnostic(
@@ -287,7 +263,6 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
                 browser_reach,
                 interval_s=max(60, settings.services.browser_reach_probe_interval_s),
                 timeout_s=max(20, settings.services.browser_reach_timeout_s * 3 + 10),
-                failure_threshold=settings.services.browser_reach_failure_threshold,
             )
         )
     if "loki" in requested:

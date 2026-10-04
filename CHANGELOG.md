@@ -12,26 +12,36 @@ and the matching GitHub Releases.
   earns: private-storage convergence skips are one summary WARNING per tree
   (per-node DEBUG, `node_modules` no longer descended — the 18,516-line/24h
   source), `host_turn_reconcile_skipped` and split-runner `direct_db_url` log
-  INFO, `sse_drop` splits transport losses (INFO) from queue-full (WARNING),
-  the shell reaper defers silently while a deploy window is open, and root
-  diagnostics count UNAVAILABLE rounds toward the failure threshold
-  (`AVA_BREW_PIN_PROBE_FAILURE_THRESHOLD` for brew-pin).
-- Escalation needs consecutive rounds or a real failure: a dispatcher
-  reconnect, the first Telegram push failure and a page_server relaunch log
-  WARNING without a traceback, and `NOT REVIVABLE` reports ERROR only after
-  `terminal_escalate_rounds` (default 2) consecutive terminal rounds.
-- Host-stall companions stop paging: the interrupt watcher's abandoned-task
-  report and psycopg's `query cancellation failed` line log at INFO (the
-  demotion is event-side only; the file sinks keep psycopg's own level), and a
-  browser-UA gateway 401 is DEBUG — post-rollout tab retries, with the
-  `auth401_rejected` aggregate still counting every rejection.
-- Delivery watchdog stall alerts flow through the `delivery_stalled` event
-  alone (the log line is INFO) and hold while a deploy window is open and
-  through the settle window after it closes or a resume
-  (`AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS`, default 300s); the agent db
-  pool reports a slow borrow after `AVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS`
-  (default 10s, was 3s) and coalesces it per host within
-  `AVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS` (default 300s).
+  INFO, `sse_drop` splits transport losses (INFO) from queue-full (WARNING), a
+  dispatcher reconnect, the first Telegram push failure and a page_server
+  relaunch log WARNING without a traceback, the interrupt watcher's
+  abandoned-task report and psycopg's `query cancellation failed` line log at
+  INFO (event-side only), and a browser-UA gateway 401 is DEBUG — post-rollout
+  tab retries, with the `auth401_rejected` aggregate still counting every
+  rejection. `delivery_stalled` is the single stall signal (its log line is
+  INFO) and the agent db pool reports a slow borrow after
+  `AVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS` (default 10s, was 3s).
+- Alert notification is Grafana Alerting's alone
+  ([decision](decisions/2026-10-04-alerting-on-grafana-alerting.md)): signal ->
+  rule (`for:` is the debounce) -> notification policy (grouping, repeat) ->
+  the webhook into the gateway's `POST /api/alerts` ingest -> IM. The health
+  probe, the machine/station liveness pass, the exec boot failure, the
+  inspector-metrics gap, the impersonation event log, the root unit episodes
+  and the IM push watchdog no longer write alert rows or push IM themselves;
+  each emits a declared event and a rule in `rules.yml` carries its alert. The
+  in-code gates are gone with their keys: `AVA_ALERTS_TRANSITION_WARNING_SECONDS`,
+  `AVA_ALERTS_TRANSITION_ERROR_SECONDS`,
+  `AVA_ALERTS_INSPECT_METRICS_DEGRADED_COOLDOWN_SECONDS`,
+  `AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS`,
+  `AVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS`,
+  `AVA_VENV_PROBE_FAILURE_THRESHOLD`, `AVA_BREW_PIN_PROBE_FAILURE_THRESHOLD` and
+  `AVA_BROWSER_REACH_FAILURE_THRESHOLD`, the root-unit episode store,
+  `terminal_escalate_rounds`, the boot-defer streak ledger (`hosted_boot_recovery_stalled`
+  is now `hosted_boot_recovery_deferred`, one event per deferred boot) and the
+  deploy-window gates of the delivery watchdog and the shell reaper.
+  `python -m cli.fleet_update down` opens one Grafana silence over every alert
+  (the disk alerts excepted) and `up` expires it; `ava cluster health-probe`
+  emits `health_probe_ran` every run, and its absence is itself a rule.
 - Agent shells live in one `pty-sessions` roster service per machine instead of one detached
   host process each. A session outlives an agent, an agent host and a gateway restarting; `ava
   stop`, `ava restart`, an update, a service crash and a reboot end every session, and `ava stop`

@@ -29,7 +29,7 @@ grace; first readiness or the deadline ends that grace.
 | `redis-acl` | gateway with local data plane | Admin-side native PID/data-directory custody followed by runtime-credential PING; listener ownership is checked before and after protocol execution. No ACL writes or instance start. |
 | `pgbouncer` | gateway with local enabled pooler | Native PID/config custody, admin-console authentication, and required public listener. It does not mistake a failed Postgres query for a dead pooler. No ensure or restart. |
 | `browser-reach` | selected root browser unit | Captured root listener ancestry around a temporary browser fetch, contrasted with a host HTTP request. Failed host baseline or unusable CDP is unavailable; browser-only failure is DOWN. |
-| `observatory-station` | gateway with remote observability URL | Authenticated remote OTLP protocol request. Missing credential or unresolved target is unavailable and cannot resolve an outage alert. Fresh observations feed the existing station alert transition path. |
+| `observatory-station` | gateway with remote observability URL | Authenticated remote OTLP protocol request. Missing credential or unresolved target is unavailable. A failure is episode-logged only: the station hosts the observability backends, so no alert can carry it. |
 | `lgtm-write-path` | selected root Loki unit | Captured Loki listener ancestry around a unique write/read probe. Failed and persistently throttled paths retain their registered events; no backend restart. |
 
 Native Redis observations use the public
@@ -47,11 +47,12 @@ reorganization cannot silently turn them UNAVAILABLE.
 Status includes expected diagnostics before any sample, with null sample time and
 verdict. Each subsequent sample includes its verdict, detail, and the consecutive
 non-alive count: failures and unknown results both extend the streak, and only a
-healthy sample resets it. Episode reports are transition-gated behind each
-diagnostic's failure threshold, so a below-threshold streak stays out of the log;
-alert reporters run only on fresh, non-unavailable evidence through the same
-bounded worker slot. An alert backend that hangs cannot create
-concurrent reports or diagnostic workers.
+healthy sample resets it. Every non-alive sample emits `root_diagnostic` at
+WARNING (the observability rule's pending period carries the debounce) and the
+first healthy sample after a streak logs the recovery at INFO. Alert reporters
+run only on fresh, non-unavailable evidence through the same bounded worker
+slot. An alert backend that hangs cannot create concurrent reports or
+diagnostic workers.
 
 Readiness of native LGTM services belongs to their actual root service specs.
 External station reachability is a remote protocol claim and carries no authority

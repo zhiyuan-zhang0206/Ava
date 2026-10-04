@@ -21,8 +21,8 @@ from typing import Protocol
 
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
-from services.ava_root.alerts import AlertRouter, UnitAlertFacts, UnitAlertView
 from services.ava_root.custody import ReconcileOutcome
+from services.ava_root.failure_state import UnitFailureFacts, UnitFailureView, derive_kind, describe
 from services.ava_root.manifest import UnknownUnitError
 from services.ava_root.probes import Probe, ProbeError, ProbeRegistry
 
@@ -49,8 +49,8 @@ class RevivalHost(Protocol):
         """Why a would-be reviver must not act on `unit_id` now, or None."""
         ...
 
-    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
-        """The alert-relevant facts of one unit; unknown units raise UnknownUnitError."""
+    def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
+        """The failure-state facts of one unit; unknown units raise UnknownUnitError."""
         ...
 
     async def reconcile_custody(self) -> list[ReconcileOutcome]:
@@ -97,13 +97,6 @@ class HealthConfig:
     breaker_rounds: int = 5
     """Consecutive non-alive rounds that open the hold-forever breaker."""
 
-    terminal_escalate_rounds: int = 2
-    """Consecutive terminal rounds before the NOT REVIVABLE report escalates to ERROR.
-
-    A single terminal round is usually a one-round inspection race (a psutil gap
-    mapping to UNAVAILABLE, alive again next round); only a streak means the unit
-    is genuinely unresolvable (2026-10-03 triage, E7)."""
-
     def __post_init__(self) -> None:
         if not math.isfinite(self.startup_grace_s) or self.startup_grace_s < 0:
             raise ValueError("startup_grace_s must be nonnegative")
@@ -126,8 +119,6 @@ class HealthConfig:
             # would open the breaker on the very round the threshold is met and
             # hold without a single restart attempt (same rule as run_keepalive).
             raise ValueError("breaker_rounds must be greater than failures_before_restart")
-        if self.terminal_escalate_rounds < 1:
-            raise ValueError("terminal_escalate_rounds must be at least 1")
 
 
 @dataclass(slots=True)
@@ -158,14 +149,11 @@ class UnitHealth:
     last_detail: str = ""
     """Detail string of the last probe verdict."""
 
-    terminal_rounds: int = 0
-    """Consecutive terminal verdicts since the last non-terminal round."""
-
 
 # The supervisor's deferral reason for a unit whose explicit intent is stopped
 # (`intent != RUNNING`, set by the operator or the service selection). That
 # state is EXPECTED, never a failure: it is the one reason a down verdict
-# neither counts toward the breaker nor alerts. Every other reason (an
+# neither counts toward the breaker nor reports a failure. Every other reason (an
 # in-flight retry, a `never` policy) suppresses the action only.
 _HELD_DOWN = "held down"
 
@@ -236,7 +224,6 @@ class HealthMonitor:
         config: HealthConfig | None = None,
         gate: HealthGate | None = None,
         startup_graces: Mapping[str, float] | None = None,
-        alerts: AlertRouter | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._registry = registry
@@ -248,10 +235,9 @@ class HealthMonitor:
         self._units: dict[str, UnitHealth] = {}
         self._runners: dict[str, ProbeRunner] = {}
         self._task: asyncio.Task[None] | None = None
-        self._alerts = alerts
 
     async def run_round(self) -> None:
-        """Reconcile custody, then probe every unit once, in registration order, alert."""
+        """Reconcile custody, then probe every unit once, in registration order."""
         try:
             await self._supervisor.reconcile_custody()
         except Exception:
@@ -266,34 +252,39 @@ class HealthMonitor:
                 state.last_verdict = "unavailable"
                 state.last_detail = f"health round raised {type(exc).__name__}: {exc}"
                 _log.exception("[health] unit %s: round failed; continuing", unit_id)
-        await self._observe_alerts()
+        self._report_failure_states()
 
-    async def _observe_alerts(self) -> None:
-        """Feed this round's unit facts to the alert router, off the event loop.
+    def _report_failure_states(self) -> None:
+        """Emit one `root_unit_failure_state` per unit sitting in a failure state.
 
-        The router's user-channel post is blocking HTTP, and the root loop must
-        keep serving control requests while delivery is attempted. Units
-        outside the supervisor's tree (the static probe path) carry no alert
-        facts and are skipped; the router contains per-unit failures itself.
+        The condition is a state, so it is reported on every round while it
+        holds. Units outside the supervisor's tree (the static probe path) carry
+        no failure facts and are skipped.
         """
-        if self._alerts is None:
-            return
-        views: list[UnitAlertView] = []
         for unit_id in self._registry.unit_ids():
             try:
-                facts = self._supervisor.unit_alert_facts(unit_id)
+                facts = self._supervisor.unit_failure_facts(unit_id)
             except UnknownUnitError:
                 continue
             state = self._units.get(unit_id)
-            views.append(
-                UnitAlertView(
-                    unit=unit_id,
-                    facts=facts,
-                    breaker_open=state is not None and state.breaker_since is not None,
-                    detail=state.last_detail if state is not None else "",
-                )
+            view = UnitFailureView(
+                unit=unit_id,
+                facts=facts,
+                breaker_open=state is not None and state.breaker_since is not None,
+                detail=state.last_detail if state is not None else "",
             )
-        await asyncio.to_thread(self._alerts.observe, views)
+            kind = derive_kind(view)
+            if kind is None:
+                continue
+            from base.log import logger
+
+            logger.warning(
+                "[health] unit {unit}: failure state {kind} ({detail})",
+                event="root_unit_failure_state",
+                unit=unit_id,
+                kind=kind.value,
+                detail=describe(view, kind),
+            )
 
     async def start(self) -> None:
         """Run rounds until `stop()` — sleep first, then one round per interval."""
@@ -324,7 +315,6 @@ class HealthMonitor:
                 "startup_remaining_s": self._startup_remaining(unit_id, state),
                 "generation_ready": state.generation_ready,
                 "consecutive_failures": state.consecutive_failures,
-                "terminal_rounds": state.terminal_rounds,
                 "respawn_attempts": state.respawn_attempts,
                 "breaker_open": state.breaker_since is not None,
                 "breaker_for_s": (
@@ -340,7 +330,7 @@ class HealthMonitor:
 
     @staticmethod
     def _emit_breaker_open(unit_id: str, rounds: int, attempts: int, detail: str) -> None:
-        """One registered alert per unresolved service failure episode."""
+        """One registered event when a unit's restart breaker opens."""
         from base.log import logger
 
         logger.warning(
@@ -391,7 +381,6 @@ class HealthMonitor:
         result = await self._probe(unit_id, probe)
         state.last_verdict = result.verdict.value
         state.last_detail = result.detail
-        self._track_terminal_streak(state, result)
 
         if result.alive:
             self._reset(state)
@@ -401,7 +390,7 @@ class HealthMonitor:
         deferral = self._deferral(unit_id)
         if deferral == _HELD_DOWN:
             # Operator stop: expected state, not a failure — no action, no
-            # counting, no alert (the operator's own stop must not become noise).
+            # counting, no failure signal (the operator's own stop must not become noise).
             # The verdict still lands in `last_verdict`/`last_detail` for the
             # status and event surfaces.
             self._reset(state)
@@ -483,39 +472,24 @@ class HealthMonitor:
             return
         self._report_unready_restart(unit_id, state, after.detail, delay_s)
 
-    @staticmethod
-    def _track_terminal_streak(state: UnitHealth, result: DaemonProbe) -> None:
-        """Maintain the consecutive-terminal streak for the NOT REVIVABLE escalation.
-
-        The single writer of `terminal_rounds`: a terminal verdict extends the
-        streak, any other verdict re-arms it — so the escalation sees exactly
-        CONSECUTIVE terminal rounds.
-        """
-        state.terminal_rounds = state.terminal_rounds + 1 if result.terminal else 0
-
     def _report_terminal(self, unit_id: str, state: UnitHealth, detail: str) -> None:
-        """Report one terminal verdict, escalating only after a streak.
+        """Report one terminal verdict, once per round it is observed.
 
         One flaky inspection round (a psutil race mapping to UNAVAILABLE, or a
-        replacement's ownership gap) is alive again next round and is not an
-        incident: WARNING. Only `terminal_escalate_rounds` CONSECUTIVE terminal
-        rounds mean the unit is genuinely unresolvable and escalate to ERROR
-        (2026-10-03 triage, E7). The restart machinery resets either way —
-        terminal never restarts.
+        replacement's ownership gap) is alive again next round, so the source
+        level is WARNING; whether a persisting condition pages is the
+        observability rule's pending period. The restart machinery resets either
+        way — terminal never restarts.
         """
         self._reset(state)
-        report = (
-            _log.error
-            if state.terminal_rounds >= self._config.terminal_escalate_rounds
-            else _log.warning
-        )
-        report(
-            "[health] unit %s: NOT REVIVABLE by this unit (%s, terminal round %d) — "
-            "not restarting; resolve the reported ownership or inspection failure "
-            "before retrying",
-            unit_id,
-            detail,
-            state.terminal_rounds,
+        from base.log import logger
+
+        logger.warning(
+            "[health] unit {unit}: NOT REVIVABLE by this unit ({detail}) — not restarting; "
+            "resolve the reported ownership or inspection failure before retrying",
+            event="root_unit_not_revivable",
+            unit=unit_id,
+            detail=detail,
         )
 
     def _report_unready_restart(
@@ -550,7 +524,7 @@ class HealthMonitor:
         state.consecutive_failures = failures
         if failures >= self._config.breaker_rounds and state.breaker_since is None:
             state.breaker_since = _monotonic()
-            # One alert per hold episode — a registered event; the per-round
+            # One registered event when the hold opens; the per-round
             # hold line below carries the continuing state.
             self._emit_breaker_open(unit_id, failures, state.respawn_attempts, detail)
         if state.breaker_since is not None:

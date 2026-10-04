@@ -61,15 +61,12 @@ def _alert(
 def _webhook(
     status: str = "firing",
     alerts: list[dict[str, Any]] | None = None,
-    source: str | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": status,
         "alerts": alerts or [_alert(status=status, **extra)],
     }
-    if source is not None:
-        payload["source"] = source
     return payload
 
 
@@ -219,17 +216,12 @@ def test_ingest_resolved_without_prior_notify_is_silent(db_conn: psycopg.Connect
 
 
 def test_ingest_severity_parsing(db_conn: psycopg.Connection) -> None:
-    """critical/warning/error parse; the legacy P0-P3 labels map onto the new
-    classes (compat shim); an unknown/absent severity normalizes to warning
-    (the quietest default)."""
+    """critical/warning/error parse; an unknown/absent severity normalizes to
+    warning (the quietest default)."""
     with TestClient(app) as client:
         _ingest(client, _webhook(alerts=[_alert(severity="critical", fingerprint="f1")]))
         _ingest(client, _webhook(alerts=[_alert(severity="warning", fingerprint="f2")]))
         _ingest(client, _webhook(alerts=[_alert(severity="error", fingerprint="f3")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="P0", fingerprint="f4")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="P1", fingerprint="f5")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="P2", fingerprint="f6")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="P3", fingerprint="f7")]))
         _ingest(client, _webhook(alerts=[_alert(severity="BOGUS", fingerprint="f8")]))
         _ingest(client, _webhook(alerts=[_alert(severity=None, fingerprint="f9")]))
 
@@ -240,10 +232,6 @@ def test_ingest_severity_parsing(db_conn: psycopg.Connection) -> None:
         "f1": "critical",
         "f2": "warning",
         "f3": "error",
-        "f4": "critical",
-        "f5": "error",
-        "f6": "warning",
-        "f7": "warning",
         "f8": "warning",
         "f9": "warning",
     }
@@ -821,40 +809,23 @@ def test_list_unresolved_before_resolved(db_conn: psycopg.Connection, client: Te
 # -- sources -----------------------------------------------------------------
 
 
-def test_ingest_health_probe_source_stored_and_notified(db_conn: psycopg.Connection) -> None:
-    """source="health-probe" rides into the row; the firing still notifies."""
-    payload = _webhook(source="health-probe", alerts=[_alert(fingerprint="hp1")])
+def test_ingest_rows_are_grafana_sourced(db_conn: psycopg.Connection) -> None:
+    """The webhook is the only writer: its rows carry source="grafana", and a re-send keeps it."""
     with TestClient(app) as client:
-        resp = _ingest(client, payload)
-        assert resp.status_code == 200
-        assert resp.json()["notified"] == 1
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT source FROM alerts")
-        row = cur.fetchone()
-        assert row is not None
-        assert row[0] == "health-probe"
-
-
-def test_ingest_conflict_preserves_original_source(db_conn: psycopg.Connection) -> None:
-    """A re-send under a different source does not rewrite provenance."""
-    with TestClient(app) as client:
-        _ingest(client, _webhook(source="machine-probe", alerts=[_alert(fingerprint="s1")]))
+        _ingest(client, _webhook(alerts=[_alert(fingerprint="s1")]))
         _ingest(client, _webhook(alerts=[_alert(fingerprint="s1")]))
     with db_conn.cursor() as cur:
         cur.execute("SELECT source FROM alerts")
-        row = cur.fetchone()
-        assert row is not None
-        assert row[0] == "machine-probe"
+        assert cur.fetchall() == [("grafana",)]
 
 
-def test_ingest_resolved_health_probe_notifies_recovery(db_conn: psycopg.Connection) -> None:
-    """A health-probe firing + resolved pair lands as one row + two IMs."""
+def test_ingest_resolved_notifies_recovery(db_conn: psycopg.Connection) -> None:
+    """A firing + resolved pair lands as one row + two IMs."""
     with TestClient(app) as client:
-        r1 = _ingest(client, _webhook(source="health-probe", alerts=[_alert(fingerprint="hp2")]))
+        r1 = _ingest(client, _webhook(alerts=[_alert(fingerprint="hp2")]))
         r2 = _ingest(
             client,
             _webhook(
-                source="health-probe",
                 status="resolved",
                 alerts=[
                     _alert(status="resolved", fingerprint="hp2", ends_at="2026-08-04T11:00:00Z")
@@ -883,12 +854,12 @@ def test_list_returns_source(db_conn: psycopg.Connection, client: TestClient) ->
                 "starts_at": now - timedelta(minutes=1),
                 "ends_at": None,
                 "fingerprint": "fm",
-                "source": "machine-probe",
+                "source": "grafana",
             }
         ],
     )
     body = client.get("/api/alerts").json()
-    assert body["alerts"][0]["source"] == "machine-probe"
+    assert body["alerts"][0]["source"] == "grafana"
 
 
 def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -912,84 +883,3 @@ def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
     kwargs = seen["kwargs"]
     assert kwargs["channel"] == "ava:alerts"
     assert kwargs["broadcast"] is True
-
-
-# -- CLI-side start-readiness alerts against the real store (QA #1196 nits) ----
-#
-# The readiness tier's alert writes (cli.commands._probe) execute their real
-# SQL here — the same session DB the ingest tests use — closing the fake-only
-# gap: `_unresolved_alert_instance`'s lookup, `upsert_alert`'s ON CONFLICT
-# (which must preserve notified_at across updates), and the resolved flip.
-
-
-def test_start_readiness_alert_lifecycle_on_real_db(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """End to end through `cli.commands._probe` on the real alerts table:
-    firing inserts one unresolved row per service, a re-firing start UPDATES it
-    (no duplicate, no re-notify), the resolved edge flips it with ends_at, and a
-    failure AFTER resolution is a fresh instance with a fresh IM."""
-    import base.telemetry.alerts as _alerts
-    from cli.commands import _probe as _probe_mod
-    from cli.commands._repo import ServiceSpec
-    from ops.roster.service_spec import _GATEWAY
-
-    def _spec(service: str) -> ServiceSpec:
-        return ServiceSpec(
-            session=service,
-            cmd="x",
-            capabilities=_GATEWAY,
-            requires_db=True,
-            curl_url="http://localhost:1/",
-        )
-
-    ims: list[str] = []
-
-    # Production opens a fresh connection per alert write (`with conn:` closes
-    # it on exit — psycopg3), so the seam must mint fresh connections too
-    # instead of reusing the fixture's `db_conn`.
-    def _fresh_conn() -> psycopg.Connection:
-        return psycopg.connect(settings.data_plane.db_url)
-
-    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _fresh_conn)
-    monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "DELETE FROM alerts WHERE labels->>'alertname' = %s",
-            (_probe_mod._NON_CRITICAL_ALERTNAME,),
-        )
-    db_conn.commit()
-
-    specs = (_spec("labeler"),)
-    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
-    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(*), count(notified_at) FROM alerts WHERE labels->>'alertname' = %s",
-            (_probe_mod._NON_CRITICAL_ALERTNAME,),
-        )
-        row = cur.fetchone()
-    assert row == (1, 1), "re-firing must update the open instance, not duplicate it"
-
-    _probe_mod._resolve_recovered_non_critical_alerts(specs, im_enabled=True)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT status, ends_at IS NOT NULL FROM alerts WHERE labels->>'alertname' = %s",
-            (_probe_mod._NON_CRITICAL_ALERTNAME,),
-        )
-        row = cur.fetchone()
-    assert row == ("resolved", True), "the resolved edge must flip the row with ends_at"
-    assert len(ims) == 2, "one firing IM + one resolved IM"
-
-    # A failure after resolution is a NEW instance (the open one is resolved),
-    # with its own IM — the recovery-notification loop stays alive.
-    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(*) FROM alerts WHERE labels->>'alertname' = %s AND status = 'unresolved'",
-            (_probe_mod._NON_CRITICAL_ALERTNAME,),
-        )
-        row = cur.fetchone()
-    assert row == (1,), "a failure after resolution is a fresh unresolved instance"
-    assert len(ims) == 3, "the re-fired failure gets a new IM"

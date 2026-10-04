@@ -4,11 +4,12 @@ Checks cover gateway liveness, agent population, crash loops, schema, selected
 services, Redis relay, disk usage, WAL archiving, editable-install records, source integrity,
 and provider account health. Any failed check returns unhealthy.
 
-Outage episodes retain their first observation and grade by elapsed time:
-normal recovery stays quiet, then WARNING escalates to ERROR. A live deploy
-pauses explained alert grading; disk pressure remains independent. Recovery
-resolves only alerts that fired. Owner notification uses the alerts ingest and
-its local fallback when the gateway is unavailable.
+Every run emits one `health_probe_ran` heartbeat (its absence is the dead-man
+signal); every unhealthy run also emits one `health_probe_failing` event naming
+the failed check and its failure class, repeated on every run while the condition holds;
+Grafana alert rules turn that stream into graded notifications (`for:` is the
+normal-recovery budget, then WARNING, then ERROR). The probe itself decides
+nothing about notifying.
 
 The probe never selects a release, rolls back code, or publishes known-good
 state.
@@ -22,21 +23,8 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-# Outage episodes and edge alerts live in
-# `health_alerts` (split out 2026-08-07 to stay under the 800-line ceiling).
-# The probe runner uses the pieces below; the rest are re-exported so tests
-# and callers that address them as `health.<name>` keep working.
+from base import telemetry
 from cli.commands.cluster._provider_guard import run_provider_guard
-from cli.commands.cluster.health_alerts import (
-    ALERT_STATE_FILE,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
-    _alert_failure,
-    _alert_recovery,
-    _alert_summary,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
-    _deploy_suppression,
-    _ingest_alert,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
-    _ingest_alert_fallback,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
-    notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
-)
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
 # defaults are set at registration time.
@@ -161,22 +149,46 @@ def _agent_population_failure_class(min_agents: int) -> str | None:
     return "code"
 
 
-def _grade(home: Path, message: str) -> None:
-    """Grade one failed check, annotating the deploy that pauses its grading."""
-    deploying = _deploy_suppression()
-    _alert_failure(home, message, deploy_explains=deploying is not None)
-    if deploying is not None:
-        print(f"  deploy in flight — alert grading paused ({deploying})", file=sys.stderr)
+def _report_failing(check: str, message: str, *, failure_class: str = "alert-only") -> None:
+    """Emit this run's `health_probe_failing` signal for one failed check.
+
+    `check` is the stable name Grafana groups by; `failure_class` is `code`,
+    `environment`, `maintenance`, or `alert-only` (a check whose failure rolling
+    code back cannot fix). Emit never raises."""
+    telemetry.emit(
+        "telemetry",
+        "health_probe_failing",
+        level="warning",
+        source="health-probe",
+        attributes={"check": check, "failure_class": failure_class, "message": message},
+    )
 
 
-def _unhealthy(home: Path, message: str, *, failure_class: str = "code") -> int:
+def _report_ran(unhealthy_checks: int) -> None:
+    """Emit this run's `health_probe_ran` heartbeat; its absence means the probe stopped."""
+    telemetry.emit(
+        "telemetry",
+        "health_probe_ran",
+        source="health-probe",
+        attributes={"unhealthy_checks": unhealthy_checks},
+    )
+
+
+def _unhealthy(check: str, message: str, *, failure_class: str = "code") -> int:
     """Report an unhealthy observation without making a release decision."""
     print(message, file=sys.stderr)
     if failure_class == "maintenance":
         print("  local agent maintenance explains the low population", file=sys.stderr)
     elif failure_class == "environment":
         print("  environment-class failure", file=sys.stderr)
-    _grade(home, message)
+    _report_failing(check, message, failure_class=failure_class)
+    return 1
+
+
+def _alert_only_failure(check: str, message: str) -> int:
+    """Report a failed alert-only check (rolling code back does not fix it)."""
+    print(message, file=sys.stderr)
+    _report_failing(check, message)
     return 1
 
 
@@ -256,7 +268,7 @@ def _service_probes() -> list[str]:
     cannot certify health, even when the gateway responds.
 
     The probe's `detail` rides along into the entry because this list becomes the
-    owner's alert text, and that alert is the only thing a human sees. "ava-ops
+    `health_probe_failing` message, the only diagnostic a human sees in the alert. "ava-ops
     not responding" and "ava-ops is answering, but it is /home/ava/.ava" are the
     same bare session name and completely different incidents — the second one
     means another unit holds this unit's port and no amount of waiting fixes it."""
@@ -339,10 +351,9 @@ def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str 
     Reported through check 6. A full disk
     is the 2026-08-08 outage class (checkpoint growth filled the disk and the
     gateway could not start), but rolling the cluster back to a previous
-    commit frees no disk space, so it is not rollback evidence. The edge
-    alert machinery (state file) keeps a persistent over-watermark condition
-    to one firing + one recovery notification, matching the R7
-    chronic-condition semantics in the Grafana rules.
+    commit frees no disk space, so it is not rollback evidence. The failure is
+    reported as `alert-only`, repeated on every run while the volume stays over
+    the watermark.
     """
     fraction = _disk_usage_fraction()
     if fraction is None or fraction <= watermark:
@@ -408,17 +419,14 @@ def _source_tree_failure() -> str | None:
     return "prod source tree tampered: " + "; ".join(violations)
 
 
-def _run_source_tree_check(home: Path) -> int | None:
-    """Run check 8 — alert-only, so it bypasses ``_unhealthy`` (a tampered
+def _run_source_tree_check() -> int | None:
+    """Run check 8 — alert-only, so it reports as `alert-only` (a tampered
     tree is the 2026-08-28 outage class, but rollback does not undo an on-disk
-    edit). Returns None when the check passes, 1 when it alerts."""
+    edit). Returns None when the check passes, 1 when it fails."""
     failure = _source_tree_failure()
     if failure is None:
         return None
-    message = f"FAIL: source tree — {failure}"
-    print(message, file=sys.stderr)
-    _grade(home, message)
-    return 1
+    return _alert_only_failure("source_tree", f"FAIL: source tree — {failure}")
 
 
 def run_health_probe(
@@ -431,12 +439,11 @@ def run_health_probe(
 ) -> int:
     """Return 0 for healthy, 1 for unhealthy, and 2 for a checkout refusal.
 
-    Observations feed graded owner alerts; nothing here selects, rolls back or
-    publishes a release.
+    Failed checks emit `health_probe_failing`; nothing here selects, rolls back
+    or publishes a release.
     """
-    from base.paths import ava_home, prod_service_checkout_error, repo_root
+    from base.paths import prod_service_checkout_error, repo_root
 
-    home = ava_home()
     refusal = prod_service_checkout_error(repo_root())
     if refusal is not None:
         # A worktree/dev checkout driving the probe is the 2026-08-07 accident
@@ -446,18 +453,19 @@ def run_health_probe(
         print(f"health-probe refused: {refusal}", file=sys.stderr)
         return 2
 
-    return _observe_cluster_health(
-        home,
+    telemetry.init_telemetry(process="cli-health-probe")
+    rc = _observe_cluster_health(
         agent_min=agent_min,
         crash_loop_max_restarts=crash_loop_max_restarts,
         crash_loop_window_minutes=crash_loop_window_minutes,
         check_crash_loops=check_crash_loops,
         check_schema=check_schema,
     )
+    _report_ran(unhealthy_checks=rc)
+    return rc
 
 
 def _observe_cluster_health(
-    home: Path,
     *,
     agent_min: int | None,
     crash_loop_max_restarts: int,
@@ -471,16 +479,13 @@ def _observe_cluster_health(
     # Keep the existing success line in check 6's output position below.
     disk_failure = _disk_usage_failure()
     if disk_failure is not None:
-        message = f"FAIL: disk usage — {disk_failure}"
-        print(message, file=sys.stderr)
-        _alert_failure(home, message, deploy_explains=False)
-        return 1
+        return _alert_only_failure("disk_usage", f"FAIL: disk usage — {disk_failure}")
 
     # 1. Gateway liveness (primary signal)
     if not _gateway_liveness_with_retry():
         failure_class = "environment" if _data_plane_abnormal() else "code"
         return _unhealthy(
-            home,
+            "gateway_liveness",
             "FAIL: gateway liveness — health endpoint unreachable or non-200",
             failure_class=failure_class,
         )
@@ -496,7 +501,7 @@ def _observe_cluster_health(
         agent_min = settings.daemon.health_probe_agent_min
     if not _agent_population(agent_min):
         return _unhealthy(
-            home,
+            "agent_population",
             f"FAIL: agent population — fewer than {agent_min} agent(s) running/idling",
             failure_class=_agent_population_failure_class(agent_min) or "code",
         )
@@ -506,7 +511,7 @@ def _observe_cluster_health(
     if check_crash_loops:
         if not _crash_loop_detection(crash_loop_max_restarts, crash_loop_window_minutes):
             return _unhealthy(
-                home,
+                "crash_loop",
                 f"FAIL: crash-loop detected — agent(s) restarted > {crash_loop_max_restarts} "
                 f"times in {crash_loop_window_minutes} min",
             )
@@ -519,15 +524,15 @@ def _observe_cluster_health(
     if check_schema:
         if not _schema_health():
             return _unhealthy(
-                home,
+                "schema",
                 "FAIL: schema health — applied version behind required (CodeBehindSchema)",
             )
         print("  ✓ schema health")
 
-    return _check_alert_only_health(home)
+    return _check_alert_only_health()
 
 
-def _check_alert_only_health(home: Path) -> int:
+def _check_alert_only_health() -> int:
     """Observe the remaining service, host, and provider health signals."""
 
     # 5. Per-service health and the host-level Redis bridge.
@@ -535,10 +540,9 @@ def _check_alert_only_health(home: Path) -> int:
         failure for failure in (_redis_bridge_probe(),) if failure is not None
     ]
     if failing:
-        message = f"FAIL: service probe — not healthy: {', '.join(sorted(failing))}"
-        print(message, file=sys.stderr)
-        _grade(home, message)
-        return 1
+        return _alert_only_failure(
+            "service_probe", f"FAIL: service probe — not healthy: {', '.join(sorted(failing))}"
+        )
     print("  ✓ service probes")
 
     # 6. Data-volume usage passed before gateway liveness. A full disk alerts
@@ -550,10 +554,7 @@ def _check_alert_only_health(home: Path) -> int:
     # code back. Silent unless AVA_WALG_CONFIG_FILE switches WAL-G on.
     archive_failure = _walg_archive_failure()
     if archive_failure is not None:
-        message = f"FAIL: {archive_failure}"
-        print(message, file=sys.stderr)
-        _grade(home, message)
-        return 1
+        return _alert_only_failure("walg_archive", f"FAIL: {archive_failure}")
     from services.gateway_side.walg.config import enabled as walg_enabled
 
     if walg_enabled():
@@ -566,10 +567,9 @@ def _check_alert_only_health(home: Path) -> int:
     # recovery; this probe and ordinary startup never rewrite these records.
     editable_failure = _editable_install_failure()
     if editable_failure is not None:
-        message = f"FAIL: editable install — {editable_failure}"
-        print(message, file=sys.stderr)
-        _grade(home, message)
-        return 1
+        return _alert_only_failure(
+            "editable_install", f"FAIL: editable install — {editable_failure}"
+        )
     print("  ✓ editable install records")
 
     # 8. Source-tree integrity — alert-only, same class as checks 5-7: a
@@ -578,17 +578,15 @@ def _check_alert_only_health(home: Path) -> int:
     # box), but rolling back code does not undo an on-disk edit. The probe
     # detects and alerts; it never writes, and nothing repairs the tree for
     # the operator.
-    source_check = _run_source_tree_check(home)
+    source_check = _run_source_tree_check()
     if source_check is not None:
         return source_check
     print("  ✓ source tree integrity")
 
     # 9-10. Provider account guard — alert-only, like checks 5-8 (see `_provider_guard`).
-    if (guard_rc := run_provider_guard(home, alert_failure=_alert_failure)) is not None:
+    if (guard_rc := run_provider_guard(report=_report_failing)) is not None:
         return guard_rc
 
-    # All checks passed — resolve any alert episode that actually fired.
-    _alert_recovery(home)
     return 0
 
 
@@ -600,7 +598,7 @@ def cmd_health_probe(
     check_crash_loops: bool = True,
     check_schema: bool = True,
 ) -> int:
-    """Report cluster health through exit status, diagnostics, and graded alerts."""
+    """Report cluster health through exit status, diagnostics, and `health_probe_failing` events."""
     return run_health_probe(
         agent_min=agent_min,
         crash_loop_max_restarts=crash_loop_max_restarts,

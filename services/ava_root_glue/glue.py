@@ -17,7 +17,6 @@ from base.deploy.progress_timeout import (
     SERVICE_READY_TIMEOUT_S,
 )
 from ops.roster import build_services
-from services.ava_root.alerts import AlertRouter, AlertWebhookNotifier
 from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.probes import ProbeError, ProbeRegistry
 from services.ava_root.selfcheck import SelfCheckConfig, TreeSelfCheck
@@ -64,7 +63,6 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
         registry,
         diagnostics=build_diagnostics(requested),
         startup_graces=startup_graces,
-        alerts=AlertRouter(context.run_dir, notifier=AlertWebhookNotifier()),
     )
 
 
@@ -76,20 +74,13 @@ def assemble(
     selfcheck_config: SelfCheckConfig | None = None,
     diagnostics: Sequence[Diagnostic] | None = None,
     startup_graces: Mapping[str, float] | None = None,
-    alerts: AlertRouter | None = None,
 ) -> list[WiringParticipant]:
-    """Build the two monitors over `registry` and attach their status surfaces.
-
-    `alerts` is the episode router the reference wiring supplies; the drill
-    assembly deliberately leaves it unset, so a dry run never posts its
-    throwaway units to the real alert store.
-    """
+    """Build the two monitors over `registry` and attach their status surfaces."""
     monitor = HealthMonitor(
         context.supervisor,
         registry,
         config=health_config,
         startup_graces=startup_graces,
-        alerts=alerts,
     )
     check = TreeSelfCheck(context.supervisor, config=selfcheck_config)
     if diagnostics is not None:

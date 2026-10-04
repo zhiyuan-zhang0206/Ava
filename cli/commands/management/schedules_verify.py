@@ -13,23 +13,12 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-import httpx
-
-from cli.commands.management.schedules import _TIMEOUT_S, _gateway_base, _headers
+from base import telemetry
 
 # One child's budget. task #3696 exception inventory: a self-imposed guard on a
 # single check child — a healthy top-level import set takes seconds, so a child
 # still running at 90s is wedged and must not park the sweep behind it.
 _VERIFY_CHILD_TIMEOUT_S = 90.0
-
-# The stable identity of the sweep's alert instance (one drift episode per
-# cluster). Severity is fixed, so the fingerprint covers the label pair.
-_VERIFY_ALERTNAME = "schedule dry-import"
-
-# Delivery attempts for one alert POST. task #3696 exception inventory: fixed
-# by the 2026-08-25 alert-delivery ruling (design #1595) — retry once, then drop; no direct-DB
-# fallback for non-agent emitters.
-_VERIFY_ALERT_ATTEMPTS = 2
 
 
 # The child's last stdout line -> the RED detail (prefix added to the line's remainder).
@@ -99,11 +88,11 @@ def _read_rows_file(path: str) -> list[tuple[int, str, str]]:
 @dataclass(frozen=True)
 class VerifyPorts:
     """What a verify sweep reads and does: the schedule rows, the per-script dry
-    import and the alert report. `cmd_schedules_verify` wires the real ones."""
+    import and the failure report. `cmd_schedules_verify` wires the real ones."""
 
     read_rows: Callable[[], list[tuple[int, str, str]]]
     check_script: Callable[[str], str | None]
-    alert: Callable[..., None]
+    report: Callable[..., None]
 
 
 def _verify_sweep(*, notify: bool, ports: VerifyPorts) -> int:
@@ -118,7 +107,7 @@ def _verify_sweep(*, notify: bool, ports: VerifyPorts) -> int:
         print(f"RESULT ts={stamp} checked=0 green=0 red=0 rc=2")
         print(f"TOOL-ERROR {detail}")
         if notify:
-            ports.alert(stamp=stamp, checked=0, reds=[], tool_error=detail)
+            ports.report(checked=0, reds=[], tool_error=detail)
         return 2
 
     reds: list[tuple[int, str, str]] = []
@@ -138,13 +127,13 @@ def _verify_sweep(*, notify: bool, ports: VerifyPorts) -> int:
     print(f"RESULT ts={stamp} checked={checked} green={green} red={len(reds)} rc={rc}")
     for schedule_id, name, missing in reds:
         print(f"RED id={schedule_id} name={name} missing={missing}")
-    if notify:
-        ports.alert(stamp=stamp, checked=checked, reds=reds, tool_error=None)
+    if notify and reds:
+        ports.report(checked=checked, reds=reds, tool_error=None)
     return rc
 
 
 def _verify_file(path: str) -> int:
-    """`--check-file PATH` — dry-import one script file (no DB, no alert)."""
+    """`--check-file PATH` — dry-import one script file (no DB, no signal)."""
     try:
         source = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -176,9 +165,9 @@ def cmd_schedules_verify(
     ...` on rc=2; exit codes 0 all clean / 1 red / 2 tool error. `--check-file`
     checks one file off-DB (the falsification hook); `--rows-file` sweeps a JSON
     dump of the table (`[[id, name, script], ...]`) instead of reading it, so
-    this checkout never dials the database, and never alerts (the alert funnel
-    reports the live table); otherwise a non-clean sweep alerts through
-    `/api/alerts` unless `--no-notify`."""
+    this checkout never dials the database, and never signals (the signal
+    reports the live table); otherwise a non-clean sweep emits a
+    `schedule_verify_failed` event unless `--no-notify`."""
     if check_file is not None:
         return _verify_file(check_file)
     if rows_file is not None:
@@ -186,117 +175,37 @@ def cmd_schedules_verify(
     ports = ports or VerifyPorts(
         read_rows=partial(_read_rows_file, rows_file) if rows_file else _read_schedule_rows,
         check_script=_check_script,
-        alert=_alert_verify,
+        report=_report_verify,
     )
     return _verify_sweep(notify=notify, ports=ports)
 
 
-def _open_verify_starts_at() -> str | None:
-    """`starts_at` of the open (unresolved) verify alert, or None.
-
-    The alerts table is the episode state (same derivation as the machine
-    liveness pass): reusing an open instance's `starts_at` lets the ingest's
-    notified_at gate keep a repeated red run from re-paging."""
-    from base.db import Database
-
-    with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT starts_at FROM alerts WHERE labels->>'alertname' = %s "
-            "AND status = 'unresolved' ORDER BY starts_at DESC LIMIT 1",
-            (_VERIFY_ALERTNAME,),
-        )
-        row = cur.fetchone()
-    return row[0].isoformat() if row is not None else None
-
-
-def _alert_verify(
-    *,
-    stamp: str,
-    checked: int,
-    reds: list[tuple[int, str, str]],
-    tool_error: str | None,
-    open_starts_at: Callable[[], str | None] = _open_verify_starts_at,
+def _report_verify(
+    *, checked: int, reds: list[tuple[int, str, str]], tool_error: str | None
 ) -> None:
-    """Report a non-clean sweep through the alerts ingest — best-effort.
+    """Emit one `schedule_verify_failed` event for a non-clean sweep.
 
-    Alert is the sanctioned system -> human surface for non-agent emitters (the
-    health probe posts the same shape): one firing instance per drift episode,
-    refreshed by later red runs and resolved by a clean one. Never raises —
-    the caller already sees the result on stdout."""
-    from base.cluster import home_label
-    from base.paths import ava_home
-    from base.telemetry.alerts import fingerprint
-
-    try:
-        labels = {"alertname": _VERIFY_ALERTNAME, "severity": "error"}
-        starts_at = open_starts_at()
-        label = home_label(ava_home())
-        if reds or tool_error is not None:
-            if tool_error is not None:
-                detail = f"tool-error: {tool_error}"
-            else:
-                listing = "; ".join(
-                    f"id={sid} name={name} missing={missing}" for sid, name, missing in reds
-                )
-                detail = (
-                    f"{len(reds)}/{checked} in-store schedule script(s) "
-                    f"failed dry-import: {listing}"
-                )
-            alert = {
-                "status": "firing",
-                "labels": labels,
-                "annotations": {"summary": f"[{label}] [schedule-verify] {detail}"},
-                "startsAt": starts_at or stamp,
-                "endsAt": "",
-                "fingerprint": fingerprint(labels),
-            }
-        elif starts_at is not None:
-            alert = {
-                "status": "resolved",
-                "labels": labels,
-                "annotations": {
-                    "summary": (
-                        f"[{label}] [schedule-verify] all {checked} in-store schedule "
-                        "scripts dry-import clean"
-                    )
-                },
-                "startsAt": starts_at,
-                "endsAt": stamp,
-                "fingerprint": fingerprint(labels),
-            }
-        else:
-            return  # a clean run with no open episode stays silent
-        _post_verify_alert(alert)
-    except Exception as exc:  # alerting must never break the sweep
-        print(f"  (verify alert failed: {type(exc).__name__}: {exc})", file=sys.stderr)
-
-
-def _post_verify_alert(alert: dict[str, Any]) -> None:
-    """POST one alert to the gateway's `/api/alerts` funnel; retry once, then drop."""
-    payload = {"source": "schedule-verify", "alerts": [alert]}
-    last_error: Exception | None = None
-    for _attempt in range(_VERIFY_ALERT_ATTEMPTS):
-        try:
-            resp = httpx.post(
-                f"{_gateway_base()}/api/alerts",
-                json=payload,
-                headers=_headers(),
-                timeout=_TIMEOUT_S,
-            )
-            resp.raise_for_status()
-            return
-        except Exception as exc:  # retried once, then dropped
-            last_error = exc
-    if isinstance(last_error, httpx.HTTPStatusError):
-        # Log the status + body only, never the exception: its repr embeds the
-        # request, whose Authorization header must stay out of stderr.
-        print(
-            f"  (verify alert delivery failed: HTTP {last_error.response.status_code} "
-            f"{last_error.response.text[:120]})",
-            file=sys.stderr,
-        )
+    The event is the signal a Grafana rule reads; a clean sweep emits nothing,
+    so the alert resolves on its own once reds stop recurring."""
+    if tool_error is not None:
+        detail = f"tool-error: {tool_error}"
     else:
-        print(f"  (verify alert delivery failed: {type(last_error).__name__})", file=sys.stderr)
+        listing = "; ".join(
+            f"id={sid} name={name} missing={missing}" for sid, name, missing in reds
+        )
+        detail = f"{len(reds)}/{checked} in-store schedule script(s) failed dry-import: {listing}"
+    telemetry.emit(
+        "telemetry",
+        "schedule_verify_failed",
+        level="error",
+        source="schedule-verify",
+        attributes={
+            "checked": checked,
+            "red": len(reds),
+            "tool_error": tool_error,
+            "detail": detail,
+        },
+    )
 
 
 def h_schedules_verify(args: argparse.Namespace) -> int:

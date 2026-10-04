@@ -577,12 +577,8 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         _exercise_understanding_node_grants(conn, agent_id)
         # the compact-boundary build enqueue (INSERT; task #4674)
         _exercise_hierarchy_job_grants(conn, agent_id)
-        # the start-readiness alert surface (SELECT + INSERT + UPDATE — the
-        # firing upsert / resolve path runs in the runner process; task
-        # #3747, where the surface shipped without the alerts entry and every
-        # pure agent-runner's start failed the resolve with
-        # InsufficientPrivilege)
-        _exercise_alert_grants(conn)
+        # alerts is gateway-written only: the runner reads it but cannot write it
+        _assert_alert_writes_denied(conn)
         # machine_units register_self (INSERT + UPDATE + SELECT)
         conn.execute("INSERT INTO machine_units (machine_name, home) VALUES ('m1', '/h1')")
         conn.execute("UPDATE machine_units SET url = 'http://m1' WHERE machine_name = 'm1'")
@@ -768,37 +764,20 @@ def _exercise_hierarchy_job_grants(conn: psycopg.Connection, agent_id: int) -> N
     assert row == ("pending",)
 
 
-def _exercise_alert_grants(conn: psycopg.Connection) -> None:
-    """The start-readiness alert surface `ava start` writes from the runner
-    process (cli/commands/_probe.py): the firing upsert INSERTs the instance
-    (or updates the open one in place), the recovery edge resolves it with an
-    UPDATE, and the open-instance lookup SELECTs it by labels first.
-    Regression for task #3747: the surface shipped without the alerts entry
-    and every pure agent-runner's start logged the resolve failing with
-    InsufficientPrivilege. DELETE stays ungranted — resolution is a status
-    write.
-    """
-    conn.execute(
-        "INSERT INTO alerts (status, severity, alertname, labels, starts_at,"
-        " fingerprint, source) VALUES ('unresolved', 'warning', 'non-critical"
-        " service not ready after start', %s::jsonb, now(), 'fp-start-readiness',"
-        " 'start-readiness')",
-        ('{"service": "ava-browser"}',),
-    )
-    row = conn.execute(
-        "SELECT id FROM alerts WHERE fingerprint = 'fp-start-readiness' AND status = 'unresolved'"
-    ).fetchone()
-    assert row is not None
-    conn.execute(
-        "UPDATE alerts SET status = 'resolved', ends_at = now(), updated_at = now()"
-        " WHERE fingerprint = 'fp-start-readiness'"
-    )
-    assert conn.execute(
-        "SELECT count(*) FROM alerts WHERE fingerprint = 'fp-start-readiness'"
-        " AND status = 'resolved'"
-    ).fetchone() == (1,)
+def _assert_alert_writes_denied(conn: psycopg.Connection) -> None:
+    """The alerts table is written only by the gateway ingest: the runner reads
+    it and holds neither INSERT nor UPDATE (nor DELETE)."""
+    assert conn.execute("SELECT count(*) FROM alerts").fetchone() == (0,)
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        conn.execute("DELETE FROM alerts WHERE fingerprint = 'fp-start-readiness'")
+        conn.execute(
+            "INSERT INTO alerts (status, severity, alertname, labels, starts_at,"
+            " fingerprint, source) VALUES ('unresolved', 'warning', 'x', '{}'::jsonb,"
+            " now(), 'fp-runner', 'grafana')"
+        )
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        conn.execute("UPDATE alerts SET status = 'resolved' WHERE fingerprint = 'fp-runner'")
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        conn.execute("DELETE FROM alerts WHERE fingerprint = 'fp-runner'")
 
 
 def _identity_url(url: str) -> str:
@@ -965,35 +944,17 @@ def test_impersonation_entry_grant_reaches_a_cluster_born_before_the_table(
     assert row == (1,)
 
 
-def test_alert_write_grant_reaches_a_cluster_born_before_the_entry(runner_db: str) -> None:
-    """Task #3747 regression: a cluster whose runner surface predates the
-    alerts entry.
-
-    Fresh-birth coverage lives in `test_runner_grant_matrix`; the prod shape
-    is the reverse: the role carried no alerts write entry, so every start's
-    resolve failed with InsufficientPrivilege until the start-path refresh
-    re-ran the grant layer with the entry present.
-    """
+def test_refresh_revokes_the_alert_writes_an_earlier_release_granted(runner_db: str) -> None:
+    """A cluster born when the runner matrix granted INSERT/UPDATE on alerts
+    converges to read-only: the grant refresh revokes what the matrix no longer
+    names."""
     _grant_runner(runner_db)
-
-    # Simulate a cluster whose surface predates this entry: the role's alerts
-    # grants as they were — the blanket read grant, no write grants.
     with psycopg.connect(runner_db, autocommit=True) as conn:
-        conn.execute("REVOKE INSERT, UPDATE ON alerts FROM ava_runner")
+        conn.execute("GRANT INSERT, UPDATE ON alerts TO ava_runner")
 
-    # Before the refresh: reading works, the write is denied — exactly the
-    # prod symptom ("non-critical service alert resolve failed
-    # (InsufficientPrivilege)").
-    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
-        assert conn.execute("SELECT count(*) FROM alerts").fetchone() == (0,)
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            _exercise_alert_grants(conn)
-
-    # The start-path refresh (ensure_groups) re-runs the grant layer with the
-    # alerts entry.
     _grant_runner(runner_db)
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
-        _exercise_alert_grants(conn)
+        _assert_alert_writes_denied(conn)
 
 
 def test_hierarchy_jobs_insert_grant_reaches_a_cluster_born_before_the_entry(

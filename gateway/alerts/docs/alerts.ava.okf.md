@@ -14,14 +14,12 @@ Notice — own table, own UI section, own IM channel; nothing here touches
 `agent_notices`. Grafana's embedded Alertmanager evaluates the alert rules
 (`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` as code) and delivers the Alertmanager
 standard webhook payload to the gateway; this router is the other half of
-the loop. The cluster health probe (`cli/commands/cluster/health_alerts.py`) posts
-its time-graded health alerts through the same endpoint with
-`source="health-probe"`, and the heartbeat liveness pass
-(`services/heartbeat/liveness.py`) writes its machine offline/online edges
-straight to the table (`source="machine-probe"`) — every producer rides one
-store/IM pipeline: one row per episode, with another IM when severity increases. The
-store/IM core lives in `base/telemetry/alerts.py` (this router is one caller; the
-probes run the same functions locally). Three HTTP surfaces plus one background
+the loop. This router is the only way alerts enter the store: no other process writes
+`alerts` or pushes an alert to IM (`tests/scripts/test_alert_single_path.py`);
+every other condition is an event plus a Grafana rule
+([decision](../../../decisions/2026-10-04-alerting-on-grafana-alerting.md)).
+One row per episode, with another IM when severity increases. The store/IM core
+lives in `base/telemetry/alerts.py`. Three HTTP surfaces plus one background
 reconciler:
 
 - `POST /api/alerts` — the webhook (Grafana embedded-Alertmanager contact
@@ -35,7 +33,7 @@ reconciler:
   every ingest; the UI's initial fetch covers rows ingested before the
   subscription opened.
 - Grafana reconciliation — on events-maintenance service start and every five minutes, fetch
-  Grafana's current Alertmanager instances and resolve stored Grafana rows
+  Grafana's current Alertmanager instances and resolve stored rows
   absent from that truth set. This closes the lost-RESOLVE-webhook gap.
 
 ## Store — `alerts`
@@ -49,8 +47,9 @@ Columns: `status` (unresolved|resolved — no ack state) /
 normalized — anything else defaults to warning) / `alertname` / `labels` /
 `annotations` (jsonb, the Alertmanager shape) / `starts_at` / `ends_at` /
 `fingerprint` (Alertmanager-standard fnv-1a over sorted labels, computed
-when a direct writer omits it) / `generator_url` / `source`
-(`grafana` | `health-probe` | `machine-probe`) / `notified_at` / timestamps.
+when the payload omits it) / `generator_url` / `source` (`grafana`; rows
+written before 2026-10-04 also carry the retired in-process writers' tags) /
+`notified_at` / timestamps.
 Index: `(status, starts_at DESC)` serves the list path.
 
 ## Contract

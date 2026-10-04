@@ -2,8 +2,8 @@
 
 The first failed attempt is the transient norm (the measured ~0.65s connect
 window; a flaky link): WARNING with a one-line cause, no traceback. Only when
-the single retry fails does the send log ERROR + stack and run the push-failure
-watchdog. This module exists beside `test_im_bridge_core.py` because that file
+the single retry fails does the send log ERROR + stack and emit the
+im_push_failed event. This module exists beside `test_im_bridge_core.py` because that file
 sits at its frozen size ceiling.
 """
 
@@ -43,7 +43,7 @@ class _Adapter:
 
 
 class _Core:
-    """The slice `send_with_retry`/`alert_push_failure` read."""
+    """The slice `send_with_retry` reads."""
 
     config = im_bridge_config(im_push_retry_backoff_seconds=0.0, im_push_retry_jitter_seconds=0.0)
 
@@ -74,8 +74,8 @@ async def test_first_failure_logs_warning_and_a_healed_retry_stays_clean(
 async def test_failed_retry_keeps_error_with_traceback(
     _no_sleep: None, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Only a retry failure escalates: ERROR + traceback (the push-failure
-    watchdog then decides about the cross-channel alert)."""
+    """Only a retry failure escalates: ERROR + traceback (the
+    im_push_failed event follows)."""
     caplog.set_level(logging.WARNING, logger=_LOGGER)
     adapter = _Adapter(fail_attempts=2)
 

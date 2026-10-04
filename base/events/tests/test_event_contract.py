@@ -88,23 +88,11 @@ def test_custody_reconcile_payload_names_the_evidence() -> None:
     )
 
 
-def test_root_unit_alert_payloads_name_the_evidence() -> None:
+def test_root_unit_failure_payloads_name_the_evidence() -> None:
     from base.events.contract import payload_keys
 
-    assert payload_keys("root_unit_alert_fired") == (
-        "unit",
-        "kind",
-        "since_timestamp_seconds",
-        "detail",
-        "delivery",
-    )
-    assert payload_keys("root_unit_alert_resolved") == (
-        "unit",
-        "kind",
-        "since_timestamp_seconds",
-        "failed_for_s",
-        "delivery",
-    )
+    assert payload_keys("root_unit_failure_state") == ("unit", "kind", "detail")
+    assert payload_keys("root_unit_not_revivable") == ("unit", "detail")
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
@@ -245,6 +233,17 @@ _DECLARED_PAYLOAD_KEYS = {
     "heartbeat_backoff_raised": ("level", "interval_seconds"),
     "heartbeat_backoff_reset": ("previous_level", "reason"),
     "delivery_stalled": ("inbound_id", "age_s"),
+    "db_pool_acquire_slow": (
+        "name",
+        "elapsed",
+        "slot_wait_ms",
+        "check_ms",
+        "check_attempts",
+        "pool_size",
+        "pool_available",
+        "requests_waiting",
+        "connections_errors",
+    ),
     "telemetry_read_stale": (
         "source",
         "signal",

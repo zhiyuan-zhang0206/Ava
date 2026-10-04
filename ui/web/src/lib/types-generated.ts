@@ -1862,10 +1862,10 @@ export interface paths {
          *     The separate transaction race between the pause latch and creation of a
          *     brand-new agent row is outside this resurrection boundary.
          *
-         *     Open "machine offline" alerts for the machine are resolved as part of the
-         *     latch step — an expected absence is not an incident. Idempotent: pausing
-         *     an already-paused machine re-runs the (now-empty) drain/terminate and
-         *     returns the existing latch.
+         *     The expected absence is silent at the source: the latch removes the machine
+         *     from the liveness pass's targets, so it emits no `machine_probe_failed`
+         *     signal. Idempotent: pausing an already-paused machine re-runs the
+         *     (now-empty) drain/terminate and returns the existing latch.
          *
          *     Refuses (400) to pause the gateway's own machine — the gateway host must
          *     stay a cluster member for the cluster to answer anything.
@@ -4154,8 +4154,7 @@ export interface components {
          *     receiver/commonLabels/… — ignored here) and the slimmer Grafana-managed
          *     webhook shape; only ``status`` + ``alerts[]`` matter to the store.
          *     ``source`` tags the row's provenance: the webhook omits it (default
-         *     ``grafana``), while the health probe posts ``source="health-probe"`` and
-         *     the liveness pass ``source="machine-probe"``.
+         *     ``grafana``).
          */
         AlertWebhookPayload: {
             /**

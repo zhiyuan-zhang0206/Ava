@@ -13,7 +13,7 @@ Package door — no imports, no re-exports; callers use `gateway.inspect.router`
   - `_cache.py`           — bounded TTL + single-flight query cache with load admission
   - `_live.py`            — fresh agents_meta/notice projections for /inspect/live
   - `_metrics.py`         — SQL-only persisted statistics over observations + historical days
-  - `_metrics_health.py`  — coverage verdicts: background log + alert episodes
+  - `_metrics_health.py`  — coverage verdicts: background log + coverage-gap event
   - `_plugin_widgets.py`  — plugin inspector-widget loading + per-agent resolution
   - `_plugin_metrics.py`  — plugin metric registry + per-agent execution
 """

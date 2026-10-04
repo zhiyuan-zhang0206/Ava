@@ -3,16 +3,14 @@
 WP4 (task #1946): the gateway probes a REMOTE observatory station through
 the reachability contract (the address the station advertises in
 machine_units) with the cluster bearer, and FAILS OPEN — a failed probe
-never blocks or restarts local business; it records an alert after two
-consecutive failures and resolves on recovery. With no AVA_OBSERVABILITY_URL
-configured the check is a no-op.
+never blocks or restarts local business; a failed probe only logs. With no
+AVA_OBSERVABILITY_URL configured the check is a no-op.
 """
 
 from __future__ import annotations
 
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -20,7 +18,6 @@ import pytest
 import base.db
 from base.cluster.authority.api import publish_telemetry_token, telemetry_token
 from base.config import settings
-from base.db import Database
 from base.paths import ava_home
 from services.heartbeat import station_probe as hc
 
@@ -29,10 +26,7 @@ from services.heartbeat import station_probe as hc
 def _clean_state() -> None:
     """Reset the in-process probe state between tests (the module dict is
     process-global, same as the watchdog would hold it)."""
-    hc._state["failures"] = 0
-    hc._state["transition_since"] = None
     with base.db.connect() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM alerts WHERE labels->>'alertname' = %s", (hc._ALERTNAME,))
         cur.execute("DELETE FROM machine_units WHERE machine_name LIKE 'station-test%'")
         conn.commit()
 
@@ -183,62 +177,19 @@ def test_station_answers_without_a_published_token_warns_and_fails_open(
     assert hc._station_answers("http://10.0.0.9:4318") is True
 
 
-def test_alert_fires_after_two_consecutive_failures_and_resolves(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Two consecutive failed probes fire the alert; a successful probe
-    resolves every open row for the alertname (the machine-offline pattern)."""
-    monkeypatch.setattr(hc.settings.alerts, "transition_warning_seconds", 0)
-    monkeypatch.setattr(hc.settings.alerts, "transition_error_seconds", 3600)
-    monkeypatch.setattr("base.telemetry.alerts.notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
-    target = hc._StationTarget(url="http://10.0.0.9:4318", advertised=True, name="station-test-a")
-    now = datetime.now(UTC)
-
-    # first failure: below the consecutive-failure threshold — no alert yet
-    hc._alert_edges(Database.from_settings(), target, ok=False, now=now)
-    with base.db.connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(*) FROM alerts WHERE labels->>'alertname' = %s",
-            (hc._ALERTNAME,),
-        )
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
-
-    # second consecutive failure: fires
-    hc._alert_edges(Database.from_settings(), target, ok=False, now=now)
-    with base.db.connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT status, labels->>'severity' FROM alerts WHERE labels->>'alertname' = %s",
-            (hc._ALERTNAME,),
-        )
-        row = cur.fetchone()
-    # the alerts table stores the open status as 'unresolved' (the wire
-    # status is 'firing'; upsert_alert normalizes)
-    assert row is not None and row[0] == "unresolved" and row[1] == "warning"
-
-    hc._alert_edges(Database.from_settings(), target, ok=True, now=now)
-    with base.db.connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT status FROM alerts WHERE labels->>'alertname' = %s",
-            (hc._ALERTNAME,),
-        )
-        rows = cur.fetchall()
-    assert rows and all(r[0] == "resolved" for r in rows)
-
-
 def test_main_probes_advertised_station_and_does_not_raise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """End-to-end: with a registered station and a healthy probe, main()
-    runs clean and no alert fires."""
+    """End-to-end: with a registered station, main() runs clean on a healthy
+    probe and fails open on a failing one."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
     _insert_station_unit()
-    monkeypatch.setattr(hc, "_station_answers", lambda _url: True)  # pyright: ignore[reportUnknownArgumentType]
+    answers = [True, False]
+
+    def probe(_url: str) -> bool:
+        return answers.pop(0)
+
+    monkeypatch.setattr(hc, "_station_answers", probe)
+    hc.main()
     hc.main()  # must not raise
-    with base.db.connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(*) FROM alerts WHERE labels->>'alertname' = %s",
-            (hc._ALERTNAME,),
-        )
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
+    assert answers == []

@@ -21,11 +21,11 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 - **Cluster-wide**: not dependent on a local session, cross-machine wake-up (wherever the target agent runs, it is woken in its claim loop on that machine)
 - **Mounted-console liveness**: the one-minute machine/lease pass keeps lifecycle
   intent and reachability separate in `agents_meta.status` / `liveness_state`.
-  `machine_probe.transition_since` records the first failed probe until
-  recovery. The same episode stays silent during the normal-recovery budget,
-  fires WARNING after `AVA_ALERTS_TRANSITION_WARNING_SECONDS`, and escalates
-  in place to ERROR after `AVA_ALERTS_TRANSITION_ERROR_SECONDS`. The pass reads no
-  deploy context, so a runner offline across an update grades from its true start.
+  `machine_probe.consecutive_failures` counts failed probes until recovery,
+  and each failed probe of an unpaused rollout target emits a
+  `machine_probe_failed` event (machine + `consecutive_failures`) — the signal
+  the Grafana "machine offline" rules grade (grace window, WARNING -> ERROR).
+  A paused machine is not a target, so it emits nothing.
   Edges entering or leaving `offline` publish the canonical `agent_updated`
   snapshot after commit, so the existing frontend fold updates immediately;
   `unknown → online` is not broadcast because both render online and a
@@ -46,7 +46,7 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 The liveness pass retains machine reachability and agent lease observation.
 It runs once at start, then every `LIVENESS_PASS_INTERVAL_S`, and it also records
 one `machine_status_snapshot` row for every unpaused agent-runner (rollout targets
-and staging/stopped hosts alike); judging and alerting stay with the rollout targets.
+and staging/stopped hosts alike); judging and the failure signal stay with the rollout targets.
 The gateway's roster read renders from those rows (`gateway/cluster/snapshots.py`)
 and dials inline only a missing or stale one (`?fresh=true` dials everything).
 It does not read or grade the retired controller's stranded-hold records, whose

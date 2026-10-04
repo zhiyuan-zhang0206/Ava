@@ -995,13 +995,13 @@ def test_unknown_slash_command_without_agent_errors() -> None:
     assert gateway.sent == []
 
 
-# --- Task #829: weixin push-failure alerting + recovered hint ---
+# --- Task #829: weixin push-failure event + recovered hint ---
 
 
 class FakeFailingWeixinAdapter(FakePlainAdapter):
     """Weixin adapter stand-in whose sends always fail, with the watchdog
     state the real adapter maintains (push_failures / push_failed_at /
-    push_recovered_at / _push_alerted_at)."""
+    push_recovered_at)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -1009,8 +1009,6 @@ class FakeFailingWeixinAdapter(FakePlainAdapter):
         self.push_failures = 0
         self.push_failed_at: float | None = None
         self.push_recovered_at: float | None = None
-        self._push_alerted_at: float | None = None
-        self.owner_alerts: list[str] = []
         self.send_attempts = 0
 
     async def send(
@@ -1025,10 +1023,6 @@ class FakeFailingWeixinAdapter(FakePlainAdapter):
         self.send_attempts += 1
         raise RuntimeError("iLink sendmessage error: ret=-2 errmsg=prepare failed")
 
-    async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
-        del markdown
-        self.owner_alerts.append(text)
-
 
 class FakeFlakyWeixinAdapter(FakePlainAdapter):
     """Weixin adapter stand-in whose first send fails and whose retry
@@ -1042,7 +1036,6 @@ class FakeFlakyWeixinAdapter(FakePlainAdapter):
         self.push_failures = 0
         self.push_failed_at: float | None = None
         self.push_recovered_at: float | None = None
-        self._push_alerted_at: float | None = None
         self.send_attempts = 0
 
     async def send(
@@ -1066,17 +1059,18 @@ class FakeFlakyWeixinAdapter(FakePlainAdapter):
         self.sent.append((chat_id, text))
 
 
-def test_weixin_push_failures_alert_other_channel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """After enough consecutive weixin send failures, the user is alerted
-    through another channel (Telegram) — inbound-only failure is invisible
-    to the user otherwise (Task #829). A double failure costs exactly one
-    retry, past the bounded jitter backoff (task #4252)."""
+def test_weixin_push_failure_emits_the_failed_event(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A weixin send whose single retry also fails emits ``im_push_failed``
+    carrying the adapter's consecutive-failure count — inbound-only failure is
+    invisible to the user otherwise (Task #829); the alert rule tells them.
+    A double failure costs exactly one retry, past the bounded jitter backoff
+    (task #4252)."""
     gateway = FakeGateway()
     core = _core(gateway)
     wx = FakeFailingWeixinAdapter()
-    tg = FakeTypingAdapter()
     core.register(wx)
-    core.register(tg)
     wx.push_failures = 2
     wx.push_failed_at = 1234.0
     sleeps: list[float] = []
@@ -1086,43 +1080,31 @@ def test_weixin_push_failures_alert_other_channel(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(push_watchdog, "_sleep", _record)
 
-    async def scenario() -> None:
-        await core._send("weixin", "o9cq804", Reply("hello"))
-        # send + retry both fail; the alert goes out on telegram's owner chat
-        assert any("push link failed" in t for t in tg.owner_sent)
-        assert wx._push_alerted_at is not None
+    asyncio.run(core._send("weixin", "o9cq804", Reply("hello")))
 
-    asyncio.run(scenario())
     assert wx.send_attempts == 2  # exactly one retry
     assert len(sleeps) == 1
     base = core.config.im_push_retry_backoff_seconds
     jitter = core.config.im_push_retry_jitter_seconds
     assert base <= sleeps[0] <= base + jitter
+    events = [r["extra"] for r in loguru_records if r["extra"].get("event") == "im_push_failed"]
+    assert [(e["channel"], e["failures"]) for e in events] == [("weixin", 2)]
 
 
-def test_weixin_push_failure_alert_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The cross-channel alert fires at most once per cooldown window."""
+def test_weixin_healed_retry_emits_no_failed_event(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
     gateway = FakeGateway()
     core = _core(gateway)
-    wx = FakeFailingWeixinAdapter()
-    tg = FakeTypingAdapter()
+    wx = FakeFlakyWeixinAdapter([])
     core.register(wx)
-    core.register(tg)
-    wx.push_failures = 2
-    wx.push_failed_at = 100.0
-    wx._push_alerted_at = 100.0  # just alerted
 
     async def _no_sleep(seconds: float) -> None:
         del seconds
 
     monkeypatch.setattr(push_watchdog, "_sleep", _no_sleep)
-
-    async def scenario() -> None:
-        # same window -> no second alert
-        await core._send("weixin", "o9cq804", Reply("hello"))
-        assert wx.owner_alerts == []
-
-    asyncio.run(scenario())
+    asyncio.run(core._send("weixin", "o9cq804", Reply("hello")))
+    assert not [r for r in loguru_records if r["extra"].get("event") == "im_push_failed"]
 
 
 def test_weixin_push_recovery_hints_on_next_inbound() -> None:

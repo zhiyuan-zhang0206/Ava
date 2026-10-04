@@ -23,3 +23,5 @@ A two-hour staleness sweep was rejected. Rule evaluation happens every one or
 five minutes, but the notification policy repeats an unchanged firing only
 every four hours. Ingest silence at two hours is therefore compatible with a
 still-firing alert and cannot safely be treated as resolution truth.
+
+Forward: the notification policy that sets the repeat interval this reasoning relies on, and the other alert paths around it, are described in [2026-10-04](2026-10-04-alerting-on-grafana-alerting.md); the reconciliation itself stands.

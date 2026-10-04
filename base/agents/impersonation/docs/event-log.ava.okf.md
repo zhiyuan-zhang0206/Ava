@@ -65,12 +65,13 @@ open or failed. No external store, certifier or loop takes part.
 A failed receipt never completes its lease. A lease that ended with an open
 receipt is pending as `awaiting_participant_seal`.
 
-## Alerts
+## Signal
 
-State alerts only, no thresholds. `ImpersonationEventSealStuck` fires for an ended
-lease still waiting on an open receipt and resolves when it seals (the gateway ttl
-reaper reconciles it each pass); `ImpersonationEventCaptureFailed` fires when a
-capture fails and stays, because the lease can no longer complete.
+State signal only, no thresholds. The gateway ttl reaper emits
+`impersonation_event_log_incomplete` on every pass, per lease and condition, while the
+row fact holds: `seal_stuck` for an ended lease still waiting on an open receipt (clears
+when it seals), `capture_failed` for a lease with a failed receipt (permanent, because the
+lease can no longer complete). The alert rule over the event stream owns the notification.
 
 ## Hand-off statistics
 
