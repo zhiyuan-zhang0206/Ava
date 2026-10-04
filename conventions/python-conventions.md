@@ -260,10 +260,24 @@ which loguru leaves in the text while dropping the arguments. A stdlib
 `logging.getLogger(...)` logger is the opposite: it keeps `%s`
 (`_log.warning("gate for %s raised: %s", name, exc)`), and a `{}` field with
 positional arguments raises `TypeError` at emit, losing the line. Both
-directions are enforced by `scripts/lint/loguru_format.py` (hook
+directions are enforced by `scripts/lint/diagnostics/loguru_format.py` (hook
 `lint-loguru-format`), which also flags `exc_info=` on a loguru call — loguru
 has no such parameter (the traceback rides `extra` and is lost), so it is
 `logger.opt(exception=True)`; stdlib loggers keep `exc_info`.
+
+## No silent failures
+
+A broad handler (`except Exception`, `except BaseException`, bare `except`,
+`contextlib.suppress(Exception)`) must re-raise or report; a swallowed failure is
+indistinguishable from a feature that works. In order of preference: narrow the
+handler to the exceptions the `try` body can legitimately raise (an expected
+condition may then be handled quietly); delete it and let the failure surface;
+keep the broad handler at a real boundary (a loop that must go on, best-effort
+cleanup or telemetry) and log at WARNING with the traceback
+(`logger.opt(exception=True).warning(...)`) or emit a structured event. A debug or
+info line is not a report. Enforced by `scripts/lint/diagnostics/no_silent_failures.py` (hook
+`lint-no-silent-failures`); the one exemption is `# silent-ok: <reason>` on the
+handler line, for a reporting channel's own failure path.
 
 ## No decorative emoji in core Python
 

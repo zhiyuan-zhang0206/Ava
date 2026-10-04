@@ -202,7 +202,7 @@ def add_sink(sink: Any, /, **kwargs: Any) -> int:
 
     Every loguru sink in this codebase is registered through this helper; its
     one `logger.add` passes a literal `diagnose=False`, which
-    `scripts/lint/logger_add_diagnose.py` (a pre-commit hook) requires of
+    `scripts/lint/diagnostics/logger_add_diagnose.py` (a pre-commit hook) requires of
     every non-test `logger.add(...)` call. loguru's own default is
     `diagnose=True`: on a formatted exception it renders every
     local variable's value from every frame of the traceback into the sink's

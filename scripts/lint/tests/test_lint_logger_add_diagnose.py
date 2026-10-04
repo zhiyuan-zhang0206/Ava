@@ -1,4 +1,4 @@
-"""`scripts/lint/logger_add_diagnose.py` — no logger.add(...) sink without diagnose=False.
+"""`scripts/lint/diagnostics/logger_add_diagnose.py` — no logger.add(...) sink without diagnose=False.
 
 The invariant this guards: loguru's `diagnose` defaults to True, so any sink
 that does not turn it off has `logger.exception(...)` render every local
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.logger_add_diagnose")
+_lint = importlib.import_module("scripts.lint.diagnostics.logger_add_diagnose")
 
 
 def _violations(src: str) -> list[tuple[int, str]]:

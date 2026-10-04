@@ -6,7 +6,7 @@ loguru has no `exc_info` parameter (stdlib logging does), so
 `logger.warning(..., exc_info=True)` rides the record's `extra` and the
 traceback is never attached; `logger.opt(exception=True)` is the way it goes on
 the call. Run:
-`.venv/bin/python scripts/lint/loguru_format.py [path ...]` (defaults to
+`.venv/bin/python scripts/lint/diagnostics/loguru_format.py [path ...]` (defaults to
 the framework dirs plus `scripts/`; an explicit path that does not exist is an
 error (stderr + exit 1) rather than a silent no-op). Also run automatically via
 pre-commit hook.
@@ -109,7 +109,7 @@ import re
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import lint_common  # noqa: E402 - standalone script
@@ -448,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"\n{total} log call(s) that lose their message or traceback: loguru takes "
             "`{}` fields and `logger.opt(exception=True)` (it has no `exc_info`); stdlib "
-            "logging takes `%s`; see the docstring at the top of scripts/lint/loguru_format.py.",
+            "logging takes `%s`; see the docstring at the top of scripts/lint/diagnostics/loguru_format.py.",
             file=sys.stderr,
         )
         return 1

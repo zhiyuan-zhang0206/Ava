@@ -1,4 +1,4 @@
-"""`scripts/lint/loguru_format.py` — every log call's message format matches its logger.
+"""`scripts/lint/diagnostics/loguru_format.py` — every log call's message format matches its logger.
 
 loguru formats with `str.format`, so a stdlib-style `%s` message logs the
 literal placeholder and loses every argument. These cases pin what the lint
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.loguru_format")
+_lint = importlib.import_module("scripts.lint.diagnostics.loguru_format")
 
 
 def _lines(src: str) -> list[int]:
