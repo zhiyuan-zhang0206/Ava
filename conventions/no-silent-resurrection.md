@@ -45,8 +45,8 @@ Implementation: `scripts/ci/no_silent_resurrection.py` (stdlib + git only).
    text somewhere in the same commit (a move is not a deletion).
 5. Inside a run, a stretch where every strong line is dead - weak, blank and
    still-present lines bridge; a strong line that is neither breaks the
-   stretch - is a **hit** when it holds at least two dead strong lines or one
-   distinctive dead line (an identifier of at least 12 characters with an
+   stretch - is a **hit** when it holds at least three dead strong lines or one
+   distinctive dead line (an identifier of at least 20 characters with an
    underscore or camelCase). A hit is attributed to the commit covering the
    most of its dead lines (ties: the most recent).
 6. **Allowances** come from the PR's commit messages (merge-base..head): a
@@ -97,19 +97,27 @@ and re-added in the same commit was never deleted.
 ## False positives and tuning
 
 The thresholds (`MIN_STRONG_LENGTH`, `MAX_STRONG_LENGTH`, `MIN_DEAD_LINES`,
-`DISTINCTIVE_IDENTIFIER_LENGTH` in the script) were set against a sweep of the
-check over every `main` commit in the 30-day window. Reviewers: when the check
-flags a diff that genuinely restores content on purpose, add the
-`Resurrects:` line; when it flags unrelated content, record the commit here
-and either extend the skip table, raise the minimum unit, or tighten the line
-classifier - the sweep is the tool for that. The residual false-positive
-classes on record:
+`DISTINCTIVE_IDENTIFIER_LENGTH` in the script) are set against a sweep of the
+check over every `main` commit of the 30-day window (one pass = 2024 commits).
+When the check flags unrelated content, record the commit here and either
+extend the skip table, raise the minimum unit, or tighten the line classifier;
+the sweep is the tool for that. Recorded passes and residual classes:
 
+- Pass 1 (2 dead lines / solo identifier >= 12): 116 of 850 commits flagged
+  (~13.7%). The noise was single "distinctive" hits on generic lines
+  (`raise psycopg.OperationalError("db down")`, `capture_output=True` -
+  framework names are not distinctive) and two-line idioms (`def main() ->
+  int:` + `parser = _parse()`); the incident's true blocks were all 3+ lines.
+- Change: minimum unit 2 -> 3 dead lines; the solo-line identifier bar
+  12 -> 20 characters.
+- Pass 2 (after the change): numbers recorded in a follow-up commit before
+  the first enqueue.
 - 2026-10-04, the check's own introduction: the skip table names the
-  pre-2026-09-29 `shared/` locations, and those string literals are text the
-  shared -> base move (9ae6105a6) had deleted, so the PR carries a sha-scoped
-  `Resurrects:` line. A PR that names recently deleted paths in literals can
-  hit the same way.
+  pre-2026-09-29 `shared/` locations; those literals are text the shared ->
+  base move (9ae6105a6) had deleted. Under pass-1 thresholds the check
+  flagged its own PR and a sha-scoped `Resurrects:` line demonstrated the
+  allowance; the pass-2 thresholds drop the two-line match below the minimum
+  unit and the trailer was removed.
 
 ## Local runs
 
