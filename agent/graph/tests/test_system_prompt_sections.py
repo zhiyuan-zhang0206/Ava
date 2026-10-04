@@ -430,11 +430,13 @@ def test_user_tone_uses_strong_gemini_variant(monkeypatch: pytest.MonkeyPatch) -
     """A registered gemini model gets the strong variant. The id is picked from
     the registry rather than hardcoded: a model swap (gemini-3.7-flash ->
     gemini-3.8-flash, #1535) must not break this contract test by drifting the
-    id out of MODELS."""
-    from base.lm.registry import MODELS
+    id out of the model catalog."""
+    from base.lm.plugin_providers import model_catalog
 
     gemini_id = next(
-        model for model, spec in MODELS.items() if spec.provider == "gemini" and spec.spawnable
+        model
+        for model, spec in model_catalog().models.items()
+        if spec.provider == "gemini" and spec.spawnable
     )
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
     monkeypatch.setattr(settings.lm, "llm_model", gemini_id)
@@ -517,7 +519,7 @@ def test_user_tone_section_is_present_in_the_full_prompt_when_enabled(
 
 
 def test_knowledge_cutoff_appears_for_known_model(monkeypatch: pytest.MonkeyPatch):
-    """When the current model has an entry in MODEL_KNOWLEDGE_CUTOFF,
+    """When the current model has a knowledge cutoff,
     build_system_prompt() appends a 'Knowledge cutoff: YYYY-MM' line."""
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
     from agent.graph.system_prompt import build_system_prompt
@@ -527,7 +529,7 @@ def test_knowledge_cutoff_appears_for_known_model(monkeypatch: pytest.MonkeyPatc
 
 
 def test_knowledge_cutoff_absent_for_unknown_model(monkeypatch: pytest.MonkeyPatch):
-    """When the model is not in MODEL_KNOWLEDGE_CUTOFF, no cutoff line is
+    """When the model has no knowledge cutoff, no cutoff line is
     appended — the prompt just omits it rather than crashing."""
     monkeypatch.setattr(settings.lm, "llm_model", "unknown-model-v1")
     from agent.graph.system_prompt import build_system_prompt
@@ -537,24 +539,26 @@ def test_knowledge_cutoff_absent_for_unknown_model(monkeypatch: pytest.MonkeyPat
 
 
 def test_model_knowledge_cutoff_all_entries_valid():
-    """Every entry in MODEL_KNOWLEDGE_CUTOFF is a YYYY-MM string."""
+    """Every knowledge cutoff in the catalog is a YYYY-MM string."""
     import re
 
-    from base.lm.factory import MODEL_KNOWLEDGE_CUTOFF
+    from base.lm.plugin_providers import model_catalog
 
-    assert len(MODEL_KNOWLEDGE_CUTOFF) > 0
-    for model, cutoff in MODEL_KNOWLEDGE_CUTOFF.items():
+    cutoffs = model_catalog().knowledge_cutoffs
+    assert len(cutoffs) > 0
+    for model, cutoff in cutoffs.items():
         assert re.match(r"^\d{4}-\d{2}$", cutoff), f"Bad format for {model}: {cutoff!r}"
 
 
 def test_supported_models_all_have_cutoff(monkeypatch: pytest.MonkeyPatch):
-    """Every model in SUPPORTED_MODELS has an entry in MODEL_KNOWLEDGE_CUTOFF."""
-    from base.lm.factory import MODEL_KNOWLEDGE_CUTOFF, SUPPORTED_MODELS
+    """Every spawnable model in the catalog has a knowledge cutoff."""
+    from base.lm.plugin_providers import model_catalog
 
-    for models in SUPPORTED_MODELS.values():
+    catalog = model_catalog()
+    for models in catalog.supported_models.values():
         for model in models:
-            assert model in MODEL_KNOWLEDGE_CUTOFF, (
-                f"{model!r} is in SUPPORTED_MODELS but missing from MODEL_KNOWLEDGE_CUTOFF"
+            assert model in catalog.knowledge_cutoffs, (
+                f"{model!r} is spawnable but has no knowledge cutoff"
             )
 
 

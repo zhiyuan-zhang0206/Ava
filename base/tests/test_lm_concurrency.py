@@ -18,12 +18,12 @@ from base.lm.concurrency import (
     known_provider_keys,
     parse_limits,
 )
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_provider_plugins() -> None:
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
 
 def test_concurrency_cap_is_disabled_by_default() -> None:

@@ -30,7 +30,7 @@ from base.cluster import machines as _machines
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from gateway.agents import forward as _agents_forward_router
 from gateway.agents import router as _agents_router
 from gateway.app import app
@@ -47,13 +47,13 @@ def _provider_plugins_loaded() -> None:
     """Load the provider plugins once, before any test isolates the plugin paths.
 
     The app's lifespan loads provider plugins once per process
-    (`ensure_provider_plugins_loaded`) and raises when it finds none. A test that
+    (`model_catalog`) and raises when it finds none. A test that
     points `paths.repo_plugins_dir` at an empty temp directory and then starts the
     app finds none, so it passed only when an earlier test in the same worker had
     already loaded the real set, and failed when run alone or first. This session
     fixture runs before every function-scoped monkeypatch.
     """
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
 
 @pytest.fixture(autouse=True)

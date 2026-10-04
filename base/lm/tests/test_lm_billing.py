@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import re
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
+from base.lm.provider_api import ProviderBinding
+from tests.fixtures.model_catalog import AddBindings
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_provider_plugins() -> None:
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
 
 class _RecordedSpan:
@@ -158,21 +160,23 @@ def test_vendor_of_model_recognizes_registered_core_and_plugin_prefixes(
     assert vendor_of_model(model) == vendor
 
 
-def test_vendor_of_model_uses_registered_plugin_display_name(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_vendor_of_model_uses_registered_plugin_display_name(add_bindings: AddBindings) -> None:
     """A registered plugin provider contributes its lowercase manufacturer name.
 
     The regression this catches is silently skipping a billable plugin call
     after provider registration has made the model invokable.
     """
-    from base.lm import provider_api
     from base.lm.billing import vendor_of_model
 
-    monkeypatch.setitem(
-        provider_api.REGISTRY.bindings,
-        "acme-",
-        SimpleNamespace(display_name="Acme AI"),
+    add_bindings(
+        {
+            "acme-": ProviderBinding(
+                prefix="acme-",
+                display_name="Acme AI",
+                key_env="ACME_API_KEY",
+                build=lambda _ctx: FakeListChatModel(responses=["unused"]),
+            )
+        }
     )
 
     assert vendor_of_model("acme-fast") == "acme ai"

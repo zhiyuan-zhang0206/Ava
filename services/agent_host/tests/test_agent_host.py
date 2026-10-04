@@ -51,6 +51,7 @@ from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome, _config_fingerprint
 from tests.base.poll_until import poll_until_async
+from tests.fixtures.model_catalog import AddModels
 
 
 def _host(**kwargs: Any) -> AgentHost:
@@ -1408,23 +1409,25 @@ class TestNormalizedModelConfig:
 
     @pytest.fixture(autouse=True)
     def _load_provider_plugins(self) -> None:
-        from base.lm.plugin_providers import ensure_provider_plugins_loaded
+        from base.lm.plugin_providers import model_catalog
 
-        ensure_provider_plugins_loaded()
+        model_catalog()
 
     @pytest.fixture
-    def withdrawn_model(self, monkeypatch: pytest.MonkeyPatch, _load_provider_plugins: None) -> str:
+    def withdrawn_model(self, add_models: AddModels, _load_provider_plugins: None) -> str:
         from dataclasses import replace
 
-        from base.lm.registry import MODELS
+        from base.lm.plugin_providers import model_catalog
 
         model = "deepseek-retired-fixture"
-        monkeypatch.setitem(
-            MODELS,
-            model,
-            replace(
-                MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"
-            ),
+        add_models(
+            {
+                model: replace(
+                    model_catalog().models["deepseek-flash"],
+                    spawnable=False,
+                    unavailable_fallback="deepseek-flash",
+                )
+            }
         )
         return model
 

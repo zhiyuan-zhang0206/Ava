@@ -41,8 +41,9 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.lm.registry import MODELS, ModelSpec
+from base.lm.registry import ModelSpec
 from base.native_process.turn_identity import bind_turn_identity
+from tests.fixtures.model_catalog import AddModels
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -340,6 +341,7 @@ async def test_stall_events_carry_provider_health_fields(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
+    add_models: AddModels,
 ) -> None:
     """The stall + pair events carry vendor/model/stage (the 09-14/15 wave was
     100% api.deepseek.com yet nothing in the telemetry said so) plus the
@@ -362,9 +364,7 @@ async def test_stall_events_carry_provider_health_fields(
 
     # This synthetic provider now crosses the LLM node's compaction gate too;
     # declare its context budget instead of depending on an installed plugin.
-    monkeypatch.setitem(
-        MODELS, "deepseek-v4-flash", ModelSpec(provider="deepseek", context_window=128_000)
-    )
+    add_models({"deepseek-v4-flash": ModelSpec(provider="deepseek", context_window=128_000)})
     original = settings.lm.llm_model
     try:
         settings.lm.llm_model = "deepseek-v4-flash"

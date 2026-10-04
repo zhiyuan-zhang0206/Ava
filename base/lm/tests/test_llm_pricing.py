@@ -17,7 +17,7 @@ from typing import Any, cast
 import pytest
 
 from base.lm import pricing
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from base.lm.pricing import (
     CostQuote,
     Rates,
@@ -27,13 +27,14 @@ from base.lm.pricing import (
     quote,
     rates_at,
 )
+from tests.fixtures.model_catalog import SetPrices
 
 _M = 1_000_000
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_provider_plugins() -> None:
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
 
 def _pricing_catalog_raw() -> dict[str, Any]:
@@ -63,33 +64,27 @@ def _runtime_pricing_catalog_raw() -> dict[str, Any]:
 
 
 def _plugin_rates(model: str, at: datetime) -> Rates:
-    selected = pricing._PLUGIN_PRICES[model].rates_at(at, input_tokens=0)
+    selected = model_catalog().prices.plugin[model].rates_at(at, input_tokens=0)
     assert selected is not None
     return selected
 
 
 @pytest.fixture
-def deepseek_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+def deepseek_archive_catalog(set_prices: SetPrices) -> None:
     """Route explicit DeepSeek history checks through the archived periods."""
-    merged = dict(pricing._CATALOG)
-    merged.update(_parse_catalog(_pricing_catalog_raw()))
-    monkeypatch.setattr(pricing, "_CATALOG", merged)
+    set_prices(pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {}))
 
 
 @pytest.fixture
-def gemini_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+def gemini_archive_catalog(set_prices: SetPrices) -> None:
     """Route explicit Gemini period/tier history checks through the archive."""
-    merged = dict(pricing._CATALOG)
-    merged.update(_parse_catalog(_pricing_catalog_raw()))
-    monkeypatch.setattr(pricing, "_CATALOG", merged)
+    set_prices(pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {}))
 
 
 @pytest.fixture
-def glm_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+def glm_archive_catalog(set_prices: SetPrices) -> None:
     """Route explicit GLM period/tier history checks through the archive."""
-    merged = dict(pricing._CATALOG)
-    merged.update(_parse_catalog(_pricing_catalog_raw()))
-    monkeypatch.setattr(pricing, "_CATALOG", merged)
+    set_prices(pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {}))
 
 
 def test_pricing_catalog_schema_v2_vendor_lock() -> None:
@@ -499,19 +494,17 @@ def test_rates_at_rejects_a_naive_instant() -> None:
         rates_at("deepseek-v4-pro", datetime.fromisoformat("2026-08-17T01:00:00"), _M)
 
 
-def test_deepseek_plugin_prices_equal_archive_current_base_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ensure_provider_plugins_loaded()
+def test_deepseek_plugin_prices_equal_archive_current_base_tier() -> None:
+    model_catalog()
     model_ids = ("deepseek-flash",)
     outside_daily_override = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {model: _plugin_rates(model, outside_daily_override) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
 
     for model in model_ids:
-        selected = rates_at(model, outside_daily_override, input_tokens=0)
+        selected = archive_book.rates_at(model, outside_daily_override, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert pricing.plugin_price_provenance(model) == (
@@ -520,10 +513,8 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier(
         )
 
 
-def test_gemini_plugin_prices_equal_archive_current_base_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ensure_provider_plugins_loaded()
+def test_gemini_plugin_prices_equal_archive_current_base_tier() -> None:
+    model_catalog()
     model_ids = (
         "gemini-3.8-flash",
         "gemini-3.7-flash",
@@ -534,10 +525,10 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier(
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
 
     for model in model_ids:
-        selected = rates_at(model, current_instant, input_tokens=0)
+        selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert pricing.plugin_price_provenance(model) == (
@@ -546,9 +537,7 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier(
         )
 
 
-def test_anthropic_plugin_prices_equal_archive_current_base_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_anthropic_plugin_prices_equal_archive_current_base_tier() -> None:
     model_ids = (
         "claude-sonnet-5",
         "claude-haiku-4-5-20251001",
@@ -560,10 +549,10 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier(
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
 
     for model in model_ids:
-        selected = rates_at(model, current_instant, input_tokens=0)
+        selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert pricing.plugin_price_provenance(model) == (
@@ -572,9 +561,7 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier(
         )
 
 
-def test_openai_plugin_prices_equal_archive_current_base_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_openai_plugin_prices_equal_archive_current_base_tier() -> None:
     model_ids = (
         "gpt-5.6-sol",
         "gpt-5.6-terra",
@@ -584,10 +571,10 @@ def test_openai_plugin_prices_equal_archive_current_base_tier(
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
 
     for model in model_ids:
-        selected = rates_at(model, current_instant, input_tokens=0)
+        selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert pricing.plugin_price_provenance(model) == (
@@ -596,9 +583,7 @@ def test_openai_plugin_prices_equal_archive_current_base_tier(
         )
 
 
-def test_qwen_plugin_prices_equal_archive_current_base_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_qwen_plugin_prices_equal_archive_current_base_tier() -> None:
     model_ids = (
         "qwen3.8-max",
         "qwen3.8-27b",
@@ -608,10 +593,10 @@ def test_qwen_plugin_prices_equal_archive_current_base_tier(
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
 
     for model in model_ids:
-        selected = rates_at(model, current_instant, input_tokens=0)
+        selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert pricing.plugin_price_provenance(model) == (
@@ -620,9 +605,7 @@ def test_qwen_plugin_prices_equal_archive_current_base_tier(
         )
 
 
-def test_glm_plugin_prices_equal_archive_current_base_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_glm_plugin_prices_equal_archive_current_base_tier() -> None:
     model_ids = (
         "glm-5.2",
         "glm-5.3",
@@ -633,10 +616,10 @@ def test_glm_plugin_prices_equal_archive_current_base_tier(
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
 
     for model in model_ids:
-        selected = rates_at(model, current_instant, input_tokens=0)
+        selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert pricing.plugin_price_provenance(model) == (
@@ -645,17 +628,15 @@ def test_glm_plugin_prices_equal_archive_current_base_tier(
         )
 
 
-def test_kimi_plugin_prices_equal_archive_current_base_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_kimi_plugin_prices_equal_archive_current_base_tier() -> None:
     model = "kimi-k3"
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = _plugin_rates(model, current_instant)
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
 
-    selected = rates_at(model, current_instant, input_tokens=0)
+    selected = archive_book.rates_at(model, current_instant, input_tokens=0)
     assert selected is not None
     assert plugin_rates.as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
     assert pricing.plugin_price_provenance(model) == (
@@ -664,9 +645,7 @@ def test_kimi_plugin_prices_equal_archive_current_base_tier(
     )
 
 
-def test_mimo_plugin_prices_equal_archive_current_base_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_mimo_plugin_prices_equal_archive_current_base_tier() -> None:
     model_ids = (
         "mimo-v2.5-pro",
         "mimo-v2.6-pro",
@@ -676,10 +655,10 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier(
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
 
     for model in model_ids:
-        selected = rates_at(model, current_instant, input_tokens=0)
+        selected = archive_book.rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert pricing.plugin_price_provenance(model) == (

@@ -5,11 +5,12 @@ which model an agent runs on — no routing, no fallback, no per-turn hook
 (``base/lm/model-providers-as-plugins.md``,
 ``decisions/2026-07-29-no-runtime-model-routing.md``). A ``provider.py`` registers nothing: it
 exports ``contribute()`` returning a ``PluginContributions`` whose ``providers`` hold one
-``ProviderContribution`` each (the binding, the model rows and the prices). The one writer of the
-process's model catalog is ``base/lm/plugin_providers.py``, which loads every enabled plugin's
-``provider.py`` once per process, before the first build / spawn validation / model list, and
-installs each declaration through ``install_provider``; the prefix map is flat — a duplicate prefix, or one that
-nests inside another (``foo-`` vs ``foo-bar-``), fails fast at registration.
+``ProviderContribution`` each (the binding, the model rows and the prices). The process's model
+catalog (``base/lm/catalog.py``) is built by ``base/lm/plugin_providers.py``, which loads every
+enabled plugin's ``provider.py`` once per process, before the first build / spawn validation /
+model list, and installs each declaration into the catalog builder; the prefix map is flat — a
+duplicate prefix, or one that nests inside another (``foo-`` vs ``foo-bar-``), fails fast at
+installation.
 Core registers no providers; enabled plugins are the sole source of bindings,
 chat-model rows, provider vocabularies, media fallbacks, keys, and live prices.
 
@@ -51,7 +52,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     # Annotation-only reference (`ProviderBinding.build`): the registration
@@ -61,16 +62,32 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm._providers import ThinkingConfig
-from base.lm.pricing import register_plugin_price
-from base.lm.registry import ModelSpec, register_models
-from base.lm.stop import StopSpec, register_stop_spec
+from base.lm.registry import ModelSpec
+from base.lm.stop import StopSpec
 
 # Increment for breaking contract changes; additive optional fields stay on the
 # current version. A plugin written against an older shape keeps working —
 # consumers of a new field must degrade when it is absent. (Mirrors the
 # plugin-spec-v2 ``engines.ava`` host-compatibility idea.)
 PROVIDER_API_VERSION = 2
+
+
+class ThinkingConfig(TypedDict):
+    """The Anthropic extended-thinking config passed to `build_chat_model`.
+
+    `{"type": "disabled"}` turns thinking off (short-text paths); `{"type":
+    "enabled", "budget_tokens": N}` turns it on with a token budget;
+    `{"type": "adaptive"}` (adaptive-thinking claude models only) lets the
+    model decide whether to think, with `display` choosing summarized text
+    vs signature-only. Only the claude / deepseek branches pass the dict
+    through on the wire; every other branch reads `type` and mirrors
+    disabled onto its own switch (the provider plugins own those switches);
+    kimi logs a warning instead.
+    """
+
+    type: Literal["enabled", "disabled", "adaptive"]
+    budget_tokens: NotRequired[int]
+    display: NotRequired[Literal["summarized", "omitted"]]
 
 
 class PriceWindow(NamedTuple):
@@ -179,58 +196,6 @@ class ProviderBinding:
     attach: AttachPolicy | None = None
 
 
-class _ProviderRegistry:
-    """Plugin-side registration state; consulted by ``base/lm/factory.py``.
-
-    Core registers no bindings. The reserved-prefix seam remains for contract
-    compatibility, but the production reserved set is empty.
-    """
-
-    def __init__(self) -> None:
-        self.bindings: dict[str, ProviderBinding] = {}
-        self._reserved_prefixes: set[str] = set()
-
-    def reserve_core_prefixes(self, prefixes: set[str]) -> None:
-        self._reserved_prefixes = prefixes
-
-    def ensure_available(self, binding: ProviderBinding, *, plugin: str) -> None:
-        """Reject a binding collision before its companion data mutates."""
-        _check_prefix(binding.prefix, plugin, self.bindings, self._reserved_prefixes)
-
-    def add(self, binding: ProviderBinding, *, plugin: str) -> None:
-        self.ensure_available(binding, plugin=plugin)
-        self.bindings[binding.prefix] = binding
-
-
-REGISTRY = _ProviderRegistry()
-
-
-def _check_prefix(
-    prefix: str,
-    plugin: str,
-    bindings: dict[str, ProviderBinding],
-    reserved: set[str],
-) -> None:
-    if not prefix or not prefix.endswith("-"):
-        raise ValueError(
-            f"provider plugin {plugin!r}: prefix {prefix!r} must end with '-' "
-            "(e.g. 'foo-'); dispatch is model.startswith(prefix)"
-        )
-    for existing in [*bindings, *reserved]:
-        if prefix == existing:
-            raise ValueError(
-                f"provider plugin {plugin!r}: prefix {prefix!r} already claimed "
-                "(by core or another plugin) — the prefix map is flat and a "
-                "collision is an error, not a precedence order"
-            )
-        if prefix.startswith(existing) or existing.startswith(prefix):
-            raise ValueError(
-                f"provider plugin {plugin!r}: prefix {prefix!r} nests inside "
-                f"existing prefix {existing!r} — nested prefixes are an ordered "
-                "fallback chain wearing another name; rejected"
-            )
-
-
 def provider_key_present(key_env: str) -> bool:
     """Whether the live process env carries ``key_env``.
 
@@ -267,7 +232,7 @@ def require_key(key_env: str) -> str:
 
 
 class ProviderRegistrationError(ValueError):
-    """An `install_provider()` call violated the provider-registration contract — a
+    """A provider installation (`CatalogBuilder.install`) violated the provider-registration contract — a
     duplicate or nested prefix, a model/binding mismatch, an unpriced spawnable
     model, malformed price data.
 
@@ -283,86 +248,8 @@ class ProviderRegistrationError(ValueError):
 class ProviderContribution:
     """What one provider plugin declares: the dispatch binding, the chat-model rows it owns and
     their live prices. A `provider.py` returns these from `contribute()`
-    (`PluginContributions.providers`); `install_provider` is the only thing that acts on them."""
+    (`PluginContributions.providers`); `CatalogBuilder.install` is the only thing that acts on them."""
 
     binding: ProviderBinding
     models: Mapping[str, ModelSpec]
     pricing: Mapping[str, PriceRates]
-
-
-def install_provider(plugin: str, contribution: ProviderContribution) -> None:
-    """Install one declared provider into the process's model catalog. Order matters: models
-    validate before prices mutate runtime state, then the stop vocabulary and binding land.
-
-    Only `base/lm/plugin_providers.py` calls this. A contract violation raises
-    `ProviderRegistrationError` (a ValueError): installation is fail-fast, not best-effort, and
-    the loader propagates this class instead of containing it — the flat maps cannot pick a winner
-    between two claimants. An arbitrary exception from the module around this call is the
-    loader's business, not this function's.
-    """
-    try:
-        _register_contract(
-            plugin, contribution.binding, models=contribution.models, pricing=contribution.pricing
-        )
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except ProviderRegistrationError:
-        raise
-    except Exception as exc:
-        raise ProviderRegistrationError(str(exc)) from exc
-
-
-def _register_contract(
-    plugin: str,
-    binding: ProviderBinding,
-    *,
-    models: Mapping[str, ModelSpec],
-    pricing: Mapping[str, PriceRates],
-) -> None:
-    """The installation sequence `install_provider()` guards — see its docstring."""
-    REGISTRY.ensure_available(binding, plugin=plugin)
-    provider = binding.provider_key or binding.prefix.rstrip("-")
-
-    extra_prices = set(pricing) - set(models)
-    if extra_prices:
-        raise ValueError(
-            f"provider plugin {plugin!r}: prices declared for unregistered models "
-            f"{sorted(extra_prices)!r}"
-        )
-    for model_id, spec in models.items():
-        if not model_id.startswith(binding.prefix):
-            raise ValueError(
-                f"provider plugin {plugin!r}: model id {model_id!r} must start with "
-                f"the binding prefix {binding.prefix!r} so factory dispatch can reach it"
-            )
-        if spec.provider != provider:
-            raise ValueError(
-                f"provider plugin {plugin!r}: model {model_id!r} declares "
-                f"provider {spec.provider!r} but the binding prefix {binding.prefix!r} "
-                f"implies {provider!r} — fix the ModelSpec.provider"
-            )
-
-    register_models(
-        provider,
-        models,
-        anthropic_protocol=binding.anthropic_protocol,
-        pending_price_models=pricing.keys(),
-    )
-
-    for model_id, price in pricing.items():
-        register_plugin_price(
-            model_id,
-            cache_miss=price.cache_miss,
-            cache_hit=price.cache_hit,
-            output=price.output,
-            source_url=price.source_url,
-            source_checked_at=price.source_checked_at,
-            vendor=price.vendor,
-            periods=price.periods,
-            plugin=plugin,
-        )
-
-    if binding.stop_spec is not None:
-        register_stop_spec(binding.stop_spec, plugin=plugin)
-
-    REGISTRY.add(binding, plugin=plugin)

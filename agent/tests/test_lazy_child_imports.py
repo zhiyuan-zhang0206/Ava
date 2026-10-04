@@ -17,7 +17,7 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
 - importing `base.lm.registry` (the media-capability data leaf) must not
   pull `base.lm.factory` / `base.lm.provider_api`;
 - the provider-registration surface (`base.lm.provider_api` plus the `lm_*`
-  provider plugins loaded by `ensure_provider_plugins_loaded`) must stay off
+  provider plugins loaded by `model_catalog`) must stay off
   the LM chat-model stack (task #3633);
 - the child's plugin autoload surface form (`ava.ensure_plugins_loaded(surface=True)`)
   must load the plugin surfaces only — no agent-runtime faces, no `agent.state`
@@ -192,14 +192,13 @@ def test_provider_registration_surface_stays_off_the_lm_stack() -> None:
 
 
 _PROVIDER_PLUGIN_LOAD = """
-from base.lm import provider_api
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 
-ensure_provider_plugins_loaded()
+catalog = model_catalog()
 heavy = sorted(
     name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
 )
-print(json.dumps({"bindings": len(provider_api.REGISTRY.bindings), "heavy": heavy}))
+print(json.dumps({"bindings": len(catalog.bindings), "heavy": heavy}))
 """
 
 

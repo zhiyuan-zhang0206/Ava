@@ -36,11 +36,8 @@ def _view(stored: str | None) -> DefaultModelView:
     (`base/lm/factory.py:validate_model_config`). A withdrawn id registered
     with a fallback therefore reports the model a new agent actually runs,
     never the id that is dead on the wire."""
-    from base.lm.plugin_providers import ensure_provider_plugins_loaded
     from base.lm.registry import resolve_available_model
 
-    # Plugin models must be registered before the registry lookup below.
-    ensure_provider_plugins_loaded()
     if stored is not None:
         return DefaultModelView(model=resolve_available_model(stored), source="cluster")
     return DefaultModelView(model=resolve_available_model(settings.lm.llm_model), source="config")
@@ -57,13 +54,13 @@ def get_default_model(request: Request) -> DefaultModelView:
 def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModelView:
     """Set the cluster's default model.
 
-    400 when the id is not a spawnable model in `base/lm/registry.py:MODELS`.
+    400 when the id is not a spawnable model in the model catalog.
     Takes effect for agents born after the write; every existing agent keeps the
     model stamped on its own row.
     """
-    from base.lm.factory import SUPPORTED_MODELS
+    from base.lm.plugin_providers import model_catalog
 
-    spawnable = {m for models in SUPPORTED_MODELS.values() for m in models}
+    spawnable = {m for models in model_catalog().supported_models.values() for m in models}
     if body.model not in spawnable:
         raise HTTPException(
             status_code=400,

@@ -3,10 +3,8 @@
 A fixture plugin directory is written into the session's tmp AVA_HOME
 (tests/fixtures/env_bootstrap.py redirects AVA_HOME), so these tests exercise the real
 discovery path (base/plugins_config.discover_plugins) and the real loader
-(base/lm/plugin_providers). Every test restores the module-level
-registration state it mutated: MODELS + derived views, provider_api bindings,
-plugin prices, stop vocabulary, the loader's once-flag, and the concurrency
-key cache.
+(base/lm/plugin_providers). The provider-plugin tests run against an empty
+catalog slot (`provider_plugin`), so the process's own catalog is untouched.
 """
 
 from __future__ import annotations
@@ -25,26 +23,20 @@ from langchain_core.messages import AIMessage
 from base import paths
 from base.lm import plugin_providers as plugin_loader
 from base.lm import pricing, provider_api, stop
+from base.lm.catalog import CatalogBuilder
 from base.lm.concurrency import known_provider_keys
 from base.lm.factory import (
-    MODEL_CONTEXT_WINDOW,
-    MODEL_KNOWLEDGE_CUTOFF,
-    SUPPORTED_MODELS,
     build_chat_model,
     model_supports_vision,
     provider_key_of_model,
     validate_model_config,
 )
-from base.lm.plugin_providers import _reset_loaded_for_tests, ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog, use_catalog
 from base.lm.provider_api import PriceRates, ProviderBinding, ProviderContribution
-from base.lm.registry import (
-    MODELS,
-    ModelSpec,
-    ModelTuning,
-    register_models,
-)
+from base.lm.registry import ModelSpec, ModelTuning
 from base.lm.tests.provider_plugin_support import provider_plugin as provider_plugin
 from base.packages.plugins import enable_config
+from tests.fixtures.model_catalog import AddBindings
 
 _REPO_PROVIDER_PLUGINS = {
     "lm_alibaba",
@@ -113,29 +105,20 @@ def test_repo_provider_plugins_are_the_exact_default_enabled_set() -> None:
 def test_zero_provider_plugins_fail_loud_and_remain_retryable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    loader_was_loaded = plugin_loader._STATE.loaded
+    with use_catalog(None), monkeypatch.context() as isolated:
+        isolated.setattr(enable_config, "discover_plugins", dict)
 
-    try:
-        with monkeypatch.context() as isolated:
-            isolated.setattr(provider_api.REGISTRY, "bindings", {})
-            isolated.setattr(enable_config, "discover_plugins", dict)
-            _reset_loaded_for_tests()
-
-            with pytest.raises(RuntimeError, match="no provider plugins enabled"):
-                ensure_provider_plugins_loaded()
-            assert not plugin_loader._STATE.loaded
-    finally:
-        _reset_loaded_for_tests()
-        plugin_loader._STATE.loaded = loader_was_loaded
+        with pytest.raises(RuntimeError, match="no provider plugins enabled"):
+            model_catalog()
+        assert plugin_loader._STATE.catalog is None
 
 
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
-    ensure_provider_plugins_loaded()
-    assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
+    assert set(model_catalog().models) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
     # longer carries — historical usage stays priceable from the archive.
-    assert set(pricing._CATALOG) == {
+    assert set(model_catalog().prices.archive) == {
         "gemini-embedding-2",
         "deepseek-v4.1-flash-expires-on-0910",
         "deepseek-v4-pro",
@@ -153,26 +136,24 @@ def test_repo_model_vendor_vocabulary_is_complete() -> None:
         "gpt-5.4-mini",
     }
     assert {
-        model: pricing.model_vendor(model) for model in pricing._PLUGIN_PRICES
+        model: pricing.model_vendor(model) for model in model_catalog().prices.plugin
     } == _REPO_MODEL_VENDORS
 
 
 def test_repo_plugin_prices_equal_archive_at_frozen_instant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ensure_provider_plugins_loaded()
-    plugin_prices = dict(pricing._PLUGIN_PRICES)
+    plugin_prices = dict(model_catalog().prices.plugin)
     archive_raw = json.loads(
         (Path(__file__).resolve().parents[3] / "base/lm/pricing_catalog_archive.json").read_text()
     )
     archive_models = archive_raw["models"]
-    monkeypatch.setattr(pricing, "_CATALOG", pricing._parse_catalog(archive_raw))
-    monkeypatch.setattr(pricing, "_PLUGIN_PRICES", {})
+    archive_only = pricing.PriceBook(pricing._parse_catalog(archive_raw), {})
     frozen_instant = datetime(2026, 9, 5, tzinfo=UTC)
     assert set(plugin_prices) == _REPO_MODEL_VENDORS.keys()
     for model, plugin_price in plugin_prices.items():
         plugin_rates = plugin_price.rates_at(frozen_instant, input_tokens=0)
-        archive_rates = pricing.rates_at(model, frozen_instant, input_tokens=0)
+        archive_rates = archive_only.rates_at(model, frozen_instant, input_tokens=0)
         assert plugin_rates is not None and archive_rates is not None
         assert plugin_rates.as_tuple() == pytest.approx(archive_rates.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert plugin_price.vendor == archive_models[model]["vendor"]
@@ -183,10 +164,16 @@ def test_repo_plugin_prices_equal_archive_at_frozen_instant(
 
 
 def _install(
-    binding: ProviderBinding, *, models: dict[str, ModelSpec], pricing: dict[str, PriceRates]
-) -> None:
+    binding: ProviderBinding,
+    *,
+    models: dict[str, ModelSpec],
+    pricing: dict[str, PriceRates],
+    builder: CatalogBuilder | None = None,
+) -> CatalogBuilder:
     """Install a hand-built provider declaration the way the loader does for a plugin."""
-    provider_api.install_provider("test", ProviderContribution(binding, models, pricing))
+    builder = builder or CatalogBuilder()
+    builder.install("test", ProviderContribution(binding, models, pricing))
+    return builder
 
 
 def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> None:
@@ -194,18 +181,19 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
     config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_deepseek"].enabled
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert {model for model in MODELS if model.startswith("deepseek-")} == {"deepseek-flash"}
-    assert set(SUPPORTED_MODELS["deepseek"]) == {"deepseek-flash"}
-    assert "deepseek-v4-pro" not in pricing._PLUGIN_PRICES
+    assert {model for model in model_catalog().models if model.startswith("deepseek-")} == {
+        "deepseek-flash"
+    }
+    assert set(model_catalog().supported_models["deepseek"]) == {"deepseek-flash"}
+    assert "deepseek-v4-pro" not in model_catalog().prices.plugin
     assert pricing.model_vendor("deepseek-v4-pro") == "deepseek"
 
-    from base.lm.factory import _MODEL_KEY_MAP, provider_key_map
+    from base.lm.factory import provider_key_map
 
-    assert "deepseek-" not in _MODEL_KEY_MAP
-    assert provider_key_map()["deepseek-"] == ("DeepSeek", None, "DEEPSEEK_API_KEY")
-    binding = provider_api.REGISTRY.bindings["deepseek-"]
+    assert provider_key_map()["deepseek-"] == ("DeepSeek", "DEEPSEEK_API_KEY")
+    binding = model_catalog().bindings["deepseek-"]
     assert binding.effort_levels == ("high", "max")
     assert binding.anthropic_protocol
     assert not binding.vision
@@ -217,7 +205,7 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
     config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_google"].enabled
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     gemini_models = {
         "gemini-3.8-flash",
@@ -226,8 +214,8 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
         "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
     }
-    assert gemini_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["gemini"]) == {
+    assert gemini_models <= model_catalog().models.keys()
+    assert set(model_catalog().supported_models["gemini"]) == {
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
@@ -236,11 +224,10 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
     }
     assert pricing.model_vendor("gemini-3.8-flash") == "google"
 
-    from base.lm.factory import _MODEL_KEY_MAP, provider_key_map
+    from base.lm.factory import provider_key_map
 
-    assert "gemini-" not in _MODEL_KEY_MAP
-    assert provider_key_map()["gemini-"] == ("Google", None, "GEMINI_API_KEY")
-    binding = provider_api.REGISTRY.bindings["gemini-"]
+    assert provider_key_map()["gemini-"] == ("Google", "GEMINI_API_KEY")
+    binding = model_catalog().bindings["gemini-"]
     assert binding.effort_levels == ("minimal", "low", "medium", "high")
     assert not binding.anthropic_protocol
     assert binding.vision
@@ -257,22 +244,21 @@ def test_repo_alibaba_provider_is_enabled_and_registers_complete_contract() -> N
     config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_alibaba"].enabled
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     qwen_models = {
         "qwen3.8-max",
         "qwen3.8-27b",
         "qwen3.8-flash",
     }
-    assert qwen_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["qwen"]) == qwen_models
+    assert qwen_models <= model_catalog().models.keys()
+    assert set(model_catalog().supported_models["qwen"]) == qwen_models
     assert pricing.model_vendor("qwen3.8-max") == "alibaba"
 
-    from base.lm.factory import _MODEL_KEY_MAP, provider_key_map
+    from base.lm.factory import provider_key_map
 
-    assert "qwen" not in _MODEL_KEY_MAP
-    assert provider_key_map()["qwen"] == ("Alibaba", None, "DASHSCOPE_API_KEY")
-    binding = provider_api.REGISTRY.bindings["qwen3.8-"]
+    assert provider_key_map()["qwen"] == ("Alibaba", "DASHSCOPE_API_KEY")
+    binding = model_catalog().bindings["qwen3.8-"]
     assert binding.provider_key == "qwen"
     assert binding.effort_levels == ("none", "high")
     assert not binding.anthropic_protocol
@@ -285,7 +271,7 @@ def test_repo_zhipu_provider_is_enabled_and_registers_complete_contract() -> Non
     config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_zhipu"].enabled
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     glm_models = {
         "glm-5.2",
@@ -293,16 +279,15 @@ def test_repo_zhipu_provider_is_enabled_and_registers_complete_contract() -> Non
         "glm-5.3-flash",
         "glm-5.3-flashx",
     }
-    assert glm_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["glm"]) == glm_models
+    assert glm_models <= model_catalog().models.keys()
+    assert set(model_catalog().supported_models["glm"]) == glm_models
     assert pricing.model_vendor("glm-5.2") == "zhipu"
 
-    from base.lm.factory import _MODEL_KEY_MAP, provider_key_map, provider_key_of_model
+    from base.lm.factory import provider_key_map, provider_key_of_model
 
-    assert "glm-" not in _MODEL_KEY_MAP
-    assert provider_key_map()["glm-"] == ("Zhipu", None, "GLM_API_KEY")
+    assert provider_key_map()["glm-"] == ("Zhipu", "GLM_API_KEY")
     assert provider_key_of_model("glm-5.2") == "glm"
-    binding = provider_api.REGISTRY.bindings["glm-"]
+    binding = model_catalog().bindings["glm-"]
     assert binding.prefix == "glm-"
     assert binding.provider_key is None
     assert binding.effort_levels == ("low", "high", "max")
@@ -316,18 +301,17 @@ def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> 
     config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_moonshot"].enabled
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert "kimi-k3" in MODELS
-    assert set(SUPPORTED_MODELS["kimi"]) == {"kimi-k3"}
+    assert "kimi-k3" in model_catalog().models
+    assert set(model_catalog().supported_models["kimi"]) == {"kimi-k3"}
     assert pricing.model_vendor("kimi-k3") == "moonshot"
 
-    from base.lm.factory import _MODEL_KEY_MAP, provider_key_map, provider_key_of_model
+    from base.lm.factory import provider_key_map, provider_key_of_model
 
-    assert "kimi-" not in _MODEL_KEY_MAP
-    assert provider_key_map()["kimi-"] == ("Moonshot", None, "MOONSHOT_API_KEY")
+    assert provider_key_map()["kimi-"] == ("Moonshot", "MOONSHOT_API_KEY")
     assert provider_key_of_model("kimi-k3") == "kimi"
-    binding = provider_api.REGISTRY.bindings["kimi-"]
+    binding = model_catalog().bindings["kimi-"]
     assert binding.prefix == "kimi-"
     assert binding.provider_key is None
     assert binding.effort_levels == ("low", "high", "max")
@@ -347,21 +331,20 @@ def _assert_mimo_models_registered_with_pricing_vendor() -> None:
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     }
-    assert {model for model in MODELS if model.startswith("mimo-")} == mimo_models
-    assert set(SUPPORTED_MODELS["mimo"]) == mimo_models
-    assert MODELS["mimo-v2.5-pro"].superseded_by == "mimo-v2.6-pro"
-    assert "mimo-v2.5-pro-ultraspeed" not in pricing._PLUGIN_PRICES
+    assert {model for model in model_catalog().models if model.startswith("mimo-")} == mimo_models
+    assert set(model_catalog().supported_models["mimo"]) == mimo_models
+    assert model_catalog().models["mimo-v2.5-pro"].superseded_by == "mimo-v2.6-pro"
+    assert "mimo-v2.5-pro-ultraspeed" not in model_catalog().prices.plugin
     assert pricing.model_vendor("mimo-v2.5-pro-ultraspeed") == "xiaomi"
     assert pricing.model_vendor("mimo-v2.5-pro") == "xiaomi"
 
 
 def _assert_mimo_provider_key_and_binding() -> None:
-    from base.lm.factory import _MODEL_KEY_MAP, provider_key_map, provider_key_of_model
+    from base.lm.factory import provider_key_map, provider_key_of_model
 
-    assert _MODEL_KEY_MAP == {}
-    assert provider_key_map()["mimo-"] == ("Xiaomi", None, "MIMO_API_KEY")
+    assert provider_key_map()["mimo-"] == ("Xiaomi", "MIMO_API_KEY")
     assert provider_key_of_model("mimo-v2.5-pro") == "mimo"
-    binding = provider_api.REGISTRY.bindings["mimo-"]
+    binding = model_catalog().bindings["mimo-"]
     assert binding.prefix == "mimo-"
     assert binding.provider_key is None
     assert binding.effort_levels == ("none", "high")
@@ -375,7 +358,7 @@ def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> No
     config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_xiaomi"].enabled
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     _assert_mimo_models_registered_with_pricing_vendor()
     _assert_mimo_provider_key_and_binding()
@@ -383,12 +366,12 @@ def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> No
 
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:
     provider_plugin()
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert "testp-1" in MODELS
-    assert "testp-1" in SUPPORTED_MODELS["testp"]
-    assert MODEL_CONTEXT_WINDOW["testp-1"] == 200_000
-    assert MODEL_KNOWLEDGE_CUTOFF["testp-1"] == "2026-01"
+    assert "testp-1" in model_catalog().models
+    assert "testp-1" in model_catalog().supported_models["testp"]
+    assert model_catalog().context_windows["testp-1"] == 200_000
+    assert model_catalog().knowledge_cutoffs["testp-1"] == "2026-01"
     assert provider_key_of_model("testp-1") == "testp"
     assert "testp" in known_provider_keys()
     assert "testp-1" in pricing.MODEL_PRICING
@@ -412,16 +395,14 @@ def test_plugin_price_vendor_reaches_pricing_lookup(
     expected: str | None,
 ) -> None:
     provider_plugin(price_vendor=price_vendor)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert pricing._PLUGIN_PRICES["testp-1"].vendor == expected
+    assert model_catalog().prices.plugin["testp-1"].vendor == expected
     assert pricing.model_vendor("testp-1") == expected
     assert pricing.model_vendor("testp-unpriced") is None
 
 
-def test_plugin_binding_effort_levels_reach_build_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_plugin_binding_effort_levels_reach_build_context(add_bindings: AddBindings) -> None:
     contexts: list[provider_api.BuildContext] = []
 
     def _build(ctx: provider_api.BuildContext) -> FakeListChatModel:
@@ -435,8 +416,7 @@ def test_plugin_binding_effort_levels_reach_build_context(
         build=_build,
         effort_levels=("low", "high"),
     )
-    monkeypatch.setitem(provider_api.REGISTRY.bindings, binding.prefix, binding)
-    monkeypatch.setattr("base.lm.factory.ensure_provider_plugins_loaded", lambda: None)
+    add_bindings({binding.prefix: binding})
 
     assert isinstance(
         build_chat_model(
@@ -457,7 +437,7 @@ def test_plugin_model_validation_and_key_check(
     provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     provider_plugin()
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
     with pytest.raises(ValueError, match="TESTP_API_KEY"):
@@ -511,17 +491,27 @@ def test_duplicate_prefix_rejected(provider_plugin: Callable[..., None]) -> None
         dir_name="test_provider2",
     )
     with pytest.raises(provider_api.ProviderRegistrationError, match="already claimed") as excinfo:
-        ensure_provider_plugins_loaded()
+        model_catalog()
     assert "already claimed" in str(excinfo.value.__cause__)
-    assert "testp-other" not in MODELS
+    # A fail-closed load leaves no catalog behind; the next call builds (and fails) afresh.
+    assert plugin_loader._STATE.catalog is None
 
 
-def test_nested_prefix_rejected(provider_plugin: Callable[..., None]) -> None:
-    provider_plugin()
-    ensure_provider_plugins_loaded()
+def test_nested_prefix_rejected() -> None:
+    first = _install(
+        provider_api.ProviderBinding(
+            prefix="testp-",
+            display_name="TestProvider",
+            key_env="TESTP_API_KEY",
+            build=lambda _ctx: FakeListChatModel(responses=["x"]),
+        ),
+        models={},
+        pricing={},
+    )
     with pytest.raises(ValueError, match="nests inside"):
         _install(
-            provider_api.ProviderBinding(
+            builder=first,
+            binding=provider_api.ProviderBinding(
                 prefix="testp-sub-",
                 display_name="Sub",
                 key_env="SUB_API_KEY",
@@ -547,46 +537,6 @@ def test_nested_prefix_rejected(provider_plugin: Callable[..., None]) -> None:
                 )
             },
         )
-
-
-def test_core_prefix_cannot_be_shadowed(provider_plugin: Callable[..., None]) -> None:
-    reserved = set(provider_api.REGISTRY._reserved_prefixes)
-    provider_api.REGISTRY.reserve_core_prefixes({"core-"})
-    try:
-        with pytest.raises(ValueError, match="already claimed"):
-            _install(
-                provider_api.ProviderBinding(
-                    prefix="core-",
-                    display_name="Shadow",
-                    key_env="X",
-                    build=lambda _ctx: FakeListChatModel(responses=["x"]),
-                ),
-                models={},
-                pricing={},
-            )
-    finally:
-        provider_api.REGISTRY.reserve_core_prefixes(reserved)
-
-
-def test_loader_reserves_core_prefixes_before_bootstrap_can_load_a_plugin(
-    provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Bootstrap may be the first provider consumer, before factory import setup."""
-    from base.lm import factory
-
-    reserved = set(provider_api.REGISTRY._reserved_prefixes)
-    provider_api.REGISTRY._reserved_prefixes.clear()
-    monkeypatch.setattr(factory, "_MODEL_KEY_MAP", {"core-": ("Core", "core_key", "CORE_KEY")})
-    provider_plugin(prefix="core-", model="core-test")
-    try:
-        with pytest.raises(
-            provider_api.ProviderRegistrationError, match="already claimed"
-        ) as excinfo:
-            ensure_provider_plugins_loaded()
-        assert "already claimed" in str(excinfo.value.__cause__)
-    finally:
-        provider_api.REGISTRY._reserved_prefixes.clear()
-        provider_api.REGISTRY._reserved_prefixes.update(reserved)
 
 
 def test_plugin_model_id_must_match_binding_prefix() -> None:
@@ -642,20 +592,14 @@ def test_plugin_price_must_name_registered_model() -> None:
         )
 
 
-def test_duplicate_model_id_rejected() -> None:
-    with pytest.raises(RuntimeError, match="already registered"):
-        register_models("testp", {"mimo-v2.5-pro": ModelSpec(provider="testp")})
-
-
 def test_spawnable_model_without_price_rejected(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(with_price=False)
     with pytest.raises(provider_api.ProviderRegistrationError, match="no current price") as excinfo:
-        ensure_provider_plugins_loaded()
+        model_catalog()
     assert "no current price" in str(excinfo.value.__cause__)
 
 
-@pytest.mark.usefixtures("provider_plugin")
-def test_model_validation_failure_leaves_registration_retryable() -> None:
+def test_model_validation_failure_leaves_the_builder_retryable() -> None:
     binding = provider_api.ProviderBinding(
         prefix="testp-",
         display_name="TestProvider",
@@ -670,13 +614,12 @@ def test_model_validation_failure_leaves_registration_retryable() -> None:
         source_checked_at="2026-08-22",
     )
     invalid = ModelSpec(provider="testp", spawnable=True)
+    builder = CatalogBuilder()
 
     with pytest.raises(provider_api.ProviderRegistrationError, match="missing registry facts"):
-        _install(binding, models={"testp-1": invalid}, pricing={"testp-1": price})
+        _install(binding, models={"testp-1": invalid}, pricing={"testp-1": price}, builder=builder)
 
-    assert "testp-1" not in pricing._PLUGIN_PRICES
-    assert "testp-1" not in MODELS
-    assert "testp-" not in provider_api.REGISTRY.bindings
+    assert not builder.has_bindings
 
     valid = ModelSpec(
         provider="testp",
@@ -686,11 +629,12 @@ def test_model_validation_failure_leaves_registration_retryable() -> None:
         effort_levels=("low", "high"),
         tuning=ModelTuning(reasoning_effort="high"),
     )
-    _install(binding, models={"testp-1": valid}, pricing={"testp-1": price})
+    _install(binding, models={"testp-1": valid}, pricing={"testp-1": price}, builder=builder)
+    catalog = builder.build()
 
-    assert "testp-1" in pricing._PLUGIN_PRICES
-    assert MODELS["testp-1"] == valid
-    assert provider_api.REGISTRY.bindings["testp-"] == binding
+    assert "testp-1" in catalog.prices.plugin
+    assert catalog.models["testp-1"] == valid
+    assert catalog.bindings["testp-"] == binding
 
 
 def test_loader_revalidates_cross_model_constraints(
@@ -698,10 +642,10 @@ def test_loader_revalidates_cross_model_constraints(
 ) -> None:
     provider_plugin(superseded_by="testp-missing")
 
-    with pytest.raises(RuntimeError, match="not in MODELS"):
-        ensure_provider_plugins_loaded()
+    with pytest.raises(RuntimeError, match="not in models"):
+        model_catalog()
 
-    assert not plugin_loader._STATE.loaded
+    assert plugin_loader._STATE.catalog is None
 
 
 @pytest.mark.parametrize(
@@ -713,7 +657,7 @@ def test_loader_revalidates_cross_model_constraints(
 )
 def test_plugin_price_validation(cache_miss: float, source_checked_at: str, error: str) -> None:
     with pytest.raises(ValueError, match=error):
-        pricing.register_plugin_price(
+        pricing.plugin_model_price(
             "invalid-plugin-price",
             cache_miss=cache_miss,
             cache_hit=0.1,
@@ -729,7 +673,7 @@ def test_stop_spec_registration_reaches_classify_stop(provider_plugin: Callable[
         model="tests-1",
         stop_spec='StopSpec("testsdk", "finish_reason", frozenset({"stop"}), frozenset({"length"}))',
     )
-    ensure_provider_plugins_loaded()
+    model_catalog()
     from base.lm.stop import classify_stop
 
     category, raw = classify_stop(
@@ -751,9 +695,9 @@ def test_disabled_plugin_skipped(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(dir_name="disabled_provider")
     cfg_path = paths.ava_home() / "plugins_config.json"
     cfg_path.write_text(json.dumps({"plugins": {"disabled_provider": {"enabled": False}}}))
-    ensure_provider_plugins_loaded()
-    assert "testp-1" not in MODELS
-    assert "kept-1" in MODELS
+    model_catalog()
+    assert "testp-1" not in model_catalog().models
+    assert "kept-1" in model_catalog().models
 
 
 def test_broken_provider_plugin_skipped_and_others_load(
@@ -769,9 +713,9 @@ def test_broken_provider_plugin_skipped_and_others_load(
     (broken / "plugin.py").write_text("# broken provider stub")
     (broken / "provider.py").write_text("raise RuntimeError('provider boom')\n")
     try:
-        ensure_provider_plugins_loaded()  # must not raise
+        model_catalog()  # must not raise
 
-        assert "kept-1" in MODELS
+        assert "kept-1" in model_catalog().models
         assert any(
             "broken_provider" in r["message"] and "failed to load" in r["message"]
             for r in loguru_records
@@ -786,9 +730,9 @@ def test_provider_missing_provider_py_is_noop(provider_plugin: Callable[..., Non
     plugin_dir = paths.plugins_dir() / "no_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text("# empty")
-    ensure_provider_plugins_loaded()
-    assert "kept-1" in MODELS
-    assert "no_provider-1" not in MODELS
+    model_catalog()
+    assert "kept-1" in model_catalog().models
+    assert "no_provider-1" not in model_catalog().models
 
 
 def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None]) -> None:
@@ -798,6 +742,6 @@ def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None])
     plugin_dir = paths.plugins_dir() / "orphan_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "provider.py").write_text("# no plugin.py beside me")
-    ensure_provider_plugins_loaded()
-    assert "kept-1" in MODELS
-    assert "orphan-provider-1" not in MODELS
+    model_catalog()
+    assert "kept-1" in model_catalog().models
+    assert "orphan-provider-1" not in model_catalog().models

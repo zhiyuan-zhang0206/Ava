@@ -38,6 +38,7 @@ pytest_plugins = [
     "tests.fixtures.units",
     "tests.fixtures.log_capture",
     "tests.fixtures.retry_waits",
+    "tests.fixtures.model_catalog",
     # Directory-level fixtures that follow their tests (`PATH_SCOPES`), not a conftest.
     "tests.fixtures.path_scopes",
     # Stall forensics (task #3513: the asyncio probe under `-o faulthandler_timeout=N`)
