@@ -129,7 +129,7 @@ def _load_healthcheck_lint(
 
     def fake_services():
         return tuple(
-            _FakeSpecWithHealthcheck(f"session-{m}", f"services.healthchecks.{m}")
+            _FakeSpecWithHealthcheck(f"session-{m}", f"services.supervision.healthchecks.{m}")
             for m in spec_modules
         )
 
@@ -217,7 +217,7 @@ def test_diagnostic_imports_include_nested_and_aliased_modules(monkeypatch, tmp_
 
     source = tmp_path / "probes.py"
     source.write_text(
-        "def probe():\n    from services.healthchecks import redis_acl as check, owned_service\n    from services.healthchecks.permissions_helper import probe\n"
+        "def probe():\n    from services.supervision.healthchecks import redis_acl as check, owned_service\n    from services.supervision.healthchecks.permissions_helper import probe\n"
     )
     monkeypatch.setattr(lint, "_DIAGNOSTIC_PROBES", source)
     assert lint.diagnostic_healthchecks() == {"redis_acl", "owned_service", "permissions_helper"}

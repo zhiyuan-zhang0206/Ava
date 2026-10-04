@@ -264,7 +264,7 @@ export interface paths {
          *     and forwards a launch-only op to the target runner's ops server, whether
          *     the runner is remote or co-located on this box (localhost) — one code
          *     path, uniform logs/traces, no in-process shortcut. Auto label generation
-         *     is done asynchronously by the services/labeler daemon — does not block
+         *     is done asynchronously by the services/derived/labeler daemon — does not block
          *     the spawn response.
          *
          *     Plain and fork first prompts commit with the row. The fork marker precedes
@@ -2831,7 +2831,7 @@ export interface paths {
          *     identity), `machine` its host, `started_at` this process's birth, and `sha`
          *     the code frozen at boot. A 200 on this port only proves *something* listens
          *     there, so the watchdog verifies the stable identity too rather than the status
-         *     code alone — see `services/healthchecks/gateway.py`. The start and code facts
+         *     code alone — see `services/supervision/healthchecks/gateway.py`. The start and code facts
          *     also let read-only post-deploy checks detect a new serving generation without
          *     consulting disk state. Each field was additive to the `{"status": "ok"}` contract.
          *

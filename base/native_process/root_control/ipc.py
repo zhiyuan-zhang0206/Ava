@@ -1,7 +1,7 @@
 """The K1 control-plane wire protocol (one JSON object per line).
 
 The root supervisor speaks this protocol over a Unix socket. The two ends of this module are transport-only:
-`services.ava_root.server` binds the socket, `base.native_process.root_control.client` dials
+`services.supervision.ava_root.server` binds the socket, `base.native_process.root_control.client` dials
 it, and both validate shapes fail-fast so a drifting peer is rejected at the
 boundary instead of being carried into the supervisor.
 

@@ -65,7 +65,7 @@ def services() -> tuple[ServiceSpec, ...]:
     return (
         healthz_daemon(
             "memory-indexer",
-            module="services.memory_indexer.daemon",
+            module="services.derived.memory_indexer.daemon",
             capabilities=_GATEWAY,
             # The pool is a markdown checkout on disk and the default index backends
             # (numpy) never open the main DB (which is also why it is the one

@@ -588,7 +588,7 @@ async def supervise_relay(
 
     Two call sites: the claim gate (native loop paused or resuming) and the
     held-controls pass while an active lease parks the agent outside the graph
-    (services/agent_host/host.py `_apply_held_controls`). The dispatcher's
+    (services/agent_runner/agent_host/host.py `_apply_held_controls`). The dispatcher's
     pending scan keeps waking agents with an open lease, giving the seam a
     periodic trigger even without inbound traffic (task #3998).
 

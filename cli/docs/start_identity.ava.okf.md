@@ -34,7 +34,7 @@ no stale copy of a credential outlives a rotation there. An initialized home
 (`configured`, `provisioned` or `ready`) refuses a second `ava init` and changes
 nothing; its identity changes only through `ava cluster destroy` and a new init. A gateway claim
 also pins a minted logical-backup passphrase before it publishes `.env`
-(`services/gateway_side/backup/passphrase.ensure_minted`; an interrupted birth
+(`services/backup/artifact/passphrase.ensure_minted`; an interrupted birth
 keeps the first one). Unregistered existing resources, a terminal destroy intent, or a capability set
 that differs from the intent's refuses a start.
 

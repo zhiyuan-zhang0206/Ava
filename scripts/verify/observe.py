@@ -287,7 +287,7 @@ def check_helper_chain(_home: Path, _source: Path) -> Detail:
     changes nothing."""
     from base.native_process.root_control.client import RootClient
     from base.paths import root_run_dir
-    from services.permissions_helper import client as helper
+    from services.desktop.permissions_helper import client as helper
 
     ping: Detail = dict(helper.ping())
     seen = {key: ping[key] for key in HELPER_PING}

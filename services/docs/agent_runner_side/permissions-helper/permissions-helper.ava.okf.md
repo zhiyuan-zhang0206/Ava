@@ -50,14 +50,14 @@ TCC keys grants on the helper's code identity. A stable certificate plus fixed b
 The helper also seeds `ava-root` (`root_seed` / `root_status` / `root_stop`): [[root-seeding.ava.okf.md]].
 
 ## Key Dependencies
-- [[tool-calls.ava.okf.md]] — skills that drive the desktop call this helper via `services.permissions_helper.client`
+- [[tool-calls.ava.okf.md]] — skills that drive the desktop call this helper via `services.desktop.permissions_helper.client`
 - [[cli/docs/cli.ava.okf.md|CLI/converge]] — the converge phase (`cli/commands/converge/host.py:_ensure_permissions_helper`) builds+signs+loads during `ava start`; the following `_ensure_screen_capture` and `_ensure_accessibility` steps probe both helper grants and record unavailable statuses for the next agent startup to report
 
 ## Entry Points
-- `services/permissions_helper/lifecycle.py` — bring-up called by converge
-- `services/permissions_helper/launchd_job.py` — the launchd job surface (label/plist/`launchctl print` read + parse, retirement, replacement guard) shared by lifecycle and the helper healthcheck
-- `services/permissions_helper/client.py` — Python-side call entry
-- `services/permissions_helper/helper/main.swift` — Swift daemon
+- `services/desktop/permissions_helper/lifecycle.py` — bring-up called by converge
+- `services/desktop/permissions_helper/launchd_job.py` — the launchd job surface (label/plist/`launchctl print` read + parse, retirement, replacement guard) shared by lifecycle and the helper healthcheck
+- `services/desktop/permissions_helper/client.py` — Python-side call entry
+- `services/desktop/permissions_helper/helper/main.swift` — Swift daemon
 - `scripts/tcc-preauth.sh` — read-only helper/TCC diagnostics and manual grant list
 
 ## Notes

@@ -26,7 +26,7 @@ from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
 from gateway.events import audit_rows
 from gateway.routers.tests.staleness_support import use_heartbeat_age
-from services.events_maintenance import rollup
+from services.upkeep.events_maintenance import rollup
 
 
 def _seed_agent(

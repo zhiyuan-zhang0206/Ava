@@ -16,7 +16,7 @@ def test_probe_set_gateway_classifies_signal_types() -> None:
     for name in ("gateway", "frontend", "memory-search"):
         assert views[name].kind == "identity"
     assert "gateway-watchdog" not in views
-    assert views["gateway"].healthcheck_module == "services.healthchecks.gateway"
+    assert views["gateway"].healthcheck_module == "services.supervision.healthchecks.gateway"
 
 
 def test_probe_set_agent_runner_membership() -> None:

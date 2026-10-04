@@ -10,7 +10,7 @@ tags:
 # Alert Resolution Reconciliation
 
 When `GRAFANA_ADMIN_PASSWORD` is set, the events-maintenance service
-(`services/events_maintenance/alert_reconciler.py`, one of its resident loops)
+(`services/upkeep/events_maintenance/alert_reconciler.py`, one of its resident loops)
 reconciles at start and every five minutes. It reads
 `GET /api/alertmanager/grafana/api/v2/alerts` from the co-located Grafana with
 admin basic auth and compares exact `(fingerprint, startsAt)` instance keys to

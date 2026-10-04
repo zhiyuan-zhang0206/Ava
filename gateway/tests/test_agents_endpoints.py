@@ -589,7 +589,7 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make non-blocked artifact reads deterministic without external services."""
     import gateway.events.agent_events as agent_events_router
     import gateway.routers.memory as memory_router
-    from services.memory_indexer.embeddings import factory as _embedding_factory
+    from services.derived.memory_indexer.embeddings import factory as _embedding_factory
 
     class _StubProvider:
         dim = 8

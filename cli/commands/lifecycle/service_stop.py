@@ -11,7 +11,7 @@ session whole. `close_terminals` asks the service for it at `ava stop`
 (decisions/2026-09-28-stop-escalates-to-sigkill.md) and gives every busy session
 whose shell it verified gone its owner's notice, naming what of it outlived the
 SIGKILL. A service that is not running is closed from its ledger instead
-(`services.pty_sessions.ledger.sweep`), and its owners are told it crashed, not
+(`services.agent_runner.pty_sessions.ledger.sweep`), and its owners are told it crashed, not
 that this stop closed their sessions. KILL reaches only identities the service
 captured from its sessions' shells.
 """
@@ -40,7 +40,7 @@ from cli.commands.lifecycle._maintenance_stop_report import (
     occupied_groups,
 )
 from ops import pty_close_notices
-from services.pty_sessions import ledger
+from services.agent_runner.pty_sessions import ledger
 
 # How long a normal stop's terminal closure waits between its HUP/TERM and the
 # SIGKILL of whatever is left (decisions/2026-09-28-stop-escalates-to-sigkill.md):

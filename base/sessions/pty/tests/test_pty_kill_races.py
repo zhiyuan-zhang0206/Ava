@@ -4,9 +4,9 @@ Each test pins a window the #3521 review found, on real processes: a kill that
 orphans a stopped process group and lets the kernel SIGCONT a frozen member; a
 member that keeps forking while the kill runs; a kill that raises with members
 still frozen; and a session id that only a live member can vouch for. The
-service's own kill (`services/pty_sessions/session.py`) runs this same
+service's own kill (`services/agent_runner/pty_sessions/session.py`) runs this same
 `session_tree` core; its verdict for a member the caller may not signal is
-pinned in `services/pty_sessions/tests/test_session.py`.
+pinned in `services/agent_runner/pty_sessions/tests/test_session.py`.
 
 Every process a test starts carries the test's tmp dir on argv (it runs a
 script from there), so `pty_reaper` reaps whatever a failing kill leaves.

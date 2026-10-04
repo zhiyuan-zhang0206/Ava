@@ -554,7 +554,7 @@ CREATE CONSTRAINT TRIGGER inbound_messages_lifecycle_pointer_done_guard
 -- DROPped; these tables survive so the whole-life aggregates the readers need do
 -- not vanish with the raw rows). The whole ~59-day history reduces to ~2900 rows,
 -- so these are never themselves subject to retention. A gateway maintenance daemon
--- (services.events_maintenance) upserts them daily; the upsert is a full-day
+-- (services.upkeep.events_maintenance) upserts them daily; the upsert is a full-day
 -- overwrite recompute keyed on the PK, so it is idempotent — a re-run never
 -- double-counts. The read-time split is day-boundary (UTC midnight): the ledger
 -- serves rolled days, while the newest retained day (which can be stale) and today
@@ -1075,7 +1075,7 @@ CREATE TABLE user_settings (
 -- each machine, UPSERT its own (name, role, url) here. gateway_url is the machine's inbound base URL
 -- the rest of the cluster dials: the gateway URL, or an agent-runner's ops server URL
 -- `http://<reachable-host>:<ops_port>`. Cross-machine RPC (spawn / lifecycle / status / config /
--- inventory) is a direct POST to that URL's /ops endpoint (gateway/cluster_rpc.py -> services/agent_ops).
+-- inventory) is a direct POST to that URL's /ops endpoint (gateway/cluster_rpc.py -> services/agent_runner/agent_ops).
 -- description is free-text machine metadata surfaced to agents (ava.self.MACHINE / ava.agents.list_machines); the framework does not dispatch on it.
 -- stopped_at marks an intentional `ava stop` (best-effort POST /api/cluster/stopping just before local
 -- teardown); register_self() clears it back to NULL on `ava start`. The cluster view is a live probe, so a

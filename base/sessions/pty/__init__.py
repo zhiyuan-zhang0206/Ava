@@ -1,7 +1,7 @@
 """PTY sessions — the client side of the pty-sessions service.
 
 Every agent interactive shell lives in the machine's pty-sessions service
-(``services/pty_sessions``), an ordinary roster process that holds each session's
+(``services/agent_runner/pty_sessions``), an ordinary roster process that holds each session's
 pty master and its screen model. A session therefore outlives an agent, an agent
 host or a gateway restarting; it ends with its shell, a ``kill``, a stop's
 closure, or the service stopping (decisions/2026-10-03-pty-sessions-service.md).

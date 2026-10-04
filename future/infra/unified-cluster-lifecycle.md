@@ -2,7 +2,7 @@
 
 This is the remaining implementation plan for the September 25 architecture
 revision. Current implemented behavior belongs in
-[Ava Root](../../services/ava_root/docs/ava_root.ava.okf.md) and
+[Ava Root](../../services/supervision/ava_root/docs/ava_root.ava.okf.md) and
 [start identity](../../cli/docs/start_identity.ava.okf.md). The earlier
 [decision](../../decisions/2026-09-12-process-lifecycle-final-state.md) remains a
 historical record; its same-PID replacement and intermediate migration paths

@@ -4,7 +4,7 @@ import { runInNewContext } from "node:vm";
 
 import { describe, expect, it, vi } from "vitest";
 
-const template = readFileSync(resolve(process.cwd(), "../../services/gate/static/login.html"), "utf8");
+const template = readFileSync(resolve(process.cwd(), "../../services/entrypoints/gate/static/login.html"), "utf8");
 
 describe("gate login through the HTTPS browser entry", () => {
   it.each([

@@ -24,7 +24,7 @@ def test_helper_macos_stop_failure_propagates(
         assert target == home and helper_port > 0
         raise RuntimeError("job survived")
 
-    monkeypatch.setattr("services.permissions_helper.launchd_job.unregister_helper", failed)
+    monkeypatch.setattr("services.desktop.permissions_helper.launchd_job.unregister_helper", failed)
     with pytest.raises(RuntimeError, match="job survived"):
         stop_permissions_helper()
 
@@ -36,5 +36,7 @@ def test_helper_non_macos_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     def unexpected(target: Path, *, helper_port: int, force: bool, timeout_s: float) -> None:
         pytest.fail("a user-wide Windows helper must not be stopped by one home")
 
-    monkeypatch.setattr("services.permissions_helper.launchd_job.unregister_helper", unexpected)
+    monkeypatch.setattr(
+        "services.desktop.permissions_helper.launchd_job.unregister_helper", unexpected
+    )
     stop_permissions_helper()

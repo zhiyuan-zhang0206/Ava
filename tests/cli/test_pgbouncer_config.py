@@ -131,7 +131,7 @@ def test_backup_defaults_to_a_direct_dump_source() -> None:
     remote plane dumps through its provider's direct URL; a local plane through
     the owner authority over the postmaster's own socket (proved on a born home
     in tests/lifecycle/db_authority/test_backup_owner.py)."""
-    from services import backup
+    from services.backup import dump as backup
 
     assert "dump_source(db)" in inspect.getsource(backup._run_backup)
     src = inspect.getsource(backup.dump_source)

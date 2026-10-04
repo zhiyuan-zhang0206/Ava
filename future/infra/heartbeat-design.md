@@ -2,7 +2,7 @@
 
 > Status: **Partially superseded** (2026-06-22). The self-check heartbeat (Tier 2)
 > is now **implemented with a deliberately simpler design** than this proposal:
-> a single gateway daemon (`services/heartbeat/`) that nudges idle agents on a
+> a single gateway daemon (`services/wake/heartbeat/`) that nudges idle agents on a
 > fixed interval, with an agent-driven **opt-out** (`ava.self.pause_heartbeat`)
 > instead of the exponential-backoff + miss-counter + escalation chain below.
 > See [`runbook.md`](../../conventions/runbook.md) (the `heartbeat` service row) for current

@@ -14,15 +14,15 @@ import redis.asyncio as aredis
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
-import services.labeler.labeler as labels_module
+import services.derived.labeler.labeler as labels_module
 from base.agents.labels import publish_label_updated
 from base.config import settings
 from base.db import create_agent
 from base.events.live.bus import EventBus
 from gateway.app import app
-from services.labeler.labeler import _normalize as _normalize_to
-from services.labeler.labeler import generate_label_async
-from services.labeler.tests.slices import labeler_config, labeler_db
+from services.derived.labeler.labeler import _normalize as _normalize_to
+from services.derived.labeler.labeler import generate_label_async
+from services.derived.labeler.tests.slices import labeler_config, labeler_db
 
 
 def _normalize(raw: str) -> str:
@@ -552,7 +552,7 @@ class TestSpawnAgentSchedulesLabelGeneration:
     ) -> None:
         """POST /api/agents with prompt → label remains NULL.
 
-        Label auto-generation has been moved from the Gateway BackgroundTask to a separate services/labeler daemon.
+        Label auto-generation has been moved from the Gateway BackgroundTask to a separate services/derived/labeler daemon.
         The Gateway spawn endpoint no longer triggers label generation — the labeler daemon asynchronously polls
         the agents table and discovers new agents to generate labels."""
         monkeypatch.setattr(

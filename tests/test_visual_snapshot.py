@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Page
 
-from tests.e2e._visual_snapshot import assert_visual_snapshot, snapshot_path
+from tests.e2e.visual._visual_snapshot import assert_visual_snapshot, snapshot_path
 
 
 class _FakePage:

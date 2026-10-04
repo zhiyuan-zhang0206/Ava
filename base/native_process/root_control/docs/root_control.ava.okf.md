@@ -12,7 +12,7 @@ tags:
 
 `base/native_process/root_control/` holds what both ends of the root supervisor's local
 control plane speak, so lower layers reach the root without importing the
-service ([[services/ava_root/docs/ava_root.ava.okf.md]] is the server).
+service ([[services/supervision/ava_root/docs/ava_root.ava.okf.md]] is the server).
 
 - `ipc.py` — one JSON object per line, capped at 64 KiB; requests and responses
   are validated fail-fast, unknown verbs and error codes are rejected.

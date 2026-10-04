@@ -56,7 +56,7 @@ class ServiceSpec:
             when that can exceed root's default TERM window. Derive it from the
             same constants or settings the service's shutdown code reads, never
             restate the number. Root's window for the unit is this plus
-            ``services.ava_root_glue.manifests.STOP_MARGIN_S``; None = the service
+            ``services.supervision.ava_root_glue.manifests.STOP_MARGIN_S``; None = the service
             finishes inside root's default window.
         curl_url: HTTP readiness endpoint; None for non-HTTP protocols.
         tcp_port: listener port for a non-HTTP protocol readiness probe.

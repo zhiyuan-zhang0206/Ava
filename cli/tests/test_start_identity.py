@@ -96,7 +96,7 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
     """Logical backups are encrypted under a passphrase the birth mints and pins
     (0600), independent of the cluster secret: an empty-secret single box gets
     a random one, never the public sha256(""). An interrupted birth keeps it."""
-    from services.gateway_side.backup import passphrase
+    from services.backup.artifact import passphrase
 
     upsert = identity.upsert_env
 
@@ -117,7 +117,7 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
 
 def test_a_remote_unit_birth_pins_no_backup_passphrase(inputs: identity.IdentityInput) -> None:
     """Only a gateway runs logical backups; a joining agent-runner holds no key."""
-    from services.gateway_side.backup import passphrase
+    from services.backup.artifact import passphrase
 
     runner = replace(
         inputs,

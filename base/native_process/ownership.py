@@ -1,7 +1,7 @@
 """PID/birth-validated process-tree ownership shared by the stop path and probes.
 
 The stop boundary (``cli.commands.lifecycle.service_stop``) and the frontend identity
-probe (``services.healthchecks.frontend``) must answer the same question — "is
+probe (``services.supervision.healthchecks.frontend``) must answer the same question — "is
 this pid the recorded session's leader or one of its descendants, still the
 process it was?" — so the primitive lives here, importable by both without the
 ops layer reaching through services into cli (issue #2123).

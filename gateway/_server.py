@@ -68,7 +68,7 @@ def main() -> None:
     """Prepare the gateway process and start its ASGI server."""
     assert_schema_current(settings.data_plane.db_url)
 
-    # pidfile — `services/healthchecks/gateway.py` uses it to probe.
+    # pidfile — `services/supervision/healthchecks/gateway.py` uses it to probe.
     # SIGKILL does not trigger atexit; the healthcheck uses kill -0 to
     # judge liveness, so a stale pidfile is not fatal (kill -0 fail -> restart).
     pidfile = settings.services.gateway_pidfile
@@ -118,7 +118,7 @@ def main() -> None:
     #   unauthenticated API to the LAN.
     # - **agent-runner**: 127.0.0.1. The gateway does not reach an
     #   agent-runner's gateway directly — gateway→agent-runner RPC goes
-    #   to the separate ava-ops server (services/agent_ops), which dispatches
+    #   to the separate ava-ops server (services/agent_runner/agent_ops), which dispatches
     #   each op in-process via gateway.ops_*. The only callers of an
     #   agent-runner's gateway :8000 are local SDK + local agent processes,
     #   so bind 127.0.0.1.

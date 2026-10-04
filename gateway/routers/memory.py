@@ -282,7 +282,7 @@ async def _backend_topk(
     the deadline is handed down to bound the backend's own wait; the caller's
     `asyncio.timeout` covers the rest.
     """
-    from services.memory_indexer.backends import factory
+    from services.derived.memory_indexer.backends import factory
 
     return await factory.get_backend(database, dim=dim, fingerprint=fingerprint).search_topk_async(
         query_vector, k, timeout=deadline
@@ -313,7 +313,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
         IndexerUnavailable: embedder API / search backend unreachable, or the
             search exceeded its deadline (wire 503)
     """
-    from services.memory_indexer.embeddings import factory as _embedding_factory
+    from services.derived.memory_indexer.embeddings import factory as _embedding_factory
 
     provider = _embedding_factory.get_provider()
 

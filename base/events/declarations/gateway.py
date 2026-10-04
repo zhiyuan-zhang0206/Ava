@@ -89,7 +89,7 @@ class Auth401Rejected(TypedDict):
 
 
 class AgentRegistry(TypedDict):
-    """`agent_registry` payload — services/events_maintenance/registry_gauge.py 60s loop.
+    """`agent_registry` payload — services/upkeep/events_maintenance/registry_gauge.py 60s loop.
 
     One event per 60s window carrying the ``agents`` table high-water mark
     (max id) — the fleet's growth curve (task #2010). Absolute state, never
@@ -102,7 +102,7 @@ class AgentRegistry(TypedDict):
 
 
 class MemorySearchStats(TypedDict):
-    """`memory_search_stats` payload — services/memory_search/app.py 60s flusher.
+    """`memory_search_stats` payload — services/derived/memory_search/app.py 60s flusher.
 
     One event per 60s window carrying the memory-search store's absolute
     state: total chunk rows plus the duration of the most recent successful
@@ -170,7 +170,7 @@ class PageServeDirMissing(TypedDict):
 
 
 class GateAuthProbeFailed(TypedDict):
-    """`gate_auth_probe_failed` payload — services/gate/daemon.py.
+    """`gate_auth_probe_failed` payload — services/entrypoints/gate/daemon.py.
 
     One row per failed gateway auth probe, emitted by the gate's fail-closed
     verdict (audit #1736: probe exceptions used to collapse into an
@@ -277,7 +277,7 @@ EVENTS: dict[str, EventSpec] = {
         payload=AgentRegistry,
         tier="noise",
         site=(
-            'services/events_maintenance/registry_gauge.py:emit_max_agent_id telemetry.emit("telemetry", ...)'
+            'services/upkeep/events_maintenance/registry_gauge.py:emit_max_agent_id telemetry.emit("telemetry", ...)'
         ),
     ),
     # memory search store stats (row-growth monitoring, task #2088) — one
@@ -288,7 +288,7 @@ EVENTS: dict[str, EventSpec] = {
         "memory search store rows + last save duration (absolute state, 60s sample)",
         payload=MemorySearchStats,
         tier="noise",
-        site=("services/memory_search/app.py:emit_memory_search_stats (positional emit)"),
+        site=("services/derived/memory_search/app.py:emit_memory_search_stats (positional emit)"),
     ),
     # gate entry-point diagnostics
     "gate_auth_probe_failed": telemetry_event(
@@ -347,14 +347,16 @@ EVENTS: dict[str, EventSpec] = {
         category="log",
         tier="observation",
         doc="the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page)",
-        site=('services/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)'),
+        site=(
+            'services/desktop/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)'
+        ),
     ),
     "chrome_page_ttl_renewed": telemetry_event(
         "chrome_page_ttl_renewed",
         "Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at",
         tier="observation",
         site=(
-            'services/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)'
+            'services/desktop/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)'
         ),
     ),
 }

@@ -37,7 +37,7 @@ CORE_THRESHOLD_DEFAULT = 85.0
 
 # Per-risk-domain minimum line floors (percent). Each key is a domain
 # prefix: top-level packages ("ops") or second-level subdomains
-# ("services/backup_scheduler"). A prefix matches every reported file whose path is the
+# ("services/backup"). A prefix matches every reported file whose path is the
 # prefix itself or starts with "prefix/".
 #
 # Calibrated 2026-08-29 from the first measuring CI run (PR #965):
@@ -75,7 +75,7 @@ def _aggregate(files: dict[str, dict]) -> tuple[dict[str, list[int]], dict[str, 
 
     Returns (per_domain, per_subdomain): per_domain keys are top-level
     packages ("ops"); per_subdomain keys are the first two path segments
-    ("services/backup_scheduler") — both maps hold [covered, valid] pairs.
+    ("services/backup") — both maps hold [covered, valid] pairs.
     """
     per_domain: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     per_subdomain: dict[str, list[int]] = defaultdict(lambda: [0, 0])

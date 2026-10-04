@@ -121,7 +121,7 @@ def test_consumer_scan_skips_a_process_whose_cmdline_read_fails(
         pid = 5005
 
         def cmdline(self) -> list[str]:
-            return ["python", "-m", "services.agent_host.daemon"]
+            return ["python", "-m", "services.agent_runner.agent_host.daemon"]
 
         def environ(self) -> dict[str, str]:
             return {}

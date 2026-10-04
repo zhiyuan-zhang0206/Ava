@@ -41,7 +41,7 @@ over a live service's sessions.
 The service holds no database. After a start-time sweep it stages the busy
 sessions' notices on disk (`run/pty-close-notices.json`) and gives them to a
 one-shot child, `python -m ops.pty_close_notices`
-(`services/pty_sessions/crash_notices.py`), from a task beside the serving loop
+(`services/agent_runner/pty_sessions/crash_notices.py`), from a task beside the serving loop
 with a thirty-second limit; the child writes the whole batch in one transaction,
 under `CRASH_REASON`, and removes the file. A batch the child does not finish —
 the limit cut it short, or the database answered nothing — loses nothing: it

@@ -16,18 +16,18 @@ from pathlib import Path
 VISUAL_DRIFT_EXIT_CODE = 10
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_VISUAL_TEST_MODULE = "tests/e2e/test_visual_regression.py"
+_VISUAL_TEST_MODULE = "tests/e2e/visual/test_visual_regression.py"
 _VISUAL_TEST_COMMAND = ["uv", "run", "pytest", _VISUAL_TEST_MODULE]
 _GIT_STATUS_COMMAND = ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"]
 _BASELINE_PATHS_BY_TEST = {
     "test_home_visual_regression": Path(
-        "tests/e2e/__snapshots__/test_visual_regression/test_home_visual_regression/home.png"
+        "tests/e2e/visual/__snapshots__/test_visual_regression/test_home_visual_regression/home.png"
     ),
     "test_fleet_visual_regression": Path(
-        "tests/e2e/__snapshots__/test_visual_regression/test_fleet_visual_regression/fleet.png"
+        "tests/e2e/visual/__snapshots__/test_visual_regression/test_fleet_visual_regression/fleet.png"
     ),
     "test_mobile_visual_regression": Path(
-        "tests/e2e/__snapshots__/test_visual_regression/test_mobile_visual_regression/mobile.png"
+        "tests/e2e/visual/__snapshots__/test_visual_regression/test_mobile_visual_regression/mobile.png"
     ),
 }
 _FAILED_SUMMARY = re.compile(r"^FAILED\s+(?P<nodeid>\S+)\s+-\s+(?P<reason>.*)$")

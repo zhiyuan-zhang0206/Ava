@@ -2594,7 +2594,7 @@ groups:
   # (fleet-graph degradation wave, 2026-08-23, #3224). Their `for` windows
   # remain unchanged, so semantics hold at 1/5 the evaluation cost.
 
-      # ── ava-ops-machine-offline-warning: replaces services/heartbeat/liveness.py _fire_machine_offline WARNING grade (transition_severity warning_after_s=180) ──
+      # ── ava-ops-machine-offline-warning: replaces services/wake/heartbeat/liveness.py _fire_machine_offline WARNING grade (transition_severity warning_after_s=180) ──
       - uid: ava-ops-machine-offline-warning
         title: "Machine offline (agent-runner unreachable)"
         condition: D
@@ -2663,7 +2663,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-machine-offline-error: replaces services/heartbeat/liveness.py _fire_machine_offline ERROR grade (transition_severity error_after_s=600) ──
+      # ── ava-ops-machine-offline-error: replaces services/wake/heartbeat/liveness.py _fire_machine_offline ERROR grade (transition_severity error_after_s=600) ──
       - uid: ava-ops-machine-offline-error
         title: "Machine offline 10+ minutes (agent-runner unreachable)"
         condition: D
@@ -3005,7 +3005,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-im-push-failed: replaces services/im_bridge/push_watchdog.py alert_push_failure (cross-channel send_to_owner push, threshold 2, 1800s cooldown, adapter._push_alerted_at) ──
+      # ── ava-ops-im-push-failed: replaces services/entrypoints/im_bridge/push_watchdog.py alert_push_failure (cross-channel send_to_owner push, threshold 2, 1800s cooldown, adapter._push_alerted_at) ──
       - uid: ava-ops-im-push-failed
         title: "IM push link failing (weixin)"
         condition: D
@@ -3074,7 +3074,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-im-feishu-owner-seed-failed: replaces services/im_bridge/adapters/feishu.py _seed_owner_from_switch_state telegram send_to_owner message (copy.FEISHU_OWNER_SEED_*) ──
+      # ── ava-ops-im-feishu-owner-seed-failed: replaces services/entrypoints/im_bridge/adapters/feishu.py _seed_owner_from_switch_state telegram send_to_owner message (copy.FEISHU_OWNER_SEED_*) ──
       - uid: ava-ops-im-feishu-owner-seed-failed
         title: "Feishu owner chat not restored at bridge boot"
         condition: D
@@ -3141,7 +3141,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-delivery-stalled: replaces services/delivery_watchdog/daemon.py _DeployWindowGate (deploy-window hold + settle window, AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS). The per-row event itself is unchanged; this rule is its Grafana notification path (the event had no per-event rule, only the >50/10m backlog rule). ──
+      # ── ava-ops-delivery-stalled: replaces services/wake/delivery_watchdog/daemon.py _DeployWindowGate (deploy-window hold + settle window, AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS). The per-row event itself is unchanged; this rule is its Grafana notification path (the event had no per-event rule, only the >50/10m backlog rule). ──
       - uid: ava-ops-delivery-stalled
         title: "Chat delivery stalled (delivery_stalled event)"
         condition: D
@@ -3280,7 +3280,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-unit-restart-failed: replaces services/ava_root/alerts.py AlertRouter/AlertWebhookNotifier: fire once per episode (kind restart_failed, severity error) posted to /api/alerts with source ava-root ──
+      # ── ava-ops-root-unit-restart-failed: replaces services/supervision/ava_root/alerts.py AlertRouter/AlertWebhookNotifier: fire once per episode (kind restart_failed, severity error) posted to /api/alerts with source ava-root ──
       - uid: ava-ops-root-unit-restart-failed
         title: "Root unit replacement failed"
         condition: D
@@ -3348,7 +3348,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-unit-breaker-open: replaces services/ava_root/alerts.py episode kind breaker_open (severity critical) ──
+      # ── ava-ops-root-unit-breaker-open: replaces services/supervision/ava_root/alerts.py episode kind breaker_open (severity critical) ──
       - uid: ava-ops-root-unit-breaker-open
         title: "Root unit restart breaker open"
         condition: D
@@ -3417,7 +3417,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-unit-custody-held: replaces services/ava_root/alerts.py episode kind custody_held (severity warning) ──
+      # ── ava-ops-root-unit-custody-held: replaces services/supervision/ava_root/alerts.py episode kind custody_held (severity warning) ──
       - uid: ava-ops-root-unit-custody-held
         title: "Root unit native custody held"
         condition: D
@@ -3484,7 +3484,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-unit-not-revivable: replaces services/ava_root/health.py terminal_escalate_rounds=2 (consecutive terminal rounds escalate WARNING -> ERROR) ──
+      # ── ava-ops-root-unit-not-revivable: replaces services/supervision/ava_root/health.py terminal_escalate_rounds=2 (consecutive terminal rounds escalate WARNING -> ERROR) ──
       - uid: ava-ops-root-unit-not-revivable
         title: "Root unit not revivable"
         condition: D
@@ -4789,7 +4789,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-hosted-boot-recovery-deferred: replaces services/agent_host/boot_defer.py consecutive-boot streak ledger + ALERT_AFTER_BOOTS=3 escalation to hosted_boot_recovery_stalled (event renamed hosted_boot_recovery_deferred, emitted every deferred boot; consecutive-ness is approximated by a 24h count) ──
+      # ── ava-ops-hosted-boot-recovery-deferred: replaces services/agent_runner/agent_host/boot_defer.py consecutive-boot streak ledger + ALERT_AFTER_BOOTS=3 escalation to hosted_boot_recovery_stalled (event renamed hosted_boot_recovery_deferred, emitted every deferred boot; consecutive-ness is approximated by a 24h count) ──
       - uid: ava-ops-hosted-boot-recovery-deferred
         title: "Hosted boot recovery deferred repeatedly"
         condition: D

@@ -11,9 +11,9 @@ Measured on macOS arm64, Python 3.12, httpx 0.28.1, warm bytecode cache, one
 fresh process per run, median of three (without the guard -> with it):
 
     import httpx (bare)                21.55 -> 15.95 MiB
-    services.heartbeat.daemon          58.08 -> 53.83 MiB
-    services.agent_ops.daemon          60.38 -> 56.19 MiB
-    services.agent_host.daemon         93.59 -> 89.66 MiB
+    services.wake.heartbeat.daemon          58.08 -> 53.83 MiB
+    services.agent_runner.agent_ops.daemon          60.38 -> 56.19 MiB
+    services.agent_runner.agent_host.daemon         93.59 -> 89.66 MiB
 
 Why it works, and what it depends on. `httpx/__init__.py` (0.28.x) ends with
 

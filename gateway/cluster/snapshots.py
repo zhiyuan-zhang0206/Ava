@@ -1,7 +1,7 @@
 """The roster's read model: the last status_probe of each roster-visible agent-runner.
 
 The heartbeat service's liveness pass probes every such machine once a minute and
-writes the outcome into `machine_status_snapshot` (`services/heartbeat/liveness.py`).
+writes the outcome into `machine_status_snapshot` (`services/wake/heartbeat/liveness.py`).
 The gateway's roster and machines reads render from these rows instead of dialing
 each runner on every read, so a blackholed host can never cost a read its dial
 budget (task #3507) and the gateway keeps no failure memory of its own. A row older

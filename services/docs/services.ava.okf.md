@@ -18,12 +18,14 @@ native ownership of the responding listener.
   heartbeat, messaging, delivery-watchdog, ttl-reaper, schedule-manager, maintenance, indexing, and backups.
 - [[services/docs/agent_runner_side/agent_runner_side.ava.okf.md|Agent-runner services]] include agent-host,
   ops, page-server, browser, and local MCP services.
-- [[services/ava_root_glue/docs/ava_root_glue.ava.okf.md|Root deployment wiring]] registers
+- [[services/supervision/ava_root_glue/docs/ava_root_glue.ava.okf.md|Root deployment wiring]] registers
   the exact selected roster, service recovery, read-only diagnostics, and tree
   self-check. Delivery-watchdog is a business delivery service, not a service
   lifecycle scheduler.
-- [[services/healthchecks/docs/healthchecks.ava.okf.md|Protocol probes]] return evidence;
+- [[services/supervision/healthchecks/docs/healthchecks.ava.okf.md|Protocol probes]] return evidence;
   they have no spawn, session restart, or OS-job authority.
+
+Code lives in domain groups under `services/<group>/<service>/` (no `__init__.py` on a group): `supervision` (root supervisor, its wiring, protocol probes), `agent_runner` (agent host, ops server, page server, pty sessions), `desktop` (browser, computer-use, permissions helper), `entrypoints` (Gate, IM bridge), `wake` (heartbeat, delivery watchdog, schedule manager), `upkeep` (TTL reaper, events maintenance), `derived` (memory index and search, labeler, hierarchy worker) and `backup` (scheduler, WAL-G, artifact handling, the dump itself). `redis_bridge` and `pidfile.py` stay at the top. The capability split documented below cuts across these groups.
 
 Agent shells, watchers, and other persistent interactive sessions are subordinate
 runtime work, rather than a second service lifecycle. On macOS the installed

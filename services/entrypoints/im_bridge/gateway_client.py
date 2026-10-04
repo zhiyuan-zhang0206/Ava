@@ -1,0 +1,210 @@
+"""Gateway REST and SSE client for the IM Bridge."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import uuid
+from collections.abc import AsyncGenerator, Mapping
+from typing import Any, Literal
+
+import httpx
+
+from services.entrypoints.im_bridge.config import ImBridgeConfig
+from services.entrypoints.im_bridge.types import AgentDetail, AgentDirectoryPage
+
+_log = logging.getLogger("services.entrypoints.im_bridge.gateway_client")
+
+
+class GatewayClient:
+    """REST + SSE client for the Ava gateway (the Post Gateway)."""
+
+    def __init__(
+        self, config: ImBridgeConfig, *, gateway_url: str, auth_headers: Mapping[str, str]
+    ) -> None:
+        self._config = config
+        self._base = gateway_url.rstrip("/")
+        # The machine API token's Bearer (`gateway_auth_headers()`), empty in the open posture.
+        self._auth_headers = dict(auth_headers)
+        self._client: httpx.AsyncClient | None = None
+
+    async def _http(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                base_url=self._base, timeout=httpx.Timeout(30.0, connect=10.0)
+            )
+        return self._client
+
+    def _headers(self) -> dict[str, str]:
+        return dict(self._auth_headers)
+
+    async def list_agents(
+        self,
+        *,
+        scope: Literal["live", "terminated", "all"],
+        query: str = "",
+        before_id: int | None = None,
+    ) -> AgentDirectoryPage:
+        """Read one compact directory page; callers choose scope and pagination."""
+        client = await self._http()
+        params: dict[str, str | int] = {"scope": scope, "query": query, "limit": 100}
+        if before_id is not None:
+            params["before_id"] = before_id
+        resp = await client.get("/api/agents", headers=self._headers(), params=params)
+        if resp.status_code != 200:
+            raise RuntimeError(f"list agents failed: HTTP {resp.status_code}")
+        return resp.json()
+
+    async def get_agent(self, agent_id: int) -> AgentDetail | None:
+        """Fetch one agent's detail, distinguishing absence from gateway failure."""
+        client = await self._http()
+        resp = await client.get(f"/api/agents/{agent_id}", headers=self._headers())
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise RuntimeError(f"get agent {agent_id} failed: HTTP {resp.status_code}")
+        return resp.json()
+
+    async def send_message(
+        self, agent_id: int, text: str, *, idempotency_key: str | None = None
+    ) -> None:
+        """POST /api/agents/{id}/messages — enqueue a chat inbound; retries with
+        backoff (an IM message must not drop once the platform offset moved).
+        AtLeastOnceWithKey: same Idempotency-Key on every retry, so the server
+        dedups — never a duplicate even after commit. Outbox replays pass
+        their persisted key (Task #1032), so a replay after a lost gateway
+        response stays a no-op server-side."""
+        key = idempotency_key or uuid.uuid4().hex
+        for attempt, delay in enumerate(self._config.im_send_retry_delays, start=1):
+            try:
+                client = await self._http()
+                resp = await client.post(
+                    f"/api/agents/{agent_id}/messages",
+                    headers={**self._headers(), "Idempotency-Key": key},
+                    # IM is a frontend like the web composer — the human speaking
+                    # through any channel is just "user".
+                    json={"content": text, "source": "user"},
+                )
+                if resp.status_code == 201:
+                    return
+                if resp.status_code >= 500:
+                    # gateway mid-rollout — retry; 4xx (validation) never retries
+                    _log.warning(
+                        "send to agent %s failed: HTTP %s (attempt %d, retry in %.0fs)",
+                        agent_id,
+                        resp.status_code,
+                        attempt,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise RuntimeError(f"send to agent {agent_id} failed: HTTP {resp.status_code}")
+            except httpx.HTTPError:
+                _log.warning(
+                    "send to agent %s failed (attempt %d, retry in %.0fs)",
+                    agent_id,
+                    attempt,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+        raise RuntimeError(
+            f"send to agent {agent_id} failed after {len(self._config.im_send_retry_delays)} attempts"
+        )
+
+    async def list_presets(self) -> list[dict[str, Any]]:
+        """GET /api/presets — spawn menu layer 1: [{id, name, label,
+        description, config}], ordered by name."""
+        client = await self._http()
+        resp = await client.get("/api/presets", headers=self._headers())
+        if resp.status_code != 200:
+            raise RuntimeError(f"list presets failed: HTTP {resp.status_code}")
+        return resp.json()
+
+    async def list_models(self) -> dict[str, Any]:
+        """GET /api/models — spawn menu layer 2: {providers, models, default}."""
+        client = await self._http()
+        resp = await client.get("/api/models", headers=self._headers())
+        if resp.status_code != 200:
+            raise RuntimeError(f"list models failed: HTTP {resp.status_code}")
+        return resp.json()
+
+    async def spawn_agent(self, *, preset: str | None, config: dict[str, object] | None) -> int:
+        """POST /api/agents — create an agent, return its id. A named preset
+        rides config_overlay["preset"] (task #4086: the top-level field is
+        retired); the gateway folds it into config, the runner never sees it."""
+        client = await self._http()
+        overlay = dict(config) if config else {}
+        if preset is not None:
+            overlay["preset"] = preset
+        payload: dict[str, object] = {"spawner": "user"}
+        if overlay:
+            payload["config"] = overlay
+        resp = await client.post("/api/agents", headers=self._headers(), json=payload)
+        if resp.status_code != 201:
+            raise RuntimeError(f"spawn failed: HTTP {resp.status_code} - {resp.text[:300]}")
+        return int(resp.json()["id"])
+
+    async def list_commands(self) -> list[dict[str, Any]]:
+        """GET /api/commands — the Ava slash-command catalog (every active
+        skill gets a same-named command; project/user/plugin templates add
+        more). name + description + instruction_hint, deduped and sorted."""
+        client = await self._http()
+        resp = await client.get("/api/commands", headers=self._headers())
+        if resp.status_code != 200:
+            raise RuntimeError(f"list commands failed: HTTP {resp.status_code}")
+        return resp.json()
+
+    async def get_timeline(self, agent_id: int, limit: int | None = None) -> list[dict[str, Any]]:
+        """GET /api/agents/{id}/timeline?limit=N → rendered TimelineItems.
+
+        Without an explicit limit, N is the configured /switch fetch window
+        (services.im_bridge_timeline_window) — the number the replay trims
+        from."""
+        client = await self._http()
+        if limit is None:
+            limit = self._config.im_bridge_timeline_window
+        resp = await client.get(
+            f"/api/agents/{agent_id}/timeline",
+            headers=self._headers(),
+            params={"limit": limit},
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"timeline {agent_id} failed: HTTP {resp.status_code}")
+        return resp.json().get("items", [])
+
+    async def stream_events(
+        self, agent_id: int
+    ) -> AsyncGenerator[dict[str, Any], None]:  # pragma: no cover - generator
+        """SSE GET /api/agents/{id}/events/stream; yield parsed event dicts."""
+        client = await self._http()
+        async with client.stream(
+            "GET",
+            f"/api/agents/{agent_id}/events/stream",
+            headers=self._headers(),
+            timeout=httpx.Timeout(self._config.im_sse_read_timeout_seconds, connect=10.0),
+        ) as resp:
+            if resp.status_code != 200:
+                raise RuntimeError(f"sse {agent_id} failed: HTTP {resp.status_code}")
+            buf = b""
+            async for chunk in resp.aiter_bytes():
+                buf += chunk
+                while b"\n\n" in buf:
+                    frame_bytes, buf = buf.split(b"\n\n", 1)
+                    # Decode whole frames by byte accumulation: a per-chunk
+                    # decode turns a multi-byte character split across
+                    # transport chunks into U+FFFD replacements.
+                    frame = frame_bytes.decode("utf-8", errors="replace")
+                    data = None
+                    # Split on "\n" only - str.splitlines() also breaks on
+                    # U+0085 / U+2028 / U+2029, which are legal unescaped
+                    # inside a JSON string; a split there truncates the
+                    # payload and the frame is dropped.
+                    for line in frame.split("\n"):
+                        if line.startswith("data:"):
+                            data = line[5:].strip()
+                    if data and data != '{"role":"heartbeat"}':
+                        try:
+                            yield json.loads(data)
+                        except json.JSONDecodeError:
+                            _log.warning("sse unparseable frame: %.120s", data)

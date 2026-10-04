@@ -147,7 +147,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_TERMINATE_GRACE_S",
     ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
     (
-        "services/backup_scheduler/operation/custody.py",
+        "services/backup/scheduler/operation/custody.py",
         "TERMINATE_GRACE_S",
     ): "independent: the SIGTERM courtesy window for one scheduled backup operation worker to "
     "unwind its own private cleanup (key files, decrypted scratch) before the controller's "
@@ -194,7 +194,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "STALL_SECONDS",
     ): "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour",
     (
-        "services/computer/mcp_daemon.py",
+        "services/desktop/computer/mcp_daemon.py",
         "_WATCHDOG_MIN_STALL_S",
     ): "not a clock: a sanity floor on the operator-configured loop-stall window "
     "(settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor "

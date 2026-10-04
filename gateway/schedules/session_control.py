@@ -3,7 +3,7 @@
 The sessions are kept alive by the `schedule-manager` service, a separate
 process, so the API neither calls it nor holds its state. `request_sync` queues
 a row in `schedule_sync_requests` (the service consumes it within about a
-second, `services/schedule_manager/requests.py`) and waits a bounded time for the
+second, `services/wake/schedule_manager/requests.py`) and waits a bounded time for the
 row to be consumed, so a start / stop / restart answers with the converged
 status when the service is up and still answers when it is not. `capture` reads
 the session's recent output straight from the shell backend: it needs no

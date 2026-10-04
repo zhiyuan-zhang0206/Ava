@@ -363,7 +363,7 @@ def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str 
 
 def _walg_archive_failure() -> str | None:
     """The first broken WAL-archiving condition, or None (also None while WAL-G is off)."""
-    from services.gateway_side.walg import probe
+    from services.backup.walg import probe
 
     return probe.failure()
 
@@ -555,7 +555,7 @@ def _check_alert_only_health() -> int:
     archive_failure = _walg_archive_failure()
     if archive_failure is not None:
         return _alert_only_failure("walg_archive", f"FAIL: {archive_failure}")
-    from services.gateway_side.walg.config import enabled as walg_enabled
+    from services.backup.walg.config import enabled as walg_enabled
 
     if walg_enabled():
         print("  ✓ WAL archiving")

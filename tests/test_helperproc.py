@@ -17,8 +17,8 @@ from base.native_process import pid_starttime_ticks
 from base.sessions import helper_chain_guard, helperproc
 from base.sessions.helper_chain_guard import parent_chain_intact
 from base.sessions.record import SessionRecord
-from services.permissions_helper import client
-from services.permissions_helper.client import PermissionsHelperError
+from services.desktop.permissions_helper import client
+from services.desktop.permissions_helper.client import PermissionsHelperError
 
 
 def _current_process_record(*, generation: str | None = None) -> SessionRecord:
@@ -122,7 +122,7 @@ def test_new_session_preserves_argv_and_non_login_shell(
 
     monkeypatch.setattr(client, "spawn_process", fake_spawn_process)
     backend = helperproc.HelperProcSessionBackend()
-    argv = [sys.executable, "-m", "services.agent_host.daemon"]
+    argv = [sys.executable, "-m", "services.agent_runner.agent_host.daemon"]
 
     assert backend.new_session("ava-agent", argv, unit_home, env={})
     assert backend.new_session(
@@ -387,7 +387,7 @@ def test_parent_chain_guard_rejects_an_outside_pid_on_a_real_chain(tmp_path: Pat
 
 
 def test_parent_chain_checks_are_wired_at_host_boot_and_heartbeat() -> None:
-    from services.agent_host import daemon
+    from services.agent_runner.agent_host import daemon
 
     hosted_boot = inspect.getsource(daemon.main)
     hosted_beat = inspect.getsource(daemon._beat_forever)
@@ -399,7 +399,7 @@ def test_parent_chain_checks_are_wired_at_host_boot_and_heartbeat() -> None:
 def test_broken_parent_chain_exits_host_with_software_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.agent_host import daemon
+    from services.agent_runner.agent_host import daemon
 
     exits: list[int] = []
     monkeypatch.setattr(daemon, "parent_chain_intact", lambda: False)

@@ -27,7 +27,7 @@ One row per contract in `pyproject.toml`, under the name it has there.
 | Contract | Rule |
 |---|---|
 | `Layered architecture (base < ava < agent < gateway < cli)` | the stack above |
-| `Hosted agent runner (base < ava < agent < services.agent_host)` | `services.agent_host` sits above `agent`; nothing below it imports `services.agent_host` |
+| `Hosted agent runner (base < ava < agent < services.agent_runner.agent_host)` | `services.agent_runner.agent_host` sits above `agent`; nothing below it imports `services.agent_runner.agent_host` |
 | `services must not import the agent kernel` | `services` does not import `agent`, except the enumerated `ignore_imports` entries ([below](#ignore_imports)) |
 | `base must not import services` | `base` does not import `services`; no exceptions |
 | `services must not import cli` | `services` does not import `cli`; no exceptions |
@@ -37,9 +37,9 @@ One row per contract in `pyproject.toml`, under the name it has there.
 
 - **`services`** is not a layer. The contracts fix four things: `base` does not
   import it; it does not import `cli`; it does not import `agent`, except the
-  enumerated entries (all but one are `services.agent_host`, the hosted runner that
+  enumerated entries (all but one are `services.agent_runner.agent_host`, the hosted runner that
   runs agent turns in-process and sits above `agent`); and nothing below `agent`
-  imports `services.agent_host`. That puts `services` below `cli`, above `base` and
+  imports `services.agent_runner.agent_host`. That puts `services` below `cli`, above `base` and
   outside the agent kernel. No contract names a direction between `services` and
   `gateway`, `ava` or `ops`.
 - **`ops`** has only the ops contract: above `base`, below `gateway` and `cli`.
@@ -73,15 +73,15 @@ One row per contract in `pyproject.toml`, under the name it has there.
 
 Edges the contracts do not see or do not cover. They are listed, not exempted.
 
-- `services` → `scripts`: `services/backup_scheduler/worker.py` and
-  `services/gateway_side/walg/drill.py` import
+- `services` → `scripts`: `services/backup/scheduler/worker.py` and
+  `services/backup/walg/drill.py` import
   `scripts.data_plane_ops.restore_drill` inside functions. Production code importing
   a tooling script; `scripts/` is outside the graph.
 - `ops` ↔ `services`: `ops/roster/__init__.py` and `ops/spec.py` import `services.*`
   inside functions, and many `services` modules import `ops`. No contract covers the
   pair.
 - String-form imports of a higher layer. `base/sessions/helperproc.py` loads
-  `services.permissions_helper.client` by name: a `base` → `services` edge, which
+  `services.desktop.permissions_helper.client` by name: a `base` → `services` edge, which
   `base must not import services` exists to forbid. `ava/__init__.py` and
   `ava/external/state.py` load `agent.extensions` and `agent.state` by name;
   `ava/__init__.py` documents that as how `ava` keeps no static dependency on

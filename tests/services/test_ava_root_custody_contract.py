@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from services.permissions_helper import lifecycle
+from services.desktop.permissions_helper import lifecycle
 
 
 @pytest.mark.skipif(

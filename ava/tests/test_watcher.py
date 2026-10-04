@@ -206,7 +206,7 @@ def test_watcher_child_dies_when_the_pty_service_dies(
         child = psutil.Process(child_pid)
         shell = psutil.Process(child.ppid())
         host = psutil.Process(shell.ppid())
-        assert "services.pty_sessions.daemon" in " ".join(host.cmdline())
+        assert "services.agent_runner.pty_sessions.daemon" in " ".join(host.cmdline())
 
         os.kill(host.pid, signal.SIGKILL)
 

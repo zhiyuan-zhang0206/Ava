@@ -103,7 +103,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
     from base.config import settings
     from base.host.private_storage import write_private_bytes
     from base.native_process.os_platform import file_lock
-    from services.permissions_helper.launchd_job import unregister_helper
+    from services.desktop.permissions_helper.launchd_job import unregister_helper
 
     # Publish a terminal intent before stopping. Concurrent/internal starts must
     # refuse it from the first moment of the teardown.

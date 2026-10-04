@@ -1,4 +1,4 @@
-"""services.ava_root_glue.manifests: roster -> K2 manifest generation."""
+"""services.supervision.ava_root_glue.manifests: roster -> K2 manifest generation."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from base.config import settings
 # are irrelevant to the roster-driven assertions here (same precedent as
 # cli/commands/cluster/tests/test_cluster_health.py).
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
-from services.ava_root.manifest import ManifestError, load_manifests
-from services.ava_root.supervisor import SupervisorConfig
-from services.ava_root_glue import manifests as gen
+from services.supervision.ava_root.manifest import ManifestError, load_manifests
+from services.supervision.ava_root.supervisor import SupervisorConfig
+from services.supervision.ava_root_glue import manifests as gen
 
 _REPO = Path("/checkout/repo")
 
@@ -94,7 +94,7 @@ def test_key_units_exec_restart_attach() -> None:
     assert units["agent-host"]["exec"] == [
         "/bin/sh",
         "-c",
-        "cd /checkout/repo && exec .venv/bin/python -m services.agent_host.daemon",
+        "cd /checkout/repo && exec .venv/bin/python -m services.agent_runner.agent_host.daemon",
     ]
     assert units["page-server"]["restart"] == "always"
     assert units["page-server"]["attach"] == "root"
@@ -218,7 +218,7 @@ def test_gateway_window_follows_the_drain_budget_the_launch_hands_uvicorn(
 
 
 def test_browser_mcp_window_covers_every_bounded_shutdown_step() -> None:
-    from services.browser import shutdown_budget
+    from services.desktop.browser import shutdown_budget
 
     window = cast("float", _real_units()["browser-mcp"]["stop_timeout_s"])
     steps = shutdown_budget.SHUTDOWN_STEPS * shutdown_budget.SHUTDOWN_STEP_TIMEOUT_S

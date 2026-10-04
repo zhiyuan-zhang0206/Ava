@@ -84,7 +84,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import import_cache, lint_common, placement_evidence
+from scripts.structure import import_cache, lint_common, placement_evidence, service_units
 
 # First-party code tops that take part in placement (import-linter roots + scripts).
 CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts")
@@ -167,7 +167,7 @@ def unit_of(module: str) -> str | None:
     if parts[0] not in CODE_TOPS:
         return None
     if parts[0] == "services" and len(parts) > 1:
-        return f"services.{parts[1]}"
+        return service_units.unit_of(parts)
     return parts[0]
 
 
@@ -327,12 +327,7 @@ def _matching_units(name: str, units: list[str]) -> list[str]:
 def _build_units(repo_root: Path) -> list[str]:
     units = {top for top in CODE_TOPS if top != "services"}
     units.add("services")
-    services = repo_root / "services"
-    for child in services.iterdir() if services.is_dir() else ():
-        if child.is_dir() and child.name != "docs" and not child.name.startswith("__"):
-            units.add(f"services.{child.name}")
-        elif child.suffix == ".py" and child.stem != "__init__":
-            units.add(f"services.{child.stem}")
+    units |= service_units.build(repo_root / "services")
     return sorted(units)
 
 

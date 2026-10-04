@@ -1,0 +1,14 @@
+{
+  "ambient_state": {
+    "services/supervision/ava_root/health.py::asyncio-task:HealthMonitor.start": 1,
+    "services/supervision/ava_root/health.py::thread:ProbeRunner.observe": 1,
+    "services/supervision/ava_root/selfcheck.py::asyncio-task:TreeSelfCheck.start": 1,
+    "services/supervision/ava_root/supervisor.py::asyncio-task:Supervisor._spawn": 1,
+    "services/supervision/ava_root_glue/diagnostics.py::asyncio-task:RootHealthRounds.start": 1,
+    "services/supervision/ava_root_glue/glue.py::ambient-container:STATIC_PROBES": 1,
+    "services/supervision/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy": 1
+  },
+  "patch_targets": {
+    "services/supervision/ava_root/tests/test_ava_root_ipc.py::base.deploy.lifecycle.start_serving._lock_path": 1
+  }
+}

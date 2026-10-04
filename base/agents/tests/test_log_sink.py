@@ -137,7 +137,7 @@ def test_sink_agent_id_numeric_string_converts_to_int(
 def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
     """stdlib `logging.getLogger(...).info(...)` goes through _StdlibInterceptHandler →
     loguru sink → the unified event stream. Verifies that service modules (e.g.
-    `services/agent_ops/daemon.py` that use stdlib logging) have their logs reach
+    `services/agent_runner/agent_ops/daemon.py` that use stdlib logging) have their logs reach
     the event stream after the upgrade, without needing to rewrite callsites line by line."""
     import logging
 

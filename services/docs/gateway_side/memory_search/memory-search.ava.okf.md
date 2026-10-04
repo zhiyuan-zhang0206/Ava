@@ -8,7 +8,7 @@ tags: []
 # Memory Search — NumPy Service
 
 ## What is it
-A standalone local process (`python -m services.memory_search.daemon`) serving
+A standalone local process (`python -m services.derived.memory_search.daemon`) serving
 the memory search HTTP API on `127.0.0.1:19531` . The
 indexer daemon and the gateway both dial it over HTTP, so the
 numpy backend needs no cross-process shared state: this one process owns the
@@ -30,16 +30,16 @@ persistence.
 
 ## Key Dependencies
 - [[memory-indexer.ava.okf.md]] — writer (indexer daemon) and reader (gateway search)
-- [[services/ava_root_glue/docs/ava_root_glue.ava.okf.md]] — kept alive via `healthchecks/memory_search.py`
+- [[services/supervision/ava_root_glue/docs/ava_root_glue.ava.okf.md]] — kept alive via `healthchecks/memory_search.py`
 
 ## Entry Points
-- `services/memory_search/daemon.py` — `.venv/bin/python -m services.memory_search.daemon`
-- `services/memory_search/app.py:build_app()` — the FastAPI app (upsert / upsert_batch / delete / delete_stale_batch / meta / search / healthz); `delete_stale_batch` is the tail-cleanup companion to `upsert_batch` (issue #1946)
+- `services/derived/memory_search/daemon.py` — `.venv/bin/python -m services.derived.memory_search.daemon`
+- `services/derived/memory_search/app.py:build_app()` — the FastAPI app (upsert / upsert_batch / delete / delete_stale_batch / meta / search / healthz); `delete_stale_batch` is the tail-cleanup companion to `upsert_batch` (issue #1946)
 
 ## Notes
 - Port: `AVA_MEMORY_SEARCH_PORT` (default 19531), URI: `AVA_MEMORY_SEARCH_URI`
 - Data dir: `AVA_MEMORY_SEARCH_DATA_DIR` (default `$AVA_HOME/memory-search/`)
-- Selected via `AVA_MEMORY_SEARCH_BACKEND=numpy` (`services/memory_indexer/backends/factory.py`)
+- Selected via `AVA_MEMORY_SEARCH_BACKEND=numpy` (`services/derived/memory_indexer/backends/factory.py`)
 - **Probe limitation (tracked)**: the healthcheck's POST /search probe carries
   no identity payload, so the `PORT_TAKEN` terminal verdict is unreachable for
   it — another unit's daemon answering a valid search payload would read as

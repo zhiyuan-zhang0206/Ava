@@ -154,7 +154,7 @@ PURE_REPO_CALLEES: dict[str, str] = {
     "base.events.contract.family_events": "a tuple over the static event registry",
     "base.events.loader.load_events": "merges the static per-domain event declarations",
     "base.packages.skills.scan._rx": "compiles a regex from a literal pattern",
-    "services.gateway_side.backup.passphrase.derive": "a key derivation of a literal: a fixed value",
+    "services.backup.artifact.passphrase.derive": "a key derivation of a literal: a fixed value",
 }
 
 # Exact sites let through, `path::rule:name` (the baseline's own key shape) -> why.
@@ -245,6 +245,6 @@ DEFERRED: dict[str, str] = {
         "gateway/auth/rejection_log.py::ambient-container:_auth401_last_warn",
         "gateway/auth/rejection_log.py::ambient-container:_auth401_suppressed",
         "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at",
-        "services/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy",
+        "services/supervision/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy",
     )
 }

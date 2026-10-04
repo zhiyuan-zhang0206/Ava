@@ -7,7 +7,7 @@ Three parts cover any window, and none grows with the age of the cluster:
 - whole UTC days before those from the day-grain ledger `agent_model_tokens_daily` (a window that
   starts mid-day also reads that first partial day from the raw rows);
 - for the all-time window, the folded whole-life sums `agent_model_tokens_total` up to the fold watermark,
-  then the ledger days after it (`services.events_maintenance.token_totals`).
+  then the ledger days after it (`services.upkeep.events_maintenance.token_totals`).
 
 A row is counted in exactly one part: the ledger days end before the raw tail starts, and a partial
 first day ends where the ledger days begin.
@@ -21,7 +21,7 @@ from typing import Any, LiteralString, NamedTuple, cast
 
 from base.events.contract import LLM_USAGE_KEYS
 from base.telemetry.event_sql import numeric
-from services.events_maintenance.token_totals import folded_through
+from services.upkeep.events_maintenance.token_totals import folded_through
 
 _RETAINED_WINDOW = timedelta(days=7)
 

@@ -2,7 +2,7 @@
 
 A schedule is a persistent, supervised session (a `script` + a `command`
 to run it); the schedule-manager service keeps one session per enabled row
-(services/schedule_manager/manager.py) and this router reaches it through
+(services/wake/schedule_manager/manager.py) and this router reaches it through
 `session_control` (queued sync requests). This router is the management surface: list /
 create / get / update / delete, start / stop / restart, logs, run history, and a
 `draft` endpoint that hands a natural-language request to an ava-schedule-writer agent.

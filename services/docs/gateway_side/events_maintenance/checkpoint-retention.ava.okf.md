@@ -53,10 +53,10 @@ does not consume the productive-thread cap, allowing later candidates to run.
 
 ## Ownership
 
-- `services/events_maintenance/checkpoint_reaper.py` owns candidate discovery,
+- `services/upkeep/events_maintenance/checkpoint_reaper.py` owns candidate discovery,
   rotation, recheck, and the keep-three policy.
 - `base/agents/history/checkpoint_cleanup.py` owns the atomic trim, survivor references, and
   retained ancestry and in-flight-write guard. Compaction stamps boundaries but
   does not invoke the retired keep-one deletion flow.
-- `services/events_maintenance/daemon.py` no longer schedules checkpoint
+- `services/upkeep/events_maintenance/daemon.py` no longer schedules checkpoint
   trimming or reports a trim health component.

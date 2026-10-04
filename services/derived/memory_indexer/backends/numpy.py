@@ -1,0 +1,168 @@
+"""NumPy memory search backend — HTTP client over the local memory_search service.
+
+The storage lives in the standalone `services/derived/memory_search/` process
+(loopback HTTP on 19531), so the indexer daemon (write path) and the
+gateway (read path) both talk to it over HTTP — one process owns the
+in-memory matrix + npz, no cross-process shared state.
+
+`connect()` opens the sync client the daemon's batched writes use and
+probes the service (a real GET /meta — the retry loop in
+`services.derived.memory_indexer.daemon` calls connect() until the service is up).
+The gateway's `search_topk_async` opens a per-call async client bounded by
+the caller's deadline.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import httpx
+import numpy as np
+
+from base.config import settings
+from services.derived.memory_indexer.backends.base import KIND_BODY
+
+
+class NumPyBackend:
+    """Protocol-compliant backend over the memory_search HTTP service."""
+
+    name = "numpy"
+
+    def __init__(self, *, readonly: bool = False) -> None:
+        self._client: httpx.Client | None = None
+        self._readonly = readonly
+
+    @property
+    def _uri(self) -> str:
+        return settings.services.memory_search_uri
+
+    def connect(self) -> None:
+        """Open the sync client + prove the service answers (a real GET
+        /meta, not a TCP connect — a foreign process on the port fails here
+        and the daemon's retry loop keeps waiting)."""
+        client = httpx.Client(base_url=self._uri, timeout=5.0)
+        try:
+            client.get("/meta").raise_for_status()
+        except Exception:
+            client.close()
+            raise
+        self._client = client
+
+    def close(self) -> None:
+        """Close the client when one exists; idempotent."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def _require_client(self) -> httpx.Client:
+        if self._client is None:
+            raise RuntimeError(f"{self.name} backend not connected — call connect() first")
+        return self._client
+
+    def _require_writable(self) -> None:
+        """Reject mutations through a backend created for read-only work."""
+        if self._readonly:
+            raise RuntimeError(
+                "numpy backend is read-only; only the indexer daemon's cold-start "
+                "reconcile on startup may write this index"
+            )
+
+    def upsert(
+        self,
+        path: str,
+        mtime: float,
+        content_hash: str,
+        embedding: np.ndarray,
+        *,
+        kind: str = KIND_BODY,
+        chunk_idx: int = 0,
+    ) -> None:
+        """Write / update one chunk row — see `backends.base`."""
+        self._require_writable()
+        resp = self._require_client().post(
+            "/upsert",
+            json={
+                "path": path,
+                "mtime": float(mtime),
+                "content_hash": content_hash,
+                "kind": kind,
+                "chunk_idx": int(chunk_idx),
+                "vector": embedding.astype(np.float32).tolist(),
+            },
+        )
+        resp.raise_for_status()
+
+    def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+        """Write chunk rows in one service request and one npz save."""
+        self._require_writable()
+        if not rows:
+            return
+        resp = self._require_client().post(
+            "/upsert_batch",
+            json={
+                "rows": [
+                    {
+                        "path": path,
+                        "mtime": float(mtime),
+                        "content_hash": content_hash,
+                        "kind": kind,
+                        "chunk_idx": int(chunk_idx),
+                        "vector": embedding.astype(np.float32).tolist(),
+                    }
+                    for path, mtime, content_hash, embedding, kind, chunk_idx in rows
+                ]
+            },
+            timeout=300.0,
+        )
+        resp.raise_for_status()
+
+    def delete(self, path: str) -> None:
+        """Delete every chunk row of `path`; the service no-ops when absent."""
+        self._require_writable()
+        self._require_client().post("/delete", json={"path": path}).raise_for_status()
+
+    def delete_stale_rows(
+        self,
+        entries: Sequence[tuple[str, dict[str, int]]],
+    ) -> None:
+        """Tail-cleanup (issue #1946) — one HTTP call + one npz save for the
+        whole batch; see the backend protocol for the semantics."""
+        self._require_writable()
+        if not entries:
+            return
+        self._require_client().post(
+            "/delete_stale_batch",
+            json={"entries": [{"path": path, "kind_limits": limits} for path, limits in entries]},
+        ).raise_for_status()
+
+    def all_meta(self) -> dict[str, tuple[float, str, str]]:
+        """Per-path (mtime, content_hash, provider_fingerprint) — see
+        `backends.base`."""
+        resp = self._require_client().get("/meta")
+        resp.raise_for_status()
+        return {
+            path: (float(mtime), str(hash_), str(fingerprint))
+            for path, (mtime, hash_, fingerprint) in resp.json().items()
+        }
+
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
+        """Exact cosine top-k paths — see `backends.base`."""
+        resp = self._require_client().post(
+            "/search",
+            json={"vector": query_vector.astype(np.float32).tolist(), "k": k},
+        )
+        resp.raise_for_status()
+        return [str(p) for p in resp.json()["paths"]]
+
+    async def search_topk_async(
+        self, query_vector: np.ndarray, k: int, *, timeout: float
+    ) -> list[str]:
+        """Async twin of `search_topk` — a per-call async client bounded by
+        the caller's deadline, closed in `finally`."""
+        async with httpx.AsyncClient(base_url=self._uri, timeout=timeout) as client:
+            resp = await client.post(
+                "/search",
+                json={"vector": query_vector.astype(np.float32).tolist(), "k": k},
+            )
+            resp.raise_for_status()
+            return [str(p) for p in resp.json()["paths"]]

@@ -135,7 +135,7 @@ def _ensure_browser(ctx: ConvergeCtx) -> None:
     # when the profile is still absent/empty AND a human is at the TTY. Watchdog
     # respawns and rollout-driven starts have no TTY, so they take the fresh
     # default and never block.
-    from services.browser.profile import ensure_browser_profile
+    from services.desktop.browser.profile import ensure_browser_profile
 
     ensure_browser_profile(interactive=sys.stdin.isatty() and sys.stdout.isatty())
 
@@ -151,7 +151,7 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     reason = permissions_helper_incapability()
     if reason is not None:
         raise RuntimeError(f"macOS root supervision cannot start: {reason}")
-    from services.permissions_helper import converge
+    from services.desktop.permissions_helper import converge
 
     converge()
 
@@ -242,7 +242,7 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         clear_status()
         return
 
-    from services.permissions_helper.client import check_screen_capture
+    from services.desktop.permissions_helper.client import check_screen_capture
 
     status = check_screen_capture()
     if status.available:
@@ -271,7 +271,7 @@ def _ensure_accessibility(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         clear_accessibility_status()
         return
 
-    from services.permissions_helper.client import check_accessibility
+    from services.desktop.permissions_helper.client import check_accessibility
 
     status = check_accessibility()
     if status.available:

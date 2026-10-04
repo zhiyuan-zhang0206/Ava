@@ -1,7 +1,7 @@
 """In-daemon client for the per-machine computer-mcp service.
 
 The computer MCP server is fronted by the supervised `computer-mcp` daemon
-(`services/computer/mcp_daemon.py`) exactly like the browser one — so the MCP
+(`services/desktop/computer/mcp_daemon.py`) exactly like the browser one — so the MCP
 daemon dials its line protocol directly instead of paying a per-agent stdio
 bridge child. `connect_computer_direct()` returns a session-shaped client; each
 agent connection keeps its own socket, and the daemon stamps the agent's

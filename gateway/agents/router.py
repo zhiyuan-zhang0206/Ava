@@ -666,7 +666,7 @@ async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent
     and forwards a launch-only op to the target runner's ops server, whether
     the runner is remote or co-located on this box (localhost) — one code
     path, uniform logs/traces, no in-process shortcut. Auto label generation
-    is done asynchronously by the services/labeler daemon — does not block
+    is done asynchronously by the services/derived/labeler daemon — does not block
     the spawn response.
 
     Plain and fork first prompts commit with the row. The fork marker precedes

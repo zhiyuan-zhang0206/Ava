@@ -362,6 +362,8 @@ def e2e_db(_e2e_process_env: None) -> Iterator[None]:
 
 
 _LOG_DIR = _REPO_ROOT / "tmp" / "e2e-logs"
+_AGENT_HOST_MODULE = "services.agent_runner.agent_host.daemon"
+_AGENT_OPS_MODULE = "services.agent_runner.agent_ops.daemon"
 
 
 @pytest.fixture(scope="session")
@@ -610,7 +612,7 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
 @pytest.fixture
 def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None]:
     """Run the local agent host with this test's model and machine identity."""
-    cmd = [sys.executable, "-m", "tests.e2e._proc", gateway_proc, "services.agent_host.daemon"]
+    cmd = [sys.executable, "-m", "tests.e2e._proc", gateway_proc, _AGENT_HOST_MODULE]
     env = os.environ.copy()
     # Prod-shaped launch: the `agent` profile (marker-less construction masked a
     # `runner`-profile soak crash, 2026-08-30) dialing as a write generation's
@@ -639,7 +641,7 @@ def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None
 
 @pytest.fixture
 def ops_proc(gateway_proc: str) -> Iterator[None]:
-    """services/agent_ops/daemon.py — the agent-runner ops server.
+    """services/agent_runner/agent_ops/daemon.py — the agent-runner ops server.
 
     Spawn is HTTP-uniform: `POST /api/agents` creates the row on the gateway and
     forwards the launch to this host's ops server over localhost (no in-process
@@ -667,7 +669,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
         conn.commit()
     log_path = _LOG_DIR / f"ops-{_E2E_SUFFIX}.log"
     with managed_proc(
-        [sys.executable, "-m", "tests.e2e._proc", gateway_proc, "services.agent_ops.daemon"],
+        [sys.executable, "-m", "tests.e2e._proc", gateway_proc, _AGENT_OPS_MODULE],
         env=env,
         label="ops",
         log_path=str(log_path),

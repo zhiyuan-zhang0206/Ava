@@ -324,7 +324,7 @@ on this surface. Status of each, as of WP3:
 |---|---|---|
 | Sidecar OTLP receiver `127.0.0.1:4318` | `deploy/otel-collector/otel-collector.yaml` | Parameterized — `AVA_TELEMETRY_OTLP_PORT` (single source, task #1945) |
 | Gateway OTLP ingress + runner relay `:4318` | `cli/commands/observability/otel_collector.py` | Parameterized — same setting |
-| Roster gate + healthcheck probes `:4318` | `ops/spec.py`, `services/healthchecks/otel_collector.py` | Parameterized — same setting |
+| Roster gate + healthcheck probes `:4318` | `ops/spec.py`, `services/supervision/healthchecks/otel_collector.py` | Parameterized — same setting |
 | Agent export endpoint default `http://127.0.0.1:4318` | `base/config/observability.py` | Default derived from the same constant; the full URL stays a separate override (`AVA_TELEMETRY_OTLP_ENDPOINT`) |
 | Loki/Prometheus/Grafana readiness | `base/telemetry/lgtm_local.py` | Local native listen settings; external query URLs do not select process ownership. |
 | Grafana `root_url` `http://localhost:3003` | `deploy/lgtm/native/config/run.sh` | Deliberately NOT parameterized into a converge render: it is the browser-facing redirect base, resolved at runtime from `GRAFANA_ROOT_URL` (migration section above). Rendered run.sh is asserted byte-identical in `cli/commands/observability/tests/test_converge_lgtm.py` |

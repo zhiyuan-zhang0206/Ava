@@ -12,7 +12,6 @@
     "ava_builtins/plugins/lm_google/gemini_cache.py::ambient-container:_MEMO": 1,
     "ava_builtins/plugins/lm_google/gemini_cache.py::ambient-container:_NEGATIVE": 1
   },
-  "complexity": {},
   "files": {
     "ava_builtins/plugins/ava_code/tests/test_ava_code_plugin.py": 1599,
     "ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py": 882,
@@ -22,7 +21,6 @@
     "ava_builtins/plugins/tests/test_ava_memory_write.py": 1181,
     "ava_builtins/plugins/tests/test_ava_sdk_reminder_plugin.py": 1088
   },
-  "nesting": {},
   "patch_targets": {
     "ava_builtins/plugins/ava_code/tests/test_ava_code_plugin.py::agent.graph.exec.output._overflow_dir": 1,
     "ava_builtins/plugins/lm_google/tests/test_llm_decode_ms.py::agent.graph.llm._stream": 1,

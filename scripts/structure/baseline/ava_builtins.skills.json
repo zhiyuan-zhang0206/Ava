@@ -1,6 +1,4 @@
 {
-  "complexity": {},
-  "directories": {},
   "files": {
     "ava_builtins/skills/tests/test_self_evolution_collect.py": 913
   }

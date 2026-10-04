@@ -115,7 +115,7 @@ import os
 import sys
 from pathlib import Path
 
-from services.permissions_helper.client import spawn_process
+from services.desktop.permissions_helper.client import spawn_process
 
 workdir = Path(sys.argv[1])
 probe = Path(sys.argv[2])

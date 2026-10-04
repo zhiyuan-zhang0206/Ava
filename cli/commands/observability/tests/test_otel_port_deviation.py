@@ -8,7 +8,7 @@ from base import db
 from base.config import settings
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import _render_real_template
-from services.heartbeat import station_probe
+from services.wake.heartbeat import station_probe
 
 
 @pytest.mark.parametrize("station_port", [4318, 4325])

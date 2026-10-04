@@ -27,7 +27,7 @@ the *call*.
 
 Without a check the invariant is "each call site remembered", which is exactly
 the state that produced the defect: the sync pools in `base/log/__init__.py`,
-`gateway/app.py` and `services/agent_ops/daemon.py` all wrote
+`gateway/app.py` and `services/agent_runner/agent_ops/daemon.py` all wrote
 `kwargs={"prepare_threshold": None}` and stopped there, and PR #940's sweep of the
 bare `psycopg.connect` sites left them untouched because they are a different
 failure mode (a pool borrow is already capped by the pool's acquire timeout, so

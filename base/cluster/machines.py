@@ -174,7 +174,7 @@ def unit_dial_url(roles: MachineRoles) -> str | None:
     The single definition, shared by both callers of `register_self`: `ava start`
     (`cli/commands/_repo.py:_register_machine_or_die`, passing its resolved
     capability set) and the ops daemon's own boot registration
-    (`services/agent_ops/daemon.py`, passing `machine_role()`). Two writers of one
+    (`services/agent_runner/agent_ops/daemon.py`, passing `machine_role()`). Two writers of one
     row that each computed this shape themselves would be free to advertise
     different addresses for the same unit, and the loser would be a host the
     gateway dials at an address nothing answers on.
@@ -284,7 +284,7 @@ def register_self(db: Database, url: str | None = None) -> None:
 
     Two callers, and the second is what makes the record mean what its readers
     assume. `ava start` registers at the tail of a supervised bring-up; the ops
-    daemon registers at its OWN boot (`services/agent_ops/daemon.py`), once it is
+    daemon registers at its OWN boot (`services/agent_runner/agent_ops/daemon.py`), once it is
     actually serving. A host can come back up without completing an `ava start`
     — an OS-scheduled autostart, a watchdog respawn, a rollout's restart leg —
     and before the daemon registered itself such a host kept a `stopped_at` latch

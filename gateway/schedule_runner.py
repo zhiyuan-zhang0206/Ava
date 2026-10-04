@@ -134,7 +134,7 @@ def _mark_completed(database: Database, schedule_id: int) -> None:
     crash — this is the durable signal the ScheduleManager reads to leave the
     schedule alone instead of relaunching / counting it toward the crash breaker.
     The manager reads liveness before status, so a session that is gone is
-    guaranteed to have this write already committed (see services/schedule_manager/manager.py)."""
+    guaranteed to have this write already committed (see services/wake/schedule_manager/manager.py)."""
     with database.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE schedules SET status = 'completed', updated_at = now() WHERE id = %s",

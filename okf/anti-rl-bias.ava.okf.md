@@ -19,7 +19,7 @@ instead of asking; an agent that declares intent beats a prompt that asks it to.
 
 ## Mechanisms
 
-1. **Idle heartbeat** — `services/heartbeat/` ([[services/docs/gateway_side/heartbeat.ava.okf.md]]).
+1. **Idle heartbeat** — `services/wake/heartbeat/` ([[services/docs/gateway_side/heartbeat.ava.okf.md]]).
    A gateway daemon polls idle agents and sends a nudge naming three honest
    options: still working (do nothing), waiting (`ava.self.pause_heartbeat(duration)`
    suppresses nudges for a declared window; real wake-ups still arrive), or done

@@ -64,7 +64,7 @@ fn open_in_cluster_chrome(url: &str) -> bool {
     if stream.set_read_timeout(timeout).is_err() || stream.set_write_timeout(timeout).is_err() {
         return false;
     }
-    // browser-MCP line protocol, see services/browser/mcp_daemon.py.
+    // browser-MCP line protocol, see services/desktop/browser/mcp_daemon.py.
     let request = serde_json::json!({
         "id": 1,
         "method": "call_tool",

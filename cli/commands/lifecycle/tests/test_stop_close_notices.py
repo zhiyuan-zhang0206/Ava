@@ -33,7 +33,7 @@ from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop_support import written as written
 from ops import pty_close_notices
-from services.pty_sessions import ledger
+from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper

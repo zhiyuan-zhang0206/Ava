@@ -19,12 +19,12 @@ Three consumers read the clock:
   the incident behind task #2417 escaped through: agent 2998 claimed its whole
   inbound queue, then hung inside ``graph.ainvoke`` for 3.5h with no pending
   row ever aging) and cancels + reschedules it.
-- ``services/agent_host/daemon.py`` snapshots active turns onto its existing
+- ``services/agent_runner/agent_host/daemon.py`` snapshots active turns onto its existing
   15-second Redis heartbeat. The gateway delivery watchdog can therefore make
   the same liveness judgment outside the process whose event loop may freeze.
 
 A companion registry lives here too: the **admission-wait** registry, which the
-host's admission gate (``services/agent_host/admission.py``) fills while a turn
+host's admission gate (``services/agent_runner/agent_host/admission.py``) fills while a turn
 queues for a slot. A queued turn's clock is silent by design, so the
 dispatcher's stall scan reads ``admission_wait_age_s`` to tell "queued" from
 "stuck" — cancelling a waiter would only re-queue it at the tail. Wait length
@@ -105,7 +105,7 @@ def reset_turn_progress(agent_id: int) -> None:
 
 
 # --- admission-wait registry -------------------------------------------------
-# One agent's turn parked at the admission gate (services/agent_host/admission.py)
+# One agent's turn parked at the admission gate (services/agent_runner/agent_host/admission.py)
 # is invisible to the progress clock above: it shows no activity because it is
 # not running, and it must NOT read as a stalled turn. The gate registers the
 # waiter here before its acquire await (no await in between), and the

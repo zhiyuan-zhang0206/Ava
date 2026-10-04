@@ -4,7 +4,7 @@ Loki keeps an observation copy for Grafana and short windows; this table is the 
 run timeline, the inspector and `/api/events` read. The emitter's drain thread appends every
 batch here right after the local JSONL mirror, so the producer never waits and the mirror
 stays the fallback: a batch that does not land is still in the mirror, which
-`services/events_maintenance/telemetry_replay.py` replays by event id.
+`services/upkeep/events_maintenance/telemetry_replay.py` replays by event id.
 
 Only events somebody reads out of this table are stored: `is_persisted` is the one judgment,
 and the live sink, the mirror replay and the backfill script all apply it, so a row the live

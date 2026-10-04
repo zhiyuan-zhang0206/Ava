@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Computer-mcp — accessibility tools (ax_tree, ax_act)"
-description: "The element-level path of computer-use: a bounded accessibility walk in the permissions helper, formatted and judged (quality verdict) by services/computer/ax_tools.py, stable element ids across walks, and ax_act element actions; the screenshot tools remain the explicit fallback."
+description: "The element-level path of computer-use: a bounded accessibility walk in the permissions helper, formatted and judged (quality verdict) by services/desktop/computer/ax_tools.py, stable element ids across walks, and ax_act element actions; the screenshot tools remain the explicit fallback."
 tags:
 - services
 - computer-use
@@ -9,7 +9,7 @@ tags:
 
 # Computer-mcp — accessibility tools (`ax_tree`, `ax_act`)
 
-The element-level alternative to screenshot + OCR (`services/computer/ax_tools.py`).
+The element-level alternative to screenshot + OCR (`services/desktop/computer/ax_tools.py`).
 The helper walks the target app's focused window through the macOS accessibility
 API (`ax_tree`, gated on the Accessibility grant like click/type) — breadth-first,
 bounded by a node cap, a depth cap, a time budget and a per-element messaging
@@ -28,7 +28,7 @@ fails the tool with a rebuild instruction.
 The helper numbers every walk's nodes afresh (raw ids) and stamps each with a
 path fingerprint: parent fingerprint + role + identifier/title/description +
 the ordinal among same-keyed siblings (values are excluded; a window keeps its
-title). `services/computer/ax_ids.py` gives the same fingerprint the same
+title). `services/desktop/computer/ax_ids.py` gives the same fingerprint the same
 agent-visible id (`eN`) across walks, so a UI that shifted a little keeps its
 ids; an element whose title changes is a new element. One table is live at a
 time, for one app process: a different app or a restarted process starts a
@@ -65,7 +65,7 @@ reason for a thin tree: `electron_ax_disabled`, `electron_enable_failed`,
 `unresponsive` (nothing readable in time), `canvas` and `sparse`.
 
 `include_ocr_gap=true` (whole-window reads only) also OCRs the screen
-(`services/computer/ax_gap.py`) and appends the text whose center falls in no
+(`services/desktop/computer/ax_gap.py`) and appends the text whose center falls in no
 control or text element of the tree as `[px:N]` lines, the same fusion as UFO2's
 UIA + vision merge. `px:` ids belong to that one call; the only action is
 `ax_act(id="px:N", action="press")`, a click at the text center. An OCR failure

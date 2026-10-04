@@ -7,7 +7,7 @@ resource limit). This module hosts agents as named, detached processes tracked
 by small on-disk records. Daemons run here too (services
 need no PTY, and the per-box PTY ceiling then stops bounding service count);
 only the agents' own persistent shells live elsewhere, in the machine's
-pty-sessions service (`services/pty_sessions`, reached through
+pty-sessions service (`services/agent_runner/pty_sessions`, reached through
 `base/sessions/pty`), which keeps the long-lived interactive pane.
 
 The agent launch and the reap / status consumers use this surface:

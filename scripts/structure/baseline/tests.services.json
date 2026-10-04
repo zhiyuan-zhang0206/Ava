@@ -1,12 +1,12 @@
 {
   "patch_targets": {
-    "tests/services/test_backup_scheduler_shutdown.py::services.backup._db_size_breakdown": 1,
-    "tests/services/test_backup_scheduler_shutdown.py::services.backup._key_file": 1,
-    "tests/services/test_backup_scheduler_shutdown.py::services.backup._run_with_progress": 1,
-    "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._backup_loop": 1,
-    "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._is_running": 1,
-    "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._remove_pidfile": 1,
-    "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._write_pidfile": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup.dump._db_size_breakdown": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup.dump._key_file": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup.dump._run_with_progress": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup.scheduler.daemon._backup_loop": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup.scheduler.daemon._is_running": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup.scheduler.daemon._remove_pidfile": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup.scheduler.daemon._write_pidfile": 1,
     "tests/services/test_maintenance_readiness.py::gateway.app._cluster_is_paused": 1
   }
 }

@@ -263,7 +263,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
 
 
 def _age_and_sweep_notices(conn: psycopg.Connection, agent_id: int) -> None:
-    from services.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
+    from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 
     conn.execute(
         "UPDATE inbound_messages SET created_at=created_at-interval '2 days' "
