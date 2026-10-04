@@ -78,7 +78,9 @@ def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPat
     finally:
         logger.remove(sink)
     assert cache.value.sample_every == 5
-    assert any(row["level"].name == "WARNING" for row in reports)
+    warned = [row for row in reports if row["level"].name == "WARNING"]
+    assert warned and warned[0]["exception"] is not None  # the traceback rides it (#4979)
+    assert warned[0]["exception"].type is OSError
     assert not cache.refreshing
 
 
