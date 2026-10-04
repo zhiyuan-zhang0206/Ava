@@ -45,6 +45,13 @@ def _human_text(call: Call) -> str:
     return "\n".join(m["text"] for m in call if m["type"] == "human")
 
 
+def _human_witness(agent_id: int, *markers: str) -> tuple[bool, object]:
+    calls = model_inputs(agent_id)
+    human = "\n".join(_human_text(call) for call in calls)
+    missing = [marker for marker in markers if marker not in human]
+    return not missing, {"missing": missing, "model_calls": len(calls)}
+
+
 def _inbounds(agent_id: int, prefix: str) -> list[tuple[str, str, str]]:
     with psycopg.connect(settings.data_plane.db_url) as conn:
         rows = conn.execute(
@@ -94,7 +101,12 @@ def test_background_exit_wakes_agent_with_code_log_and_tail(
     assert "exited with code 7" in content
     assert path in content and "BG-TAIL-MARK" in content
     assert "BG-TAIL-MARK" in Path(path).read_text()
-    assert any("BG-TAIL-MARK" in _human_text(call) for call in model_inputs(spawned_agent))
+    poll_until(
+        lambda: _human_witness(spawned_agent, "BG-TAIL-MARK"),
+        timeout=60.0,
+        interval=0.3,
+        what="background tail in model input",
+    )
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_background_policy")
@@ -123,7 +135,12 @@ def test_background_completion_respects_the_failures_policy(
     assert _inbounds(agent, f"shell:{success_id}") == []
     failure_rows = _inbounds(agent, f"shell:{failure_id}")
     assert "exited with code 9" in failure_rows[0][1]
-    assert any("POLICY-FAILURE" in _human_text(call) for call in model_inputs(agent))
+    poll_until(
+        lambda: _human_witness(agent, "POLICY-FAILURE"),
+        timeout=60.0,
+        interval=0.3,
+        what="failed background job in model input",
+    )
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_session_verbs")
@@ -241,8 +258,12 @@ def test_launch_at_and_cron_watchers_wake_owner_with_their_sources(
     assert any(
         source == f"watcher:{cron}" and "CRON-WAKE-MARK" in content for source, content, _ in rows
     )
-    human = "\n".join(_human_text(call) for call in model_inputs(spawned_agent))
-    assert "AT-WAKE-MARK" in human and "CRON-WAKE-MARK" in human
+    poll_until(
+        lambda: _human_witness(spawned_agent, "AT-WAKE-MARK", "CRON-WAKE-MARK"),
+        timeout=115.0,
+        interval=0.5,
+        what="at and cron wakes in model input",
+    )
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_timeout")
@@ -259,7 +280,12 @@ def test_watcher_timeout_reports_exit_124_to_the_agent(
     poll_until(timed_out, timeout=60.0, interval=0.3, what="watcher timeout notice")
     _, content, _ = _inbounds(spawned_agent, f"watcher:{wid}")[0]
     assert "exited with code 124" in content
-    assert any("exited with code 124" in _human_text(call) for call in model_inputs(spawned_agent))
+    poll_until(
+        lambda: _human_witness(spawned_agent, "exited with code 124"),
+        timeout=60.0,
+        interval=0.3,
+        what="watcher timeout in model input",
+    )
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_resurrection")
@@ -276,7 +302,12 @@ def test_at_watcher_revives_a_terminated_owner(spawned_agent: int, clean_shell_w
 
     poll_until(revived, timeout=60.0, interval=0.3, what="watcher revives its owner")
     wait_for_status(agent, "idling")
-    assert any("RESURRECT-WAKE-MARK" in _human_text(call) for call in model_inputs(agent))
+    poll_until(
+        lambda: _human_witness(agent, "RESURRECT-WAKE-MARK"),
+        timeout=60.0,
+        interval=0.3,
+        what="resurrected owner's wake in model input",
+    )
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_orphan")
