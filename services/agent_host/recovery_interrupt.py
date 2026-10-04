@@ -2,7 +2,6 @@
 
 import asyncio
 import time
-from weakref import WeakKeyDictionary
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
@@ -13,7 +12,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _POLL_INTERVAL_SECONDS = 2.0
 _QUERY_TIMEOUT_SECONDS = 5.0
-_PEEK_LOCKS: WeakKeyDictionary[AsyncConnectionPool, asyncio.Lock] = WeakKeyDictionary()
 
 
 class RecoveryInterrupt:
@@ -31,15 +29,14 @@ class RecoveryInterrupt:
     failure plus a pending cancel cannot create a busy retry loop.
     """
 
-    def __init__(self, pool: AsyncConnectionPool, incarnation: RuntimeIncarnation) -> None:
+    def __init__(
+        self, pool: AsyncConnectionPool, incarnation: RuntimeIncarnation, peek_lock: asyncio.Lock
+    ) -> None:
+        """`peek_lock` is the host's one lock for `pool`, shared by every observer of it."""
         self._pool = pool
         self._incarnation = incarnation
         self._observed = False
-        lock = _PEEK_LOCKS.get(pool)
-        if lock is None:
-            lock = asyncio.Lock()
-            _PEEK_LOCKS[pool] = lock
-        self._peek_lock = lock
+        self._peek_lock = peek_lock
 
     async def wait_backoff(self, delay: float) -> None:
         """Spend the existing backoff budget checking for external control."""

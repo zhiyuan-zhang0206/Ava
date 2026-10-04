@@ -1702,7 +1702,7 @@ class TestBounds:
 
 
 class TestSchedulerIntegration:
-    async def test_crash_event_keeps_config_fingerprint_across_host_shield_task(
+    async def test_crash_event_carries_the_hosts_turn_config_fingerprint(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         overlay: dict[str, object] = {"llm_model": "broken-model-config"}
@@ -1717,7 +1717,7 @@ class TestSchedulerIntegration:
 
         monkeypatch.setattr(dispatcher.logger, "exception", _capture)
         monkeypatch.setattr(host, "_runtime_for", _explode)
-        sched = TurnScheduler(host.run_turn)
+        sched = TurnScheduler(host.run_turn, config_fingerprint=host.turn_fingerprints.get)
 
         sched.wake(1)
         for _ in range(8):

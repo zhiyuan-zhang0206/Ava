@@ -41,7 +41,7 @@ async def test_pending_external_interrupt_shortens_backoff_without_claiming(
         db_conn, agent, "", "user", kind=kind, bus=event_bus, database=database
     )
     db_conn.commit()
-    interrupt = RecoveryInterrupt(aops_pool, incarnation)
+    interrupt = RecoveryInterrupt(aops_pool, incarnation, asyncio.Lock())
 
     await asyncio.wait_for(interrupt.wait_backoff(30), timeout=1)
 
@@ -66,7 +66,9 @@ async def test_interrupt_arriving_during_backoff_is_observed(
     agent, _, _prompt_id, _attempt_id = create_agent_row(
         database, event_bus, spawner="user", machine=machine_name()
     )
-    interrupt = RecoveryInterrupt(aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()))
+    interrupt = RecoveryInterrupt(
+        aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()), asyncio.Lock()
+    )
     checked = asyncio.Event()
     original = recovery_interrupt.has_pending_interrupt
 
@@ -108,7 +110,9 @@ async def test_self_control_does_not_shorten_backoff(
         db_conn, agent, "", "self", kind="terminate", bus=event_bus, database=database
     )
     db_conn.commit()
-    interrupt = RecoveryInterrupt(aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()))
+    interrupt = RecoveryInterrupt(
+        aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()), asyncio.Lock()
+    )
     started = time.monotonic()
     await interrupt.wait_backoff(0.04)
     assert time.monotonic() - started >= 0.035
@@ -121,7 +125,7 @@ async def test_unavailable_control_pool_does_not_extend_backoff_or_leak_borrower
         max_size=1,
         kwargs={"autocommit": True},
     ) as pool:
-        interrupt = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()))
+        interrupt = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()), asyncio.Lock())
         async with pool.connection():
             started = time.monotonic()
             await asyncio.wait_for(interrupt.wait_backoff(0.04), 0.5)
@@ -137,7 +141,7 @@ async def test_external_cancellation_unwinds_the_inline_control_query() -> None:
         max_size=1,
         kwargs={"autocommit": True},
     ) as pool:
-        interrupt = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()))
+        interrupt = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()), asyncio.Lock())
         async with pool.connection():
             waiter = asyncio.create_task(interrupt.wait_backoff(30))
             await asyncio.sleep(0.01)
@@ -169,8 +173,9 @@ async def test_optional_observers_share_one_pool_slot_without_queueing(
         kwargs={"autocommit": True},
     ) as pool:
         await pool.wait()
-        first = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()))
-        second = RecoveryInterrupt(pool, RuntimeIncarnation(2, uuid4(), uuid4()))
+        peek_lock = asyncio.Lock()
+        first = RecoveryInterrupt(pool, RuntimeIncarnation(1, uuid4(), uuid4()), peek_lock)
+        second = RecoveryInterrupt(pool, RuntimeIncarnation(2, uuid4(), uuid4()), peek_lock)
         waiting = asyncio.create_task(first.wait_backoff(30))
         try:
             await asyncio.wait_for(entered.wait(), 1)
@@ -235,6 +240,7 @@ async def test_recovery_retries_promptly_but_does_not_execute_or_ack_control(
                 graph=graph,
                 incarnation=incarnation,
                 database_waits=DatabaseWaits(),
+                peek_lock=asyncio.Lock(),
             )
         )
     try:
