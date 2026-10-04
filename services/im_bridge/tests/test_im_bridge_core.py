@@ -774,6 +774,45 @@ def _models_data() -> dict[str, Any]:
     }
 
 
+def _assert_preset_layer(out: object) -> None:
+    assert isinstance(out, Reply)
+    assert out.text == copy.SPAWN_LAYER_PRESET
+    labels = [b[0] for b in out.buttons or []]
+    assert labels[0] == copy.SPAWN_BUTTON_NO_PRESET
+    assert "coder" in labels and "Code Reviewer" in labels
+    assert labels[-1] == copy.SPAWN_BUTTON_SUMMARY_PREFIX + " / ".join(
+        [copy.SPAWN_BUTTON_DEFAULT_VALUE] * 3
+    )
+
+
+def _assert_model_layer_after_coder(out: object) -> None:
+    assert isinstance(out, Reply)
+    assert out.text == copy.SPAWN_LAYER_MODEL
+    labels = [b[0] for b in out.buttons or []]
+    assert "deepseek-v4-pro" in labels and "deepseek-v4-flash" in labels
+    assert labels[-1] == (
+        copy.SPAWN_BUTTON_SUMMARY_PREFIX
+        + "coder / "
+        + copy.SPAWN_BUTTON_DEFAULT_VALUE
+        + " / "
+        + copy.SPAWN_BUTTON_DEFAULT_VALUE
+    )
+
+
+def _assert_effort_layer_after_pro(out: object) -> None:
+    assert isinstance(out, Reply)
+    assert out.text == copy.SPAWN_LAYER_EFFORT
+    labels = [b[0] for b in out.buttons or []]
+    assert labels[0] == copy.SPAWN_BUTTON_PROVIDER_DEFAULT
+    assert labels[1] == "effort: low"
+    assert "effort: max" in labels
+    assert labels[-1] == (
+        copy.SPAWN_BUTTON_SUMMARY_PREFIX
+        + "coder / deepseek-v4-pro / "
+        + copy.SPAWN_BUTTON_DEFAULT_VALUE
+    )
+
+
 def test_spawn_menu_layers_render_with_summary_button() -> None:
     """/spawn walks preset -> model -> effort, each layer carrying the
     summary [Spawn] button; the effort layer offers the model's own options
@@ -785,42 +824,12 @@ def test_spawn_menu_layers_render_with_summary_button() -> None:
     core = _core(gateway)
     state = ChatState("telegram", "12345")
 
-    out = asyncio.run(core._cmd_spawn(state))
-    assert isinstance(out, Reply)
-    assert out.text == copy.SPAWN_LAYER_PRESET
-    labels = [b[0] for b in out.buttons or []]
-    assert labels[0] == copy.SPAWN_BUTTON_NO_PRESET
-    assert "coder" in labels and "Code Reviewer" in labels
-    assert labels[-1] == copy.SPAWN_BUTTON_SUMMARY_PREFIX + " / ".join(
-        [copy.SPAWN_BUTTON_DEFAULT_VALUE] * 3
-    )
-
+    _assert_preset_layer(asyncio.run(core._cmd_spawn(state)))
     # pick a preset -> model layer
-    out2 = asyncio.run(core._handle_spawn_menu(state, "spawn:preset:1"))
-    assert isinstance(out2, Reply)
-    assert out2.text == copy.SPAWN_LAYER_MODEL
-    labels2 = [b[0] for b in out2.buttons or []]
-    assert "deepseek-v4-pro" in labels2 and "deepseek-v4-flash" in labels2
-    assert labels2[-1] == (
-        copy.SPAWN_BUTTON_SUMMARY_PREFIX
-        + "coder / "
-        + copy.SPAWN_BUTTON_DEFAULT_VALUE
-        + " / "
-        + copy.SPAWN_BUTTON_DEFAULT_VALUE
-    )
-
+    _assert_model_layer_after_coder(asyncio.run(core._handle_spawn_menu(state, "spawn:preset:1")))
     # pick a model -> effort layer with the model's own options
-    out3 = asyncio.run(core._handle_spawn_menu(state, "spawn:model:deepseek-v4-pro"))
-    assert isinstance(out3, Reply)
-    assert out3.text == copy.SPAWN_LAYER_EFFORT
-    labels3 = [b[0] for b in out3.buttons or []]
-    assert labels3[0] == copy.SPAWN_BUTTON_PROVIDER_DEFAULT
-    assert labels3[1] == "effort: low"
-    assert "effort: max" in labels3
-    assert labels3[-1] == (
-        copy.SPAWN_BUTTON_SUMMARY_PREFIX
-        + "coder / deepseek-v4-pro / "
-        + copy.SPAWN_BUTTON_DEFAULT_VALUE
+    _assert_effort_layer_after_pro(
+        asyncio.run(core._handle_spawn_menu(state, "spawn:model:deepseek-v4-pro"))
     )
 
 

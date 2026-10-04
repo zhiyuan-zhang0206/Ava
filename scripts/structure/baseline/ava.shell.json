@@ -1,5 +1,3 @@
 {
-  "complexity": {
-    "ava/shell/tests/test_shell_background.py::test_run_background_e2e_notice_log_and_close": 16
-  }
+  "complexity": {}
 }

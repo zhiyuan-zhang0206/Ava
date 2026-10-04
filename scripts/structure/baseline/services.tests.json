@@ -1,7 +1,4 @@
 {
-  "complexity": {
-    "services/tests/test_backup.py::test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv": 17
-  },
   "files": {
     "services/tests/test_backup.py": 902
   }

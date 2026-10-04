@@ -7,22 +7,10 @@
     "services/agent_host/runtime.py::contextvar:_active_turn_config_fingerprint": 1,
     "services/agent_host/stall_guard.py::asyncio-task:run_invocation_with_stall_guard": 1
   },
-  "complexity": {
-    "services/agent_host/tests/test_agent_host_recrash_reap.py::test_settle_boundary_prompt_reaps_the_second_crash_at_once": 15,
-    "services/agent_host/tests/test_circuit_breaker.py::test_two_permanent_rejections_trip_the_recovery_breaker": 19,
-    "services/agent_host/tests/test_host_pool_capacity.py::test_six_host_pools_settle_one_thousand_short_requests_through_pgbouncer": 15,
-    "services/agent_host/tests/test_hosted_compact_failure.py::test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound": 17,
-    "services/agent_host/tests/test_hosted_failure_settlement_recovery.py::test_abort_survives_database_loss_before_halted_state_write": 17,
-    "services/agent_host/tests/test_hosted_lifecycle.py::test_hosted_applies_only_after_continuation_returns": 15,
-    "services/agent_host/tests/test_maintenance_prior_failure.py::test_prior_tail_flush_outage_defers_receipt_until_reflushed": 16
-  },
   "files": {
     "services/agent_host/tests/test_agent_host.py": 1770,
     "services/agent_host/tests/test_circuit_breaker.py": 864,
     "services/agent_host/tests/test_turn_dispatcher.py": 1428
-  },
-  "nesting": {
-    "services/agent_host/tests/test_host_pool_capacity.py::test_more_than_twenty_workload_leases_share_bounded_backends": 6
   },
   "patch_targets": {
     "services/agent_host/tests/test_hosted_backlog_recovery.py::agent.turn.progress._PROGRESS": 1,

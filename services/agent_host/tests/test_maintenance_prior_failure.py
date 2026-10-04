@@ -145,6 +145,30 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     ).fetchone() == (None, None, None)
 
 
+async def _assert_tail_still_durable(
+    pool: AsyncConnectionPool[Any], config: RunnableConfig, tail: AIMessage
+) -> None:
+    reader = AsyncPostgresSaver(pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget_tuple(config)
+    assert cold is not None and tail in cold.checkpoint["channel_values"]["messages"]
+
+
+async def _run_turn_whose_tail_flush_hits_a_database_outage(
+    host: host_module.AgentHost, agent: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broken = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)
+    await broken.close()
+
+    async def fail_flush(_saver: object, _agent: int) -> None:
+        await broken.execute("SELECT 1")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(host_module, "flush_checkpoint", fail_flush)
+        with pytest.raises(psycopg.OperationalError):
+            await host.run_turn(agent)
+
+
 async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -160,16 +184,7 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
         holder="failed-flush",
         acquired_at=WHEN,
     )
-    broken = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)
-    await broken.close()
-
-    async def fail_flush(_saver: object, _agent: int) -> None:
-        await broken.execute("SELECT 1")
-
-    with monkeypatch.context() as patch:
-        patch.setattr(host_module, "flush_checkpoint", fail_flush)
-        with pytest.raises(psycopg.OperationalError):
-            await host.run_turn(agent)
+    await _run_turn_whose_tail_flush_hits_a_database_outage(host, agent, monkeypatch)
     # A database-outage flush failure is crash-equivalent: recorded as an
     # undelivered receipt, never latched as a blocking failure. The tail must
     # stay durable — never silently cleared or dropped — and the drain must
@@ -185,10 +200,7 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
         "SELECT status,claimed_at,applied_at FROM inbound_messages WHERE id=%s",
         (hold.commands[agent],),
     ).fetchone() == ("pending", None, None)
-    reader = AsyncPostgresSaver(aops_pool)
-    wrap_saver_reads_with_delta_reconstruction(reader)
-    cold = await reader.aget_tuple(config)
-    assert cold is not None and tail in cold.checkpoint["channel_values"]["messages"]
+    await _assert_tail_still_durable(aops_pool, config, tail)
     # Restoring the channel re-drives the receipt through the held-control
     # path: the wake scan keeps the agent woken (no failure fence), the held
     # controls re-flush the buffered tail BEFORE claiming the restart, and
@@ -209,8 +221,5 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
         "SELECT runtime_owner,runtime_generation,incarnation_resources FROM agents_meta WHERE id=%s",
         (agent,),
     ).fetchone() == (None, None, None)
-    reader = AsyncPostgresSaver(aops_pool)
-    wrap_saver_reads_with_delta_reconstruction(reader)
-    cold = await reader.aget_tuple(config)
-    assert cold is not None and tail in cold.checkpoint["channel_values"]["messages"]
+    await _assert_tail_still_durable(aops_pool, config, tail)
     assert calls == ["save", "fail"]

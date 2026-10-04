@@ -53,6 +53,93 @@ async def _control_query(pool: AsyncConnectionPool) -> None:
         assert row == (1,)
 
 
+async def _hold_workload_lease(
+    workload: AsyncConnectionPool,
+    value: int,
+    *,
+    acquired: asyncio.Queue[None],
+    release: asyncio.Event,
+    backend_ids: set[int],
+) -> None:
+    """Borrow one workload lease, report it, and keep it until `release`."""
+    async with workload.connection() as conn:
+        row = await (await conn.execute("SELECT %s::int, pg_backend_pid()", (value,))).fetchone()
+        assert row is not None and row[0] == value
+        backend_ids.add(row[1])
+        acquired.put_nowait(None)
+        await release.wait()
+
+
+async def _observe_full_workload_pool(
+    workload: AsyncConnectionPool,
+    control: AsyncConnectionPool,
+    admin: psycopg.AsyncConnection[DictRow],
+    pooled: str,
+    *,
+    borrower_count: int,
+    acquired: asyncio.Queue[None],
+    backend_ids: set[int],
+    tasks: asyncio.TaskGroup,
+    record_property: Callable[[str, object], None],
+) -> None:
+    """With every lease held, one more workload request queues while control
+    still reads, and PgBouncer's client/server counts stay bounded."""
+    async with asyncio.timeout(15):
+        for _ in range(borrower_count):
+            await acquired.get()
+        queued = tasks.create_task(_control_query(workload))
+        while workload.get_stats()["requests_waiting"] == 0:
+            await asyncio.sleep(0)
+        assert workload.get_stats()["requests_waiting"] == 1
+        assert not queued.done()
+        # All workload clients remain borrowed. Their autocommit
+        # queries released the two backends for this control read.
+        await _control_query(control)
+        assert not queued.done()
+        counts = await _pool_counts(admin, str(conninfo_to_dict(pooled)["dbname"]))
+        assert counts["clients"] >= borrower_count + 1
+        assert 0 < counts["servers"] <= _BACKENDS
+        assert 0 < len(backend_ids) <= _BACKENDS
+        record_property("held_workload_leases", borrower_count)
+        record_property("queued_workload_requests", 1)
+        record_property("pgbouncer_clients", counts["clients"])
+        record_property("pgbouncer_servers", counts["servers"])
+
+
+async def _borrow_every_lease_then_release(
+    workload: AsyncConnectionPool,
+    control: AsyncConnectionPool,
+    admin: psycopg.AsyncConnection[DictRow],
+    pooled: str,
+    record_property: Callable[[str, object], None],
+) -> None:
+    borrower_count = 64
+    acquired: asyncio.Queue[None] = asyncio.Queue()
+    release = asyncio.Event()
+    backend_ids: set[int] = set()
+    async with asyncio.TaskGroup() as tasks:
+        for value in range(borrower_count):
+            tasks.create_task(
+                _hold_workload_lease(
+                    workload, value, acquired=acquired, release=release, backend_ids=backend_ids
+                )
+            )
+        try:
+            await _observe_full_workload_pool(
+                workload,
+                control,
+                admin,
+                pooled,
+                borrower_count=borrower_count,
+                acquired=acquired,
+                backend_ids=backend_ids,
+                tasks=tasks,
+                record_property=record_property,
+            )
+        finally:
+            release.set()
+
+
 async def test_more_than_twenty_workload_leases_share_bounded_backends(
     record_property: Callable[[str, object], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -70,48 +157,9 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
                 _admin_console_url(pooled), autocommit=True, row_factory=dict_row
             ) as admin,
         ):
-            borrower_count = 64
-            acquired: asyncio.Queue[None] = asyncio.Queue()
-            release = asyncio.Event()
-            backend_ids: set[int] = set()
-
-            async def borrower(value: int) -> None:
-                async with workload.connection() as conn:
-                    row = await (
-                        await conn.execute("SELECT %s::int, pg_backend_pid()", (value,))
-                    ).fetchone()
-                    assert row is not None and row[0] == value
-                    backend_ids.add(row[1])
-                    acquired.put_nowait(None)
-                    await release.wait()
-
-            async with asyncio.TaskGroup() as tasks:
-                for value in range(borrower_count):
-                    tasks.create_task(borrower(value))
-                try:
-                    async with asyncio.timeout(15):
-                        for _ in range(borrower_count):
-                            await acquired.get()
-                        queued = tasks.create_task(_control_query(workload))
-                        while workload.get_stats()["requests_waiting"] == 0:
-                            await asyncio.sleep(0)
-                        assert workload.get_stats()["requests_waiting"] == 1
-                        assert not queued.done()
-                        # All workload clients remain borrowed. Their autocommit
-                        # queries released the two backends for this control read.
-                        await _control_query(control)
-                        assert not queued.done()
-                        counts = await _pool_counts(admin, str(conninfo_to_dict(pooled)["dbname"]))
-                        assert counts["clients"] >= borrower_count + 1
-                        assert 0 < counts["servers"] <= _BACKENDS
-                        assert 0 < len(backend_ids) <= _BACKENDS
-                        record_property("held_workload_leases", borrower_count)
-                        record_property("queued_workload_requests", 1)
-                        record_property("pgbouncer_clients", counts["clients"])
-                        record_property("pgbouncer_servers", counts["servers"])
-                finally:
-                    release.set()
-
+            await _borrow_every_lease_then_release(
+                workload, control, admin, pooled, record_property
+            )
             assert workload.get_stats()["requests_waiting"] == 0
             await _control_query(workload)
 
@@ -159,6 +207,95 @@ async def _cancel_blocked_transaction(
     await _control_query(pool)
 
 
+async def _insert_requests_holding_first_lease(
+    pool: AsyncConnectionPool,
+    request_ids: range,
+    *,
+    acquired: asyncio.Queue[None],
+    release: asyncio.Event,
+    backend_ids: set[int],
+) -> None:
+    """Commit each request in its own short transaction; after the first one
+    keep the client lease at the barrier until `release`."""
+    for offset, request_id in enumerate(request_ids):
+        async with pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "INSERT INTO host_pool_capacity_results VALUES (%s, %s)",
+                    (request_id, request_id * 7),
+                )
+                row = await (await conn.execute("SELECT pg_backend_pid()")).fetchone()
+                assert row is not None
+                backend_ids.add(row[0])
+            if offset == 0:
+                acquired.put_nowait(None)
+                await release.wait()
+
+
+async def _observe_barrier_then_release(
+    controls: list[AsyncConnectionPool],
+    admin: psycopg.AsyncConnection[DictRow],
+    pooled: str,
+    *,
+    worker_count: int,
+    acquired: asyncio.Queue[None],
+    release: asyncio.Event,
+    record_property: Callable[[str, object], None],
+) -> None:
+    """Wait for every worker's first lease, check PgBouncer's counts and the
+    control pools, then let the workers run on."""
+    try:
+        for _ in range(worker_count):
+            await acquired.get()
+        await asyncio.gather(*(_control_query(pool) for pool in controls))
+        counts = await _pool_counts(admin, str(conninfo_to_dict(pooled)["dbname"]))
+        assert worker_count + _RUNNERS <= counts["clients"] < 100
+        assert 0 < counts["servers"] <= _BACKENDS
+        record_property("pgbouncer_clients_at_barrier", counts["clients"])
+        record_property("pgbouncer_servers_at_barrier", counts["servers"])
+    finally:
+        release.set()
+
+
+async def _settle_requests_across_pools(
+    workloads: list[AsyncConnectionPool],
+    controls: list[AsyncConnectionPool],
+    admin: psycopg.AsyncConnection[DictRow],
+    pooled: str,
+    record_property: Callable[[str, object], None],
+) -> set[int]:
+    """Run the worker fleet through the barrier; returns the backend pids seen."""
+    worker_count = _RUNNERS * _BORROWERS_PER_RUNNER
+    acquired: asyncio.Queue[None] = asyncio.Queue()
+    release = asyncio.Event()
+    backend_ids: set[int] = set()
+    async with asyncio.timeout(60), asyncio.TaskGroup() as tasks:
+        for worker_id in range(worker_count):
+            tasks.create_task(
+                _insert_requests_holding_first_lease(
+                    workloads[worker_id % _RUNNERS],
+                    range(_RUNNERS + worker_id, _REQUESTS, worker_count),
+                    acquired=acquired,
+                    release=release,
+                    backend_ids=backend_ids,
+                )
+            )
+        await _observe_barrier_then_release(
+            controls,
+            admin,
+            pooled,
+            worker_count=worker_count,
+            acquired=acquired,
+            release=release,
+            record_property=record_property,
+        )
+        # These control queries now compete with ongoing short workload
+        # transactions. Completion is required; no latency SLO is claimed.
+        for pool in controls:
+            tasks.create_task(_control_query(pool))
+    return backend_ids
+
+
 async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbouncer(
     record_property: Callable[[str, object], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -193,49 +330,9 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
                 await stack.enter_async_context(build_control_pool(Database.from_settings()))
                 for _ in range(_RUNNERS)
             ]
-            worker_count = _RUNNERS * _BORROWERS_PER_RUNNER
-            acquired: asyncio.Queue[None] = asyncio.Queue()
-            release = asyncio.Event()
-            backend_ids: set[int] = set()
-
-            async def worker(pool: AsyncConnectionPool, request_ids: range) -> None:
-                for offset, request_id in enumerate(request_ids):
-                    async with pool.connection() as conn:
-                        async with conn.transaction():
-                            await conn.execute(
-                                "INSERT INTO host_pool_capacity_results VALUES (%s, %s)",
-                                (request_id, request_id * 7),
-                            )
-                            row = await (await conn.execute("SELECT pg_backend_pid()")).fetchone()
-                            assert row is not None
-                            backend_ids.add(row[0])
-                        if offset == 0:
-                            acquired.put_nowait(None)
-                            await release.wait()
-
-            async with asyncio.timeout(60), asyncio.TaskGroup() as tasks:
-                for worker_id in range(worker_count):
-                    tasks.create_task(
-                        worker(
-                            workloads[worker_id % _RUNNERS],
-                            range(_RUNNERS + worker_id, _REQUESTS, worker_count),
-                        )
-                    )
-                try:
-                    for _ in range(worker_count):
-                        await acquired.get()
-                    await asyncio.gather(*(_control_query(pool) for pool in controls))
-                    counts = await _pool_counts(admin, str(conninfo_to_dict(pooled)["dbname"]))
-                    assert worker_count + _RUNNERS <= counts["clients"] < 100
-                    assert 0 < counts["servers"] <= _BACKENDS
-                    record_property("pgbouncer_clients_at_barrier", counts["clients"])
-                    record_property("pgbouncer_servers_at_barrier", counts["servers"])
-                finally:
-                    release.set()
-                # These control queries now compete with ongoing short workload
-                # transactions. Completion is required; no latency SLO is claimed.
-                for pool in controls:
-                    tasks.create_task(_control_query(pool))
+            backend_ids = await _settle_requests_across_pools(
+                workloads, controls, admin, pooled, record_property
+            )
 
             assert 0 < len(backend_ids) <= _BACKENDS
             for request_id, pool in enumerate(workloads):

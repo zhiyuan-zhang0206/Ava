@@ -15,12 +15,14 @@ import json
 import os
 import plistlib
 import socket
+import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -875,6 +877,82 @@ class _Call(NamedTuple):
     timeout: float
 
 
+@dataclass(frozen=True)
+class _FakeToolOutputs:
+    """What the stand-in swiftc / codesign / security answer, per `_fake_tools`'s arguments."""
+
+    authority: str | None
+    keychain_rc: int
+    sign_rc: int
+    acl_probe_rc: int
+    smoke_sign_rc: int
+    smoke_sign_stderr: bytes
+    verify_rc: int
+    designated_requirement: str | None
+    dr_streams: tuple[bytes, bytes] | None
+    identity_output: str | None
+    list_keychains_output: bytes | None
+    list_keychains_rc: int
+
+    def respond(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
+        """The result of one tool invocation; unmatched commands succeed silently."""
+        if cmd[0] == "swiftc":
+            Path(cmd[cmd.index("-o") + 1]).write_bytes(b"\x00")
+        if cmd[:3] == ["security", "find-identity", "-p"]:
+            return self._find_identity(cmd)
+        if cmd[:4] == ["security", "list-keychains", "-d", "user"]:
+            return self._list_keychains(cmd)
+        if cmd[:2] == ["codesign", "--verify"]:
+            return subprocess.CompletedProcess(cmd, self.verify_rc, b"", b"invalid")
+        if cmd[:2] == ["codesign", "--display"]:
+            shown = f"Authority={self.authority}\n" if self.authority else "Signature=adhoc\n"
+            return subprocess.CompletedProcess(cmd, 0, b"", shown.encode())
+        if cmd[:3] == ["codesign", "-d", "-r-"]:
+            return self._designated_requirement(cmd)
+        if cmd[:2] == ["security", "show-keychain-info"] and self.keychain_rc != 0:
+            return subprocess.CompletedProcess(
+                cmd, self.keychain_rc, b"", b"User interaction is not allowed."
+            )
+        if cmd[:2] == ["codesign", "--sign"]:
+            return self._sign_probe(cmd)
+        if cmd[:2] == ["codesign", "--force"] and self.sign_rc != 0:
+            return subprocess.CompletedProcess(cmd, self.sign_rc, b"", b"errSecInternalComponent")
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    def _find_identity(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
+        from services.permissions_helper import lifecycle
+
+        output = self.identity_output or f'  1) {_TEST_CERT_SHA1} "{lifecycle._CERT_CN}"\n'
+        return subprocess.CompletedProcess(cmd, 0, output.encode(), b"")
+
+    def _list_keychains(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
+        from services.permissions_helper import lifecycle
+
+        output = self.list_keychains_output
+        if output is None:
+            output = f'    "{lifecycle._keychain_path()}"\n'.encode()
+        return subprocess.CompletedProcess(
+            cmd,
+            self.list_keychains_rc,
+            output,
+            b"search list unavailable" if self.list_keychains_rc else b"",
+        )
+
+    def _designated_requirement(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
+        if self.dr_streams is not None:
+            return subprocess.CompletedProcess(cmd, 0, *self.dr_streams)
+        dr = self.designated_requirement or _test_dr()
+        # Real codesign on current macOS emits the DR line on stdout
+        # (stderr carries `Executable=...`); the reader accepts either.
+        return subprocess.CompletedProcess(cmd, 0, f"designated => {dr}\n".encode(), b"")
+
+    def _sign_probe(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
+        smoke = Path(cmd[-1]).name == "signing-smoke"
+        rc = self.smoke_sign_rc if smoke else self.acl_probe_rc
+        stderr = self.smoke_sign_stderr if smoke else b"errSecInternalComponent"
+        return subprocess.CompletedProcess(cmd, rc, b"", stderr)
+
+
 def _fake_tools(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -905,65 +983,34 @@ def _fake_tools(
     it IS the invariant under test, so a call site that regressed to plain
     `subprocess.run` would reach the real tool and fail here rather than pass
     against a stub."""
-    import subprocess
-
     from services.permissions_helper import lifecycle
 
+    outputs = _FakeToolOutputs(
+        authority=authority,
+        keychain_rc=keychain_rc,
+        sign_rc=sign_rc,
+        acl_probe_rc=acl_probe_rc,
+        smoke_sign_rc=smoke_sign_rc,
+        smoke_sign_stderr=smoke_sign_stderr,
+        verify_rc=verify_rc,
+        designated_requirement=designated_requirement,
+        dr_streams=dr_streams,
+        identity_output=identity_output,
+        list_keychains_output=list_keychains_output,
+        list_keychains_rc=list_keychains_rc,
+    )
     recorded: list[_Call] = []
 
-    def run(cmd, **kwargs):
-        cmd = list(cmd)  # pyright: ignore[reportUnknownArgumentType]
+    def run(cmd: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        argv = list(cmd)
         # Every call must arrive with a bound -- KeyError here means an unbounded
         # call site slipped back in.
-        recorded.append(_Call(cmd, kwargs["timeout"]))
-        if hang and cmd[: len(hang)] == list(hang):
-            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])  # pyright: ignore[reportUnknownArgumentType]
-        if cmd[0] == "swiftc":
-            Path(cmd[cmd.index("-o") + 1]).write_bytes(b"\x00")  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        if cmd[:3] == ["security", "find-identity", "-p"]:
-            output = identity_output or f'  1) {_TEST_CERT_SHA1} "{lifecycle._CERT_CN}"\n'
-            return subprocess.CompletedProcess(cmd, 0, output.encode(), b"")  # pyright: ignore[reportUnknownArgumentType]
-        if cmd[:4] == ["security", "list-keychains", "-d", "user"]:
-            output = list_keychains_output
-            if output is None:
-                output = f'    "{lifecycle._keychain_path()}"\n'.encode()
-            return subprocess.CompletedProcess(
-                cmd,  # pyright: ignore[reportUnknownArgumentType]
-                list_keychains_rc,
-                output,
-                b"search list unavailable" if list_keychains_rc else b"",
-            )
-        if cmd[:2] == ["codesign", "--verify"]:
-            return subprocess.CompletedProcess(cmd, verify_rc, b"", b"invalid")  # pyright: ignore[reportUnknownArgumentType]
-        if cmd[:2] == ["codesign", "--display"]:
-            shown = f"Authority={authority}\n" if authority else "Signature=adhoc\n"
-            return subprocess.CompletedProcess(cmd, 0, b"", shown.encode())  # pyright: ignore[reportUnknownArgumentType]
-        if cmd[:3] == ["codesign", "-d", "-r-"]:
-            if dr_streams is not None:
-                return subprocess.CompletedProcess(cmd, 0, *dr_streams)  # pyright: ignore[reportUnknownArgumentType]
-            dr = designated_requirement or _test_dr()
-            # Real codesign on current macOS emits the DR line on stdout
-            # (stderr carries `Executable=...`); the reader accepts either.
-            return subprocess.CompletedProcess(cmd, 0, f"designated => {dr}\n".encode(), b"")  # pyright: ignore[reportUnknownArgumentType]
-        if cmd[:2] == ["security", "show-keychain-info"] and keychain_rc != 0:
-            return subprocess.CompletedProcess(
-                cmd,  # pyright: ignore[reportUnknownArgumentType]
-                keychain_rc,
-                b"",
-                b"User interaction is not allowed.",
-            )
-        if cmd[:2] == ["codesign", "--sign"]:
-            scratch_name = Path(cmd[-1]).name  # pyright: ignore[reportUnknownArgumentType]
-            rc = smoke_sign_rc if scratch_name == "signing-smoke" else acl_probe_rc
-            stderr = (
-                smoke_sign_stderr if scratch_name == "signing-smoke" else b"errSecInternalComponent"
-            )
-            return subprocess.CompletedProcess(cmd, rc, b"", stderr)  # pyright: ignore[reportUnknownArgumentType]
-        if cmd[:2] == ["codesign", "--force"] and sign_rc != 0:
-            return subprocess.CompletedProcess(cmd, sign_rc, b"", b"errSecInternalComponent")  # pyright: ignore[reportUnknownArgumentType]
-        return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
+        recorded.append(_Call(argv, kwargs["timeout"]))
+        if hang and argv[: len(hang)] == list(hang):
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return outputs.respond(argv)
 
-    monkeypatch.setattr(lifecycle, "run_bounded", run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(lifecycle, "run_bounded", run)
     return recorded
 
 

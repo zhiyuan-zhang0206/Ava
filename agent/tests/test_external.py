@@ -238,6 +238,21 @@ def test_stale_attachment_refuses_sdk_identity_and_removes_identity_on_close(
     assert agent_identity._external_agent_id is None
 
 
+def _invalidate_lease(lease: dict[str, Any], invalidated: str) -> str:
+    """Invalidate the attached lease; the error text its next use must raise."""
+    if invalidated == "expiry":
+        lease["status"] = "expired"
+        return "expired"
+    lease["delta_version"] += 1
+    return "another attachment"
+
+
+def _assert_prior_binding_restored(prior_state: ExampleState, prior_update: dict[str, Any]) -> None:
+    assert ava.state is prior_state
+    assert ava.state_update is prior_update
+    assert external.attached_config() is None
+
+
 @pytest.mark.parametrize("invalidated", ["expiry", "state_version"])
 def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
@@ -251,19 +266,12 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
     monkeypatch.setattr(ava, "state_update", prior_update)
     attachment = external.attach("lease")
     state_module.PluginStateHandle(ExamplePlugin, "sample").update({"seen": {"unflushed"}})
-    if invalidated == "expiry":
-        lease["status"] = "expired"
-        reason = "expired"
-    else:
-        lease["delta_version"] += 1
-        reason = "another attachment"
+    reason = _invalidate_lease(lease, invalidated)
     with pytest.raises(RuntimeError, match=reason), attachment:
         pytest.fail("an invalid attachment entered its context")
     assert agent_identity._external_identity is None
     assert agent_identity._external_agent_id is None
-    assert ava.state is prior_state
-    assert ava.state_update is prior_update
-    assert external.attached_config() is None
+    _assert_prior_binding_restored(prior_state, prior_update)
     assert not staged
     attachment.close()  # Already detached; must not retry the failed lease or flush.
 
@@ -278,9 +286,7 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
     with external.attach("next"):
         assert agent_identity._external_agent_id == 405
         assert ava.self.AGENT_ID == 405
-    assert ava.state is prior_state
-    assert ava.state_update is prior_update
-    assert external.attached_config() is None
+    _assert_prior_binding_restored(prior_state, prior_update)
 
 
 def test_concurrent_constructor_fails_before_lease_lookup(

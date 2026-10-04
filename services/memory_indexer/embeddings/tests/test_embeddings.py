@@ -630,22 +630,54 @@ def _embedding_server(
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
+        def _reject(self, status: int) -> None:
+            self.send_response(status)
+            self.send_header("Content-Length", "40")
+            self.send_header("Retry-After", "7")
+            self.end_headers()
+            try:
+                for _ in range(40):
+                    self.wfile.write(b"e")
+                    self.wfile.flush()
+                    if stop.wait(0.05):
+                        return
+            except (BrokenPipeError, ConnectionResetError):
+                return  # Header-phase rejection closes the unread error body.
+
+        def _write_framing_fragments(self, framing: str) -> None:
+            size = f"{len(body):x}".encode()
+            if framing == "extension":
+                wire = [size + b";name="] + [b"x"] * 40
+                wire.append(b"\r\n" + body + b"\r\n0\r\n\r\n")
+            elif framing == "trailer":
+                wire = [size + b"\r\n" + body + b"\r\n0\r\nX-Test: "]
+                wire += [b"y"] * 40 + [b"\r\n\r\n"]
+            else:
+                raise AssertionError(f"unknown framing: {framing}")
+            for fragment in wire:
+                self.wfile.write(fragment)
+                self.wfile.flush()
+                if stop.wait(read_gap):
+                    return
+
+        def _write_body_chunks(self) -> None:
+            for chunk in chunks:
+                if chunked:
+                    self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
+                else:
+                    self.wfile.write(chunk)
+                self.wfile.flush()
+                if drip and stop.wait(read_gap):
+                    return
+            if chunked:
+                self.wfile.write(b"0\r\n\r\n")
+                self.wfile.flush()
+
         def do_POST(self) -> None:
             self.rfile.read(int(self.headers["Content-Length"]))
             started.append(time.monotonic())
             if error_status is not None and len(started) == 1:
-                self.send_response(error_status)
-                self.send_header("Content-Length", "40")
-                self.send_header("Retry-After", "7")
-                self.end_headers()
-                try:
-                    for _ in range(40):
-                        self.wfile.write(b"e")
-                        self.wfile.flush()
-                        if stop.wait(0.05):
-                            return
-                except (BrokenPipeError, ConnectionResetError):
-                    return  # Header-phase rejection closes the unread error body.
+                self._reject(error_status)
                 return
             self.send_response(200)
             if compressed:
@@ -657,32 +689,9 @@ def _embedding_server(
             self.end_headers()
             try:
                 if framing is not None:
-                    size = f"{len(body):x}".encode()
-                    if framing == "extension":
-                        wire = [size + b";name="] + [b"x"] * 40
-                        wire.append(b"\r\n" + body + b"\r\n0\r\n\r\n")
-                    elif framing == "trailer":
-                        wire = [size + b"\r\n" + body + b"\r\n0\r\nX-Test: "]
-                        wire += [b"y"] * 40 + [b"\r\n\r\n"]
-                    else:
-                        raise AssertionError(f"unknown framing: {framing}")
-                    for fragment in wire:
-                        self.wfile.write(fragment)
-                        self.wfile.flush()
-                        if stop.wait(read_gap):
-                            return
-                    return
-                for chunk in chunks:
-                    if chunked:
-                        self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
-                    else:
-                        self.wfile.write(chunk)
-                    self.wfile.flush()
-                    if drip and stop.wait(read_gap):
-                        return
-                if chunked:
-                    self.wfile.write(b"0\r\n\r\n")
-                    self.wfile.flush()
+                    self._write_framing_fragments(framing)
+                else:
+                    self._write_body_chunks()
             except (BrokenPipeError, ConnectionResetError):
                 return  # Expected when the client cancels the attempt.
 

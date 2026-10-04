@@ -16,6 +16,7 @@ import importlib
 import inspect
 from collections.abc import Iterator
 from datetime import UTC
+from typing import Any
 
 import psycopg
 import pytest
@@ -340,6 +341,22 @@ def _notices(db_conn: psycopg.Connection, agent_id: int) -> list[tuple]:
         return cur.fetchall()
 
 
+def _assert_first_notice_is_sole_pending_fyi(nid: Any) -> None:
+    assert nid.pending_count == 1
+    assert len(nid.pending_notices) == 1
+    assert nid.pending_notices[0]["id"] == nid
+    assert nid.pending_notices[0]["title"] == "migration done"
+    assert nid.pending_notices[0]["priority"] == "P1"
+    assert "created_at" in nid.pending_notices[0]
+    assert nid.superseded == []
+
+
+def _assert_second_notice_supersedes_first(nid: Any, nid2: Any) -> None:
+    assert nid2.pending_count == 1
+    assert [n["title"] for n in nid2.pending_notices] == ["hit a rate limit"]
+    assert nid2.superseded == [nid]
+
+
 def test_notify_inserts_fyi_and_snapshot_counts_unread(
     _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
@@ -350,19 +367,11 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
         # require_response defaults False -> these are FYI notices.
         nid = ava.ui.notify("migration done", content="14k rows", priority="P1")  # type: ignore[attr-defined]
         assert isinstance(nid, int)  # Notice is an int subclass — backward compatible
-        assert nid.pending_count == 1  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        assert len(nid.pending_notices) == 1  # pyright: ignore[reportAttributeAccessIssue, reportUnknownArgumentType, reportUnknownMemberType]
-        assert nid.pending_notices[0]["id"] == nid  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        assert nid.pending_notices[0]["title"] == "migration done"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        assert nid.pending_notices[0]["priority"] == "P1"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        assert "created_at" in nid.pending_notices[0]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        assert nid.superseded == []  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        _assert_first_notice_is_sole_pending_fyi(nid)
 
         # Posting a second notice auto-resolves the first (at most one).
         nid2 = ava.ui.notify("hit a rate limit")  # type: ignore[attr-defined]
-        assert nid2.pending_count == 1  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        assert [n["title"] for n in nid2.pending_notices] == ["hit a rate limit"]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        assert nid2.superseded == [nid]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        _assert_second_notice_supersedes_first(nid, nid2)
 
         db_conn.rollback()  # notify() committed via its own cursor; refresh our view
         rows = _notices(db_conn, agent_id)

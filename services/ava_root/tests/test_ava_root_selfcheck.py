@@ -107,14 +107,7 @@ def test_walk_checks_every_running_unit_and_skips_acknowledged_states(
         sleeper.wait()
 
 
-def test_missing_process_opens_one_event_per_episode(
-    recorder: _Recorder, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.ava_root.selfcheck")
-    host = _StubHost([_broken_unit("svc")])
-    check = TreeSelfCheck(host)
-
-    check.run_once()
+def _assert_first_episode_opened_one_event(check: TreeSelfCheck, recorder: _Recorder) -> None:
     chain = _chain(check)
     assert chain["broken"] is True
     assert chain["broken_total"] == 1
@@ -124,6 +117,17 @@ def test_missing_process_opens_one_event_per_episode(
     assert len(events) == 1
     assert events[0]["units"] == ["svc"]
     assert cast("dict[str, object]", events[0]["reasons"]) == {"svc": "missing"}
+
+
+def test_missing_process_opens_one_event_per_episode(
+    recorder: _Recorder, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="services.ava_root.selfcheck")
+    host = _StubHost([_broken_unit("svc")])
+    check = TreeSelfCheck(host)
+
+    check.run_once()
+    _assert_first_episode_opened_one_event(check, recorder)
 
     check.run_once()  # still broken: no second event, a hold line with the age
     assert len(recorder.events("root_chain_broken")) == 1
