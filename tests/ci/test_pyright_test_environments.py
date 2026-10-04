@@ -150,8 +150,8 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/web-ai"
-extraPaths = ["ava_builtins/skills/web-ai/scripts"]
+root = "ava_builtins/skills/integrations/web-ai"
+extraPaths = ["ava_builtins/skills/integrations/web-ai/scripts"]
 """
 
 
@@ -170,13 +170,13 @@ def test_tests_roots_are_the_outermost_tests_directory_of_a_package_module() -> 
             "base/packages/tests/test_a.py",
             "base/packages/tests/area/test_b.py",  # same root
             "base/packages/tests/tests/test_c.py",  # a tests/ inside tests/ is not a new root
-            "ava_builtins/skills/gmail/scripts/tests/test_gmail.py",
+            "ava_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py",
             "tests/base/test_top.py",  # the top-level tests/ is hand-listed
             "docs/tests/test_x.py",  # not a package host
             "base/packages/attests/x.py",
             "base/packages/mod.py",
         ]
-    ) == ["ava_builtins/skills/gmail/scripts/tests", "base/packages/tests"]
+    ) == ["ava_builtins/skills/integrations/gmail/scripts/tests", "base/packages/tests"]
 
 
 def test_an_entry_is_written_only_where_the_package_rules_differ_from_the_standard() -> None:
@@ -184,18 +184,18 @@ def test_an_entry_is_written_only_where_the_package_rules_differ_from_the_standa
         "base/x/tests/test_a.py",  # base is strict: needs an entry
         "cli/y/tests/test_b.py",  # cli already gates the two rules: none
         "ava/z/tests/test_c.py",  # no environment, global warning: needs one
-        "ava_builtins/skills/web-ai/scripts/tests/test_w.py",  # repeats the extraPaths
+        "ava_builtins/skills/integrations/web-ai/scripts/tests/test_w.py",  # repeats the extraPaths
     ]
     text = gen.generate(_SYNTHETIC_PYPROJECT, tracked)
     assert _generated_roots(text) == [
         "ava/z/tests",
-        "ava_builtins/skills/web-ai/scripts/tests",
+        "ava_builtins/skills/integrations/web-ai/scripts/tests",
         "base/x/tests",
     ]
     region = text[text.index(gen.BEGIN) : text.index(gen.END)]
     assert (
-        'root = "ava_builtins/skills/web-ai/scripts/tests"\n'
-        'extraPaths = ["ava_builtins/skills/web-ai/scripts"]\n'
+        'root = "ava_builtins/skills/integrations/web-ai/scripts/tests"\n'
+        'extraPaths = ["ava_builtins/skills/integrations/web-ai/scripts"]\n'
         'reportUnknownMemberType = "error"\n'
         'reportUnknownArgumentType = "error"\n\n'
     ) in region

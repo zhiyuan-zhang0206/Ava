@@ -432,7 +432,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/skills/test_impersonation_launch.py": (
         "contract",
-        "tests the launch scripts of the ava_builtins/skills/ava-use-other-agents skill",
+        "tests the launch scripts of the ava_builtins/skills/coordination/ava-use-other-agents skill",
     ),
     "tests/skills/test_inspect_a_trace_fetch.py": (
         "contract",
@@ -444,11 +444,11 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/skills/use_other_agents/test_coding_session_resume.py": (
         "contract",
-        "tests the spawn scripts of the ava_builtins/skills/ava-use-other-agents skill",
+        "tests the spawn scripts of the ava_builtins/skills/coordination/ava-use-other-agents skill",
     ),
     "tests/skills/use_other_agents/test_spawn_runtime_compat.py": (
         "contract",
-        "tests the spawn scripts of the ava_builtins/skills/ava-use-other-agents skill",
+        "tests the spawn scripts of the ava_builtins/skills/coordination/ava-use-other-agents skill",
     ),
     "tests/test_asyncio_stall_probe.py": (
         "contract",

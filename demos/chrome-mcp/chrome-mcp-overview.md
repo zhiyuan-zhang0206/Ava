@@ -79,7 +79,7 @@ Ava has a built-in `web-ai` skill that uses Chrome MCP to simultaneously drive t
 2. Use `ava.shell.run` to call `web-ai console`, sending one prompt simultaneously to ChatGPT + Gemini + Claude + Perplexity:
 
    ```bash
-   .venv/bin/python ava_builtins/skills/web-ai/console/scripts/ask.py \
+   .venv/bin/python ava_builtins/skills/integrations/web-ai/console/scripts/ask.py \
      --prompt "Design a real-time collaborative editor using three different architectural approaches, compare their trade-offs" \
      --models chatgpt,gemini,claude,perplexity
    ```

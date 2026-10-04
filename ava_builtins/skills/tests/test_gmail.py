@@ -11,7 +11,14 @@ from pathlib import Path
 import pytest
 
 # The skill is a standalone CLI; import its pure helpers for unit testing.
-_SKILL_DIR = Path(__file__).resolve().parents[3] / "ava_builtins" / "skills" / "gmail" / "scripts"
+_SKILL_DIR = (
+    Path(__file__).resolve().parents[3]
+    / "ava_builtins"
+    / "skills"
+    / "integrations"
+    / "gmail"
+    / "scripts"
+)
 sys.path.insert(0, str(_SKILL_DIR))
 import feed as gmail  # noqa: E402  # pyright: ignore[reportMissingImports]
 import imap as gmail_imap  # noqa: E402  # pyright: ignore[reportMissingImports]

@@ -17,7 +17,9 @@ import pytest
 from ava.shell.coding_tools import _claude_checks, _common, claude
 from base.sessions import coding_session_owner
 
-_SKILL_DIR = Path(__file__).parents[4] / "ava_builtins" / "skills" / "ava-use-other-agents"
+_SKILL_DIR = (
+    Path(__file__).parents[4] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
+)
 
 
 def _load(name: str, path: Path) -> ModuleType:

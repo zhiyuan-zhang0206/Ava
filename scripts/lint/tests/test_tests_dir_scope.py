@@ -188,10 +188,15 @@ def test_the_same_source_outside_tests_is_governed(
 
 def test_path_import_rule_skips_test_files_at_any_depth() -> None:
     tree = ast.parse('import sys\nsys.path.insert(0, "/somewhere")\n')
-    assert path_imports.measure(tree, "ava_builtins/skills/gmail/scripts/tests/test_gmail.py") == {}
+    assert (
+        path_imports.measure(
+            tree, "ava_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py"
+        )
+        == {}
+    )
     assert path_imports.measure(tree, "ava_builtins/tests/test_goal_watch_filter.py") == {}
-    assert path_imports.measure(tree, "ava_builtins/skills/gmail/scripts/run.py") == {
-        "ava_builtins/skills/gmail/scripts/run.py::sys.path": [2]
+    assert path_imports.measure(tree, "ava_builtins/skills/integrations/gmail/scripts/run.py") == {
+        "ava_builtins/skills/integrations/gmail/scripts/run.py::sys.path": [2]
     }
 
 

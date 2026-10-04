@@ -102,7 +102,7 @@ its own script (`scripts/lint/patch_targets.py`).
   `runpy.run_path`); `scripts/structure/path_imports.py` finds them. Shared
   code moves into a governed package the script imports normally, and a
   script that needs it runs on the checkout's venv python. One narrow
-  exception: a script under `ava_builtins/skills/<skill>/` may run a
+  exception: a script under `ava_builtins/skills/<group>/<skill>/` may run a
   one-line `sys.path.insert(0, ...)` / `.append(...)` guard whose argument
   is derived from `__file__` and resolves inside that same `<skill>/` tree
   (its own `scripts/`, or a sibling sub-skill's) — recognized by AST, so it

@@ -20,7 +20,7 @@ here through mirrors for open-standard clients.
 
 ## Built-in mirrors are symlinks
 
-The other 26 entries are **symlinks back to `ava_builtins/skills/<name>`** (git
+The other 26 entries are **symlinks back to `ava_builtins/skills/<group>/<name>`** (git
 tracks each link itself, mode 120000) so every built-in skill is also reachable
 under the open-standard path for other clients (Claude Code, editors). On a
 platform that checks out symlinks as plain files (`core.symlinks=false`, e.g.

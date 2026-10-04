@@ -12,7 +12,7 @@ tags:
 ## What it is
 
 This package is the implementation behind the
-`ava_builtins/skills/ava-use-other-agents/scripts/spawn_claude.py` and
+`ava_builtins/skills/coordination/ava-use-other-agents/scripts/spawn_claude.py` and
 `spawn_codex.py` command-line entries. Each launcher does the same things:
 
 1. Opens an `ava.shell.sessions` PTY.
@@ -62,4 +62,4 @@ script (`watch_work.py`) and the resident relay plugin (`ava-relay/`).
 ## Key dependencies
 - [[ava/shell/docs/shell.ava.okf.md|ava.shell]] — the session primitives every launch drives
 - [[base/sessions/docs/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
-- [[ava_builtins/skills/ava-use-other-agents/docs/ava-use-other-agents.ava.okf.md]] — the skill whose scripts are the command-line entries
+- [[ava_builtins/skills/coordination/ava-use-other-agents/docs/ava-use-other-agents.ava.okf.md]] — the skill whose scripts are the command-line entries

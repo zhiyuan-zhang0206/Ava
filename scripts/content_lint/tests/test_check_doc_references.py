@@ -195,7 +195,7 @@ def test_skill_backtick_ref_to_existing_file_is_clean(tmp_path: Path) -> None:
 
 def test_nested_skill_resolves_against_ancestor_library(tmp_path: Path) -> None:
     """A nested skill shares its parent's references/ library — the
-    ava_builtins/skills/ava-serious-engineering tree's ai-era/ and principles/
+    ava_builtins/skills/practice/ava-serious-engineering tree's ai-era/ and principles/
     skills all point at
     the root library."""
     root = tmp_path / "ava_builtins" / "skills" / "serious"

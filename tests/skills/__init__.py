@@ -1,6 +1,6 @@
 """Load an `ava_builtins/skills/` script module by file path, for tests.
 
-`ava_builtins/skills/<skill>/` directory names are kebab-case, so they are
+`ava_builtins/skills/<group>/<skill>/` directory names are kebab-case, so they are
 never importable Python packages — and Structure Rule 6
 (`scripts/structure/path_imports.py`) forbids loading one by file path from
 *inside* `ava_builtins/` too (a skill script imports a sibling only through
@@ -29,8 +29,8 @@ def load_skill_script(*parts: str, name: str | None = None) -> ModuleType:
     registered in `sys.modules` under `name` (default: `"<stem>_under_test"`)
     so `@dataclass` and similar can resolve the module by name.
 
-    Example: `load_skill_script("gmail", "scripts", "imap.py")` loads
-    `ava_builtins/skills/gmail/scripts/imap.py`.
+    Example: `load_skill_script("integrations", "gmail", "scripts", "imap.py")` loads
+    `ava_builtins/skills/integrations/gmail/scripts/imap.py`.
     """
     path = _REPO_ROOT.joinpath("ava_builtins", "skills", *parts)
     module_name = name or f"{path.stem}_under_test"

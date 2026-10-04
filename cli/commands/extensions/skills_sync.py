@@ -4,7 +4,7 @@
 provider roots — see `ava/skills/__init__.py`). This module keeps it converged with the
 three source kinds:
 
-- repo skills:             `<repo>/ava_builtins/skills/<name>/`       -> `skills/<name>/`  (origin="repo")
+- repo skills:             `<repo>/ava_builtins/skills/[<group>/]<name>/` -> `skills/<name>/`  (origin="repo")
 - built-in plugin skills:  `<repo>/ava_builtins/plugins/<p>/skills/`  -> `skills/<p>/`     (origin="plugin")
 - installed plugin skills: `$AVA_HOME/plugins/<p>/skills/` -> `skills/<p>/`   (origin="plugin")
 
@@ -178,6 +178,30 @@ def _stamp_trust(entry: InstalledPackage, s: _Source) -> None:
         entry.trust = "unreviewed"
 
 
+def _repo_skill_dirs(repo_skills: Path) -> list[Path]:
+    """The skill directories under `ava_builtins/skills/`, in name order.
+
+    A directory with its own `SKILL.md` is a skill. One without only groups skills
+    in the source tree (`skills/<group>/<name>/`): each child converges to
+    `skills/<name>/`, so the group never reaches a skill's identity.
+    """
+    if not repo_skills.is_dir():
+        return []
+    found: list[Path] = []
+    for d in sorted(repo_skills.iterdir()):
+        if not d.is_dir() or d.name in IGNORED_NAMES or not contains_skill_md(d):
+            continue
+        if (d / "SKILL.md").is_file():
+            found.append(d)
+            continue
+        found.extend(
+            c
+            for c in sorted(d.iterdir())
+            if c.is_dir() and c.name not in IGNORED_NAMES and contains_skill_md(c)
+        )
+    return found
+
+
 def iter_sources(repo: Path) -> tuple[list[_Source], list[str]]:
     """Enumerate sync units in precedence order (repo skills, then built-in
     plugins, then installed plugins). A later source whose name is already
@@ -199,11 +223,8 @@ def iter_sources(repo: Path) -> tuple[list[_Source], list[str]]:
             return
         sources[name] = _Source(name, key, src, origin, trust, bootstrap_only=bootstrap_only)
 
-    repo_skills = repo / "ava_builtins" / "skills"
-    if repo_skills.is_dir():
-        for d in sorted(repo_skills.iterdir()):
-            if d.is_dir() and d.name not in IGNORED_NAMES and contains_skill_md(d):
-                add(d.name, d, "repo", "builtin", bootstrap_only=True)
+    for d in _repo_skill_dirs(repo / "ava_builtins" / "skills"):
+        add(d.name, d, "repo", "builtin", bootstrap_only=True)
     # The repo's `.agents/skills/` project skills (the kernel-contributor
     # family: ship-a-change, write-a-pr-description, …) are deliberately NOT a
     # converge source (issue #146 / decision 2026-08-20). They reach agents
