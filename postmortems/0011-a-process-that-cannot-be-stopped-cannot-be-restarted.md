@@ -60,8 +60,9 @@ same window; the trigger was transient and did not reproduce on demand).
   loop) and every worker thread in `cond_wait`: nothing executing, one wait
   that never resolves — not a blocked call.
 - 09:51:45–59 — the operator stop intent is recorded; `RootClient.force_down`
-  escalates TERM → 10s → SIGKILL and starts a replacement (new gen 92645;
-  `failure state cleared after 885s`).
+  (TERM → 10s window → SIGKILL escalation; 10.1s end to end — TERM alone did
+  not end it) kills the process, and `up` starts the replacement (new gen
+  92645; `failure state cleared after 885s`).
 
 ## Root cause
 
