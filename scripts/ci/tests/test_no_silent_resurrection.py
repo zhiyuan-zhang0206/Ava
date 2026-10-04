@@ -38,14 +38,17 @@ _spec.loader.exec_module(resurrection)
 _BLOCK_A = (
     'delivery_watchdog_fields = ("last_error", "last_success")\n'
     "delivery_watchdog_alert_grace_seconds = compute_delivery_grace(config)\n"
+    "delivery_watchdog_alerts_path = resolve_alerts_path(config)\n"
 )
 _BLOCK_B = (
     "scheduler_lease_seconds = renew_scheduler_lease(previous_lease)\n"
     "scheduler_lease_owner = resolve_lease_owner(state)\n"
+    "scheduler_lease_window = resolve_lease_window(state)\n"
 )
 _KEEP = "def handle(payload):\n    return payload\n"
 _DISTINCTIVE = "AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS = recompute_grace(default_config)\n"
 _GENERIC_LINE = "result = compute(total, rate)\n"
+_PAIR = "    result = compute(total, rate)\n    value = lookup(source, key)\n"
 
 
 def _env(days_ago: float | None) -> dict[str, str]:
@@ -266,6 +269,23 @@ def test_single_generic_line_is_not_a_hit(
     assert "no resurrection detected" in out
 
 
+def test_two_dead_lines_are_below_the_minimum_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    body = "def handle(payload):\n" + _PAIR + "    return payload\n"
+    _write(repo, "a.py", body)
+    _commit(repo, "add the pair", days_ago=10)
+    _write(repo, "a.py", _KEEP)
+    _commit(repo, "remove the pair", days_ago=2)
+    _git(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, "a.py", body)
+    _commit(repo, "restore the pair", days_ago=0.1)
+    code, out, _err = _check(repo, monkeypatch, capsys)
+    assert code == 0
+    assert "no resurrection detected" in out
+
+
 def test_weak_lines_are_only_glue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -429,6 +449,7 @@ def test_unknown_revision_is_a_usage_error(
         ("x = 1", (False, False)),
         ("delivery_watchdog_fields = " + "x" * 1100, (False, False)),  # data blob
         ("result = compute(total, rate)", (True, False)),
+        ("capture_output = run_tool(command)", (True, False)),
         ("delivery_watchdog_fields = compute_fields(config)", (True, True)),
         ("AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS = recompute_grace(cfg)", (True, True)),
     ],

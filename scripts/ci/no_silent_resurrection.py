@@ -31,7 +31,7 @@ Pipeline (one function per stage):
    the text somewhere in the same commit (a move is not a deletion).
 5. ``find_hits`` -- inside a run, a stretch where every strong line is dead
    (weak, blank and still-present lines bridge; a strong line that is neither
-   breaks the stretch) is a hit when it holds >= 2 dead strong lines or one
+   breaks the stretch) is a hit when it holds >= MIN_DEAD_LINES dead strong lines or one
    distinctive dead line (an identifier of >= DISTINCTIVE_IDENTIFIER_LENGTH
    chars with an underscore or camelCase). Each hit is attributed to the commit
    covering the most of its dead lines (ties: the most recent).
@@ -60,16 +60,19 @@ DEFAULT_BASE = "origin/main"
 DEFAULT_HEAD = "HEAD"
 DEFAULT_DAYS = 30
 
-# A "strong" line is meaningful enough that a resurrected run of two of them
-# (or one carrying a distinctive identifier) should have been noticed by the
-# author. The thresholds are the tuning knobs; they were set from the 30-day
-# false-positive sweep described in conventions/no-silent-resurrection.md.
+# A "strong" line is meaningful enough that a resurrected run of them (or one
+# carrying a distinctive identifier) should have been noticed by the author.
+# The thresholds are the tuning knobs, set from the 30-day false-positive
+# sweep described in conventions/no-silent-resurrection.md: the minimum unit
+# is three lines (the incident's blocks were 3+ lines; two-line idiom matches
+# dominated the noise) and a solo line needs a >=20-char identifier (short
+# framework names like OperationalError matched everything).
 MIN_STRONG_LENGTH = 14
 MAX_STRONG_LENGTH = 1000
 MIN_IDENTIFIERS = 2
 MIN_IDENTIFIER_LENGTH = 3
-DISTINCTIVE_IDENTIFIER_LENGTH = 12
-MIN_DEAD_LINES = 2
+DISTINCTIVE_IDENTIFIER_LENGTH = 20
+MIN_DEAD_LINES = 3
 SAMPLE_LINES = 3
 
 # Lock and generated files carry line churn that no reader reviews: they are
