@@ -14,7 +14,6 @@ import pytest
 from base import paths
 from base.lm import plugin_providers as plugin_loader
 from base.lm import pricing, provider_api, stop
-from base.lm.concurrency import _invalidate_known_provider_keys_cache
 from base.lm.plugin_providers import _reset_loaded_for_tests
 from base.lm.registry import MODELS, _rebuild_derived_views
 
@@ -177,4 +176,3 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     stop._BY_PROVIDER.update(stop_snapshot)
     _reset_loaded_for_tests()
     plugin_loader._STATE.loaded = loader_was_loaded
-    _invalidate_known_provider_keys_cache()

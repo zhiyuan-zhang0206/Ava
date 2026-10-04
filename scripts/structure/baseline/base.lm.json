@@ -1,9 +1,6 @@
 {
   "ambient_state": {
     "base/lm/concurrency.py::global-rebind:_limiter": 2,
-    "base/lm/concurrency.py::hidden-singleton:_provider_keys": 1,
-    "base/lm/concurrency.py::import-time-call:base.lm.provider_api.REGISTRY.register_invalidator": 1,
-    "base/lm/effort.py::ambient-container:_PROVIDER_EFFORT_LEVELS": 1,
     "base/lm/factory.py::ambient-container:_MODEL_KEY_MAP": 1,
     "base/lm/factory.py::import-time-call:base.lm.provider_api.REGISTRY.reserve_core_prefixes": 1,
     "base/lm/plugin_providers.py::ambient-instance:_STATE": 1,

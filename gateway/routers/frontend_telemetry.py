@@ -52,26 +52,30 @@ _MAX_SESSIONS = 512
 # comfortably above the honest ceiling.
 _MAX_BODY_BYTES = 65_536
 
-# Sliding windows: session_id -> deque of event timestamps (monotonic-ish
-# wall clock). Module state is fine — one gateway process; a restart resets
-# every window, which only loosens the backstop briefly.
-_session_windows: dict[str, deque[float]] = {}
 
+class SessionRateLimiter:
+    """Per-session sliding windows: session_id -> deque of event timestamps
+    (wall clock). Owned by the gateway app (`app.state.telemetry_rate_limiter`),
+    so a restart resets every window, which only loosens the backstop briefly.
+    """
 
-def _rate_limited(session_id: str, now: float) -> bool:
-    """True when `session_id` has spent its per-minute event budget."""
-    win: deque[float] | None = _session_windows.get(session_id)
-    if win is None:
-        if len(_session_windows) >= _MAX_SESSIONS:
-            _session_windows.pop(next(iter(_session_windows)))
-        win = deque()
-        _session_windows[session_id] = win
-    while win and now - win[0] > 60:
-        win.popleft()
-    if len(win) >= _MAX_EVENTS_PER_MINUTE:
-        return True
-    win.append(now)
-    return False
+    def __init__(self) -> None:
+        self._windows: dict[str, deque[float]] = {}
+
+    def limited(self, session_id: str, now: float) -> bool:
+        """True when `session_id` has spent its per-minute event budget."""
+        win: deque[float] | None = self._windows.get(session_id)
+        if win is None:
+            if len(self._windows) >= _MAX_SESSIONS:
+                self._windows.pop(next(iter(self._windows)))
+            win = deque()
+            self._windows[session_id] = win
+        while win and now - win[0] > 60:
+            win.popleft()
+        if len(win) >= _MAX_EVENTS_PER_MINUTE:
+            return True
+        win.append(now)
+        return False
 
 
 def _emit_one(batch: FrontendTelemetryBatch, ev: FrontendInteractionIn) -> None:
@@ -123,11 +127,12 @@ async def ingest(request: Request) -> Response:
             retryable=False,
         )
 
+    limiter: SessionRateLimiter = request.app.state.telemetry_rate_limiter
     now = time.time()
     accepted = 0
     dropped = 0
     for ev in batch.events:
-        if _rate_limited(batch.session_id, now):
+        if limiter.limited(batch.session_id, now):
             dropped += 1
             continue
         _emit_one(batch, ev)

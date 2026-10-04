@@ -31,6 +31,7 @@ from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from gateway.cluster import snapshots
+from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
 from gateway.cluster.status import gather_cluster_status
 from gateway.events import telemetry_rows
@@ -82,7 +83,11 @@ def _machines_rows_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
 
 
 async def _roster_statuses(
-    pool: ConnectionPool, db: Database, *, fresh: bool
+    pool: ConnectionPool,
+    db: Database,
+    identity_log: IdentityMismatchLog,
+    *,
+    fresh: bool,
 ) -> list[MachineStatus]:
     """The roster of every unpaused machine: from the heartbeat liveness pass's
     snapshot, or — when `fresh` — by dialing every runner now."""
@@ -90,7 +95,9 @@ async def _roster_statuses(
     if not rows:
         return []
     found = None if fresh else await asyncio.to_thread(snapshots.read_all_blocking, pool)
-    return await gather_cluster_status(db, rows, machine_name(), snapshots=found)
+    return await gather_cluster_status(
+        db, rows, machine_name(), identity_log=identity_log, snapshots=found
+    )
 
 
 async def _dispatch_op(
@@ -187,7 +194,10 @@ async def get_cluster_roster(
     503 mode so the roster stays visible during pause.
     """
     return await _roster_statuses(
-        request.app.state.control_db_pool, request.app.state.db, fresh=fresh
+        request.app.state.control_db_pool,
+        request.app.state.db,
+        request.app.state.identity_mismatch_log,
+        fresh=fresh,
     )
 
 
@@ -345,7 +355,10 @@ async def get_cluster_machines(
     over the free-text description, not ops topology.
     """
     statuses = await _roster_statuses(
-        request.app.state.control_db_pool, request.app.state.db, fresh=fresh
+        request.app.state.control_db_pool,
+        request.app.state.db,
+        request.app.state.identity_mismatch_log,
+        fresh=fresh,
     )
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally

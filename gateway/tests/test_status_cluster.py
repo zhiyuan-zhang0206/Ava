@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from base.db import Database
 from gateway.app import app
 from gateway.cluster import status as status_router
+from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
 from ops import cluster_rpc
 
@@ -78,6 +79,7 @@ def stub_remote_probe(
     results = _RemoteProbeResults()
 
     async def fake_probe(
+        _identity_log: object,
         name: str,
         role: list[str],
         gateway_url: str | None,
@@ -187,7 +189,7 @@ class TestClusterPanel:
         _ = stub_machine_identity
         fake_flag.write_text("")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(database, cur)
+            panel = status_router._get_cluster_status(database, cur, IdentityMismatchLog())
         assert panel.current_paused is True
 
     def test_machines_list_local_plus_remote(
@@ -391,7 +393,13 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            IdentityMismatchLog(),
+            "wsl",
+            ["agent-runner"],
+            _OPS_URL,
+            datetime(2026, 5, 24, tzinfo=UTC),
+            None,
+            None,
         )
         assert seen["timeout_s"] == 11.0
         assert seen["ops_url"] == _OPS_URL
@@ -413,7 +421,13 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", must_not_dispatch)
         row = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            IdentityMismatchLog(),
+            "wsl",
+            ["agent-runner"],
+            None,
+            datetime(2026, 5, 24, tzinfo=UTC),
+            None,
+            None,
         )
 
         assert row.online is False
@@ -444,6 +458,7 @@ class TestProbeAgentRunner:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", blackhole)
         row = await asyncio.wait_for(
             status_router._probe_agent_runner(
+                IdentityMismatchLog(),
                 "wsl",
                 ["agent-runner"],
                 _OPS_URL,
@@ -467,6 +482,7 @@ class TestProbeAgentRunner:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         stopped = datetime(2026, 5, 25, tzinfo=UTC)
         r = await status_router._probe_agent_runner(
+            IdentityMismatchLog(),
             "wsl",
             ["agent-runner"],
             _OPS_URL,
@@ -495,6 +511,7 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
+            IdentityMismatchLog(),
             "wsl",
             ["agent-runner"],
             _OPS_URL,
@@ -523,7 +540,13 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            IdentityMismatchLog(),
+            "wsl",
+            ["agent-runner"],
+            _OPS_URL,
+            datetime(2026, 5, 24, tzinfo=UTC),
+            None,
+            None,
         )
         assert r.head_sha == "def5678"
 
@@ -543,7 +566,13 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
-            "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            IdentityMismatchLog(),
+            "wsl",
+            ["agent-runner"],
+            _OPS_URL,
+            datetime(2026, 5, 24, tzinfo=UTC),
+            None,
+            None,
         )
         assert r.online is True
         assert r.paused is None
@@ -565,7 +594,7 @@ class TestPanelCarriesNoFrozenPin:
 
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(database, cur)
+            panel = status_router._get_cluster_status(database, cur, IdentityMismatchLog())
         body = panel.model_dump()
         assert "cluster_target_sha" not in body
         assert "cluster_last_known_good_sha" not in body

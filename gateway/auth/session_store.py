@@ -155,6 +155,44 @@ def list_sessions(
         return [dict(row) for row in cur.fetchall()]
 
 
+class SessionTouchThrottle:
+    """Per-session throttle for `touch_session`: one DB write per interval.
+
+    Owned by the gateway app (`app.state.session_touch`), so the bookkeeping
+    lives and dies with the process serving the requests. `last_touch` maps a
+    session id to the monotonic time it was last touched.
+    """
+
+    INTERVAL_S = 60.0
+    MAX_ENTRIES = 1024
+
+    def __init__(self) -> None:
+        self.last_touch: dict[str, float] = {}
+
+    def due(self, session_id: str, now: float, *, stale_after_s: float) -> bool:
+        """Whether `session_id` should be touched now; records the touch when so."""
+        last = self.last_touch.get(session_id)
+        touch_due = last is None or now - last >= self.INTERVAL_S
+        if touch_due:
+            self.last_touch[session_id] = now
+        self._prune(now, stale_after_s)
+        return touch_due
+
+    def _prune(self, now: float, stale_after_s: float) -> None:
+        """Drop expired bookkeeping and cap the map by oldest touch time."""
+        if len(self.last_touch) <= self.MAX_ENTRIES:
+            return
+        stale_before = now - stale_after_s
+        for session_id, touched_at in tuple(self.last_touch.items()):
+            if touched_at < stale_before:
+                self.last_touch.pop(session_id, None)
+        overflow = len(self.last_touch) - self.MAX_ENTRIES
+        if overflow > 0:
+            oldest = sorted(self.last_touch, key=self.last_touch.__getitem__)[:overflow]
+            for session_id in oldest:
+                self.last_touch.pop(session_id, None)
+
+
 def touch_session(pool: ConnectionPool[Any], session_id: str) -> None:
     """Record recent use of a session."""
     with write_transaction(pool) as conn, conn.cursor() as cur:

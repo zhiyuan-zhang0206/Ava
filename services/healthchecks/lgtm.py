@@ -19,7 +19,13 @@ from typing import Any
 from base.daemon.health import DaemonProbe
 from base.paths import ava_home
 
-_local_http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+def _open_local(request: str | urllib.request.Request, *, timeout: float) -> Any:
+    """Open a loopback URL without consulting the environment's proxies."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+        request, timeout=timeout
+    )
+
 
 _NANOSECONDS_PER_SECOND = 1_000_000_000
 _WRITE_PROBE_LOOKBACK_SECONDS = 120
@@ -58,7 +64,7 @@ def _protocol_readiness(name: str) -> DaemonProbe:
 
     url = backend_urls()[name] + HEALTH_PATHS[name]
     try:
-        with _local_http.open(url, timeout=2.0) as response:
+        with _open_local(url, timeout=2.0) as response:
             if not 200 <= response.status < 300:
                 return DaemonProbe.down(f"{name} readiness HTTP {response.status}")
             if name == "grafana" and json.loads(response.read())["database"] != "ok":
@@ -142,7 +148,7 @@ def write_path_probe() -> tuple[bool, str]:
         headers={"X-Scope-OrgID": "fake"},
     )
     try:
-        with _local_http.open(query_request, timeout=2.0) as response:
+        with _open_local(query_request, timeout=2.0) as response:
             if not 200 <= response.status < 300:
                 return False, "query_error"
             payload: dict[str, Any] = json.loads(response.read())
@@ -160,7 +166,7 @@ def _push_probe(request: urllib.request.Request) -> str | None:
     """Push once, retrying only HTTP 429 with bounded backoff."""
     for attempt in range(len(_WRITE_PROBE_RETRY_BACKOFF_SECONDS) + 1):
         try:
-            with _local_http.open(request, timeout=2.0) as response:
+            with _open_local(request, timeout=2.0) as response:
                 status = response.status
                 response_body = response.read() if status >= 500 else b""
         except urllib.error.HTTPError as exc:
