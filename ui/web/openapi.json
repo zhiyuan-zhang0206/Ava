@@ -3175,7 +3175,7 @@
     "/api/commands": {
       "get": {
         "summary": "Get Commands",
-        "description": "Composer commands, globally by default or as one agent sees them.\n\nAn agent view always dials the machine recorded on ``agents_meta`` (including\nthe gateway's own machine).  A missing/offline/version-skewed runner falls\nback to the historical gateway-local catalog so autocomplete remains usable.",
+        "description": "Composer commands, globally by default or as one agent sees them.\n\nAn agent view always dials the machine recorded on ``agents_meta`` (including\nthe gateway's own machine).  A missing/offline/version-skewed runner falls\nback to the historical gateway-local catalog so autocomplete remains usable.\nAn open deploy window (read per request, task #4986) explains the\nunreachability — the fallback report drops to INFO for that request.",
         "operationId": "get_commands_api_commands_get",
         "parameters": [
           {

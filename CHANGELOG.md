@@ -32,6 +32,11 @@ and the matching GitHub Releases.
   pool reports a slow borrow after `AVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS`
   (default 10s, was 3s) and coalesces it per host within
   `AVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS` (default 300s).
+- Gateway control-console reads explain an expected outage instead of paging it: an
+  unreachable runner mid-deploy-window logs INFO naming the window (the RPC client's
+  exhausted-retry line drops to DEBUG) for `shell_probe`, `agent_skill_view` and
+  `config_audit_read`, each reading the window per request; with no window open both
+  lines stay WARNING.
 - Agent shells live in one `pty-sessions` roster service per machine instead of one detached
   host process each. A session outlives an agent, an agent host and a gateway restarting; `ava
   stop`, `ava restart`, an update, a service crash and a reboot end every session, and `ava stop`

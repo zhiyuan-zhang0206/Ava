@@ -141,6 +141,7 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         timeout_s: float | None = None,
         retries: int | None = None,
         idempotency_key: str | None = None,
+        quiet_unreachable: bool = False,
     ) -> dict:
         # Mirror dispatch_to_machine's exact signature so positionally-called
         # tests (e.g. cluster_rpc's own unit tests) keep working. None forwards
@@ -166,6 +167,7 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
             timeout_s=timeout_s,
             retries=retries,
             idempotency_key=idempotency_key,
+            quiet_unreachable=quiet_unreachable,
         )
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _in_process_config)  # pyright: ignore[reportUnknownArgumentType]
