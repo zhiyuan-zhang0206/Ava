@@ -293,6 +293,21 @@ def _resolve_module_file(name: str) -> Path | None:
     return None
 
 
+# Import edges the closure walk does not follow because the importing function never runs in a
+# gateway process: (importing file, imported module) -> (function holding the import, why). Narrow
+# on purpose: one edge, one function. `ava/_settings.py` reaches `ava.shell.sessions` (and through
+# it ava.security's `settings.agent` read) only inside `shell_sessions()`. The gateway reaches
+# `ava._settings` solely because `ava.skills` imports it to record `skill_invoked`, which the
+# gateway never does (it imports `ava.skills.composer_commands` for /api/commands). Pinned below:
+# the import must still sit in that function and no gateway-side source may name the function.
+_GATEWAY_UNREACHABLE_EDGES: dict[tuple[str, str], tuple[str, str]] = {
+    ("ava/_settings.py", "ava.shell.sessions"): (
+        "shell_sessions",
+        "agent-process shell sessions; the gateway never asks for an agent's shell",
+    ),
+}
+
+
 def _walk_import_closure(
     roots: tuple[str, ...],
     imported_modules: Callable[[ast.AST], list[str]],
@@ -321,7 +336,13 @@ def _walk_import_closure(
             tree = ast.parse(p.read_text(errors="replace"))
         except (OSError, SyntaxError):
             continue
+        rel = p.relative_to(root).as_posix()
         for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and (rel, node.module) in _GATEWAY_UNREACHABLE_EDGES
+            ):
+                continue
             frontier.extend(imported_modules(node))
     return closure
 
@@ -546,6 +567,56 @@ def test_profile_domains_match_consumption_matrix() -> None:
             f"{kind} profile contains domains nothing in the kind's code or import "
             f"closure reads — a capability-axis artifact? Remove them or prove a "
             f"consumer: {sorted(extra)}"
+        )
+
+
+def _function_imports(tree: ast.AST, function: str, module: str) -> bool:
+    """Whether a function named `function` in `tree` holds a `from <module> import ...`."""
+    return any(
+        isinstance(inner, ast.ImportFrom) and inner.module == module
+        for holder in ast.walk(tree)
+        if isinstance(holder, ast.FunctionDef | ast.AsyncFunctionDef) and holder.name == function
+        for inner in ast.walk(holder)
+    )
+
+
+def _uses_module_function(node: ast.AST, owner: str, function: str) -> bool:
+    """Whether `node` imports `function` from module `owner` or reads it off `owner`'s name."""
+    if isinstance(node, ast.ImportFrom):
+        return node.module == owner and any(alias.name == function for alias in node.names)
+    if isinstance(node, ast.Attribute) and node.attr == function:
+        leaf = owner.rsplit(".", 1)[1]
+        holder = node.value
+        return (isinstance(holder, ast.Name) and holder.id == leaf) or (
+            isinstance(holder, ast.Attribute) and holder.attr == leaf
+        )
+    return False
+
+
+def test_gateway_unreachable_edges_stay_pinned_to_real_code() -> None:
+    """Every _GATEWAY_UNREACHABLE_EDGES entry must still be a real edge in its named function,
+    and no gateway-side source may use that function of that module.
+
+    The registry excuses one import edge from the closure walk; this pin fails when the import
+    moves or disappears (stale entry) or when gateway code starts calling the function (the
+    excuse no longer holds).
+    """
+    root = _repo_root()
+    gateway_nodes = [
+        node
+        for prefix in _KIND_ROOTS["gateway"]
+        for py in _production_py_files(root, prefix)
+        for node in ast.walk(ast.parse(py.read_text(errors="replace")))
+    ]
+    for (rel, module), (function, why) in _GATEWAY_UNREACHABLE_EDGES.items():
+        tree = ast.parse((root / rel).read_text(errors="replace"))
+        assert _function_imports(tree, function, module), (
+            f"{rel}: {function}() no longer imports {module} ({why})"
+        )
+        owner = Path(rel).with_suffix("").as_posix().replace("/", ".")
+        assert not any(_uses_module_function(node, owner, function) for node in gateway_nodes), (
+            f"gateway-side code uses {owner}.{function}: the {rel} -> {module} edge is "
+            f"reachable now ({why})"
         )
 
 

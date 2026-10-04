@@ -683,17 +683,17 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
     if not skills:
         return True
     try:
+        # Function-local: ava._settings is the composition root and pulls the shell stack; only
+        # recording needs it, and the gateway's import closure must not (test_gateway_consumer_guard).
+        from ava._settings import database
         from base.telemetry.audit_events import (
             SkillInvokedPayload,
             prepare_event_log,
             record_audit_standalone_many,
         )
 
-        # `ava._settings` is loaded with the `ava` package; reaching it through sys.modules (as
-        # `ava._settings` does for `ava.external`) keeps this write-path edge out of the gateway's
-        # import closure: the gateway imports ava.skills for /api/commands, never to record.
         record_audit_standalone_many(
-            sys.modules["ava._settings"].database(),
+            database(),
             [
                 prepare_event_log(
                     event_type="skill_invoked",
