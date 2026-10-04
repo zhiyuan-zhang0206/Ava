@@ -7,6 +7,8 @@ mock the LLM path (scripted fixture instead of real Anthropic API).
 Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 (local gitignored spec draft).
 
+What is (and is not) covered, feature by feature, lives in [FEATURES.md](FEATURES.md).
+
 ## Running
 
 ```bash
