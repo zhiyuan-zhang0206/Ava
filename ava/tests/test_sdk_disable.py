@@ -1,9 +1,10 @@
-"""AVA_SDK_DISABLE removes pieces of the agent-facing SDK at ava import time.
+"""AVA_SDK_DISABLE removes pieces of the agent-facing SDK as it installs.
 
-Each subprocess test re-imports ava under a controlled env so the disable
-machinery (which runs at module init) sees the right state. In-process
-re-import is fragile because the ava package mutates sys.modules + globals;
-subprocess isolation is the only honest way to verify "agent never sees X".
+Each subprocess test imports ava and installs the SDK surface under a controlled
+env, so the disable machinery (the first step of the install) sees the right
+state. In-process re-import is fragile because the install mutates sys.modules +
+globals and the slot holds one value; subprocess isolation is the only honest way
+to verify "agent never sees X".
 """
 
 from __future__ import annotations
@@ -11,6 +12,37 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
+
+
+def _install_preamble() -> str:
+    """Import `ava` and install the SDK surface — the point the env `AVA_SDK_DISABLE`
+    entries apply.
+
+    The disable machinery runs as the first step of the SDK install
+    (`ava.sdk_surface.install`), not at `import ava`: a real agent child reaches the
+    load itself (a launched child at import, an exec child explicitly), so a bare
+    script loads explicitly."""
+    return "import ava\nava.ensure_plugins_loaded()\n"
+
+
+def _write_isolated_home(home: Path) -> None:
+    """An `$AVA_HOME` whose plugins.json disables every repo builtin plugin.
+
+    The disable machinery under test needs no plugin surface; this keeps the real
+    load light (no DB-touching builtins) and hermetic. Mirrors
+    `ava/tests/test_watcher_plugin_load.py`'s recipe."""
+    import json
+
+    from base import paths
+
+    builtins = [
+        p.name
+        for p in paths.repo_plugins_dir().iterdir()
+        if p.is_dir() and (p / "plugin.py").exists()
+    ]
+    config = {"plugins": {name: {"enabled": False} for name in builtins}}
+    (home / "plugins.json").write_text(json.dumps(config))
 
 
 def _run(script: str, *, env_disable: str | None = None) -> tuple[int, str, str]:
@@ -20,11 +52,18 @@ def _run(script: str, *, env_disable: str | None = None) -> tuple[int, str, str]
     import tempfile
 
     with tempfile.TemporaryDirectory() as home:
+        _write_isolated_home(Path(home))
         proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-            [sys.executable, "-c", textwrap.dedent(script)],
+            [sys.executable, "-c", _install_preamble() + textwrap.dedent(script)],
             capture_output=True,
             text=True,
-            env={"PATH": "/usr/bin:/bin", "HOME": home, **env, **_pass_through_env()},
+            env={
+                "PATH": "/usr/bin:/bin",
+                "HOME": home,
+                "AVA_HOME": home,
+                **env,
+                **_pass_through_env(),
+            },
             check=False,
         )
     return proc.returncode, proc.stdout, proc.stderr
@@ -186,7 +225,7 @@ def test_apply_sdk_disable_is_idempotent() -> None:
         """
         import ava
         from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        # First call at import time (via env) disabled watcher
+        # The install applied the env entries (the preamble loaded the surface)
         assert not hasattr(ava, 'watcher')
         # Second call with same entry should be a no-op — no crash, no duplicate
         apply_sdk_disable(['watcher'])
@@ -205,7 +244,7 @@ def test_apply_sdk_disable_is_cumulative() -> None:
         """
         import ava
         from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        # Env disabled watcher at import time
+        # The env baseline disabled watcher at install time
         assert not hasattr(ava, 'watcher')
         assert hasattr(ava, 'agents'), 'agents still present before second call'
         # Apply additional disable on top
@@ -227,7 +266,7 @@ def test_apply_sdk_disable_dotted_cumulative() -> None:
         """
         import ava
         from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        # Env disabled self.terminate at import time
+        # The env baseline disabled self.terminate at install time
         assert not hasattr(ava.self, 'terminate')
         assert hasattr(ava.self, 'restart'), 'restart should remain'
         # Apply additional disable
@@ -243,17 +282,18 @@ def test_apply_sdk_disable_dotted_cumulative() -> None:
 
 
 def test_apply_sdk_disable_applied_entries_tracked() -> None:
-    """applied_disable_entries reflects both env and manual calls."""
+    """The installation records both env and manual entries."""
     code, out, err = _run(
         """
         import ava
-        from ava.sdk_surface.sdk_disable import apply_sdk_disable, applied_disable_entries
-        # After import: env entries are tracked
-        assert 'watcher' in applied_disable_entries
+        from ava.sdk_surface import install as sdk_install
+        from ava.sdk_surface.sdk_disable import apply_sdk_disable
+        # After the install: env entries are recorded on the installation
+        assert 'watcher' in sdk_install.installed().disabled
         # Add a new one
         apply_sdk_disable(['agents'])
-        assert 'agents' in applied_disable_entries
-        assert 'watcher' in applied_disable_entries
+        assert 'agents' in sdk_install.installed().disabled
+        assert 'watcher' in sdk_install.installed().disabled
         print('ok')
         """,
         env_disable="watcher",
@@ -284,8 +324,8 @@ def test_help_still_renders_when_skills_is_disabled() -> None:
 
 def test_env_disable_refuses_a_framework_module() -> None:
     """Disabling framework code (identity, the surface machinery) would break the
-    framework, not scope the agent's view — `import ava` fails fast instead."""
-    code, _out, err = _run("import ava\n", env_disable="agent_identity")
+    framework, not scope the agent's view — the SDK install fails fast instead."""
+    code, _out, err = _run("", env_disable="agent_identity")
     assert code != 0
     assert "ValueError" in err and "framework module ava.agent_identity" in err, err
 
@@ -311,12 +351,12 @@ def test_unknown_names_and_already_disabled_namespaces_still_apply() -> None:
     later) stays disable-able, and a member of a namespace an earlier entry
     already disabled does not trip the guard."""
     code, out, err = _run("""
-        import ava
-        from ava.sdk_surface.sdk_disable import apply_sdk_disable, applied_disable_entries
+        from ava.sdk_surface import install as sdk_install
+        from ava.sdk_surface.sdk_disable import apply_sdk_disable
         apply_sdk_disable(["not_a_real_namespace"])
         apply_sdk_disable(["agents"])
         apply_sdk_disable(["agents.spawn"])
-        print(sorted(applied_disable_entries))
+        print(sorted(sdk_install.installed().disabled))
     """)
     assert code == 0, err
     assert "['agents', 'agents.spawn', 'not_a_real_namespace']" in out, out

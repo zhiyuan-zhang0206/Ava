@@ -55,11 +55,11 @@ def _help(*targets: object) -> str:
 def _installed() -> Iterator[None]:
     """Install the recorders over the real `ava` singleton, then restore — so a
     wrapped function never leaks into the rest of the suite."""
-    metering.install()
+    ledger = metering.install()
     try:
         yield
     finally:
-        metering.uninstall()
+        metering.uninstall(ledger)
 
 
 # ── transparency ──────────────────────────────────────────────────────────────
@@ -72,13 +72,13 @@ def test_help_is_byte_identical_across_install() -> None:
     before_ns = _help(ava.files)
     before_fn = _help(ava.files.read)
 
-    metering.install()
+    ledger = metering.install()
     try:
         assert _help(ava) == before_root
         assert _help(ava.files) == before_ns
         assert _help(ava.files.read) == before_fn
     finally:
-        metering.uninstall()
+        metering.uninstall(ledger)
 
 
 def test_signature_and_identity_metadata_preserved() -> None:
@@ -86,7 +86,7 @@ def test_signature_and_identity_metadata_preserved() -> None:
     # must be unchanged (functools.wraps + __wrapped__ resolution).
     before_sig = inspect.signature(ava.files.read)
     before_doc = ava.files.read.__doc__
-    metering.install()
+    ledger = metering.install()
     try:
         read = ava.files.read
         assert read.__name__ == "read"
@@ -94,7 +94,7 @@ def test_signature_and_identity_metadata_preserved() -> None:
         assert read.__doc__ == before_doc
         assert inspect.signature(read) == before_sig
     finally:
-        metering.uninstall()
+        metering.uninstall(ledger)
 
 
 def test_function_attached_members_survive(_installed: None) -> None:
@@ -270,7 +270,6 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
     namespace walk — the walk re-resolves dynamic member surfaces (the `ava.skills`
     index scans the skills tree and reads the install registry), which state a
     passing test arranged can poison after the test itself went green."""
-    metering.uninstall()  # clean baseline, as in the sibling tests above
     target = SimpleNamespace()
 
     def demo() -> str:
@@ -282,7 +281,7 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
         return [(target, "demo", "demo")]
 
     monkeypatch.setattr(metering, "_instrument_targets", _stub_targets)
-    metering.install()
+    ledger = metering.install()
     wrapped = target.demo
     assert wrapped is not demo
     assert metering.is_recorder(wrapped)
@@ -291,7 +290,7 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
         pytest.fail("uninstall() must not re-walk the namespace (task #3426)")
 
     monkeypatch.setattr(metering, "_instrument_targets", _no_walk)
-    metering.uninstall()
+    metering.uninstall(ledger)
     assert target.demo is demo
 
 
@@ -300,10 +299,9 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
     surface (simulating the broken-registry state a test deliberately leaves
     behind); uninstall() must complete without touching the surface and restore
     every recorded pair."""
-    metering.uninstall()
-    metering.install()
-    assert metering._WRAPPED
-    recorded = list(metering._WRAPPED)
+    ledger = metering.install()
+    assert ledger
+    recorded = list(ledger)
 
     def _poisoned(_self: object) -> list[str]:
         raise RuntimeError("simulated corrupt install registry")
@@ -312,7 +310,7 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
     with pytest.raises(RuntimeError):
         metering._instrument_targets()  # the old teardown path explodes here
 
-    metering.uninstall()
+    metering.uninstall(ledger)
     # Completeness on the precise unit of the guarantee: no recorded pair still
     # holds a recorder.
     for parent, attr in recorded:
@@ -427,8 +425,8 @@ def test_install_does_not_evaluate_dynamic_namespace_directory(
 
     monkeypatch.setattr(ava.skills, "__dir__", dynamic_names)
     monkeypatch.setattr(ava.mcps, "__dir__", dynamic_names)
-    metering.install()
-    metering.uninstall()
+    ledger = metering.install()
+    metering.uninstall(ledger)
 
 
 def test_a_failing_identity_snapshot_is_reported_and_the_call_goes_on(

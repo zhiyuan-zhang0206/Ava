@@ -27,7 +27,6 @@ from .sdk_surface import process_context
 # renderer), and `plugins` (the plugin registration API). The plugin-author
 # entry points are re-exported here; framework controls (the render
 # contextvars, the SDK-disable entries) are imported from their own module.
-from .sdk_surface import sdk_disable as _sdk_disable
 from .sdk_surface.const import const as const
 from .sdk_surface.discovery import agent_visible_names as agent_visible_names
 from .sdk_surface.help import help as help
@@ -179,18 +178,14 @@ def unbind_exec_turn() -> None:
     globals().pop(_UPDATE_KEY, None)
 
 
-# Per-process latches: set once this process has loaded plugin namespaces via
-# the subprocess self-load path (`ensure_plugins_loaded`). Framework-internal —
-# only `ensure_plugins_loaded` writes them. `_plugins_loaded` = the plugin
-# surfaces; `_plugin_faces_loaded` = the agent-runtime faces (state fields /
-# hooks / prompt sections), loaded only on the full path — a stateful child,
-# via `ensure_plugins_loaded(surface=False)`. The agent process does NOT go
-# through this path (it calls `agent.extensions.load_extensions` directly from
-# build_graph / host boot and re-registers built-in hooks after), so both
-# latches stay False there and a genuinely-unknown `ava.X` keeps failing fast in
-# `__getattr__`.
-_plugins_loaded = False
-_plugin_faces_loaded = False
+# Plugin-load state lives in the SDK installation slot (`ava.sdk_surface.install`):
+# an `Installation` once loaded (`.faces` = the agent-runtime faces — state fields /
+# hooks / prompt sections, loaded on the full path via
+# `ensure_plugins_loaded(surface=False)`), `load_attempted()` true while a load is in
+# flight or after one failed. The agent process does NOT go through this path (it calls
+# `agent.extensions.load_extensions` directly from build_graph / host boot and
+# re-registers built-in hooks after), so a genuinely-unknown `ava.X` keeps failing fast
+# in `__getattr__` there; nothing to latch in this module.
 
 # False until this module finishes importing its own submodules (set True at the
 # very bottom). The lazy plugin load in `__getattr__` MUST stay dormant during
@@ -213,10 +208,12 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
     contract (task #3633). `surface=False` loads the full agent-runtime faces
     too (state fields / hooks / prompt sections), called when a stateful
     child's lazy state slot resolves: the state schema needs the plugins'
-    field registrations. Latched per stage so each runs at most once per process — a
-    call that arrives while the loader module is still initializing (a
-    re-entrant import) defers instead, so a later miss retries once the module
-    is complete.
+    field registrations. Each stage runs at most once per process — the load state
+    is the installation slot (`ava.sdk_surface.install`): `installed()` answers
+    "loaded", `faces` "and the faces", `load_attempted()` "in flight, or attempted
+    and failed (no retry)". A call that arrives while the loader module is still
+    initializing (a re-entrant import) defers instead, so a later miss retries
+    once the module is complete.
 
     The loader lives in the agent layer; it is reached via `importlib` (a runtime
     string, not a static `from agent import`) so this ava-layer module keeps NO
@@ -232,31 +229,47 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
     without the plugin surface. The agent host surfaces the same failure at its
     own boot. KeyboardInterrupt / SystemExit are not swallowed.
     """
-    global _plugins_loaded, _plugin_faces_loaded  # noqa: PLW0603 — one-shot latches
-    if _plugin_faces_loaded:
+    from .sdk_surface import install as _sdk_install
+    from .sdk_surface import sdk_disable
+
+    installation = _sdk_install.installed()
+    if installation is not None and (surface or installation.faces):
         return
-    if _plugins_loaded and surface:
+    if _sdk_install.load_attempted():
+        # A load is in flight (a re-entrant miss during the load), or one was
+        # attempted and failed — this process does not retry it (the slot keeps
+        # the attempt; a fresh `install()` overwrites it, `uninstall()` does not
+        # clear it).
         return
     import importlib
 
-    if _plugins_loaded:
-        # Surfaces are already loaded and this call wants the faces (a child
-        # upgrading for a state snapshot). Faces only — re-running the loader
-        # would re-execute the surfaces; the latch keeps it to once per process.
-        _plugin_faces_loaded = True
+    if installation is not None:
+        # Surfaces are loaded and this call wants the faces (a child upgrading
+        # for a state snapshot). Faces only — re-running the loader would
+        # re-execute the surfaces; the faces flag keeps it to once per process.
+        # Marked before the load so a failure is not retried (same stance as the
+        # containment below).
+        _sdk_install.mark_faces_loaded()
         try:
             importlib.import_module("agent.extensions").load_agent_faces()
         except Exception as exc:
             _contain_plugin_load_failure(exc)
         return
-    # Latch BEFORE loading: a plugin's top-level access of a not-yet-registered
-    # `ava.X` re-enters `__getattr__` during the load, and the latch makes that
+    # Apply the env AVA_SDK_DISABLE entries BEFORE the load: a refused entry (one
+    # naming a framework module) is an operator error and must fail fast — never
+    # contained by the load containment below — and with the sentinel in place a
+    # disabled plugin namespace fails the install's own namespace check, exactly as
+    # it did when the env was applied at `import ava`. `install()` applies them
+    # again (idempotently) when it is reached directly — the host boot path.
+    sdk_disable.apply_entries(sdk_disable.env_entries())
+    # Mark BEFORE loading: a plugin's top-level access of a not-yet-registered
+    # `ava.X` re-enters `__getattr__` during the load, and the marker makes that
     # re-entry fail fast (as it does in the agent process) instead of recursing.
-    _plugins_loaded = True
+    _sdk_install.mark_load_attempt()
     try:
         importlib.import_module("agent.extensions").load_extensions(surface=surface)
         if not surface:
-            _plugin_faces_loaded = True
+            _sdk_install.mark_faces_loaded()
     except Exception as exc:
         if isinstance(exc, AttributeError) and (
             "partially initialized module 'agent.extensions'" in str(exc)
@@ -264,10 +277,10 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
             # Not a failure — too early. A process that imports an `agent.*`
             # module before `ava` reaches this call while the loader module is
             # still its own partial `sys.modules` entry: the attribute does not
-            # exist YET. Unlatch so the next miss retries once the module
-            # finishes initializing; the in-flight lookup fails fast meanwhile
-            # (`_maybe_load_plugins_for_missing` reads the latch).
-            _plugins_loaded = False
+            # exist YET. Clear the attempt so the next miss retries once the
+            # module finishes initializing; the in-flight lookup fails fast
+            # meanwhile (`_maybe_load_plugins_for_missing` reads the slot).
+            _sdk_install.clear_load_attempt()
             return
         _contain_plugin_load_failure(exc)
 
@@ -299,32 +312,32 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
     namespace modules that plugins extend (`ava.self`, `ava.ui`).
 
     A persistent-shell child an agent launched runs a bare `python x.py`
-    (no bootstrap to hook, and the session env allowlist does NOT carry
-    AVA_AGENT_ID — Task #856), so a plugin namespace
+    (no bootstrap to hook), so a plugin namespace
     (`ava.tasks`) or a plugin member on an existing namespace (`ava.ui.notify`,
     `ava.self.set_label` from ava_fleet) would AttributeError. On the first such miss,
     load plugins once — then the caller retries the lookup.
 
-    Returns True iff this call latched a load (caller should re-attempt
+    Returns True iff this call loaded plugins (caller should re-attempt
     `getattr`); a deferral — the loader module is still importing — returns
     False so the caller fails fast now and a later miss retries. Fires only in
     an agent-launched child (`agent_identity.is_launched_child`), only after `import ava`
-    is complete (`_init_complete`), only once (`_plugins_loaded`), and never for
-    underscore names — so gateway / cli / the agent process keep fail-fast on a
-    genuinely-unknown attribute, `import ava` is untouched, and a dunder probe
-    never triggers a load.
+    is complete (`_init_complete`), only while no load is installed, in flight or
+    failed, and never for underscore names — so gateway / cli / the agent process
+    keep fail-fast on a genuinely-unknown attribute, `import ava` is untouched,
+    and a dunder probe never triggers a load.
     """
-    if name.startswith("_") or not _init_complete or _plugins_loaded:
+    if name.startswith("_") or not _init_complete:
+        return False
+    from .sdk_surface import install as _sdk_install
+
+    if _sdk_install.installed() is not None or _sdk_install.load_attempted():
         return False
     from . import agent_identity
 
     if not agent_identity.is_launched_child():
         return False
     ensure_plugins_loaded()
-    # Retry the lookup only if a load was recorded: a deferral (the loader
-    # module is still importing) leaves the latch off, so the caller fails fast
-    # now instead of re-entering this path, and a later miss retries.
-    return _plugins_loaded
+    return _sdk_install.installed() is not None
 
 
 # PEP 562 module-level `__getattr__`. Plugins set runtime attributes via
@@ -408,8 +421,9 @@ extend._qualname = "ava.extend"  # type: ignore[attr-defined]  # agent-facing na
 # alias imports which the type checker already honors). `const` / `extend` / the
 # exception classes are deliberately absent: they are plugin-author / framework API,
 # importable but out of the agent's view. The SDK install (`ava.sdk_surface.install`)
-# appends plugin namespaces to this list and AVA_SDK_DISABLE removes from it, so it
-# must be defined before `apply_sdk_disable` runs.
+# appends plugin namespaces to this list and the env's AVA_SDK_DISABLE entries
+# (applied first, inside install()) remove from it, so it must be defined before
+# the SDK install runs.
 __all_for_ava__ = [
     "agents",
     "context",
@@ -424,9 +438,6 @@ __all_for_ava__ = [
     "watcher",
     "web",
 ]
-
-# Apply env-based entries at import time (existing behavior)
-_sdk_disable.apply_sdk_disable(_sdk_disable.env_entries())
 
 # The agent-facing FQN a help() heading shows comes from `fn.__module__`
 # (`ava.help` → `# ava.help`). The implementations live in `ava/sdk_surface/`
@@ -450,11 +461,10 @@ _init_complete = True
 # so such a child loads plugins at import, and lazy-on-miss stays as the
 # backstop. The agent host binds identities per turn and does not
 # export a process-wide AVA_AGENT_ID; gateway / cli do not carry it either.
-# Only an agent-launched child reaches this load.
+# Only an agent-launched child reaches this load — the one import-time trigger
+# the ambient-state lint keeps for the ava package. Metering installs with the
+# SDK surface (`ava.sdk_surface.install.install`), not here.
 from . import agent_identity
-from .sdk_surface import metering as _metering
-
-_metering.install()
 
 if agent_identity.is_launched_child():
     ensure_plugins_loaded()

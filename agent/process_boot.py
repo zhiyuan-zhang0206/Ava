@@ -23,22 +23,19 @@ from base.paths import workspace_dir
 
 
 def _apply_per_agent_sdk_disable() -> None:
-    """Apply per-agent sdk_disable delta after config_overlay framework scope.
+    """Apply the per-agent sdk_disable list additively on the installed SDK surface.
 
-    sdk_disable is applied at ``ava`` import time from the env var
-    ``AVA_SDK_DISABLE``.  Per-agent overlay additions to sdk_disable are
-    set on settings by ``apply_config_overlay`` and must be applied on top
-    of the env baseline — ``sdk_disable.apply_sdk_disable`` is idempotent, so
-    only genuinely new entries take effect.
+    The env baseline ``AVA_SDK_DISABLE`` is applied by the SDK install while it
+    builds the installation; the per-agent ``config_overlay`` sdk_disable value is
+    set on settings by ``apply_config_overlay`` and must be applied on top —
+    ``sdk_disable.apply_sdk_disable`` takes only entries not yet applied (the
+    installation records its own disable set), so re-listing the env baseline is a
+    no-op.
     """
-
     configured = agent_setting("sdk_disable")
     if not configured:
         return
-    env_entries = set(sdk_disable.env_entries())
-    new_disable = [e for e in configured if e not in env_entries]
-    if new_disable:
-        sdk_disable.apply_sdk_disable(new_disable)
+    sdk_disable.apply_sdk_disable(list(configured))
 
 
 def _apply_per_agent_eval_isolation() -> None:

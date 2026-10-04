@@ -1,9 +1,5 @@
 {
   "ambient_state": {
-    "ava/__init__.py::global-rebind:_plugin_faces_loaded": 1,
-    "ava/__init__.py::global-rebind:_plugins_loaded": 1,
-    "ava/__init__.py::import-time-call:ava.ensure_plugins_loaded": 1,
-    "ava/__init__.py::import-time-call:ava.sdk_surface.metering.install": 1,
-    "ava/__init__.py::import-time-call:ava.sdk_surface.sdk_disable.apply_sdk_disable": 1
+    "ava/__init__.py::import-time-call:ava.ensure_plugins_loaded": 1
   }
 }

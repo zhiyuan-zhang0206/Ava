@@ -155,53 +155,46 @@ def _sdk_expand_section(slices: AgentSlices) -> str:
     if not wanted:
         return ""
     import ava
-    from ava.sdk_surface import discovery
-    from ava.sdk_surface import help as help_render
 
     pieces: list[str] = []
     seen_targets: set[int] = set()
-    # Text-only models drop media-gated members (`ava.self.attach`; ruling 2026-08-28).
+    # Text-only models drop media-gated members (`ava.self.attach`; ruling
+    # 2026-08-28). Render parameters are arguments, passed per call — never set
+    # process-wide. Render classes compactly in the system prompt: name +
+    # docstring + field annotations + enum values, methods and nested classes
+    # skipped — fields stay so the agent sees attribute names, and the full
+    # contract (methods) is one `ava.help(ava.X.ClassName)` away.
     hidden: frozenset[str] = ava.attachment_transport.media_gated_members(slices.brain.llm_model)
-    _hidden_token = discovery.hidden_surface_members.set(hidden)
-    # Render classes compactly in the system prompt: show name + docstring +
-    # field annotations + enum values, skip methods and nested classes. Fields
-    # stay so the agent sees attribute names; the full contract (methods) is one
-    # `ava.help(ava.X.ClassName)` away.
-    _compact_token = help_render.compact_classes.set(True)
-    try:
-        for path in wanted:
-            if _disabled_by_sdk_config(path, slices.prompt.sdk_disable):
-                continue
-            target: object = ava
-            try:
-                for segment in path.split("."):
-                    target = getattr(target, segment)
-            except AttributeError:
-                logging.getLogger(__name__).warning(
-                    "sdk_expand_in_system_prompt: ava.%s does not resolve and is not covered "
-                    "by AVA_SDK_DISABLE (typo, or a plugin namespace whose plugin is not "
-                    "loaded?), skipping",
-                    path,
-                )
-                continue
-            if id(target) in seen_targets:
-                logging.getLogger(__name__).warning(
-                    "sdk_expand_in_system_prompt: %r resolves to an already-expanded "
-                    "namespace; rendering once. The expand list should be deduped, so a "
-                    "duplicate points at a polluted list (a stray plugin sdk expansion or "
-                    "cross-test global-state leak). effective list was %r",
-                    path,
-                    wanted,
-                )
-                continue
-            seen_targets.add(id(target))
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                ava.help(target)
-            pieces.append(buf.getvalue().rstrip())
-    finally:
-        discovery.hidden_surface_members.reset(_hidden_token)
-        help_render.compact_classes.reset(_compact_token)
+    for path in wanted:
+        if _disabled_by_sdk_config(path, slices.prompt.sdk_disable):
+            continue
+        target: object = ava
+        try:
+            for segment in path.split("."):
+                target = getattr(target, segment)
+        except AttributeError:
+            logging.getLogger(__name__).warning(
+                "sdk_expand_in_system_prompt: ava.%s does not resolve and is not covered "
+                "by AVA_SDK_DISABLE (typo, or a plugin namespace whose plugin is not "
+                "loaded?), skipping",
+                path,
+            )
+            continue
+        if id(target) in seen_targets:
+            logging.getLogger(__name__).warning(
+                "sdk_expand_in_system_prompt: %r resolves to an already-expanded "
+                "namespace; rendering once. The expand list should be deduped, so a "
+                "duplicate points at a polluted list (a stray plugin sdk expansion or "
+                "cross-test global-state leak). effective list was %r",
+                path,
+                wanted,
+            )
+            continue
+        seen_targets.add(id(target))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ava.help(target, compact_classes=True, hidden_members=hidden)
+        pieces.append(buf.getvalue().rstrip())
 
     if not pieces:
         return ""

@@ -2,8 +2,9 @@
 (the runtime state + emit path live in ``base/agents/sdk/telemetry.py``, kept there so an
 SDK function body in the ``ava`` layer can ``annotate()`` its own call).
 
-Every public ``ava.*`` callable is wrapped, once, by a transparent recorder installed
-at SDK import and again at agent-graph build time after plugins load. On each top-level call the recorder (via ``run_metered``) writes one ``sdk_call``
+Every public ``ava.*`` callable is wrapped, once, by a transparent recorder installed by
+the SDK installation (``ava.sdk_surface.install``) over the final surface — after the plugin
+load, outermost of any plugin wrap layer. On each top-level call the recorder (via ``run_metered``) writes one ``sdk_call``
 event into the unified ``events`` stream, carrying the dotted function name in ``attributes.fn``
 (``files.read``, ``shell.run``, ``self.compact``) plus any ``detail`` the call
 annotated. the Grafana call-frequency ranking sums those events — replacing the old regex
@@ -24,7 +25,7 @@ Transparency contract — the recorder MUST NOT perturb the SDK surface:
 Every public call is metered, including bare Python, CLI and external attachments.
 Only outermost calls count, so SDK-internal fan-out does not inflate usage.
 ``recording()`` collects an optional per-execution tally; it is not an event gate.
-Static functions are wrapped at SDK import and again after plugin loading; dynamic
+Static functions are wrapped by the installation; dynamic
 MCP calls are wrapped at their common call funnel.
 """
 
@@ -57,15 +58,6 @@ def _recorder(fn: Callable[..., Any]) -> Callable[..., Any]:
 def is_recorder(fn: object) -> bool:
     """Whether `fn` is itself a metering recorder (not a wrapper that merely copied one's attributes)."""
     return getattr(fn, _RECORDER_MARK, None) is fn
-
-
-# Restore ledger (task #3426): the ``(parent, attr)`` pairs install() actually
-# wrapped, in wrap order. uninstall() restores from this record rather than
-# re-walking the namespace — the walk resolves dynamic member surfaces
-# (``ava.skills``'s ``__all_for_ava__`` scans the skills tree and reads the
-# install registry), so teardown would otherwise be exposed to state a passing
-# test deliberately arranged (macOS local: 8 teardowns exploded after green).
-_WRAPPED: list[tuple[Any, str]] = []
 
 
 @contextlib.contextmanager
@@ -187,59 +179,56 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
     return targets
 
 
-def install() -> None:
+def install() -> tuple[tuple[Any, str], ...]:
     """Wrap every public ``ava.*`` callable with the recording proxy. Idempotent.
 
-    Called from ``load_extensions`` after plugins load, so plugin namespaces /
+    Called by ``ava.sdk_surface.install`` after plugins load, so plugin namespaces /
     members / declared wrap layers are all present and get metered too (the
     recorder sits outermost of any plugin wrap). Re-running only wraps targets whose
     current top callable is not already a recorder, so it is safe to call on every
     plugin reload — a newly plugin-wrapped target gets a fresh outermost recorder.
+
+    Returns the restore ledger: the ``(parent, attr)`` pairs this call actually wrapped,
+    in wrap order. The installation carries it; ``uninstall(ledger)`` restores from it.
     """
+    wrapped: list[tuple[Any, str]] = []
     for parent, attr, fq in _instrument_targets():
         current = getattr(parent, attr, None)
         if current is None or is_recorder(current):
             continue
         setattr(parent, attr, _make_recorder(current, fq))
-        _WRAPPED.append((parent, attr))
+        wrapped.append((parent, attr))
 
     mcps_mod = getattr(ava, "mcps", None)
     if mcps_mod is not None:
         funnel = getattr(mcps_mod, _MCP_CALL_FUNNEL, None)
         if callable(funnel) and not is_recorder(funnel):
             setattr(mcps_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel))
-            _WRAPPED.append((mcps_mod, _MCP_CALL_FUNNEL))
+            wrapped.append((mcps_mod, _MCP_CALL_FUNNEL))
+    return tuple(wrapped)
 
 
-def uninstall() -> None:
-    """Restore every metered target to the callable the recorder wraps — test
+def uninstall(ledger: tuple[tuple[Any, str], ...]) -> None:
+    """Restore every metered target in `ledger` to the callable the recorder wraps — test
     teardown, so a test that installs the recorders does not leak them into the
     shared ``ava`` singleton the rest of the suite imports.
 
-    The suite calls this after every test (autouse ``_restore_metering`` in
-    ``tests/fixtures/guards.py``), because ``install()`` is a side effect of
-    ``load_extensions()`` and is reached lazily on any ``ava.*`` miss — so merely
-    touching the namespace metered it for every later test in the worker (issue #83).
+    ``ledger`` is the record ``install()`` returned — the ``(parent, attr)`` pairs it
+    actually wrapped, in wrap order; the Installation carries it
+    (``install.installed().metered``), and the suite's autouse restore
+    (``tests/fixtures/guards.py``) passes that plus any direct ``install()`` return.
 
-    Restores from the ``install()`` record (``_WRAPPED``), never by re-walking the
-    namespace: the walk resolves dynamic member surfaces (``ava.skills``'s index
-    scans the skills tree and reads the install registry) and must not run at
-    teardown, where a test's deliberately-broken state can make it raise — the
-    failure shape of task #3426 (macOS local: 8 teardowns exploded after the test
-    bodies had gone green).
+    Restore from the record, never by re-walking the namespace: the walk resolves
+    dynamic member surfaces (``ava.skills``'s index scans the skills tree and reads
+    the install registry) and must not run at teardown, where a test's
+    deliberately-broken state can make it raise — the failure shape of task #3426
+    (macOS local: 8 teardowns exploded after the test bodies had gone green).
     """
-    # O(1) early-out: the ledger is empty when nothing is installed. Without it every
+    # O(1) early-out: the ledger is empty when nothing was wrapped. Without it every
     # per-test teardown would pay for a full restore pass that could only find nothing.
-    if not _WRAPPED:
+    if not ledger:
         return
-
-    # Restore from the install() ledger, never by walking the namespace (task
-    # #3426): the walk re-resolves dynamic member surfaces (`ava.skills` scans the
-    # skills tree and reads the install registry), which test-arranged state can
-    # poison. Every wrapped pair was recorded at wrap time, so the restore stays
-    # complete.
-    for parent, attr in _WRAPPED:
+    for parent, attr in ledger:
         current = getattr(parent, attr, None)
         if current is not None and is_recorder(current):
             setattr(parent, attr, current.__wrapped__)
-    _WRAPPED.clear()
