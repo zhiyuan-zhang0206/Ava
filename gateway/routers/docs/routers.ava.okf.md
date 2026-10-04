@@ -30,7 +30,6 @@ Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*`
 - **delivery** — chat inbound delivery helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
 - **ops_monitor** (`/api/ops/monitor`) — time-bucketed ops panel series (SSE backlog / LLM latency+TPS / restart counts), see [[gateway/cluster/docs/ops-monitor.ava.okf.md]]
 - **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read, IM fan-out via im_bridge [[gateway/alerts/docs/alerts.ava.okf.md]]
-- **work_failed** (`POST /api/work-failed`) — durable, deduplicated CI/QA/merge failure feedback routed to the author, nearest live birth-lineage delegator, or a P1 task alert [[gateway/routers/docs/work-failed.ava.okf.md]]
 - **event_resolutions** (`/api/event-resolutions`) — authenticated immutable-Loki warning/error class dismissal history: create, status-filtered review list, and manual reopen; writes `event_dismissals` and emits transition markers, while the events-maintenance daemon publishes the resulting gauges
 
 ### Cluster & configuration

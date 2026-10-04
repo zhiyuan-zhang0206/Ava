@@ -1,16 +1,9 @@
-"""The reaper's remote-call loop: shell kills and work-failure redelivery.
+"""The reaper's remote-call loop.
 
-Both phases dial other machines or processes, so they run apart from the
+TTL-expired persistent shell sessions are killed on their home machines
+(`shells`). This loop dials other machines, so it runs apart from the
 database-only sweep (`sweep`): a slow or unreachable machine holds up this
 loop's next round, never a page expiry.
-
-- **Shells** — TTL-expired persistent shell sessions are killed on their home
-  machines (`shells`).
-- **Work failures** — a gateway crash after recording a `work_failed_events` row
-  but before finishing its route is retried through the original
-  author/delegator/task fallback chain
-  (`gateway.routers.work_failed.reconcile_stale_work_failures`; each event's
-  delivery is bounded by an RPC deadline there).
 """
 
 from __future__ import annotations
@@ -24,7 +17,6 @@ from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
-from gateway.routers import work_failed as work_failed_router
 from services.ttl_reaper import shells
 
 _log = logging.getLogger(__name__)
@@ -33,18 +25,11 @@ _log = logging.getLogger(__name__)
 async def remote_round(
     pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
 ) -> None:
-    """One pass: reclaim expired shells, then redeliver stale work failures."""
+    """One pass: reclaim expired shells."""
     reaped = await shells.reap_expired_shells(pool, db, bus, progress)
     progress.beat()
-    failures = await work_failed_router.reconcile_stale_work_failures(
-        pool, db, bus, on_event=progress.beat
-    )
-    if reaped or failures:
-        _log.info(
-            "[ttl-reaper] reclaimed %d shell(s); completed %d stale work failure(s)",
-            len(reaped),
-            failures,
-        )
+    if reaped:
+        _log.info("[ttl-reaper] reclaimed %d shell(s)", len(reaped))
 
 
 async def remote_loop(

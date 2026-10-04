@@ -576,7 +576,6 @@
     "web_search_timeout_seconds": "web",
     "webhook_token": "alerts",
     "wedged_agent_inbound_age_seconds": "daemon",
-    "work_failed_retry_grace_seconds": "gateway",
     "workspace_in_system_prompt": "agent",
     "xiaomi_api_key": "lm",
     "zhipu_api_key": "lm"
@@ -1003,7 +1002,6 @@
     "web_search_timeout_seconds": "AVA_WEB_SEARCH_TIMEOUT_SECONDS",
     "webhook_token": "AVA_ALERTS_WEBHOOK_TOKEN",
     "wedged_agent_inbound_age_seconds": "AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",
-    "work_failed_retry_grace_seconds": "AVA_WORK_FAILED_RETRY_GRACE_SECONDS",
     "workspace_in_system_prompt": "AVA_WORKSPACE_IN_SYSTEM_PROMPT",
     "xiaomi_api_key": "MIMO_API_KEY",
     "zhipu_api_key": "GLM_API_KEY"
@@ -1430,7 +1428,6 @@
     "web_search_timeout_seconds": "cluster-pinned",
     "webhook_token": "cluster-pinned",
     "wedged_agent_inbound_age_seconds": "cluster-pinned",
-    "work_failed_retry_grace_seconds": "cluster-pinned",
     "workspace_in_system_prompt": "cluster-pinned",
     "xiaomi_api_key": "cluster-pinned",
     "zhipu_api_key": "cluster-pinned"
@@ -1857,7 +1854,6 @@
     "web_search_timeout_seconds": "agent-runner",
     "webhook_token": "gateway",
     "wedged_agent_inbound_age_seconds": "agent-runner",
-    "work_failed_retry_grace_seconds": "gateway",
     "workspace_in_system_prompt": "agent-runner",
     "xiaomi_api_key": "agent-runner",
     "zhipu_api_key": "agent-runner"
