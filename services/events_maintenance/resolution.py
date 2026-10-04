@@ -2,8 +2,10 @@
 
 The event record is append-only, so no resolution path may write a
 ``resolved_by`` attribute back onto historical events. Active rows in
-``event_dismissals`` instead remove one exact (category, level, event_name,
-source, process) class from the count — a row whose ``process`` is empty is a
+``event_dismissals`` instead remove one (level, event_name, source, process)
+event class from the count — the emission category (log | telemetry) is not
+part of the dismissal identity, so a row survives its event's reclassification
+between the two transports (task #4964). A row whose ``process`` is empty is a
 wildcard that cancels every process of its base, the scope every pre-dimension
 row keeps (task #4329 B5). The companion ten-minute query is the safety
 valve: a renewed burst reopens the class before it can hide a new incident.
@@ -24,7 +26,7 @@ The counts are read from `telemetry_events` by :func:`class_counts`. The public 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -52,6 +54,10 @@ class EventClass:
     reads as "every process" on a dismissal row and as "the row's body had no
     process" on the count side — the mixed-version read both maps to the
     wildcard.
+
+    ``category`` stays part of the counted class key; dismissal matching
+    deliberately ignores it, so a row survives its event's reclassification
+    between the two transports (task #4964) — see :func:`_is_dismissed`.
     """
 
     category: str
@@ -288,10 +294,9 @@ def _emit_auto_resolved(event_class: EventClass, days: int) -> None:
 
 
 def _same_base(left: EventClass, right: EventClass) -> bool:
-    """Whether two classes share the four base fields (process aside)."""
+    """Whether two classes share the dismissal base (process and category aside)."""
 
-    return (left.category, left.level, left.event_name, left.source) == (
-        right.category,
+    return (left.level, left.event_name, left.source) == (
         right.level,
         right.event_name,
         right.source,
@@ -301,25 +306,36 @@ def _same_base(left: EventClass, right: EventClass) -> bool:
 def _is_dismissed(event_class: EventClass, active: set[EventClass]) -> bool:
     """Whether any active row cancels this counted class.
 
-    An exact row (same process) or a wildcard row (``process=""`` — the scope
-    every pre-dimension dismissal keeps) matches. A counted class whose
-    ``process`` is empty (mixed-version read) matches only the wildcard: no
-    live process can be attributed to it.
+    The emission category is not part of the match (task #4964): a class the
+    count carries as ``telemetry`` is cancelled by a row stored from its
+    earlier ``log`` life, and vice versa — the 2026-08 log->telemetry
+    reclassification left whole rows inert otherwise. An exact row (same
+    process) or a wildcard row (``process=""`` — the scope every pre-dimension
+    dismissal keeps) matches. A counted class whose ``process`` is empty
+    (mixed-version read) matches only the wildcard: no live process can be
+    attributed to it.
     """
 
-    return event_class in active or replace(event_class, process="") in active
+    return any(
+        _same_base(candidate, event_class) and candidate.process in (event_class.process, "")
+        for candidate in active
+    )
 
 
 def _burst_count_for(event_class: EventClass, burst_counts: dict[EventClass, int]) -> int:
     """The ten-minute count one dismissal watches.
 
-    An exact dismissal watches its own class; a wildcard dismissal watches
-    the sum over every process of its base, so any process's burst still
-    trips the safety valve.
+    Category-agnostic like the matching: an exact dismissal watches its own
+    process of the base; a wildcard dismissal watches the sum over every
+    process of its base, so any process's burst still trips the safety valve.
     """
 
     if event_class.process:
-        return burst_counts.get(event_class, 0)
+        return sum(
+            count
+            for other, count in burst_counts.items()
+            if _same_base(other, event_class) and other.process == event_class.process
+        )
     return sum(count for other, count in burst_counts.items() if _same_base(other, event_class))
 
 
