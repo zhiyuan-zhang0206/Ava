@@ -21,7 +21,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     """
     import ava.mcps
     from agent.extensions import load_extensions
-    from ava.sdk_surface.metering import _RECORDERS
+    from ava.sdk_surface.metering import is_recorder
 
     assert "_restore_metering" in request.fixturenames
 
@@ -29,15 +29,15 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     bare_funnel = ava.mcps._call_raw
 
     load_extensions()
-    metered = {fq for p, a, fq in metering._instrument_targets() if getattr(p, a) in _RECORDERS}
+    metered = {fq for p, a, fq in metering._instrument_targets() if is_recorder(getattr(p, a))}
     assert metered, "the leak this guards is gone"
-    assert ava.mcps._call_raw in _RECORDERS
+    assert is_recorder(ava.mcps._call_raw)
 
     metering.uninstall()  # the fixture's action, made observable
     assert ava.mcps._call_raw is bare_funnel
     # The whole surface, not just the funnel: a later test asserting on identity or
     # on call counts through a wrapped path must see no recorder anywhere.
-    assert not [fq for p, a, fq in metering._instrument_targets() if getattr(p, a) in _RECORDERS]
+    assert not [fq for p, a, fq in metering._instrument_targets() if is_recorder(getattr(p, a))]
 
 
 def test_a_plugin_load_leaves_no_namespace_behind(

@@ -35,7 +35,7 @@ def _apply_per_agent_sdk_disable() -> None:
     configured = agent_setting("sdk_disable")
     if not configured:
         return
-    env_entries = set(sdk_disable.sdk_disable_entries)
+    env_entries = set(sdk_disable.env_entries())
     new_disable = [e for e in configured if e not in env_entries]
     if new_disable:
         sdk_disable.apply_sdk_disable(new_disable)

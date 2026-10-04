@@ -184,7 +184,7 @@ def _base_callable(current: Callable[..., Any]) -> Callable[..., Any]:
     (functools.wraps); the lazy import avoids the ava <-> submodule cycle."""
     from ava.sdk_surface import metering
 
-    while current in metering._RECORDERS:
+    while metering.is_recorder(current):
         current = current.__wrapped__  # pyright: ignore[reportFunctionMemberAccess]
     return current
 
