@@ -16,7 +16,8 @@ slot a minute calls a tick, which claims and drains due build jobs — each in
 its own child process — and runs the reconcile scan only when
 `hierarchy_fallback_scan_seconds` has elapsed (the first tick after a
 process start always scans), tracking work in `hierarchy_jobs` +
-`hierarchy_worker_state`. A master switch (`hierarchy_worker_enabled`,
+`hierarchy_worker_state`. Every tick reaps the orphan `running` rows whose
+holder process is gone (task #4975), before that scan. A master switch (`hierarchy_worker_enabled`,
 shipped off) gates both the enqueue and the tick; a rollout allowlist
 (`hierarchy_worker_agents`, comma-separated ids, empty = every agent) narrows
 the served agents — an unlisted agent is not enqueued, scanned, baselined or
@@ -28,7 +29,12 @@ claimed, so listing it later starts it as a first-sight agent.
   scan backstops lost events, stranded retries and budget continuations (both
   paths idempotent: at most one live job per agent, enforced by a partial
   unique index and an atomic claim; the claim also backfills `include_tail`
-  from `scan.first_build` for event-enqueued rows). An agent's first sight
+  from `scan.first_build` for event-enqueued rows). A refused enqueue is
+  resolved, never silent (task #4975): the live job is kept with a log line
+  (its run merges the newer boundary through its own advance target), or — a
+  running row past the deadline + grace window, when no live holder can
+  exist — flipped to `failed` with the orphan marker and the boundary
+  re-inserts at once. An agent's first sight
   records the boundary silently — no build for pre-existing history; the
   worker only follows new compactions (backfill is on-demand, P2c).
 - **The first build is the full retention window** (one-time and bounded),
@@ -52,9 +58,14 @@ claimed, so listing it later starts it as a first-sight agent.
   hash cache, and continues there.
 - **Failure handling**: node failures ride the job row's scope stats and are
   retried by the next run; a crashed or killed job is recovered by the parent
-  process or the stale-running sweep, and non-clean retries back off
+  process, the holder reap (a running row whose child process is gone — the
+  child stamps its own pid at boot; task #4975), or the stale-running sweep
+  (deadline + grace, the no-restart fallback), and non-clean retries back off
   exponentially (base/cap configurable). A budget-truncated continuation
-  drains immediately. A regen-halt cut (task #4674) instead carries a
+  drains immediately. An orphan reclaim (the holder reap or the enqueue-side
+  conflict supersede, below) lands the row `failed` with the orphan marker:
+  the pacing reads skip it entirely — an interrupted run neither delays nor
+  lengthens the retry backoff, since it is not an attempt. A regen-halt cut (task #4674) instead carries a
   non-null `error` marker on its `done` row — it never counts as a build
   (`scan.first_build` / `scan._has_clean_baseline`) and its continuation
   waits out the backoff rather than draining.

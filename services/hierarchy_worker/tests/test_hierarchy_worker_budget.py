@@ -139,8 +139,12 @@ def test_the_tick_defers_first_builds_without_tripping_anything(
     def fake_claim(_conn: object, *, defer_first_builds: bool, **_kw: object) -> None:
         seen.append(defer_first_builds)
 
+    def no_reap(_conn: object) -> int:  # the fake conn has no execute
+        return 0
+
     monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
     monkeypatch.setattr(runner, "_fallback_scanned_at", None)
+    monkeypatch.setattr(runner, "reap_orphans", no_reap)
 
     def not_due(_now: object, _config: object) -> bool:
         return False

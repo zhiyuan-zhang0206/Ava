@@ -20,6 +20,13 @@ stops until an operator resets it (the §4 guardrails, task #4674). First
 builds are paced separately: past their own 24h budget the claim parks them
 and takes the rest, resuming as the window rolls — no trip.
 
+Every tick reaps the orphan `running` rows whose holder process is gone
+(`reap_orphans`, task #4975) — before the scan, so the same tick re-enqueues
+those agents immediately: no deadline+grace wait (the scan's stale sweep
+stays as the no-restart fallback) and no retry backoff (an interrupted run
+is not an attempt outcome). A crash that leaves the child alive is not a
+reap: the holder pid is the child's own.
+
 Serial by construction — one child at a time, the cost guardrail pinned in
 review (3187). Every DB step is idempotent and race-free (partial unique
 index + atomic claim), so even a second worker process could only duplicate
@@ -34,10 +41,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import psutil
 import psycopg
 from psycopg import Connection
 
 from base import telemetry
+from base.agents.history.hierarchy.jobs import ORPHAN_MARKER
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import logger
@@ -186,6 +195,68 @@ def _baseline_untracked(conn: Connection, job_id: int, agent_id: int, boundary: 
     )
 
 
+def _holder_alive(pid: int | None) -> bool:
+    """Whether a running row's holder process still exists (task #4975).
+
+    The holder is the job child, which stamps its own pid at boot
+    (`execute.execute_job`); a pid recycled by an unrelated process reads
+    as alive and the row falls back to the stale sweep, and a zombie is not
+    live (the flaky-test checklist's rule) — the child exited, so nobody can
+    finish or recover the row. Pids are the gateway host's own: every
+    hierarchy job child runs there.
+    """
+    if pid is None:
+        # The child died before registering (or predates the column): no holder.
+        return False
+    try:
+        proc = psutil.Process(pid)
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+    except psutil.AccessDenied:
+        return True  # exists, just not ours to signal
+
+
+def reap_orphans(conn: Connection) -> int:
+    """Fail every `running` row whose holder process is gone, so its agent can
+    rebuild immediately.
+
+    Run at the top of every tick iteration, before the scan and any claim
+    (task #4975): `ava stop` kills processes, so a stop-left row's child is
+    gone — its pid is dead (or never registered) — while a crash that left the
+    child alive is left alone for the child to finish. Each row lands `failed`
+    with the orphan marker (`base.agents.history.hierarchy.jobs`): the pacing
+    reads skip marker rows, so the re-enqueue neither waits out the job
+    deadline + stale grace (the scan's sweep stays the no-restart fallback)
+    nor the retry backoff — the run was interrupted, not attempted. Returns
+    the number reaped; the `status = 'running'` guard settles races with a
+    concurrent recovery.
+    """
+    dead: list[tuple[int, int, str, int | None, object]] = []
+    for job_id, agent_id, kind, pid, started in conn.execute(
+        "SELECT id, agent_id, kind, holder_pid, coalesce(started_at, created_at)"
+        " FROM hierarchy_jobs WHERE status = 'running'"
+    ).fetchall():
+        if not _holder_alive(int(pid) if pid is not None else None):
+            dead.append((int(job_id), int(agent_id), str(kind), pid, started))
+    for job_id, agent_id, kind, pid, started in dead:
+        conn.execute(
+            "UPDATE hierarchy_jobs SET status = 'failed', finished_at = now(), error = %s"
+            " WHERE id = %s AND status = 'running'",
+            (ORPHAN_MARKER, job_id),
+        )
+        logger.warning(
+            "hierarchy worker: reaped orphan running job {job} (agent {agent}, kind {kind},"
+            " holder pid {pid}, started {started}) — no holder process left to finish it",
+            job=job_id,
+            agent=agent_id,
+            kind=kind,
+            pid=pid,
+            started=started,
+        )
+    return len(dead)
+
+
 def claim_next(
     conn: Connection, *, agents: frozenset[int] = frozenset(), defer_first_builds: bool = False
 ) -> ClaimedJob | None:
@@ -296,8 +367,10 @@ def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
     The event trigger enqueues each compact boundary's job, so a tick
     consumes; the reconcile scan runs only when
     `hierarchy_fallback_scan_seconds` has elapsed since the last one (the
-    first tick after boot always scans). A tripped 24h budget stops the tick
-    before any claim.
+    first tick after boot always scans). Every iteration first reaps
+    `running` rows whose holder process is gone (task #4975) — before the
+    scan, so a stop-left row is failed and its agent re-enqueued in the same
+    pass. A tripped 24h budget stops the tick before any claim.
 
     Returns when the queue is dry, the breaker is tripped, the unit is quiesced
     (the stop window), or after a transient failure — the next tick retries and nothing is lost. A
@@ -312,6 +385,7 @@ def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
             return  # the stop window: no database work until `ava start` releases the hold
         try:
             with db.connect(autocommit=True) as conn:
+                reap_orphans(conn)
                 if _regen_budget_check(conn, config):
                     return
                 now = datetime.now(UTC)

@@ -110,9 +110,19 @@ def _fake_connect(**_kw: object) -> _FakeConnection:
 
 
 def _armed_tick(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Arm a fake-connection tick test: switch on, first scan due, breaker quiet."""
+    """Arm a fake-connection tick test: switch on, first scan due, breaker quiet.
+
+    The reap is stubbed out (its own tests run against the real database): the
+    fake connection has no `execute`. The test that pins the reap's place in
+    the tick installs its own recorder over this.
+    """
+
+    def no_reap(_conn: object) -> int:
+        return 0
+
     monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
     monkeypatch.setattr(runner, "_fallback_scanned_at", None)
+    monkeypatch.setattr(runner, "reap_orphans", no_reap)
     monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn, _config: False)
     monkeypatch.setattr(runner, "_first_builds_deferred", lambda _conn, _config: False)
 
@@ -157,6 +167,34 @@ def test_run_tick_drains_back_to_back_and_scans_once_per_window(
         hierarchy_config(), fake_database(_fake_connect)
     )  # inside the fallback window: no re-scan, nothing due
     assert len(scanned) == 1
+
+
+def test_run_tick_reaps_before_the_scan_every_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reap runs before the scan on every tick (task #4975), so a stop-left
+    row is failed and its agent re-enqueued in the same pass; the scan keeps
+    its own fallback cadence."""
+    order: list[str] = []
+
+    def fake_scan(_conn: object, _config: object) -> ScanOutcome:
+        order.append("scan")
+        return ScanOutcome()
+
+    def record_reap(_conn: object) -> int:
+        order.append("reap")
+        return 0
+
+    _armed_tick(monkeypatch)
+    monkeypatch.setattr(runner, "reap_orphans", record_reap)
+    monkeypatch.setattr(runner, "scan", fake_scan)
+    monkeypatch.setattr(runner, "claim_next", lambda _conn, **_kw: None)
+
+    runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
+    assert order == ["reap", "scan"]
+
+    runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
+    assert order == ["reap", "scan", "reap"]  # reaped again; the scan is window-paced
 
 
 def test_run_tick_returns_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:

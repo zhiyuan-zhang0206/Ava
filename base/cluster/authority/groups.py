@@ -60,8 +60,10 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("INSERT, UPDATE", ("agent_tasks", "agent_impersonation_messages")),
     # Understanding-tree regeneration reconciles superseded cuts (task #3704).
     ("SELECT, INSERT, UPDATE, DELETE", ("understanding_nodes",)),
-    # Compact-boundary tree-build enqueue (task #4674).
-    ("INSERT", ("hierarchy_jobs",)),
+    # Compact-boundary tree-build enqueue (task #4674) plus its conflict
+    # supersede: flipping a provably dead running row to failed before the
+    # boundary re-inserts (task #4975).
+    ("INSERT, UPDATE", ("hierarchy_jobs",)),
     # Page close at exit.
     ("UPDATE", ("agent_pages",)),
     # Shell TTL deadlines and their append-only renewal trail.

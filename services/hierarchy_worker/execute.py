@@ -2,11 +2,13 @@
 
 Executed as `python -m services.hierarchy_worker.job --job-id N` (the
 entrypoint in `job.py` calls `execute_job`). The child owns its job row's
-completion: it writes the materialized nodes, records the run's scope and
-token stats, and — only when the run skipped nothing — advances the agent's
-scan cursor (a `compact` job) or the tail-seal delta column (a `tail` job,
-task #3981 C; a tail run advances no cursor — it seals a trailing stretch,
-it does not claim compact coverage). A crash, a kill, or the parent's
+completion: at boot it registers itself as the row's holder pid
+(`_register_holder` — the worker's orphan reap reads it, task #4975), then it
+writes the materialized nodes, records the run's scope and token stats, and —
+only when the run skipped nothing — advances the agent's scan cursor (a
+`compact` job) or the tail-seal delta column (a `tail` job, task #3981 C; a
+tail run advances no cursor — it seals a trailing stretch, it does not claim
+compact coverage). A crash, a kill, or the parent's
 deadline leaves the row `running`; the parent runner recovers it, and a
 retry resumes from the hash cache with zero redone nodes.
 
@@ -24,6 +26,7 @@ prefix cache, and the generation model is the agent's own effective model —
 
 from __future__ import annotations
 
+import os
 import time
 import traceback
 
@@ -78,6 +81,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
         )
         return 0
 
+    _register_holder(db, job_id)
     model, overrides = agent_model_target(db, agent_id, fallback=config.hierarchy_model)
     started = time.monotonic()
     try:
@@ -173,6 +177,21 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
         _record_failed(job_id, tail, db)
         logger.error("hierarchy job {} failed:\n{}", job_id, tail)
         return 1
+
+
+def _register_holder(db: Database, job_id: int) -> None:
+    """Stamp this child's pid on its running row (task #4975).
+
+    The worker's orphan reap (`runner.reap_orphans`) fails any running row
+    whose holder pid is gone; this stamp is what lets it tell a stop-left row
+    from one a live child is still working. Fail-fast on purpose: a run whose
+    registration was refused must not proceed under a pid-less row.
+    """
+    with db.write_transaction() as conn:
+        conn.execute(
+            "UPDATE hierarchy_jobs SET holder_pid = %s WHERE id = %s AND status = 'running'",
+            (os.getpid(), job_id),
+        )
 
 
 def _advance_target(db: Database, agent_id: int, trigger_boundary: str) -> str:

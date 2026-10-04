@@ -32,6 +32,7 @@ from base.agents.history.checkpoint_cleanup import (
     mark_compact_boundary,
     trim_checkpoints,
 )
+from base.agents.history.hierarchy.jobs import ORPHAN_MARKER
 from base.config import settings
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
@@ -362,11 +363,14 @@ async def test_mark_compact_boundary_stamps_newest(aops_pool: AsyncConnectionPoo
 
 
 async def test_mark_compact_boundary_enqueues_one_live_build_job(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """The stamp best-effort enqueues the worker's build job (task #4674): one
     pending `compact` job at the stamped boundary, live-deduped by the partial
-    unique index — a second boundary adds no row while one is live."""
+    unique index — a second boundary adds no row while one is live, and the
+    kept collision is logged, never silent (task #4975)."""
     monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
     ids = await _put_turns(aops_pool, "1", 4)
     await mark_compact_boundary(aops_pool, "1")
@@ -378,6 +382,69 @@ async def test_mark_compact_boundary_enqueues_one_live_build_job(
             " FROM hierarchy_jobs WHERE agent_id = 1"
         )
         assert await cur.fetchall() == [(1, "compact", ids[-1], "pending", False)]
+    kept = [r for r in loguru_records if "kept live pending job" in r["message"]]
+    assert len(kept) == 1, "the refused enqueue must be logged, not swallowed silently"
+
+
+async def _insert_running_job(
+    pool: AsyncConnectionPool, *, agent_id: int, boundary: str, started_seconds_ago: int
+) -> None:
+    """One `running` job row as a stopped worker leaves it, aged by the caller."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail,"
+            " started_at) VALUES (%s, 'compact', %s, 'running', false,"
+            " now() - make_interval(secs => %s))",
+            (agent_id, boundary, started_seconds_ago),
+        )
+
+
+async def test_enqueue_supersedes_an_orphaned_running_row(
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """Task #4975: a running row past its deadline window has no live holder
+    left (a stop killed it) — the enqueue flips it to failed with the orphan
+    marker and enqueues the new boundary at once, instead of waiting out the
+    scan's stale sweep (60 min) and the retry backoff behind it (30 min)."""
+    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
+    ids = await _put_turns(aops_pool, "1", 4)
+    await _insert_running_job(aops_pool, agent_id=1, boundary="b-old", started_seconds_ago=7200)
+
+    await mark_compact_boundary(aops_pool, "1")
+
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT status, trigger_boundary, error FROM hierarchy_jobs"
+            " WHERE agent_id = 1 ORDER BY id"
+        )
+        rows = await cur.fetchall()
+    assert len(rows) == 2
+    assert rows[0][0] == "failed" and rows[0][2] == ORPHAN_MARKER  # the orphan, reclaimed
+    assert rows[1][0] == "pending" and rows[1][1] == ids[-1]  # its boundary, enqueued now
+    assert any("superseded orphaned running job" in r["message"] for r in loguru_records)
+
+
+async def test_enqueue_keeps_a_live_running_job_and_logs_it(
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A running row inside its deadline window cannot be proven dead from the
+    agent's process — its holder may be writing this very boundary's run — so
+    the enqueue keeps it and logs the kept collision (task #4975)."""
+    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
+    await _put_turns(aops_pool, "1", 4)
+    await _insert_running_job(aops_pool, agent_id=1, boundary="b-old", started_seconds_ago=60)
+
+    await mark_compact_boundary(aops_pool, "1")
+
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT status, trigger_boundary FROM hierarchy_jobs WHERE agent_id = 1")
+        assert await cur.fetchall() == [("running", "b-old")]  # untouched, no second row
+    kept = [r for r in loguru_records if "kept live running job" in r["message"]]
+    assert len(kept) == 1, "the kept collision must be logged, not swallowed silently"
 
 
 async def test_enqueue_stays_silent_off_or_for_foreign_threads(

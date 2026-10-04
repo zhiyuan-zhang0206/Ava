@@ -5,9 +5,9 @@
 # continuation drains immediately). A low-frequency reconcile scan runs behind
 # that trigger as the safety net for lost events and stranded retries. The
 # worker's durable state is the job layer in the DB (partial unique index +
-# atomic claim + stale recovery), so a missed slot loses nothing — the slot
-# paces the idle wait and keeps the worker in the fleet's standard schedule
-# ledger.
+# atomic claim + holder reap + stale recovery), so a missed slot loses
+# nothing — the slot paces the idle wait and keeps the worker in the fleet's
+# standard schedule ledger.
 #
 # The tick body lives in services/hierarchy_worker/runner.py so it is
 # importable and testable; this file is the thin host, using the same slot

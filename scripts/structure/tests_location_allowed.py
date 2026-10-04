@@ -122,6 +122,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "asserts the ava_runner capability matrix declared in db/schema.sql",
     ),
+    "tests/base/test_runner_role_hierarchy_grants.py": (
+        "contract",
+        "the hierarchy_jobs supersede grant reaches a cluster born before its migration: db/schema.sql, the migration and the group matrix",
+    ),
     "tests/base/test_scan_contract.py": (
         "contract",
         "scans every first-party skill of the repository for critical findings",

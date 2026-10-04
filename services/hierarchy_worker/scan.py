@@ -16,9 +16,13 @@ budget left work over) is due immediately — a drain must not stall; anything
 else that ended not-clean waits out an exponential backoff derived from the
 trailing non-clean streak, so a deterministic failure retries about once a
 day instead of hot-looping, and the next compact's job supersedes it anyway.
-Stale `running` rows (a dead worker's leftover) are parked to `failed` once
-they outlive their own hard deadline, which puts them on the same backoff
-path.
+Orphan-reclaimed rows (a stop interrupted the run; task #4975) are skipped by
+the pacing reads entirely — an interrupted run is not an attempt outcome, so
+it neither delays the retry nor counts toward the streak.
+Stale `running` rows (a dead worker's leftover the holder reap has not met)
+are parked to `failed` once they outlive their own hard deadline, which puts
+them on the same backoff path — the fallback beside the holder reap
+(`runner.reap_orphans`).
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 
 from psycopg import Connection
 
+from base.agents.history.hierarchy.jobs import ORPHAN_MARKER
 from base.log import logger
 from services.hierarchy_worker.config import HierarchyWorkerConfig
 
@@ -152,7 +157,11 @@ def _admits(served: frozenset[int], agent_id: int) -> bool:
 
 
 def _recover_stale(conn: Connection, config: HierarchyWorkerConfig) -> int:
-    """Park `running` rows older than a job could legitimately live."""
+    """Park `running` rows older than a job could legitimately live.
+
+    The fallback beside the holder reap: `runner.reap_orphans` reclaims a row
+    whose holder process is gone on every tick; this sweep catches the rest —
+    a wedged child, or a holder pid an unrelated process recycled."""
     cutoff = datetime.now(UTC) - timedelta(
         seconds=config.hierarchy_job_deadline_seconds + config.hierarchy_stale_grace_seconds
     )
@@ -409,13 +418,16 @@ def _tail_due_by_history(
 
 def _last_finished(conn: Connection, agent_id: int, kind: str) -> _LastJob | None:
     """The agent's last finished attempt of this kind (pacing reads are
-    kind-scoped — tail and compact decisions must not perturb each other)."""
+    kind-scoped — tail and compact decisions must not perturb each other —
+    and skip orphan-reclaimed rows: an interrupted run is not an attempt,
+    task #4975)."""
     row = conn.execute(
         "SELECT status, coalesce(failed, 0), coalesce(skipped, 0),"
         "       coalesce(finished_at, started_at, created_at), error"
         " FROM hierarchy_jobs WHERE agent_id = %s AND kind = %s AND status IN ('done', 'failed')"
+        "   AND error IS DISTINCT FROM %s"
         " ORDER BY id DESC LIMIT 1",
-        (agent_id, kind),
+        (agent_id, kind, ORPHAN_MARKER),
     ).fetchone()
     if row is None:
         return None
@@ -429,12 +441,15 @@ def _last_finished(conn: Connection, agent_id: int, kind: str) -> _LastJob | Non
 
 
 def _nonclean_streak(conn: Connection, agent_id: int, kind: str) -> int:
-    """Consecutive not-clean attempts of this kind at the head of the history."""
+    """Consecutive not-clean attempts of this kind at the head of the history
+    (orphan-reclaimed rows skipped: an interrupted run never counts as a
+    failure, task #4975)."""
     rows = conn.execute(
         "SELECT status, coalesce(failed, 0), coalesce(skipped, 0)"
         " FROM hierarchy_jobs WHERE agent_id = %s AND kind = %s AND status IN ('done', 'failed')"
+        "   AND error IS DISTINCT FROM %s"
         " ORDER BY id DESC LIMIT %s",
-        (agent_id, kind, _STREAK_WINDOW),
+        (agent_id, kind, ORPHAN_MARKER, _STREAK_WINDOW),
     ).fetchall()
     streak = 0
     for status, failed, skipped in rows:

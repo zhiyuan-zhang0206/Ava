@@ -2068,7 +2068,12 @@ CREATE TABLE hierarchy_jobs (
     error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ
+    finished_at TIMESTAMPTZ,
+    -- The pid of the child process holding a `running` row (task #4975): the
+    -- job child stamps its own pid at boot, and the worker's orphan reap
+    -- fails any running row whose holder pid is gone, so a stop-killed job
+    -- does not wait out the stale sweep.
+    holder_pid INTEGER
 );
 -- Enqueue de-dup: at most one live job per (agent, kind).
 CREATE UNIQUE INDEX hierarchy_jobs_live
@@ -2086,14 +2091,16 @@ COMMENT ON TABLE hierarchy_jobs IS
 -- ava_runner surface: the compact-boundary event enqueue (task #4674) inserts
 -- one build job per new boundary from the agent process
 -- (`mark_compact_boundary`'s async twin) — idempotent via the live partial
--- unique index, best-effort by design. Gated on the role's existence (fresh
--- bootstrap applies this baseline before install birth creates ava_runner),
--- and base/cluster/authority/groups.py's ensure_groups grants the same
--- surface at birth.
+-- unique index, best-effort by design — and its conflict supersede (task
+-- #4975) flips a running row past the deadline window to failed before the
+-- boundary re-inserts. Gated on the role's existence (fresh bootstrap applies
+-- this baseline before install birth creates ava_runner), and
+-- base/cluster/authority/groups.py's ensure_groups grants the same surface at
+-- birth.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT INSERT ON hierarchy_jobs TO ava_runner;
+        GRANT INSERT, UPDATE ON hierarchy_jobs TO ava_runner;
     END IF;
 END $$;
 

@@ -754,9 +754,10 @@ def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int)
 
 
 def _exercise_hierarchy_job_grants(conn: psycopg.Connection, agent_id: int) -> None:
-    """The compact-boundary enqueue INSERT the agent-side twin writes from the
-    runner process (task #4674): one pending build job — BIGSERIAL id from the
-    owning sequence, idempotent via the live partial index — SELECTed back."""
+    """The compact-boundary enqueue surface the agent-side twin writes from the
+    runner process: the INSERT of one pending build job (task #4674) —
+    BIGSERIAL id from the owning sequence, idempotent via the live partial
+    index — and the conflict supersede's UPDATE (task #4975), SELECTed back."""
     conn.execute(
         "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail)"
         " VALUES (%s, 'compact', 'b1', 'pending', false)",
@@ -766,6 +767,12 @@ def _exercise_hierarchy_job_grants(conn: psycopg.Connection, agent_id: int) -> N
         "SELECT status FROM hierarchy_jobs WHERE agent_id = %s", (agent_id,)
     ).fetchone()
     assert row == ("pending",)
+    # The supersede's UPDATE half — guarded on a still-running row in prod; the
+    # privilege it exercises is the same.
+    conn.execute(
+        "UPDATE hierarchy_jobs SET status = 'failed' WHERE agent_id = %s AND status = 'pending'",
+        (agent_id,),
+    )
 
 
 def _exercise_alert_grants(conn: psycopg.Connection) -> None:

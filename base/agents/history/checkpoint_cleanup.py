@@ -51,11 +51,14 @@ any survivor is the correct rule.
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import NamedTuple
+from datetime import UTC, datetime, timedelta
+from typing import Any, NamedTuple
 
+from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base import telemetry
+from base.agents.history.hierarchy.jobs import ORPHAN_MARKER
 from base.config import settings
 from base.config.hierarchy_worker_fields import parse_hierarchy_worker_agents
 from base.db.transaction import async_write_transaction, write_transaction
@@ -259,6 +262,41 @@ _ENQUEUE_COMPACT_JOB_SQL = (
     " ON CONFLICT (agent_id, kind) WHERE status IN ('pending', 'running') DO NOTHING"
 )
 
+# The live job a refused enqueue collided with. The partial unique index
+# admits at most one live (agent, kind) row, so this read is exact.
+_LIVE_COMPACT_JOB_SQL = (
+    "SELECT id, status, coalesce(started_at, created_at) FROM hierarchy_jobs"
+    " WHERE agent_id = %s AND kind = 'compact' AND status IN ('pending', 'running')"
+    " ORDER BY id DESC LIMIT 1"
+)
+
+# The conflict supersede (task #4975): a running row past the deadline window
+# cannot have a live holder (`base.agents.history.hierarchy.jobs`) — the same
+# proof the scan's stale sweep uses — so the enqueue flips it to failed with
+# the orphan marker and re-inserts, instead of leaving the boundary to the
+# sweep's schedule. The status guard keeps a raced sweep or a child's own
+# outcome write from being overwritten.
+_SUPERSEDE_ORPHAN_SQL = (
+    "UPDATE hierarchy_jobs SET status = 'failed', finished_at = now(), error = %s"
+    " WHERE id = %s AND status = 'running'"
+)
+
+
+def _past_the_orphan_window(started: datetime) -> bool:
+    """Whether a running row has outlived every possible live holder.
+
+    The job deadline is where the owning parent kills a wedged child, and the
+    stale grace is the window after it the parent recovers the row — so a row
+    past both has no parent left to finish or recover it (task #4975). This is
+    the scan's stale window applied at the moment of an enqueue conflict; the
+    window itself is never shortened.
+    """
+    window = (
+        settings.daemon.hierarchy_job_deadline_seconds
+        + settings.daemon.hierarchy_stale_grace_seconds
+    )
+    return datetime.now(UTC) - started > timedelta(seconds=window)
+
 
 def _compact_agent_id(thread_id: str) -> int | None:
     """The agent id a compact-boundary thread denotes; None for foreign threads.
@@ -308,7 +346,10 @@ async def mark_compact_boundary(
 
     It then best-effort enqueues the worker's build job for that boundary
     (task #4674): a missed enqueue degrades to the worker's 10-minute
-    reconcile scan, never to a lost compact round.
+    reconcile scan, never to a lost compact round. An enqueue the live
+    partial unique index refuses is resolved, never dropped in silence: the
+    live job is kept with a log line, or superseded when it is an orphan — a
+    stopped worker's running row past its deadline window (task #4975).
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(_MARK_BOUNDARY_SQL, (thread_id, checkpoint_ns, thread_id, checkpoint_ns))
@@ -324,7 +365,10 @@ async def _enqueue_compact_job(
     Never raises and never blocks the compact round: any failure is a warning
     plus the `hierarchy_enqueue_failed` event. Idempotent via the live partial
     unique index; a pending job superseded by a newer boundary is merged by
-    the run's own advance target.
+    the run's own advance target. A refusal is never silent (task #4975):
+    `_resolve_conflict` inspects the live job, keeps it with a log line —
+    or supersedes it when it is an orphan (a stopped worker's running row,
+    past its deadline window) so the boundary re-enqueues at once.
     """
     agent_id = _compact_agent_id(thread_id)
     if agent_id is None or boundary is None or not _worker_serves(agent_id):
@@ -332,6 +376,8 @@ async def _enqueue_compact_job(
     try:
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             await cur.execute(_ENQUEUE_COMPACT_JOB_SQL, (agent_id, boundary))
+            if cur.rowcount == 0:
+                await _resolve_conflict(cur, agent_id, boundary)
     except Exception as exc:
         logger.warning(
             "hierarchy enqueue failed for agent {agent} (boundary {boundary}): {error!r}",
@@ -340,6 +386,78 @@ async def _enqueue_compact_job(
             error=exc,
         )
         _enqueue_failed(agent_id, exc)
+
+
+async def _resolve_conflict(cur: AsyncCursor[Any], agent_id: int, boundary: str) -> None:
+    """Handle an enqueue the live partial unique index refused (task #4975).
+
+    Pending jobs and still-young running jobs are kept — their run merges the
+    newer boundary through its own advance target — and the decision is logged
+    with the live job, never left silent. A running job past its deadline
+    window is an orphan: it is flipped to `failed` with the orphan marker and
+    the boundary re-inserts. Every step is race-guarded (the supersede UPDATE
+    only replaces a row still `running`), and the whole resolution rides the
+    enqueue's transaction, so the old row lands failed together with the new
+    job or not at all.
+    """
+    await cur.execute(_LIVE_COMPACT_JOB_SQL, (agent_id,))
+    live = await cur.fetchone()
+    if live is None:
+        # The conflicting row finished between the INSERT and this read: the
+        # slot is free — re-insert at once so the boundary does not wait for
+        # the scan.
+        await _reinsert_after_conflict(cur, agent_id, boundary)
+        return
+    job_id, status = int(live[0]), str(live[1])
+    started = live[2]
+    if status != "running" or not _past_the_orphan_window(started):
+        logger.info(
+            "hierarchy enqueue: kept live {status} job {job} for agent {agent}"
+            " (boundary {boundary} merges into its run)",
+            status=status,
+            job=job_id,
+            agent=agent_id,
+            boundary=boundary,
+        )
+        return
+    await cur.execute(_SUPERSEDE_ORPHAN_SQL, (ORPHAN_MARKER, job_id))
+    if cur.rowcount:
+        logger.info(
+            "hierarchy enqueue: superseded orphaned running job {job} for agent {agent}"
+            " (started {started}, past its deadline window)",
+            job=job_id,
+            agent=agent_id,
+            started=started,
+        )
+    else:
+        # A raced stale sweep or the child's own outcome write got there
+        # first; whatever the slot holds now is the winner's to finish.
+        logger.info(
+            "hierarchy enqueue: running job {job} for agent {agent} moved on under us"
+            " (a raced sweep or recovery)",
+            job=job_id,
+            agent=agent_id,
+        )
+    await _reinsert_after_conflict(cur, agent_id, boundary)
+
+
+async def _reinsert_after_conflict(cur: AsyncCursor[Any], agent_id: int, boundary: str) -> None:
+    """Re-attempt the insert once the conflicting row is gone; log the landing."""
+    await cur.execute(_ENQUEUE_COMPACT_JOB_SQL, (agent_id, boundary))
+    if cur.rowcount:
+        logger.info(
+            "hierarchy enqueue: boundary {boundary} enqueued for agent {agent}"
+            " after the conflicting job cleared",
+            boundary=boundary,
+            agent=agent_id,
+        )
+    else:
+        logger.info(
+            "hierarchy enqueue: a live job already holds agent {agent}'s slot;"
+            " boundary {boundary} merges into it",
+            boundary=boundary,
+            agent=agent_id,
+        )
 
 
 async def count_checkpoints(

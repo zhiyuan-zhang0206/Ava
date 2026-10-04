@@ -6,11 +6,16 @@ Modules:
   which agents need a job (behind, or their last attempt was not clean),
   enqueue idempotently (the reconcile pass behind the compact-boundary event
   trigger, task #4674), and park stale `running` rows a dead process left.
+  Orphan-reclaimed rows are skipped by its pacing reads (task #4975): an
+  interrupted run neither delays the retry nor counts as a failure.
   A second, opt-in channel (`hierarchy_tail_seal_enabled`, task #3981 C)
   enqueues `tail` jobs for idle agents with an established baseline.
 - `runner`: the resident loop the schedule hosts — claim one due job, run
   it as a child process under a hard deadline, and drain back-to-back (serial
-  by construction). The queue is fed by the compact-boundary event trigger
+  by construction). Every tick reaps the orphan `running` rows whose holder
+  process is gone, before the scan, so those agents re-enqueue at once (no
+  deadline+grace wait, no retry backoff; task #4975).
+  The queue is fed by the compact-boundary event trigger
   (task #4674): each boundary enqueues its own job, the reconcile scan runs
   behind it on `hierarchy_fallback_scan_seconds`, and a tripped 24h
   regeneration budget stops claiming until an operator resets the breaker.
