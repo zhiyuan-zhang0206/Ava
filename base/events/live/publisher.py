@@ -143,7 +143,7 @@ class AgentEventPublisher:
                 # hung publish, and tear down the client's connections so the
                 # next batch reconnects fresh instead of riding a half-dead
                 # socket (keepalive/health-check would take up to ~30s).
-                self._note_drop("publish_error", detail=repr(exc))
+                self._note_drop("publish_error", detail=f"{type(exc).__name__}: {exc}")
                 with suppress(Exception):
                     # redis-py (8.x) types disconnect() as async and it IS a
                     # coroutine at runtime — it must be awaited or the
@@ -190,7 +190,7 @@ class AgentEventPublisher:
         )
         failed = [r for r in results if isinstance(r, Exception)]
         if failed:
-            self._note_drop("publish_error", detail=repr(failed[0]))
+            self._note_drop("publish_error", detail=f"{type(failed[0]).__name__}: {failed[0]}")
 
     def _note_drop(self, kind: str, detail: str = "") -> None:
         self._dropped += 1

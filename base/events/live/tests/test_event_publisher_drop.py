@@ -9,9 +9,11 @@ past 0).
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from base.events.live.publisher import AgentEventPublisher
 
@@ -72,3 +74,61 @@ def test_publish_error_emit_reports_sse_drop_event(monkeypatch: pytest.MonkeyPat
     assert kw["kind"] == "publish_error"
     assert kw["detail"] == "ConnectionError('boom')"
     assert kw["n"] == 1
+
+
+async def test_publish_error_detail_carries_the_class_and_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transport failure's detail keeps the class AND the message: redis-py
+    8.1's repr reads "network:ConnectionError" — the message that names the
+    real fault is gone (task #4964)."""
+    warns: list[dict] = []
+    fake_logger = MagicMock()
+    fake_logger.warning.side_effect = lambda _msg, **kw: warns.append(kw)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.events.live.publisher.logger", fake_logger)
+
+    def _boom(_batch: list[str]) -> None:
+        raise RedisConnectionError("no route to host")
+
+    pub = _publisher()
+    monkeypatch.setattr(pub, "_publish_batch", _boom)
+    await pub.start()
+    pub.emit("one")
+    for _ in range(200):
+        if warns:
+            break
+        await asyncio.sleep(0.01)
+    await pub.aclose()
+
+    assert len(warns) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert warns[0]["kind"] == "publish_error"
+    assert warns[0]["detail"] == "ConnectionError: no route to host"
+
+
+async def test_batch_command_failure_detail_carries_the_class_and_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-command shed path describes its failing result the same way
+    (task #4964)."""
+    warns: list[dict] = []
+    fake_logger = MagicMock()
+    fake_logger.warning.side_effect = lambda _msg, **kw: warns.append(kw)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.events.live.publisher.logger", fake_logger)
+
+    failure = RedisConnectionError("broken pipe")
+
+    class _Pipeline:
+        def publish(self, *_args: object, **_kwargs: object) -> None: ...
+
+        async def execute(self, *, raise_on_error: bool = False) -> list[object]:
+            assert raise_on_error is False
+            return [failure]
+
+    redis = MagicMock()
+    redis.pipeline.return_value = _Pipeline()
+    pub = AgentEventPublisher(redis, "ava:events", agent_id=42, maxsize=2, publish_timeout=0.1)
+    await pub._publish_batch(["one"])
+
+    assert len(warns) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert warns[0]["kind"] == "publish_error"
+    assert warns[0]["detail"] == "ConnectionError: broken pipe"
