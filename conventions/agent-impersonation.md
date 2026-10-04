@@ -81,6 +81,12 @@ ava agents timeline 405 --limit 100 --before 23.0
 ava impersonate exec 0 --agent 405 --file operation.py
 ```
 
+These reads authenticate with the local machine's cluster bearer; a bare
+executor session that carries none may answer `401`. From such a session,
+read the same window inside the lease attachment — `ava impersonate exec 0
+--agent 405`, then `ava.context.gateway.get("/api/agents/405/timeline")`
+with `params` as in the CLI form (`{"limit": 100, "before": 23.0}`).
+
 The exec form runs local Python in a short attachment. Direct Python uses:
 
 ```python
