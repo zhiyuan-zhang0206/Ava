@@ -16,7 +16,6 @@ collaboration contract (and locates the impersonator guide) and whose
 
 from __future__ import annotations
 
-import contextlib
 import shlex
 import sys
 import tempfile
@@ -37,7 +36,14 @@ from ._claude_checks import (
     _wait_for_ready,
 )
 from ._common import cancel as _cancel_generation
-from ._common import impersonator_guide, init_file, new_generation, worker_bootstrap
+from ._common import (
+    impersonator_guide,
+    init_file,
+    kill_session_after_failed_launch,
+    new_generation,
+    terminate_generation_after_failed_launch,
+    worker_bootstrap,
+)
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from ._common import session_uuid as session_uuid
@@ -201,8 +207,7 @@ def _run_supervised_launch(
             sid, worker_bootstrap(contract, workspace, tasks_file, work_file, resumed=resume)
         )
     except BaseException:
-        with contextlib.suppress(Exception):
-            ava.shell.sessions.kill(sid)
+        kill_session_after_failed_launch(sid)
         raise
 
     print(f"ready. name={session_name}  workspace={workspace}")
@@ -299,14 +304,8 @@ def _run_takeover_launch(
         # now, so its CAS cannot reclaim this PTY. The launcher still owns the
         # numeric id and must reclaim it directly before rolling back its record.
         if sid is not None:
-            with contextlib.suppress(Exception):
-                ava.shell.sessions.kill(sid)
-        with contextlib.suppress(Exception):
-            coding_session_owner.terminate_generation(
-                key,
-                generation,
-                reason="launch-failed",
-            )
+            kill_session_after_failed_launch(sid)
+        terminate_generation_after_failed_launch(key, generation)
         raise
 
     print(f"ready. name={active.expected_suffix} workspace={workspace}")

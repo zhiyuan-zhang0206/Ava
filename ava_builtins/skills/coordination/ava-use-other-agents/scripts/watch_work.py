@@ -14,14 +14,13 @@ supervision loop keeps its schedule and retries at its next trigger.
 
 from __future__ import annotations
 
-import contextlib
 import datetime as dt
 import re
 import time
 from pathlib import Path
 
 import ava
-from base.agents import AgentNotFound, AgentStatus
+from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.sessions import coding_session_owner
 
 WORK_FILE = "/path/to/work.md"
@@ -80,15 +79,31 @@ def terminal_reason(
     return None
 
 
+# True while the gateway is unreachable, so an outage that spans many polls is reported once and
+# its end once.
+_gateway_down = False
+
+
 def _owner_terminated(agent_id: int) -> bool:
+    global _gateway_down  # noqa: PLW0603 — one-shot latch
     try:
-        return ava.agents.get_status(agent_id) is AgentStatus.TERMINATED
+        terminated = ava.agents.get_status(agent_id) is AgentStatus.TERMINATED
     except AgentNotFound:
-        return True
-    except Exception:
+        terminated = True
+    except GatewayUnavailable as exc:
         # Gateway unavailability is not proof of termination. The PTY liveness
         # and absolute expiry checks remain local and continue to protect it.
+        if not _gateway_down:
+            _gateway_down = True
+            print(
+                f"gateway unavailable checking owner agent {agent_id}; treating it as alive: {exc!r}",
+                flush=True,
+            )
         return False
+    if _gateway_down:
+        _gateway_down = False
+        print("gateway reachable again", flush=True)
+    return terminated
 
 
 def _session_crashed(owner: coding_session_owner.CodingSessionOwner) -> bool:
@@ -152,21 +167,20 @@ def _terminalize(
     try:
         stopped = coding_session_owner.terminate_generation(key, generation, reason=reason)
     except Exception as exc:
+        print(f"terminalizing generation {generation} ({reason}) failed: {exc!r}", flush=True)
         if reason != "owner-terminated":
-            with contextlib.suppress(Exception):
-                _notify(
-                    owner_agent_id,
-                    f"Codex cleanup failed for generation {generation}: {exc}",
-                    canonical=True,
-                )
-        return False
-    if stopped and reason != "owner-terminated":
-        with contextlib.suppress(Exception):
             _notify(
                 owner_agent_id,
-                f"Codex generation {generation} terminalized ({reason}).",
+                f"Codex cleanup failed for generation {generation}: {exc}",
                 canonical=True,
             )
+        return False
+    if stopped and reason != "owner-terminated":
+        _notify(
+            owner_agent_id,
+            f"Codex generation {generation} terminalized ({reason}).",
+            canonical=True,
+        )
     return stopped
 
 

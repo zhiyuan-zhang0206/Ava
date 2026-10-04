@@ -46,6 +46,7 @@ from ava.mcp_config import (
 from ava.sdk_surface.validation import coerce_str
 from ava.security import scan_content
 from base.config import settings
+from base.log import logger
 
 from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 from ._remote import (
@@ -374,8 +375,14 @@ async def _invalidate_session(server: str) -> None:
         _sessions.pop(server, None)
         stack = _session_stacks.pop(server, None)
         if stack is not None:
-            with suppress(Exception):
+            try:
                 await stack.aclose()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "closing the transport stack of MCP server {} failed; "
+                    "the next connect spawns a fresh one anyway",
+                    server,
+                )
 
 
 async def _call_with_reconnect(

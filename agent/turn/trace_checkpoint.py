@@ -29,6 +29,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent.state import BaseAgentState
 from base.agents.context import AvaContext
+from base.log import logger
 
 
 async def attach_trace_checkpoint_ref(
@@ -54,8 +55,12 @@ async def attach_trace_checkpoint_ref(
         if checkpoint_id is None:
             return
     except Exception:
-        # No readable checkpoint yet (fresh thread, first super-step) — the
-        # next turn's commit will carry the link.
+        # A fresh thread yields an empty snapshot (handled above); a raise is a checkpoint
+        # read failure. The next turn's commit will carry the link.
+        logger.opt(exception=True).warning(
+            "trace checkpoint link skipped: reading the agent's checkpoint failed",
+            agent_id=agent_id,
+        )
         return
     # The span-side write only lands while the span is still recording. The
     # turn root is a placeholder ended at turn START (#1964), so in

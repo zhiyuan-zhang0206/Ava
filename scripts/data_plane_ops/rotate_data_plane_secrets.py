@@ -26,6 +26,7 @@ from pathlib import Path
 
 import redis
 from dotenv import dotenv_values
+from redis.exceptions import RedisError
 
 from base.cluster import (
     ensure_cluster_redis_acl,
@@ -152,7 +153,7 @@ def _redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
             socket_timeout=3,
         ) as client:
             return bool(client.ping())
-    except Exception:
+    except (RedisError, OSError):
         return False
 
 

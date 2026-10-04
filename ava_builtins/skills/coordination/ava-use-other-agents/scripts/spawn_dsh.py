@@ -31,7 +31,6 @@ one ``key=value`` per line.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import re
 import shlex
@@ -41,7 +40,7 @@ import time
 from pathlib import Path
 
 import ava
-from base.agents import AgentNotFound, AgentStatus
+from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.sessions import coding_session_owner
 
 _HERE = Path(__file__).resolve().parent
@@ -139,9 +138,13 @@ def _owner_terminated(agent_id: int) -> bool:
         return ava.agents.get_status(agent_id) is AgentStatus.TERMINATED
     except AgentNotFound:
         return True
-    except Exception:
+    except GatewayUnavailable as exc:
         # An unavailable gateway cannot prove an owner dead; expiry keeps
         # responsibility, and guessing here could kill active work.
+        print(
+            f"gateway unavailable checking owner agent {agent_id}; treating it as alive: {exc!r}",
+            file=sys.stderr,
+        )
         return False
 
 
@@ -223,10 +226,14 @@ def _launch(workspace: Path, name: str, brief: str, ttl_seconds: float) -> int:
         dsh_session = _wait_for_session(sid)
     except BaseException:
         if sid is not None:
-            with contextlib.suppress(Exception):
+            try:
                 ava.shell.sessions.kill(sid)
-        with contextlib.suppress(Exception):
+            except Exception as kill_exc:
+                print(f"could not reclaim shell session {sid}: {kill_exc!r}", file=sys.stderr)
+        try:
             coding_session_owner.terminate_generation(key, generation, reason="launch-failed")
+        except Exception as term_exc:
+            print(f"could not roll back generation {generation}: {term_exc!r}", file=sys.stderr)
         raise
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
     print(f"dsh_session={dsh_session}")

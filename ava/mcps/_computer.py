@@ -111,7 +111,7 @@ class ComputerLineSession:
 
 async def _close_writer(writer: asyncio.StreamWriter) -> None:
     writer.close()
-    with suppress(Exception):
+    with suppress(OSError):  # the socket is already gone: reset / broken pipe on close
         await writer.wait_closed()
 
 

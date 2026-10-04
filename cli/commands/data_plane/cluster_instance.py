@@ -599,6 +599,7 @@ def _redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
     the gateway-only Redis admin password). Used by `ava status`; degrades to
     False on any error, including a home without its admin password."""
     import redis as _redis
+    from redis.exceptions import RedisError
 
     client = _redis.Redis(
         host=redis_host,
@@ -608,7 +609,7 @@ def _redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
     )
     try:
         return bool(client.ping())  # pyright: ignore[reportUnknownMemberType]
-    except Exception:
+    except (RedisError, OSError):
         return False
     finally:
         client.close()

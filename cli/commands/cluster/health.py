@@ -23,6 +23,10 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
+import psycopg
+import redis.exceptions
+
 from base import telemetry
 from cli.commands.cluster._provider_guard import run_provider_guard
 
@@ -62,7 +66,9 @@ def _gateway_liveness() -> bool:
     try:
         resp = dial_get(url, timeout=10.0)
         return resp.status_code == 200
-    except Exception:
+    except (httpx.HTTPError, OSError):
+        # Connection refused / timeout: the gateway is not answering, which is
+        # the unhealthy verdict this probe exists to return.
         return False
 
 
@@ -84,7 +90,7 @@ def _data_plane_abnormal() -> bool:
     try:
         with Database.from_settings().connect(autocommit=True):
             pass
-    except Exception:
+    except (psycopg.Error, OSError):
         return True
     try:
         client = EventBus.from_settings().sync_redis()
@@ -92,7 +98,7 @@ def _data_plane_abnormal() -> bool:
             client.ping()  # pyright: ignore[reportUnknownMemberType] — redis-py types ping's optional argument as Unknown.
         finally:
             client.close()
-    except Exception:
+    except (redis.exceptions.RedisError, OSError):
         return True
     return False
 
@@ -115,7 +121,7 @@ def _agent_population(min_agents: int) -> bool:
                 return False
             count: int = row[0]
             return count >= min_agents
-    except Exception:
+    except (psycopg.Error, OSError):
         # DB unreachable — if the gateway is up but DB is down, that is itself
         # an unhealthy state. The gateway liveness check would also fail in
         # that case, so this is a secondary signal.
@@ -135,7 +141,7 @@ def _agent_population_failure_class(min_agents: int) -> str | None:
                 "AND lease_expires_at > now()"
             )
             row = cur.fetchone()
-    except Exception:
+    except (psycopg.Error, OSError):
         return "environment"
     if row is None:
         return "code"
@@ -216,7 +222,7 @@ def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
             ).fetchall()
         # Any agent over the threshold is a crash loop.
         return not any(count > max_restarts for _agent, count in rows)
-    except Exception:
+    except (psycopg.Error, OSError):
         # Database unreachable — can't check crash loops. Return True (healthy) to
         # avoid a false positive on this secondary signal; the gateway liveness
         # and agent population checks are the primary signals.
@@ -251,7 +257,7 @@ def _schema_health() -> bool:
     except (CodeBehindSchema, SchemaVersionMismatch):
         # A real skew between the applied set and this checkout's migrations.
         return False
-    except Exception:
+    except (psycopg.Error, OSError):
         # DB unreachable / connection flake — cannot read the applied set.
         # Healthy by default; the gateway-liveness and agent-population checks
         # are the primary signals and keep failing while the DB is truly down.

@@ -150,7 +150,7 @@ class _CallbackServer:
                 )
                 await writer.drain()
                 writer.close()
-                with suppress(Exception):
+                with suppress(OSError):  # the browser already dropped the connection
                     await writer.wait_closed()
 
                 from urllib.parse import parse_qs, urlparse
@@ -176,14 +176,22 @@ class _CallbackServer:
                 fut = self._result
                 if fut is not None and not fut.done():
                     fut.set_exception(e)
+                else:
+                    logger.opt(exception=True).warning(
+                        "[mcp-oauth] callback handler failed after the authorization flow settled"
+                    )
 
         server = await asyncio.start_server(_handle, "127.0.0.1", self.port)
         try:
             return await asyncio.wait_for(self._result, timeout=_OAUTH_FLOW_TIMEOUT_S)
         finally:
             server.close()
-            with suppress(Exception):
+            try:
                 await server.wait_closed()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[mcp-oauth] closing the callback server failed; the flow result is unaffected"
+                )
 
     @property
     def redirect_uri(self) -> str:

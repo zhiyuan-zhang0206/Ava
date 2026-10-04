@@ -95,12 +95,12 @@ def _id_to_hex(value: str) -> str:
         return value.lower()
     try:
         decoded = base64.b64decode(value, validate=True)
-    except Exception:
+    except ValueError:  # binascii.Error is a ValueError
         # Unpadded base64 (legacy OTLP JSON writers may omit the trailing
         # "="); pad to a multiple of 4 and retry the strict decode.
         try:
             decoded = base64.b64decode(value + "=" * (-len(value) % 4), validate=True)
-        except Exception as exc:  # binascii.Error / ValueError
+        except ValueError as exc:  # binascii.Error is a ValueError
             raise ValueError(f"malformed span id {value[:24]!r} (neither hex nor base64)") from exc
     if len(decoded) not in (16, 8):
         raise ValueError(

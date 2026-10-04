@@ -7,7 +7,6 @@ reader-join task. The direct child owns a POSIX process group.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import subprocess
 import threading
 import time
@@ -147,9 +146,9 @@ def start_reader_join(
     """Make one bounded reader join after the root's sole reap attempt."""
 
     async def _join_after_reap() -> None:
-        # The barrier reports the reap failure separately; still join once.
-        with contextlib.suppress(Exception):
-            await asyncio.shield(reap_task)
+        # Wait for the reap to settle without reading its result: `settle_resources` reports
+        # a reap failure, and the reader is still joined once.
+        await asyncio.wait({reap_task})
         # Put the bound inside Thread.join: wait_for(to_thread(join)) cancels
         # only the Future and leaves the executor worker blocked indefinitely.
         await asyncio.to_thread(reader.join, _READER_JOIN_TIMEOUT_S)

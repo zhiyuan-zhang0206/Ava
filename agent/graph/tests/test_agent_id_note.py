@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.graph.prompt.context_notes import _own_label, agent_id_note
+from agent.graph.prompt.context_notes import _machine_clause, _own_label, agent_id_note
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
@@ -188,3 +188,20 @@ def test_own_label_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("ava.DB", _Boom())
     assert _own_label(29) is None
+
+
+def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unset machine name is an expected condition; any other failure reading it surfaces."""
+    from base.cluster import machine
+
+    def _unset() -> str:
+        raise machine.MachineNameMissing("unset")
+
+    def _broken() -> str:
+        raise RuntimeError("settings unreadable")
+
+    monkeypatch.setattr(machine, "machine_name", _unset)
+    assert _machine_clause() is None
+    monkeypatch.setattr(machine, "machine_name", _broken)
+    with pytest.raises(RuntimeError, match="settings unreadable"):
+        _machine_clause()

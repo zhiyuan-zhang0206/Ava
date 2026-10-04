@@ -31,6 +31,7 @@ from base.packages.plugins import load_report
 from base.packages.plugins.config_face import CONFIG_FACE
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.gate import check_manifest
+from base.telemetry import report_sink_failure
 
 SURFACE_FACES: tuple[str, ...] = (SURFACE_MODULE, CONFIG_FACE)
 # The dotted packages a plugin's modules load under (`agent.extensions._pkg_of`).
@@ -105,8 +106,14 @@ def loaded_state_classes() -> frozenset[type[BaseModel]]:
             continue
         try:
             classes.update(_declared(parts[-2], FACE_MODULE, contribute).state)
-        except Exception:  # noqa: S112 — reported by build_registry; a serializer must not raise here
-            continue
+        except Exception as exc:
+            # A serializer must not raise here; the plugin's classes are missing from it instead.
+            # The serializer asks on every payload: a broken face reports first and every 50th.
+            report_sink_failure(
+                f"plugin {parts[-2]} agent_runtime face (its state classes are missing "
+                "from the serializer allowlist)",
+                exc,
+            )
     return frozenset(classes)
 
 

@@ -126,7 +126,7 @@ def live_submit(
         return _clip(f"{type(exc).__name__}: {exc}")
     finally:
         if conn is not None:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(OSError):
                 conn.close()
 
 

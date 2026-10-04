@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Mapping
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack
 from threading import Lock, local
 from types import TracebackType
 from typing import Any, Self
@@ -19,6 +19,7 @@ from ava._settings import database
 from base.agents import impersonation as control
 from base.cluster.machine import machine_name
 from base.config.agent_pins import resolve_agent_config_pins
+from base.log import logger
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import PluginConfigView, resolve_agent_plugin_pins
 
@@ -58,7 +59,7 @@ def _deliver_telemetry_before_detach() -> None:
     """
     if "base.telemetry" not in sys.modules:
         return
-    with suppress(Exception):
+    try:
         from base import telemetry
 
         telemetry.sync(bounded=True)
@@ -66,6 +67,11 @@ def _deliver_telemetry_before_detach() -> None:
             from base.telemetry.otlp import telemetry_otlp
 
             telemetry_otlp.finalize()
+    except Exception:
+        logger.opt(exception=True).warning(
+            "external attachment: telemetry delivery before detach failed; "
+            "queued records stay in the JSONL mirror"
+        )
 
 
 class Attachment:

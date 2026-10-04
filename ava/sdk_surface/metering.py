@@ -17,7 +17,7 @@ Transparency contract — the recorder MUST NOT perturb the SDK surface:
     and sets ``__wrapped__``, so ``inspect.signature`` (and therefore ``ava.help``)
     resolves the original signature byte-for-byte, and function-attached members
     (``ava.understand.UnderstandError``) survive via the ``__dict__`` copy.
-  - Pure side channel: metering failures are swallowed and never change the call's
+  - Pure side channel: metering failures are logged and never change the call's
     arguments, return value, or exceptions. Lifecycle exceptions
     (``AgentTermination`` / ``AgentRestart``) propagate untouched.
 
@@ -40,6 +40,7 @@ from typing import Any
 
 import ava
 from ava import agent_identity
+from base.telemetry import report_sink_failure
 
 # Identity set of live recorder objects. install() skips a target only when the
 # current top callable *is* one of these — robust to `ava.extend`'s wrap machinery,
@@ -63,7 +64,7 @@ def _caller() -> Generator[None, None, None]:
     from base.agents.sdk import telemetry as sdk_usage_telemetry
 
     identity = {}
-    with contextlib.suppress(Exception):
+    try:
         agent_identity._try_establish_from_env()
         borrowed = agent_identity._external_agent_id
         turn = agent_identity.current_turn_agent_id()
@@ -78,6 +79,10 @@ def _caller() -> Generator[None, None, None]:
             "agent_id": agent_id,
             "source": source,
         }
+    except Exception as exc:
+        # Runs on every SDK call: reported first and every 50th. sdk_call events carry no
+        # agent id or source while it fails.
+        report_sink_failure("SDK metering caller-identity capture", exc)
     token = sdk_usage_telemetry.set_identity(identity)
     try:
         yield

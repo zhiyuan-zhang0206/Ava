@@ -14,6 +14,7 @@ from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from base.cluster import session_name
 from base.config import settings
+from base.log import logger
 from base.paths import repo_root, workspace_dir
 from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
 from base.sessions.page_session import is_page_label
@@ -238,8 +239,14 @@ class ShellSessions:
         except RuntimeError:
             # An untracked session could never be reclaimed — dispose of it
             # rather than leaving a live session the reaper cannot see.
-            with contextlib.suppress(Exception):
+            try:
                 backend.kill_session(full, graceful=False)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "disposing of untracked session {!r} after its TTL record failed also failed; "
+                    "the session stays live",
+                    full,
+                )
             raise
         return session_id, full
 
