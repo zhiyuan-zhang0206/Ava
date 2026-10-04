@@ -77,6 +77,7 @@ from services.browser.mcp_upstream import (
     _bounded,
     _bounded_stack_close,
     _create_upstream,
+    _reap_cancelled,
     _StoppingError,
 )
 from services.browser.page_lifecycle import (
@@ -484,7 +485,7 @@ async def _handle_client(
                 conn_page = await _serve_line(line, writer, daemon_ref, conn_page)
     finally:
         writer.close()
-        with suppress(Exception):
+        with suppress(OSError):
             await writer.wait_closed()
 
 
@@ -540,7 +541,7 @@ async def _socket_in_use(path: Path) -> bool:
     except OSError:
         return True
     writer.close()
-    with suppress(Exception):
+    with suppress(OSError):
         await writer.wait_closed()
     del reader  # nothing to close on a StreamReader; the writer close suffices
     return True
@@ -634,12 +635,10 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
             if daemon_ref[0].dead.is_set():
                 logger.error("[browser-mcp] upstream session died; reconnecting...")
                 watchdog_task.cancel()
-                with suppress(BaseException):
-                    await watchdog_task
+                await _reap_cancelled(watchdog_task, "upstream watchdog")
                 watchdog_task = None
                 reaper_task.cancel()
-                with suppress(BaseException):
-                    await reaper_task
+                await _reap_cancelled(reaper_task, "dead-page reaper")
                 reaper_task = None
                 daemon_ref[0] = None
                 # Close the dead upstream stack NOW — its npx/node children
@@ -657,20 +656,17 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
         logger.info("[browser-mcp] shutting down")
         if watchdog_task is not None:
             watchdog_task.cancel()
-            with suppress(BaseException):
-                await watchdog_task
+            await _reap_cancelled(watchdog_task, "upstream watchdog")
         if reaper_task is not None:
             reaper_task.cancel()
-            with suppress(BaseException):
-                await reaper_task
+            await _reap_cancelled(reaper_task, "dead-page reaper")
         session_task.cancel()
-        # CancelledError is a BaseException, not an Exception: suppressing
-        # only Exception here let a cancelled session loop escape the finally
-        # and skip every remaining cleanup step — upstream stack, server, and
-        # socket close (2026-09-09 #2043: SIGTERM left a live daemon that
-        # blocked `cluster update` for the whole 300s stop budget).
-        with suppress(BaseException):
-            await session_task
+        # CancelledError is a BaseException, not an Exception: letting a
+        # cancelled session loop escape the finally skipped every remaining
+        # cleanup step — upstream stack, server, and socket close (2026-09-09
+        # #2043: SIGTERM left a live daemon that blocked `cluster update` for
+        # the whole 300s stop budget). `_reap_cancelled` absorbs it.
+        await _reap_cancelled(session_task, "gateway session loop")
         # Two bounded steps, so the daemon may keep closing for up to
         # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
         # is derived from that total.

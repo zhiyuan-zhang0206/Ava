@@ -124,7 +124,7 @@ async def resurrect_one(
                     trigger_inbound_kind="chat",
                 )
         except Exception:
-            _log.info(
+            _log.warning(
                 "[delivery] resurrect retry failed for agent %s",
                 agent_id,
                 exc_info=True,

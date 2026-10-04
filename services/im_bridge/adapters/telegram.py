@@ -20,7 +20,7 @@ import contextlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -389,11 +389,13 @@ class TelegramAdapter(IMAdapter):
         # chunk, never carrying the token. Guarded so a malformed response
         # body cannot fail a send that already landed.
         message_id: Any = ""
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(ValueError):  # a non-JSON 200 body
             body: Any = resp.json()
-            result: Any = body.get("result")
-            if result is not None:
-                message_id = result.get("message_id", "")
+            result: Any = (
+                cast(dict[str, Any], body).get("result") if isinstance(body, dict) else None
+            )
+            if isinstance(result, dict):
+                message_id = cast(dict[str, Any], result).get("message_id", "")
         logger.info("telegram send ok chat_id={} message_id={}", chat_id, message_id)
 
     # -- offset persistence ----------------------------------------------

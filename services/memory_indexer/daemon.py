@@ -653,6 +653,14 @@ async def _connect_backend_with_retry(
     ) from last_exc
 
 
+def _close_backend(backend: MemorySearchBackend) -> None:
+    """Close the backend at shutdown; a failure is logged so the remaining teardown still runs."""
+    try:
+        backend.close()
+    except Exception:
+        _log.warning("[indexer] backend close failed during shutdown", exc_info=True)
+
+
 async def run() -> None:
     """Write pidfile -> start healthz server -> cold-start -> drain loop.
 
@@ -730,8 +738,7 @@ async def run() -> None:
     finally:
         observer.stop()
         observer.join(timeout=5.0)
-        with suppress(Exception):
-            backend.close()
+        _close_backend(backend)
         await stop_health_server(health)
         _remove_pidfile()
         _log.info("[indexer] daemon stopped")

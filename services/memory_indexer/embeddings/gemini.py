@@ -54,6 +54,7 @@ from base.host.net.resilience import (
     http_classifier,
     retry,
 )
+from base.log import logger
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 
 _MODEL_ID = "gemini-embedding-2"
@@ -161,8 +162,8 @@ def _emit_billing(body: dict[str, Any]) -> None:
 
     Called before `_vectors_from_body` on purpose: the provider bills the
     request whether or not our shape validation accepts the response, so a
-    malformed-but-billed response must still reach the ledger. Billing
-    failures are swallowed — they can never break the embed call.
+    malformed-but-billed response must still reach the ledger. A billing
+    failure is logged at WARNING and never breaks the embed call.
     """
     try:
         from base.lm.usage import log_usage_fields
@@ -176,7 +177,9 @@ def _emit_billing(body: dict[str, Any]) -> None:
             usage_kind="embedding",
         )
     except Exception:
-        return
+        logger.opt(exception=True).warning(
+            "gemini embedding usage was not recorded; this call is missing from the usage ledger"
+        )
 
 
 async def _post_attempt_once(

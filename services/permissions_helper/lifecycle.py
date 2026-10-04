@@ -23,6 +23,7 @@ from pathlib import Path
 import base.paths
 from base.config import settings
 from base.host.proc import run_bounded
+from base.log import logger
 from base.paths import logs_dir, permissions_helper_socket
 from services.permissions_helper import hardened_runtime
 from services.permissions_helper.build_state import (
@@ -208,6 +209,9 @@ def _signing_keychain_search_list_note() -> str:
             for line in proc.stdout.decode(errors="replace").splitlines()
         }
     except Exception:  # This diagnostic must never replace the signing refusal.
+        logger.opt(exception=True).warning(
+            "could not read the user keychain search list for the signing diagnostic"
+        )
         return "The user keychain search list is unreadable."
     location = "present in" if keychain in listed else "missing from"
     return f"The signing keychain {keychain!r} is {location} the user keychain search list."
@@ -701,7 +705,7 @@ def _helper_answers_ping() -> bool:
     for attempt in range(_HELPER_PING_ATTEMPTS):
         try:
             reply = client.ping()
-        except Exception:
+        except (client.PermissionsHelperError, OSError, ValueError):
             reply = None
         if reply is not None and reply.get("pong") is True:
             if (

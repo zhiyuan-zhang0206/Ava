@@ -442,7 +442,7 @@ class ScheduleManager:
         self._set_status(schedule_id, "running", clear_last_error=True)
 
     def _log_reap_failure(
-        self, schedule_id: int, name: str, failure: str, *, exc_info: bool = False
+        self, schedule_id: int, name: str, failure: str, *, exc: BaseException | None = None
     ) -> None:
         """Log an unresolved reap at most once per schedule per cooldown."""
         now = time.monotonic()
@@ -462,7 +462,7 @@ class ScheduleManager:
             failure,
             name,
             summary,
-            exc_info=exc_info,
+            exc_info=exc,
         )
 
     def _reap(self, schedule_id: int) -> bool:
@@ -476,8 +476,8 @@ class ScheduleManager:
         name = session_name(f"schedule-{schedule_id}")
         try:
             reaped, mode = get_shell_backend().kill_session(name)
-        except Exception:
-            self._log_reap_failure(schedule_id, name, "raised", exc_info=True)
+        except Exception as exc:
+            self._log_reap_failure(schedule_id, name, "raised", exc=exc)
             return False
         if not reaped:
             # SessionBackend's false verdict means the session survived its

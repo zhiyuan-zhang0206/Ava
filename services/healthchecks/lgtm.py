@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 
@@ -157,7 +158,7 @@ def write_path_probe() -> tuple[bool, str]:
                 for stream in payload["data"]["result"]
                 for value in stream["values"]
             )
-    except Exception:
+    except (OSError, HTTPException, ValueError, KeyError, TypeError):
         return False, "query_error"
     return (True, "ok") if visible else (False, "probe_not_visible")
 
@@ -172,7 +173,7 @@ def _push_probe(request: urllib.request.Request) -> str | None:
         except urllib.error.HTTPError as exc:
             status = exc.code
             response_body = exc.read() if status >= 500 else b""
-        except Exception:
+        except (OSError, HTTPException):
             return "push_error"
         if 200 <= status < 300:
             return None

@@ -25,6 +25,7 @@ from base.config import settings
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
+from ops.cluster_rpc import ClusterOpUnreachable
 from services.heartbeat import JITTER_SPAN_S
 from services.heartbeat import daemon as heartbeat_daemon
 from services.heartbeat.liveness import (
@@ -136,7 +137,7 @@ class FakeProbe:
     async def __call__(self, target_machine: str, **kwargs: object) -> dict[str, object]:
         self.calls.append(target_machine)
         if not self.reachable.get(target_machine, True):
-            raise ConnectionError("unreachable")
+            raise ClusterOpUnreachable("unreachable")
         return {"status": "completed", "result": {}}
 
 

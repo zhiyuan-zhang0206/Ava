@@ -71,11 +71,33 @@ async def _bounded(awaitable: Awaitable[object], what: str) -> None:
 
 
 async def _bounded_stack_close(stack: AsyncExitStack | None, what: str) -> None:
-    """Close an upstream stack within the shutdown budget; never raises."""
+    """Close an upstream stack within the shutdown budget; a failure is logged, not raised."""
     if stack is None:
         return
-    with suppress(Exception):
+    try:
         await _bounded(stack.aclose(), what)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "[browser-mcp] {} failed; its child processes may linger until the daemon exits",
+            what,
+        )
+
+
+async def _reap_cancelled(task: Awaitable[object] | None, what: str) -> None:
+    """Await a task that was just cancelled.
+
+    A `CancelledError` is the expected outcome and stays quiet; any other
+    exception the task unwound with is logged at WARNING. The caller's own
+    cancellation arriving during the await is absorbed too, so the cleanup
+    steps after it still run.
+    """
+    if task is None:
+        return
+    with suppress(asyncio.CancelledError):
+        try:
+            await task
+        except Exception:
+            logger.opt(exception=True).warning("[browser-mcp] {} raised while being reaped", what)
 
 
 async def _await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:
@@ -143,16 +165,13 @@ async def _initialize_until_stop_or_timeout(session: ClientSession, stop: asynci
         )
     finally:
         stop_task.cancel()
-        with suppress(BaseException):
-            await stop_task
+        await _reap_cancelled(stop_task, "stop-event waiter")
     if stop.is_set():
         init_task.cancel()
-        with suppress(BaseException):
-            await init_task
+        await _reap_cancelled(init_task, "upstream initialize")
         raise _StoppingError
     if not init_task.done():
         init_task.cancel()
-        with suppress(BaseException):
-            await init_task
+        await _reap_cancelled(init_task, "upstream initialize")
         raise TimeoutError("upstream session.initialize() timed out")
     await init_task  # re-raise the initialize outcome, or return cleanly

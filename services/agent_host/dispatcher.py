@@ -46,7 +46,6 @@ from queueing a burst of turns.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -332,8 +331,7 @@ class TurnScheduler:
         # way out — noise that would sit next to the real report below.
         for task in tasks.values():
             if task not in pending and not task.cancelled():
-                with contextlib.suppress(Exception):
-                    task.exception()
+                task.exception()
         if not pending:
             return
         waited = time.monotonic() - started
@@ -386,6 +384,10 @@ class TurnScheduler:
             try:
                 return agent_id, await self._activity_clock(agent_id)  # pyright: ignore[reportOptionalCall]
             except Exception:
+                logger.opt(exception=True).warning(
+                    "activity clock read failed for agent {agent_id} — reporting without it",
+                    agent_id=agent_id,
+                )
                 return agent_id, None
 
         try:
@@ -601,10 +603,18 @@ class InboundWakeDispatcher:
                 await asyncio.sleep(self._reconnect_delay_s)
             finally:
                 if pubsub is not None:
-                    with contextlib.suppress(Exception):
+                    try:
                         await pubsub.aclose()  # pyright: ignore[reportUnknownMemberType]
-                with contextlib.suppress(Exception):
+                    except Exception:
+                        logger.opt(exception=True).warning(
+                            "hosted dispatcher could not close its pubsub connection"
+                        )
+                try:
                     await redis.aclose()
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "hosted dispatcher could not close its redis client"
+                    )
 
     async def _next_scan_schedule(self, scan_backoff_s: float) -> _ScanSchedule:
         """Run the durable backstop without treating its DB failure as Redis failure."""

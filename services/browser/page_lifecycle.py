@@ -385,7 +385,7 @@ async def port_listening(host: str, port: int) -> bool:
     except (ConnectionError, OSError):
         return False
     writer.close()
-    with suppress(Exception):
+    with suppress(OSError):
         await writer.wait_closed()
     del reader  # nothing to close on a StreamReader; the writer close suffices
     return True

@@ -94,7 +94,7 @@ async def test_agent_host_publishes_active_snapshots_and_refreshes_empty_heartbe
     assert writes[1] == ("host_turn_progress:runner-a", "{}", 60)
 
 
-async def test_agent_host_progress_publish_failure_is_debug_only(
+async def test_agent_host_progress_publish_failure_is_warning_with_traceback(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -105,13 +105,14 @@ async def test_agent_host_progress_publish_failure_is_debug_only(
     patch_async_redis(monkeypatch, BrokenRedis)
 
     with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
-        await host_daemon._publish_turn_progress_heartbeat(
+        published = await host_daemon._publish_turn_progress_heartbeat(
             EventBus.from_settings(), "runner-a", set(), DatabaseWaits()
         )
 
+    assert published is False
     records = [record for record in caplog.records if record.name == host_daemon._log.name]
     assert len(records) == 1
-    assert records[0].levelno == logging.DEBUG
+    assert records[0].levelno == logging.WARNING
     assert records[0].exc_info is not None
 
 

@@ -18,7 +18,6 @@ import logging
 import signal
 import sys
 from collections.abc import Callable
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -284,8 +283,12 @@ async def run() -> None:
         if notice_task is not None:
             notice_task.cancel()
         for a in adapters:
-            with suppress(Exception):
+            try:
                 await a.stop()
+            except Exception:
+                _log.warning(
+                    "[im_bridge] adapter %s failed to stop cleanly", type(a).__name__, exc_info=True
+                )
         await stop_health_server(health)
         db_pool.close()
         _remove_pidfile()
