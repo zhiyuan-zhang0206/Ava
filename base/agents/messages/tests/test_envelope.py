@@ -343,7 +343,7 @@ class TestWeekdayFlag:
 
     def test_no_timezone_suffix_either_way(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No `%Z` in either shape — the timezone is declared once, in the
-        standing context note (`agent.graph.context_notes.timezone_note`),
+        standing context note (`agent.graph.prompt.context_notes.timezone_note`),
         not repeated on every stamp. `settings.general.timezone` is
         cluster-pinned, so the suffix was a constant, and an ambiguous one
         (`PDT` vs `PST` for one unchanged setting; `CST` for two zones)."""

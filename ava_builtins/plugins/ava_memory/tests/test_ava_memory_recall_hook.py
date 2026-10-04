@@ -17,7 +17,7 @@ from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph.memory_recall import PassiveRecall
+from agent.graph.recall.memory_recall import PassiveRecall
 from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import build_agent_state
 from ava import gateway_client

@@ -15,7 +15,7 @@ does not have. The write discipline both stores share is a system-prompt
 section (`plugin.py`), not a note: it is fixed text, where an index is not.
 
 This module only defines the builders; `plugin.py` registers them into the
-framework's ordered context-note registry (`agent.graph.context_notes`), which
+framework's ordered context-note registry (`agent.graph.prompt.context_notes`), which
 `init_context` lays down whenever a window is established. Registration lives
 there because `plugin.py` is re-executed on every plugin (re)load, while an
 import of this module hits the sys.modules cache — decorators here would not

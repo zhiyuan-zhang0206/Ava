@@ -14,7 +14,7 @@
 > | `ava/files.py` — `ava.files.read` | `file.read:<path>` |
 > | `ava/web.py` — `web.search` results, `web.fetch` answers | `web.search` / `web.fetch` |
 > | `ava/mcps/__init__.py` — **every MCP tool return** | `mcps.<server>.<tool>` |
-> | `agent/graph/_chat_inbound.py` — **inbound chat** | `inbound.chat:<source>` |
+> | `agent/graph/claim/_chat_inbound.py` — **inbound chat** | `inbound.chat:<source>` |
 | `agent/graph/claim/_dispatch.py` — **inbound system notes** (peer-authored task notes) | `inbound.system_note:<source>` |
 > | `ava_builtins/plugins/ava_code/plugin.py` — the `AGENTS.md` auto-injection | `context-file:<path>` |
 >

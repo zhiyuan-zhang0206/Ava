@@ -58,10 +58,10 @@ multi-tool agent (e.g. Claude Code's per-tool `##` catalog): Ava has one tool
 guidance is the *spine* (base + SDK overview + plugin sections), folded into
 Capabilities rather than standing as its own section.
 
-- **Core base prompt** — `agent/graph/_base_prompt.py:_BASE_SYSTEM_PROMPT`: the
+- **Core base prompt** — `agent/graph/prompt/_base_prompt.py:_BASE_SYSTEM_PROMPT`: the
   code-as-action contract (`execute_code`, speak via text content, empty
   tool-call = idle) plus the `help(ava)` SDK overview.
-- **Core expanded SDK reference** — `agent/graph/system_prompt.py:_sdk_expand_section`,
+- **Core expanded SDK reference** — `agent/graph/prompt/system_prompt.py:_sdk_expand_section`,
   rendering `effective_sdk_expand()`: plugin registrations
   (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. ava_code's `cwd`) first, then
   `settings.sdk_expand_in_system_prompt` (env `AVA_SDK_EXPAND`, default `*`),
@@ -81,18 +81,18 @@ Capabilities rather than standing as its own section.
   `ava_code` plugin's `_coding_tools_section` consults the same effective view
   and skips a module already expanded (exact path match) — with the default `*`
   every framework module is expanded, so it stays preamble-only.
-- **Core prefer-SDK nudge** — `agent/graph/system_prompt.py:_prefer_sdk_section`,
+- **Core prefer-SDK nudge** — `agent/graph/prompt/system_prompt.py:_prefer_sdk_section`,
   on by default via `settings.prompt_prefer_sdk_enabled` (env
   `AVA_SYSTEM_PROMPT_PREFER_SDK`): one line steering the agent to `ava.*` tools over
   plain-Python / raw-shell equivalents. Deliberately example-free — specific
   misuse patterns get addressed if logs show them.
-- **Core CodeAct batching** — `agent/graph/_codeact.py:_codeact_section` (registered by `system_prompt.py`),
+- **Core CodeAct batching** — `agent/graph/prompt/_codeact.py:_codeact_section` (registered by `system_prompt.py`),
   **off by default** via `settings.agent.prompt_codeact_enabled` (env
   `AVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
   call — batch file reads, fold branches into if-else logic — because each
   call is one LLM API round-trip. Opt-in (user ruling 2026-08-26): unlike the
   on-by-default behavioral sections, an unconfigured cluster never pays for it.
-- **Core capabilities index** — `agent/graph/capabilities.py:capabilities_section`:
+- **Core capabilities index** — `agent/graph/prompt/capabilities.py:capabilities_section`:
   always-on name + one-line description of the capabilities the agent already
   has, under one `# Capabilities` heading — the prompt's ONE skill index.
   Two halves: injected skills (`_skill_index_lines`, keyed by
@@ -110,7 +110,7 @@ Capabilities rather than standing as its own section.
   can explicitly disable only that latter instruction for rollback. The
   delegation check still makes consultation mandatory as its first step and
   drops that step when this section renders nothing.
-- **Core communication style** — `agent/graph/system_prompt.py:_communication_style_section`,
+- **Core communication style** — `agent/graph/prompt/system_prompt.py:_communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `AVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
   while it works — `oriented` interleaves brief progress updates in its text content,
@@ -118,7 +118,7 @@ Capabilities rather than standing as its own section.
   end, `off` omits the section from the system prompt entirely. General-agent behavior
   (see the section below for the deliberate restraint vs Codex).
 - **`ava_memory` behavior** — `ava_builtins/plugins/ava_memory/plugin.py:memory_discipline_section()`
-  (declared in the plugin's `contribute()`; the old `agent/graph/system_prompt.py:_memory_behavior_section`
+  (declared in the plugin's `contribute()`; the old `agent/graph/prompt/system_prompt.py:_memory_behavior_section`
   moved out of core with the plugin split),
   on by default via `settings.agent.prompt_memory_behavior_enabled` (env
   `AVA_SYSTEM_PROMPT_MEMORY`): the *when / what to remember* behavioral layer over the
@@ -127,11 +127,11 @@ Capabilities rather than standing as its own section.
   (read/write/search/commit) stays in the `ava.memory` SDK docstrings — this
   section does not repeat it. Auto-suppressed when both memory stores are
   switched off, so bench agents drop it without a bench-specific toggle.
-- **Core output shape** — `agent/graph/system_prompt.py:_output_conciseness_section`,
+- **Core output shape** — `agent/graph/prompt/system_prompt.py:_output_conciseness_section`,
   on by default via `settings.prompt_output_conciseness_enabled` (env
   `AVA_SYSTEM_PROMPT_CONCISENESS`): reply matched to the task, answer-first, reference
   paths/lines instead of pasting output back. General-agent behavior.
-- **Core UI delivery** — `agent/graph/system_prompt.py:_ui_delivery_section`,
+- **Core UI delivery** — `agent/graph/prompt/system_prompt.py:_ui_delivery_section`,
   on by default via `settings.prompt_ui_delivery_enabled` (env
   `AVA_SYSTEM_PROMPT_UI_DELIVERY`): content for the user goes through the UI,
   never as a bare path to a Markdown file; files keep their role as persistence
@@ -139,21 +139,21 @@ Capabilities rather than standing as its own section.
   API list (signatures drift; the SDK overview / expanded reference carry the
   concrete entry points). Complements output shape (how the *text* is written)
   with *where the deliverable lands*.
-- **Core future signals** — `agent/graph/system_prompt.py:_invest_in_the_future_section`,
+- **Core future signals** — `agent/graph/prompt/system_prompt.py:_invest_in_the_future_section`,
   on by default via `settings.agent.prompt_invest_future_enabled` (env
   `AVA_SYSTEM_PROMPT_INVEST_FUTURE`): the framework's one cross-domain
   future-signal rule. It requires the smallest closing action for a signal that
   could improve later work and preserves worthwhile follow-ups at task close.
-- **Core reporting honesty** — `agent/graph/system_prompt.py:_outcome_reporting_section`,
+- **Core reporting honesty** — `agent/graph/prompt/system_prompt.py:_outcome_reporting_section`,
   on by default via `settings.prompt_outcome_reporting_enabled` (env
   `AVA_SYSTEM_PROMPT_REPORTING`): state outcomes as they are, don't round a partial
   result up to success.
-- **Core action caution** — `agent/graph/system_prompt.py:_action_caution_section`,
+- **Core action caution** — `agent/graph/prompt/system_prompt.py:_action_caution_section`,
   on by default via `settings.prompt_action_caution_enabled` (env
   `AVA_SYSTEM_PROMPT_CAUTION`): confirm before hard-to-reverse / outward-facing actions
   (one approval ≠ standing license), and treat sending to an external service as
   publishing. Combines the irreversible-action and external-send-privacy gaps.
-- **Core align-before-action** — `agent/graph/system_prompt.py:_align_before_action_section`,
+- **Core align-before-action** — `agent/graph/prompt/system_prompt.py:_align_before_action_section`,
   on by default via `settings.prompt_align_before_action_enabled` (env
   `AVA_SYSTEM_PROMPT_ALIGN`): before large / ambiguous / hard-to-redo work, and right
   after exploring or planning, confirm scope + approach with the user instead of

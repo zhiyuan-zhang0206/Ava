@@ -324,7 +324,7 @@ def preloaded_skills_note(slices: AgentSlices) -> HumanMessage | None:
     skills (its own `skills_to_expand_at_start`); the fork grafts the new
     agent's own set after `_handle_fork` strips the inherited note — exactly
     one copy, owned by the agent reading it (issue #1320)."""
-    from agent.graph.capabilities import resolve_prompt_skills
+    from agent.graph.prompt.capabilities import resolve_prompt_skills
 
     skills = resolve_prompt_skills(
         slices.prompt.skills_to_expand_at_start,
@@ -398,7 +398,7 @@ def fork_tail_skills_note(names: list[str], sdk_disable: Sequence[str]) -> Human
     """
     if not names:
         return None
-    from agent.graph.capabilities import resolve_prompt_skills
+    from agent.graph.prompt.capabilities import resolve_prompt_skills
 
     skills = resolve_prompt_skills(names, sdk_disable, config_field="fork_tail_skills")
     rendered = _render_skill_bodies(skills, label="fork-tail-skills")

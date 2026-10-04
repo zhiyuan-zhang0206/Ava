@@ -1,7 +1,7 @@
 # pyright: reportOptionalSubscript=false
 """mutmut gap-fix unit tests — locks down the actionable cluster in `agent/graph/llm/node.py`:
 
-1. `_capture_ava_overview` (3 mutations, now in `agent/graph/_base_prompt.py`) — a module-load
+1. `_capture_ava_overview` (3 mutations, now in `agent/graph/prompt/_base_prompt.py`) — a module-load
    helper with no dedicated unit test; directly import + call, verify that stdout capture
    actually captures the output of `ava.help(ava)`.
 2. Cancel-detection boundary (`_llm_node_impl` mutmut_44) — `cancel_task in done`
@@ -29,10 +29,10 @@ from langgraph.runtime import ExecutionInfo, Runtime
 from langgraph.types import Command
 
 from agent.graph import llm_node
-from agent.graph._base_prompt import _capture_ava_overview, _get_ava_overview
 from agent.graph.llm._retry import Attempt, retry_wait
 from agent.graph.llm.node import llm_attempt
 from agent.graph.llm_errors import LlmLedger
+from agent.graph.prompt._base_prompt import _capture_ava_overview, _get_ava_overview
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext

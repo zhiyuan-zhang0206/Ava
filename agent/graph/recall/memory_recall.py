@@ -31,7 +31,7 @@ from typing import Any, NamedTuple, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
-from agent.graph._memory_filter import Candidate, filter_candidates
+from agent.graph.recall._memory_filter import Candidate, filter_candidates
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
 from base.agents import GatewayUnavailable, IndexerUnavailable

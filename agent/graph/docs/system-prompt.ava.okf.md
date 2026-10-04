@@ -13,8 +13,8 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 ## Core Mechanism
 
-### build_system_prompt (`agent/graph/system_prompt.py:build_system_prompt`)
-- The base is the `_BASE_SYSTEM_PROMPT` constant in `agent/graph/_base_prompt.py` (the `{_AVA_OVERVIEW}` placeholder injects the SDK overview)—**it never reads `AGENTS.md` at runtime** (that file is for coding agents)
+### build_system_prompt (`agent/graph/prompt/system_prompt.py:build_system_prompt`)
+- The base is the `_BASE_SYSTEM_PROMPT` constant in `agent/graph/prompt/_base_prompt.py` (the `{_AVA_OVERVIEW}` placeholder injects the SDK overview)—**it never reads `AGENTS.md` at runtime**
 - Appends SDK documentation (the output of `ava.help(ava)`)
 - Runs `FRAMEWORK_SECTIONS` in fixed order, then the registry's plugin sections
 - Injects the skill and MCP server index — **once**. `# Capabilities` is the sole index; the expanded SDK reference's `*` skips `ava.skills` / `ava.mcps` (`_CAPABILITY_SURFACES`) so it renders call contracts only, never a second capability listing
@@ -29,7 +29,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 **Conduct group**:
 - `_prefer_sdk_section` — "Prefer SDK"
-- `_codeact_section` (in `agent/graph/_codeact.py`, registered by `system_prompt`) — "CodeAct — batch work into fewer calls": pack several operations into one `execute_code` call (batch file reads, fold branches into if-else logic) because each call is one LLM API round-trip. Toggle `AVA_SYSTEM_PROMPT_CODEACT` (default off — opt-in, unlike the on-by-default sections).
+- `_codeact_section` (in `agent/graph/prompt/_codeact.py`, registered by `system_prompt`) — "CodeAct — batch work into fewer calls": pack several operations into one `execute_code` call (batch file reads, fold branches into if-else logic) because each call is one LLM API round-trip. Toggle `AVA_SYSTEM_PROMPT_CODEACT` (default off — opt-in, unlike the on-by-default sections).
 - `_keep_it_simple_section` — "Keep It Simple"
 - `_communication_style_section` — How verbose to be while working; `AVA_AGENT_COMMUNICATION_STYLE` selects `off` (default; section omitted entirely) / `oriented` (short progress reports while working) / `concise` (only speak at milestones) / `silent` (work silently, provide a complete summary at the end)
 - `_output_conciseness_section` — Output conciseness
@@ -49,7 +49,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - Header prose is assembled from whichever halves rendered, so an agent with MCP servers but no skill index is never pointed at a skill listing it does not have
 - Each index line is flattened to one line and truncated (`_one_line`): a description is free-form frontmatter from whoever wrote the SKILL.md, including a drop-in under `~/.ava/skills/`
 
-### Keeping the index from going stale (`agent/graph/capabilities.py:index_drift` + `agent/hooks/capabilities.py`)
+### Keeping the index from going stale (`agent/graph/prompt/capabilities.py:index_drift` + `agent/hooks/capabilities.py`)
 - The rendered index is a **snapshot**, built once per window; `ava.skills.names()` under it is an **uncached filesystem scan**. Nothing reconciles them by itself, so a skill installed mid-window would be reachable by name and absent from the listing the delegation check orders the agent to match every task against — until a compaction happened to rebuild the prompt
 - `init_context` records the membership it rendered into `state.capabilities.indexed` (see [[../../docs/state.ava.okf.md]]). Snapshot taken **before** the render, so a skill landing between the two is named once too many rather than dropped
 - A framework-owned `before_llm` hook diffs the live membership against that record each turn and names whatever appeared in one `new_skills` system note, in the index's own line shape; the snapshot advances with the note, so one install produces one note no matter who installed it. Drift is the trigger, not a timer
@@ -62,10 +62,10 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 ## Entry Points
 
-- `agent/graph/system_prompt.py:build_system_prompt(extensions, slices)` — Build the complete prompt
+- `agent/graph/prompt/system_prompt.py:build_system_prompt(extensions, slices)` — Build the complete prompt
 - `base/packages/plugins/extensions.py:PluginContributions` — what a plugin's `contribute()` declares
-- `agent/graph/capabilities.py:capabilities_section(slices)` / `resolve_prompt_skills()` — the `# Capabilities` index and the name→skill resolver it shares with the preloaded-skills note
-- `agent/graph/capabilities.py:indexed_skills(prompt)` / `index_drift(known, prompt)` — what the index covers right now, and the diff against a snapshot of it
+- `agent/graph/prompt/capabilities.py:capabilities_section(slices)` / `resolve_prompt_skills()` — the `# Capabilities` index and the name→skill resolver it shares with the preloaded-skills note
+- `agent/graph/prompt/capabilities.py:indexed_skills(prompt)` / `index_drift(known, prompt)` — what the index covers right now, and the diff against a snapshot of it
 - `agent/hooks/capabilities.py:_newly_installed_skills` — the `before_llm` hook that names skills installed since the index was built
 - `agent/graph/_init_context.py:init_context_node()` — caller of `build_system_prompt()`, and where the snapshot is recorded
 

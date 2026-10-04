@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from agent.graph.context_notes import FRAMEWORK_NOTES, context_notes
+from agent.graph.prompt.context_notes import FRAMEWORK_NOTES, context_notes
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 

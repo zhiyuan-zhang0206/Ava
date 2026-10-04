@@ -174,7 +174,7 @@ def workspace_section_hint(config: HistoryDump) -> str:
     the feature is off, so the section never points at a folder that stays
     empty.
 
-    Lives beside the feature (not in ``agent/graph/system_prompt.py``) so the
+    Lives beside the feature (not in ``agent/graph/prompt/system_prompt.py``) so the
     folder name comes from ``_DUMP_DIRNAME`` and the gate from the same
     settings read as the dump itself; that module also sits at its line-budget
     ceiling, so the call site is one line.

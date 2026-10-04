@@ -12,7 +12,7 @@ shared memory pool at ava.memory.PATH):
    inbound, searches the pool semantically on the recent conversation and
    injects the top matching note references so relevant durable notes surface
    without the agent asking. The recall engine lives in
-   agent/graph/memory_recall.py; this plugin is the wiring plus its firing
+   agent/graph/recall/memory_recall.py; this plugin is the wiring plus its firing
    gates.
 
 3. **Memory stewardship + daily consolidation** (bundled skills) — the pool is
@@ -38,7 +38,7 @@ notes relevant to what is being said without having to call ava.memory.search
 itself.
 
 The heavy lifting (query build, search, dedup vs already-injected paths, note
-rendering) lives in agent/graph/memory_recall.py; this plugin is just the
+rendering) lives in agent/graph/recall/memory_recall.py; this plugin is just the
 before_llm wiring plus its firing gates.
 
 Firing gates:

@@ -785,7 +785,7 @@ def test_compact_contract_lives_in_docstring_and_reaches_prompt(_ava_compact_loa
     template: the agent reads it in its own SDK, and the forced-compact request
     carries it in its own prompt. Pin both halves so the contract cannot be
     gutted or fall out of the prompt unnoticed."""
-    from agent.graph.system_prompt import build_system_prompt
+    from agent.graph.prompt.system_prompt import build_system_prompt
     from ava.self import compact
 
     contract = compact.__doc__
