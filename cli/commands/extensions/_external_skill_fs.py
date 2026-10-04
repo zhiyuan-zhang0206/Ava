@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any
 
 _MARKER_NAME = ".ava-managed.json"
-_POSIX = os.name != "nt"
+
+
+def _is_posix() -> bool:
+    return os.name != "nt"
 
 
 def _platform_mode(mode: int, *, is_dir: bool) -> int:
@@ -27,7 +30,7 @@ def _platform_mode(mode: int, *, is_dir: bool) -> int:
     pipeline's canonical private modes (0o600 / 0o700).  POSIX is authoritative
     and passed through unchanged.
     """
-    if _POSIX:
+    if _is_posix():
         return mode
     return 0o700 if is_dir else 0o600
 
@@ -295,7 +298,7 @@ def _validate_manifest_subset(
         allowed_modes = {expected_mode, cleanup_mode}
         if item["kind"] == "directory":
             allowed_modes.add(stat.S_IRWXU)
-        if _POSIX and int(item["mode"]) not in allowed_modes:
+        if _is_posix() and int(item["mode"]) not in allowed_modes:
             raise _ClientConflictError("transaction residue metadata was modified")
         if item["kind"] == "file" and item["sha256"] != wanted["sha256"]:
             raise _ClientConflictError("transaction residue content was modified")
@@ -304,7 +307,7 @@ def _validate_manifest_subset(
 def _verify_cleanup_file(path: Path, expected: dict[str, Any]) -> None:
     data, mode = _read_regular(path, source=False)
     if hashlib.sha256(data).hexdigest() != expected["sha256"] or (
-        _POSIX and mode != int(expected["mode"])
+        _is_posix() and mode != int(expected["mode"])
     ):
         raise _ClientConflictError("transaction residue file changed during cleanup")
 

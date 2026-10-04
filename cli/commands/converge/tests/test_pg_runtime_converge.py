@@ -47,7 +47,10 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     def no_path_tool(_name: str) -> None:
         return None
 
-    monkeypatch.setattr(pg_runtime.get_backend(), "pg_binary_path", installed_tool)
+    def as_method(_self: object, name: str) -> Path:
+        return installed_tool(name)
+
+    monkeypatch.setattr(type(pg_runtime.get_backend()), "pg_binary_path", as_method)
     monkeypatch.setattr(pg_runtime.shutil, "which", no_path_tool)
 
     def forbid_download() -> Path:

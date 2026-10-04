@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "cli/main.py::import-time-call:base.native_process.os_platform.ensure_line_buffered_stdio": 1,
     "cli/python_install.py::import-time-call:sys.path.insert": 1
   }
 }
