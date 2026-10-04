@@ -60,8 +60,6 @@ _PROBE_TIMEOUT_S = 5.0
 # borrows a connection from the client pool — a different socket from the
 # pubsub one, so it proved nothing about self._pubsub's health.
 
-_KEEPALIVE_OPTIONS: dict[int, int] = keepalive_options()
-
 
 class WakeState(StrEnum):
     """Whether the listener can currently provide instant pub/sub wake-ups."""
@@ -189,7 +187,7 @@ class RedisInboundListener:
             socket_timeout=None,
             health_check_interval=_HEALTH_CHECK_INTERVAL_S,
             socket_keepalive=True,
-            socket_keepalive_options=_KEEPALIVE_OPTIONS,
+            socket_keepalive_options=keepalive_options(),
             # Dead-transport detection: see `_TransportAwareAsyncConnection`.
             # Without it, a pubsub connection whose asyncio transport already
             # fired connection_lost (network outage) still reports

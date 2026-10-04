@@ -41,12 +41,6 @@ from base.native_process.os_platform import (
 # `set_defaults(func=...)` bindings the builders made against their own module globals.
 from cli.parsers import build_parser as _build_parser
 
-# Line-buffer stdout so a long command piped into `tee` (every detached rollout /
-# updater session) streams its own progress in real time instead of block-buffering
-# it to the end of the log, out of order against its children's unbuffered output.
-ensure_line_buffered_stdio()
-
-
 # The verbs that bring this unit up (every in-process `cmd_start`) open the
 # loguru sinks a service process has, under these names. Importing `base.log`
 # drops loguru's default handler, so without them every record the start path
@@ -183,6 +177,10 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Line-buffer stdout so a long command piped into `tee` (every detached rollout /
+    # updater session) streams its own progress in real time instead of block-buffering
+    # it to the end of the log, out of order against its children's unbuffered output.
+    ensure_line_buffered_stdio()
     # The operator CLI is exempt from the database code-version gate: `ava stop`
     # writes to drain agents, so a host left behind by an update must still be able
     # to run it. Service processes are launched with `python -m <module>`, never
