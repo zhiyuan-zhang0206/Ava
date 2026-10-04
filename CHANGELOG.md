@@ -20,6 +20,11 @@ and the matching GitHub Releases.
   reconnect, the first Telegram push failure and a page_server relaunch log
   WARNING without a traceback, and `NOT REVIVABLE` reports ERROR only after
   `terminal_escalate_rounds` (default 2) consecutive terminal rounds.
+- Host-stall companions stop paging: the interrupt watcher's abandoned-task
+  report and psycopg's `query cancellation failed` line log at INFO (the
+  demotion is event-side only; the file sinks keep psycopg's own level), and a
+  browser-UA gateway 401 is DEBUG — post-rollout tab retries, with the
+  `auth401_rejected` aggregate still counting every rejection.
 - Delivery watchdog stall alerts flow through the `delivery_stalled` event
   alone (the log line is INFO) and hold while a deploy window is open and
   through the settle window after it closes or a resume

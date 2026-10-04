@@ -319,6 +319,30 @@ def test_auth_middleware_logs_sse_poll_401_at_debug(
     assert "ua=stale-browser" in records[0].getMessage()
 
 
+def test_auth_middleware_logs_browser_ua_401_at_debug(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A console tab whose session died in a rollout retries every open request
+    at once; the 401 is visible in the UI and still counted in the aggregate,
+    but never WARNING-throttled per path (2026-10-03 triage #7)."""
+    _enable_cluster_auth(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
+    browser_ua = (
+        b"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        b"(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+    )
+
+    response = _unauthorized_auth_response(_request(headers=[(b"user-agent", browser_ua)]))
+    _assert_envelope(response, status=401, code="authentication_required", retryable=False)
+    records = _auth401_records(caplog)
+    assert [record.levelno for record in records] == [logging.DEBUG]
+    assert "path=/api/agents" in records[0].getMessage()
+    assert "client=127.0.0.1" in records[0].getMessage()
+    assert "Mozilla/5.0" in records[0].getMessage()
+    assert rejection_log._auth401_total == 1  # the aggregate still counts it
+    assert rejection_log._auth401_last_warn == {}  # and it burns no WARNING budget
+
+
 def test_auth_middleware_warns_on_first_non_stream_401(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
