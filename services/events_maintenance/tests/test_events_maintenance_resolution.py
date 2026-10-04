@@ -456,3 +456,81 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
     assert emitted[0][2]["process"] == ""
     assert emitted[0][2]["triggered_by_count"] == 6
+
+
+def test_dismissal_matching_ignores_the_emission_category() -> None:
+    """A row stored from an event's log-era life cancels the same class under
+    its telemetry life, and vice versa (the 2026-08 log->telemetry
+    reclassification left whole rows inert before this; task #4964)."""
+
+    telemetry = _event_class(category="telemetry", event_name="sse_drop")
+    log_row = _event_class(category="log", event_name="sse_drop")
+
+    splits = resolution.level_splits({telemetry: 5}, {log_row})
+    assert splits["warning"] == resolution.LevelSplit(total=5, dismissed=5, net=0)
+
+    splits = resolution.level_splits({log_row: 5}, {telemetry})
+    assert splits["warning"] == resolution.LevelSplit(total=5, dismissed=5, net=0)
+
+
+def test_category_agnostic_matching_keeps_the_process_rules() -> None:
+    """Dropping category does not loosen the process scope: an exact row
+    cancels only its process; a wildcard row cancels every process."""
+
+    exact = _event_class(category="log", process="agent_host")
+    same_process = _event_class(category="telemetry", process="agent_host")
+    other_process = _event_class(category="telemetry", process="im_bridge")
+    counts = {same_process: 3, other_process: 3}
+
+    scoped = resolution.level_splits(counts, {exact})
+    assert scoped["warning"] == resolution.LevelSplit(total=6, dismissed=3, net=3)
+
+    wildcard = resolution.level_splits(counts, {_event_class(category="log")})
+    assert wildcard["warning"] == resolution.LevelSplit(total=6, dismissed=6, net=0)
+
+
+def test_burst_valve_watches_the_base_across_the_category_split(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wildcard row stored from log-era life reopens on the telemetry burst
+    of its base (task #4964)."""
+
+    _insert_dismissal(db_conn, _event_class(category="log", event_name="sse_drop"))
+    counts = {_event_class(category="telemetry", event_name="sse_drop"): 6}
+
+    monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
+    emitted = _capture_events(monkeypatch)
+
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(events_resolution_burst_threshold=5),
+    )
+
+    assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    assert emitted[0][1] == "warning_reopened"
+    assert emitted[0][2]["triggered_by_count"] == 6
+
+
+def test_exact_burst_valve_watches_its_process_across_the_category_split(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exact row stored from log-era life reopens on its own process's
+    telemetry burst — and not on another process's (task #4964)."""
+
+    _insert_dismissal(db_conn, _event_class(category="log", process="agent_host"))
+    _insert_dismissal(db_conn, _event_class(category="log", process="im_bridge"))
+    counts = {
+        _event_class(category="telemetry", process="agent_host"): 6,
+        _event_class(category="telemetry", process="im_bridge"): 2,
+    }
+
+    monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
+    emitted = _capture_events(monkeypatch)
+
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(events_resolution_burst_threshold=5),
+    )
+
+    assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    assert emitted[0][2]["process"] == "agent_host"
