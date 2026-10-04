@@ -149,6 +149,17 @@ logger.remove()
 # with the `-` sentinel, throwing away the attribution the turn contextvar knows.
 logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
 
+# The one host-stall companion whose EVENT level is rewritten: psycopg logs
+# its own `query cancellation failed: ...` WARNING when a `_try_cancel`
+# outlives its timeout — the query cancel rides the same unresponsive
+# connection the stall wedged, so it lands beside the interrupt watcher's
+# abandon report (2026-10-03 triage #13: ~16 such pairs in 24h, not a bug).
+# The emitted event drops to info; every file sink keeps psycopg's true
+# WARNING for forensics. Matched by message prefix: by derivation time the
+# record names neither the library nor a category, and the prefix is the one
+# stable handle.
+_COMPANION_MSG_PREFIXES = ("query cancellation failed",)
+
 
 def _message_to_params(
     message: loguru.Message,
@@ -229,7 +240,11 @@ def _message_to_params(
         )
         extra["exception_type"] = exc.type.__name__
         extra["exception_value"] = str(exc.value)
-    return (record["time"], agent_id, record["level"].name, event, extra, source)
+    level = record["level"].name
+    if level == "WARNING" and record["message"].startswith(_COMPANION_MSG_PREFIXES):
+        # A host-stall companion, not its own signal (see the constant above).
+        level = "INFO"
+    return (record["time"], agent_id, level, event, extra, source)
 
 
 # loguru level name -> unified `events` level (lowercase; TRACE/SUCCESS collapse

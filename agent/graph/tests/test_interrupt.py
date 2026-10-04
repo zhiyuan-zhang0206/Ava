@@ -353,13 +353,18 @@ class TestWatcherExitBounded:
             )  # let the watcher actually start (an unstarted task cancels instantly)
         elapsed = asyncio.get_running_loop().time() - t0
         assert elapsed < 2.0, f"exit took {elapsed:.2f}s — the bounded abandon did not bound"
-        warnings = [r["message"] for r in loguru_records if "abandoning" in r["message"]]
-        assert warnings
-        # The warning must name WHERE the orphan is wedged: the await chain
+        abandons = [r for r in loguru_records if "abandoning" in r["message"]]
+        assert abandons
+        # INFO: the abandonment is a host-stall companion, not its own signal
+        # (2026-10-03 triage #13).
+        assert abandons[0]["level"].name == "INFO"  # pyright: ignore[reportUnknownMemberType]
+        # The report must name WHERE the orphan is wedged: the await chain
         # walks down to this test's _wedged coroutine (suspended in
         # release.wait() during its cancellation cleanup).
-        assert "wedged await chain" in warnings[0]
-        assert "_wedged" in warnings[0], f"await chain missing from warning:\n{warnings[0]}"
+        assert "wedged await chain" in abandons[0]["message"]
+        assert "_wedged" in abandons[0]["message"], (
+            f"await chain missing from the abandon report:\n{abandons[0]['message']}"
+        )
         release.set()  # let the orphan unwind so the loop closes clean
         await asyncio.sleep(0.01)
         # The orphan's eventual fate is logged with its delay since abandonment.

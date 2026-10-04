@@ -159,7 +159,8 @@ async def subscribe_interrupt(
     Yields an `asyncio.Event` the node races its work against. On body exit
     (completion / exception / cancel) the watcher task is cancelled; if it does
     not unwind within `_WATCHER_EXIT_TIMEOUT_S` (wedged on a dead DB call) it
-    is abandoned with a warning instead of stalling the turn.
+    is abandoned at INFO instead of stalling the turn — the abandonment is a
+    companion of the host stall, not its own signal (2026-10-03 triage #13).
 
     `pool` None (container/eval, no inbound queue) -> yields an event that
     never fires; the wrapped action runs uninterruptibly.
@@ -183,11 +184,11 @@ async def subscribe_interrupt(
         done, _ = await asyncio.wait({watcher}, timeout=_WATCHER_EXIT_TIMEOUT_S)
         if not done:
             # Name the exact line the watcher is wedged on — the live incident
-            # burned hours of forensics because the abandon warning could not
+            # burned hours of forensics because the abandon report could not
             # say WHERE the orphan sat (psycopg wait? lock acquire? pool
             # checkout?). The await chain is a pure frame walk, no IO.
             chain = "\n".join(awaiter_chain_lines(watcher)) or "  <no frames captured>"
-            logger.warning(
+            logger.info(
                 "subscribe_interrupt watcher did not unwind {timeout}s after cancel "
                 "(agent_id={agent_id}) — abandoning it; wedged await chain:\n{chain}",
                 timeout=_WATCHER_EXIT_TIMEOUT_S,
