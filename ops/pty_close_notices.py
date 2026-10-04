@@ -17,22 +17,28 @@ listener: the owner's agent host is already down).
 A gateway unit dials Postgres directly (its own pooler is about to stop); a
 runner-only unit has no local data plane and dials its configured URL — the
 gateway's database, the same dial the stop's posture write already made. A
-notice that could not be written (the database became unreachable) is returned
-to the caller, which reports it on stderr; nothing retries it later, because
-the closed session's record is gone by any retry.
+stop's notice that could not be written (the database became unreachable) is
+returned to the caller, which reports it on stderr; the stop neither retries
+nor stages.
 
-Delivery is idempotent per (machine, agent_id, session_id, shell-birth): the
+`write_notices` writes its whole batch in ONE transaction over that one
+connection — every idempotency claim and every inbound commits together or not
+at all — so a long sweep cannot leave a tail half-written. Delivery is
+idempotent per (machine, agent_id, session_id, shell-birth): the
 `api_idempotency` claim row and the inbound insert commit in one transaction,
 so a notice written twice is delivered once.
 
-A pty-sessions service that died uncleanly (a crash, a SIGKILL, a reboot) closes
-its sessions no one, so the next service start sweeps its ledger
+A pty-sessions service that died uncleanly (a crash, a SIGKILL, a reboot)
+closes its sessions to no one, so the next service start sweeps its ledger
 (`services.pty_sessions.ledger.sweep`) and hands the busy sessions it closed to
-a one-shot child, ``python -m ops.pty_close_notices``, which writes their notices
-under `CRASH_REASON` with this module's `main`. The service itself stays
-database-free: the child is profile-less, so it dials as an operator process, and
-a database it cannot reach is logged and nothing else — the service starts and
-serves either way.
+a one-shot child, ``python -m ops.pty_close_notices``, which writes their
+notices under `CRASH_REASON` with this module's `main`. The service itself
+stays database-free; the child is profile-less, so it dials as an operator
+process. A child that never gets to write loses nothing: the service stages
+the batch on disk first (`close_notices_path()`), the child removes the file
+only after every notice of it is written, and whatever stays staged is
+re-sent by the next service start — on the same idempotency keys, so a notice
+that already committed is skipped, never delivered twice.
 """
 
 from __future__ import annotations
@@ -40,20 +46,25 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
 
 import psycopg
+from psycopg import sql
 
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.cluster.machine import machine_name
-from base.db import Database, insert_inbound_message
+from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
 from base.events.live.bus import EventBus
+from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.log.sinks import add_sink
 from base.native_process.ownership import OwnedProcess, shown_name
 from base.sessions.pty import closure
+from base.sessions.pty.paths import close_notices_path
 from ops.cluster_status import AGENT_SHELL_RE
 
 # The reaper's notifiable boundary: only these statuses receive a closure
@@ -113,6 +124,31 @@ class ClosureNotice:
         if self.survivors:
             record["survivors"] = [{"pid": pid, "name": name} for pid, name in self.survivors]
         return record
+
+    @classmethod
+    def from_dict(cls, record: Mapping[str, Any]) -> ClosureNotice:
+        """Rebuild the notice a staged file recorded, exactly as `as_dict` wrote it.
+
+        A staged batch is the notices an earlier attempt tried to write — same
+        key, same text — so the re-send after a failure is a retry of that
+        attempt, not a fresh notice about the same shell.
+        """
+        return cls(
+            machine=str(record["machine"]),
+            agent_id=int(record["agent_id"]),
+            session_id=int(record["session_id"]),
+            name=str(record["name"]),
+            shell_pid=int(record["shell_pid"]),
+            shell_birth=str(record["shell_birth"]),
+            reason=str(record["reason"]),
+            closed_at=str(record["closed_at"]),
+            survivors=tuple(
+                (int(item["pid"]), str(item["name"]))
+                for item in cast("list[dict[str, Any]]", record.get("survivors") or [])
+            ),
+            operation=None if record.get("operation") is None else str(record["operation"]),
+            acquired_at=None if record.get("acquired_at") is None else str(record["acquired_at"]),
+        )
 
 
 def closure_notice(
@@ -190,6 +226,78 @@ def notices_for(
     return [notice for notice in built if notice is not None]
 
 
+# The staged file's shape: a versioned envelope, like the ledger's.
+_PENDING_VERSION = 1
+
+
+def read_pending(path: Path) -> list[ClosureNotice]:
+    """The notices staged for delivery; empty when none wait.
+
+    Missing reads empty. An unreadable or malformed file is logged and reads
+    empty, like the ledger: never a guessed notice, and the file stays in
+    place for the operator (a later stage replaces it with the next batch).
+    """
+    try:
+        raw = json.loads(path.read_text())
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "[pty-close-notices] staged notices {path} unreadable ({exc})", path=path, exc=exc
+        )
+        return []
+    try:
+        records = cast("list[dict[str, Any]]", raw["notices"])
+        return [ClosureNotice.from_dict(record) for record in records]
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning(
+            "[pty-close-notices] staged notices {path} malformed ({exc})", path=path, exc=exc
+        )
+        return []
+
+
+def write_pending(path: Path, notices: Sequence[ClosureNotice]) -> None:
+    """Publish the waiting notices through one atomic replace (owner-only)."""
+    payload = {"version": _PENDING_VERSION, "notices": [notice.as_dict() for notice in notices]}
+    write_text_atomic(path, json.dumps(payload), mode=0o600, sync_file=False)
+
+
+def clear_pending(path: Path) -> None:
+    """Drop the staged file once every notice in it is written."""
+    path.unlink(missing_ok=True)
+
+
+def _one_per_key(notices: Sequence[ClosureNotice]) -> list[ClosureNotice]:
+    """One notice per dedup key, the first occurrence winning.
+
+    Both the staged merge and the database batch need each key spelled once: a
+    batch that carried one key twice would claim it once and then deliver every
+    copy that finds itself owned — two inbounds for one shell birth.
+    """
+    unique: list[ClosureNotice] = []
+    seen: set[str] = set()
+    for notice in notices:
+        if notice.dedup_key() not in seen:
+            seen.add(notice.dedup_key())
+            unique.append(notice)
+    return unique
+
+
+def stage_crash_notices(swept: closure.Outcome, path: Path) -> list[ClosureNotice]:
+    """Stage the sweep's closure notices beside any already waiting; return the whole batch.
+
+    The service calls this before its one-shot child runs: everything the child
+    must write is on disk first, so a child cut short by the time limit — or
+    one a database that answers nothing fails — loses the batch to the next
+    start instead. What was already staged stays first (a re-sent notice keeps
+    its earlier record); an empty batch leaves the file untouched.
+    """
+    staged = _one_per_key((*read_pending(path), *notices_for(swept.closed, reason=CRASH_REASON)))
+    if staged:
+        write_pending(path, staged)
+    return staged
+
+
 def _content(notice: ClosureNotice) -> str:
     text = (
         f"Shell session {notice.name!r} (id {notice.session_id}, agent {notice.agent_id}) "
@@ -213,119 +321,181 @@ def _content(notice: ClosureNotice) -> str:
     return text
 
 
-def _deliver(db: Database, bus: EventBus, conn: psycopg.Connection, notice: ClosureNotice) -> None:
-    """Deliver one notice at most once in one transaction; raise to report it unwritten.
+def _claim_key(notice: ClosureNotice) -> str:
+    """The one spelling of a notice's idempotency key, shared by claim and check."""
+    return f"closure-notice:{notice.machine}:{notice.dedup_key()}"
 
-    The idempotency claim and the inbound insert commit together: a failure
-    rolls both back, a notice written twice finds the claim and skips the
-    insert — never a duplicate inbound (issue #2044 acceptance #4). The
-    transaction is declared writable first: a pooled session can default to
-    read-only (`base.db.transaction.write_transaction`).
+
+def _claim_all(cur: psycopg.Cursor, batch: Sequence[ClosureNotice]) -> set[str]:
+    """Claim every notice's idempotency key in one statement; the keys this attempt owns.
+
+    The whole batch goes in as one multi-row `ON CONFLICT (key) DO NOTHING
+    RETURNING key`: the returned keys are the notices this attempt may deliver;
+    a key an earlier attempt already claimed — delivered then, dropped then, or
+    left behind when that attempt died after committing — stays with it, so a
+    re-sent notice is skipped, never delivered twice (issue #2044 acceptance
+    #4).
     """
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SET TRANSACTION READ WRITE")
-            cur.execute(
-                "INSERT INTO api_idempotency (key, method, path, response_body, op_status, completed_at) "
-                "VALUES (%s, 'ops', 'closure-notice', %s, 'completed', now()) "
-                "ON CONFLICT (key) DO NOTHING RETURNING key",
-                (
-                    f"closure-notice:{notice.machine}:{notice.dedup_key()}",
-                    json.dumps(notice.as_dict(), default=str),
-                ),
-            )
-            owned = cur.fetchone() is not None
-            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (notice.agent_id,))
-            row = cur.fetchone()
-        status = row[0] if row is not None else None
-        if owned and status in _NOTIFIABLE_STATUSES:
-            insert_inbound_message(
-                conn,
-                notice.agent_id,
-                _content(notice),
-                source="system",
-                payload={"closure": notice.as_dict()},
-                provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
-                database=db,
-                bus=bus,
-            )
-        elif owned:
-            logger.info(
-                "[pty-close-notices] notice for agent {} (status {}) dropped — never resurrect",
-                notice.agent_id,
-                status,
-            )
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
-    if owned and status in _NOTIFIABLE_STATUSES:
+    group = sql.SQL("(%s, 'ops', 'closure-notice', %s, 'completed', now())")
+    query = sql.SQL(
+        "INSERT INTO api_idempotency (key, method, path, response_body, op_status, completed_at) "
+        "VALUES {} ON CONFLICT (key) DO NOTHING RETURNING key"
+    ).format(sql.SQL(", ").join([group] * len(batch)))
+    params: list[object] = []
+    for notice in batch:
+        params.append(_claim_key(notice))
+        params.append(json.dumps(notice.as_dict(), default=str))
+    cur.execute(query, params)
+    return {str(row[0]) for row in cur.fetchall()}
+
+
+def _owner_statuses(cur: psycopg.Cursor, batch: Sequence[ClosureNotice]) -> dict[int, str | None]:
+    """Every owner's status in one statement, for the notifiable check."""
+    cur.execute(
+        "SELECT id, status FROM agents_meta WHERE id = ANY(%s)",
+        (sorted({notice.agent_id for notice in batch}),),
+    )
+    return {int(row[0]): row[1] for row in cur.fetchall()}
+
+
+def _write_batch(
+    conn: psycopg.Connection, notices: Sequence[ClosureNotice]
+) -> list[tuple[ClosureNotice, int]]:
+    """Write the batch in the connection's one transaction; return (notice, inbound id) pairs.
+
+    The transaction is declared writable first: a pooled session can default to
+    read-only (`base.db.transaction.write_transaction`). Every claim goes in
+    one statement, every owner's status is read in one, and each owned notice
+    of a notifiable owner gets the canonical inbound insert
+    (`insert_inbound_message_in_transaction`; its lineage event is None for a
+    system-sourced chat, `base.db._lineage_event`). The single commit is the
+    batch's durability point — everything before it rolls back together — and
+    a notice this attempt does not own, or one of a terminated or unknown
+    owner, is skipped: dropped without delivery and without resurrecting
+    anyone.
+    """
+    delivered: list[tuple[ClosureNotice, int]] = []
+    dropped: list[tuple[ClosureNotice, str | None]] = []
+    with conn.cursor() as cur:
+        cur.execute("SET TRANSACTION READ WRITE")
+        owned = _claim_all(cur, notices)
+        statuses = _owner_statuses(cur, notices)
+        for notice in notices:
+            if _claim_key(notice) not in owned:
+                continue
+            status = statuses.get(notice.agent_id)
+            if status in _NOTIFIABLE_STATUSES:
+                inbound_id, _event = insert_inbound_message_in_transaction(
+                    cur,
+                    notice.agent_id,
+                    _content(notice),
+                    source="system",
+                    payload={"closure": notice.as_dict()},
+                    provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
+                )
+                delivered.append((notice, inbound_id))
+            else:
+                dropped.append((notice, status))
+    conn.commit()
+    for notice, status in dropped:
+        logger.info(
+            "[pty-close-notices] notice for agent {} (status {}) dropped — never resurrect",
+            notice.agent_id,
+            status,
+        )
+    for notice, _inbound_id in delivered:
         logger.info(
             "[pty-close-notices] wrote closure notice for agent {} session {}",
             notice.agent_id,
             notice.session_id,
         )
+    return delivered
 
 
 def write_notices(
     db: Database, bus: EventBus, notices: Sequence[ClosureNotice], *, direct: bool
 ) -> list[tuple[ClosureNotice, Exception]]:
-    """Write every notice over one short connection; return those that failed.
+    """Write every notice in one transaction over one short connection; return those that failed.
 
     `direct` dials Postgres itself, bypassing the local pooler (a gateway
     unit, whose pooler stops right after the stop's terminal phase); otherwise
     the configured URL is dialed (a runner-only unit: the gateway's database).
-    No notice, no connection. The connection is closed before this returns, and
-    each notice commits in its own transaction, so one failure does not take
-    the others with it. When the connection cannot be made every notice is
-    returned with that error.
+    No notice, no connection. The batch is one transaction — every claim and
+    every inbound commits together or not at all — so a failed batch leaves
+    nothing behind (no claim to skip the retry, no inbound that landed alone)
+    and returns every notice with the error. The connection is closed before
+    this returns. A notice written twice is delivered once: its key is spelled
+    once per call, and a call that finds the key claimed skips it.
     """
-    if not notices:
+    batch = _one_per_key(notices)
+    if not batch:
         return []
     try:
         conn = db.connect(direct=direct)
     except Exception as exc:
-        return [(notice, exc) for notice in notices]
-    failed: list[tuple[ClosureNotice, Exception]] = []
-    with conn:
-        for notice in notices:
-            try:
-                _deliver(db, bus, conn, notice)
-            except Exception as exc:
-                failed.append((notice, exc))
-    return failed
+        return [(notice, exc) for notice in batch]
+    try:
+        with conn:
+            delivered = _write_batch(conn, batch)
+    except Exception as exc:
+        return [(notice, exc) for notice in batch]
+    for notice, inbound_id in delivered:
+        # The canonical insert's fast path, after the rows are durable; in both
+        # flows that reach here the owner's agent host is down, so the wake
+        # finds no listener — it costs a best-effort publish either way.
+        publish_inbound_wake(db, bus, notice.agent_id, str(inbound_id))
+    return []
 
 
 def main() -> int:
-    """Write the crash notices for the busy sessions a ledger sweep closed.
+    """Write the closure notices the service staged; the one-shot child of the pty-sessions service.
 
-    The one-shot child of the pty-sessions service: reads a `closure.Outcome`
-    wire object from stdin, writes a notice per closed busy session under
-    `CRASH_REASON` over one pooled connection, and exits. Every failure — an
-    unreadable list, no database settings, an unreachable database — is logged
-    and returned as exit 1; nothing retries, because the sweep already cleared
-    the ledger record of these sessions.
+    Reads `run/pty-close-notices.json` (`stage_crash_notices` puts the sweep's
+    notices there before this process starts), writes them all in one
+    transaction over one short connection, and removes the file only once
+    every notice of it is written. A database it cannot reach leaves the file
+    for the next service start to re-send, on the same keys; every failure is
+    logged at ERROR with its count and returned as exit 1.
     """
     try:
-        outcome = closure.Outcome.from_wire(json.load(sys.stdin))
-        notices = notices_for(outcome.closed, reason=CRASH_REASON)
+        path = close_notices_path()
+        notices = read_pending(path)
+    except Exception as exc:
+        logger.error("[pty-close-notices] crash notices not read: {}: {}", type(exc).__name__, exc)
+        return 1
+    if not notices:
+        return 0
+    try:
         failed = write_notices(
             Database.from_settings(), EventBus.from_settings(), notices, direct=False
         )
-    except Exception as exc:
+    except Exception as exc:  # no database settings: a failed child, not a service failure
         logger.error(
-            "[pty-close-notices] crash notices not written: {}: {}", type(exc).__name__, exc
-        )
-        return 1
-    for unwritten, exc in failed:
-        logger.error(
-            "[pty-close-notices] closure notice for session {!r} (agent {}) could not be written: {}: {}",
-            unwritten.name,
-            unwritten.agent_id,
+            "[pty-close-notices] {} closure notice(s) not written: {}: {}",
+            len(notices),
             type(exc).__name__,
             exc,
         )
-    return 1 if failed else 0
+        return 1
+    if failed:
+        logger.error(
+            "[pty-close-notices] {} closure notice(s) not written and stay staged for the "
+            "next pty-sessions start to re-send",
+            len(notices),
+        )
+        return 1
+    try:
+        clear_pending(path)
+    except OSError as exc:
+        logger.error(
+            "[pty-close-notices] {} closure notice(s) written but the staged file could not "
+            "be removed ({exc}); the next start re-sends them — each is idempotent",
+            len(notices),
+            exc=exc,
+        )
+        return 0
+    logger.info("[pty-close-notices] wrote {} closure notice(s)", len(notices))
+    return 0
 
 
 if __name__ == "__main__":

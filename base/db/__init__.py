@@ -299,6 +299,43 @@ def insert_inbound_message(
         The newly inserted inbound id — the caller can use it to
         publish an `inbound_arrived` event for the web UI to show in
         real time (spec §5).
+
+    This is the self-committing shape: the row commits here, then the
+    post-commit steps run. A writer that must keep several inbounds in one
+    transaction calls :func:`insert_inbound_message_in_transaction` instead and
+    owns its own commit and post-commit steps.
+    """
+    with db.cursor() as cur:
+        new_id, prepared_event = insert_inbound_message_in_transaction(
+            cur, agent_id, content, source, kind=kind, payload=payload, provenance=provenance
+        )
+    db.commit()
+    _emit_prepared_event(prepared_event)
+    # Publish to Redis to wake the idle agent. Agents subscribe to
+    # `<prefix>:inbound:{agent_id}` (inbound_channel) via RedisInboundListener.
+    # Fire-and-forget: the agent's defensive SELECT recheck catches inbound
+    # within timeout_s regardless — but a NOPERM is logged, not swallowed.
+    publish_inbound_wake(database, bus, agent_id, str(new_id))
+    return new_id
+
+
+def insert_inbound_message_in_transaction(
+    cur: psycopg.Cursor,
+    agent_id: int,
+    content: str,
+    source: str,
+    kind: str = "chat",
+    payload: dict[str, object] | None = None,
+    provenance: InboundProvenance | None = None,
+) -> tuple[int, Event | None]:
+    """INSERT one inbound in the caller's transaction; no commit, no wake.
+
+    The batch shape of :func:`insert_inbound_message` (the pty closure notices
+    write every notice of a sweep through it, in one transaction). The caller
+    owns the outer transaction and the post-commit steps: it commits before any
+    row is delivered, then emits the returned event — None for the shapes whose
+    lineage has nothing to log — and wakes each owner via
+    :func:`publish_inbound_wake`.
     """
     _reject_reserved_payload(payload)
     from base.agents.messages.caller_identity import caller_payload
@@ -313,47 +350,41 @@ def insert_inbound_message(
     event_type, target_agent_id = _lineage_event(kind, source)
 
     prepared_event = None
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages "
-            "(agent_id, content, kind, source, payload, source_verified_by, "
-            "source_transport, content_hash, source_assertion_match) "
-            "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s) RETURNING id",
-            (
-                agent_id,
-                content,
-                kind,
-                source,
-                json.dumps(payload) if payload else None,
-                source_verified_by,
-                source_transport,
-                content_hash,
-                assertion_match,
-            ),
-        )
-        new_id = fetch_one(cur, "insert inbound message")[0]
-        if event_type is not None:
-            from base.agents.impersonation_manifest import record_central_event
-            from base.telemetry.audit_events import prepare_event_log, record_audit
+    cur.execute(
+        "INSERT INTO inbound_messages "
+        "(agent_id, content, kind, source, payload, source_verified_by, "
+        "source_transport, content_hash, source_assertion_match) "
+        "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s) RETURNING id",
+        (
+            agent_id,
+            content,
+            kind,
+            source,
+            json.dumps(payload) if payload else None,
+            source_verified_by,
+            source_transport,
+            content_hash,
+            assertion_match,
+        ),
+    )
+    new_id = fetch_one(cur, "insert inbound message")[0]
+    if event_type is not None:
+        from base.agents.impersonation_manifest import record_central_event
+        from base.telemetry.audit_events import prepare_event_log, record_audit
 
-            prepared_event = prepare_event_log(
-                event_type=event_type,
-                agent_id=agent_id,
-                source=source,
-                target_agent_id=target_agent_id,
-                payload={"inbound_id": new_id, "content": content}
-                if content
-                else {"inbound_id": new_id},
-            )
-            prepared_event = record_audit(db, record_central_event(db, prepared_event))
-    db.commit()
-    _emit_prepared_event(prepared_event)
-    # Publish to Redis to wake the idle agent. Agents subscribe to
-    # `<prefix>:inbound:{agent_id}` (inbound_channel) via RedisInboundListener.
-    # Fire-and-forget: the agent's defensive SELECT recheck catches inbound
-    # within timeout_s regardless — but a NOPERM is logged, not swallowed.
-    publish_inbound_wake(database, bus, agent_id, str(new_id))
-    return new_id
+        prepared_event = prepare_event_log(
+            event_type=event_type,
+            agent_id=agent_id,
+            source=source,
+            target_agent_id=target_agent_id,
+            payload={"inbound_id": new_id, "content": content}
+            if content
+            else {"inbound_id": new_id},
+        )
+        prepared_event = record_audit(
+            cur.connection, record_central_event(cur.connection, prepared_event)
+        )
+    return new_id, prepared_event
 
 
 def insert_spawn_prompt_in_transaction(

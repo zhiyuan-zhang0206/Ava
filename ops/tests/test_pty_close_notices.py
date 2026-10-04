@@ -1,16 +1,20 @@
-"""Shell-closure notices (issue #2044) — the stop's one short database write.
+"""Shell-closure notices (issue #2044) — the stop's and the crash child's one database write.
 
 `write_notices` delivers one system inbound per closed busy session to a live
 owner, drops it for a terminated or unknown one, delivers a notice written twice
-once, and hands back whatever it could not write instead of dropping it.
+once, and writes its whole batch in one transaction over one connection — a
+batch that fails halfway leaves nothing behind.
+
+The crash child (`python -m ops.pty_close_notices`) writes the notices the
+service staged on disk, removes the file only when every notice of it is
+written, and leaves it for the next start when the database is unreachable.
 """
 
 from __future__ import annotations
 
-import io
 import json
-import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -20,6 +24,7 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
+from base.telemetry import Event
 from ops import pty_close_notices as notices
 
 _WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
@@ -66,6 +71,36 @@ def _inbounds(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str
         return [(str(r[0]), str(r[1]), str(r[2])) for r in cur.fetchall()]
 
 
+def _claims(db_conn: psycopg.Connection) -> list[str]:
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT key FROM api_idempotency ORDER BY key")
+        return [str(row[0]) for row in cur.fetchall()]
+
+
+class _SpyDatabase(Database):
+    """A `Database` that records every explicit dial (a wake's implicit dial excluded)."""
+
+    def __init__(self, source: Database) -> None:
+        super().__init__(source._config)
+        self.dialed: list[tuple[bool, psycopg.Connection]] = []
+
+    def connect(
+        self, *, autocommit: bool = False, direct: bool | None = None, unbounded: bool = False
+    ) -> psycopg.Connection:
+        conn = super().connect(autocommit=autocommit, direct=bool(direct), unbounded=unbounded)
+        if direct is not None:  # the write's own dial names its posture; the wake's does not
+            self.dialed.append((direct, conn))
+        return conn
+
+
+@pytest.fixture
+def staged_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The child's staged file, isolated from the session home."""
+    path = tmp_path / "pty-close-notices.json"
+    monkeypatch.setattr(notices, "close_notices_path", lambda: path)
+    return path
+
+
 def test_closure_notice_rejects_non_agent_shell_names() -> None:
     """Sessions that are not agent-owned shells get no notice."""
     assert (
@@ -108,9 +143,9 @@ def test_a_live_owner_gets_one_system_inbound(
     assert source == "system"
     assert "closed by an operator stop (ava stop)" in content
     assert "id 11" in content and "macmini" in content
-    closure = json.loads(payload)["closure"]
-    assert closure["agent_id"] == aid and closure["session_id"] == 11
-    assert closure["operation"] == "local-pause:macmini:1:uuid"
+    closure_payload = json.loads(payload)["closure"]
+    assert closure_payload["agent_id"] == aid and closure_payload["session_id"] == 11
+    assert closure_payload["operation"] == "local-pause:macmini:1:uuid"
 
 
 def test_a_notice_written_twice_is_delivered_once(
@@ -169,32 +204,94 @@ def test_an_unknown_agent_gets_no_inbound(
         assert row is not None and row[0] == 0
 
 
-def test_a_failed_notice_is_returned_and_rolled_back_whole(
+def test_a_hundred_session_batch_writes_every_claim_and_inbound(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    """A sweep-sized batch — 100 busy sessions, past the incident's ~38 truncation
+    point — writes every notice, its claim and its inbound, in one call."""
+    live, second, dead = (
+        _agent(db_conn, "running"),
+        _agent(db_conn, "running"),
+        _agent(db_conn, "terminated"),
+    )
+    batch = (
+        [
+            _notice(agent_id=live, session_id=1000 + n, birth=f"starttime:{5000 + n}")
+            for n in range(50)
+        ]
+        + [
+            _notice(agent_id=second, session_id=2000 + n, birth=f"starttime:{6000 + n}")
+            for n in range(45)
+        ]
+        + [
+            _notice(agent_id=dead, session_id=3000 + n, birth=f"starttime:{7000 + n}")
+            for n in range(5)
+        ]
+    )
+    spied = _SpyDatabase(database)
+
+    assert notices.write_notices(spied, event_bus, batch, direct=True) == []
+
+    assert [flag for flag, _conn in spied.dialed] == [True]
+    assert len(_inbounds(db_conn, live)) == 50
+    assert len(_inbounds(db_conn, second)) == 45
+    assert _inbounds(db_conn, dead) == []
+    assert len(_claims(db_conn)) == 100
+
+
+def test_a_hundred_session_batch_that_fails_writes_nothing(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """A notice whose insert fails is handed back with its error — never dropped
-    quietly — and leaves no idempotency claim behind, so writing it again
-    delivers it. The notice after it still lands."""
+    """The batch is one transaction: a write that fails on the last notice leaves no
+    inbound and no claim behind — not even for the ninety-nine before it — so the
+    re-send can deliver every notice once."""
     aid = _agent(db_conn, "running")
-    bad, good = _notice(agent_id=aid), _notice(agent_id=aid, birth="starttime:9999")
-    insert = notices.insert_inbound_message
+    batch = [
+        _notice(agent_id=aid, session_id=1000 + n, birth=f"starttime:{5000 + n}")
+        for n in range(100)
+    ]
+    insert = notices.insert_inbound_message_in_transaction
 
-    def fail_once(conn: Any, agent_id: int, content: str, **kwargs: Any) -> int:
-        if kwargs["payload"]["closure"]["shell_birth"] == bad.shell_birth:
+    def fail_on_the_last(
+        cur: psycopg.Cursor, agent_id: int, content: str, **kwargs: Any
+    ) -> tuple[int, Event | None]:
+        if kwargs["payload"]["closure"]["session_id"] == 1099:
             raise RuntimeError("db down")
-        return insert(conn, agent_id, content, **kwargs)
+        return insert(cur, agent_id, content, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(notices, "insert_inbound_message", fail_once)
-        failed = notices.write_notices(database, event_bus, [bad, good], direct=True)
-    assert [(n, str(exc)) for n, exc in failed] == [(bad, "db down")]
-    assert len(_inbounds(db_conn, aid)) == 1
+        patch.setattr(notices, "insert_inbound_message_in_transaction", fail_on_the_last)
+        failed = notices.write_notices(database, event_bus, batch, direct=True)
+    assert [notice for notice, _exc in failed] == batch
+    assert all("db down" in str(exc) for _notice_, exc in failed)
+    assert _inbounds(db_conn, aid) == []
+    assert _claims(db_conn) == []
 
-    assert notices.write_notices(database, event_bus, [bad], direct=True) == []
-    assert len(_inbounds(db_conn, aid)) == 2
+    assert notices.write_notices(database, event_bus, batch, direct=True) == []
+    assert len(_inbounds(db_conn, aid)) == 100
+    assert len(_claims(db_conn)) == 100
+
+
+def test_a_batch_skips_a_key_an_earlier_write_claimed(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    """A batch that contains a notice whose key was already claimed delivers only
+    the new ones: the claim's RETURNING subset is what the batch trusts."""
+    aid = _agent(db_conn, "running")
+    delivered = _notice(agent_id=aid, session_id=11)
+    fresh = _notice(agent_id=aid, session_id=12, birth="starttime:9999")
+    assert notices.write_notices(database, event_bus, [delivered], direct=True) == []
+
+    assert notices.write_notices(database, event_bus, [delivered, fresh], direct=True) == []
+
+    rows = _inbounds(db_conn, aid)
+    assert sorted(json.loads(payload)["closure"]["session_id"] for _c, _s, payload in rows) == [
+        11,
+        12,
+    ]
 
 
 def test_an_unreachable_database_returns_every_notice_with_the_error(
@@ -233,28 +330,12 @@ def test_the_connection_is_the_one_asked_for_and_is_closed(
     one connection is closed when the write returns — nothing stays connected
     into the data plane's shutdown."""
     aid = _agent(db_conn, "running")
-    dialed: list[tuple[bool, psycopg.Connection]] = []
-
-    class _Spy(Database):
-        def connect(
-            self, *, autocommit: bool = False, direct: bool | None = None, unbounded: bool = False
-        ) -> psycopg.Connection:
-            conn = super().connect(autocommit=autocommit, direct=bool(direct), unbounded=unbounded)
-            if direct is not None:  # the write's own dial names its posture; the wake's does not
-                dialed.append((direct, conn))
-            return conn
-
-    spied = _Spy(database._config)
+    spied = _SpyDatabase(database)
 
     assert notices.write_notices(spied, event_bus, [_notice(agent_id=aid)], direct=direct) == []
 
-    assert [flag for flag, _conn in dialed] == [direct]
-    assert dialed[0][1].closed
-
-
-def _swept(*sessions: closure.ClosedSession) -> io.StringIO:
-    """The sweep's outcome as the service writes it to the child's stdin."""
-    return io.StringIO(json.dumps(closure.Outcome(closed=tuple(sessions)).to_wire()))
+    assert [flag for flag, _conn in spied.dialed] == [direct]
+    assert spied.dialed[0][1].closed
 
 
 def _ended(agent_id: int, session_id: int = 11, starttime: int = 4242) -> closure.ClosedSession:
@@ -292,38 +373,104 @@ def test_notices_for_skips_a_session_that_is_not_an_agent_shell() -> None:
     assert [notice.agent_id for notice in built] == [5]
 
 
-def test_the_crash_child_writes_each_swept_session_once_and_never_resurrects(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+def test_a_staged_batch_round_trips_through_the_file(tmp_path: Path) -> None:
+    """The staged file carries the exact notice — `as_dict`/`from_dict` is a lossless
+    round trip, a stop's hold and a survivor list included — so a re-send is the
+    same notice, on the same key, with the same text."""
+    path = tmp_path / "pty-close-notices.json"
+    stopped = _notice(survivors=((4242, "sudo"),))
+
+    notices.write_pending(path, [stopped])
+    (read_back,) = notices.read_pending(path)
+
+    assert read_back == stopped
+    assert read_back.dedup_key() == stopped.dedup_key()
+    assert notices._content(read_back) == notices._content(stopped)
+
+
+def test_staging_merges_beside_what_already_waits(tmp_path: Path) -> None:
+    """A next start stages its sweep beside the batch still waiting: the record
+    already on disk stays (same key, first one wins) and the new session appends."""
+    path = tmp_path / "pty-close-notices.json"
+    (waiting,) = notices.stage_crash_notices(
+        closure.Outcome(closed=(_ended(5, session_id=7),)), path
+    )
+
+    staged = notices.stage_crash_notices(
+        closure.Outcome(closed=(_ended(5, session_id=7), _ended(5, session_id=8, starttime=9999))),
+        path,
+    )
+
+    assert [notice.session_id for notice in staged] == [7, 8]
+    assert staged[0] == waiting, "the record already staged is the one kept"
+    assert notices.read_pending(path) == staged
+
+
+def test_the_crash_child_writes_the_staged_batch_once_and_never_resurrects(
+    db_conn: psycopg.Connection, staged_path: Path
 ) -> None:
-    """The one-shot child (`python -m ops.pty_close_notices`) end to end through the
-    real write: a live owner gets one inbound, a terminated owner none, and running the
-    child again for the same shell births delivers nothing new."""
+    """The one-shot child (`python -m ops.pty_close_notices`) end to end: it writes
+    the staged notices — a live owner gets one inbound, a terminated owner none — and
+    removes the file; staged again (a commit whose file was left behind), it
+    delivers nothing new."""
     live, dead = _agent(db_conn, "running"), _agent(db_conn, "terminated")
-    wire = (_ended(live), _ended(dead, session_id=12))
+    staged = notices.notices_for(
+        [_ended(live), _ended(dead, session_id=12)], reason=notices.CRASH_REASON
+    )
+    notices.write_pending(staged_path, staged)
 
-    monkeypatch.setattr(sys, "stdin", _swept(*wire))
     assert notices.main() == 0
-    monkeypatch.setattr(sys, "stdin", _swept(*wire))
+    assert not staged_path.exists(), "a written batch leaves no staged file"
+
+    notices.write_pending(staged_path, staged)
     assert notices.main() == 0
 
-    ((content, _source, _payload),) = _inbounds(db_conn, live)
+    ((content, source, _payload),) = _inbounds(db_conn, live)
+    assert source == "system"
     assert notices.CRASH_REASON in content
     assert _inbounds(db_conn, dead) == []
 
 
-def test_the_crash_child_reports_an_unreachable_database_and_fails_softly(
-    monkeypatch: pytest.MonkeyPatch,
+def test_the_crash_child_reports_an_unreachable_database_and_keeps_the_batch(
+    staged_path: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
     def refuse(self: Database, **_kwargs: object) -> psycopg.Connection:
         raise psycopg.OperationalError("connection refused")
 
     monkeypatch.setattr(Database, "connect", refuse)
-    monkeypatch.setattr(sys, "stdin", _swept(_ended(5)))
+    notices.write_pending(staged_path, [_notice()])
 
     assert notices.main() == 1
 
+    assert [notice.session_id for notice in notices.read_pending(staged_path)] == [11]
+    assert any(
+        record["level"].name == "ERROR" and "1 closure notice(s) not written" in record["message"]
+        for record in loguru_records
+    )
 
-def test_the_crash_child_survives_an_unreadable_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
 
-    assert notices.main() == 1
+def test_the_crash_child_reads_a_malformed_file_as_nothing_and_keeps_it(
+    staged_path: Path, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A malformed staged file is never guessed at: the child writes nothing and
+    leaves the file for the operator, like the ledger's unreadable read."""
+    staged_path.write_text("{not json")
+
+    assert notices.main() == 0
+
+    assert staged_path.read_text() == "{not json"
+    assert any(
+        record["level"].name == "WARNING" and "unreadable" in record["message"]
+        for record in loguru_records
+    )
+
+
+def test_the_crash_child_with_nothing_staged_writes_nothing(
+    staged_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def never(**kwargs: object) -> psycopg.Connection:
+        raise AssertionError("an empty staged file dialed the database")
+
+    monkeypatch.setattr(Database, "connect", never)
+
+    assert notices.main() == 0
