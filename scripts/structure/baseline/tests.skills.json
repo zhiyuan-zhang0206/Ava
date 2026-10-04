@@ -1,5 +1,1 @@
-{
-  "complexity": {
-    "tests/skills/test_impersonation_launch.py::test_self_takeover_bootstrap_inlines_brief_and_links_real_guide": 17
-  }
-}
+{}

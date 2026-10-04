@@ -159,6 +159,37 @@ def _panel_diffs(a: Any, b: Any, path: str) -> list[str]:
 # ── fidelity ──────────────────────────────────────────────────────────────────
 
 
+def _non_row_panels_by_title(dashboard: dict[str, Any]) -> dict[str, Any]:
+    return {panel["title"]: panel for panel in dashboard["panels"] if panel["type"] != "row"}
+
+
+def _adopt_rendered_custom_look(expected: dict[str, Any], actual: dict[str, Any]) -> None:
+    """Normalization #3: a fixture panel without a custom block adopts the
+    rendered default look. Only a real rendered custom is adopted — a logs panel
+    renders no fieldConfig at all, so no stub is materialized on either side."""
+    actual_defaults = actual.get("fieldConfig", {}).get("defaults")
+    fixture_defaults = expected.get("fieldConfig", {}).get("defaults")
+    if (
+        actual_defaults is not None
+        and actual_defaults.get("custom") is not None
+        and (fixture_defaults is None or fixture_defaults.get("custom") is None)
+    ):
+        expected.setdefault("fieldConfig", {}).setdefault("defaults", {})["custom"] = (
+            actual_defaults["custom"]
+        )
+
+
+def _fidelity_deltas(
+    spec: MetricSpec, fixture_panel: dict[str, Any], rendered: dict[str, Any]
+) -> list[str]:
+    """The normalized diff between one spec's fixture panel and its render."""
+    expected = _canonical_panel(fixture_panel)
+    actual = _canonical_panel(rendered)
+    if spec.custom is None:
+        _adopt_rendered_custom_look(expected, actual)
+    return _panel_diffs(expected, actual, render_title(spec))
+
+
 def test_rendered_panels_match_the_provisioning_file(
     world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
 ) -> None:
@@ -166,13 +197,8 @@ def test_rendered_panels_match_the_provisioning_file(
     counterpart — the migration lock: content and geometry (gridPos) both,
     modulo the three enumerable normalizations."""
     core_specs, plugin_specs, dashboard = world
-    fixture = _fixture()
-    fixture_by_title: dict[str, Any] = {
-        panel["title"]: panel for panel in fixture["panels"] if panel["type"] != "row"
-    }
-    rendered_by_title: dict[str, Any] = {
-        panel["title"]: panel for panel in dashboard["panels"] if panel["type"] != "row"
-    }
+    fixture_by_title = _non_row_panels_by_title(_fixture())
+    rendered_by_title = _non_row_panels_by_title(dashboard)
 
     problems: list[str] = []
     for spec in [*core_specs, *plugin_specs]:
@@ -182,24 +208,7 @@ def test_rendered_panels_match_the_provisioning_file(
         assert rendered is not None, f"{spec.name} rendered no panel"
         fixture_panel = fixture_by_title.get(render_title(spec))
         assert fixture_panel is not None, f"{spec.name} has no fixture counterpart"
-        expected = _canonical_panel(fixture_panel)
-        actual = _canonical_panel(rendered)
-        if spec.custom is None:
-            # The standard look profile: a fixture panel without a custom block
-            # adopts the rendered default (normalization #3). Only a real
-            # rendered custom is adopted — a logs panel renders no fieldConfig
-            # at all, so no stub is materialized on either side.
-            actual_defaults = actual.get("fieldConfig", {}).get("defaults")
-            fixture_defaults = expected.get("fieldConfig", {}).get("defaults")
-            if (
-                actual_defaults is not None
-                and actual_defaults.get("custom") is not None
-                and (fixture_defaults is None or fixture_defaults.get("custom") is None)
-            ):
-                expected.setdefault("fieldConfig", {}).setdefault("defaults", {})["custom"] = (
-                    actual_defaults["custom"]
-                )
-        deltas = _panel_diffs(expected, actual, render_title(spec))
+        deltas = _fidelity_deltas(spec, fixture_panel, rendered)
         if deltas:
             problems.append(f"{spec.name}: " + "; ".join(deltas[:6]))
     assert not problems, "rendered panels diverged from the provisioning file:\n" + "\n".join(
@@ -284,6 +293,46 @@ def test_layout_engine_reproduces_the_full_fixture_geometry(
 # ── invariants ────────────────────────────────────────────────────────────────
 
 
+def _rectangles_overlap(grid: dict[str, Any], other_grid: dict[str, Any]) -> bool:
+    return bool(
+        grid["x"] < other_grid["x"] + other_grid["w"]
+        and other_grid["x"] < grid["x"] + grid["w"]
+        and grid["y"] < other_grid["y"] + other_grid["h"]
+        and other_grid["y"] < grid["y"] + grid["h"]
+    )
+
+
+def _assert_no_overlapping_panels(panels: list[dict[str, Any]]) -> None:
+    for index, panel in enumerate(panels):
+        for other in panels[index + 1 :]:
+            assert not _rectangles_overlap(panel["gridPos"], other["gridPos"]), (
+                f"gridPos overlap: {panel['id']} vs {other['id']}"
+            )
+
+
+def _assert_one_panel_per_grafana_spec(
+    specs: list[MetricSpec], panels: list[dict[str, Any]]
+) -> None:
+    rendered_titles = [panel["title"] for panel in panels if panel["type"] != "row"]
+    for spec in specs:
+        if "grafana" in spec.output:
+            assert rendered_titles.count(render_title(spec)) == 1, (
+                f"{spec.name} must render exactly one panel"
+            )
+
+
+def _assert_shell_anchors(dashboard: dict[str, Any], panels: list[dict[str, Any]]) -> None:
+    assert dashboard["uid"] == "ava-ops-main"
+    assert dashboard["timezone"] == "Asia/Shanghai"
+    assert dashboard["refresh"] == "10m"
+    assert dashboard["time"] == {"from": "now-24h", "to": "now"}
+    rows = [panel["title"] for panel in panels if panel["type"] == "row"]
+    # Every fixture section now has registered specs (S2, task #3697), so the
+    # rendered row list is the fixture's row list, in fixture order.
+    fixture_rows = [entry["title"] for entry in _fixture()["panels"] if entry["type"] == "row"]
+    assert rows == fixture_rows
+
+
 def test_render_invariants(
     world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
 ) -> None:
@@ -295,34 +344,9 @@ def test_render_invariants(
     ids = [panel["id"] for panel in panels]
     assert len(ids) == len(set(ids)), "panel ids must be unique"
 
-    for index, panel in enumerate(panels):
-        grid = panel["gridPos"]
-        for other in panels[index + 1 :]:
-            other_grid = other["gridPos"]
-            overlap = (
-                grid["x"] < other_grid["x"] + other_grid["w"]
-                and other_grid["x"] < grid["x"] + grid["w"]
-                and grid["y"] < other_grid["y"] + other_grid["h"]
-                and other_grid["y"] < grid["y"] + grid["h"]
-            )
-            assert not overlap, f"gridPos overlap: {panel['id']} vs {other['id']}"
-
-    rendered_titles = [panel["title"] for panel in panels if panel["type"] != "row"]
-    for spec in [*core_specs, *plugin_specs]:
-        if "grafana" in spec.output:
-            assert rendered_titles.count(render_title(spec)) == 1, (
-                f"{spec.name} must render exactly one panel"
-            )
-
-    assert dashboard["uid"] == "ava-ops-main"
-    assert dashboard["timezone"] == "Asia/Shanghai"
-    assert dashboard["refresh"] == "10m"
-    assert dashboard["time"] == {"from": "now-24h", "to": "now"}
-    rows = [panel["title"] for panel in panels if panel["type"] == "row"]
-    # Every fixture section now has registered specs (S2, task #3697), so the
-    # rendered row list is the fixture's row list, in fixture order.
-    fixture_rows = [entry["title"] for entry in _fixture()["panels"] if entry["type"] == "row"]
-    assert rows == fixture_rows
+    _assert_no_overlapping_panels(panels)
+    _assert_one_panel_per_grafana_spec([*core_specs, *plugin_specs], panels)
+    _assert_shell_anchors(dashboard, panels)
 
 
 def test_barchart_panels_keep_the_tick_label_filter_enabled(

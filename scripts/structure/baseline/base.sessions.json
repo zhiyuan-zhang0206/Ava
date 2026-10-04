@@ -3,7 +3,5 @@
     "base/sessions/backend.py::global-rebind:_backend": 1,
     "base/sessions/backend.py::global-rebind:_shell_backend": 1
   },
-  "complexity": {
-    "base/sessions/tests/subreaper_probe.py::ancestor": 16
-  }
+  "complexity": {}
 }

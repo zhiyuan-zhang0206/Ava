@@ -123,24 +123,32 @@ def _all_rendered() -> dict[str, list[str]]:
 # ── registration ──────────────────────────────────────────────────────────────
 
 
+def _assert_spec_matches_expected(name: str, spec: MetricSpec) -> None:
+    panel, output, event_name, category, n_targets = EXPECTED[name]
+    assert spec.panel == panel, name
+    assert spec.output == output, name
+    assert spec.event_name == event_name, name
+    assert spec.category == category, name
+    assert spec.plugin == "core", name
+    expected_query_type = "promql" if name == "ava_obs_turn_duration_s" else "logql"
+    assert spec.query_type == expected_query_type, name
+    assert len(spec.targets or []) + 1 == n_targets, name
+    if spec.target_names is not None:
+        assert len(spec.target_names) == n_targets, name
+
+
+def _assert_rendered_logql_validates(name: str, spec: MetricSpec) -> None:
+    for expr in [render_query(spec), *render_targets(spec)[1:]]:
+        validate_logql(expr, name)
+
+
 def test_pack_registers_all_metrics() -> None:
     specs = {m.name: m for m in _pack()}
     assert set(EXPECTED) == set(specs)
-    for name, (panel, output, event_name, category, n_targets) in EXPECTED.items():
-        spec = specs[name]
-        assert spec.panel == panel, name
-        assert spec.output == output, name
-        assert spec.event_name == event_name, name
-        assert spec.category == category, name
-        assert spec.plugin == "core", name
-        expected_query_type = "promql" if name == "ava_obs_turn_duration_s" else "logql"
-        assert spec.query_type == expected_query_type, name
-        assert len(spec.targets or []) + 1 == n_targets, name
-        if spec.target_names is not None:
-            assert len(spec.target_names) == n_targets, name
+    for name, spec in specs.items():
+        _assert_spec_matches_expected(name, spec)
         if spec.query_type == "logql":
-            for expr in [render_query(spec), *render_targets(spec)[1:]]:
-                validate_logql(expr, name)
+            _assert_rendered_logql_validates(name, spec)
 
 
 def test_logql_queries_have_event_stream_and_json() -> None:

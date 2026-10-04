@@ -133,6 +133,112 @@ def _explore_url(base_url: str, trace_target: dict[str, Any]) -> str:
     return f"{base_url}/explore?{urllib.parse.urlencode({'left': json.dumps(left, separators=(',', ':'))})}"
 
 
+def _basic_auth_headers(user: str, password: str) -> dict[str, str]:
+    return {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
+
+
+def _native_grafana_env(
+    *, port: int, base_url: str, tmp_path: Path, admin_user: str, admin_password: str
+) -> dict[str, str]:
+    """Process env that runs the shipped Grafana settings in a disposable tmp_path instance."""
+    env = os.environ.copy()
+    env.update(_grafana_environment())
+    env.update(
+        {
+            "GF_SERVER_HTTP_ADDR": "127.0.0.1",
+            "GF_SERVER_HTTP_PORT": str(port),
+            "GF_SERVER_ROOT_URL": f"{base_url}/",
+            "GF_PATHS_DATA": str(tmp_path / "data"),
+            "GF_PATHS_LOGS": str(tmp_path / "logs"),
+            "GF_PATHS_PLUGINS": str(tmp_path / "plugins"),
+            "GF_PATHS_PROVISIONING": str(tmp_path / "provisioning"),
+            "GF_LOG_LEVEL": "error",
+            "GF_LOG_MODE": "console",
+            "GF_SECURITY_ADMIN_USER": admin_user,
+            "GF_SECURITY_ADMIN_PASSWORD": admin_password,
+        }
+    )
+    return env
+
+
+def _start_grafana(binary: Path, home: Path, env: dict[str, str]) -> subprocess.Popen[str]:
+    return subprocess.Popen(  # noqa: S603 - checksum-pinned test binary
+        [str(binary), "server", "--homepath", str(home)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+
+def _stop_grafana(process: subprocess.Popen[str]) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
+def _assert_viewer_settings_and_retries(base_url: str, admin_headers: dict[str, str]) -> None:
+    settings_status, _, settings_body = _request(f"{base_url}/api/frontend/settings")
+    assert settings_status == 200
+    settings = json.loads(settings_body)
+    assert settings["viewersCanEdit"] is True
+    assert settings["liveEnabled"] is False
+    admin_status, _, admin_body = _request(
+        f"{base_url}/api/admin/settings",
+        headers=admin_headers,
+    )
+    assert admin_status == 200
+    admin_settings = json.loads(admin_body)
+    assert admin_settings["database"]["query_retries"] == "5"
+
+
+def _import_shipped_dashboards_and_open_as_viewer(
+    base_url: str, admin_headers: dict[str, str]
+) -> None:
+    # Import the one user-facing shipped dashboard into this disposable
+    # instance (2026-08-23 merge: ops-main is the only shipped dashboard —
+    # the URL that prompted this incident).
+    for dashboard, route in ((_dashboard("ava-ops-main.json"), "/d/ava-ops-main/ava-ops"),):
+        import_status, _, import_body = _request(
+            f"{base_url}/api/dashboards/db",
+            data=json.dumps({"dashboard": dashboard, "overwrite": True}).encode(),
+            headers={**admin_headers, "Content-Type": "application/json"},
+        )
+        assert import_status == 200, (import_status, import_body[:500])
+        dashboard_status, dashboard_location, _ = _request(f"{base_url}{route}")
+        assert dashboard_status == 200
+        assert dashboard_location == ""
+
+
+def _assert_viewer_can_explore_trace(base_url: str, trace_target: dict[str, Any]) -> None:
+    explore_url = _explore_url(base_url, trace_target)
+    status, location, body = _request(explore_url)
+
+    assert status == 200, (status, location, body[:500])
+    assert location == ""
+    parsed_left = json.loads(
+        urllib.parse.parse_qs(urllib.parse.urlsplit(explore_url).query)["left"][0]
+    )
+    assert parsed_left["datasource"] == trace_target["datasource"]["uid"]
+    assert parsed_left["queries"][0]["datasource"] == trace_target["datasource"]
+    assert parsed_left["queries"][0]["queryType"] == trace_target["queryType"]
+    assert parsed_left["queries"][0]["query"] == TRACE_ID
+
+
+def _assert_viewer_cannot_persist_dashboard(base_url: str) -> None:
+    # viewers_can_edit grants Explore and temporary panel edits only.  It
+    # must not accidentally grant permission to persist a dashboard.
+    save_status, _, _ = _request(
+        f"{base_url}/api/dashboards/db",
+        data=b'{"dashboard":{"title":"must-not-save"},"overwrite":false}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert save_status == 403
+
+
 def test_shipped_grafana_runtime_contract() -> None:
     """Keep security, concurrency, and capacity settings transport-neutral."""
     compose: dict[str, Any] = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
@@ -167,45 +273,25 @@ def test_shipped_alert_rules_provision_against_native_grafana(tmp_path: Path) ->
     with the whole shipped provisioning tree and checks the provisioned API.
     """
     binary, home = _grafana_distribution()
-    shipped = _grafana_environment()
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}/grafana"
     admin_user = "native-alert-contract-admin"
     admin_password = f"native-alert-contract-{TRACE_ID}"
-    admin_headers = {
-        "Authorization": "Basic "
-        + base64.b64encode(f"{admin_user}:{admin_password}".encode()).decode()
-    }
+    admin_headers = _basic_auth_headers(admin_user, admin_password)
     expected_uids = _shipped_alert_rule_uids()
     shutil.copytree(PROVISIONING_DIR, tmp_path / "provisioning")
 
-    env = os.environ.copy()
-    env.update(shipped)
-    env.update(
-        {
-            "GF_SERVER_HTTP_ADDR": "127.0.0.1",
-            "GF_SERVER_HTTP_PORT": str(port),
-            "GF_SERVER_ROOT_URL": f"{base_url}/",
-            "GF_PATHS_DATA": str(tmp_path / "data"),
-            "GF_PATHS_LOGS": str(tmp_path / "logs"),
-            "GF_PATHS_PLUGINS": str(tmp_path / "plugins"),
-            "GF_PATHS_PROVISIONING": str(tmp_path / "provisioning"),
-            "GF_LOG_LEVEL": "error",
-            "GF_LOG_MODE": "console",
-            "GF_SECURITY_ADMIN_USER": admin_user,
-            "GF_SECURITY_ADMIN_PASSWORD": admin_password,
-        }
+    env = _native_grafana_env(
+        port=port,
+        base_url=base_url,
+        tmp_path=tmp_path,
+        admin_user=admin_user,
+        admin_password=admin_password,
     )
     for directory in ("data", "logs", "plugins"):
         (tmp_path / directory).mkdir()
 
-    process = subprocess.Popen(  # noqa: S603 - checksum-pinned test binary
-        [str(binary), "server", "--homepath", str(home)],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    process = _start_grafana(binary, home, env)
     try:
         _wait_until_healthy(base_url, process, _shipped_grafana_version())
         status, _, body = _request(
@@ -216,81 +302,32 @@ def test_shipped_alert_rules_provision_against_native_grafana(tmp_path: Path) ->
         provisioned_rules: list[dict[str, Any]] = json.loads(body)
         assert {rule["uid"] for rule in provisioned_rules} == expected_uids
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=10)
+        _stop_grafana(process)
 
 
 def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> None:
     """Regression: a dashboard Trace link must not redirect Viewer to Home."""
     binary, home = _grafana_distribution()
-    shipped = _grafana_environment()
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}/grafana"
     admin_user = "native-contract-admin"
     admin_password = f"native-contract-{TRACE_ID}"
-    admin_headers = {
-        "Authorization": "Basic "
-        + base64.b64encode(f"{admin_user}:{admin_password}".encode()).decode()
-    }
-    env = os.environ.copy()
-    env.update(shipped)
-    env.update(
-        {
-            "GF_SERVER_HTTP_ADDR": "127.0.0.1",
-            "GF_SERVER_HTTP_PORT": str(port),
-            "GF_SERVER_ROOT_URL": f"{base_url}/",
-            "GF_PATHS_DATA": str(tmp_path / "data"),
-            "GF_PATHS_LOGS": str(tmp_path / "logs"),
-            "GF_PATHS_PLUGINS": str(tmp_path / "plugins"),
-            "GF_PATHS_PROVISIONING": str(tmp_path / "provisioning"),
-            "GF_LOG_LEVEL": "error",
-            "GF_LOG_MODE": "console",
-            "GF_SECURITY_ADMIN_USER": admin_user,
-            "GF_SECURITY_ADMIN_PASSWORD": admin_password,
-        }
+    admin_headers = _basic_auth_headers(admin_user, admin_password)
+    env = _native_grafana_env(
+        port=port,
+        base_url=base_url,
+        tmp_path=tmp_path,
+        admin_user=admin_user,
+        admin_password=admin_password,
     )
     for directory in ("data", "logs", "plugins", "provisioning"):
         (tmp_path / directory).mkdir()
 
-    process = subprocess.Popen(  # noqa: S603 - checksum-pinned test binary
-        [str(binary), "server", "--homepath", str(home)],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    process = _start_grafana(binary, home, env)
     try:
         _wait_until_healthy(base_url, process, _shipped_grafana_version())
-        settings_status, _, settings_body = _request(f"{base_url}/api/frontend/settings")
-        assert settings_status == 200
-        settings = json.loads(settings_body)
-        assert settings["viewersCanEdit"] is True
-        assert settings["liveEnabled"] is False
-        admin_status, _, admin_body = _request(
-            f"{base_url}/api/admin/settings",
-            headers=admin_headers,
-        )
-        assert admin_status == 200
-        admin_settings = json.loads(admin_body)
-        assert admin_settings["database"]["query_retries"] == "5"
-
-        # Import the one user-facing shipped dashboard into this disposable
-        # instance (2026-08-23 merge: ops-main is the only shipped dashboard —
-        # the URL that prompted this incident).
-        for dashboard, route in ((_dashboard("ava-ops-main.json"), "/d/ava-ops-main/ava-ops"),):
-            import_status, _, import_body = _request(
-                f"{base_url}/api/dashboards/db",
-                data=json.dumps({"dashboard": dashboard, "overwrite": True}).encode(),
-                headers={**admin_headers, "Content-Type": "application/json"},
-            )
-            assert import_status == 200, (import_status, import_body[:500])
-            dashboard_status, dashboard_location, _ = _request(f"{base_url}{route}")
-            assert dashboard_status == 200
-            assert dashboard_location == ""
+        _assert_viewer_settings_and_retries(base_url, admin_headers)
+        _import_shipped_dashboards_and_open_as_viewer(base_url, admin_headers)
 
         # No shipped dashboard links to Tempo since the 2026-08-23 merge
         # (the Recent traces panel left with ava-overview; Tempo returns in a
@@ -302,31 +339,7 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
             "queryType": "traceql",
             "refId": "A",
         }
-        explore_url = _explore_url(base_url, trace_target)
-        status, location, body = _request(explore_url)
-
-        assert status == 200, (status, location, body[:500])
-        assert location == ""
-        parsed_left = json.loads(
-            urllib.parse.parse_qs(urllib.parse.urlsplit(explore_url).query)["left"][0]
-        )
-        assert parsed_left["datasource"] == trace_target["datasource"]["uid"]
-        assert parsed_left["queries"][0]["datasource"] == trace_target["datasource"]
-        assert parsed_left["queries"][0]["queryType"] == trace_target["queryType"]
-        assert parsed_left["queries"][0]["query"] == TRACE_ID
-
-        # viewers_can_edit grants Explore and temporary panel edits only.  It
-        # must not accidentally grant permission to persist a dashboard.
-        save_status, _, _ = _request(
-            f"{base_url}/api/dashboards/db",
-            data=b'{"dashboard":{"title":"must-not-save"},"overwrite":false}',
-            headers={"Content-Type": "application/json"},
-        )
-        assert save_status == 403
+        _assert_viewer_can_explore_trace(base_url, trace_target)
+        _assert_viewer_cannot_persist_dashboard(base_url)
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=10)
+        _stop_grafana(process)

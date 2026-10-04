@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,9 +40,113 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(db_recovery, "_MAX_BACKOFF_SECONDS", 0.02)
 
 
+def _mark_agent_stale_with_pending_cause(
+    db_conn: psycopg.Connection,
+    agent: int,
+    incarnation: Any,
+    *,
+    held: bool,
+    event_bus: EventBus,
+    database: Database,
+) -> None:
+    """Make the agent look 100s stale, held by maintenance or by an old pending message."""
+    if held:
+        acquired = datetime.now(UTC)
+        pause_owner.begin_maintenance("waiting", acquired)
+        cohort.prepare(
+            db_conn,
+            machine=machine_name(),
+            host_owner=incarnation.owner,
+            holder="waiting",
+            acquired_at=acquired,
+        )
+    else:
+        message = insert_inbound_message(
+            db_conn, agent, "pending", "user", bus=event_bus, database=database
+        )
+        db_conn.execute(
+            "UPDATE inbound_messages SET created_at=now()-interval '100s' WHERE id=%s", (message,)
+        )
+    db_conn.execute(
+        "UPDATE agents_meta SET last_active_at=now()-interval '100s' WHERE id=%s", (agent,)
+    )
+    db_conn.commit()
+
+
+def _recovery_run(
+    control: AsyncConnectionPool,
+    graph: Any,
+    saver: Any,
+    incarnation: Any,
+    recovered: asyncio.Event,
+    cancelled: asyncio.Event,
+) -> Callable[[int], Awaitable[None]]:
+    """A turn body that waits in real DB recovery, then parks until cancelled."""
+    agent = incarnation.agent_id
+
+    async def run(_agent: int) -> None:
+        try:
+            with bind_turn_identity(agent, incarnation=incarnation):
+                await db_recovery.recover_database(
+                    pool=control, graph=graph, checkpointer=saver, incarnation=incarnation
+                )
+            recovered.set()
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    return run
+
+
+async def _wait_until_database_wait_is_visible(agent: int) -> None:
+    async with asyncio.timeout(2):
+        while database_wait_snapshot(agent) is None:
+            await asyncio.sleep(0.001)
+
+
+async def _assert_automatic_scan_spares_the_database_wait(
+    dispatcher: InboundWakeDispatcher,
+    scheduler: TurnScheduler,
+    agent: int,
+    cancelled: asyncio.Event,
+) -> None:
+    before = progress.turn_progress_snapshot(agent)
+    await dispatcher.scan_once()
+    assert agent in scheduler.active_agents
+    assert not cancelled.is_set()
+    assert progress.turn_progress_snapshot(agent)["last_marks"] == before["last_marks"]  # type: ignore[index]
+
+
+async def _assert_explicit_force_cancels_the_database_wait(
+    scheduler: TurnScheduler, agent: int, cancelled: asyncio.Event
+) -> None:
+    async def validate(_agent: int, _command: int) -> bool:
+        return True
+
+    assert await scheduler.cancel_exact_force(agent, 1, validate)
+    assert cancelled.is_set()
+    assert database_wait_snapshot(agent) is None
+
+
+async def _assert_stale_handling_resumes_after_recovery(
+    dispatcher: InboundWakeDispatcher,
+    recovered: asyncio.Event,
+    cancelled: asyncio.Event,
+    agent: int,
+) -> None:
+    await asyncio.wait_for(recovered.wait(), 2)
+    assert database_wait_snapshot(agent) is not None
+    await dispatcher.scan_once()
+    assert not cancelled.is_set(), "finite success handoff also protects the next DB stage"
+    db_wait._WAITING[agent].deadline = time.monotonic() - 1
+    assert database_wait_snapshot(agent) is None
+    await dispatcher.scan_once()
+    assert cancelled.is_set(), "normal stale handling must resume after DB recovery"
+
+
 @pytest.mark.parametrize("held", [False, True])
 @pytest.mark.parametrize("force", [False, True])
-async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # noqa: PLR0915 — real recovery, two stale detectors and final force/cleanup in one task.
+async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     held: bool,
@@ -65,45 +170,17 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
         db=Database.from_settings(),
     )
     host._owner = incarnation.owner
-    if held:
-        acquired = datetime.now(UTC)
-        pause_owner.begin_maintenance("waiting", acquired)
-        cohort.prepare(
-            db_conn,
-            machine=machine_name(),
-            host_owner=incarnation.owner,
-            holder="waiting",
-            acquired_at=acquired,
-        )
-    else:
-        message = insert_inbound_message(
-            db_conn, agent, "pending", "user", bus=event_bus, database=database
-        )
-        db_conn.execute(
-            "UPDATE inbound_messages SET created_at=now()-interval '100s' WHERE id=%s", (message,)
-        )
-    db_conn.execute(
-        "UPDATE agents_meta SET last_active_at=now()-interval '100s' WHERE id=%s", (agent,)
+    _mark_agent_stale_with_pending_cause(
+        db_conn, agent, incarnation, held=held, event_bus=event_bus, database=database
     )
-    db_conn.commit()
     recovered, cancelled = asyncio.Event(), asyncio.Event()
     progress._PROGRESS[agent] = [time.monotonic() - 100]
     async with AsyncConnectionPool[psycopg.AsyncConnection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
     ) as control:
-
-        async def run(_agent: int) -> None:
-            try:
-                with bind_turn_identity(agent, incarnation=incarnation):
-                    await db_recovery.recover_database(
-                        pool=control, graph=graph, checkpointer=saver, incarnation=incarnation
-                    )
-                recovered.set()
-                await asyncio.Event().wait()
-            finally:
-                cancelled.set()
-
-        scheduler = TurnScheduler(run)
+        scheduler = TurnScheduler(
+            _recovery_run(control, graph, saver, incarnation, recovered, cancelled)
+        )
         dispatcher = InboundWakeDispatcher(
             scheduler=scheduler,
             bus=EventBus.from_settings(),
@@ -113,33 +190,18 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
         try:
             async with control.connection():
                 scheduler.wake(agent)
-                async with asyncio.timeout(2):
-                    while database_wait_snapshot(agent) is None:
-                        await asyncio.sleep(0.001)
-                before = progress.turn_progress_snapshot(agent)
-                await dispatcher.scan_once()
-                assert agent in scheduler.active_agents
-                assert not cancelled.is_set()
-                assert progress.turn_progress_snapshot(agent)["last_marks"] == before["last_marks"]  # type: ignore[index]
-                if force:
-
-                    async def validate(_agent: int, _command: int) -> bool:
-                        return True
-
-                    assert await scheduler.cancel_exact_force(agent, 1, validate)
-                    assert cancelled.is_set()
-                    assert database_wait_snapshot(agent) is None
-            if not force:
-                await asyncio.wait_for(recovered.wait(), 2)
-                assert database_wait_snapshot(agent) is not None
-                await dispatcher.scan_once()
-                assert not cancelled.is_set(), (
-                    "finite success handoff also protects the next DB stage"
+                await _wait_until_database_wait_is_visible(agent)
+                await _assert_automatic_scan_spares_the_database_wait(
+                    dispatcher, scheduler, agent, cancelled
                 )
-                db_wait._WAITING[agent].deadline = time.monotonic() - 1
-                assert database_wait_snapshot(agent) is None
-                await dispatcher.scan_once()
-                assert cancelled.is_set(), "normal stale handling must resume after DB recovery"
+                if force:
+                    await _assert_explicit_force_cancels_the_database_wait(
+                        scheduler, agent, cancelled
+                    )
+            if not force:
+                await _assert_stale_handling_resumes_after_recovery(
+                    dispatcher, recovered, cancelled, agent
+                )
         finally:
             await scheduler.aclose()
             progress._PROGRESS.pop(agent, None)

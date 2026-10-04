@@ -89,16 +89,11 @@ telemetry.emit("log", "log", attributes={{"seq": "tail", "marker": MARKER}})
 # are real. `ava.files.read` is one tail sdk_call (under 0.5 s before exit).
 
 
-def _sent_pairs() -> set[tuple[object, object]]:
-    """Decode the receiver's OTLP/HTTP log batches into (marker, seq) pairs.
-
-    The record carries both as OTLP attributes and the event body is the
-    mirror-shape JSON, so either channel identifies the record."""
+def _received_log_records(posts: list[tuple[str, bytes]]) -> list[Any]:
+    """Every OTLP LogRecord in the receiver's `/v1/logs` POST bodies."""
     from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 
-    pairs: set[tuple[object, object]] = set()
-    with _POSTS_LOCK:
-        posts = list(_POSTS)
+    records: list[Any] = []
     for path, raw in posts:
         if not path.endswith("/v1/logs") or len(raw) < 4:
             continue  # the reachability probe posts a small JSON body
@@ -107,17 +102,30 @@ def _sent_pairs() -> set[tuple[object, object]]:
             request.ParseFromString(raw)
         for resource_logs in request.resource_logs:
             for scope_logs in resource_logs.scope_logs:
-                for record in scope_logs.log_records:
-                    attrs: dict[str, Any] = {}
-                    for kv in record.attributes:
-                        if kv.value.HasField("string_value"):
-                            attrs[kv.key] = kv.value.string_value
-                    payload: dict[str, Any] = {}
-                    if record.body.string_value:
-                        with contextlib.suppress(Exception):
-                            payload = json.loads(record.body.string_value).get("attributes") or {}
-                    pairs.add((payload.get("marker", attrs.get("marker")), payload.get("seq")))
-    return pairs
+                records.extend(scope_logs.log_records)
+    return records
+
+
+def _marker_seq_of(record: Any) -> tuple[object, object]:
+    attrs: dict[str, Any] = {}
+    for kv in record.attributes:
+        if kv.value.HasField("string_value"):
+            attrs[kv.key] = kv.value.string_value
+    payload: dict[str, Any] = {}
+    if record.body.string_value:
+        with contextlib.suppress(Exception):
+            payload = json.loads(record.body.string_value).get("attributes") or {}
+    return payload.get("marker", attrs.get("marker")), payload.get("seq")
+
+
+def _sent_pairs() -> set[tuple[object, object]]:
+    """Decode the receiver's OTLP/HTTP log batches into (marker, seq) pairs.
+
+    The record carries both as OTLP attributes and the event body is the
+    mirror-shape JSON, so either channel identifies the record."""
+    with _POSTS_LOCK:
+        posts = list(_POSTS)
+    return {_marker_seq_of(record) for record in _received_log_records(posts)}
 
 
 def test_tail_record_of_a_short_lived_process_reaches_the_receiver(

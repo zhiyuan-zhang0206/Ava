@@ -92,38 +92,46 @@ def _history(saver: PostgresSaver, config: RunnableConfig) -> DeltaChannelHistor
     return saver.get_delta_channel_history(config=config, channels=["messages"])["messages"]
 
 
+def _assert_walk_has_writes_and_seed(entry: DeltaChannelHistory, expected: list[int]) -> None:
+    assert _write_numbers(entry) == expected
+    assert "seed" in entry and isinstance(entry["seed"], _DeltaSnapshot)
+
+
+def _assert_early_checkpoints_walk_back_to_root(
+    saver: PostgresSaver, first: list[RunnableConfig]
+) -> None:
+    assert _history(saver, first[0]) == {"writes": []}
+    for target, expected in ((1, []), (2, [1]), (3, [1, 2]), (5, [1, 2, 3, 4])):
+        _assert_walk_has_writes_and_seed(_history(saver, first[target]), expected)
+
+
+def _append_newer_checkpoints_across_page_boundary(
+    saver: PostgresSaver, thread: str, first: list[RunnableConfig], target: RunnableConfig
+) -> None:
+    parent = first[-1]
+    for step in range(6, 1027):
+        parent = _append_delta_checkpoint(saver, thread=thread, step=step, parent=parent)
+        if step == 1025:  # 1023 newer checkpoints: target is in the first page.
+            _assert_walk_has_writes_and_seed(_history(saver, target), [1])
+    # 1024 newer checkpoints: target is on page two.
+    _assert_walk_has_writes_and_seed(_history(saver, target), [1])
+
+
 async def test_historical_walk_page_boundary_and_compact_segment(
     db_conn: psycopg.Connection,
 ) -> None:
     thread = "6380"
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         first = _write_steps(saver, thread, 6, None)
-        root = _history(saver, first[0])
-        assert root == {"writes": []}
-        for target, expected in ((1, []), (2, [1]), (3, [1, 2]), (5, [1, 2, 3, 4])):
-            entry = _history(saver, first[target])
-            assert _write_numbers(entry) == expected
-            assert "seed" in entry and isinstance(entry["seed"], _DeltaSnapshot)
-
+        _assert_early_checkpoints_walk_back_to_root(saver, first)
         target = first[2]
-        parent = first[-1]
-        for step in range(6, 1027):
-            parent = _append_delta_checkpoint(saver, thread=thread, step=step, parent=parent)
-            if step == 1025:  # 1023 newer checkpoints: target is in the first page.
-                before = _history(saver, target)
-                assert _write_numbers(before) == [1]
-                assert "seed" in before and isinstance(before["seed"], _DeltaSnapshot)
-
-        after = _history(saver, target)  # 1024 newer checkpoints: target is on page two.
-        assert _write_numbers(after) == [1]
-        assert "seed" in after and isinstance(after["seed"], _DeltaSnapshot)
+        _append_newer_checkpoints_across_page_boundary(saver, thread, first, target)
 
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as async_saver:
         async_entry = (
             await async_saver.aget_delta_channel_history(config=target, channels=["messages"])
         )["messages"]
-    assert _write_numbers(async_entry) == [1]
-    assert "seed" in async_entry and isinstance(async_entry["seed"], _DeltaSnapshot)
+    _assert_walk_has_writes_and_seed(async_entry, [1])
 
     # This is the production boundary shape: a walk checkpoint outside the
     # newest page, read by the gateway as one retained compaction segment.

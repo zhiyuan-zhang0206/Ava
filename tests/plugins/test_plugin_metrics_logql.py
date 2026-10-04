@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.grafana_dashboard_supply import load_repo_plugin_specs
@@ -120,6 +121,71 @@ def test_plugin_panels_live_under_their_plugin_rows() -> None:
         )
 
 
+def _assert_no_dashboard_panel_overlap(panels: list[dict[str, Any]]) -> None:
+    for index, panel in enumerate(panels):
+        grid = panel["gridPos"]
+        for other in panels[index + 1 :]:
+            other_grid = other["gridPos"]
+            overlaps = (
+                grid["x"] < other_grid["x"] + other_grid["w"]
+                and other_grid["x"] < grid["x"] + grid["w"]
+                and grid["y"] < other_grid["y"] + other_grid["h"]
+                and other_grid["y"] < grid["y"] + grid["h"]
+            )
+            assert not overlaps, (
+                f"dashboard gridPos overlap: panel {panel['id']} ({panel['title']!r}) and "
+                f"panel {other['id']} ({other['title']!r})"
+            )
+
+
+def _assert_sql_panel_matches_spec(panel: dict[str, Any], expected: list[str]) -> None:
+    targets = panel["targets"]
+    assert panel["datasource"] == {"type": "postgres", "uid": "ops"}
+    assert [target["rawSql"] for target in targets] == expected
+    assert all("queryType" not in target for target in targets)
+
+
+def _assert_promql_panel_matches_spec(
+    panel: dict[str, Any], spec: MetricSpec, expected: list[str]
+) -> None:
+    targets = panel["targets"]
+    assert panel["datasource"] == {"type": "prometheus", "uid": "prometheus"}
+    assert [target["expr"] for target in targets] == expected
+    if spec.panel in {"stat", "table"}:
+        assert all(
+            target.get("instant") is True and target.get("range") is False for target in targets
+        )
+    else:
+        assert all(target["queryType"] == "range" for target in targets)
+    assert spec.target_names is not None
+    assert [target["legendFormat"] for target in targets] == spec.target_names
+
+
+def _assert_loki_panel_matches_spec(
+    panel: dict[str, Any], spec: MetricSpec, expected: list[str]
+) -> None:
+    targets = panel["targets"]
+    assert panel["datasource"] == {"type": "loki", "uid": "loki"}
+    assert [target["expr"] for target in targets] == expected
+    expected_query_type = (
+        "instant"
+        if spec.query_type == "logql"
+        and (spec.panel in {"stat", "table"} or "$__range" in expected[0])
+        else "range"
+    )
+    assert all(target["queryType"] == expected_query_type for target in targets)
+
+
+def _assert_dashboard_panel_matches_spec(panel: dict[str, Any], spec: MetricSpec) -> None:
+    expected = render_targets(spec)
+    if spec.query_type == "sql":
+        _assert_sql_panel_matches_spec(panel, expected)
+    elif spec.query_type == "promql":
+        _assert_promql_panel_matches_spec(panel, spec, expected)
+    else:
+        _assert_loki_panel_matches_spec(panel, spec, expected)
+
+
 def test_dashboard_json_matches_core_registrations() -> None:
     """Every core Grafana spec has one exact dashboard counterpart.
 
@@ -139,52 +205,9 @@ def test_dashboard_json_matches_core_registrations() -> None:
     panels_by_title = {panel.get("title"): panel for panel in data["panels"]}
 
     assert len(panels_by_title) == len(data["panels"]), "dashboard panel titles must be unique"
-    for index, panel in enumerate(data["panels"]):
-        grid = panel["gridPos"]
-        for other in data["panels"][index + 1 :]:
-            other_grid = other["gridPos"]
-            overlaps = (
-                grid["x"] < other_grid["x"] + other_grid["w"]
-                and other_grid["x"] < grid["x"] + grid["w"]
-                and grid["y"] < other_grid["y"] + other_grid["h"]
-                and other_grid["y"] < grid["y"] + grid["h"]
-            )
-            assert not overlaps, (
-                f"dashboard gridPos overlap: panel {panel['id']} ({panel['title']!r}) and "
-                f"panel {other['id']} ({other['title']!r})"
-            )
+    _assert_no_dashboard_panel_overlap(data["panels"])
     for spec in specs:
-        panel = panels_by_title[render_title(spec)]
-        targets = panel["targets"]
-        expected = render_targets(spec)
-        if spec.query_type == "sql":
-            assert panel["datasource"] == {"type": "postgres", "uid": "ops"}
-            assert [target["rawSql"] for target in targets] == expected
-            assert all("queryType" not in target for target in targets)
-            continue
-        if spec.query_type == "promql":
-            assert panel["datasource"] == {"type": "prometheus", "uid": "prometheus"}
-            assert [target["expr"] for target in targets] == expected
-            if spec.panel in {"stat", "table"}:
-                assert all(
-                    target.get("instant") is True and target.get("range") is False
-                    for target in targets
-                )
-            else:
-                assert all(target["queryType"] == "range" for target in targets)
-            assert spec.target_names is not None
-            assert [target["legendFormat"] for target in targets] == spec.target_names
-            continue
-
-        assert panel["datasource"] == {"type": "loki", "uid": "loki"}
-        assert [target["expr"] for target in targets] == expected
-        expected_query_type = (
-            "instant"
-            if spec.query_type == "logql"
-            and (spec.panel in {"stat", "table"} or "$__range" in expected[0])
-            else "range"
-        )
-        assert all(target["queryType"] == expected_query_type for target in targets)
+        _assert_dashboard_panel_matches_spec(panels_by_title[render_title(spec)], spec)
 
 
 def test_dashboard_has_102_loki_targets() -> None:
@@ -247,6 +270,71 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
     assert f"deriv(max({gauge})[1h:])" in (specs["core_agent_max_id_growth_rate"].query)
 
 
+def _pr_flow_daily_query(field: str, unit: str) -> str:
+    """The by-day read-back query of one export-job gauge field."""
+    from base.telemetry.otlp.telemetry_otlp import _strip_unit_suffix
+
+    name = f"ava_pr_flow_daily_{_strip_unit_suffix(field)}_{unit}"
+    return f"max by (day) (last_over_time({name}[26h]))"
+
+
+def _assert_pr_flow_payload_fields_are_gauges() -> None:
+    """Every payload field behind the panels is absolute state, never a count
+    to accrue across re-emissions."""
+    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
+
+    for field in (
+        "ready_to_merge_median_seconds",
+        "ready_to_merge_p90_seconds",
+        "flake_new_quarantines",
+    ):
+        assert _METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge"
+    assert _METRIC_DISPOSITION[("pr_flow_run", "queue_depth")] == "gauge"
+
+
+def _assert_pr_flow_specs_match_the_export_job(
+    specs: dict[str, MetricSpec],
+) -> tuple[MetricSpec, MetricSpec, MetricSpec]:
+    from base.telemetry.otlp.telemetry_otlp import _strip_unit_suffix
+
+    latency = specs["core_pr_flow_ready_to_merge"]
+    assert latency.query_type == "promql"
+    assert latency.panel == "table"
+    assert latency.unit == "s"
+    assert latency.query == _pr_flow_daily_query("ready_to_merge_median_seconds", "seconds")
+    assert (latency.targets or []) == [
+        _pr_flow_daily_query("ready_to_merge_p90_seconds", "seconds")
+    ]
+    assert latency.target_names == ["median", "p90"]
+
+    queue = specs["core_pr_flow_queue_depth"]
+    assert queue.query_type == "promql"
+    assert queue.panel == "timeseries"
+    assert queue.query == f"ava_pr_flow_run_{_strip_unit_suffix('queue_depth')}_ratio"
+
+    flakes = specs["core_pr_flow_flakes"]
+    assert flakes.query == _pr_flow_daily_query("flake_new_quarantines", "ratio")
+    assert flakes.target_names == ["new quarantines"]
+    return latency, queue, flakes
+
+
+def _assert_pr_flow_tiles_mirror_specs(
+    by_title: dict[Any, dict[str, Any]],
+    all_specs: tuple[MetricSpec, MetricSpec, MetricSpec],
+    joined_specs: tuple[MetricSpec, MetricSpec],
+) -> None:
+    for spec in all_specs:
+        assert by_title[render_title(spec)]["description"] == spec.description
+    for spec in joined_specs:
+        joins = [
+            t
+            for t in by_title[render_title(spec)].get("transformations", [])
+            if t["id"] == "joinByField"
+        ]
+        assert joins, render_title(spec)
+        assert joins[0]["options"] == {"byField": "day", "mode": "outer"}
+
+
 def test_pr_flow_panels_match_the_otlp_contract() -> None:
     """Export-job emission, Prometheus instruments, and dashboard tiles share names.
 
@@ -260,58 +348,13 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
     per-series frame picker, not one row per day), which is why the JSON
     carries the joinByField transformation.
     """
-
-    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
-
     specs = {spec.name: spec for spec in _load_core()}
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     by_title = {panel.get("title"): panel for panel in json.loads(path.read_text())["panels"]}
 
-    def latency_query(field: str) -> str:
-        name = f"ava_pr_flow_daily_{_strip_unit_suffix(field)}_seconds"
-        return f"max by (day) (last_over_time({name}[26h]))"
-
-    def ratio_query(field: str) -> str:
-        name = f"ava_pr_flow_daily_{_strip_unit_suffix(field)}_ratio"
-        return f"max by (day) (last_over_time({name}[26h]))"
-
-    # Every payload field behind the panels is absolute state, never a count
-    # to accrue across re-emissions.
-    for field in (
-        "ready_to_merge_median_seconds",
-        "ready_to_merge_p90_seconds",
-        "flake_new_quarantines",
-    ):
-        assert _METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge"
-    assert _METRIC_DISPOSITION[("pr_flow_run", "queue_depth")] == "gauge"
-
-    latency = specs["core_pr_flow_ready_to_merge"]
-    assert latency.query_type == "promql"
-    assert latency.panel == "table"
-    assert latency.unit == "s"
-    assert latency.query == latency_query("ready_to_merge_median_seconds")
-    assert (latency.targets or []) == [latency_query("ready_to_merge_p90_seconds")]
-    assert latency.target_names == ["median", "p90"]
-
-    queue = specs["core_pr_flow_queue_depth"]
-    assert queue.query_type == "promql"
-    assert queue.panel == "timeseries"
-    assert queue.query == f"ava_pr_flow_run_{_strip_unit_suffix('queue_depth')}_ratio"
-
-    flakes = specs["core_pr_flow_flakes"]
-    assert flakes.query == ratio_query("flake_new_quarantines")
-    assert flakes.target_names == ["new quarantines"]
-
-    for spec in (latency, queue, flakes):
-        assert by_title[render_title(spec)]["description"] == spec.description
-    for spec in (latency, flakes):
-        joins = [
-            t
-            for t in by_title[render_title(spec)].get("transformations", [])
-            if t["id"] == "joinByField"
-        ]
-        assert joins, render_title(spec)
-        assert joins[0]["options"] == {"byField": "day", "mode": "outer"}
+    _assert_pr_flow_payload_fields_are_gauges()
+    latency, queue, flakes = _assert_pr_flow_specs_match_the_export_job(specs)
+    _assert_pr_flow_tiles_mirror_specs(by_title, (latency, queue, flakes), (latency, flakes))
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:
@@ -333,6 +376,29 @@ def test_dashboard_legends_and_time_ranges_are_explicit() -> None:
     assert all("interval" not in panel for panel in panels)
 
 
+_COST_WINDOW_TILES = (
+    "LLM cost (window)",
+    "Tokens (window)",
+    "LLM cost estimate — day pace",
+    "LLM cost estimate — 30-day pace",
+    "LLM cost / minute",
+)
+_COST_DESCRIBED_TILES = (
+    "LLM cost estimate — day pace",
+    "LLM cost estimate — 30-day pace",
+    "LLM cost / minute",
+    "LLM cost by model (Top 20)",
+    "LLM cost by agent (Top 20)",
+)
+
+
+def _assert_llm_usage_panels_filter_telemetry(panels: list[dict[str, Any]]) -> None:
+    for panel in panels:
+        expressions = [target.get("expr", "") for target in panel.get("targets", [])]
+        if any('event_name="llm_usage"' in expression for expression in expressions):
+            assert all('category="telemetry"' in expression for expression in expressions)
+
+
 def test_cost_dashboard_windows_and_telemetry_contract() -> None:
     """Cost tiles follow the dashboard window; no llm_usage panel reads logs."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
@@ -341,27 +407,12 @@ def test_cost_dashboard_windows_and_telemetry_contract() -> None:
 
     assert data["timezone"] == "Asia/Shanghai"
     assert all(panel["collapsed"] is False for panel in data["panels"] if panel["type"] == "row")
-    for title in (
-        "LLM cost (window)",
-        "Tokens (window)",
-        "LLM cost estimate — day pace",
-        "LLM cost estimate — 30-day pace",
-        "LLM cost / minute",
-    ):
+    for title in _COST_WINDOW_TILES:
         assert "timeFrom" not in by_title[title]
         assert "interval" not in by_title[title]
 
     core_by_title = {render_title(spec): spec for spec in _load_core()}
-    for title in (
-        "LLM cost estimate — day pace",
-        "LLM cost estimate — 30-day pace",
-        "LLM cost / minute",
-        "LLM cost by model (Top 20)",
-        "LLM cost by agent (Top 20)",
-    ):
+    for title in _COST_DESCRIBED_TILES:
         assert by_title[title]["description"] == core_by_title[title].description
 
-    for panel in data["panels"]:
-        expressions = [target.get("expr", "") for target in panel.get("targets", [])]
-        if any('event_name="llm_usage"' in expression for expression in expressions):
-            assert all('category="telemetry"' in expression for expression in expressions)
+    _assert_llm_usage_panels_filter_telemetry(data["panels"])

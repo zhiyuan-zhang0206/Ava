@@ -134,20 +134,9 @@ async def test_the_reap_records_its_audit_fact_in_the_reaping_transaction(
     ]
 
 
-async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    reap_spies: tuple[list[dict[str, object]], list[int]],
-    loguru_records: list[dict[str, Any]],
-    event_bus: EventBus,
+def _assert_row_terminated_by_the_reaper_with_mark_kept(
+    db_conn: psycopg.Connection[Any], agent_id: int
 ) -> None:
-    events, published = reap_spies
-    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
-    published.clear()
-
-    reaped = await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus)
-    assert [corpse.agent_id for corpse in reaped] == [agent_id]
-
     row = db_conn.execute(
         "SELECT status, termination_source, lease_expires_at, "
         "last_turn_fatal_at IS NOT NULL FROM agents_meta WHERE id = %s",
@@ -158,16 +147,10 @@ async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
     # released, and the mark kept — it names the death.
     assert row == ("terminated", "reaper", None, True)
 
-    assert events == [
-        {
-            "from": "idling",
-            "to": "terminated",
-            "reason": "corpse_reaper",
-            "crash_count": RECRASH_CONFIRMED_CRASHES,
-        }
-    ]
-    assert published == [agent_id]
 
+def _assert_death_wake_committed_with_the_termination(
+    db_conn: psycopg.Connection[Any], agent_id: int, reaped: list[Any]
+) -> None:
     # The reap consumes no recovery bookkeeping — the age/budget/suppression
     # boundaries of the recovery paths stay out of this mechanism's hands —
     # but the death's wake is committed with the termination (task #4039):
@@ -187,6 +170,35 @@ async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
     )
     assert payload == {HOSTED_TURN_RECOVERY_MARKER: True}
     assert [corpse.recovery_wake_id for corpse in reaped] == [wake_id]
+
+
+async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    reap_spies: tuple[list[dict[str, object]], list[int]],
+    loguru_records: list[dict[str, Any]],
+    event_bus: EventBus,
+) -> None:
+    events, published = reap_spies
+    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+    published.clear()
+
+    reaped = await reap_recrashed_corpse(aops_pool, incarnation, bus=event_bus)
+    assert [corpse.agent_id for corpse in reaped] == [agent_id]
+
+    _assert_row_terminated_by_the_reaper_with_mark_kept(db_conn, agent_id)
+
+    assert events == [
+        {
+            "from": "idling",
+            "to": "terminated",
+            "reason": "corpse_reaper",
+            "crash_count": RECRASH_CONFIRMED_CRASHES,
+        }
+    ]
+    assert published == [agent_id]
+
+    _assert_death_wake_committed_with_the_termination(db_conn, agent_id, reaped)
     reaped_records = [
         r for r in loguru_records if r["extra"].get("event") == "corpse_reaper_terminated"
     ]

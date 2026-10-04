@@ -124,15 +124,7 @@ def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:
     )
 
 
-def test_gateway_uvicorn_run_passes_log_config_none() -> None:
-    """The gateway launch assembly must keep `log_config=None` — the whole point
-    of #970. The launch parameters live in `serve_kwargs()` (the one dict `serve`
-    builds uvicorn's config from), so the pin follows the call into the returned
-    dict literal; a future edit cannot silently reintroduce uvicorn's dictConfig
-    clobber."""
-    src = (_REPO_ROOT / "gateway" / "_server.py").read_text()
-    tree = ast.parse(src)
-
+def _assert_serve_is_called_with_the_serve_kwargs_assembly(tree: ast.Module) -> None:
     serve_calls = [
         node
         for node in ast.walk(tree)
@@ -148,6 +140,8 @@ def test_gateway_uvicorn_run_passes_log_config_none() -> None:
         assert isinstance(target, ast.Call) and isinstance(target.func, ast.Name)
         assert target.func.id == "serve_kwargs"
 
+
+def _log_config_entries_in_serve_kwargs(tree: ast.Module) -> list[ast.expr | None]:
     entries: list[ast.expr | None] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "serve_kwargs":
@@ -158,6 +152,21 @@ def test_gateway_uvicorn_run_passes_log_config_none() -> None:
                         for key, value in zip(child.keys, child.values, strict=True)
                         if isinstance(key, ast.Constant) and key.value == "log_config"
                     )
+    return entries
+
+
+def test_gateway_uvicorn_run_passes_log_config_none() -> None:
+    """The gateway launch assembly must keep `log_config=None` — the whole point
+    of #970. The launch parameters live in `serve_kwargs()` (the one dict `serve`
+    builds uvicorn's config from), so the pin follows the call into the returned
+    dict literal; a future edit cannot silently reintroduce uvicorn's dictConfig
+    clobber."""
+    src = (_REPO_ROOT / "gateway" / "_server.py").read_text()
+    tree = ast.parse(src)
+
+    _assert_serve_is_called_with_the_serve_kwargs_assembly(tree)
+
+    entries = _log_config_entries_in_serve_kwargs(tree)
     assert len(entries) == 1, "serve_kwargs() must carry exactly one 'log_config' entry"
     entry = entries[0]
     assert isinstance(entry, ast.Constant) and entry.value is None
