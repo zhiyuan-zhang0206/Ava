@@ -663,3 +663,107 @@ def test_bad_non_lite_field_does_not_block_lite_scripts(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("SCRIPT AVA_MODEL "), proc.stdout
     assert proc.stdout.rstrip().endswith(" 0 yes"), proc.stdout
+
+
+def test_field_faces_serve_while_another_thread_builds() -> None:
+    """The settings-free faces must not race another thread's eager build: a
+    `from base.config import _FIELDS` that lands while a build is in flight is
+    served in place — without waiting and without upgrading (task #4964: the
+    delivery_outbox keyed-send path used to get a spurious ImportError from
+    the global `is_upgrading()` gate; these faces never depend on the
+    upgrade)."""
+    proc = _spawn(
+        "import threading\n"
+        "import base.config as c\n"
+        "import base.config._full as full\n"
+        "real = full.build\n"
+        "entered = threading.Event()\n"
+        "release = threading.Event()\n"
+        "def gated():\n"
+        "    entered.set()\n"
+        "    if not release.wait(30):\n"
+        "        raise RuntimeError('gate not released')\n"
+        "    return real()\n"
+        "full.build = gated\n"
+        "out = {}\n"
+        "def read(tag):\n"
+        "    try:\n"
+        "        out[tag] = c.settings.web.web_jina_reader_base\n"
+        "    except Exception as exc:  # noqa: BLE001\n"
+        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
+        "t = threading.Thread(target=read, args=('build',))\n"
+        "t.start()\n"
+        "assert entered.wait(30), 'build never started'\n"
+        "try:\n"
+        "    from base.config import _FIELDS, FIELD_INFOS\n"
+        "    from base.config import CONFIG_UNCHANGED_SENTINEL, ConfigFieldMeta\n"
+        "    faces = 'ok' if (len(_FIELDS) > 0 and len(FIELD_INFOS) > 0\n"
+        "                     and CONFIG_UNCHANGED_SENTINEL is not None\n"
+        "                     and ConfigFieldMeta is not None) else 'empty'\n"
+        "except Exception as exc:  # noqa: BLE001\n"
+        "    faces = f'{type(exc).__name__}: {exc}'\n"
+        "held = t.is_alive()\n"
+        "upgrades = c._boot_state()['upgrades']\n"
+        "release.set()\n"
+        "t.join(30)\n"
+        "print('FACES', faces, held, upgrades, c._boot_state()['mode'])\n"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.startswith("FACES ok True 0 full"), proc.stdout
+
+
+def test_module_attribute_read_waits_then_serves() -> None:
+    """A module-attribute read (`getattr(base.config, 'Settings')`) takes the
+    same bounded wait as the view and `get_field` faces (task #4069): it lands
+    during another thread's in-flight build, waits for it, and is served the
+    installed value — while the building thread's own re-entrant read keeps
+    the documented window error instead of self-waiting (task #4964)."""
+    proc = _spawn(
+        "import threading\n"
+        "import base.config as c\n"
+        "import base.config._full as full\n"
+        "real = full.build\n"
+        "entered = threading.Event()\n"
+        "release = threading.Event()\n"
+        "inside = {}\n"
+        "def gated():\n"
+        "    entered.set()\n"
+        "    try:\n"
+        "        getattr(c, 'Settings')\n"
+        "        inside['reentrant'] = 'READ-OK'\n"
+        "    except Exception as exc:  # noqa: BLE001\n"
+        "        inside['reentrant'] = f'{type(exc).__name__}: {exc}'\n"
+        "    if not release.wait(30):\n"
+        "        raise RuntimeError('gate not released')\n"
+        "    return real()\n"
+        "full.build = gated\n"
+        "out = {}\n"
+        "def read(tag):\n"
+        "    try:\n"
+        "        out[tag] = c.settings.web.web_jina_reader_base\n"
+        "    except Exception as exc:  # noqa: BLE001\n"
+        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
+        "t1 = threading.Thread(target=read, args=('build',))\n"
+        "t1.start()\n"
+        "assert entered.wait(30), 'build never started'\n"
+        "def read_attr(tag):\n"
+        "    try:\n"
+        "        out[tag] = c.Settings\n"
+        "    except Exception as exc:  # noqa: BLE001\n"
+        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
+        "t2 = threading.Thread(target=read_attr, args=('waiter',))\n"
+        "t2.start()\n"
+        "t2.join(0.5)\n"
+        "held = t2.is_alive()\n"
+        "release.set()\n"
+        "t1.join(30)\n"
+        "t2.join(30)\n"
+        "served = getattr(out.get('waiter'), '__name__', '') == 'Settings'\n"
+        "same = out.get('waiter') is c.Settings\n"
+        "reentrant = str(inside.get('reentrant', '?'))\n"
+        "print('ATTR', c._boot_state()['upgrades'], held, served, same,\n"
+        "      reentrant.startswith('AttributeError: config boot-lite:'),\n"
+        "      'in flight' in reentrant)\n"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.startswith("ATTR 1 True True True True True"), proc.stdout

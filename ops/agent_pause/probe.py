@@ -52,19 +52,20 @@ def host_running() -> bool:
 def _find_unrecorded_agent_host(home: Path) -> bool:
     """Whether the process table holds an agent-host for `home` with no record.
 
-    macOS psutil can leak a raw PermissionError while building one process's
-    info mid-iteration (a sysctl race with a process diverging under load —
-    the 2026-09-18 flake); the identical read succeeds when re-probed, so the
-    scan retries once. A persistent failure raises — an unreadable scan must
-    never silently read as "not running"."""
+    macOS psutil can leak a raw PermissionError — or, on psutil 7.2.2, a raw
+    SystemError — while building one process's info mid-iteration (a sysctl
+    race with a process diverging under load — the 2026-09-18 flake); the
+    identical read succeeds when re-probed, so the scan retries once. A
+    persistent failure raises — an unreadable scan must never silently read
+    as "not running"."""
     import psutil
 
     try:
         processes = list(psutil.process_iter(["pid", "cmdline"]))
-    except PermissionError:
+    except (PermissionError, SystemError):
         try:
             processes = list(psutil.process_iter(["pid", "cmdline"]))
-        except PermissionError as exc:
+        except (PermissionError, SystemError) as exc:
             raise RuntimeError("cannot verify whether an unrecorded agent-host is running") from exc
     for process in processes:
         argv = cast(list[str], process.info["cmdline"] or [])

@@ -1,8 +1,9 @@
 """One-shot startup helpers run before the graph loop begins.
 
 - `wrap_saver_writes_with_loud_failure` — monkey-patch checkpointer aput
-  / aput_writes to log every failure as `checkpoint_write_failed` before
-  re-raising (LangGraph internally swallows aput failures otherwise)
+  / aput_writes to log every real failure as `checkpoint_write_failed` before
+  re-raising (LangGraph internally swallows aput failures otherwise); a
+  cooperative cancellation passes through unlogged
 - `wrap_saver_writes_with_nstep_interval` — throttle checkpoint writes to
   every Nth super-step while keeping aput_writes in lockstep and exposing a
   final-state flush
@@ -63,9 +64,10 @@ from base.log import logger
 def wrap_saver_writes_with_loud_failure(
     checkpointer: AsyncPostgresSaver, agent_id: int | None = None
 ) -> None:
-    """Wrap aput / aput_writes to log every failure as a checkpoint_write_failed
-    event before re-raising. See call site for the langgraph silent-swallow
-    background-task path this defends against.
+    """Wrap aput / aput_writes to log every real failure as a
+    checkpoint_write_failed event before re-raising (a cooperative
+    CancelledError is control flow and propagates unlogged). See call site for
+    the langgraph silent-swallow background-task path this defends against.
 
     The two methods are monkey-patched on the instance — langgraph never
     re-binds them after `__init__`, so this is safe across the saver
@@ -88,6 +90,8 @@ def wrap_saver_writes_with_loud_failure(
         owner = write_agent_id(config)
         try:
             return await orig_aput(config, *args, **kwargs)
+        except asyncio.CancelledError:
+            raise  # cancellation is control flow, not a failed write (task #4964)
         except BaseException:
             logger.opt(exception=True).error(
                 "checkpoint aput failed",
@@ -101,6 +105,8 @@ def wrap_saver_writes_with_loud_failure(
         owner = write_agent_id(config)
         try:
             return await orig_aput_writes(config, *args, **kwargs)
+        except asyncio.CancelledError:
+            raise  # cancellation is control flow, not a failed write (task #4964)
         except BaseException:
             logger.opt(exception=True).error(
                 "checkpoint aput_writes failed",

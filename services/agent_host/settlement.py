@@ -187,11 +187,10 @@ async def reconcile_inbounds_after_abort(
             reason="ownership_lost",
         )
     except Exception:
-        logger.warning(
+        logger.opt(exception=True).warning(
             "host abort reconcile failed — the next cold admission retries it",
             event="host_abort_reconcile_failed",
             agent_id=agent_id,
-            exc_info=True,
         )
 
 
@@ -253,9 +252,8 @@ async def reconcile_inbounds_after_turn(
             reason="ownership_lost",
         )
     except Exception:
-        logger.warning(
+        logger.opt(exception=True).warning(
             "turn inbound reconcile failed — the next cold admission retries it",
             event="host_turn_reconcile_failed",
             agent_id=agent_id,
-            exc_info=True,
         )
