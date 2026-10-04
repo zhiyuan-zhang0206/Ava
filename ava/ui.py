@@ -20,6 +20,7 @@ import ava
 from ava import gateway_client
 from ava._settings import page_host
 from ava.sdk_surface.validation import coerce_str, coerce_typed
+from base.log import logger
 
 _NAME_RE = _re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -174,6 +175,11 @@ class PageHost:
         try:
             pages = gateway_client.list_open_pages(self.agent_id)
         except Exception:
+            logger.opt(exception=True).warning(
+                "listing agent {}'s open pages failed; treating port {} as not its own",
+                self.agent_id,
+                port,
+            )
             return False
         return any(int(page["port"]) == port for page in pages)
 
@@ -284,7 +290,7 @@ def _error_detail(exc: Exception) -> str | None:
         return None
     try:
         parsed = response.json()
-    except Exception:
+    except ValueError:  # the error body is not JSON
         return None
     if not isinstance(parsed, dict):
         return None

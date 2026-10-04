@@ -1,7 +1,6 @@
 """Shared graph invocation configuration and recoverable turn-error reporting."""
 
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -51,12 +50,14 @@ def emit_error_event(
 ) -> None:
     """Best-effort single Error event to the frontend SSE channel.
 
-    emit() is a non-blocking best-effort enqueue; the suppress guards the
-    assert so a missing publisher can't mask the original exception.
+    A context built without a publisher (an embedding caller) has no channel, so the event
+    is dropped; a failing emit is logged, never raised over the original exception.
     """
-    with suppress(Exception):
-        assert ctx.event_publisher is not None  # noqa: S101
-        ctx.event_publisher.emit(
+    publisher = ctx.event_publisher
+    if publisher is None:
+        return
+    try:
+        publisher.emit(
             Error(
                 agent_id=agent_id,
                 content=content,
@@ -67,6 +68,12 @@ def emit_error_event(
                 blocked=blocked,
                 recovery=recovery,
             ).model_dump_json()
+        )
+    except Exception:
+        # This runs inside an error handler: a failure to report must not mask the original one.
+        logger.opt(exception=True).warning(
+            "emitting the turn Error event for agent {} failed; the frontend does not see it",
+            agent_id,
         )
 
 
@@ -250,6 +257,9 @@ async def _breaker_already_open(
     try:
         current = await circuit_reader()
     except Exception:
+        logger.opt(exception=True).warning(
+            "reading the circuit breaker state failed; treating the breaker as not open"
+        )
         current = None
     return current is not None and current.open and current.reason == reason
 

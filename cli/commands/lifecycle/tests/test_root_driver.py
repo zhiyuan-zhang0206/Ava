@@ -61,6 +61,24 @@ def test_readiness_probes_now_instead_of_believing_cached_health(
     assert result.unready
 
 
+def test_raising_identity_probe_reads_unavailable_and_warns() -> None:
+    from base.log import logger
+
+    def broken() -> DaemonProbe:
+        raise ValueError("probe bug")
+
+    records: list[str] = []
+    sink = logger.add(lambda message: records.append(str(message)), level="WARNING")
+    try:
+        assert driver._health_verdicts((spec(probe=broken),), status()) == {
+            "gateway": "unavailable"
+        }
+    finally:
+        logger.remove(sink)
+    assert len(records) == 1
+    assert "ValueError: probe bug" in records[0]
+
+
 def test_fresh_readiness_rejects_generation_change(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshots = iter([status(pid=100), status(pid=101)])
     monkeypatch.setattr(driver, "root_client", object)

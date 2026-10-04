@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import datetime
 import hashlib
 import logging
@@ -118,6 +117,10 @@ def _prune_stale_watcher_files(keep: _pl.Path) -> None:
     try:
         alive = set(_sessions.list())
     except Exception:
+        logger.warning(
+            "[watcher] listing live sessions failed; skipping the prune of stale watcher files",
+            exc_info=True,
+        )
         alive = None  # conservative: no session info, no pruning
     d = keep.parent
     for pat, exclude in ((_SCRIPT_FILE_RE, _BOOT_FILE_RE), (_BOOT_FILE_RE, _SCRIPT_FILE_RE)):
@@ -396,8 +399,15 @@ def _spawn(
             session_id,
             exc_info=True,
         )
-        with contextlib.suppress(Exception):
+        try:
             _sessions.kill(session_id)
+        except Exception:
+            logger.warning(
+                "[watcher] killing session %s after the failed start also failed; "
+                "it stays until its TTL expires",
+                session_id,
+                exc_info=True,
+            )
         raise
     return session_id
 

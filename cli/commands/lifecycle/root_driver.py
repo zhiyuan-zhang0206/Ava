@@ -13,6 +13,7 @@ from typing import Any, NamedTuple, cast
 from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineRoles
 from base.config import settings
+from base.log import logger
 from cli.commands._probe import ReadinessWait
 from cli.commands._repo import ServiceSpec, session_name
 from cli.start_runtime import StartRuntime
@@ -147,9 +148,10 @@ def _helper_wire_ok() -> bool:
 
     try:
         ping = helper_client.ping()
-        return all(ping.get(capability) is True for capability in _HELPER_PROTOCOLS)
-    except Exception:
+    except (helper_client.PermissionsHelperError, OSError):
+        # Socket absent / refused / timed out / helper error reply: not answering.
         return False
+    return all(ping.get(capability) is True for capability in _HELPER_PROTOCOLS)
 
 
 def _require_root_owner(status: dict[str, Any]) -> None:
@@ -572,7 +574,9 @@ def wait_for_service_tree(
 def _health_verdicts(
     specs: tuple[ServiceSpec, ...], status: dict[str, Any] | None
 ) -> dict[str, str]:
-    """Probe now; a cached root health round cannot certify a new generation."""
+    """Probe now; a cached root health round cannot certify a new generation.
+
+    A probe that raises is logged and reads as "unavailable"."""
     if status is None:
         return {}
     verdicts: dict[str, str] = {}
@@ -582,6 +586,9 @@ def _health_verdicts(
         try:
             verdicts[spec.session] = spec.identity_probe().verdict.value
         except Exception:
+            logger.opt(exception=True).warning(
+                "identity probe for {} raised; treating it as unavailable", spec.session
+            )
             verdicts[spec.session] = "unavailable"
     return verdicts
 

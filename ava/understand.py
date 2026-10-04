@@ -13,7 +13,6 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast, overload
-from zoneinfo import ZoneInfo
 
 from ava import files as _files
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
@@ -71,11 +70,7 @@ def _save_understand_output(prompt: str, result: str, *, source: str) -> Path | 
 
     d = workspace_dir(agent_id) / _OVERFLOW_DIRNAME
     d.mkdir(parents=True, exist_ok=True)
-    try:
-        tz = Clock.from_settings().explicit_zone()
-    except Exception:
-        tz = ZoneInfo("UTC")
-    now = datetime.now(tz)
+    now = datetime.now(Clock.from_settings().explicit_zone())
     slug = _slugify(prompt, max_len=40)
     path = d / f"understand_{now.strftime('%Y%m%d_%H%M%S_%f')}_{slug}.txt"
     content = "# understand result\n"

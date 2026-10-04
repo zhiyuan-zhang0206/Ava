@@ -139,11 +139,8 @@ def _data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
     nothing to probe. See the module docstring for the role-aware skip."""
     if ctx.roles is None:
         return []  # unit not configured yet — no URLs to probe
-    try:
-        pg_url = settings.data_plane.db_url
-        redis_url = settings.data_plane.redis_url
-    except Exception:  # a preflight must never fail a start
-        return []
+    pg_url = settings.data_plane.db_url
+    redis_url = settings.data_plane.redis_url
     if not pg_url or not redis_url:
         return []
 

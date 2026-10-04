@@ -21,7 +21,6 @@ loop while still detecting staleness before the next threshold-sized window.
 
 from __future__ import annotations
 
-import contextlib
 import threading
 import time
 from collections.abc import Callable
@@ -63,9 +62,9 @@ def heartbeat_age(pool: Any, *, now: datetime) -> float | None:
 
 def _emit(event_name: str, attributes: dict[str, Any]) -> None:
     """Best-effort status event; the JSONL mirror survives an OTLP outage."""
-    with contextlib.suppress(Exception):
-        from base import telemetry
+    from base import telemetry
 
+    with telemetry.failure_isolated("telemetry staleness status event"):
         telemetry.emit("telemetry", event_name, attributes=attributes)
 
 
@@ -152,8 +151,10 @@ class TelemetryStaleness:
                 stale = self._report_source(
                     source="postgres", age_s=age_s, now_s=moment.timestamp()
                 )
-            except Exception as exc:
-                logger.debug("telemetry heartbeat check failed: {}", exc)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "telemetry heartbeat check failed; the verdict falls back to not-stale"
+                )
             self._last_check_monotonic = checked_at
             self._last_stale = stale
             return stale

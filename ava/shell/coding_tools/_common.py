@@ -11,7 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 import ava
-from base.agents import AgentNotFound, AgentStatus
+from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
+from base.log import logger
 from base.sessions import coding_session_owner
 
 
@@ -94,10 +95,41 @@ def owner_terminated(agent_id: int) -> bool:
         return ava.agents.get_status(agent_id) is AgentStatus.TERMINATED
     except AgentNotFound:
         return True
-    except Exception:
+    except GatewayUnavailable:
         # An unavailable gateway cannot prove an owner dead. The supervisor and
         # expiry retain responsibility; guessing here could kill active work.
+        logger.opt(exception=True).warning(
+            "gateway unavailable while checking whether owner agent {} terminated; "
+            "treating the owner as alive",
+            agent_id,
+        )
         return False
+
+
+def kill_session_after_failed_launch(session_id: int) -> None:
+    """Reclaim the PTY of a launch that is already failing; the launch's own error stays primary."""
+    try:
+        ava.shell.sessions.kill(session_id)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "reclaiming shell session {} after a failed coding-session launch failed; "
+            "it stays until its TTL expires",
+            session_id,
+        )
+
+
+def terminate_generation_after_failed_launch(
+    key: coding_session_owner.CodingSessionKey, generation: str
+) -> None:
+    """Roll back the record of a launch that is already failing; the launch's own error stays primary."""
+    try:
+        coding_session_owner.terminate_generation(key, generation, reason="launch-failed")
+    except Exception:
+        logger.opt(exception=True).warning(
+            "rolling back coding-session generation {} after a failed launch failed; "
+            "its record stays until the sweep reclaims it",
+            generation,
+        )
 
 
 def new_generation(

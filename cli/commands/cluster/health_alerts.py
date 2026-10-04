@@ -234,7 +234,7 @@ def _ingest_recovery_self_heal(resp: httpx.Response, *, status: str) -> None:
         return
     try:
         body = resp.json()
-    except Exception:
+    except ValueError:  # a non-JSON body is not the ingest's reply shape
         return
     if body.get("inserted") == 1 and body.get("notified") == 0:
         notify_owner("[health-probe] cluster recovered: all checks passing")
@@ -390,7 +390,11 @@ def _alert_recovery(home: Path) -> None:
                 "AND status = 'unresolved'"
             )
             open_rows = cur.fetchall()
-    except Exception:
+    except Exception as exc:
+        print(
+            f"  (could not read the open 'cluster health' alerts to resolve them: {exc!r})",
+            file=sys.stderr,
+        )
         open_rows = None
     if open_rows:
         for row_fingerprint, row_start in open_rows:

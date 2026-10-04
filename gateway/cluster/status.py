@@ -420,11 +420,14 @@ async def _probe_agent_runner(
 
 def _local_resource_sample() -> ResourceSample | None:
     """One live resource reading for the gateway's own machine (no status_snapshot call)."""
-    try:
-        from base.host.resource_sample import resource_sample
+    import psutil
 
+    from base.host.resource_sample import resource_sample
+
+    try:
         return resource_sample()
-    except Exception:  # psutil may not be installed; degrade gracefully
+    except (OSError, psutil.Error):
+        # An unreadable disk / process table degrades the row to no resource figures.
         return None
 
 

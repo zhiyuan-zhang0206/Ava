@@ -42,7 +42,6 @@ import sys
 import threading
 import time
 import traceback
-from contextlib import suppress
 from pathlib import Path
 from types import FrameType
 
@@ -242,8 +241,13 @@ def _stall_action(database: Database, schedule_id: int, message: str, run_id: in
     """Reap descendants, bound failure recording, then hard-exit for manager recovery."""
 
     def record_failure() -> None:
-        with suppress(Exception):
+        try:
             _record_error(database, schedule_id, message)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "Schedule {} stall message could not be recorded in last_error; exiting without it",
+                schedule_id,
+            )
         _record_run_end(database, run_id, ok=False, note=f"stalled ({_stall_timeout_s():.0f}s)")
 
     try:
@@ -315,6 +319,7 @@ def _start_stall_guard(database: Database, schedule_id: int, run_id: int | None)
     def _guard() -> None:
         last_sig: tuple[str, int, str] | None = None
         stalled_since: float | None = None
+        frame_read_failed = False
         # quiesce-exempt: a watchdog thread inside one schedule runner process; it reads frames, not the database
         while not stop.is_set():
             time.sleep(_stall_check_interval_s())
@@ -327,11 +332,20 @@ def _start_stall_guard(database: Database, schedule_id: int, run_id: int | None)
                     stalled_since = None
                     continue
                 sig = (frame.f_code.co_filename, frame.f_lineno, frame.f_code.co_name)
-            except Exception as exc:
+            except Exception:
                 # The guard must never crash the runner; a failed frame read is
-                # just one skipped check.
-                logger.debug("schedule stall guard frame read failed: {}", exc)
+                # just one skipped check, reported on the first failure only.
+                if not frame_read_failed:
+                    frame_read_failed = True
+                    logger.opt(exception=True).warning(
+                        "Schedule {} stall guard frame read failed; "
+                        "stall detection is skipped while it keeps failing",
+                        schedule_id,
+                    )
                 continue
+            if frame_read_failed:
+                frame_read_failed = False
+                logger.info("Schedule {} stall guard frame read recovered", schedule_id)
             now = time.monotonic()
             if sig == last_sig and stalled_since is not None:
                 if now - stalled_since >= _stall_timeout_s():

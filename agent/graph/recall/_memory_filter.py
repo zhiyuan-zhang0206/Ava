@@ -227,6 +227,11 @@ async def filter_candidates(
                 return kept
             last_failure = "unparseable reply"
         except Exception:
+            logger.opt(exception=True).warning(
+                "[{}] filter call failed (attempt {}); retrying or injecting nothing",
+                _LABEL,
+                _attempt,
+            )
             last_failure = "filter call failed"
     logger.warning(
         "[{label}] {body}",

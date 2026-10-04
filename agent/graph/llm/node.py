@@ -263,7 +263,7 @@ def _note_failed_attempt(
             if attempt.number >= max_attempts:
                 _log_llm_retry_duration(attempt, outcome="attempts_exhausted")
         # `_retry.retry_wait` reads this attribute to clip the next wait to the budget.
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(AttributeError):  # an exception type that refuses new attributes
             setattr(exc, RETRY_REMAINING_ATTR, remaining_seconds)
 
 

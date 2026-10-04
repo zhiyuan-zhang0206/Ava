@@ -202,8 +202,10 @@ def warn_orphaned_local_instance() -> None:
                 "the URLs back to local and run `ava stop`.",
                 file=sys.stderr,
             )
-    except Exception as exc:
-        logger.debug("orphaned-local-instance probe skipped: {exc!r}", exc=exc)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "orphaned-local-instance probe failed; no teardown hint was printed"
+        )
 
 
 def prepare_gateway_schema() -> None:

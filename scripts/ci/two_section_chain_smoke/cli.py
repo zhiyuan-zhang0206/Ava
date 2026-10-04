@@ -547,7 +547,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     except SmokeError as failure:
         print(str(failure))
         if helper_sock.exists():
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(OSError, RuntimeError):
                 helper_client.stop_root(sock_path=helper_sock)
         print(f"helper stderr tail:\n{_tail(workdir / 'helper.stderr.log')}")
         print(f"root stderr tail:\n{_tail(workdir / 'root.stderr.log')}")

@@ -137,7 +137,7 @@ def _derive_repo() -> str:
         m = re.search(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$", out)
         if m:
             return f"{m.group(1)}/{m.group(2)}"
-    except Exception:  # noqa: S110 - best-effort lookup; fall back
+    except (OSError, subprocess.SubprocessError):  # noqa: S110 - best-effort lookup; fall back
         pass
     return _FALLBACK_REPO
 

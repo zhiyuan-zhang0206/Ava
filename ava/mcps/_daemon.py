@@ -93,9 +93,14 @@ class _Buckets:
 
     async def close(self) -> None:
         """Close every cached session's transport and forget them all."""
-        for stack in self.stacks.values():
-            with suppress(Exception):
+        for server, stack in self.stacks.items():
+            try:
                 await stack.aclose()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "closing the transport stack of MCP server {} failed; its session is dropped anyway",
+                    server,
+                )
         self.sessions.clear()
         self.stacks.clear()
 
@@ -187,8 +192,14 @@ async def _invalidate_session(
         buckets.sessions.pop(server, None)
         stack = buckets.stacks.pop(server, None)
         if stack is not None:
-            with suppress(Exception):
+            try:
                 await stack.aclose()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "closing the transport stack of MCP server {} failed; "
+                    "the next connect spawns a fresh one anyway",
+                    server,
+                )
 
 
 async def _connect_server(server: str, oauth_locks: dict[str, asyncio.Lock]) -> Any:
@@ -423,6 +434,11 @@ async def _dispatch_with_retry(
             except Exception as e:
                 if _attempt == 2 or not _is_transport_error(e):
                     raise
+                logger.opt(exception=True).warning(
+                    "MCP server {} transport error (attempt {}); dropping its session and retrying",
+                    server,
+                    _attempt + 1,
+                )
                 await _invalidate_session(server, scope)
                 await asyncio.sleep(min(2**_attempt, 8))
     except Exception as e:
@@ -453,7 +469,7 @@ async def _handle_client(
                 await writer.drain()
     finally:
         writer.close()
-        with suppress(Exception):
+        with suppress(OSError):  # the client is already gone: reset / broken pipe on close
             await writer.wait_closed()
 
 

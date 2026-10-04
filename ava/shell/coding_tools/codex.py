@@ -35,7 +35,14 @@ import ava
 from base.sessions import coding_session_owner
 
 from ._common import cancel as _cancel_generation
-from ._common import impersonator_guide, init_file, new_generation, worker_bootstrap
+from ._common import (
+    impersonator_guide,
+    init_file,
+    kill_session_after_failed_launch,
+    new_generation,
+    terminate_generation_after_failed_launch,
+    worker_bootstrap,
+)
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from ._common import session_uuid as session_uuid
@@ -217,8 +224,7 @@ def _launch_supervisor(
     try:
         ava.shell.sessions.send(session_id, command)
     except BaseException:
-        with contextlib.suppress(Exception):
-            ava.shell.sessions.kill(session_id)
+        kill_session_after_failed_launch(session_id)
         raise
     if owner.owner_agent_id is None:
         raise RuntimeError("launching owner has no agent identity")
@@ -541,14 +547,8 @@ def _start_generation(
         # now, so its CAS cannot reclaim this PTY. The launcher still owns the
         # numeric id and must reclaim it directly before rolling back its record.
         if sid is not None:
-            with contextlib.suppress(Exception):
-                ava.shell.sessions.kill(sid)
-        with contextlib.suppress(Exception):
-            coding_session_owner.terminate_generation(
-                key,
-                generation,
-                reason="launch-failed",
-            )
+            kill_session_after_failed_launch(sid)
+        terminate_generation_after_failed_launch(key, generation)
         raise
     return active, remote, codex_session
 
