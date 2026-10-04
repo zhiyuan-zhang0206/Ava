@@ -6,7 +6,7 @@ output — an independent review reproduced this concretely by recovering a
 `psycopg.connect` DSN's password from a `logger.exception`-logged connection
 failure. Every sink in `base/log/__init__.py` and `base/log/sinks.py` goes through
 `base.log.sinks.add_sink`, which passes `diagnose=False` (see
-scripts/lint/logger_add_diagnose.py, which guards this repo-wide).
+scripts/lint/diagnostics/logger_add_diagnose.py, which guards this repo-wide).
 
 These tests exercise the actual production sink constructor —
 `base.log.sinks._add_file_sink`, the file sink every `init_*` entry point in

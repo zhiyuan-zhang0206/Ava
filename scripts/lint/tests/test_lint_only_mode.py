@@ -102,12 +102,12 @@ _TAILNET_IP = ".".join(["100", "64", "1", "2"])  # spelled in pieces: the lint s
 CASES = [
     Case("scripts.lint.no_emoji", "base/x.py", f"x = '{_EMOJI}'\n"),
     Case(
-        "scripts.lint.logger_add_diagnose",
+        "scripts.lint.diagnostics.logger_add_diagnose",
         "base/x.py",
         "from loguru import logger\nlogger.add('a.log')\n",
     ),
     Case(
-        "scripts.lint.loguru_format",
+        "scripts.lint.diagnostics.loguru_format",
         "base/x.py",
         "from loguru import logger\nlogger.warning('x %s', 1)\n",
     ),

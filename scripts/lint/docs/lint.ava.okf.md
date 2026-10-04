@@ -68,6 +68,11 @@ The `lint_*.py` gates that take path arguments share one contract: a typo'd targ
 - **Explicit arguments must resolve.** A missing one is `error: target path(s) not found: <argument(s)>` on stderr, exit 1. Resolution is per-script: absolute paths as-is; a relative path against the repo root with a caller-cwd fallback (`lint_no_cjk` / `lint_no_tailnet`), against the repo root only (`time_bomb`), or against the caller's cwd (the rest; pre-commit passes absolute paths).
 - **Out-of-repo targets scan under their absolute path.** Scope-anchored scripts (`code_structure` / `fixture_scope` / `no_plugin_wrap`) skip one outside their scope silently (rc 0). Directory targets enumerate members (`turn_scoped_config` takes `.py` files only, so a directory scans nothing); an unreadable member (dangling symlink, non-UTF-8) is skipped. `time_bomb` resolves callees through its repo-scoped index, so an out-of-repo source file's source half silently passes; only its test half applies.
 
+## `no_silent_failures.py`
+
+No broad handler swallows a failure unreported — see
+[[scripts/lint/docs/no-silent-failures.ava.okf.md]].
+
 ## `loguru_format.py`
 
 Message-format and lost-traceback rules for loguru vs stdlib loggers — see

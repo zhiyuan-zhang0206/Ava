@@ -24,7 +24,7 @@ interception; the event-pipeline sink stays in `base/log/__init__.py`.
 
 - **`diagnose` is always off.** Every sink goes through `add_sink`, which
   forces `diagnose=False` and refuses `diagnose=True`; the
-  `lint-logger-add-diagnose` hook (`scripts/lint/logger_add_diagnose.py`)
+  `lint-logger-add-diagnose` hook (`scripts/lint/diagnostics/logger_add_diagnose.py`)
   rejects any non-test `logger.add` without a literal `diagnose=False`,
   `add_sink`'s own included. loguru's default renders
   each traceback frame's local variables into the sink, which put a
