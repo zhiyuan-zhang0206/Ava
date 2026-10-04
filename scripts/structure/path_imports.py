@@ -11,7 +11,7 @@ frozen sites live in the `path_imports` section of the scripts/structure/baselin
 as `path::target -> site count`, matched exactly like the locality sections.
 
 **One narrow exception** (2026-09-29 narrowing): a script under
-`ava_builtins/skills/<skill>/` may run a one-line `sys.path.insert(0, ...)` /
+`ava_builtins/skills/<group>/<skill>/` may run a one-line `sys.path.insert(0, ...)` /
 `sys.path.append(...)` guard whose argument is derived from `__file__` and whose
 resolved directory stays inside that same `<skill>/` tree — the pattern
 `lint_no_script_sibling_imports.py` already documents
@@ -251,15 +251,15 @@ def _guard_target(rel_path: str, expr: ast.expr) -> list[str] | None:
 
 def _is_within_own_skill(rel_path: str, target_parts: list[str]) -> bool:
     """True when `target_parts` stays inside the top-level skill directory that
-    `rel_path` (an `ava_builtins/skills/<skill>/...` file) itself lives under —
-    `ava_builtins/skills/<skill>/` is the boundary, not the narrower directory a
-    nested sub-skill happens to sit in."""
+    `rel_path` (an `ava_builtins/skills/<group>/<skill>/...` file) itself lives under —
+    `ava_builtins/skills/<group>/<skill>/` is the boundary, not the narrower
+    directory a nested sub-skill happens to sit in."""
     if not rel_path.startswith(_SKILLS_SCOPE):
         return False
     file_parts = rel_path.split("/")
-    if len(file_parts) < 3:
+    if len(file_parts) < 4:
         return False
-    skill_root = file_parts[:3]  # ["ava_builtins", "skills", "<skill>"]
+    skill_root = file_parts[:4]  # ["ava_builtins", "skills", "<group>", "<skill>"]
     return target_parts[: len(skill_root)] == skill_root
 
 

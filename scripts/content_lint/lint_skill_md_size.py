@@ -40,8 +40,8 @@ _HARD_CEILING = 300
 # family is globbed at both the root and the sub-skill level — a sub-skill is
 # where depth accumulates, so it is exactly where the ceiling has to reach.
 _SKILL_MD_GLOBS = [
-    "ava_builtins/skills/*/SKILL.md",
     "ava_builtins/skills/*/*/SKILL.md",
+    "ava_builtins/skills/*/*/*/SKILL.md",
     "ava_builtins/plugins/*/skills/SKILL.md",
     "ava_builtins/plugins/*/skills/*/SKILL.md",
     ".agents/skills/*/SKILL.md",

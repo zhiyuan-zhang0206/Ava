@@ -299,7 +299,7 @@ def _indented_code(line: str, *, open_now: bool, prev_blank: bool, in_list: bool
 # markdown links). Unlike the deliberately-unsafe generic backtick path, this
 # shape is unambiguous: it must resolve to a `references/` dir of the skill or
 # one of its ancestors (a nested skill shares its parent's library — the
-# ava_builtins/skills/ava-serious-engineering tree's ai-era/ and principles/
+# ava_builtins/skills/practice/ava-serious-engineering tree's ai-era/ and principles/
 # skills all point at
 # the root library). Three review rounds lost two of these to library moves
 # (Task #939).

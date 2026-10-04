@@ -10,7 +10,7 @@ tags:
 # Skill System
 
 Skills are reusable instruction packs that agents load at runtime. Each repo
-skill is a self-contained directory under `ava_builtins/skills/<name>/`
+skill is a self-contained directory under `ava_builtins/skills/<group>/<name>/`
 (`SKILL.md` + optional `scripts/` / `references/` / `assets/`); the full
 catalog, grouped by what each skill does, is
 [[ava_builtins/skills/docs/skills.ava.okf.md|the skills index]].

@@ -18,7 +18,7 @@ pointed at AI apps instead of content sources.
 
 ## Shape
 
-Root skill `ava_builtins/skills/web-ai/` with a shared driver `scripts/webchat.py` (open a
+Root skill `ava_builtins/skills/integrations/web-ai/` with a shared driver `scripts/webchat.py` (open a
 fresh chat, type the prompt, submit, wait for the streamed answer to finish —
 completion judged by text-stability so a drifted stop-button selector still
 converges). Children add it to `sys.path` and import it, then add their specifics.
@@ -50,7 +50,7 @@ selection.
   (`console --continue-url`, `deep-research reply`).
 - [x] `perplexity` as a console site — user call: its search is the best.
   Landed (the corp-gateway 502 blocking it was resolved); live in
-  `ava_builtins/skills/web-ai/scripts/_sites.py`.
+  `ava_builtins/skills/integrations/web-ai/scripts/_sites.py`.
 
 Future candidates (not committed): Grok DeepSearch, AI Studio.
 

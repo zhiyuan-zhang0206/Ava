@@ -14,7 +14,7 @@ from ava.impersonation.launch import bootstrap_message
 from ava.shell.coding_tools import codex
 from base.sessions import coding_session_owner
 
-_SKILL_DIR = Path(__file__).parents[2] / "ava_builtins/skills/ava-use-other-agents"
+_SKILL_DIR = Path(__file__).parents[2] / "ava_builtins/skills/coordination/ava-use-other-agents"
 _ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
 
 
@@ -31,7 +31,7 @@ def _owner(state_dir: Path) -> coding_session_owner.CodingSessionOwner:
 def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     provider: str, tmp_path: Path
 ) -> None:
-    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     assert guide.is_file()
     brief = "Goal: fix the login flow.\nDecision: keep the session table as-is."
     message = bootstrap_message(42, "Fix login", provider, brief, guide)
@@ -61,7 +61,7 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
 )
 def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide: str) -> None:
     """The general guide covers every host; relay startup and traps are per host."""
-    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     path = guide.parent / "reference" / host_guide
     assert path.is_file()
     message = bootstrap_message(42, "Fix login", provider, "brief", guide)
@@ -71,7 +71,7 @@ def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide:
 
 
 def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
-    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, codex_remote=_ENDPOINT)
     assert f"--codex-remote {_ENDPOINT}" in message
     assert "delivers into that same server" in message
@@ -292,7 +292,7 @@ def test_launch_requires_native_identity_before_creating_workspace(
 
 
 def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
-    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "claude", "brief", guide, relay_resident=True)
     assert "Ava relay plugin" in message
     assert "do not arm a Monitor watch" in message
@@ -301,14 +301,14 @@ def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
 
 
 def test_codex_bootstrap_ignores_the_resident_flag() -> None:
-    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, relay_resident=True)
     assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
     assert "Ava relay plugin" not in message
 
 
 def test_dsh_bootstrap_names_the_session_plugin_relay() -> None:
-    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "dsh", "brief", guide)
     assert "--provider dsh" in message and "--as 'DeepSeek Harness: Fix login'" in message
     assert "Ava relay plugin loaded into this DeepSeek Harness session" in message

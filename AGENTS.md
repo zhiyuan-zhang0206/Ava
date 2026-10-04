@@ -186,7 +186,7 @@ Five axes, one fact per place: `*.ava.okf.md` in each package's `docs/` = what t
 | Set up dev environment | [`conventions/dev-setup.md`](conventions/dev-setup.md) |
 | Run ops / deploy | [`conventions/runbook.md`](conventions/runbook.md) |
 | Write a PR | **[`.agents/skills/write-a-pr-description/SKILL.md`](.agents/skills/write-a-pr-description/SKILL.md)** |
-| Understand part of the codebase interactively | [`ava_builtins/skills/ava-workflow/calibrate/SKILL.md`](ava_builtins/skills/ava-workflow/calibrate/SKILL.md) |
+| Understand part of the codebase interactively | [`ava_builtins/skills/practice/ava-workflow/calibrate/SKILL.md`](ava_builtins/skills/practice/ava-workflow/calibrate/SKILL.md) |
 | Find every reference before changing or moving something | `.venv/bin/python scripts/audit/where_used.py TARGET` (`pkg.mod:name`, `pkg.mod` or a path): importers, tests, patch targets, docs, baselines in one call; after a move, `scripts/audit/module_moves.py OLD=NEW` |
 | Follow coding conventions | [`conventions/python-conventions.md`](conventions/python-conventions.md) |
 | Know which layer may import which | [`conventions/import-layering.md`](conventions/import-layering.md) |
@@ -206,15 +206,15 @@ Five axes, one fact per place: `*.ava.okf.md` in each package's `docs/` = what t
    same kind found along the way is fixed in the same PR when it is a small
    leftover (user ruling); otherwise it must leave a trace: report the debt or
    hand it off — never let it evaporate.
-4. **Unclear requirements — ask first** ([workflow align](ava_builtins/skills/ava-workflow/align/SKILL.md)).
+4. **Unclear requirements — ask first** ([workflow align](ava_builtins/skills/practice/ava-workflow/align/SKILL.md)).
 5. **Behavior changes are locked by a test** — no tests for the sake of tests.
 6. **Re-read the diff before committing**; drop what is not necessary.
 7. **Price our own code's liabilities together with new dependencies.**
 
 Rules 1–2 and 5–7 are referenced, not restated, by
-[serious-engineering implementation](ava_builtins/skills/ava-serious-engineering/practices/implementation/SKILL.md)
-and [serious-engineering dependency-management](ava_builtins/skills/ava-serious-engineering/principles/dependency-management/SKILL.md);
-rule 4's ask-first loop is [workflow align](ava_builtins/skills/ava-workflow/align/SKILL.md).
+[serious-engineering implementation](ava_builtins/skills/practice/ava-serious-engineering/practices/implementation/SKILL.md)
+and [serious-engineering dependency-management](ava_builtins/skills/practice/ava-serious-engineering/principles/dependency-management/SKILL.md);
+rule 4's ask-first loop is [workflow align](ava_builtins/skills/practice/ava-workflow/align/SKILL.md).
 
 ## Workflow (mandatory)
 

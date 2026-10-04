@@ -72,7 +72,7 @@ def _queried_by_sql() -> tuple[dict[str, Path], dict[str, Path]]:
 
 def _self_evolution_names() -> set[str]:
     """The names `ava-self-evolution` reads from `/api/events` telemetry (record.py)."""
-    path = _ROOT / "ava_builtins/skills/ava-self-evolution/scripts/record.py"
+    path = _ROOT / "ava_builtins/skills/platform/ava-self-evolution/scripts/record.py"
     failures: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if (

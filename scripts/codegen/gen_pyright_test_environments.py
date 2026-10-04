@@ -22,7 +22,7 @@ hand-written and left byte-for-byte alone.
 * The entry sets exactly the two call-signature rules to `error`; the other five rules
   come from the global configuration (`warning`).
 * A tests directory inside a hand-written entry that carries more than rules (the
-  `extraPaths` of `ava_builtins/skills/web-ai`) repeats those settings, because the
+  `extraPaths` of `ava_builtins/skills/integrations/web-ai`) repeats those settings, because the
   generated entry takes precedence and would otherwise drop them.
 
 Run after adding, moving or removing a tests directory, or let the pre-commit
