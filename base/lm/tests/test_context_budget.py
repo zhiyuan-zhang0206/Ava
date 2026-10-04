@@ -20,13 +20,12 @@ from base.lm.context_budget import (
     latest_input_tokens,
     resolve_context_budget,
 )
-from base.lm.factory import MODEL_CONTEXT_WINDOW, SUPPORTED_MODELS
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_provider_plugins() -> None:
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
 
 def test_budget_is_thirty_forty_percent_of_a_1m_window() -> None:
@@ -63,7 +62,7 @@ def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule() ->
     model's thresholds are exactly 30% / 40% of its own context window — except
     the deepseek entries, which carry the user-pinned 0.374 / 0.512 (see
     test_deepseek_budget_is_374k_soft_512k_hard)."""
-    for models in SUPPORTED_MODELS.values():
+    for models in model_catalog().supported_models.values():
         for model in models:
             if model == "deepseek-flash":
                 continue
@@ -115,7 +114,7 @@ def test_soft_stays_below_hard_for_every_spawnable_model() -> None:
     """Registry invariant across the whole roster: the reminder must fire
     strictly before the forced compaction, whatever combination of per-model
     fraction and ceiling the entry carries."""
-    for models in SUPPORTED_MODELS.values():
+    for models in model_catalog().supported_models.values():
         for model in models:
             budget = resolve_context_budget(model)
             assert 0 < budget.soft_compact_tokens < budget.hard_compact_tokens, model
@@ -123,7 +122,7 @@ def test_soft_stays_below_hard_for_every_spawnable_model() -> None:
 
 
 def test_unknown_model_raises() -> None:
-    """A model with no MODEL_CONTEXT_WINDOW entry cannot have thresholds derived —
+    """A model with no model_catalog().context_windows entry cannot have thresholds derived —
     fail-fast rather than borrow a wrong window."""
     with pytest.raises(UnknownModelWindowError, match="no-such-model"):
         resolve_context_budget("no-such-model")
@@ -134,10 +133,10 @@ def test_every_supported_model_resolves() -> None:
     compact hook's resolve never raises for a legitimately-spawned agent. This
     is what lets the hook let UnknownModelWindowError surface (it only fires on a
     developer registry gap, which this test catches in CI, not prod)."""
-    for models in SUPPORTED_MODELS.values():
+    for models in model_catalog().supported_models.values():
         for model in models:
-            assert model in MODEL_CONTEXT_WINDOW, (
-                f"{model} is spawnable but missing from MODEL_CONTEXT_WINDOW — "
+            assert model in model_catalog().context_windows, (
+                f"{model} is spawnable but missing from model_catalog().context_windows — "
                 f"add it so its compaction thresholds can be derived"
             )
             # And it actually resolves without raising.
@@ -155,9 +154,9 @@ def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
     code = textwrap.dedent(
         f"""
         from base.lm.context_budget import resolve_context_budget
-        from base.lm.registry import MODELS
+        from base.lm import plugin_providers
 
-        assert not MODELS, "fresh process must start with an empty registry"
+        assert plugin_providers._STATE.catalog is None, "fresh process must start with no catalog"
         budget = resolve_context_budget({model!r})
         print(budget.max_context_tokens)
         """

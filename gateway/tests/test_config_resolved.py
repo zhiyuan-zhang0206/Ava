@@ -7,7 +7,7 @@ name the winning layer correctly for each of the three layers, and every row's
 `name` must be a real config field so the panel can link back to that field's
 editor.
 
-A model with per-model tuning is injected into MODELS rather than asserted on a
+A model with per-model tuning is added to the model catalog rather than asserted on a
 real entry: the tuning column is empty today (#811 landed the mechanism, not the
 values), and a test that waited for a real tuned model would silently stop
 covering the model-default layer.
@@ -19,23 +19,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.config import field_names, settings
-from base.lm.registry import DEFAULT_TUNING, MODELS, ModelSpec, ModelTuning, tuning_field_names
+from base.lm.registry import DEFAULT_TUNING, ModelSpec, ModelTuning, tuning_field_names
 from gateway.app import app
+from tests.fixtures.model_catalog import AddModels
 
 TUNED_MODEL = "test-tuned-model"
 
 
 @pytest.fixture
-def tuned_model(monkeypatch: pytest.MonkeyPatch) -> str:
+def tuned_model(add_models: AddModels) -> str:
     """Register a throwaway model whose per-model layer has an opinion on one
     mechanical and one prompt-behavior field, leaving the rest to the floor."""
-    monkeypatch.setitem(
-        MODELS,
-        TUNED_MODEL,
-        ModelSpec(
-            provider="claude",
-            tuning=ModelTuning(auto_compact_fraction=0.55, agent_communication_style="silent"),
-        ),
+    add_models(
+        {
+            TUNED_MODEL: ModelSpec(
+                provider="claude",
+                tuning=ModelTuning(auto_compact_fraction=0.55, agent_communication_style="silent"),
+            )
+        }
     )
     return TUNED_MODEL
 

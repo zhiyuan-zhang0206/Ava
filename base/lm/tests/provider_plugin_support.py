@@ -1,7 +1,7 @@
 """Fixture plugin writer for the provider-plugin tests: a `provider.py` + `plugin.py` pair in the
-session's tmp AVA_HOME, with every piece of module-level model-catalog state restored after the
-test (MODELS + derived views, provider bindings, plugin prices, stop vocabulary, the loader's
-once-flag, the concurrency key cache)."""
+session's tmp AVA_HOME. The test runs against an empty catalog slot, so its first
+`model_catalog()` builds the catalog afresh from the enabled plugins, the fixture's among them; the
+process's own catalog comes back after the test."""
 
 from __future__ import annotations
 
@@ -12,10 +12,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.lm import plugin_providers as plugin_loader
-from base.lm import pricing, provider_api, stop
-from base.lm.plugin_providers import _reset_loaded_for_tests
-from base.lm.registry import MODELS, _rebuild_derived_views
+from base.lm.plugin_providers import use_catalog
 
 _PLUGIN_SOURCE = """from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
@@ -70,46 +67,7 @@ _PRICE_LINE = """\"{model}\": PriceRates(
 
 @pytest.fixture
 def provider_plugin() -> Generator[Callable[..., None], None, None]:
-    """Write a fixture provider.py + enable config, then restore all
-    module-level registration state after the test."""
-
-    # Another test in the same process may have already triggered the production loader. Reset the test-only once flag
-    # before creating this fixture plugin, or its provider.py would never be discovered.
-    loader_was_loaded = plugin_loader._STATE.loaded
-    _reset_loaded_for_tests()
-    models_snapshot = dict(MODELS)
-    bindings_snapshot = dict(provider_api.REGISTRY.bindings)
-    prices_snapshot = dict(pricing._PLUGIN_PRICES)
-    stop_snapshot = dict(stop._BY_PROVIDER)
-    for model_id in tuple(MODELS):
-        if model_id.startswith(
-            (
-                "claude-",
-                "deepseek-",
-                "gemini-",
-                "glm-",
-                "gpt-",
-                "kimi-",
-                "mimo-",
-                "qwen3.8-",
-            )
-        ):
-            MODELS.pop(model_id)
-            pricing._PLUGIN_PRICES.pop(model_id, None)
-    for prefix in (
-        "claude-",
-        "deepseek-",
-        "gemini-",
-        "glm-",
-        "gpt-",
-        "kimi-",
-        "mimo-",
-        "qwen3.8-",
-    ):
-        provider_api.REGISTRY.bindings.pop(prefix, None)
-    for provider_key in ("anthropic", "google_genai", "moonshot", "openai"):
-        stop._BY_PROVIDER.pop(provider_key, None)
-    _rebuild_derived_views()
+    """Write a fixture provider.py + enable config, and give the test an empty catalog slot."""
     # Tests share one session AVA_HOME — remove anything this test created so
     # a later test's loader scan cannot see leftover plugin dirs.
     created: list[Path] = []
@@ -157,22 +115,10 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         # empty stub here; it contributes nothing agent-side).
         (plugin_dir / "plugin.py").write_text("# provider plugin stub")
 
-    yield _write
+    with use_catalog(None):
+        yield _write
 
     for d in created:
         shutil.rmtree(d, ignore_errors=True)
     cfg = paths.ava_home() / "plugins_config.json"
     cfg.unlink(missing_ok=True)
-
-    # Restore module-level registration state (the session shares one process).
-    MODELS.clear()
-    MODELS.update(models_snapshot)
-    _rebuild_derived_views()
-    provider_api.REGISTRY.bindings.clear()
-    provider_api.REGISTRY.bindings.update(bindings_snapshot)
-    pricing._PLUGIN_PRICES.clear()
-    pricing._PLUGIN_PRICES.update(prices_snapshot)
-    stop._BY_PROVIDER.clear()
-    stop._BY_PROVIDER.update(stop_snapshot)
-    _reset_loaded_for_tests()
-    plugin_loader._STATE.loaded = loader_was_loaded

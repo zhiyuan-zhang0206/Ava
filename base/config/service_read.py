@@ -317,11 +317,9 @@ def bootstrap_config_values() -> dict[str, str]:
     # Provider keys are not Settings fields, so they cannot arrive through
     # BOOTSTRAP_FIELDS. Read only declared keys from the raw gateway .env; this
     # is the authenticated, fresh-file channel a split runner materializes.
-    from base.lm import provider_api
-    from base.lm.plugin_providers import ensure_provider_plugins_loaded
+    from base.lm.plugin_providers import model_catalog
 
-    ensure_provider_plugins_loaded()
-    for binding in provider_api.REGISTRY.bindings.values():
+    for binding in model_catalog().bindings.values():
         if binding.key_env in aliases and binding.key_env not in out:
             out[binding.key_env] = aliases[binding.key_env]
     return out

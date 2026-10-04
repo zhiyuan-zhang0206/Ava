@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 from loguru import logger
 
 from base.lm.effort import clamp_effort
+from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
@@ -23,7 +24,7 @@ from base.lm.provider_api import (
     ProviderContribution,
     require_key,
 )
-from base.lm.registry import MODELS, ModelSpec, ModelTuning, resolve_setting
+from base.lm.registry import ModelSpec, ModelTuning, resolve_setting
 from base.lm.stop import StopSpec
 from base.packages.plugins.extensions import PluginContributions
 
@@ -57,7 +58,7 @@ def claude_extended_thinking_kwarg(
     thinking unset (provider default OFF); also None for any model that is not
     extended-thinking-only or when the caller already set `thinking`.
     """
-    spec = MODELS.get(model)
+    spec = model_catalog().models.get(model)
     if thinking is not None or spec is None or not spec.extended_thinking_only:
         return None
     if budget_tokens > 0:
@@ -103,7 +104,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     if spec is None or spec.max_output_tokens is None:
         raise ValueError(
             f"Unknown claude model {ctx.model!r} — register it (with "
-            f"max_output_tokens) in `base/lm/registry.py:MODELS`"
+            f"max_output_tokens) in this plugin's ModelSpec rows"
         )
 
     thinking = _effective_thinking(ctx, spec)

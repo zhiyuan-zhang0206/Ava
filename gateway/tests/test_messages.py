@@ -16,6 +16,7 @@ from base.daemon.schedules.completion_notices import (
     policy_for_agent,
 )
 from gateway.app import app
+from tests.fixtures.model_catalog import AddModels
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
@@ -378,26 +379,29 @@ class TestMultimodalMessage:
         assert blocks[1]["image_url"]["url"] == url
 
     def test_image_to_withdrawn_vision_model_resolves_text_only_422(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        add_models: AddModels,
     ) -> None:
         """The image gate resolves a withdrawn vision pin to its text-only fallback."""
         from dataclasses import replace
         from pathlib import Path
 
-        from base.lm.plugin_providers import ensure_provider_plugins_loaded
-        from base.lm.registry import MODELS
+        from base.lm.plugin_providers import model_catalog
 
-        ensure_provider_plugins_loaded()
         model = "deepseek-vision-fixture"
-        monkeypatch.setitem(
-            MODELS,
-            model,
-            replace(
-                MODELS["deepseek-flash"],
-                spawnable=False,
-                unavailable_fallback="deepseek-flash",
-                media_types=frozenset({"image"}),
-            ),
+        base = model_catalog().models["deepseek-flash"]
+        add_models(
+            {
+                model: replace(
+                    base,
+                    spawnable=False,
+                    unavailable_fallback="deepseek-flash",
+                    media_types=frozenset({"image"}),
+                )
+            }
         )
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, model=model)

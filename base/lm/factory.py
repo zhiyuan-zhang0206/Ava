@@ -47,7 +47,7 @@ Adding a provider means adding a `provider.py` beside a plugin's `plugin.py`
 `base/lm/provider_api.py`, loaded by `base/lm/plugin_providers.py`).
 
 **`max_tokens` + reasoning effort dispatching** — per-model facts (output caps,
-effort vocabularies) live in `base/lm/registry.py` (`MODELS`); the
+effort vocabularies) live in `base/lm/registry.py` (`ModelSpec`, held by the catalog); the
 per-provider clamp machinery lives in the companion module `base/lm/effort.py`
 (its docstring has the detail). In short: the two anthropic-protocol branches
 pin max_tokens explicitly to the model's documented output cap
@@ -84,10 +84,9 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from base.config import field_alias, get_field, settings
+from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import provider_api
-from base.lm._providers import ThinkingConfig
 
 # Reasoning-effort dispatch lives in the companion module base/lm/effort.py
 # (split for the file-size ceiling); per-model facts and the media-capability
@@ -96,34 +95,17 @@ from base.lm._providers import ThinkingConfig
 from base.lm.effort import (
     clamp_effort as clamp_effort,
 )  # re-exported (tests import it via factory)
-from base.lm.plugin_providers import (
-    ensure_provider_plugins_loaded as ensure_provider_plugins_loaded,
-)  # re-exported (gateway entry points call it before reading the registry)
-from base.lm.registry import (
-    _VISION_MODEL_PREFIXES as _VISION_MODEL_PREFIXES,  # re-exported legacy fallback
-)
-from base.lm.registry import (
-    MODEL_CONTEXT_WINDOW as MODEL_CONTEXT_WINDOW,  # re-exported catalog view
-)
-from base.lm.registry import (
-    MODEL_IDENTITY as MODEL_IDENTITY,  # re-exported catalog view
-)
-from base.lm.registry import (
-    MODEL_KNOWLEDGE_CUTOFF as MODEL_KNOWLEDGE_CUTOFF,  # re-exported catalog view
-)
-from base.lm.registry import (
-    MODELS,
-    resolve_available_model,
-    resolve_setting,
-)
-from base.lm.registry import (
-    SUPPORTED_MODELS as SUPPORTED_MODELS,  # re-exported catalog view
-)
+from base.lm.plugin_providers import model_catalog
+from base.lm.provider_api import ThinkingConfig
 from base.lm.registry import (
     attach_modalities_for_model as attach_modalities_for_model,  # re-exported resolution
 )
 from base.lm.registry import (
     media_types_for_model as media_types_for_model,  # re-exported resolution
+)
+from base.lm.registry import (
+    resolve_available_model,
+    resolve_setting,
 )
 
 
@@ -149,73 +131,37 @@ def model_supports_vision(model: str) -> bool:
 
 
 def vision_capable_provider_names() -> list[str]:
-    """Display names of every vision-capable binding — core + plugin.
+    """Display names of every vision-capable binding.
 
     Feeds the message endpoint's 422 error text (gateway/agents/
     state.py), so the "switch to a vision-capable model" hint stops
     being a hardcoded list that a new provider must remember to edit.
     """
-    ensure_provider_plugins_loaded()
-    names = [
-        display
-        for prefix, (display, _attr, _env) in _MODEL_KEY_MAP.items()
-        if prefix in _VISION_MODEL_PREFIXES
-    ]
-    names.extend(
-        binding.display_name
-        for binding in provider_api.REGISTRY.bindings.values()
-        if binding.vision
-    )
-    return names
+    return [binding.display_name for binding in model_catalog().bindings.values() if binding.vision]
 
 
 def provider_key_of_model(model: str) -> str | None:
     """Provider key for a model name, or None for an unregistered prefix.
 
-    Keys are the core `_MODEL_KEY_MAP` prefixes with a trailing dash stripped,
-    plus each registered plugin's explicit provider key or stripped dispatch
+    Each registered plugin's explicit provider key or stripped dispatch
     prefix — the same keys `AVA_LLM_MAX_CONCURRENT` accepts
     (`base/lm/concurrency.py`). None means the limiter passes through.
     """
-    ensure_provider_plugins_loaded()
-    for prefix in _MODEL_KEY_MAP:
-        if model.startswith(prefix):
-            return prefix.rstrip("-")
-    for prefix, binding in provider_api.REGISTRY.bindings.items():
-        if model.startswith(prefix):
-            return binding.provider_key or prefix.rstrip("-")
-    return None
+    return model_catalog().provider_key_of(model)
 
 
-# Core model prefix → (provider display name, settings attribute, env var name).
-# All providers are plugin-owned now, so this compatibility map stays empty;
-# plugins declare their prefix, display name, and environment variable in
-# ProviderBinding.
-_MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {}
+def provider_key_map() -> dict[str, tuple[str, str]]:
+    """Provider dispatch prefix/key → (display name, key env var).
 
-# The legacy reserved-prefix seam remains, but core owns no provider prefixes.
-provider_api.REGISTRY.reserve_core_prefixes(set())
-
-
-def provider_key_map() -> dict[str, tuple[str, str | None, str]]:
-    """Provider dispatch prefix/key → key-source metadata.
-
-    The merged single source for `_ensure_provider_key` and the concurrency
-    limiter's known-key set. Plugin entries carry None for the settings attr —
-    their key lives in the process environment only (bootstrap plugin-secrets
-    section on a split runner; the cluster `.env` file at the spawn boundary).
+    The single source for `_ensure_provider_key` and the concurrency limiter's
+    known-key set. The key lives in the process environment only (bootstrap
+    plugin-secrets section on a split runner; the cluster `.env` file at the
+    spawn boundary).
     """
-    merged: dict[str, tuple[str, str | None, str]] = {
-        prefix: (display_name, attr, env_var)
-        for prefix, (display_name, attr, env_var) in _MODEL_KEY_MAP.items()
+    return {
+        binding.provider_key or prefix: (binding.display_name, binding.key_env)
+        for prefix, binding in model_catalog().bindings.items()
     }
-    merged.update(
-        {
-            binding.provider_key or prefix: (binding.display_name, None, binding.key_env)
-            for prefix, binding in provider_api.REGISTRY.bindings.items()
-        }
-    )
-    return merged
 
 
 def validate_model_config(
@@ -231,7 +177,7 @@ def validate_model_config(
 
     Resolves the effective model from ``config.llm_model`` first, falling back
     to ``model`` (the cluster default), then checks:
-    1. The model name is registered in SUPPORTED_MODELS.
+    1. The model name is a spawnable model of the catalog.
     2. The required API key for that model's provider is configured.
 
     Args:
@@ -246,10 +192,6 @@ def validate_model_config(
         ValueError: model unknown or its API key is not configured. The
             message is user-facing (fit for an HTTP 400 body).
     """
-    # Plugin providers register here (once per process) so a plugin model can
-    # pass the SUPPORTED_MODELS membership check below.
-    ensure_provider_plugins_loaded()
-
     # Resolve effective model: per-agent overlay wins over cluster default.
     effective_model: str | None = None
     if config is not None:
@@ -267,7 +209,9 @@ def validate_model_config(
     effective_model = resolve_available_model(effective_model)
 
     # 1. Model must be registered.
-    all_models: list[str] = [m for models in SUPPORTED_MODELS.values() for m in models]
+    all_models: list[str] = [
+        m for models in model_catalog().supported_models.values() for m in models
+    ]
     if effective_model not in all_models:
         raise ValueError(
             f"unknown model {effective_model!r}. Available models: " + ", ".join(sorted(all_models))
@@ -286,55 +230,32 @@ def validate_model_config(
 def _ensure_provider_key(effective_model: str) -> None:
     """Fail fast when the effective model's provider API key is not configured.
 
-    Drives the lookup from `provider_key_map()`. Provider-plugin entries read
-    the `.env` file directly because their keys have no Settings field. The
-    settings-backed branch remains only for compatibility with the empty core
-    map. An unregistered model that slipped past SUPPORTED_MODELS raises with a
-    pointer to the map.
+    Drives the lookup from `provider_key_map()`. The key has no Settings field, so it
+    is read from the process env and the `.env` file directly. An unregistered model
+    that slipped past the spawnable-model check raises.
     """
-    for prefix, (_provider, attr, env_var) in provider_key_map().items():
+    for prefix, (_display, env_var) in provider_key_map().items():
         if not effective_model.startswith(prefix):
             continue
-        if attr is None:
-            # Plugin provider: the key has no Settings field. It arrives on
-            # this unit's effective channel: a pure agent-runner receives it
-            # from /api/bootstrap injected into os.environ (no materialized
-            # .env cache of cluster facts since 2026-08-01), the gateway
-            # loads its own .env into the process env at boot. The file
-            # fallback covers the gateway profile that pops provider keys
-            # from os.environ (Task #856 / regression #1562).
-            from base.host.env.runtime_config import read_env_aliases
+        # The key arrives on this unit's effective channel: a pure agent-runner
+        # receives it from /api/bootstrap injected into os.environ (no
+        # materialized .env cache of cluster facts since 2026-08-01), the gateway
+        # loads its own .env into the process env at boot. The file
+        # fallback covers the gateway profile that pops provider keys
+        # from os.environ (Task #856 / regression #1562).
+        from base.host.env.runtime_config import read_env_aliases
 
-            if provider_api.provider_key_present(env_var) or env_var in read_env_aliases():
-                return
-            raise ValueError(
-                f"{effective_model} requires {env_var} which is not "
-                "configured on this unit — set it in the cluster .env "
-                "(gateway unit) or restart the runner daemon so its "
-                "bootstrap fetch delivers it"
-            )
-        key = get_field(attr)
-        if key is None:
-            # The gateway profile pops provider keys from os.environ
-            # (per-process env assembly, Task #856) while the cluster's
-            # .env file stays the authoritative configuration source.
-            # Fall back to the file so the spawn boundary can still
-            # fail fast on a genuinely missing key without carrying the
-            # secret in the gateway process env (regression: #1562
-            # popped the keys and every spawn 400'd).
-            from base.host.env.runtime_config import read_env_aliases
-
-            if field_alias(attr) in read_env_aliases():
-                return
-            raise ValueError(
-                f"{effective_model} requires {env_var} which is not "
-                "configured — set it in ~/.ava/.env or export before "
-                "spawning"
-            )
-        return
+        if provider_api.provider_key_present(env_var) or env_var in read_env_aliases():
+            return
+        raise ValueError(
+            f"{effective_model} requires {env_var} which is not "
+            "configured on this unit — set it in the cluster .env "
+            "(gateway unit) or restart the runner daemon so its "
+            "bootstrap fetch delivers it"
+        )
     raise ValueError(
         f"no provider mapping for model {effective_model!r} — "
-        "add its prefix to base/lm/factory.py:_MODEL_KEY_MAP"
+        "enable the provider plugin that owns its prefix"
     )
 
 
@@ -462,10 +383,10 @@ def build_chat_model(
         )
         return _resolve_override(override, model)
 
-    # Plugin providers register here (once per process) — every process that
-    # builds a model loads them, including the labeler daemon and the eval
+    # Every process that builds a model loads the provider plugins (once per
+    # process) through the catalog, including the labeler daemon and the eval
     # harness that never load plugin.py.
-    ensure_provider_plugins_loaded()
+    catalog = model_catalog()
 
     requested_model = model
     model = resolve_available_model(model)
@@ -477,7 +398,7 @@ def build_chat_model(
     # Resolve streaming: explicit kwarg overrides model default, model default
     # overrides the fallback True (kimi defaults to True — streaming-first with
     # a non-streaming fallback on 429).
-    spec = MODELS.get(model)
+    spec = catalog.models.get(model)
     if streaming is None:
         streaming = spec.streaming if spec is not None else True
     disable_streaming = not streaming
@@ -489,7 +410,7 @@ def build_chat_model(
     # The prefix map is flat (no nesting, collisions rejected at registration),
     # so at most one binding matches. Every builder receives the shared
     # cross-provider context defined in provider_api.py.
-    for prefix, binding in provider_api.REGISTRY.bindings.items():
+    for prefix, binding in catalog.bindings.items():
         if model.startswith(prefix):
             return binding.build(
                 provider_api.BuildContext(

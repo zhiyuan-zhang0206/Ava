@@ -91,14 +91,14 @@ def get_models() -> ModelsResponse:
     the versioned pricing catalog. The default mirrors `settings.lm.llm_model`
     so the UI can pre-select it.
     """
-    from base.lm.factory import SUPPORTED_MODELS, ensure_provider_plugins_loaded
+    from base.lm.plugin_providers import model_catalog
     from base.lm.pricing import rates_at
+    from base.lm.registry import explain_setting
     from gateway.schemas.models import ModelInfo, ModelPricing
 
-    # Plugin provider models register here (once per process) — the spawn
+    # Plugin provider models are in the catalog (loaded once per process) — the spawn
     # dropdown must list them even though the gateway never loads plugin.py.
-    ensure_provider_plugins_loaded()
-    from base.lm.registry import MODELS, explain_setting
+    catalog = model_catalog()
 
     # Stable model facts come off the registry; volatile prices come off the
     # effective-dated catalog. `effort_levels` is the same vocabulary the factory
@@ -106,9 +106,9 @@ def get_models() -> ModelsResponse:
     # claude-haiku-4-5 it is the binary thinking on/off vocabulary), so the
     # dropdown and the wire behavior cannot drift apart.
     models: dict[str, ModelInfo] = {}
-    for provider, model_list in SUPPORTED_MODELS.items():
+    for provider, model_list in catalog.supported_models.items():
         for model in model_list:
-            spec = MODELS[model]
+            spec = catalog.models[model]
             rates = rates_at(model, input_tokens=0)
             if rates is None:
                 raise RuntimeError(f"spawnable model {model!r} has no current catalog price")
@@ -138,7 +138,7 @@ def get_models() -> ModelsResponse:
             )
 
     return ModelsResponse(
-        providers=SUPPORTED_MODELS,
+        providers=dict(catalog.supported_models),
         models=models,
         default=settings.lm.llm_model,
     )

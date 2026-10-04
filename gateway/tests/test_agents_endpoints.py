@@ -17,21 +17,17 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
-from base.lm.registry import MODELS
+from base.lm.plugin_providers import model_catalog
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
+from tests.fixtures.model_catalog import AddModels
 
 
 @pytest.fixture
-def withdrawn_model(monkeypatch: pytest.MonkeyPatch) -> str:
-    ensure_provider_plugins_loaded()
+def withdrawn_model(add_models: AddModels) -> str:
     model = "deepseek-retired-fixture"
-    monkeypatch.setitem(
-        MODELS,
-        model,
-        replace(MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"),
-    )
+    base = model_catalog().models["deepseek-flash"]
+    add_models({model: replace(base, spawnable=False, unavailable_fallback="deepseek-flash")})
     return model
 
 
@@ -110,15 +106,14 @@ def test_get_models_returns_grouped_supported_models() -> None:
     assert body["default"] == settings.lm.llm_model
 
 
-def test_get_models_surfaces_superseded_by(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_models_surfaces_superseded_by(
+    add_models: AddModels,
+) -> None:
     """The picker's hide-by-default rule is data, not gateway logic: the
     endpoint publishes each model's ``superseded_by`` straight off the registry,
     and an un-superseded model carries null."""
-    from dataclasses import replace
-
-    from base.lm.registry import MODELS
-
-    monkeypatch.setitem(MODELS, "glm-5.2", replace(MODELS["glm-5.2"], superseded_by="kimi-k3"))
+    glm = model_catalog().models["glm-5.2"]
+    add_models({"glm-5.2": replace(glm, superseded_by="kimi-k3")})
     with TestClient(app) as client:
         resp = client.get("/api/models")
     body = resp.json()
@@ -146,9 +141,7 @@ def _assert_provider_binding_vocabulary(
     models: dict[str, Any], provider: str, binding: str
 ) -> None:
     """The provider's models all publish the binding's wire-clamp vocabulary."""
-    from base.lm import provider_api
-
-    binding_levels = provider_api.REGISTRY.bindings[binding].effort_levels
+    binding_levels = model_catalog().bindings[binding].effort_levels
     assert binding_levels is not None
     provider_models = [m for m, info in models.items() if info["provider"] == provider]
     assert provider_models, f"no {provider} models registered for the binding check"
@@ -158,9 +151,7 @@ def _assert_provider_binding_vocabulary(
 
 def _assert_provider_vocabulary_subset(models: dict[str, Any], provider: str, binding: str) -> None:
     """The provider's declared vocabularies stay inside the provider-wide fallback."""
-    from base.lm import provider_api
-
-    binding_levels = provider_api.REGISTRY.bindings[binding].effort_levels
+    binding_levels = model_catalog().bindings[binding].effort_levels
     assert binding_levels is not None
     fallback = set(binding_levels)
     provider_models = [m for m, info in models.items() if info["provider"] == provider]
@@ -176,7 +167,6 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     providers must mirror their plugin binding's clamp vocabularies — a drift
     would silently offer the spawn UI a value build_chat_model then clamps
     away, or hide a value the provider actually accepts."""
-    from base.lm.registry import MODELS
 
     with TestClient(app) as client:
         resp = client.get("/api/models")
@@ -184,7 +174,7 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
 
     # The endpoint serves exactly the registry's per-model vocabulary.
     for model, info in models.items():
-        expected_levels = MODELS[model].effort_levels
+        expected_levels = model_catalog().models[model].effort_levels
         assert expected_levels is not None, model
         assert info["reasoning_effort_options"] == list(expected_levels), model
 
@@ -219,7 +209,6 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     default, while the pin is operator policy (visible in the config panel's
     per-model view)."""
     from base.config import settings
-    from base.lm.registry import MODELS
 
     with TestClient(app) as client:
         resp = client.get("/api/models")
@@ -240,7 +229,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     # and sits on the model's own ladder (a default off the ladder would be
     # clamped or dropped at build — a UI lie).
     for model, info in models.items():
-        expected = MODELS[model].tuning.reasoning_effort
+        expected = model_catalog().models[model].tuning.reasoning_effort
         assert info["reasoning_effort_default"] == expected, model
         assert expected, model  # concrete, never ""
         assert expected in info["reasoning_effort_options"], model

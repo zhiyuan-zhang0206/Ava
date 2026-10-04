@@ -20,6 +20,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from ops.agents import create_agent_row
+from tests.fixtures.model_catalog import AddModels
 
 
 def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str, int | None] | None:
@@ -146,24 +147,22 @@ class TestSpawnAgent:
         # launch received the overlay
 
     def test_snapshot_reports_effective_model_vision_support(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, add_models: AddModels
     ) -> None:
         from dataclasses import replace
 
-        from base.lm.plugin_providers import ensure_provider_plugins_loaded
-        from base.lm.registry import MODELS
+        from base.lm.plugin_providers import model_catalog
 
-        ensure_provider_plugins_loaded()
         model = "deepseek-vision-fixture"
-        monkeypatch.setitem(
-            MODELS,
-            model,
-            replace(
-                MODELS["deepseek-flash"],
-                spawnable=False,
-                unavailable_fallback="deepseek-flash",
-                media_types=frozenset({"image"}),
-            ),
+        add_models(
+            {
+                model: replace(
+                    model_catalog().models["deepseek-flash"],
+                    spawnable=False,
+                    unavailable_fallback="deepseek-flash",
+                    media_types=frozenset({"image"}),
+                )
+            }
         )
         monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
         default_model_agent = _spawn_agent()

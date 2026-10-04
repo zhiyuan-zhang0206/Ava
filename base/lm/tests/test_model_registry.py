@@ -13,11 +13,9 @@ from pathlib import Path
 import pytest
 
 from base.config import field_names, get_field, per_agent_field_names, settings
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from base.lm.registry import (
     DEFAULT_TUNING,
-    MODELS,
-    SUPPORTED_MODELS,
     ModelSpec,
     ModelTuning,
     explain_setting,
@@ -26,11 +24,20 @@ from base.lm.registry import (
     resolve_setting,
     tuning_field_names,
 )
+from tests.fixtures.model_catalog import AddModels
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_provider_plugins() -> None:
-    ensure_provider_plugins_loaded()
+    model_catalog()
+
+
+def _validate_with(overrides: dict[str, ModelSpec]) -> None:
+    """Run the whole-registry validation over the installed catalog with some rows replaced."""
+    from base.lm import registry as reg
+
+    catalog = model_catalog()
+    reg.validate_models({**catalog.models, **overrides}, prices=catalog.prices)
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +107,9 @@ def test_every_spawnable_model_has_core_facts() -> None:
     carry window, cutoff, an effort vocabulary, and catalog pricing."""
     from base.lm.pricing import rates_at
 
-    for provider, model_list in SUPPORTED_MODELS.items():
+    for provider, model_list in model_catalog().supported_models.items():
         for model in model_list:
-            spec = MODELS[model]
+            spec = model_catalog().models[model]
             assert spec.provider == provider
             assert spec.spawnable
             assert spec.context_window is not None
@@ -115,18 +122,18 @@ def test_superseded_models_stay_spawnable() -> None:
     """Supersession is display-only (picker visibility): a superseded model
     must keep ``spawnable=True`` so settings/config_overlay can still switch
     back to it, and its replacement must be a registered model id."""
-    for model_id, spec in MODELS.items():
+    for model_id, spec in model_catalog().models.items():
         if spec.superseded_by is None:
             continue
         assert spec.spawnable, model_id
-        assert spec.superseded_by in MODELS, model_id
+        assert spec.superseded_by in model_catalog().models, model_id
 
 
 def test_gemini_3_8_flash_is_spawnable_again() -> None:
     """The 2026-09-06 user order restored 3.8 to the production picker
     (fresh-spawn verified clean); it resolves to itself, not to 3.7."""
-    assert "gemini-3.8-flash" in SUPPORTED_MODELS["gemini"]
-    assert "gemini-3.7-flash" in SUPPORTED_MODELS["gemini"]
+    assert "gemini-3.8-flash" in model_catalog().supported_models["gemini"]
+    assert "gemini-3.7-flash" in model_catalog().supported_models["gemini"]
     assert resolve_available_model("gemini-3.8-flash") == "gemini-3.8-flash"
 
 
@@ -141,8 +148,8 @@ def test_gemini_3_8_flash_is_spawnable_again() -> None:
 )
 def test_retired_model_is_absent_from_registry(model: str) -> None:
     """Unusable ids leave the runtime roster; only the archive prices history."""
-    assert model not in MODELS
-    assert all(model not in models for models in SUPPORTED_MODELS.values())
+    assert model not in model_catalog().models
+    assert all(model not in models for models in model_catalog().supported_models.values())
     assert resolve_available_model(model) == model
 
 
@@ -150,7 +157,7 @@ def test_deepseek_flash_registry_facts() -> None:
     """The canonical flash-tier id (user report 2026-09-17, task #3750): the
     provider renamed DeepSeek's V4 Flash; the new id carries the flash facts,
     tuning and price the retired entry kept."""
-    spec = MODELS["deepseek-flash"]
+    spec = model_catalog().models["deepseek-flash"]
     assert spec.provider == "deepseek"
     assert spec.spawnable
     assert spec.context_window == 1_000_000
@@ -158,7 +165,7 @@ def test_deepseek_flash_registry_facts() -> None:
     assert spec.knowledge_cutoff == "2026-04"
     assert spec.model_identity == "You are running on DeepSeek Flash."
     assert spec.effort_levels == ("high", "max")
-    assert "deepseek-flash" in SUPPORTED_MODELS["deepseek"]
+    assert "deepseek-flash" in model_catalog().supported_models["deepseek"]
     assert resolve_setting("reasoning_effort", model="deepseek-flash") == "max"
     assert resolve_setting("auto_compact_fraction", model="deepseek-flash") == 0.512
     assert resolve_setting("compact_reminder_fraction", model="deepseek-flash") == 0.374
@@ -169,7 +176,7 @@ def test_gemini_flash_lite_latest_registry_facts() -> None:
     models page + thinking guide, checked 2026-09-10): 1M window, March 2026
     cutoff, the full thinking vocabulary with a `minimal` default, and the
     multimodal matrix of the 3.x flash family."""
-    spec = MODELS["gemini-flash-lite-latest"]
+    spec = model_catalog().models["gemini-flash-lite-latest"]
     assert spec.provider == "gemini"
     assert spec.spawnable
     assert spec.context_window == 1_048_576
@@ -179,88 +186,66 @@ def test_gemini_flash_lite_latest_registry_facts() -> None:
     assert resolve_setting("reasoning_effort", model="gemini-flash-lite-latest") == "minimal"
 
 
-def test_superseded_chain_validation_rejects_self_link(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The import-time chain guard refuses a model that names itself as its
+def test_superseded_chain_validation_rejects_self_link() -> None:
+    """The chain guard refuses a model that names itself as its
     own replacement (would hide it from the picker with nothing to show)."""
     from dataclasses import replace
 
-    from base.lm import registry as reg
-
-    monkeypatch.setitem(
-        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="glm-5.2")
-    )
+    models = model_catalog().models
     with pytest.raises(RuntimeError, match="its own replacement"):
-        reg._validate_registry()
+        _validate_with({"glm-5.2": replace(models["glm-5.2"], superseded_by="glm-5.2")})
 
 
-def test_superseded_chain_validation_rejects_unknown_target(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The replacement id must exist in MODELS — a dangling link would hide
+def test_superseded_chain_validation_rejects_unknown_target() -> None:
+    """The replacement id must exist in the catalog's models — a dangling link would hide
     the old model while the supposed replacement is nowhere in the roster."""
     from dataclasses import replace
 
-    from base.lm import registry as reg
-
-    monkeypatch.setitem(
-        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="glm-9.9")
-    )
-    with pytest.raises(RuntimeError, match="not in MODELS"):
-        reg._validate_registry()
+    models = model_catalog().models
+    with pytest.raises(RuntimeError, match="not in models"):
+        _validate_with({"glm-5.2": replace(models["glm-5.2"], superseded_by="glm-9.9")})
 
 
-def test_superseded_chain_validation_rejects_non_spawnable_target(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_superseded_chain_validation_rejects_non_spawnable_target() -> None:
     """The replacement must itself be offered in the picker (spawnable) —
     hiding a model behind a replacement that never shows would strand it."""
     from dataclasses import replace
 
-    from base.lm import registry as reg
-
-    monkeypatch.setitem(
-        reg.MODELS, "gpt-5.6-sol", replace(reg.MODELS["gpt-5.6-sol"], spawnable=False)
-    )
-    monkeypatch.setitem(
-        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="gpt-5.6-sol")
-    )
+    models = model_catalog().models
     with pytest.raises(RuntimeError, match="not spawnable"):
-        reg._validate_registry()
+        _validate_with(
+            {
+                "gpt-5.6-sol": replace(models["gpt-5.6-sol"], spawnable=False),
+                "glm-5.2": replace(models["glm-5.2"], superseded_by="gpt-5.6-sol"),
+            }
+        )
 
 
-def test_superseded_chain_validation_rejects_cycle(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_superseded_chain_validation_rejects_cycle() -> None:
     """Each hidden model must eventually lead to one the picker can show."""
     from dataclasses import replace
 
-    from base.lm import registry as reg
-
-    monkeypatch.setitem(
-        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="kimi-k3")
-    )
-    monkeypatch.setitem(
-        reg.MODELS, "kimi-k3", replace(reg.MODELS["kimi-k3"], superseded_by="glm-5.2")
-    )
+    models = model_catalog().models
     with pytest.raises(RuntimeError, match="cycle"):
-        reg._validate_registry()
+        _validate_with(
+            {
+                "glm-5.2": replace(models["glm-5.2"], superseded_by="kimi-k3"),
+                "kimi-k3": replace(models["kimi-k3"], superseded_by="glm-5.2"),
+            }
+        )
 
 
-def test_superseded_chain_validation_accepts_valid_link(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_superseded_chain_validation_accepts_valid_link() -> None:
     """A well-formed chain (target registered and spawnable) passes the
     guard — superseding is a supported registry state, not an error shape."""
     from dataclasses import replace
 
-    from base.lm import registry as reg
-
-    monkeypatch.setitem(
-        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="kimi-k3")
-    )
-    reg._validate_registry()
+    models = model_catalog().models
+    _validate_with({"glm-5.2": replace(models["glm-5.2"], superseded_by="kimi-k3")})
 
 
 def test_glm_5_3_registry_facts() -> None:
-    spec = MODELS["glm-5.3"]
+    spec = model_catalog().models["glm-5.3"]
     assert spec.provider == "glm"
     assert spec.spawnable
     assert spec.context_window == 1_000_000
@@ -275,7 +260,7 @@ def test_glm_5_3_flash_registry_facts() -> None:
     """The flash sibling shares the GLM-5.3 series' window, cutoff estimate,
     effort vocabulary (docs: only low/high/max), always-on thinking, and the
     GLM-family retry posture — priced separately in the catalog."""
-    spec = MODELS["glm-5.3-flash"]
+    spec = model_catalog().models["glm-5.3-flash"]
     assert spec.provider == "glm"
     assert spec.spawnable
     assert spec.context_window == 1_000_000
@@ -292,7 +277,7 @@ def test_glm_5_3_flashx_registry_facts() -> None:
     page) shares the series' window, cutoff estimate, effort vocabulary,
     always-on thinking, and the GLM-family retry posture — priced separately
     in the catalog."""
-    spec = MODELS["glm-5.3-flashx"]
+    spec = model_catalog().models["glm-5.3-flashx"]
     assert spec.provider == "glm"
     assert spec.spawnable
     assert spec.context_window == 1_000_000
@@ -309,8 +294,8 @@ def test_mimo_v2_6_registry_facts() -> None:
     V2.6 cutoff publication, so both carry the V2.5 family estimate; the
     capacity-unpublished UltraSpeed SKU retains the stricter retry posture."""
     for model, spec in (
-        ("mimo-v2.6-pro", MODELS["mimo-v2.6-pro"]),
-        ("mimo-v2.6-pro-ultraspeed", MODELS["mimo-v2.6-pro-ultraspeed"]),
+        ("mimo-v2.6-pro", model_catalog().models["mimo-v2.6-pro"]),
+        ("mimo-v2.6-pro-ultraspeed", model_catalog().models["mimo-v2.6-pro-ultraspeed"]),
     ):
         assert spec.provider == "mimo"
         assert spec.spawnable
@@ -329,11 +314,11 @@ def test_glm_5_3_series_thinking_cannot_be_disabled() -> None:
     rejected by the endpoint (400, error code 1210, live-checked 2026-08-27),
     so the builder must warn instead of sending the disabled body (kimi-k3
     pattern)."""
-    assert MODELS["glm-5.3"].thinking_always_on
-    assert MODELS["glm-5.3-flash"].thinking_always_on
-    assert MODELS["glm-5.3-flashx"].thinking_always_on
+    assert model_catalog().models["glm-5.3"].thinking_always_on
+    assert model_catalog().models["glm-5.3-flash"].thinking_always_on
+    assert model_catalog().models["glm-5.3-flashx"].thinking_always_on
     # glm-5.2 keeps the off switch — the family boundary is 5.3, not glm-*.
-    assert not MODELS["glm-5.2"].thinking_always_on
+    assert not model_catalog().models["glm-5.2"].thinking_always_on
 
 
 def test_image_media_types_match_the_verified_model_matrix() -> None:
@@ -365,7 +350,9 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "qwen3.8-27b",
         "qwen3.8-flash",
     }
-    assert {model for model, spec in MODELS.items() if "image" in spec.media_types} == expected
+    assert {
+        model for model, spec in model_catalog().models.items() if "image" in spec.media_types
+    } == expected
 
 
 def test_qwen_roster_is_exactly_the_three_flat_tier_models() -> None:
@@ -378,7 +365,7 @@ def test_qwen_roster_is_exactly_the_three_flat_tier_models() -> None:
     `"range_name": "Default"` for each: a single flat tier, no boundary to
     guess. Adding a fourth Qwen means re-clearing that bar
     (base/lm/docs/pricing.ava.okf.md)."""
-    assert sorted(SUPPORTED_MODELS["qwen"]) == [
+    assert sorted(model_catalog().supported_models["qwen"]) == [
         "qwen3.8-27b",
         "qwen3.8-flash",
         "qwen3.8-max",
@@ -388,7 +375,7 @@ def test_qwen_roster_is_exactly_the_three_flat_tier_models() -> None:
 def test_model_ids_match_their_provider_prefix() -> None:
     """A registry entry filed under the wrong provider would dispatch to the
     wrong build_chat_model branch."""
-    for model, spec in MODELS.items():
+    for model, spec in model_catalog().models.items():
         assert model.startswith(spec.provider), (model, spec.provider)
 
 
@@ -396,7 +383,7 @@ def test_user_tone_defaults_are_per_family() -> None:
     """The shared tone guidance is on, except every Claude entry explicitly
     opts out so the user must deliberately enable its lighter variant."""
     assert DEFAULT_TUNING.prompt_user_tone_enabled is True
-    for model, spec in MODELS.items():
+    for model, spec in model_catalog().models.items():
         expected = False if spec.provider == "claude" else None
         assert spec.tuning.prompt_user_tone_enabled is expected, model
 
@@ -428,8 +415,8 @@ def test_unregistered_model_falls_back_to_shared_floor() -> None:
     assert resolve_setting("auto_compact_fraction", model="no-such-model") == 0.4
 
 
-def test_per_model_default_wins_over_shared_floor(monkeypatch: pytest.MonkeyPatch) -> None:
-    spec = MODELS["deepseek-flash"]
+def test_per_model_default_wins_over_shared_floor(add_models: AddModels) -> None:
+    spec = model_catalog().models["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
         spawnable=spec.spawnable,
@@ -439,17 +426,19 @@ def test_per_model_default_wins_over_shared_floor(monkeypatch: pytest.MonkeyPatc
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(auto_compact_fraction=0.9, agent_communication_style="silent"),
     )
-    monkeypatch.setitem(MODELS, "deepseek-flash", tuned)
+    add_models({"deepseek-flash": tuned})
     assert resolve_setting("auto_compact_fraction", model="deepseek-flash") == 0.9
     assert resolve_setting("agent_communication_style", model="deepseek-flash") == "silent"
     # A field the entry has no opinion on still falls to the shared floor.
     assert resolve_setting("compact_reminder_fraction", model="deepseek-flash") == 0.3
 
 
-def test_explicit_setting_wins_over_per_model_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_setting_wins_over_per_model_default(
+    monkeypatch: pytest.MonkeyPatch, add_models: AddModels
+) -> None:
     """A non-None settings value (env/.env/per-agent overlay all write one) is
     the explicit layer — it beats the per-model default."""
-    spec = MODELS["deepseek-flash"]
+    spec = model_catalog().models["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
         spawnable=spec.spawnable,
@@ -459,16 +448,18 @@ def test_explicit_setting_wins_over_per_model_default(monkeypatch: pytest.Monkey
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(auto_compact_fraction=0.9, reasoning_effort="high"),
     )
-    monkeypatch.setitem(MODELS, "deepseek-flash", tuned)
+    add_models({"deepseek-flash": tuned})
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.5)
     assert resolve_setting("auto_compact_fraction", model="deepseek-flash") == 0.5
 
 
-def test_explicit_empty_string_beats_per_model_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_empty_string_beats_per_model_effort(
+    monkeypatch: pytest.MonkeyPatch, add_models: AddModels
+) -> None:
     """An explicitly empty AVA_REASONING_EFFORT is a real choice ("use the
     provider default"), distinct from unset — it must mask a per-model effort
     default rather than fall through it."""
-    spec = MODELS["deepseek-flash"]
+    spec = model_catalog().models["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
         spawnable=spec.spawnable,
@@ -478,7 +469,7 @@ def test_explicit_empty_string_beats_per_model_effort(monkeypatch: pytest.Monkey
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(reasoning_effort="max"),
     )
-    monkeypatch.setitem(MODELS, "deepseek-flash", tuned)
+    add_models({"deepseek-flash": tuned})
     assert resolve_setting("reasoning_effort", model="deepseek-flash") == "max"
     monkeypatch.setattr(settings.lm, "reasoning_effort", "")
     assert resolve_setting("reasoning_effort", model="deepseek-flash") == ""
@@ -516,6 +507,7 @@ def test_tuning_field_names_are_the_governed_set() -> None:
 )
 def test_explain_setting_names_the_winning_layer(
     monkeypatch: pytest.MonkeyPatch,
+    add_models: AddModels,
     explicit: float | None,
     tuned: float | None,
     expected_source: str,
@@ -523,19 +515,19 @@ def test_explain_setting_names_the_winning_layer(
 ) -> None:
     """Every layer combination reports the value AND which layer produced it,
     while the losing candidates stay visible (the whole point of the view)."""
-    spec = MODELS["deepseek-flash"]
-    monkeypatch.setitem(
-        MODELS,
-        "deepseek-flash",
-        ModelSpec(
-            provider=spec.provider,
-            spawnable=spec.spawnable,
-            context_window=spec.context_window,
-            max_output_tokens=spec.max_output_tokens,
-            knowledge_cutoff=spec.knowledge_cutoff,
-            effort_levels=spec.effort_levels,
-            tuning=ModelTuning(auto_compact_fraction=tuned),
-        ),
+    spec = model_catalog().models["deepseek-flash"]
+    add_models(
+        {
+            "deepseek-flash": ModelSpec(
+                provider=spec.provider,
+                spawnable=spec.spawnable,
+                context_window=spec.context_window,
+                max_output_tokens=spec.max_output_tokens,
+                knowledge_cutoff=spec.knowledge_cutoff,
+                effort_levels=spec.effort_levels,
+                tuning=ModelTuning(auto_compact_fraction=tuned),
+            )
+        }
     )
     resolved = explain_setting("auto_compact_fraction", model="deepseek-flash", explicit=explicit)
     assert (resolved.source, resolved.value) == (expected_source, expected_value)
@@ -639,12 +631,18 @@ def test_attach_modalities_declaration_must_stay_within_media_types() -> None:
 
     from base.lm import registry as reg
 
-    bad = replace(MODELS["glm-5.3-flash"], attach_modalities=frozenset({"video"}))
+    bad = replace(model_catalog().models["glm-5.3-flash"], attach_modalities=frozenset({"video"}))
     with pytest.raises(RuntimeError, match="attach_modalities"):
-        reg._validate_spec("glm-5.3-flash", bad, anthropic_protocol=False)
+        reg.validate_spec(
+            "glm-5.3-flash", bad, anthropic_protocol=False, prices=model_catalog().prices
+        )
     # A strict subset (attach narrower than the endpoint) is legal.
-    narrower = replace(MODELS["gemini-3.8-flash"], attach_modalities=frozenset({"image"}))
-    reg._validate_spec("gemini-3.8-flash", narrower, anthropic_protocol=False)
+    narrower = replace(
+        model_catalog().models["gemini-3.8-flash"], attach_modalities=frozenset({"image"})
+    )
+    reg.validate_spec(
+        "gemini-3.8-flash", narrower, anthropic_protocol=False, prices=model_catalog().prices
+    )
 
 
 def test_reasoning_effort_default_must_stay_within_effort_levels() -> None:
@@ -656,10 +654,12 @@ def test_reasoning_effort_default_must_stay_within_effort_levels() -> None:
 
     from base.lm import registry as reg
 
-    spec = MODELS["glm-5.3-flash"]
+    spec = model_catalog().models["glm-5.3-flash"]
     bad = replace(spec, tuning=replace(spec.tuning, reasoning_effort="ultra"))
     with pytest.raises(RuntimeError, match="outside its effort_levels"):
-        reg._validate_spec("glm-5.3-flash", bad, anthropic_protocol=False)
+        reg.validate_spec(
+            "glm-5.3-flash", bad, anthropic_protocol=False, prices=model_catalog().prices
+        )
 
 
 def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
@@ -667,15 +667,20 @@ def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
     code = textwrap.dedent(
         """
         from dataclasses import replace
-        from base.lm.registry import MODELS, resolve_available_model
+        from base.lm import plugin_providers
+        from base.lm.registry import resolve_available_model
 
-        assert not MODELS, "fresh process must start with an empty registry"
+        assert plugin_providers._STATE.catalog is None, "fresh process must start with no catalog"
         assert resolve_available_model("deepseek-flash") == "deepseek-flash"
-        MODELS["deepseek-retired-fixture"] = replace(
-            MODELS["deepseek-flash"], spawnable=False,
+        catalog = plugin_providers.model_catalog()
+        withdrawn = replace(
+            catalog.models["deepseek-flash"], spawnable=False,
             unavailable_fallback="deepseek-flash",
         )
-        assert resolve_available_model("deepseek-retired-fixture") == "deepseek-flash"
+        with plugin_providers.use_catalog(
+            replace(catalog, models={**catalog.models, "deepseek-retired-fixture": withdrawn})
+        ):
+            assert resolve_available_model("deepseek-retired-fixture") == "deepseek-flash"
         print("OK")
         """
     )
@@ -692,16 +697,20 @@ def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
 
 
 def test_normalize_overlay_settles_withdrawn_model_and_returns_receipt(
-    monkeypatch: pytest.MonkeyPatch,
+    add_models: AddModels,
 ) -> None:
     """A synthetic withdrawal keeps the write-side settlement contract covered."""
     from dataclasses import replace
 
     model = "deepseek-retired-fixture"
-    monkeypatch.setitem(
-        MODELS,
-        model,
-        replace(MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"),
+    add_models(
+        {
+            model: replace(
+                model_catalog().models["deepseek-flash"],
+                spawnable=False,
+                unavailable_fallback="deepseek-flash",
+            )
+        }
     )
     config: dict[str, object] = {"llm_model": model, "reasoning_effort": "low"}
     assert normalize_overlay_llm_model(config) == (model, "deepseek-flash")

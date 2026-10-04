@@ -382,21 +382,16 @@ def resolve_overlay_targets(overlay: dict[str, object]) -> dict[str, tuple[str |
 
 
 def _validate_model_membership(value: object) -> str | None:
-    """A model-name overlay field must be a registered id (base/lm/registry.py
-    MODELS, plugin-registered models included). An unregistered id would pass
+    """A model-name overlay field must be a registered id (the model catalog,
+    plugin-registered models included). An unregistered id would pass
     the Pydantic str type check, persist, and crash the next boot at model
     build (Task #1704 — the deepseek-v4-flash-vision incident)."""
-    from base.lm.plugin_providers import ensure_provider_plugins_loaded
-    from base.lm.registry import MODELS
+    from base.lm.plugin_providers import model_catalog
 
-    # Registry-consulting check: make it self-sufficient. MODELS starts empty
-    # and is filled by the provider-plugin loader; without this, a process whose
-    # first registry use is overlay validation false-rejected every valid id
-    # ("valid models: " empty — task #3138).
-    ensure_provider_plugins_loaded()
-    if isinstance(value, str) and value in MODELS:
+    models = model_catalog().models
+    if isinstance(value, str) and value in models:
         return None
-    valid_models = ", ".join(sorted(MODELS))
+    valid_models = ", ".join(sorted(models))
     return f"value {value!r} is not a registered model; valid models: {valid_models}"
 
 
@@ -454,7 +449,7 @@ def _range_validator(
 # Semantic range validators for framework overlay fields — Pydantic type
 # validation (above) accepts any string / any number, so fields whose legal
 # values form a named universe get an explicit range check here. Model-name
-# fields check MODELS membership (an unknown id would crash the next boot at
+# fields check model-catalog membership (an unknown id would crash the next boot at
 # model build); numeric fields get finite + bound checks (NaN/Inf/negative
 # timeouts and out-of-window fractions would wedge or corrupt the runtime).
 # Plugin config fields are deliberately not range-checked (their schemas own

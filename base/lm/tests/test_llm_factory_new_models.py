@@ -9,9 +9,9 @@ from langchain_anthropic import ChatAnthropic
 
 from base.config import settings
 from base.lm.factory import build_chat_model
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 
-ensure_provider_plugins_loaded()
+model_catalog()
 
 
 class TestGpt6Builds:

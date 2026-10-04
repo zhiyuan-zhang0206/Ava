@@ -28,7 +28,7 @@ tags:
 | `glm-` | ReasoningContentChatModel (Zhipu) | GLM_API_KEY |
 | `qwen` | ReasoningContentChatModel (Alibaba) | DASHSCOPE_API_KEY + `AVA_DASHSCOPE_BASE_URL` |
 
-- `base/lm/registry.py:MODELS` starts empty and is plugin-populated; derived views rebuild in place, so imported readers see new models immediately. A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
+- `base/lm/catalog.py:ModelCatalog` is an immutable value built from the enabled plugins (`plugin_providers.model_catalog()`). A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
 - `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered + key configured, else 400 (fail-fast vs silent hang).
 - `close_chat_model(llm)` — closes a model's provider client(s) when its owner is done (best-effort; only already-materialized clients); the hierarchy worker builds one model per job and closes it at run end (task #3915).
 - Gateway lifespan loads providers; zero bindings raises before the once flag, so a corrected config is retryable.
@@ -44,7 +44,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - `extract_reasoning_tokens()` — `usage_metadata.output_token_details` preferred, else char estimates.
 
 ### stop classification (`stop.py`)
-- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; core's table starts empty and plugin bindings register four client-class keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; an unregistered provider key fails with a `register_stop_spec` pointer.
+- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; plugin bindings declare four client-class keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; an unregistered provider key fails.
 
 ### billing (`billing.py` + `pricing.py` + `pricing_catalog_archive.json`) — [[pricing.ava.okf.md]]
 - `billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension; task budgets instead consume explicit `task_id` on `llm_usage` events. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites only provide the response and usage kind.
@@ -69,7 +69,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - **DeepSeek uses the Anthropic protocol, not langchain-deepseek**: the latter 1.0.1 breaks AIMessages on thinking + tool_calls + streaming (empty metadata → next-round 400s; upstream #34166 OPEN). The Anthropic-compat endpoint (`api.deepseek.com/anthropic`) sidesteps it.
 - **max_tokens**: both anthropic-protocol branches (claude / deepseek) pin it explicitly to `ModelSpec.max_output_tokens` — langchain-anthropic falls back to a legacy 4096 for ids it doesn't know, truncating thinking mid-turn (#169). `_validate_registry` refuses a spawnable claude/deepseek entry without the cap; unregistered ids fail fast. OpenAI-style branches leave it unset (those APIs default to the model's own cap).
 - **streaming default** (`ModelSpec.streaming`): True, and no registry entry sets False today (kimi-k3's former False was removed — `decisions/2026-07-25-per-model-tuning-values.md`). Explicit kwarg overrides.
-- **model identity** (`ModelSpec.model_identity` → `MODEL_IDENTITY`): per-model note injected before knowledge cutoff in the system prompt (deepseek-flash, kimi-k3, both qwen3.8s).
+- **model identity** (`ModelSpec.model_identity` → `ModelCatalog.identities`): per-model note injected before knowledge cutoff in the system prompt (deepseek-flash, kimi-k3, both qwen3.8s).
 - **Anthropic prompt caching**: claude branch passes `cache_control: ephemeral`; system + eligible blocks cached 5 min server-side. No facade — submodules imported directly.
 - **Qwen**: graded by a token budget, not a level enum, so the knob rides the `enable_thinking` switch (mimo's binary `none`/`high`). Endpoint is CONFIG (`AVA_DASHSCOPE_BASE_URL`) — a dedicated workspace host is unreachable from the public default, and region changes reprice. Verified live 2026-08-20: thinking-off honored, and the streamed usage frame carries `cached_tokens` → `cache_read`. Explicit `cache_control` tier unwired.
 

@@ -32,7 +32,7 @@ import pytest
 
 from base.config import settings
 from base.host.net.resilience import ExponentialBackoff, Policy
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from services.memory_indexer.embeddings import factory, gemini
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.memory_indexer.embeddings.gemini import (
@@ -206,7 +206,7 @@ def _load_provider_plugins() -> None:
     nothing — so without this the file only passed when an earlier test
     module in the same worker happened to load the plugins (#4031).
     """
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
 
 @pytest.fixture(autouse=True)

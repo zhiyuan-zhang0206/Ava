@@ -2102,7 +2102,7 @@ export interface paths {
          * Put Default Model
          * @description Set the cluster's default model.
          *
-         *     400 when the id is not a spawnable model in `base/lm/registry.py:MODELS`.
+         *     400 when the id is not a spawnable model in the model catalog.
          *     Takes effect for agents born after the write; every existing agent keeps the
          *     model stamped on its own row.
          */
