@@ -890,10 +890,13 @@ class _FakeProc:
 
     def __init__(self, pid: int, cmdline: list[str], cwd: str, env: dict[str, str]) -> None:
         self.pid = pid
-        self.info = {"cmdline": cmdline}
+        self._cmdline = cmdline
         self._cwd = cwd
         self._env = env
         self.killed = False
+
+    def cmdline(self) -> list[str]:
+        return self._cmdline
 
     def cwd(self) -> str:
         return self._cwd
