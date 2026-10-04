@@ -213,20 +213,26 @@ def test_runners_stop_first_and_start_last(env: tuple[Cluster, Callable[..., int
         i for i, k in enumerate(kinds) if k == "stop"
     )
     assert [a for k, a in cluster.effects if k in ("start", "oneshot")] == ["gw", "mac", "lin"]
-    assert kinds[-6:] == ["smoke"] * 3 + ["refresh"] * 3
+    assert kinds[-10:-4] == ["smoke"] * 3 + ["refresh"] * 3
+    assert set(kinds[-4:]) == {"schedules-verify", "plugins-verify"}
     assert [a for k, a in cluster.effects if k == "refresh"] == ["gw", "mac", "lin"]
 
 
-def test_drift_checks_run_before_any_agent_smoke(env: tuple[Cluster, Callable[..., int]]) -> None:
+def test_drift_checks_run_after_the_smoke_and_the_refresh(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
     """The gateway's in-store schedule scripts are checked once (the DB lives there); every host's
-    plugins are checked; all of it before an agent is spawned onto the new code."""
+    plugins are checked; all of it after the smoke and the refresh, so a red never skips them."""
     cluster, run = env
     assert run("down") == 0
     assert run("up") == 0
     assert [a for k, a in cluster.effects if k == "schedules-verify"] == ["gw"]
     assert [a for k, a in cluster.effects if k == "plugins-verify"] == ["gw", "mac", "lin"]
     kinds = [kind for kind, _ in cluster.effects]
-    assert max(i for i, k in enumerate(kinds) if k.endswith("-verify")) < kinds.index("smoke")
+    first_verify = min(
+        i for i, k in enumerate(kinds) if k in ("schedules-verify", "plugins-verify")
+    )
+    assert first_verify > max(i for i, k in enumerate(kinds) if k in ("smoke", "refresh"))
 
 
 @pytest.mark.parametrize(
@@ -248,7 +254,8 @@ def test_a_red_drift_check_fails_up_with_its_detail(
     assert run("up") == 1
     out = capsys.readouterr().out
     assert detail in out and "FAILED: drift check failed" in out
-    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+    # The smoke and the refresh still ran: a red only fails `up`, last.
+    assert {"smoke", "refresh"} <= {k for k, _ in cluster.effects}
     # Every check ran: a red does not hide the next host's.
     assert [a for k, a in cluster.effects if k == "plugins-verify"] == ["gw", "mac", "lin"]
 

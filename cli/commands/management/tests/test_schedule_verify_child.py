@@ -91,6 +91,9 @@ def test_a_removed_module_attribute_is_red() -> None:
         "from base.db import Database\nDatabase.from_settings().connect()\n",
         # The agent SDK is wrapped by plugins at load time, so its static signature is not the contract.
         "import ava\nava.agents.spawn(prompt='x', label='plugin-added keyword')\n",
+        # A namespace a plugin installs into `ava` at load time (2026-10-04, model-scan-backstop).
+        "import ava\nresults = ava.tasks.get('x').results\n",
+        "import ava\n\ndef scan(task_id):\n    return ava.tasks.get(task_id).results\n",
         # Code outside the checkout is not this check's business.
         "import json\njson.dumps()\n",
         "import os\nos.getpid(1)\n",
