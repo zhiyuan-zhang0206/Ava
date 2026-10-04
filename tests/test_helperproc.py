@@ -14,7 +14,7 @@ import psutil
 import pytest
 
 from base.native_process import pid_starttime_ticks
-from base.sessions import helper_chain_guard, helperproc
+from base.sessions import helperproc
 from base.sessions.helper_chain_guard import parent_chain_intact
 from base.sessions.record import SessionRecord
 from services.desktop.permissions_helper import client
@@ -175,26 +175,32 @@ def test_record_registry_drives_list_timestamps_and_generation(unit_home: Path) 
 
 
 def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path,
 ) -> None:
-    record = _current_process_record()
-    path = unit_home / "run" / "sessions" / "ava-live.json"
-    record.write(path)
-    sent: list[tuple[int, int]] = []
-    liveness = iter((True, False))
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        record = replace(_current_process_record(), pid=child.pid)
+        record = replace(
+            record,
+            create_time=psutil.Process(child.pid).create_time(),
+            starttime=pid_starttime_ticks(child.pid),
+        )
+        path = unit_home / "run" / "sessions" / "ava-live.json"
+        record.write(path)
 
-    monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
-    monkeypatch.setattr(helperproc, "_process_is_live", lambda _proc: next(liveness))
-
-    assert helperproc.HelperProcSessionBackend().kill_session(
-        "ava-live", graceful=True, timeout=0.0
-    ) == (True, "graceful")
-    assert sent == [(record.pid, signal.SIGTERM)]
-    assert not path.exists()
+        assert helperproc.HelperProcSessionBackend().kill_session(
+            "ava-live", graceful=True, timeout=10.0
+        ) == (True, "graceful")
+        assert child.wait(timeout=10) == -signal.SIGTERM
+        assert not path.exists()
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
 
 
 def test_graceful_delivery_tolerates_whole_second_create_time_drift(
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A drifted reading must not refuse the process resolution accepted.
 
@@ -205,7 +211,7 @@ def test_graceful_delivery_tolerates_whole_second_create_time_drift(
     drifted = replace(_current_process_record(), create_time=psutil.Process().create_time() - 1.0)
     sent: list[tuple[int, int]] = []
 
-    monkeypatch.setattr(helperproc, "_read_record", lambda _name: drifted)
+    drifted.write(unit_home / "run" / "sessions" / "ava-live.json")
     monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
 
     assert helperproc.HelperProcSessionBackend().graceful_signal("ava-live", expected=drifted)
@@ -213,15 +219,12 @@ def test_graceful_delivery_tolerates_whole_second_create_time_drift(
 
 
 def test_graceful_delivery_refuses_a_birth_beyond_the_tolerance(
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     replaced = replace(_current_process_record(), create_time=psutil.Process().create_time() + 60.0)
     sent: list[tuple[int, int]] = []
 
-    monkeypatch.setattr(helperproc, "_read_record", lambda _name: replaced)
-    monkeypatch.setattr(
-        helperproc, "_process_for_record", lambda _record: psutil.Process(replaced.pid)
-    )
+    replaced.write(unit_home / "run" / "sessions" / "ava-live.json")
     monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
 
     assert not helperproc.HelperProcSessionBackend().graceful_signal("ava-live", expected=replaced)
@@ -293,30 +296,29 @@ def test_permissions_helper_spawn_defaults_off() -> None:
 def test_parent_chain_guard_allows_unmanaged_and_rejects_malformed_markers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    read_ppid = {os.getpid(): 100}.get
     monkeypatch.delenv("AVA_PERMISSIONS_HELPER_PID", raising=False)
-    monkeypatch.setattr(helper_chain_guard, "_read_ppid", {os.getpid(): 100}.get)
-    assert parent_chain_intact()
+    assert parent_chain_intact(read_ppid)
 
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "100")
-    assert parent_chain_intact()
+    assert parent_chain_intact(read_ppid)
 
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "not-an-int")
-    assert not parent_chain_intact()
+    assert not parent_chain_intact(read_ppid)
 
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "0")
-    assert not parent_chain_intact()
+    assert not parent_chain_intact(read_ppid)
 
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "-3")
-    assert not parent_chain_intact()
+    assert not parent_chain_intact(read_ppid)
 
 
 def test_parent_chain_guard_rejects_a_helper_outside_the_chain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     chain = {os.getpid(): 100, 100: 1}
-    monkeypatch.setattr(helper_chain_guard, "_read_ppid", chain.get)
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "101")
-    assert not parent_chain_intact()
+    assert not parent_chain_intact(chain.get)
 
 
 def test_parent_chain_guard_accepts_the_helper_above_an_intermediate(
@@ -325,17 +327,15 @@ def test_parent_chain_guard_accepts_the_helper_above_an_intermediate(
     # unit -> root -> helper: the geometry under the root supervisor, which
     # the former direct-parent check misread as an orphan and killed at boot.
     chain = {os.getpid(): 101, 101: 100}
-    monkeypatch.setattr(helper_chain_guard, "_read_ppid", chain.get)
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "100")
-    assert parent_chain_intact()
+    assert parent_chain_intact(chain.get)
 
 
 def test_parent_chain_guard_rejects_a_broken_intermediate_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(helper_chain_guard, "_read_ppid", {os.getpid(): 101}.get)
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "100")
-    assert not parent_chain_intact()
+    assert not parent_chain_intact({os.getpid(): 101}.get)
 
 
 def test_parent_chain_guard_stops_at_the_depth_bound(
@@ -344,13 +344,12 @@ def test_parent_chain_guard_stops_at_the_depth_bound(
     links: dict[int, int] = {os.getpid(): 7000}
     for step in range(40):
         links[7000 + step] = 7001 + step
-    monkeypatch.setattr(helper_chain_guard, "_read_ppid", links.get)
 
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "7030")  # 31 links up
-    assert parent_chain_intact()
+    assert parent_chain_intact(links.get)
 
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "7040")  # 41 links up
-    assert not parent_chain_intact()
+    assert not parent_chain_intact(links.get)
 
 
 def _run_probe_chain(marker_dir: Path, *, marker_value: str | None = None) -> str:

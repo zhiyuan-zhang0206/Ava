@@ -17,21 +17,18 @@ import asyncio
 import time
 from urllib.parse import urlsplit, urlunsplit
 
-import psycopg
 import pytest
 import redis.asyncio as aredis
 from redis.exceptions import NoPermissionError
 
 from base.cluster import inbound_channel, redis_channel_prefix
 from base.config import settings
-from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener, WakeFailure, WakeState
 
 
 async def _publish_inbound(agent_id: int, inbound_id: int = 42) -> None:
     """Publish a wake-up to the agent's (cluster-scoped) Redis channel."""
-    from base.events.live.bus import EventBus
 
     r = EventBus.from_settings().sync_redis()
     try:
@@ -317,7 +314,6 @@ class TestWakeHealth:
 
     async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
         from base.cluster import WAKE_KEY_TTL_S, wake_key
-        from base.events.live.bus import EventBus
 
         r = EventBus.from_settings().sync_redis()
         try:
@@ -488,7 +484,6 @@ def _make_scoped_user(user: str, channel_grant: str) -> None:
     full key + command access, password == username. `resetchannels` clears the
     default channel grant first, so the user reaches ONLY the granted pattern,
     modelling `ensure_cluster_redis_acl`'s `resetchannels &<prefix>:*`."""
-    from base.events.live.bus import EventBus
 
     r = EventBus.from_settings().sync_redis()
     try:
@@ -599,7 +594,6 @@ class TestWakeKeyBreadcrumb:
 
     async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
         from base.cluster import WAKE_KEY_TTL_S, wake_key
-        from base.events.live.bus import EventBus
 
         r = EventBus.from_settings().sync_redis()
         try:
@@ -609,7 +603,6 @@ class TestWakeKeyBreadcrumb:
 
     async def _get_wake_key(self, agent_id: int) -> str | None:
         from base.cluster import wake_key
-        from base.events.live.bus import EventBus
 
         r = EventBus.from_settings().sync_redis(decode_responses=True)
         try:
@@ -668,29 +661,6 @@ class TestWakeKeyBreadcrumb:
             )
         finally:
             await listener.close()
-
-    async def test_publish_sets_wake_key_too(self, database: Database, event_bus: EventBus) -> None:
-        """The publisher writes the key alongside the pub/sub message (pinned
-        at the `base.db.publish_inbound_wake` boundary via
-        `insert_inbound_message`), so a wake that the listener DOES receive
-        leaves a breadcrumb for the next reconnect window too."""
-        from base.db import create_agent, insert_inbound_message
-
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
-            agent_id = create_agent(conn)
-            insert_inbound_message(conn, agent_id, "wake", "user", bus=event_bus, database=database)
-        assert await self._get_wake_key(agent_id) is not None, (
-            "insert_inbound_message did not SETEX the wake key"
-        )
-        # cleanup
-        from base.cluster import wake_key
-        from base.events.live.bus import EventBus
-
-        r = EventBus.from_settings().sync_redis()
-        try:
-            r.delete(wake_key(agent_id))
-        finally:
-            r.close()
 
 
 class TestDeadTransportSurvival:

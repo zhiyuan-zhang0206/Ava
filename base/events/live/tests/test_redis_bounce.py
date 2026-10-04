@@ -2,7 +2,7 @@
 bounce (process killed, then restarted) and still wakes on a post-restart
 publish.
 
-The existing `base/tests/test_redis_listener.py::test_reconnect_after_close`
+The existing `base/events/live/tests/test_redis_listener.py::test_reconnect_after_close`
 only closes the *client* connection — the server stays up, so reconnect is
 immediate. This exercises the harder real-outage shape: the server process dies
 under a parked listener (the connection is severed mid-`get_message`), stays down

@@ -10,6 +10,7 @@ collision freezes nothing) are asserted alongside.
 """
 
 import asyncio
+import time
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -38,6 +39,16 @@ def _as_live_host(monkeypatch: pytest.MonkeyPatch, owner: UUID) -> None:
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     monkeypatch.setattr(agent_pause, "host_identity", lambda: HostIdentity(owner, frozenset()))
     monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
+
+
+def _poll_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cap each wait-loop sleep at 50 ms so a collision is re-checked quickly."""
+    real_sleep = time.sleep
+
+    def short_sleep(seconds: float) -> None:
+        real_sleep(min(seconds, 0.05))
+
+    monkeypatch.setattr(time, "sleep", short_sleep)
 
 
 def _events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -151,7 +162,7 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
     db_conn.commit()
     _as_live_host(monkeypatch, owner)
     monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 5.0)
-    monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
+    _poll_fast(monkeypatch)
     events = _events(monkeypatch)
 
     real_prepare = cohort.prepare
@@ -198,7 +209,7 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     db_conn.commit()
     _as_live_host(monkeypatch, owner)
     monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 0.3)
-    monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
+    _poll_fast(monkeypatch)
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
@@ -375,7 +386,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     db_conn.commit()
     _as_live_host(monkeypatch, uuid4())
     monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 0.3)
-    monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
+    _poll_fast(monkeypatch)
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
