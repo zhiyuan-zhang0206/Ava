@@ -169,6 +169,30 @@ async def test_non_probe_unreachable_stays_warning(
 
 
 @pytest.mark.asyncio
+async def test_quiet_unreachable_logs_debug(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A caller that verified the machine is expected unreachable right now (an
+    open deploy window — the control-console reads, task #4986) logs the
+    exhausted-retry line at DEBUG; the default stays WARNING (pinned above),
+    and the raise is unchanged."""
+
+    def _boom(_r: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    _patch(monkeypatch, handler=_boom)
+    with (
+        caplog.at_level(logging.DEBUG, logger="ops.cluster_rpc"),
+        pytest.raises(cluster_rpc.ClusterOpUnreachable),
+    ):
+        await cluster_rpc.dispatch_to_machine(
+            _db(), "wsl", "shell_probe", {}, retries=0, quiet_unreachable=True
+        )
+    recs = [r for r in caplog.records if "unreachable after" in r.getMessage()]
+    assert recs and all(r.levelno == logging.DEBUG for r in recs)
+
+
+@pytest.mark.asyncio
 async def test_unregistered_machine_raises_target_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing machines row -> ClusterOpTargetAbsent, the definitive-absence
     subclass of ClusterOpUnreachable (task #4143): consumers that own

@@ -299,8 +299,13 @@ async def dispatch_to_machine(
     timeout_s: float | None = None,
     retries: int | None = None,
     idempotency_key: str | None = None,
+    quiet_unreachable: bool = False,
 ) -> dict[str, Any]:
     """Resolve `target_machine`'s ops URL from the `machines` table, then `dispatch_to_url`.
+
+    `quiet_unreachable=True` — the caller verified unreachability is expected
+    right now (an open deploy window: the control-console reads pass
+    `deploy_in_flight(db)`; task #4986). See `dispatch_to_url`.
 
     Raises:
         ClusterOpTargetAbsent: no machines row exists for the target (a definitive absence --
@@ -332,6 +337,7 @@ async def dispatch_to_machine(
         timeout_s=timeout_s,
         retries=retries,
         idempotency_key=idempotency_key,
+        quiet_unreachable=quiet_unreachable,
     )
 
 
@@ -344,6 +350,7 @@ async def dispatch_to_url(
     timeout_s: float | None = None,
     retries: int | None = None,
     idempotency_key: str | None = None,
+    quiet_unreachable: bool = False,
 ) -> dict[str, Any]:
     """POST one op to `target_machine`'s ops server at `ops_url`, block on the response.
 
@@ -371,6 +378,11 @@ async def dispatch_to_url(
     Postgres may be down (the compensating `cluster/resume` of a failed fleet update, the
     roster's per-machine probe) resolves it earlier and calls this directly; otherwise
     `dispatch_to_machine` resolves it from the `machines` table.
+
+    `quiet_unreachable=True` — the caller verified unreachability is the
+    expected state right now (an open deploy window; the control-console reads
+    pass `deploy_in_flight(db)`): the exhausted-retry line logs at DEBUG
+    instead of WARNING. The retry budget and the raise are unchanged.
 
     Raises:
         ClusterOpUnreachable: the POST hit a connect/read timeout or non-200
@@ -423,6 +435,10 @@ async def dispatch_to_url(
     # reachability failures stay DEBUG (an offline host at panel cadence is
     # steady-state; the roster's own per-machine backoff widens the gap), every
     # other kind is operator-initiated so its exhausted retry stays a WARNING.
+    # A caller that verified the failure is explained right now
+    # (quiet_unreachable — the console reads during an open deploy window)
+    # logs DEBUG too; the severity question is "does the caller know why",
+    # never "hide the failure".
     # `last` is guaranteed set: the loop runs at least once (retries >= 0 is
     # enforced above) and every attempt either returns or raises.
     if last is None:  # pragma: no cover — unreachable by the loop invariant
@@ -430,7 +446,7 @@ async def dispatch_to_url(
             f"cluster_rpc retry loop exhausted without recording a failure "
             f"(machine={target_machine!r}, kind={kind!r})"
         )
-    log = _log.debug if kind == "status_probe" else _log.warning
+    log = _log.debug if kind == "status_probe" or quiet_unreachable else _log.warning
     log(
         "cluster_rpc %s -> machine=%s unreachable after %d attempt(s) (%.1fs): %r",
         kind,
