@@ -670,13 +670,9 @@ class TestRuffExecutableResolution:
     ):
         """The regression itself: empty PATH must not disable the fixers."""
         monkeypatch.setenv("PATH", "")
-        _ruff_executable.cache_clear()
-        try:
-            assert shutil.which("ruff") is None, "precondition: PATH cannot find ruff"
-            assert _ruff_format("x=1\n") == "x = 1\n"
-            assert "import json" in _detect_missing_imports("json.dumps({'a': 1})")
-        finally:
-            _ruff_executable.cache_clear()
+        assert shutil.which("ruff") is None, "precondition: PATH cannot find ruff"
+        assert _ruff_format("x=1\n") == "x = 1\n"
+        assert "import json" in _detect_missing_imports("json.dumps({'a': 1})")
 
 
 # ============================================================================

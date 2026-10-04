@@ -221,7 +221,7 @@ class TestRemind:
     ) -> None:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 1
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == owner
@@ -266,7 +266,7 @@ class TestRemind:
             for number in range(3)
         ]
 
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 1
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == owner
@@ -315,7 +315,7 @@ class TestRemind:
             updated_s_ago=3600,
         )
 
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 1
         assert len(deliver) == 1
         _delivered_owner, message = deliver[0]
         ids_in_order = [int(line.split(" ")[1].lstrip("#")) for line in message.splitlines()[1:]]
@@ -341,7 +341,7 @@ class TestRemind:
         _make_task(db_conn, owner=first_owner, remind_interval_seconds=1800, updated_s_ago=3600)
         _make_task(db_conn, owner=second_owner, remind_interval_seconds=1800, updated_s_ago=3600)
 
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 2
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 2
         messages_by_owner = dict(deliver)
         assert set(messages_by_owner) == {first_owner, second_owner}
         assert "2 overdue task(s)" in messages_by_owner[first_owner]
@@ -357,7 +357,7 @@ class TestRemind:
     ) -> None:
         owner = _make_agent(db_conn)
         _make_task(db_conn, owner=owner, remind_interval_seconds=3600, updated_s_ago=1800)
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 0
         assert deliver == []
 
     def test_terminated_owner_receives_inbound_without_resurrection(
@@ -369,7 +369,7 @@ class TestRemind:
     ) -> None:
         dead = _make_agent(db_conn, status="terminated")
         task_id = _make_task(db_conn, owner=dead, remind_interval_seconds=1800, updated_s_ago=3600)
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 1
         inbounds = _inbound_messages(db_conn, dead)
         assert len(inbounds) == 1
         content, kind, source = inbounds[0]
@@ -408,7 +408,7 @@ class TestRemind:
             raise RuntimeError("inbound insert failed")
 
         monkeypatch.setattr(daemon, "deliver_message", _boom)
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 0
         row = _task_row(db_conn, tid)
         assert row is not None
         _status, _owner, reminder_count, last_reminded_at = row
@@ -425,7 +425,7 @@ class TestRemind:
     ) -> None:
         owner = _make_agent(db_conn)
         _make_task(db_conn, owner=owner, remind_interval_seconds=None, updated_s_ago=100 * _DAY_S)
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 0
 
     def test_done_task_not_reminded(
         self,
@@ -441,7 +441,7 @@ class TestRemind:
         _make_task(
             db_conn, status="done", owner=owner, remind_interval_seconds=1800, updated_s_ago=3600
         )
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 0
 
     def test_backoff_blocks_duplicate_reminder(
         self,
@@ -459,7 +459,7 @@ class TestRemind:
             updated_s_ago=7200,
             last_reminded_s_ago=1800,  # reminded 30 min ago, backoff is 1h
         )
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 0
 
     def test_backoff_expired_allows_new_reminder(
         self,
@@ -477,7 +477,7 @@ class TestRemind:
             updated_s_ago=7200,
             last_reminded_s_ago=7200,  # reminded 2h ago, backoff is 1h
         )
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 1
 
     def test_interval_floor_blocks_hourly_nag(
         self,
@@ -499,7 +499,7 @@ class TestRemind:
             updated_s_ago=20000,
             last_reminded_s_ago=5400,  # 1.5h ago
         )
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 0
         assert deliver == []
 
     def test_interval_floor_allows_repeat_after_full_interval(
@@ -518,7 +518,7 @@ class TestRemind:
             updated_s_ago=20000,
             last_reminded_s_ago=15000,  # 4h+ elapsed — a fresh reminder is due
         )
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert _run_reminders(pool, database, event_bus, 3600.0, {}) == 1
 
     def test_counter_failure_retries_without_redelivery(
         self,
@@ -533,7 +533,7 @@ class TestRemind:
         write fails (a DB blip after a 2xx delivery), the next sweep retries
         the counter write WITHOUT re-delivering the message — the owner gets
         one reminder, not a duplicate minutes later."""
-        monkeypatch.setattr(daemon, "_pending_counter_writes", {})
+        pending: dict[int, float] = {}
         owner = _make_agent(db_conn)
         task_ids = [
             _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
@@ -553,7 +553,7 @@ class TestRemind:
 
         # First sweep: one digest lands; one task counter fails while the
         # other succeeds. The next sweep must only retry the failed counter.
-        _run_reminders(pool, database, event_bus, 3600.0)
+        _run_reminders(pool, database, event_bus, 3600.0, pending)
         assert len(deliver) == 1
         failed_row = _task_row(db_conn, task_ids[0])
         advanced_row = _task_row(db_conn, task_ids[1])
@@ -564,7 +564,7 @@ class TestRemind:
         assert advanced_row[3] is not None
 
         # Second sweep: the failed counter advances, with no second digest.
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert _run_reminders(pool, database, event_bus, 3600.0, pending) == 0
         assert len(deliver) == 1
         for task_id in task_ids:
             row = _task_row(db_conn, task_id)
@@ -584,7 +584,7 @@ class TestRemind:
         """The dedup mark is window-bounded: past the window the task is
         reminded again — a new overdue window (the owner updated the task,
         resetting the counters) must not lose its reminder to a stale mark."""
-        monkeypatch.setattr(daemon, "_pending_counter_writes", {})
+        pending: dict[int, float] = {}
 
         class _FakeTime:
             now = 0.0
@@ -608,7 +608,7 @@ class TestRemind:
 
         monkeypatch.setattr(daemon, "_advance_reminder_counters", _flaky)
 
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert _run_reminders(pool, database, event_bus, 3600.0, pending) == 0
         assert len(deliver) == 1
 
         # Time passes beyond the dedup window, the owner updates the task
@@ -623,5 +623,5 @@ class TestRemind:
         db_conn.commit()
 
         # The stale mark is expired: a fresh reminder is delivered.
-        assert _run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert _run_reminders(pool, database, event_bus, 3600.0, pending) == 1
         assert len(deliver) == 2

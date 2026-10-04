@@ -181,7 +181,6 @@ _F821_MSG_RE = re.compile(r"Undefined name `([^`]+)`")
 # only thing that varies is the agent's source, which is piped to stdin and
 # never interpolated into the command. S603 fires solely because the executable
 # is a resolved path rather than a string literal.
-@functools.cache
 def _ruff_executable() -> str:
     """Absolute path to the ``ruff`` that ships in this interpreter's env.
 

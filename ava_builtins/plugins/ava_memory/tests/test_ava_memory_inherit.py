@@ -9,7 +9,6 @@ does with the note (strip on fork + regraft) is pinned in
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -81,15 +80,6 @@ class _FakeChain:
         if self.error is not None:
             raise self.error
         return [dict(row) for row in self.rows]
-
-
-@pytest.fixture(autouse=True)
-def _fresh_chain_cache() -> Iterator[None]:
-    """The builder caches the immutable chain per process; each test starts
-    empty, so call counts reflect that test's calls only."""
-    inherit._CHAIN_CACHE.clear()
-    yield
-    inherit._CHAIN_CACHE.clear()
 
 
 @pytest.fixture
@@ -234,7 +224,6 @@ def test_remote_ancestors_are_skipped_and_footered(
 
     # Remote-only chain: no content, no note (the footer appears only when
     # there is something to carry it).
-    inherit._CHAIN_CACHE.clear()
     chain.rows = [_remote_row(600343)]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 1)
     assert inherit.inherited_memory_note(AgentSlices.resolve()) is None
@@ -248,15 +237,15 @@ def test_chain_read_failure_degrades_and_is_not_cached(chain: _FakeChain) -> Non
     assert len(chain.calls) == 2
 
 
-def test_chain_read_is_cached_per_process(
+def test_chain_is_read_at_each_establishment(
     chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("ava.agent_identity._agent_id", 1)
-    _write_entry(600351, "rules", _wrap("cached block"))
+    _write_entry(600351, "rules", _wrap("fresh block"))
     chain.rows = [_local_row(600351)]
     assert inherit.inherited_memory_note(AgentSlices.resolve()) is not None
     assert inherit.inherited_memory_note(AgentSlices.resolve()) is not None
-    assert chain.calls == [1]  # the established agent id; read once
+    assert chain.calls == [1, 1]  # the established agent id; read per establishment
 
 
 def test_content_is_deterministic(chain: _FakeChain) -> None:
@@ -265,7 +254,6 @@ def test_content_is_deterministic(chain: _FakeChain) -> None:
     _write_entry(600361, "rules", _wrap("stable block"))
     chain.rows = [_local_row(600361)]
     first = inherit.inherited_memory_note(AgentSlices.resolve())
-    inherit._CHAIN_CACHE.clear()
     second = inherit.inherited_memory_note(AgentSlices.resolve())
     assert first is not None and second is not None
     assert _note_text(first) == _note_text(second)
@@ -303,7 +291,6 @@ def test_total_guardrail_clips_and_omits(
 
     # Exact exhaustion: nothing of the crossing block fits, so it is omitted
     # whole behind the same marker (no dangling section header).
-    inherit._CHAIN_CACHE.clear()
     monkeypatch.setattr(settings.agent, "memory_inherit_max_total_chars", 40)
     monkeypatch.setattr(settings.agent, "memory_inherit_max_block_chars", 0)
     note = inherit.inherited_memory_note(AgentSlices.resolve())
