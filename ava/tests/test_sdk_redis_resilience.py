@@ -12,7 +12,7 @@ aredis client).
 import pytest
 import redis
 
-from ava import _settings
+from base.agents.context.clients import ClientSet
 
 
 def test_connect_redis_applies_resilience_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,7 +24,7 @@ def test_connect_redis_applies_resilience_kwargs(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(redis.Redis, "from_url", staticmethod(fake_from_url))
 
-    _settings._connect_redis()  # pyright: ignore[reportUnknownMemberType]
+    ClientSet()._connect_redis()
 
     kw = captured["kwargs"]
     assert kw["decode_responses"] is True

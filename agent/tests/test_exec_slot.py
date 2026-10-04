@@ -5,6 +5,7 @@ instead of returning None, `ava.in_exec_turn()` is the one explicit predicate, a
 `PluginStateHandle` has a pure host side (`view` / `delta`) beside the exec-side `read` / `update`.
 """
 
+from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
@@ -103,3 +104,36 @@ def test_handle_view_and_delta_are_pure_over_the_graph_state():
     assert handle.delta({"counter": 6, "seen": {"b"}}) == {"demo__counter": 6, "demo__seen": {"b"}}
     with pytest.raises(ValueError, match="unknown field"):
         handle.delta({"typo": 1})
+
+
+def test_child_clients_are_lazy_and_released_when_the_process_ends(tmp_path: Path) -> None:
+    """A connection the child's code never touches is never built; one it touches is closed by the
+    child itself before it exits."""
+    from agent.graph.exec.protocol import read_result
+    from agent.tests.test_exec_child import _spawn
+
+    marker = tmp_path / "closed"
+    code = f"""
+import ava
+from base.agents.context.clients import ClientSet
+from pathlib import Path
+
+class Conn:
+    closed = False
+    broken = False
+    def close(self):
+        Path({str(marker)!r}).write_text("closed")
+
+ClientSet._connect_sql = lambda self: Conn()
+print("before:", repr(ava.context.sql))
+ava.DB.closed
+print("after:", ava.DB.__class__.__name__)
+print("marker before exit:", Path({str(marker)!r}).exists())
+"""
+    proc, _request, result = _spawn(tmp_path, code)
+
+    assert proc.returncode == 0, proc.stderr
+    assert read_result(result).kind == "done"
+    assert "before: <lazy sql (not connected)>" in proc.stdout
+    assert "marker before exit: False" in proc.stdout
+    assert marker.read_text() == "closed"

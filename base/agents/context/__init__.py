@@ -12,6 +12,8 @@ dependencies as `runtime.context.X`:
   `base.host.env.agent_slices`), built by the host when the turn starts;
 - **`extensions`**: the plugins' contributions, held by the host that loaded them;
 - **`identity`**: who the run acts as (`AgentIdentity`);
+- **`clients`**: the lazily-built connections the process holds (SQL, Redis, gateway HTTP, and the
+  SDK layer's own), closed with `close()`.
 - **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`,
   `recall_log_key`. The host builds each once and hands the same object to every turn it runs;
   a context built without them (the eval driver, a test) carries private ones.
@@ -19,7 +21,8 @@ dependencies as `runtime.context.X`:
 The exec child holds the same type. The host puts `describe()` of the turn's context in the exec
 request envelope and the child builds its instance with `from_description()`, so agent code reads
 the identity the host's turn carries (`ava.context`). Only what is serializable and not secret
-crosses; a handle the child needs it builds itself from its own settings.
+crosses (identity, the gateway endpoint); a connection the child needs it builds itself, on first
+use, from its own settings and environment, and releases when the process ends.
 
 `frozen=True`: context is read-only during a run. If you need mutable state, split it into a
 separate dataclass.
@@ -28,9 +31,11 @@ separate dataclass.
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
+from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
@@ -38,6 +43,7 @@ from base.agents.observation.turn_progress import TurnProgress
 # The handle types are annotations only: the exec child builds this same type from its request
 # envelope, and its start must not import psycopg / redis / langchain for handles it never holds.
 if TYPE_CHECKING:
+    import httpx
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
     from psycopg_pool import AsyncConnectionPool
@@ -110,6 +116,25 @@ class AvaContext:
     """Who this run acts as. The host sets it for a turn it serves; the exec child and a launched
     script get theirs from a description, an external controller's carries its lease."""
 
+    clients: ClientSet = field(default_factory=ClientSet)
+    """The connections this run's process holds. Built on first use; the owner of the context
+    (the exec child, a launched script, an attachment, the host) closes them."""
+
+    @property
+    def sql(self) -> LazyConnection:
+        """The cluster database as one autocommit connection."""
+        return self.clients.sql
+
+    @property
+    def redis(self) -> LazyConnection:
+        """The cluster Redis client."""
+        return self.clients.redis
+
+    @property
+    def gateway(self) -> httpx.Client:
+        """The HTTP client for the gateway API."""
+        return self.clients.gateway
+
     def require_identity(self) -> AgentIdentity:
         """The identity of this run; a context built without one fails here."""
         if self.identity is None:
@@ -118,12 +143,21 @@ class AvaContext:
 
     def describe(self) -> dict[str, Any]:
         """The serializable, non-secret description an exec request envelope carries."""
-        return {"identity": self.require_identity().describe()}
+        return {
+            "identity": self.require_identity().describe(),
+            "gateway_url": self.clients.gateway_url,
+        }
 
     @classmethod
-    def from_description(cls, description: dict[str, Any]) -> Self:
-        """The context an exec child builds from the envelope's description."""
-        return cls(identity=AgentIdentity.from_description(description["identity"]))
+    def from_description(
+        cls, description: dict[str, Any], *, database: Callable[[], Database]
+    ) -> Self:
+        """The context an exec child builds from the envelope's description; `database` is how its
+        own process names the cluster database (the child resolves credentials itself)."""
+        return cls(
+            identity=AgentIdentity.from_description(description["identity"]),
+            clients=ClientSet(gateway_url=description["gateway_url"], database=database),
+        )
 
     def plugin_registry(self) -> ExtensionRegistry:
         """What the plugins contribute; an empty registry when this run loaded none."""

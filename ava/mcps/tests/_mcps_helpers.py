@@ -6,6 +6,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import ava.mcps as mcps_mod
+from ava.mcps._clients import McpClients
+
+
+def local_mcp_clients(monkeypatch: pytest.MonkeyPatch) -> McpClients:
+    """Give this test its own MCP clients (daemon absent -> local mode)."""
+    clients = McpClients()
+    monkeypatch.setattr(mcps_mod, "_clients", lambda: clients)
+    return clients
 
 
 @pytest.fixture
@@ -29,11 +37,11 @@ def mock_session(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     session.list_tools = AsyncMock()
     session.call_tool = AsyncMock()
 
-    async def _fake_connect(server: str, **kwargs: object) -> MagicMock:
+    async def _fake_connect(mcp: McpClients, server: str, **kwargs: object) -> MagicMock:
         return session
 
+    local_mcp_clients(monkeypatch)
     monkeypatch.setattr(mcps_mod, "_connect", _fake_connect)
-    monkeypatch.setattr(mcps_mod, "_sessions", {})
     # Disable disk cache to avoid cross-test pollution (mock data vs real cached data inconsistency)
     monkeypatch.setattr(mcps_mod, "_read_cache", lambda _server: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(mcps_mod, "_write_cache", lambda _server, _tools: None)  # pyright: ignore[reportUnknownArgumentType]

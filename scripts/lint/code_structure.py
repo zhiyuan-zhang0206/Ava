@@ -207,6 +207,9 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # (psycopg pool, redis bus, chat model) are annotation-only fields it never holds, and
         # importing them would put the whole DB / LM stack on its boot path.
         "base/agents/context/__init__.py",
+        # The same exec-child boot path: a ClientSet builds psycopg / redis / httpx clients on first
+        # use only, so its client types are annotation-only.
+        "base/agents/context/clients.py",
         # LM provider registration surface: the chat-model stack is a heavy
         # import on the exec-child boot path, which never uses the type
         # (annotation-only references; task #3633).

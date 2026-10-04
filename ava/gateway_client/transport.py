@@ -8,82 +8,35 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
 
-import ava
+from ava.sdk_surface import process_context
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.agents.messages.delivery_outbox import (
     TRANSIENT_HTTP_STATUSES as _TRANSIENT_HTTP_STATUSES,
 )
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
-from base.cluster.auth import bearer_header
-from base.cluster.machine import gateway_bearer
 from base.config import settings
 from base.host.net.resilience import Policy, http_classifier, retry
 
-# Singleton: process-wide shared connection pool. Connect/read timeout is a
-# guard against a stuck gateway line. Most gateway ops are near-instant,
-# but spawn does real server-side work (launch the new process + poll until it
-# claims its row), so the budget must comfortably exceed the server's confirm
-# window — otherwise a read timeout on a spawn that DID succeed triggers a retry
-# that re-POSTs the non-idempotent create and yields a phantom-twin agent.
-# Default value see `base.config.Settings.gateway_client_http_timeout_seconds`;
-# env override: `AVA_GATEWAY_HTTP_TIMEOUT_SECONDS`.
-_client: httpx.Client | None = None  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
 
-
-def _swap_client(client: httpx.Client | None) -> httpx.Client | None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    """Install *client* as the process-wide client and return the one it replaced.
-
-    The only place the module singleton is rebound: the lazy build and
-    `use_client` both go through it."""
-    global _client
-    previous, _client = _client, client
-    return previous
-
-
-def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    """Process-wide httpx client, built on first use so importing the SDK in a
-    no-config context does not require the gateway URL to be resolvable until an
-    actual call is made. `use_client` installs a different one."""
-    import httpx
-
-    from base.host.net.http_dial import transport_for_url
-
-    client = _client
-    if client is None:
-        # The gateway requires auth on every API route of an authenticated
-        # cluster. The SDK is a script/agent caller, so it presents a bearer
-        # (the cookie path is the browser's): the machine API token its launch
-        # environment carries (an agent inherits the agent-host's), else the
-        # human secret (an operator on the gateway home; never an agent or
-        # runner process, which raises `GatewayApiTokenMissing` instead).
-        # Neither (the open posture / an unprovisioned checkout) sends no
-        # header — matches the gateway's fail-open when its own secret is unset.
-        bearer = gateway_bearer()
-        headers = bearer_header(bearer) if bearer else {}
-        client = httpx.Client(
-            base_url=ava.GATEWAY_URL,
-            timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
-            headers=headers,
-            # Pins the dial when GATEWAY_URL's host is an IPv4 literal (e.g. a
-            # private-network address) — see base/host/net/http_dial.py. None (a hostname
-            # target) is httpx's own default transport, unchanged.
-            transport=transport_for_url(ava.GATEWAY_URL),
-        )
-        _swap_client(client)
-    return client
+def _http() -> httpx.Client:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """The bound context's gateway client, built on first use so importing the SDK in a no-config
+    context does not require the gateway URL to be resolvable until an actual call is made. Its
+    timeout is `Settings.gateway_client_http_timeout_seconds` (env override
+    `AVA_GATEWAY_HTTP_TIMEOUT_SECONDS`): most gateway ops are near-instant, but spawn does real
+    server-side work (launch the new process + poll until it claims its row), so the budget must
+    comfortably exceed the server's confirm window, otherwise a read timeout on a spawn that DID
+    succeed triggers a retry that re-POSTs the non-idempotent create and yields a phantom-twin
+    agent. `use_client` routes the calls through a different one."""
+    return process_context.current().gateway
 
 
 @contextmanager
 def use_client(client: Any) -> Generator[Any]:
     """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
-    in-process gateway, or any `httpx.Client` — then put back whichever client was installed
-    before (none: the next call builds the default one)."""
-    previous = _swap_client(client)
-    try:
+    in-process gateway, or any `httpx.Client` — then put back whichever client was there before."""
+    with process_context.current().clients.using_gateway(client):
         yield client
-    finally:
-        _swap_client(previous)
 
 
 # Gateway cold start ~0.6s (measured). Default 3 retries, base interval 1s —
@@ -284,7 +237,7 @@ def _request_with_retry(
     if attempts < 1:
         # Preserve the old range(attempts) behavior for a zero/negative override.
         raise GatewayUnavailable(
-            f"Gateway transport error at {_client_singleton().base_url} (after {attempts} retries): None"
+            f"Gateway transport error at {_http().base_url} (after {attempts} retries): None"
         )
     policy = Policy(
         max_attempts=attempts,
@@ -301,12 +254,11 @@ def _request_with_retry(
     except httpx.TransportError as exc:
         if not retryable and not isinstance(exc, pre_send_errors):
             raise GatewayUnavailable(
-                f"Gateway transport error at {_client_singleton().base_url} "
+                f"Gateway transport error at {_http().base_url} "
                 f"(no retry: non-idempotent request; result unknown, may have been delivered): {exc!s}"
             ) from exc
         raise GatewayUnavailable(
-            f"Gateway transport error at {_client_singleton().base_url} "
-            f"(after {attempts} retries): {exc!s}"
+            f"Gateway transport error at {_http().base_url} (after {attempts} retries): {exc!s}"
         ) from exc
 
 
@@ -386,7 +338,7 @@ def post(
 
     retries = _max_retries() if max_retries is None else max_retries
     return _request_with_retry(
-        lambda: _client_singleton().post(
+        lambda: _http().post(
             path, json=json or {}, params=params, timeout=per_call, headers=headers
         ),
         retries,
@@ -417,9 +369,7 @@ def get(
 
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
     retries = _max_retries() if max_retries is None else max_retries
-    return _request_with_retry(
-        lambda: _client_singleton().get(path, params=params, timeout=per_call), retries
-    )
+    return _request_with_retry(lambda: _http().get(path, params=params, timeout=per_call), retries)
 
 
 def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
@@ -429,11 +379,9 @@ def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821 
     notice) is idempotent by contract: repeating it cannot change the
     outcome beyond the first application.
     """
-    return _request_with_retry(
-        lambda: _client_singleton().patch(path, json=json or {}), _max_retries()
-    )
+    return _request_with_retry(lambda: _http().patch(path, json=json or {}), _max_retries())
 
 
 def _delete(path: str) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified DELETE wrapper + transient-failure retry + failure → GatewayUnavailable. Same policy as `post`; DELETE is idempotent by semantics."""
-    return _request_with_retry(lambda: _client_singleton().delete(path), _max_retries())
+    return _request_with_retry(lambda: _http().delete(path), _max_retries())

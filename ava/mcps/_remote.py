@@ -33,6 +33,14 @@ class _RemoteMCPClient:
         self._lock = threading.Lock()
         self._req_id = 0
 
+    def close(self) -> None:
+        """Close the daemon socket if one is open."""
+        with self._lock:
+            sock, self._sock = self._sock, None
+        if sock is not None:
+            with suppress(OSError):
+                sock.close()
+
     def _ensure_connected(self) -> socket.socket:
         if self._sock is not None:
             try:
@@ -161,6 +169,11 @@ def _current_agent_id() -> int | None:
     return borrowed if borrowed is not None else effective_agent_id()
 
 
+def connect_remote(socket_path: str) -> _RemoteMCPClient:
+    """A client of the MCP daemon listening on `socket_path` (it dials on its first request)."""
+    return _RemoteMCPClient(socket_path)
+
+
 def _socket_path_for() -> str:
     """Filesystem path of the shared MCP daemon socket — the client side of the
     convention. The daemon is a per-machine service (one for all agents;
@@ -184,26 +197,3 @@ def _daemon_socket_path() -> str | None:
     present; the caller's connect then fails and routes to the local fallback."""
     path = _socket_path_for()
     return path if Path(path).exists() else None
-
-
-_remote_client: _RemoteMCPClient | None = None
-_remote_client_lock = threading.Lock()
-
-
-def _get_remote_client() -> _RemoteMCPClient | None:
-    """Return cached remote client if this agent's MCP daemon is running, else
-    None (caller falls back to local connect).
-
-    The client is created once per subprocess and reused across calls.
-    """
-    global _remote_client  # noqa: PLW0603
-    socket_path = _daemon_socket_path()
-    if not socket_path:
-        return None
-    if _remote_client is not None:
-        return _remote_client
-    with _remote_client_lock:
-        if _remote_client is not None:
-            return _remote_client
-        _remote_client = _RemoteMCPClient(socket_path)
-        return _remote_client

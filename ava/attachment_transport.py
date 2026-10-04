@@ -1,15 +1,14 @@
-"""Register media for delivery across the child-to-parent attachment transport.
+"""Register media for delivery through the exec turn's state update.
 
-The child-local buffer is drained into the exec envelope, checkpointed by the
-parent, and turned into one media message appended right after the exec output
-of the registering turn (user ruling 2026-08-26).
+`ava.self.attach` appends each registration to `ava.state_update["attach"]`; the exec node takes
+the entries out of the delta it commits, validates them, parks them in the `attach` channel of the
+checkpointed state and turns them into one media message appended right after the exec output of the
+registering turn (user ruling 2026-08-26). The SDK keeps no buffer of its own.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any
 
 from ava.files import resolve
 from ava.sdk_surface.validation import coerce_str
@@ -18,9 +17,9 @@ from base.lm.attach_constants import (
     ATTACH_MAX_LABEL_CHARS,
     ATTACH_MEDIA_MIME,
 )
-from base.log import logger
 
-_ATTACHMENTS: list[dict[str, Any]] = []
+# The graph-state channel a registration is appended to (`BaseAgentState.attach`).
+_ATTACH_CHANNEL = "attach"
 
 
 def media_gated_members(model: str) -> frozenset[str]:
@@ -103,7 +102,12 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
         )
     path = coerce_str(path, "path", allow_types=(Path,))
     label = coerce_str(label, "label", allow_none=True)
-    if not os.environ.get("AVA_EXEC_REQUEST_FILE"):
+    import ava
+    from ava.sdk_surface import process_context
+
+    bound = process_context.peek()
+    borrowed = bound is not None and bound.identity is not None and bound.identity.lease is not None
+    if not ava.in_exec_turn() or borrowed:
         raise RuntimeError(
             "ava.self.attach only works inside an agent turn (execute_code); "
             "outside a turn there is no runner to deliver the attachment"
@@ -125,22 +129,12 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
         raise TypeError("attachment label must be a str or None")
     if label is not None and len(label) > ATTACH_MAX_LABEL_CHARS:
         raise ValueError(f"attachment label exceeds {ATTACH_MAX_LABEL_CHARS} characters")
-    _ATTACHMENTS.append({"path": str(resolved), "label": label})
-
-
-def take_attachments() -> list[dict[str, Any]]:
-    """Drain registered attachments for the exec child result envelope."""
-    entries = list(_ATTACHMENTS)
-    _ATTACHMENTS.clear()
-    accepted: list[dict[str, Any]] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            logger.warning("dropping tampered attachment registration with non-dict entry")
-            continue
-        path = entry.get("path")
-        label = entry.get("label")
-        if not isinstance(path, str) or not isinstance(label, str | None):
-            logger.warning("dropping tampered attachment registration with invalid shape")
-            continue
-        accepted.append({"path": path, "label": label})
-    return accepted
+    update = ava.state_update
+    if not isinstance(update, dict):
+        raise TypeError(
+            f"ava.state_update must stay a dict, got {type(update).__name__} (attachment)"
+        )
+    update[_ATTACH_CHANNEL] = [
+        *update.get(_ATTACH_CHANNEL, []),
+        {"path": str(resolved), "label": label},
+    ]

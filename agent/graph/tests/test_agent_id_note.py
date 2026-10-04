@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from agent.graph.prompt.context_notes import _machine_clause, _own_label, agent_id_note
+from ava.sdk_surface import process_context
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
@@ -168,26 +169,31 @@ class _FakeDB:
         return _FakeCursor(self._row)
 
 
+def _fake_sql(monkeypatch: pytest.MonkeyPatch, fake: object) -> None:
+    """Serve `ava.DB` from `fake` for this test: the bound context's SQL slot."""
+    monkeypatch.setattr(process_context.current().clients, "_sql", fake)
+
+
 def test_own_label_normalizes_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
     """A label is free text; the one-line note gets it whitespace-collapsed."""
-    monkeypatch.setattr("ava.DB", _FakeDB(("  memory\n  steward ",)))
+    _fake_sql(monkeypatch, _FakeDB(("  memory\n  steward ",)))
     assert _own_label(29) == "memory steward"
 
 
 def test_own_label_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
     """No row / empty label / read failure all degrade to "no label clause" —
     the identity line itself outranks the label."""
-    monkeypatch.setattr("ava.DB", _FakeDB(None))
+    _fake_sql(monkeypatch, _FakeDB(None))
     assert _own_label(29) is None
 
-    monkeypatch.setattr("ava.DB", _FakeDB(("",)))
+    _fake_sql(monkeypatch, _FakeDB(("",)))
     assert _own_label(29) is None
 
     class _Boom:
         def cursor(self) -> object:
             raise RuntimeError("db down")
 
-    monkeypatch.setattr("ava.DB", _Boom())
+    _fake_sql(monkeypatch, _Boom())
     assert _own_label(29) is None
 
 

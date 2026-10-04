@@ -15,7 +15,7 @@ files + signals:
   (`init_subprocess_logger` adds no stderr handler), and stdout/stderr are
   reconfigured to line buffering so `print(..., end="")` still streams.
 - Result envelope: `AVA_EXEC_RESULT_FILE` — outcome kind, plugin state-update
-  delta (plugin fields, security findings), attachments, the run's SDK-call
+  delta (plugin fields, security findings, attachment registrations), the run's SDK-call
   tally, and (for a crash) the full traceback text. Written on every exit path except `os._exit`
   (watchdog / the agent's own call) and SIGKILL — the parent classifies those
   from its own cancel/timeout flags.
@@ -484,9 +484,8 @@ def _bind_identity(request: RequestPayload) -> None:
     """Bind this child's `AvaContext`, built from the host's description, and the logger and
     incarnation of the agent it acts as."""
     from ava.sdk_surface import process_context
-    from base.agents.context import AvaContext
 
-    process_context.bind_process(AvaContext.from_description(request.context))
+    process_context.bind_process(process_context.context_from_description(request.context))
     if request.agent_id is None:
         return
     if request.incarnation is not None:
@@ -504,7 +503,7 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     code, write the result envelope."""
     child = _import_runtime(boot_started_at)
     from agent.graph.exec.protocol import ResultPayload, read_request, write_result
-    from ava.attachment_transport import own_media_gated_members, take_attachments
+    from ava.attachment_transport import own_media_gated_members
     from ava.sdk_surface.discovery import hidden_surface_members
 
     _line_buffered_output()
@@ -562,7 +561,6 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
         return
     finally:
         _take_result_state_update(child, payload, state_injected=request.state_raw is not None)
-        payload.attachments = take_attachments()
     # Outside the try: a boot-phase exception (config fetch, request read,
     # plugin load) propagates to main(), which writes the crash envelope with
     # code_reached=False. A write failure here falls back to the best-effort
@@ -597,6 +595,11 @@ def main() -> None:
         # The crash envelope's record needs the same last-mile delivery (task
         # #4312).
         _deliver_envelope_telemetry()
+    finally:
+        # The connections this child opened (SQL, Redis, gateway, MCP) end with it.
+        from ava.sdk_surface import process_context
+
+        process_context.close_process()
 
 
 def _write_crashed_result(
@@ -619,7 +622,6 @@ def _write_crashed_result(
         "full_traceback": full_traceback,
         "code_reached": code_reached,
         "state_update_error": None,
-        "attachments": None,
         "sdk_calls": None,
     }
     try:

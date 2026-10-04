@@ -10,7 +10,7 @@ logs it shares the home with):
   `base/agents/incarnation/exec_request_evidence.py` reads), the description of the run's
   `AvaContext` (identity; `AvaContext.describe`), the timeout, and the typed state snapshot.
 - result  `<uuid>.json`: the outcome kind, the state-update delta (plugin fields,
-  security findings), attachments, the run's SDK-call tally, and — for a crash —
+  security findings, attachment registrations), the run's SDK-call tally, and — for a crash —
   the child-formatted traceback text.
 
 Request leftovers are durable cleanup evidence and are never age-pruned;
@@ -142,8 +142,7 @@ class ResultPayload:
     `state_update` carries the raw `ava.state_update` delta (typed-blob
     decoded); `state_update_error` is set when the agent tampered with the
     slot (left it a non-dict) — the parent then raises the same TypeError the
-    old in-process path raised. `attachments` are plain JSON dicts drained
-    from a child-local buffer; `sdk_calls` is the run's real SDK-call tally."""
+    old in-process path raised. `sdk_calls` is the run's real SDK-call tally."""
 
     kind: ResultKind
     lifecycle_type: str | None = None
@@ -157,7 +156,6 @@ class ResultPayload:
     code_reached: bool | None = None
     state_update: dict[str, Any] | None = None
     state_update_error: str | None = None
-    attachments: list[dict[str, Any]] | None = None
     # The run's SDK-call tally in `base.agents.sdk.telemetry.tally_entries` shape
     # (`[{"method": ..., "count": N}, ...]`); the exec node attaches it to the
     # exec_output ToolMessage as `additional_kwargs["sdk_calls"]`. None = the
@@ -303,7 +301,6 @@ def write_result(path: Path, payload: ResultPayload) -> None:
         "full_traceback": payload.full_traceback,
         "code_reached": payload.code_reached,
         "state_update_error": payload.state_update_error,
-        "attachments": payload.attachments,
         "sdk_calls": payload.sdk_calls,
     }
     if payload.state_update is not None:
@@ -344,7 +341,6 @@ def read_result(path: Path) -> ResultPayload:
         code_reached=(code_reached if isinstance(code_reached, bool) else None),
         state_update=cast("dict[str, Any] | None", state_update),
         state_update_error=envelope.get("state_update_error"),
-        attachments=cast("list[dict[str, Any]] | None", envelope.get("attachments")),
         sdk_calls=cast("list[dict[str, Any]] | None", envelope.get("sdk_calls")),
     )
     _log_envelope_transfer("result", "read", path, started_at)
