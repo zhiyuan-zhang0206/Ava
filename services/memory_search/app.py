@@ -17,7 +17,6 @@ service; no LAN port is opened.
 """
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -207,13 +206,12 @@ def build_app(store: MemoryStore, max_batch_rows: int) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-        flusher = asyncio.create_task(_stats_flusher(store, lock))
-        try:
-            yield
-        finally:
-            flusher.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await flusher
+        async with asyncio.TaskGroup() as background:
+            flusher = background.create_task(_stats_flusher(store, lock))
+            try:
+                yield
+            finally:
+                flusher.cancel()
 
     app = FastAPI(title="ava-memory-search", lifespan=lifespan)
 

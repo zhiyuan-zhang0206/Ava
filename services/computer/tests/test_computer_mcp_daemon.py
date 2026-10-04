@@ -1065,7 +1065,8 @@ async def test_run_raises_stream_limit_for_large_snapshots(
     monkeypatch.setattr(daemon_mod.asyncio, "start_unix_server", capture_server_options)
 
     try:
-        with pytest.raises(RuntimeError, match="server options captured"):
+        # The failure leaves run()'s TaskGroup, so it arrives in an exception group.
+        with pytest.RaisesGroup(pytest.RaisesExc(RuntimeError, match="server options captured")):
             await daemon_mod.run(sock=str(sock))
         assert server_options["limit"] == 64 * 1024 * 1024
     finally:
@@ -1105,27 +1106,25 @@ async def test_shutdown_cancels_active_clients(database: Database) -> None:
         # SDK connection equivalent (a real client sits in handle()'s readline).
         started = asyncio.Event()
 
-        async def stuck_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        async def stuck_client(*_a: object) -> None:
             started.set()
             with suppress(Exception):
                 await asyncio.Event().wait()  # never completes on its own
 
-        # _tracked_client registers the done_callback that removes the task from
-        # daemon._clients — the same wiring run() uses.
-        task = daemon_mod._tracked_client(daemon, None, None)  # type: ignore[arg-type]
-        task.cancel()  # replace the default coroutine with the stuck one below
-        task = asyncio.create_task(stuck_client(None, None))  # type: ignore[arg-type]
-        daemon._clients.add(task)
-        task.add_done_callback(daemon._clients.discard)
-        await started.wait()
+        daemon.handle = stuck_client  # type: ignore[method-assign]
+        async with asyncio.TaskGroup() as clients:
+            # _tracked_client registers the done_callback that removes the task from
+            # daemon._clients — the same wiring run() uses.
+            daemon_mod._tracked_client(daemon, clients, None, None)  # type: ignore[arg-type]
+            await started.wait()
 
-        # run()'s shutdown path: cancel every tracked client, then gather.
-        for t in list(daemon._clients):
-            t.cancel()
-        # gather(return_exceptions=True) swallows the handler's CancelledError —
-        # awaiting the task again would re-raise it (suppress(Exception) can't).
-        await asyncio.gather(*daemon._clients, return_exceptions=True)
-        assert daemon._clients == set()
+            # run()'s shutdown path: cancel every tracked client, then gather.
+            for t in list(daemon._clients):
+                t.cancel()
+            # gather(return_exceptions=True) swallows the handler's CancelledError —
+            # awaiting the task again would re-raise it (suppress(Exception) can't).
+            await asyncio.gather(*daemon._clients, return_exceptions=True)
+            assert daemon._clients == set()
     finally:
         cleanup(d)
 

@@ -222,7 +222,7 @@ async def test_inject_once_skips_when_gateway_url_unset(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(gateway_session, "gateway_api_base", raise_missing)
     monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
-    await GatewaySession().inject_once()  # must not raise
+    await GatewaySession(asyncio.TaskGroup()).inject_once()  # must not raise
     assert calls == []
 
 
@@ -235,7 +235,7 @@ async def test_inject_once_skips_on_empty_secret(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
     monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", "")
-    await GatewaySession().inject_once()
+    await GatewaySession(asyncio.TaskGroup()).inject_once()
     assert calls == []
 
 
@@ -248,7 +248,7 @@ async def test_inject_once_injects_with_settings(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
     monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    await GatewaySession().inject_once()
+    await GatewaySession(asyncio.TaskGroup()).inject_once()
     assert calls == [(gateway_session.settings.services.browser_cdp_port, GATEWAY, SECRET)]
 
 
@@ -288,13 +288,13 @@ async def test_inject_once_swallows_injection_failure(monkeypatch: pytest.Monkey
     monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
     monkeypatch.setattr(gateway_session, "inject_session_cookie", boom)
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    await GatewaySession().inject_once()  # must not raise
+    await GatewaySession(asyncio.TaskGroup()).inject_once()  # must not raise
 
 
 async def test_session_loop_injects_then_waits(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
-    keeper = GatewaySession()
+    keeper = GatewaySession(asyncio.TaskGroup())
 
     async def fake_inject_once() -> None:
         calls.append("inject")
@@ -309,16 +309,17 @@ async def test_session_loop_injects_then_waits(monkeypatch: pytest.MonkeyPatch) 
 
 
 async def test_spawn_inject_tracks_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    keeper = GatewaySession()
+    async with asyncio.TaskGroup() as tasks:
+        keeper = GatewaySession(tasks)
 
-    async def fake_inject_once() -> None:
-        pass
+        async def fake_inject_once() -> None:
+            pass
 
-    monkeypatch.setattr(keeper, "inject_once", fake_inject_once)
-    gateway_session._spawn_inject(keeper)
-    assert len(keeper.inject_tasks) == 1
-    # let the task finish so its done-callback clears the set
-    await asyncio.gather(*keeper.inject_tasks)
+        monkeypatch.setattr(keeper, "inject_once", fake_inject_once)
+        keeper.spawn_inject()
+        assert len(keeper.inject_tasks) == 1
+        # let the task finish so its done-callback clears the set
+        await asyncio.gather(*keeper.inject_tasks)
     assert keeper.inject_tasks == set()
 
 
@@ -396,7 +397,7 @@ async def test_inject_once_remembers_the_injected_cookie(monkeypatch: pytest.Mon
     monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
     monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    keeper = GatewaySession()
+    keeper = GatewaySession(asyncio.TaskGroup())
 
     await keeper.inject_once()
 
@@ -409,7 +410,7 @@ async def test_inject_once_remembers_the_injected_cookie(monkeypatch: pytest.Mon
 async def test_verify_once_injects_when_cookie_invalid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    keeper = GatewaySession()
+    keeper = GatewaySession(asyncio.TaskGroup())
     injected: list[tuple[int, str, str]] = []
 
     async def fake_inject(port: int, url: str, secret: str) -> None:
@@ -428,7 +429,7 @@ async def test_verify_once_injects_when_cookie_invalid(
 async def test_verify_once_skips_injection_when_cookie_valid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    keeper = GatewaySession()
+    keeper = GatewaySession(asyncio.TaskGroup())
     injected: list[tuple[int, str, str]] = []
 
     async def fake_inject(port: int, url: str, secret: str) -> None:
@@ -447,7 +448,7 @@ async def test_verify_once_skips_injection_when_cookie_valid(
 async def test_verify_once_injects_when_no_cookie_known(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    keeper = GatewaySession()
+    keeper = GatewaySession(asyncio.TaskGroup())
     injected: list[tuple[int, str, str]] = []
 
     async def fake_inject(port: int, url: str, secret: str) -> None:
@@ -464,7 +465,7 @@ async def test_verify_once_injects_when_no_cookie_known(
 async def test_verify_once_swallows_check_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    keeper = GatewaySession()
+    keeper = GatewaySession(asyncio.TaskGroup())
     injected: list[tuple[int, str, str]] = []
 
     async def fake_inject(port: int, url: str, secret: str) -> None:
@@ -490,20 +491,35 @@ async def test_verify_once_skips_when_gateway_unconfigured(
         raise RuntimeError("gateway_url unset")
 
     monkeypatch.setattr(gateway_session, "gateway_api_base", raise_missing)
-    await GatewaySession().verify_once()  # must not raise
+    await GatewaySession(asyncio.TaskGroup()).verify_once()  # must not raise
 
 
 async def test_spawn_verify_tracks_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    keeper = GatewaySession()
+    async with asyncio.TaskGroup() as tasks:
+        keeper = GatewaySession(tasks)
 
-    async def fake_verify_once() -> None:
-        pass
+        async def fake_verify_once() -> None:
+            pass
 
-    monkeypatch.setattr(keeper, "verify_once", fake_verify_once)
-    gateway_session._spawn_verify(keeper)
-    assert len(keeper.verify_tasks) == 1
-    await asyncio.gather(*keeper.verify_tasks)
+        monkeypatch.setattr(keeper, "verify_once", fake_verify_once)
+        keeper.spawn_verify()
+        assert len(keeper.verify_tasks) == 1
+        await asyncio.gather(*keeper.verify_tasks)
     assert keeper.verify_tasks == set()
+
+
+async def test_a_failing_one_shot_does_not_abort_its_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with asyncio.TaskGroup() as tasks:
+        keeper = GatewaySession(tasks)
+
+        async def broken_inject_once() -> None:
+            raise RuntimeError("defect")
+
+        monkeypatch.setattr(keeper, "inject_once", broken_inject_once)
+        keeper.spawn_inject()
+        await asyncio.gather(*keeper.inject_tasks)
 
 
 @pytest.mark.parametrize(
