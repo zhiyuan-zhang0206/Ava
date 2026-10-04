@@ -13,8 +13,8 @@ Deltas, streamed chunks concatenated in order). One FIFO worker preserves it,
 where fire-and-forget per-event tasks would reorder under load.
 
 Degradation is intentional and safe: a slow/unreachable Redis makes a publish
-time out or error, and that batch of events is dropped (rate-limited warning)
-rather than retried or blocked on. The worker drains in batches through a
+time out or error, and that batch of events is dropped (one rate-limited drop
+report) rather than retried or blocked on. The worker drains in batches through a
 single Redis pipeline, so a degraded link's round-trip cost is amortized across
 many events instead of paid once per event (a link where one publish takes 1s
 would otherwise drain at 1 event/s and fill the queue within seconds).
@@ -78,7 +78,9 @@ class AgentEventPublisher:
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
         self._task: asyncio.Task[None] | None = None
         self._dropped = 0
-        self._reported = 0  # drops already covered by a warning — delta-only reports
+        self._reported = 0  # drops already covered by a report — delta-only reports
+        self._queue_full_dropped = 0  # local-backpressure drops seen (worst-wins severity)
+        self._reported_queue_full = 0
         self._last_warn = 0.0
         self._last_drop_kind = "unknown"
         self._last_drop_detail = ""
@@ -88,7 +90,7 @@ class AgentEventPublisher:
         never blocks, never raises — a full queue sheds the OLDEST buffered
         event to keep the newest (the live view is worth the most-recent
         state; the turn-end snapshot repairs the gap) and counts toward a
-        rate-limited warning."""
+        rate-limited drop report."""
         try:
             self._queue.put_nowait(payload)
         except asyncio.QueueFull:
@@ -194,6 +196,8 @@ class AgentEventPublisher:
 
     def _note_drop(self, kind: str, detail: str = "") -> None:
         self._dropped += 1
+        if kind == "queue_full":
+            self._queue_full_dropped += 1
         self._last_drop_kind = kind
         self._last_drop_detail = detail
         now = time.monotonic()
@@ -208,6 +212,8 @@ class AgentEventPublisher:
         # final residual is flushed by aclose().
         n = self._dropped - self._reported
         self._reported = self._dropped
+        queue_full_in_window = self._queue_full_dropped - self._reported_queue_full
+        self._reported_queue_full = self._queue_full_dropped
         if n <= 0:
             return
         # The latest cause is named so "central redis down" (ConnectionError)
@@ -217,7 +223,17 @@ class AgentEventPublisher:
         # counts queue backlog over time from these rows (see
         # gateway/cluster/ops_series.py). Rate-limited to _WARN_INTERVAL_S, so a
         # sustained burst reports once per interval with the delta n.
-        logger.warning(
+        #
+        # Severity follows the cause (2026-10-03 triage): a transport-side
+        # publish error is the flaky-link / host-stall norm and reports at
+        # INFO (the row still lands in the event store; the backpressure
+        # alert reads the drop rate, not this level). A full queue is local
+        # backpressure — the live view is shedding events the worker could
+        # not drain — and reports at WARNING; any queue_full in the window
+        # wins, so a mixed window never downplays backpressure.
+        level = "WARNING" if queue_full_in_window > 0 else "INFO"
+        logger.log(
+            level,
             "[event-publisher] dropped {n} SSE event(s) (agent_id={aid}, "
             "kind={kind}, last cause: {detail}) — live view degraded, "
             "committed state unaffected",
