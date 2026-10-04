@@ -211,10 +211,10 @@ repos:
       # unmarked sink renders every local variable of the failing frames (DSNs,
       # tokens, passwords) into the sink's output — file, journal, and the
       # telemetry pipeline that mirrors into Loki. No inline exemption; see
-      # scripts/lint/logger_add_diagnose.py header.
+      # scripts/lint/diagnostics/logger_add_diagnose.py header.
       - id: lint-logger-add-diagnose
         name: lint logger.add diagnose (no sink without diagnose=False)
-        entry: .venv/bin/python scripts/lint/logger_add_diagnose.py --only
+        entry: .venv/bin/python scripts/lint/diagnostics/logger_add_diagnose.py --only
         language: system
         types: [python]
 
@@ -226,10 +226,21 @@ repos:
       # each name comes from, not by file. loguru also has no `exc_info=`
       # parameter — the kwarg silently drops the traceback (use
       # `.opt(exception=True)`), flagged too. Deliberate literals opt out with
-      # `# log-format-ok: <reason>`; see scripts/lint/loguru_format.py header.
+      # `# log-format-ok: <reason>`; see scripts/lint/diagnostics/loguru_format.py header.
       - id: lint-loguru-format
         name: lint log format (loguru takes {}, stdlib logging takes %s)
-        entry: .venv/bin/python scripts/lint/loguru_format.py --only
+        entry: .venv/bin/python scripts/lint/diagnostics/loguru_format.py --only
+        language: system
+        types: [python]
+
+      # A broad handler (`except Exception`, `suppress(Exception)`) must re-raise or report
+      # (WARNING+ log, emit, stderr, or pass the exception on): a swallowed failure is
+      # indistinguishable from success (decisions/2026-10-04-no-silent-failures.md).
+      # Exemption: `# silent-ok: <reason>` on the handler line, reserved for a reporting
+      # channel's own failure path. See scripts/lint/diagnostics/no_silent_failures.py header.
+      - id: lint-no-silent-failures
+        name: lint silent failures (no broad handler swallows an exception unreported)
+        entry: .venv/bin/python scripts/lint/diagnostics/no_silent_failures.py --only
         language: system
         types: [python]
 

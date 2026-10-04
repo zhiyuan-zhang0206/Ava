@@ -1,6 +1,6 @@
 """Forbid a `logger.add(...)` sink that does not explicitly pass `diagnose=False`.
 
-Run: `.venv/bin/python scripts/lint/logger_add_diagnose.py [path ...]` (defaults
+Run: `.venv/bin/python scripts/lint/diagnostics/logger_add_diagnose.py [path ...]` (defaults
 to scanning the whole repo; an explicit path that does not exist is an error
 (stderr + exit 1) rather than a silent no-op). Also run automatically via
 pre-commit hook.
@@ -57,7 +57,7 @@ import re
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import lint_common  # noqa: E402 - standalone script
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} logger.add(...) call(s) without diagnose=False. See the "
-            "docstring at the top of scripts/lint/logger_add_diagnose.py.",
+            "docstring at the top of scripts/lint/diagnostics/logger_add_diagnose.py.",
             file=sys.stderr,
         )
         return 1
