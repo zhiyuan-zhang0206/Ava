@@ -37,8 +37,9 @@ def test_real_trunk_yaml_declares_the_full_gate() -> None:
     text = (_REPO_ROOT / ".trunk" / "trunk.yaml").read_text()
     document = yaml.safe_load(text)  # type: ignore[name-defined]
     statuses = document["merge"]["required_statuses"]
-    assert len(statuses) == 12
+    assert len(statuses) == 13
     assert "secret scan (Gitleaks)" in statuses
+    assert "no silent resurrection" in statuses
     assert "qa-approved-gate" not in statuses
     assert "backend (pytest + pyright)" in statuses
     assert "frontend (eslint + tsc + vitest)" in statuses
