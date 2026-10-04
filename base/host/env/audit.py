@@ -191,11 +191,17 @@ def _machine_name() -> str:
     No Settings/os.environ fallback: a broken Settings is exactly what this
     guard detects, and the unified event stream stamps its own machine field
     regardless — an empty label here only degrades the payload's copy."""
-    try:
-        from base.cluster.machine import machine_name
+    from base.cluster.machine import MachineNameMissing, machine_name
 
+    try:
         return machine_name()
+    except MachineNameMissing:
+        return ""
     except Exception:
+        # Damaged settings: the label degrades to empty, the audit record still lands.
+        logger.opt(exception=True).warning(
+            "could not read the machine name for the .env audit record; recording it empty"
+        )
         return ""
 
 

@@ -313,17 +313,20 @@ def project_events(database: Database, events: Sequence[Event]) -> None:
 
     observations: list[MetricObservation] = []
     rejected = 0
+    first_rejection: Exception | None = None
     for event in events:
         try:
             observation = observe_event(event)
             if observation is not None:
                 observations.append(observation)
-        except Exception:
+        except Exception as exc:
             rejected += 1
+            first_rejection = first_rejection or exc
     if rejected:
         report_no_pipeline(
             "[observed-metrics] rejected {n} malformed measurement(s); collection is partial",
             n=rejected,
+            exc=first_rejection,
         )
     try:
         _write_projected(database, observations)

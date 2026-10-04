@@ -149,7 +149,11 @@ def _present(identities: Iterable[OwnedProcess]) -> list[OwnedProcess]:
     for identity in identities:
         try:
             alive = identity.live()
-        except Exception:  # evidence gathering must not raise
+        except (
+            RuntimeError,
+            psutil.Error,
+            OSError,
+        ):  # unverifiable identity: reported, not certified gone
             alive = True
         if alive:
             present.append(identity)

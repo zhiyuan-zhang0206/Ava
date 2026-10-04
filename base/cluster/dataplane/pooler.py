@@ -35,6 +35,8 @@ def admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.
     Backend readiness is proven separately by the caller, as each delivered
     login. Public bind verification reads the socket table, never a self-dial.
     """
+    import psycopg
+
     from base.db.connections import connect_url
     from base.host.net.url_secret import url_with_userinfo
 
@@ -45,7 +47,7 @@ def admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.
         # The console runs no Postgres statements: no ceiling in its startup packet.
         with connect_url(url, autocommit=True, connect_timeout=3, unbounded=True):
             return True
-    except Exception:
+    except psycopg.Error:  # refused / timed out / rejected login: the pooler does not answer
         return False
 
 

@@ -245,7 +245,9 @@ def _coerce_group(group: Sequence[Any]) -> list[BaseMessage] | None:
     """
     try:
         return [message_chunk_to_message(m) for m in convert_to_messages(list(group))]
-    except Exception:
+    except (NotImplementedError, ValueError):
+        # `convert_to_messages` raises exactly these (unsupported item type; dict missing
+        # role/content; unknown message type; pydantic ValidationError is a ValueError).
         return None
 
 

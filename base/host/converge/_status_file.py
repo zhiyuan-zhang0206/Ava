@@ -23,8 +23,9 @@ def from_file[Status](path: Path, decode: Callable[[str], Status]) -> Status | N
         return None
     try:
         return decode(path.read_text())
-    except Exception:
-        # A truncated write or obsolete shape is replaced by the next converge.
+    except (ValueError, KeyError, TypeError):
+        # A truncated write (JSONDecodeError), unknown state value or obsolete shape (missing
+        # key / non-object JSON) is replaced by the next converge.
         return None
 
 
