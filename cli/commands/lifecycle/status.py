@@ -29,6 +29,7 @@ from cli.commands._repo import (
 )
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.cluster_instance import print_data_plane_status
+from cli.commands.lifecycle.hold_report import print_hold_section
 from ops.roster.service_spec import ServiceSpec
 
 
@@ -68,6 +69,8 @@ def cmd_status() -> int:
     repo = _repo_root()
     roles = _repo_commands._roles_or_none()
     print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
+    print_hold_section()
+    print()
     services_to_show = _status_roster(roles)
     name_w = max((len(session_name(spec.session)) for spec, _reason in services_to_show), default=7)
     # The root is the only service owner. Do not infer liveness from old records.

@@ -458,7 +458,6 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ["stop", "-y"],
         ["restart"],
         ["converge"],
-        ["maintenance", "stop"],
         ["cluster", "destroy"],
         ["config", "set", "KEY=VALUE"],
         ["logs", "retention"],

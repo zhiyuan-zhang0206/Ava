@@ -59,8 +59,8 @@ describes only itself (`base/cluster/record.py`).
   reads every machine's posture row, which does not belong on a read-only roster
   GET.
 - There is no `cluster` verb for a stranded maintenance hold: read it with
-  `ava maintenance status` and end it with `ava maintenance cancel` or
-  `repair` ([graceful maintenance](../../conventions/graceful-maintenance.md)).
+  `ava status` and end it with `ava start`
+  ([graceful maintenance](../../conventions/graceful-maintenance.md)).
 
 ## Key dependencies
 

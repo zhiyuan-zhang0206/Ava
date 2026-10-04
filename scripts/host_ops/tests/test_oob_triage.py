@@ -1,7 +1,7 @@
 """Tests for scripts/host_ops/oob_triage.py (task #3608).
 
 The pure layer is exercised directly: classification over both payload shapes
-(the `ava maintenance status` output and the raw pause-owner journal), the
+(the `ava status --json` hold and the raw pause-owner journal), the
 phase-to-command table, the desensitization whitelist, and the degraded
 reading when both sources fail. No subprocess and no network run here.
 
@@ -41,8 +41,6 @@ _STATUS_SAMPLE: dict[str, object] = {
         "failures": {},
         "parked": [],
         "phase": "stopping",
-        "repair_record": None,
-        "repaired": {},
         "undelivered": {},
     },
     "operation": "local-pause:wsl:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605",
@@ -103,8 +101,6 @@ def _journal_payload(
             "commands": {},
             "drained": [],
             "parked": [],
-            "repair_record": None,
-            "repaired": {},
             "undelivered": {},
         }
     )
@@ -127,15 +123,11 @@ def test_orphaned_stop_class_hold_renders_the_start_command() -> None:
     assert result.command == "ssh wsl 'cd ~/.ava/source && .venv/bin/ava start'"
 
 
-def test_orphaned_pre_stop_hold_renders_the_cancel_command() -> None:
+def test_orphaned_pre_stop_hold_renders_the_start_command() -> None:
     module = _triage_module()
     result = module.classify_status(_status_payload(phase="draining"), host="wsl")
     assert result.classification == "orphaned"
-    assert result.command == (
-        "ssh wsl 'cd ~/.ava/source && .venv/bin/ava maintenance cancel"
-        " --operation local-pause:wsl:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605"
-        " --acquired-at 2026-09-17T00:42:14.184784+00:00'"
-    )
+    assert result.command == "ssh wsl 'cd ~/.ava/source && .venv/bin/ava start'"
 
 
 def test_live_shepherd_reads_owned_not_orphaned() -> None:
@@ -227,12 +219,27 @@ def test_both_reads_failed_degrade_to_the_undetermined_line() -> None:
     assert result.command is None
 
 
+def test_status_json_hold_is_the_primary_source() -> None:
+    module = _triage_module()
+    commands: list[str] = []
+
+    def fake_read(host: str, command: str) -> dict[str, object] | None:
+        commands.append(command)
+        return {"hold": _status_payload()}
+
+    result = module.triage("wsl", read=fake_read)
+    assert commands == [module._STATUS_COMMAND]
+    assert module._STATUS_COMMAND.endswith("ava status --json")
+    assert result.source == "status"
+    assert result.classification == "orphaned"
+
+
 def test_status_surprise_falls_back_to_the_journal_read() -> None:
     module = _triage_module()
 
     def fake_read(host: str, command: str) -> dict[str, object] | None:
         if command == module._STATUS_COMMAND:
-            return {"status": "some-unknown-word"}
+            return {"hold": {"status": "some-unknown-word"}}
         return _journal_payload()
 
     result = module.triage("wsl", read=fake_read)
@@ -246,8 +253,6 @@ def test_whitelist_drops_remote_free_text() -> None:
     payload["driver"] = {"liveness": "dead", "root": {"argv": "SECRET-ARGV"}, "leader": None}
     result = module.classify_status(payload, host="wsl")
     assert result.operation is None
-    assert result.command is not None
-    assert "--operation ?" in result.command
     serialized = json.dumps(module.triage_json(result))
     assert "evil" not in serialized
     assert "SECRET-ARGV" not in serialized
@@ -319,7 +324,7 @@ def test_triage_and_render_command_defend_the_host_boundary() -> None:
 
     with pytest.raises(ValueError):
         module.triage("-OProxyCommand=sh", read=never_read)
-    assert module.render_command("-N", "stopping", None, None) is None
+    assert module.render_command("-N", "stopping") is None
 
 
 class _Proc:

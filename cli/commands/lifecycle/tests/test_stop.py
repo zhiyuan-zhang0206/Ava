@@ -306,21 +306,16 @@ def test_repeated_stop_needs_no_live_database_or_host(
     assert _restart_stop(timeout=1) == 0
 
 
-def test_failed_flush_cannot_be_released_by_a_healthy_start(
-    monkeypatch: pytest.MonkeyPatch,
+def test_failed_flush_cannot_be_released_by_a_bare_resume(
     database: Database,
     event_bus: EventBus,
 ) -> None:
+    """Only `ava start` settles a failed receipt; a resume that skips it refuses."""
     drained()
     current = admission.require_operation("local", WHEN)
     assert current.maintenance is not None
     failed = MaintenanceHold("draining", commands={42: 7}, failures={42: "final flush failed"})
     pause_owner.change_maintenance("local", WHEN, current.maintenance, failed)
-    start = MagicMock(return_value=0)
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-    with pytest.raises(RuntimeError, match="failed continuation/flush"):
-        resume_after_start(start)()
-    start.assert_not_called()
     from ops.cluster_pause import unpause_local_cluster
 
     with pytest.raises(RuntimeError, match="failed continuation/flush"):

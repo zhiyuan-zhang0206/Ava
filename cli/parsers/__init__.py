@@ -41,7 +41,6 @@ from cli.parsers.host import (
 )
 from cli.parsers.impersonation import _add_impersonation_parser
 from cli.parsers.logs import _add_logs_parser
-from cli.parsers.maintenance import _add_maintenance_parser
 from cli.parsers.management import (
     _add_config_parser,
     _add_presets_parser,
@@ -68,7 +67,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_init_parser(sub)
     _add_start_parser(sub)
     _add_stop_parser(sub)
-    _add_maintenance_parser(sub)
     _add_restart_parser(sub)
     _add_status_parser(sub)
     _add_pty_parser(sub)

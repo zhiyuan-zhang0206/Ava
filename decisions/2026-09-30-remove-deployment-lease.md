@@ -114,3 +114,6 @@ later migration.
 Forward link (2026-10-03): the stranded-pause exits are now `ava maintenance cancel` and
 `repair`; `resume --cancel` was renamed. See
 [the manual maintenance verbs deletion](2026-10-03-delete-manual-maintenance-verbs.md).
+
+Forward link (2026-10-04): `ava maintenance` is deleted entirely; the stranded-pause read is `ava
+status` and the exit is `ava start`. See [delete-ava-maintenance](2026-10-04-delete-ava-maintenance.md).

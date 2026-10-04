@@ -61,25 +61,25 @@ path (no failure fence), and certification still requires the applied
 restart, so a drain never certifies an un-flushed tail. Other failures block.
 
 Phases are `preparing → draining → drained → stopping → stopped → starting →
-ready`; `ava stop` / `ava restart` walk the first five, and no verb enters
+ready`; `ava stop` / `ava restart` walk the first five, and no command enters
 `starting` or `ready` any more (they remain in the journal vocabulary so an
 older journal still decodes). A failed prepare/drain/stop keeps the hold. Ordinary
 `ava start` authorizes the existing operation for bring-up and resumes after
 readiness. The internal
 `authorized_start` ContextVar is exact-operation authority for nested calls,
 not a service-process credential. Stranded-pause recovery cannot abandon a
-maintenance hold. A recorded blocking continuation/flush failure blocks ordinary start
-and every resume path before admission is released; the sanctioned exit is
-`ava maintenance repair --operation <holder> --acquired-at <timestamp>` after
-the root cause is fixed. Repair requires the exact generation, refuses while
-the agent-host has active continuations, and moves the cleared `failures`
-verbatim into `repaired` with an operator-identity `repair_record` — both CAS
-sides stay visible in the journal tombstone via `ava maintenance status`.
-The host-quiescence proof and the CAS release are two steps, not one atomic
-transition: a turn admitted in between still lands its failure receipt through
-the journal CAS re-read onto the hold that already moved to `repaired`, so a
-sanctioned repair can never erase a failure that raced in.
-Undelivered receipts are never cleared by repair; they never block. Resume
+maintenance hold. A recorded blocking continuation/flush failure blocks the
+drain, the phase transitions and every bare resume path; `ava start` is the exit.
+Once the unit serves, `cli/commands/lifecycle/_failed_receipts.py` settles each
+failed receipt before the hold releases: it checks that the agent's restart
+pointer is still pending or claimed (the release's resume then wakes it, with
+every other member's), logs and notifies the owner for any agent whose pointer is
+gone, skips a terminated agent, and `admission.clear_failures` drops the receipts
+from the journal by compare-and-swap. A turn that lands another failure after the
+clear keeps the hold for the next `ava start`. A start that fails before the unit
+serves settles nothing. The failure is crash-equivalent: the pointer survives in
+Postgres, and cold admission continues the agent from its last durable
+checkpoint. Undelivered receipts are never cleared; they never block. Resume
 wakes the saved restart IDs; DB pointers survive a lost Redis wake. Cold admission reloads checkpoints, leaves idle agents idle,
 continues unfinished work and does not revive terminated identities.
 Repeating `stop` after a completed, failure-free stop reads this same journal
@@ -111,11 +111,10 @@ inventing a restart/flush receipt. It preserves the original metadata for the
 existing crash-recovery policy, whose auto-resurrection and retry limits still
 apply; it does not promise the normal drain's continuation guarantee.
 
-`ava maintenance` is only the hold journal's reader and exits: `status`,
-`repair` and `cancel`. `cancel` restores ordinary recovery during
-preparation/drain; it cannot bypass a partial service stop or prove replay
-safety for a failed arbitrary external effect. A stop that failed past the
-drain is retried with `ava stop`, or finished with `ava start`.
+`ava status` reads the hold journal (`ava status --json` prints only the hold) and
+`ava start` is its only exit, over a hold in any phase. It cannot prove replay
+safety for a failed arbitrary external effect. A stop that failed past the drain
+is retried with `ava stop`, or finished with `ava start`.
 
 See [operator procedure](../../../../conventions/graceful-maintenance.md) for
 resource scopes, recovery and the first-deployment limitation.
