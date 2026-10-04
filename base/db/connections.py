@@ -341,7 +341,10 @@ def _direct_url(cfg: DbConfig) -> str:
     if cfg.pgbouncer_enabled and (
         is_loopback_host(host) or host == reachable_host().lower() or host == gateway_url_host()
     ):
-        logger.warning(
+        # Expected shape on a split agent-runner (its URL names the gateway's
+        # pooler): every `ava start` logs one, so it is INFO, not a WARNING
+        # (2026-10-03 triage).
+        logger.info(
             "direct_db_url: AVA_DB_URL names {host}:{port}, which this home's record "
             "does not name as its PgBouncer or Postgres port (a split agent-runner's "
             "URL names the gateway's pooler, resolvable only on the gateway box). "
