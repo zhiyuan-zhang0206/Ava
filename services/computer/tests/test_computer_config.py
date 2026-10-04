@@ -14,8 +14,15 @@ from services.computer import mcp_daemon
 def test_the_slice_carries_the_live_value_of_every_field(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.daemon, "computer_use_lease_s", 7.5)
     monkeypatch.setattr(settings.daemon, "computer_use_session_idle_s", 3.25)
+    monkeypatch.setattr(settings.daemon, "computer_use_loop_stall_s", 42.0)
+    monkeypatch.setattr(settings.daemon, "computer_use_shutdown_drain_s", 1.5)
     config = mcp_daemon.computer_use_config()
     for field in dataclasses.fields(config):
         flat: Any = get_field(field.name)
         assert getattr(config, field.name) == flat, field.name
-    assert (config.computer_use_lease_s, config.computer_use_session_idle_s) == (7.5, 3.25)
+    assert (
+        config.computer_use_lease_s,
+        config.computer_use_session_idle_s,
+        config.computer_use_loop_stall_s,
+        config.computer_use_shutdown_drain_s,
+    ) == (7.5, 3.25, 42.0, 1.5)

@@ -4,7 +4,9 @@ Covers the TSV parsing, coordinate passthrough (the Swift binary already
 emits physical pixels, top-left origin), soft-failure surface (OcrError on
 build/run problems), and the build-on-demand binary cache. The Swift
 recognition itself is exercised live on the preview cluster, not in unit
-tests (same stance as the permissions-helper tests).
+tests (same stance as the permissions-helper tests). The subprocess runs go
+through `base.host.proc.run_bounded` — its own tests own the bounded-kill
+behavior; here the seam is patched.
 """
 
 from __future__ import annotations
@@ -42,10 +44,12 @@ def fake_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _stub_run(monkeypatch: pytest.MonkeyPatch, results: list[_FakeCompleted]) -> None:
-    def _run(cmd: list[str], **kw: Any) -> _FakeCompleted:
+    """Patch ocr's bounded-run seam (base.host.proc.run_bounded's shape)."""
+
+    def _run(argv: list[str], **kw: Any) -> _FakeCompleted:
         return results.pop(0) if results else _FakeCompleted()
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    monkeypatch.setattr(ocr_mod, "run_bounded", _run)
 
 
 def _force_rebuild(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str) -> None:
@@ -89,10 +93,10 @@ def test_nonzero_exit_raises(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_timeout_raises(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def _hang(cmd: list[str], **kw: Any) -> _FakeCompleted:
-        raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
+    def _hang(argv: list[str], **kw: Any) -> _FakeCompleted:
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=30)
 
-    monkeypatch.setattr(subprocess, "run", _hang)
+    monkeypatch.setattr(ocr_mod, "run_bounded", _hang)
     with pytest.raises(OcrError, match="timed out"):
         ocr_image("/tmp/x.png")  # noqa: S108
 
@@ -113,10 +117,10 @@ def test_swiftc_failure_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     _force_rebuild(monkeypatch, tmp_path, "rebuild2")
     monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: "/usr/bin/swiftc")  # pyright: ignore[reportUnknownArgumentType]
 
-    def _run(cmd: list[str], **kw: Any) -> _FakeCompleted:
+    def _run(argv: list[str], **kw: Any) -> _FakeCompleted:
         return _FakeCompleted(returncode=1, stderr="compile error")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    monkeypatch.setattr(ocr_mod, "run_bounded", _run)
     with pytest.raises(OcrError, match="compile error"):
         ocr_image("/tmp/x.png")  # noqa: S108
 
@@ -126,11 +130,11 @@ def test_existing_fresh_binary_skips_compile(
 ) -> None:
     calls: list[list[str]] = []
 
-    def _run(cmd: list[str], **kw: Any) -> _FakeCompleted:
-        calls.append(cmd)
+    def _run(argv: list[str], **kw: Any) -> _FakeCompleted:
+        calls.append(argv)
         return _FakeCompleted(stdout="ok\t1\t2\t3\t4\n")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    monkeypatch.setattr(ocr_mod, "run_bounded", _run)
     items = ocr_image("/tmp/x.png")  # noqa: S108
     assert items == [{"text": "ok", "x": 1.0, "y": 2.0, "w": 3.0, "h": 4.0}]
     # exactly one subprocess call: the OCR run itself, no swiftc compile
