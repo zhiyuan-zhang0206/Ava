@@ -13,7 +13,7 @@ order (CPython 3.12 wakes the oldest live waiter; locked by the wake-order test
 in services/agent_runner/agent_host/tests/test_turn_admission.py). This class adds what the bare
 semaphore cannot express:
 
-- **The waiting state.** A waiter is registered in ``agent/turn/progress.py``
+- **The waiting state.** A waiter is registered in this gate
   BEFORE the acquire await, so there is no window in which a parked turn is
   invisible to the dispatcher's fake-alive scan. Cancelling a waiter would only
   re-queue it at the tail (its successor is a new ticket), so the wait is
@@ -34,8 +34,6 @@ import asyncio
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-
-from agent.turn.progress import begin_admission_wait, end_admission_wait
 
 
 class TurnAdmission:
@@ -65,7 +63,7 @@ class TurnAdmission:
         """Hold one slot for this turn, queuing first-in-first-out when full.
 
         Registration precedes the acquire await by construction: the ``queued``
-        check and ``begin_admission_wait`` run with no await between them and
+        check and the registration run with no await between them and
         the semaphore's own fast path is synchronous, so a registered waiter is
         exactly a turn that had to queue.
         """
@@ -76,7 +74,6 @@ class TurnAdmission:
         queued = self._slots.locked()
         if queued:
             self._waiting[agent_id] = started
-            begin_admission_wait(agent_id)
         try:
             await self._slots.acquire()
         except BaseException:
@@ -97,7 +94,16 @@ class TurnAdmission:
     def _leave_queue(self, agent_id: int) -> None:
         self._waiting.pop(agent_id, None)
         self._alerted.discard(agent_id)
-        end_admission_wait(agent_id)
+
+    def is_waiting(self, agent_id: int) -> bool:
+        """True while ``agent_id``'s turn queues at the gate.
+
+        A queued turn shows no activity by design, so the dispatcher's stall scan reads this to
+        tell "queued" from "stuck": cancelling a waiter would only re-queue it at the tail.
+        Wait length is observability (``/stats`` + the ``host_admission_wait_exceeded`` event),
+        never a cancellation trigger.
+        """
+        return agent_id in self._waiting
 
     def waiting_agents(self) -> dict[int, float]:
         """Current waiters and how long each has queued, in seconds."""

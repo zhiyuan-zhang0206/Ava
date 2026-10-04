@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from base.agents.observation.turn_progress import TurnProgress
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
@@ -24,6 +25,7 @@ async def test_actual_stats_route_matches_configured_port_home_pid_and_owner(
     pidfile.write_text(str(os.getpid()))
     host, scheduler = MagicMock(), MagicMock()
     host._owner = uuid4()
+    host.turn_progress = TurnProgress()
     host.stats.as_payload.return_value = {}
     scheduler.active_agents = {42}
     server = await start_health_server(

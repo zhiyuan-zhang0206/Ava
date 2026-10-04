@@ -36,7 +36,6 @@ import hashlib
 import hmac
 import json
 import re
-import secrets
 from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
@@ -46,7 +45,6 @@ from base.log import logger
 
 _LABEL = "recall-filter"
 _PICKED_PATH_SAMPLE_LIMIT = 10
-_RECALL_LOG_HMAC_KEY = secrets.token_bytes(32)
 
 # The judging-call bound is configurable (AVA_MEMORY_RECALL_FILTER_TIMEOUT_SECONDS,
 # task #698 G8). It sits in front of the agent's turn, so a slow filter is a slow
@@ -142,10 +140,12 @@ def _parse(reply: str, allowed: set[str]) -> list[str] | None:
     return picked
 
 
-def _log_filter_decision(query: str, candidates: list[Candidate], picked: list[str]) -> None:
+def _log_filter_decision(
+    query: str, candidates: list[Candidate], picked: list[str], log_key: bytes
+) -> None:
     """Emit one privacy-preserving, bounded record of a recall verdict.
 
-    The process-keyed query HMAC lets an operator join repeated filter decisions
+    The host-keyed query HMAC lets an operator join repeated filter decisions
     without making low-entropy conversation text dictionary-reversible from
     telemetry. Paths are reduced to basenames so the sample records what was
     surfaced without disclosing project-directory structure.
@@ -155,9 +155,7 @@ def _log_filter_decision(query: str, candidates: list[Candidate], picked: list[s
         label=_LABEL,
         body=f"{len(candidates)} candidate(s) -> {len(picked)} kept",
         event="recall_filter",
-        query_hmac_sha256=hmac.new(
-            _RECALL_LOG_HMAC_KEY, query.encode(), hashlib.sha256
-        ).hexdigest(),
+        query_hmac_sha256=hmac.new(log_key, query.encode(), hashlib.sha256).hexdigest(),
         picked_paths=[
             path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
             for path in picked[:_PICKED_PATH_SAMPLE_LIMIT]
@@ -166,7 +164,7 @@ def _log_filter_decision(query: str, candidates: list[Candidate], picked: list[s
 
 
 async def filter_candidates(
-    query: str, candidates: list[Candidate], memory: MemoryRecall
+    query: str, candidates: list[Candidate], memory: MemoryRecall, log_key: bytes
 ) -> list[str]:
     """The paths worth injecting, in the model's order, at most `inject_k`.
 
@@ -223,7 +221,7 @@ async def filter_candidates(
             picked = _parse(text, {c.path for c in candidates})
             if picked is not None:
                 kept = picked[:inject_k]
-                _log_filter_decision(query, candidates, kept)
+                _log_filter_decision(query, candidates, kept, log_key)
                 return kept
             last_failure = "unparseable reply"
         except Exception:

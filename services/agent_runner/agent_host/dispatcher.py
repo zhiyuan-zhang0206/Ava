@@ -53,14 +53,19 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Protocol, cast
 
-from agent.turn.progress import turn_progress_age_s
 from base.agents.observation.db_wait import DatabaseWaits
+from base.agents.observation.turn_progress import TurnProgress
 from base.cluster import redis_channel_prefix
 from base.deploy.maintenance import admission
 from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
+from services.agent_runner.agent_host.admission import TurnAdmission
+from services.agent_runner.agent_host.stall_guard import (
+    HostRestartRequiredError,
+    TurnStallTimeoutError,
+)
 from services.agent_runner.agent_host.turn_gates import (
     admission_waiting,
     database_waiting,
@@ -453,27 +458,6 @@ class _WakeScheduler(Protocol):
     async def cancel_agent(self, agent_id: int) -> bool: ...
 
 
-class HostRestartRequiredError(RuntimeError):
-    """A hosted turn refused its bounded cancellation and owns the task slot.
-
-    Rescheduling beside it would violate one-turn-per-agent. Letting the daemon
-    exit hands recovery to its supervisor, which restarts from the durable
-    checkpoint instead.
-    """
-
-
-class TurnStallTimeoutError(RuntimeError):
-    """A hosted turn was aborted by the no-progress stall guard (host.py).
-
-    Its ``graph.ainvoke`` made no progress for
-    ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` and was cancelled; the turn
-    task ends (the task DID unwind — that is the whole point of the bounded
-    abort) and the next wake resumes from the checkpoint. Distinct from
-    ``HostRestartRequiredError``, which is raised when the cancel refuses to
-    unwind: the daemon there must exit, here it must not.
-    """
-
-
 @dataclass(frozen=True)
 class _ScanSchedule:
     """The next durable-scan deadline and retry delay after one scan attempt."""
@@ -503,6 +487,8 @@ class InboundWakeDispatcher:
         *,
         pending_scan: Callable[[float], Awaitable[list[PendingInboundWake]]] | None = None,
         database_waits: DatabaseWaits | None = None,
+        turn_progress: TurnProgress | None = None,
+        turn_admission: TurnAdmission | None = None,
         stale_after_s: float | None = None,
         scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         recovery_wake_batch: int = 4,
@@ -516,6 +502,8 @@ class InboundWakeDispatcher:
         self._scheduler = scheduler
         self._pending_scan = pending_scan
         self._database_waits = database_waits if database_waits is not None else DatabaseWaits()
+        self._turn_progress = turn_progress if turn_progress is not None else TurnProgress()
+        self._turn_admission = turn_admission if turn_admission is not None else TurnAdmission(0)
         self._stale_after_s = stale_after_s
         self._scan_interval_s = scan_interval_s
         self._recovery_wake_batch = recovery_wake_batch
@@ -738,9 +726,9 @@ class InboundWakeDispatcher:
         return (
             candidate.stale
             and candidate.agent_id in self._scheduler.active_agents
-            and not database_waiting(self._database_waits, candidate.agent_id)
-            and not admission_waiting(candidate.agent_id)
-            and (age := turn_progress_age_s(candidate.agent_id)) is not None
+            and not database_waiting(self._database_waits, self._turn_progress, candidate.agent_id)
+            and not admission_waiting(self._turn_admission, candidate.agent_id)
+            and (age := self._turn_progress.age_s(candidate.agent_id)) is not None
             and age >= stale_after_s
         )
 
@@ -754,11 +742,11 @@ class InboundWakeDispatcher:
             # Do not apply an old clock to a task this scan just started.
             if (
                 agent_id in started
-                or database_waiting(self._database_waits, agent_id)
-                or admission_waiting(agent_id)
+                or database_waiting(self._database_waits, self._turn_progress, agent_id)
+                or admission_waiting(self._turn_admission, agent_id)
             ):
                 continue
-            age = turn_progress_age_s(agent_id)
+            age = self._turn_progress.age_s(agent_id)
             if age is None or age < stale_after_s:
                 continue
             # Earlier cancellation may have let this snapshotted task finish;

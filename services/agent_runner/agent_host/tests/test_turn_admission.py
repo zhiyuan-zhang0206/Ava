@@ -7,9 +7,9 @@ contract:
 1. **Ticket rotation** — one ticket per agent (TurnScheduler's single flight),
    arrival-order FIFO service, and a completed turn's next request taken at the
    tail: no starvation, no overtaking.
-2. **Queued is not stalled** — the waiter is registered in
-   ``agent/turn/progress.py`` BEFORE its acquire await and cleared on serve or
-   cancel; the dispatcher's fake-alive scan reads exactly this registry.
+2. **Queued is not stalled** — the waiter is registered in the gate BEFORE its
+   acquire await and cleared on serve or cancel; the dispatcher's fake-alive
+   scan reads exactly this registration (``is_waiting``).
 3. **Observability** — depth, ages and served-wait counters for ``/stats``;
    one ``long_waiters`` report per wait episode.
 4. **Unlimited mode** — ``limit <= 0`` is a state-free no-op (legacy zero
@@ -20,13 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from contextlib import suppress
 from typing import cast
 
-import pytest
-
-from agent.turn import progress
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.admission import TurnAdmission
 from services.agent_runner.agent_host.dispatcher import (
@@ -41,12 +38,6 @@ async def _until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
     while not predicate():
         assert time.monotonic() < deadline, "condition not reached in time"
         await asyncio.sleep(0)
-
-
-@pytest.fixture(autouse=True)
-def _clean_wait_registry() -> Iterator[None]:
-    yield
-    progress._ADMISSION_WAIT.clear()
 
 
 async def _park(gate: TurnAdmission, agent_id: int, entered: asyncio.Event) -> None:
@@ -146,7 +137,7 @@ class TestWaitState:
 
         waiter = asyncio.create_task(_waiter())
         try:
-            await _until(lambda: progress.admission_wait_age_s(2) is not None)
+            await _until(lambda: gate.is_waiting(2))
             assert gate.waiting == 1
             assert not entered.is_set()
         finally:
@@ -155,7 +146,7 @@ class TestWaitState:
                 await holder
         await _until(entered.is_set)
         # Cleared as soon as the slot was served, not when the turn ends.
-        assert progress.admission_wait_age_s(2) is None
+        assert not gate.is_waiting(2)
         await waiter
 
     async def test_a_cancelled_waiter_leaves_no_state_behind(self) -> None:
@@ -166,7 +157,7 @@ class TestWaitState:
 
         entered = asyncio.Event()
         waiter = asyncio.create_task(_park(gate, 2, entered))
-        await _until(lambda: progress.admission_wait_age_s(2) is not None)
+        await _until(lambda: gate.is_waiting(2))
 
         waiter.cancel()
         with suppress(asyncio.CancelledError):
@@ -174,8 +165,7 @@ class TestWaitState:
         assert gate.waiting == 0
         assert gate.waits_total == 0
         assert gate.wait_seconds_total == 0.0
-        assert progress.admission_wait_age_s(2) is None
-        assert progress._ADMISSION_WAIT.get(2) is None
+        assert not gate.is_waiting(2)
 
         holder.cancel()
         with suppress(asyncio.CancelledError):
@@ -239,12 +229,11 @@ class TestWaitState:
 
         async def _turn(agent_id: int) -> None:
             async with gate.admit(agent_id):
-                assert progress.admission_wait_age_s(agent_id) is None
+                assert not gate.is_waiting(agent_id)
 
         await asyncio.gather(*(_turn(i) for i in range(64)))
         assert gate.waiting == 0
         assert gate.waits_total == 0
-        assert progress._ADMISSION_WAIT == {}
 
 
 class TestSchedulerIntegration:

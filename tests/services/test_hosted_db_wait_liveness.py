@@ -13,9 +13,9 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.turn import progress
 from base.agents.observation import db_wait
 from base.agents.observation.db_wait import DatabaseWaits
+from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
@@ -119,12 +119,13 @@ async def _assert_automatic_scan_spares_the_database_wait(
     scheduler: TurnScheduler,
     agent: int,
     cancelled: asyncio.Event,
+    clock: TurnProgress,
 ) -> None:
-    before = progress.turn_progress_snapshot(agent)
+    before = clock.snapshot(agent)
     await dispatcher.scan_once()
     assert agent in scheduler.active_agents
     assert not cancelled.is_set()
-    assert progress.turn_progress_snapshot(agent)["last_marks"] == before["last_marks"]  # type: ignore[index]
+    assert clock.snapshot(agent)["last_marks"] == before["last_marks"]  # type: ignore[index]
 
 
 async def _assert_explicit_force_cancels_the_database_wait(
@@ -186,7 +187,8 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
     )
     recovered, cancelled = asyncio.Event(), asyncio.Event()
     waits = DatabaseWaits()
-    progress._PROGRESS[agent] = [time.monotonic() - 100]
+    clock = host.turn_progress
+    clock._marks[agent] = [time.monotonic() - 100]
     async with AsyncConnectionPool[psycopg.AsyncConnection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
     ) as control:
@@ -198,6 +200,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
             bus=EventBus.from_settings(),
             pending_scan=host.pending_inbound_wakes,
             database_waits=waits,
+            turn_progress=clock,
             stale_after_s=1.0,
         )
         try:
@@ -205,7 +208,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
                 scheduler.wake(agent)
                 await _wait_until_database_wait_is_visible(waits, agent)
                 await _assert_automatic_scan_spares_the_database_wait(
-                    dispatcher, scheduler, agent, cancelled
+                    dispatcher, scheduler, agent, cancelled, clock
                 )
                 if force:
                     await _assert_explicit_force_cancels_the_database_wait(
@@ -217,7 +220,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
                 )
         finally:
             await scheduler.aclose()
-            progress._PROGRESS.pop(agent, None)
+            clock._marks.pop(agent, None)
         assert waits.snapshot(agent) is None
 
 
@@ -295,7 +298,8 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
-    progress._PROGRESS[agent] = [time.monotonic() - 100]
+    clock = TurnProgress()
+    clock._marks[agent] = [time.monotonic() - 100]
     writes: list[dict[str, Any]] = []
 
     class CaptureRedis:
@@ -308,23 +312,23 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
         with waits.wait(incarnation) as waiting:
             waiting.renew()
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}, waits
+                EventBus.from_settings(), machine_name(), {agent}, waits, clock
             )
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}, waits
+                EventBus.from_settings(), machine_name(), {agent}, waits, clock
             )
             assert writes[0][str(agent)]["db_wait"] == writes[1][str(agent)]["db_wait"]
             assert writes[0][str(agent)]["age_s"] >= 100
-            assert writes[0][str(agent)]["last_marks"] == progress._PROGRESS[agent]
+            assert writes[0][str(agent)]["last_marks"] == clock._marks[agent]
             waiting.deadline = time.monotonic() - 1
             assert waits.snapshot(agent) is None
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}, waits
+                EventBus.from_settings(), machine_name(), {agent}, waits, clock
             )
             assert "db_wait" not in writes[-1][str(agent)]
         assert waits.snapshot(agent) is None
     finally:
-        progress._PROGRESS.pop(agent, None)
+        clock._marks.pop(agent, None)
 
 
 async def test_success_handoff_clears_on_actual_node_progress(
@@ -332,7 +336,8 @@ async def test_success_handoff_clears_on_actual_node_progress(
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
-    progress._PROGRESS[agent] = [time.monotonic() - 100]
+    clock = TurnProgress()
+    clock._marks[agent] = [time.monotonic() - 100]
     writes: list[dict[str, Any]] = []
 
     class CaptureRedis:
@@ -346,17 +351,17 @@ async def test_success_handoff_clears_on_actual_node_progress(
             waiting.renew()
             waiting.complete()
         await daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), machine_name(), {agent}, waits
+            EventBus.from_settings(), machine_name(), {agent}, waits, clock
         )
         assert "db_wait" in writes[-1][str(agent)]
-        progress.mark_turn_progress(agent)
+        clock.mark(agent)
         await daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), machine_name(), {agent}, waits
+            EventBus.from_settings(), machine_name(), {agent}, waits, clock
         )
         assert "db_wait" not in writes[-1][str(agent)]
         assert waits.snapshot(agent) is None
     finally:
-        progress._PROGRESS.pop(agent, None)
+        clock._marks.pop(agent, None)
 
 
 @pytest.mark.parametrize("pending_stale", [False, True])
@@ -364,13 +369,14 @@ async def test_pending_scan_gives_inactive_agent_a_turn_before_using_its_old_clo
     pending_stale: bool,
 ) -> None:
     agent = 876501
+    clock = TurnProgress()
     started = [asyncio.Event(), asyncio.Event()]
     calls, cancelled = 0, 0
     scans = 0
 
     async def run(_agent: int) -> None:
         nonlocal calls, cancelled
-        progress.reset_turn_progress(agent)
+        clock.reset(agent)
         started[min(calls, 1)].set()
         calls += 1
         try:
@@ -388,9 +394,10 @@ async def test_pending_scan_gives_inactive_agent_a_turn_before_using_its_old_clo
         bus=EventBus.from_settings(),
         scheduler=scheduler,
         pending_scan=pending,
+        turn_progress=clock,
         stale_after_s=1.0,
     )
-    progress._PROGRESS[agent] = [time.monotonic() - 100]
+    clock._marks[agent] = [time.monotonic() - 100]
     try:
         assert agent not in scheduler.active_agents
         await dispatcher.scan_once()
@@ -400,7 +407,7 @@ async def test_pending_scan_gives_inactive_agent_a_turn_before_using_its_old_clo
         assert calls == 1
         # The exemption lasts for one scan only. A genuinely stalled task on
         # the next scan must still cancel and admit a fresh runnable task.
-        progress._PROGRESS[agent] = [time.monotonic() - 100]
+        clock._marks[agent] = [time.monotonic() - 100]
         await dispatcher.scan_once()
         assert cancelled == 1
         await asyncio.wait_for(started[1].wait(), 1)
@@ -408,5 +415,5 @@ async def test_pending_scan_gives_inactive_agent_a_turn_before_using_its_old_clo
         assert not scheduler.restart_required
     finally:
         await scheduler.aclose()
-        progress._PROGRESS.pop(agent, None)
+        clock._marks.pop(agent, None)
     assert not scheduler.active_agents

@@ -222,7 +222,10 @@ class _PassiveMemoryRecallHook(Hook):
         try:
             recall = await asyncio.wait_for(
                 passive_memory_recall(
-                    state.messages, injected_paths=state.memory.injected_paths, agent=agent
+                    state.messages,
+                    injected_paths=state.memory.injected_paths,
+                    agent=agent,
+                    log_key=runtime.context.recall_log_key,
                 ),
                 timeout=deadline,
             )

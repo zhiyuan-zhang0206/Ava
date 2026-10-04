@@ -283,10 +283,12 @@ class _GatedGraph:
         self.release = asyncio.Event()
         self.refuse_cancel = refuse_cancel
         self.cancel_seen = False
+        self.contexts: list[AvaContext] = []
 
     async def ainvoke(
         self, _input: dict[str, Any], *, config: dict[str, Any], context: AvaContext
     ) -> dict[str, Any]:
+        self.contexts.append(context)
         self.entered.set()
         try:
             await self.release.wait()
@@ -1094,14 +1096,26 @@ class TestTurnLoop:
         recovery turn it just scheduled."""
         import time as _time
 
-        from agent.turn.progress import _PROGRESS, turn_progress_age_s
-
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         # A stale entry as a long-ago turn would leave behind...
-        _PROGRESS[11] = [_time.monotonic() - 99999.0]
+        host.turn_progress._marks[11] = [_time.monotonic() - 99999.0]
         await asyncio.wait_for(host.run_turn(11), 2)
-        age = turn_progress_age_s(11)
+        age = host.turn_progress.age_s(11)
         assert age is not None and age < 5.0, f"clock not reset, age={age}"
+
+    async def test_a_turn_runs_with_the_hosts_own_shared_state(self, wired: _Build) -> None:
+        """The graph's writers and the host's readers must hold the same objects: a context
+        built with private ones would leave the stall guard reading an empty clock."""
+        host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        graph = _GatedGraph()
+        host._graph = graph  # type: ignore[assignment]
+        task = asyncio.create_task(host.run_turn(11))
+        await poll_until_async(graph.entered.is_set)
+        graph.release.set()
+        await task
+        [ctx] = graph.contexts
+        assert ctx.turn_progress is host.turn_progress
+        assert ctx.relays is host.relays
 
     async def test_a_skipped_wake_still_starts_a_fresh_progress_window(self, wired: _Build) -> None:
         """The reset must precede every await in `_run_turn`.
@@ -1115,12 +1129,10 @@ class TestTurnLoop:
         """
         import time as _time
 
-        from agent.turn.progress import _PROGRESS, turn_progress_age_s
-
         host, _, _ = wired({11: _Row(status="terminated")})
-        _PROGRESS[11] = [_time.monotonic() - 99999.0]
+        host.turn_progress._marks[11] = [_time.monotonic() - 99999.0]
         await asyncio.wait_for(host.run_turn(11), 2)
-        age = turn_progress_age_s(11)
+        age = host.turn_progress.age_s(11)
         assert age is not None and age < 5.0, f"clock not reset, age={age}"
 
     async def test_a_crashing_turn_drops_the_runtime(self, wired: _Build) -> None:
@@ -1189,7 +1201,6 @@ class TestTurnStallGuard:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import services.agent_runner.agent_host.stall_guard as guard_mod
-        from agent.turn.progress import mark_turn_progress
 
         await self._stall_settings(monkeypatch)
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
@@ -1204,7 +1215,7 @@ class TestTurnStallGuard:
 
         async def _keep_stepping() -> None:
             while not graph.release.is_set():
-                mark_turn_progress(11)
+                host.turn_progress.mark(11)
                 await asyncio.sleep(0.004)
 
         keeper = asyncio.create_task(_keep_stepping())

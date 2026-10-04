@@ -25,9 +25,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from services.agent_runner.agent_host import dispatcher
+from services.agent_runner.agent_host.admission import TurnAdmission
 from services.agent_runner.agent_host.dispatcher import (
     InboundWakeDispatcher,
     TurnScheduler,
@@ -651,16 +653,13 @@ class TestCancelBeforeTheFirstSlice:
         """The scan's post-cancel check judges the captured task, not registry
         membership: pre-fix, the staging below exits the host with a false
         `did not unwind`."""
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
         rec = _Recorder()
         sched = TurnScheduler(rec)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return [dispatcher.PendingInboundWake(agent_id=7, stale=True)]
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), sched, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = _scan_dispatcher(sched, _pending, _STALE)
 
         sched.wake(7)
         await asyncio.wait_for(sched.cancel_agent(7), 2)
@@ -886,15 +885,12 @@ class TestPendingScan:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Old pending work and an actually stalled turn allow recovery."""
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
         scheduler = _ScanScheduler({23})
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = _scan_dispatcher(scheduler, _pending, _STALE)
 
         await disp.scan_once()
 
@@ -909,15 +905,12 @@ class TestPendingScan:
         Exiting is the only safe recovery: scheduling another task beside it
         would let one agent claim and mutate its checkpoint concurrently.
         """
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
         scheduler = _ScanScheduler({23}, unwinds_on_cancel=False)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = _scan_dispatcher(scheduler, _pending, _STALE)
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
             await disp.scan_once()
@@ -974,17 +967,34 @@ class TestStallRestartEscalation:
             await asyncio.wait_for(disp.run(), timeout=2.0)
 
 
-def _stale_age(_agent_id: int) -> float:
-    """A turn-progress clock silent well past the scan budget (task #2417)."""
-    return 3600.0
+class _FixedClock(TurnProgress):
+    """A turn-progress clock that reports one age for every agent (None: no entry)."""
+
+    def __init__(self, age_s: float | None) -> None:
+        super().__init__()
+        self._age_s = age_s
+
+    def age_s(self, agent_id: int) -> float | None:
+        return self._age_s
 
 
-def _fresh_age(_agent_id: int) -> float:
-    return 10.0
+_STALE = _FixedClock(3600.0)
+_FRESH = _FixedClock(10.0)
+_UNKNOWN = _FixedClock(None)
 
 
-def _unknown_age(_agent_id: int) -> float | None:
-    return None
+def _scan_dispatcher(
+    scheduler: object, pending: object, clock: TurnProgress, **extra: object
+) -> InboundWakeDispatcher:
+    """A dispatcher whose turn-progress clock reports a fixed age, scanning with a 180s budget."""
+    return InboundWakeDispatcher(
+        EventBus.from_settings(),
+        scheduler,  # pyright: ignore[reportArgumentType]
+        pending_scan=pending,  # pyright: ignore[reportArgumentType]
+        stale_after_s=180.0,
+        turn_progress=clock,
+        **extra,  # pyright: ignore[reportArgumentType]
+    )
 
 
 class TestTurnLevelStaleScan:
@@ -998,14 +1008,11 @@ class TestTurnLevelStaleScan:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         scheduler = _ScanScheduler({23})
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = _scan_dispatcher(scheduler, _pending, _STALE)
 
         await disp.scan_once()
 
@@ -1016,14 +1023,11 @@ class TestTurnLevelStaleScan:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         scheduler = _ScanScheduler({23})
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _fresh_age)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = _scan_dispatcher(scheduler, _pending, _FRESH)
 
         await disp.scan_once()
 
@@ -1037,14 +1041,11 @@ class TestTurnLevelStaleScan:
         has ever marked progress", which must not cancel turns it knows nothing
         about — the same reading the uncancellable report uses for None."""
         scheduler = _ScanScheduler({23})
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _unknown_age)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = _scan_dispatcher(scheduler, _pending, _UNKNOWN)
 
         await disp.scan_once()
 
@@ -1055,14 +1056,11 @@ class TestTurnLevelStaleScan:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         scheduler = _ScanScheduler({23}, unwinds_on_cancel=False)
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = _scan_dispatcher(scheduler, _pending, _STALE)
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
             await disp.scan_once()
@@ -1101,14 +1099,10 @@ class TestTurnLevelStaleScan:
         for _ in range(6):
             await asyncio.sleep(0)
 
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
-
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = _scan_dispatcher(scheduler, _pending, _STALE)
 
         await disp.scan_once()  # must not raise
 
@@ -1126,22 +1120,15 @@ class TestAdmissionWaitExemption:
     async def test_a_queued_turn_is_exempt_from_the_turn_level_scan(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agent.turn import progress
-
         scheduler = _ScanScheduler({23})
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
-        progress.begin_admission_wait(23)
-        try:
+        admission = TurnAdmission(1)
+        admission._waiting[23] = 0.0
 
-            async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-                return []
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return []
 
-            disp = InboundWakeDispatcher(
-                EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-            )
-            await disp.scan_once()
-        finally:
-            progress.end_admission_wait(23)
+        disp = _scan_dispatcher(scheduler, _pending, _STALE, turn_admission=admission)
+        await disp.scan_once()
 
         assert scheduler.cancelled == []
         assert scheduler.woken == []
@@ -1149,22 +1136,15 @@ class TestAdmissionWaitExemption:
     async def test_a_queued_stale_candidate_is_not_cancelled_before_its_wake(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agent.turn import progress
-
         scheduler = _ScanScheduler({17})
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
-        progress.begin_admission_wait(17)
-        try:
+        admission = TurnAdmission(1)
+        admission._waiting[17] = 0.0
 
-            async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-                return [dispatcher.PendingInboundWake(agent_id=17, stale=True)]
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return [dispatcher.PendingInboundWake(agent_id=17, stale=True)]
 
-            disp = InboundWakeDispatcher(
-                EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-            )
-            await disp.scan_once()
-        finally:
-            progress.end_admission_wait(17)
+        disp = _scan_dispatcher(scheduler, _pending, _STALE, turn_admission=admission)
+        await disp.scan_once()
 
         assert scheduler.cancelled == []
         assert scheduler.woken == [17]

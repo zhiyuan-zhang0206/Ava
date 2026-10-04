@@ -234,6 +234,7 @@ def make_hook_runner(
             ops_pool=runtime.context.ops_pool,
             event_publisher=event_publisher,
             agent_id=agent_id_from_config(config),
+            turn_progress=runtime.context.turn_progress,
         ):
             update: dict[str, Any] = {}
             key_writer: dict[str, str] = {}  # key -> name of the hook that set it
