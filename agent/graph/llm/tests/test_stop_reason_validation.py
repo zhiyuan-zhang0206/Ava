@@ -28,6 +28,7 @@ from langchain_core.messages import AIMessage
 
 from agent.graph.llm._chunk import _validate_stop_reason
 from agent.graph.llm_errors import (
+    LlmLedger,
     LLMStreamCorruptedError,
     LLMStreamError,
     LLMStreamTruncatedError,
@@ -309,7 +310,7 @@ async def test_llm_node_validator_wired(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(LLMStreamTruncatedError):
-        await llm_attempt(state, runtime, config, Attempt(1, time.time()))
+        await llm_attempt(state, runtime, config, Attempt(1, time.time()), ledger=LlmLedger())
 
     # llm_node does NOT emit Error event — locks the "moved to outer wrapper" design
     # point, preventing someone from re-adding emit inside llm_node because "frontend

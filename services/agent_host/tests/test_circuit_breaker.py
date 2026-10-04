@@ -26,7 +26,7 @@ from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage, Sy
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node, llm_node
-from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
+from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError, LlmLedger
 from agent.graph.tests.test_llm_helpers import _CONFIG as _LLM_CONFIG
 from agent.graph.tests.test_llm_helpers import _make_runtime as _llm_make_runtime
 from agent.hooks.compact import (
@@ -649,6 +649,7 @@ async def test_llm_node_closes_circuit_on_success() -> None:
         state,
         _llm_make_runtime(llm=fake_llm, event_publisher=MagicMock()),
         _LLM_CONFIG,
+        ledger=LlmLedger(),
     )
 
     assert cmd.update["circuit"].open is False  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
@@ -678,6 +679,7 @@ async def test_llm_node_cancel_does_not_close_circuit(fake_cancel_event) -> None
         state,
         _llm_make_runtime(llm=fake_llm, event_publisher=MagicMock()),
         _LLM_CONFIG,
+        ledger=LlmLedger(),
     )
     await trigger
 

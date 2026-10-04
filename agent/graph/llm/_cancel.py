@@ -23,9 +23,9 @@ from langgraph.types import Command
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
 from agent.graph.llm_errors import (
+    LlmLedger,
     LLMStreamError,
     _classify_and_log_provider_error,
-    _record_consecutive_error,
 )
 from agent.nodes import AFTER_EXEC
 from base.agents.context import AvaContext
@@ -40,13 +40,14 @@ async def _race_stream_vs_cancel(
     agent_id: int,
     stream_coro: Coroutine[Any, Any, None],
     handler: RedisStreamHandler,
+    ledger: LlmLedger,
 ) -> Command[LlmGoto] | None:
     """Race the streaming task against the durable-interrupt cancel event.
 
     Returns the cancelled Command (halted=True → after_exec, so claim
     dispatches the inbound) when the cancel event fires first; returns None
     once the stream completed cleanly (stream exceptions propagate, with the
-    consecutive-error tracker and provider-error classification applied).
+    ledger's consecutive-error record and provider-error classification applied).
 
     subscribe_interrupt is RAII: on node entry it watches for a durable
     interrupt inbound (kind cancel/terminate) by polling the durable queue,
@@ -90,7 +91,7 @@ async def _race_stream_vs_cancel(
             return Command[LlmGoto](update={"halted": True}, goto=AFTER_EXEC)
 
         except LLMStreamError as e:
-            _record_consecutive_error(str(agent_id), e)
+            ledger.record_consecutive_error(str(agent_id), e)
             raise
         except Exception as e:
             # Classify the provider exception (base.lm.errors.classify_error) and

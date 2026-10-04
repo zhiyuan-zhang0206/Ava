@@ -18,7 +18,7 @@ their `node.py`:
   - `llm/_stream.py`     — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
   - `llm/_cancel.py`     — llm streaming-vs-cancel race (partial turn discard)
   - `llm/_chunk.py`      — llm chunk assembly + final-message validation
-  - `llm_errors.py`      — llm stream error taxonomy + consecutive-error tracking
+  - `llm_errors.py`      — llm stream error taxonomy + failure ledger
   - `_base_prompt.py`   — immutable base system prompt + lazily captured `ava` SDK overview
   - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
   - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from .exec.node import exec_node as exec_node
     from .exec.output import EXEC_CANCEL_NOTE as EXEC_CANCEL_NOTE
     from .llm.node import llm_node as llm_node
+    from .llm_errors import LlmLedger as LlmLedger
 
 # Eager `from ._build import build_graph` used to run on every `agent.graph`
 # import — pulling the full node set (build/claim/llm/exec and their trees)
@@ -59,12 +60,14 @@ _LAZY_EXPORTS = {
     "exec_node": ".exec.node",
     "EXEC_CANCEL_NOTE": ".exec.output",
     "llm_node": ".llm.node",
+    "LlmLedger": ".llm_errors",
 }
 
 # Static checkers see the real signatures through the TYPE_CHECKING block
 # above; at runtime `__getattr__` resolves the names lazily (PEP 562).
 __all__ = [
     "EXEC_CANCEL_NOTE",
+    "LlmLedger",
     "build_graph",
     "claim_node",
     "exec_node",
