@@ -19,25 +19,24 @@ after. Both resolve to the same root because both derive it from AVA_HOME's name
 
 from __future__ import annotations
 
-import json
-import os
 import shutil
 import subprocess
-import tempfile
-from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, cast
 
 import psycopg
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
-from langchain_core.messages import AIMessage, BaseMessage
-from langchain_core.outputs import ChatGenerationChunk, ChatResult
 
 import ava
 from base.config import settings
-from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
+from tests.e2e.fakes._recording import (
+    RecordingModel,
+    exec_call,
+    model_inputs,
+    reset_record,
+    say,
+    scratch_root,
+)
 
-_USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+__all__ = ["RecordingModel", "model_inputs"]
 
 # Distinctive bodies the tests look for in the model's input.
 ROOT_RULES = "ROOT-RULES-MARK: run the narrowest failing test first."
@@ -53,16 +52,11 @@ FINAL = "scenario finished."
 
 
 def root() -> Path:
-    name = Path(os.environ["AVA_HOME"]).name
-    return Path(tempfile.gettempdir()).resolve() / f"ava-e2e-code-{name}"
+    return scratch_root("code")
 
 
 def project(name: str = "proj") -> Path:
     return root() / name
-
-
-def record_path() -> Path:
-    return root() / "model_inputs.jsonl"
 
 
 def _git_repo(path: Path) -> Path:
@@ -74,6 +68,7 @@ def _git_repo(path: Path) -> Path:
 def seed_world() -> None:
     """Plant the repos the scenarios walk. Wipes any earlier world first."""
     shutil.rmtree(root(), ignore_errors=True)
+    reset_record()
     main = _git_repo(project("proj"))
     (main / "AGENTS.md").write_text(ROOT_RULES + "\n")
     (main / "sub").mkdir()
@@ -100,83 +95,7 @@ def seed_world() -> None:
     (big / "y.py").write_text("# y\n")
 
 
-# -- recording model -----------------------------------------------------------
-
-
-def _text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    blocks: list[Any] = list(content)
-    return "\n".join(
-        str(cast(dict[str, Any], b).get("text", "")) if isinstance(b, dict) else str(b)
-        for b in blocks
-    )
-
-
-class RecordingModel(ScriptedFakeChatModel):
-    """Scripted turns; before each one, append the messages it was handed to the record."""
-
-    def _record(self, messages: list[BaseMessage]) -> None:
-        entry = {
-            "agent_id": ava.self.AGENT_ID,
-            "pid": os.getpid(),
-            "messages": [
-                {
-                    "type": m.type,
-                    "text": _text(m.content),
-                    "tag": m.additional_kwargs.get("ava_note_tag"),
-                    "tool_calls": [tc["name"] for tc in getattr(m, "tool_calls", [])],
-                }
-                for m in messages
-            ],
-        }
-        record_path().parent.mkdir(parents=True, exist_ok=True)
-        with record_path().open("a") as f:
-            f.write(json.dumps(entry) + "\n")
-
-    async def _astream(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[ChatGenerationChunk]:
-        self._record(messages)
-        yield self._make_chunk(self._next_message())
-
-    async def _agenerate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        # The compaction summary is a non-streaming call; record it like the rest.
-        self._record(messages)
-        return await super()._agenerate(messages, stop, run_manager, **kwargs)
-
-
-def model_inputs() -> list[list[dict[str, Any]]]:
-    """Every model call so far, oldest first: that call's messages as the model saw them."""
-    path = record_path()
-    if not path.exists():
-        return []
-    return [json.loads(line)["messages"] for line in path.read_text().splitlines()]
-
-
 # -- script helpers ------------------------------------------------------------
-
-
-def _exec(n: int, code: str) -> AIMessage:
-    return AIMessage(
-        content="",
-        tool_calls=[{"id": f"call_{n}", "name": "execute_code", "args": {"code": code}}],
-        usage_metadata=_USAGE,
-    )
-
-
-def _say(text: str) -> AIMessage:
-    return AIMessage(content=text, usage_metadata=_USAGE)
 
 
 def _read(path: Path) -> str:
@@ -190,9 +109,9 @@ def build_cwd_notes(model: str) -> RecordingModel:
     """Switch cwd inside the project, then run one more exec so a re-injection would show."""
     return RecordingModel(
         script=(
-            _exec(1, f"import ava\nava.cwd.set({str(project())!r})\nprint('set-done')"),
-            _exec(2, "import ava\nprint('probe', ava.cwd.get())"),
-            _say(FINAL),
+            exec_call(1, f"import ava\nava.cwd.set({str(project())!r})\nprint('set-done')"),
+            exec_call(2, "import ava\nprint('probe', ava.cwd.get())"),
+            say(FINAL),
         )
     )
 
@@ -201,15 +120,15 @@ def build_context_files(model: str) -> RecordingModel:
     """Read files in repos with AGENTS.md / CLAUDE.md; every read is one script step."""
     return RecordingModel(
         script=(
-            _exec(1, _read(project() / "sub" / "foo.py")),
-            _exec(2, _read(project() / "sub" / "bar.py")),
-            _exec(
+            exec_call(1, _read(project() / "sub" / "foo.py")),
+            exec_call(2, _read(project() / "sub" / "bar.py")),
+            exec_call(
                 3, f"import ava\nprint(ava.files.read({str(project('direct') / 'AGENTS.md')!r}))"
             ),
-            _exec(4, _read(project("direct") / "z.py")),
-            _exec(5, _read(project("twin") / "x.py")),
-            _exec(6, _read(project("big") / "y.py")),
-            _say(FINAL),
+            exec_call(4, _read(project("direct") / "z.py")),
+            exec_call(5, _read(project("twin") / "x.py")),
+            exec_call(6, _read(project("big") / "y.py")),
+            say(FINAL),
         )
     )
 
@@ -238,7 +157,7 @@ ava.files.write('gone.txt', 'x')
 ava.files.delete('gone.txt')
 print('shell-pwd', ava.shell.run('pwd').strip())
 """
-    return RecordingModel(script=(_exec(1, code), _say(FINAL)))
+    return RecordingModel(script=(exec_call(1, code), say(FINAL)))
 
 
 def _restart_applied() -> bool:
@@ -256,18 +175,21 @@ def build_cwd_restart(model: str) -> RecordingModel:
     if _restart_applied():
         return RecordingModel(
             script=(
-                _exec(1, "import ava\nprint('cwd-after-restart', ava.cwd.get())"),
-                _say(FINAL),
+                exec_call(1, "import ava\nprint('cwd-after-restart', ava.cwd.get())"),
+                say(FINAL),
             )
         )
     sub = project() / "sub"
     return RecordingModel(
-        script=(_exec(1, f"import ava\nava.cwd.set({str(sub)!r})\nprint('set-done')"), _say(FINAL))
+        script=(
+            exec_call(1, f"import ava\nava.cwd.set({str(sub)!r})\nprint('set-done')"),
+            say(FINAL),
+        )
     )
 
 
 def build_system_prompt(model: str) -> RecordingModel:
-    return RecordingModel(script=(_say(FINAL),))
+    return RecordingModel(script=(say(FINAL),))
 
 
 def build_after_compact(model: str) -> RecordingModel:
@@ -282,11 +204,11 @@ def build_after_compact(model: str) -> RecordingModel:
     )
     return RecordingModel(
         script=(
-            _exec(1, first),
-            _say("ready."),
-            _say("summary of the conversation so far."),
-            _say("context compacted, continuing."),
-            _exec(2, _read(project() / "sub" / "bar.py")),
-            _say(FINAL),
+            exec_call(1, first),
+            say("ready."),
+            say("summary of the conversation so far."),
+            say("context compacted, continuing."),
+            exec_call(2, _read(project() / "sub" / "bar.py")),
+            say(FINAL),
         )
     )
