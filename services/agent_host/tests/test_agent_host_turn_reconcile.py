@@ -129,3 +129,5 @@ async def test_unexpected_failure_is_logged_not_raised(
     await _run_pass(_incarnation())
     failed = [r for r in loguru_records if r["extra"].get("event") == "host_turn_reconcile_failed"]
     assert [r["extra"]["agent_id"] for r in failed] == [42]
+    assert failed[0]["exception"] is not None  # the traceback rides the record (#4964)
+    assert failed[0]["exception"].type is RuntimeError
