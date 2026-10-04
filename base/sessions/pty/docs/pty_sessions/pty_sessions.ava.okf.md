@@ -85,13 +85,16 @@ next start sweep what a crashed service left running. Both are described in
 [[closure-and-ledger.ava.okf.md|closure and ledger]]. `ava stop` turns the
 closure's answer into owner notices (`ops/pty_close_notices.py`) and fails on a
 process that outlived its SIGKILL; new allocations are refused for its duration.
-A crash's busy sessions are told by a one-shot child at the next start.
+A crash's busy sessions are staged on disk and told by a one-shot child at the
+next start; a batch the child does not finish is re-sent by the start after.
 
 ## Namespace
 
 - `$AVA_HOME/run/pty-sessions.sock` — the socket (0600).
 - `$AVA_HOME/run/pty-sessions.lock` — held while a service runs.
 - `$AVA_HOME/run/pty-sessions.json` — the ledger.
+- `$AVA_HOME/run/pty-close-notices.json` — crash notices the child still owes
+  their owners (removed once written; a leftover is re-sent at the next start).
 - `$AVA_HOME/logs/<name>.out.log` — the session's byte transcript, capped, which
   the converge-owned daily logs job copytruncates through `ava logs rotate` and
   `ava logs retention` prunes (its named-PTY rule covers `<name>.out.log`).

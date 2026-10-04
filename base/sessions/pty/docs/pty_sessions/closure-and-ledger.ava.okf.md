@@ -38,15 +38,20 @@ over a live service's sessions.
 
 ## Crash notices
 
-The service holds no database. After a start-time sweep it gives the busy
-sessions to a one-shot child, `python -m ops.pty_close_notices`
+The service holds no database. After a start-time sweep it stages the busy
+sessions' notices on disk (`run/pty-close-notices.json`) and gives them to a
+one-shot child, `python -m ops.pty_close_notices`
 (`services/pty_sessions/crash_notices.py`), from a task beside the serving loop
-with a thirty-second limit; the child writes one notice per session under
-`CRASH_REASON` and exits. A database it cannot reach is a log line, never a
-failed or delayed start, and nothing retries. A stop that finds no service closes
-from the ledger and writes the same notices itself. Delivery is idempotent on
-machine, agent, session and shell birth, and a terminated owner is dropped.
-Decision: `decisions/2026-10-04-pty-crash-notices.md`.
+with a thirty-second limit; the child writes the whole batch in one transaction,
+under `CRASH_REASON`, and removes the file. A batch the child does not finish —
+the limit cut it short, or the database answered nothing — loses nothing: it
+stays staged, is reported at ERROR with its count, and the next start re-sends
+it on the same idempotency keys. A database that cannot be reached is still
+never a failed or delayed start. A stop that finds no service closes from the
+ledger and writes the same notices itself. Delivery is idempotent on machine,
+agent, session and shell birth, and a terminated owner is dropped.
+Decisions: `decisions/2026-10-04-pty-crash-notices.md`,
+`decisions/2026-10-04-pty-crash-notices-staged-retry.md`.
 
 ## Dependencies
 
