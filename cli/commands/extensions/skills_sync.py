@@ -1,7 +1,7 @@
 """Skills converge — sync repo + plugin skills into the single load dir.
 
 `$AVA_HOME/skills/` is the only directory `ava.skills` scans (plus runtime
-provider roots — see `ava/skills.py`). This module keeps it converged with the
+provider roots — see `ava/skills/__init__.py`). This module keeps it converged with the
 three source kinds:
 
 - repo skills:             `<repo>/ava_builtins/skills/<name>/`       -> `skills/<name>/`  (origin="repo")

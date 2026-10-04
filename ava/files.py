@@ -72,7 +72,7 @@ def _record_skill_read(path: Path) -> None:
     try:
         from ava import skills as skills_mod
 
-        skills_mod._record_skill_invoked_by_path(path)
+        skills_mod.record_skill_invoked_by_path(path)
     except Exception as e:  # best-effort telemetry; never break a read
         logger.warning("skill attribution skipped for {}: {}", path, e)
 

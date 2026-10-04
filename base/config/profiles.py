@@ -80,7 +80,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "daemon",
             # The ttl reaper raises the impersonation event-log state alerts.
             "alerts",
-            # ava/skills.py imports base.packages.extensions.install_registry, whose
+            # ava/skills/__init__.py imports base.packages.extensions.install_registry, whose
             # resolved_policy() resolves per-package update defaults from
             # settings.packages (#3267).
             "packages",

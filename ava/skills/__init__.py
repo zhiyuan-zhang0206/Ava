@@ -24,7 +24,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # Attribution timing: a `skill_invoked` row at depth `"loaded"` — the only
 # depth the producer writes — means the agent CONSUMED a skill's SKILL.md body
 # (a `help()` render, a direct `__doc__` read, or an `ava.files.read` of the
-# skill's SKILL.md — see `_record_skill_invoked_by_path`). Resolving a node
+# skill's SKILL.md — see `record_skill_invoked_by_path`). Resolving a node
 # (`ava.skills.<name>` access) is exposure, not use: the system-prompt index
 # and every index render walk the same tree every turn and read only
 # frontmatter descriptions, so they must record nothing. `_SkillProxy` and
@@ -602,7 +602,7 @@ def _consume_skill_body(skill: Skill) -> str:
     return f"{short}\n\n{content}"
 
 
-def _record_skill_invoked_by_path(path: str | Path) -> bool:
+def record_skill_invoked_by_path(path: str | Path) -> bool:
     """Record the `skill_invoked` attribution for a direct SKILL.md file read.
 
     The `.path` + `ava.files.read(SKILL.md)` pattern consumes a skill body like

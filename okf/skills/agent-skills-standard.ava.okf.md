@@ -47,7 +47,7 @@ Every install runs **two gates over all discovered packages** (`cli/commands/ext
 ## Entry Points
 - `cli/commands/extensions/skill_package.py` — source-layout discovery + copy/register
 - `cli/commands/extensions/skill.py` — `ava skill install / enable / disable / register`
-- `ava/skills.py` — `_parse_frontmatter` (required-field gate over the shared parser), `_mount` (folder tree → namespace tree)
+- `ava/skills/__init__.py` — `_parse_frontmatter` (required-field gate over the shared parser), `_mount` (folder tree → namespace tree)
 
 ## Notes
 - The standard is a *format* contract, not a runtime one: it says nothing about how an agent is given the skill. Ava's progressive disclosure (description in the system prompt, body pulled on demand via `ava.help`) is its own choice, and is what makes a large installed set affordable.

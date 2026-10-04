@@ -17,6 +17,6 @@ This is the canonical use case for short discipline skills that "must be effecti
 
 ## Key Dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava/docs/skills.ava.okf.md|Skill System]] — `skills_to_expand_at_start` preload mechanism
+- [[ava/skills/docs/skills.ava.okf.md|Skill System]] — `skills_to_expand_at_start` preload mechanism
 - [[ava/docs/presets.ava.okf.md|ava.agents.presets]] — `ultra-speed-worker` preset loads it into a worker
 - [[ava_builtins/plugins/ava_fleet/skills/reduce-context-switch-for-human/docs/reduce-context-switch-for-human.ava.okf.md|reduce-context-switch-for-human]] — same category of "preloaded short discipline," managing interruption rhythm (contrast: ava-ultra-speed manages turnaround speed)

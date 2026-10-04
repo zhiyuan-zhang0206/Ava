@@ -42,7 +42,7 @@ instruction-hint, no body). Because of this dual audience, `expand_command` is
 message ("Agent 5:" for peers; the bare "[ts]" header for the user).
 
 Namespace: the composer identifier mirrors the skill namespace tree
-(`ava/skills.py`) — bare for built-ins, `plugin:name` for a plugin's, `a:b:name`
+(`ava/skills/__init__.py`) — bare for built-ins, `plugin:name` for a plugin's, `a:b:name`
 for deeper folder nesting (`:`-joined, like `skills.identifier`). A skill-as-command's name is
 `skills.identifier(skill)` and its `skill_target` is `skills.target(skill)`.
 

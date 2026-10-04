@@ -15,7 +15,8 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
-from ava import composer_commands, mcp_config
+from ava import mcp_config
+from ava.skills import composer_commands
 from base.db import create_agent
 from base.packages.plugins import mcp_enabled
 from base.paths import skills_dir
