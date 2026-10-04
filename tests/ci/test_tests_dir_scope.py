@@ -40,7 +40,7 @@ def _write(root: Path, rel: str, body: str) -> Path:
     [
         ("tests/agent/test_x.py", True),
         ("base/packages/tests/test_x.py", True),
-        ("ava_builtins/skills/gmail/scripts/tests/test_gmail.py", True),
+        ("ava_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py", True),
         ("base/db/test_db_guard.py", False),
         ("scripts/ci/test_selector.py", False),
         ("base/packages/attests/x.py", False),
@@ -266,7 +266,11 @@ def _hook_selects(hook_id: str, path: str) -> bool:
     [
         ("lint-fixture-scope", "tests/e2e/conftest.py", True),
         ("lint-fixture-scope", "base/packages/tests/conftest.py", True),
-        ("lint-fixture-scope", "ava_builtins/skills/gmail/scripts/tests/conftest.py", True),
+        (
+            "lint-fixture-scope",
+            "ava_builtins/skills/integrations/gmail/scripts/tests/conftest.py",
+            True,
+        ),
         ("lint-fixture-scope", "base/packages/conftest_helper.py", False),
         # The async lint and the ava-root lint skip test files, so a test edit does not run them.
         ("lint-async-no-sync-blocking", "gateway/routers/agents.py", True),
@@ -285,7 +289,11 @@ def _hook_selects(hook_id: str, path: str) -> bool:
         # The generated pyright tests environments follow the tests directories themselves:
         # any module in a package's tests/ directory can add or remove one.
         ("lint-pyright-test-environments", "base/packages/tests/test_x.py", True),
-        ("lint-pyright-test-environments", "ava_builtins/skills/gmail/scripts/tests/x.py", True),
+        (
+            "lint-pyright-test-environments",
+            "ava_builtins/skills/integrations/gmail/scripts/tests/x.py",
+            True,
+        ),
         ("lint-pyright-test-environments", "pyproject.toml", True),
         ("lint-pyright-test-environments", "tests/agent/test_x.py", False),
         ("lint-pyright-test-environments", "base/packages/plugins.py", False),

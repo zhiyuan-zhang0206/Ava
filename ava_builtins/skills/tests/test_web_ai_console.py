@@ -1,4 +1,4 @@
-"""Unit tests for the web-ai console child (ava_builtins/skills/web-ai/console/scripts/ask.py).
+"""Unit tests for the web-ai console child (ava_builtins/skills/integrations/web-ai/console/scripts/ask.py).
 
 The browser-driving half lives in webchat (covered by test_web_ai_webchat.py);
 this locks the console-only mapping from a webchat `ask_many` row to the result
@@ -12,7 +12,7 @@ from __future__ import annotations
 from tests.skills import load_skill_script
 
 ask = load_skill_script(
-    "web-ai", "console", "scripts", "ask.py", name="web_ai_console_ask_under_test"
+    "integrations", "web-ai", "console", "scripts", "ask.py", name="web_ai_console_ask_under_test"
 )
 
 

@@ -22,7 +22,9 @@ from base.sessions import coding_session_owner
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 
-_SKILL_DIR = Path(__file__).parents[4] / "ava_builtins" / "skills" / "ava-use-other-agents"
+_SKILL_DIR = (
+    Path(__file__).parents[4] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
+)
 
 
 def _load(name: str, path: Path) -> ModuleType:

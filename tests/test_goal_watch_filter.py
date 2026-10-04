@@ -21,8 +21,8 @@ from base.events.live.projection import EVENT_ADAPTER
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SNIPPET_PATHS = (
-    "ava_builtins/skills/ava-goal/scripts/watch_idle.py",
-    "ava_builtins/skills/ava-watcher/scripts/watch_idle.py",
+    "ava_builtins/skills/coordination/ava-goal/scripts/watch_idle.py",
+    "ava_builtins/skills/coordination/ava-watcher/scripts/watch_idle.py",
     "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py",
 )
 _FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "events" / "agent_updated.json"

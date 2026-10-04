@@ -1,4 +1,4 @@
-"""Hermetic unit tests for the sms skill (ava_builtins/skills/sms/scripts/query.py).
+"""Hermetic unit tests for the sms skill (ava_builtins/skills/integrations/sms/scripts/query.py).
 
 The skill's live behavior (reading the real ~/Library/Messages/chat.db under
 macOS Full Disk Access) can't run in CI — that path is verified by hand. These
@@ -18,7 +18,15 @@ from pathlib import Path
 
 import pytest
 
-_PATH = Path(__file__).parents[3] / "ava_builtins" / "skills" / "sms" / "scripts" / "query.py"
+_PATH = (
+    Path(__file__).parents[3]
+    / "ava_builtins"
+    / "skills"
+    / "integrations"
+    / "sms"
+    / "scripts"
+    / "query.py"
+)
 _spec = importlib.util.spec_from_file_location("sms_query_under_test", _PATH)
 assert _spec and _spec.loader
 sms = importlib.util.module_from_spec(_spec)

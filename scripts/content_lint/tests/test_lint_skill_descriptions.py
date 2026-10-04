@@ -49,7 +49,7 @@ description: A description: with an unquoted colon.
 def test_three_deep_skill_with_bad_frontmatter_is_rejected(repo: Path) -> None:
     _write(
         repo,
-        "ava_builtins/skills/ava-serious-research/practices/reproduce/SKILL.md",
+        "ava_builtins/skills/practice/ava-serious-research/practices/reproduce/SKILL.md",
         _BAD_FM,
     )
     assert lint.main() == 1
@@ -58,7 +58,7 @@ def test_three_deep_skill_with_bad_frontmatter_is_rejected(repo: Path) -> None:
 def test_three_deep_skill_with_good_frontmatter_passes(repo: Path) -> None:
     _write(
         repo,
-        "ava_builtins/skills/ava-serious-research/principles/falsifiability/SKILL.md",
+        "ava_builtins/skills/practice/ava-serious-research/principles/falsifiability/SKILL.md",
         _GOOD_FM,
     )
     assert lint.main() == 0
@@ -109,7 +109,7 @@ def test_plugin_root_skill_folds_against_plugin_name(repo: Path) -> None:
 def test_dash_dir_and_dash_frontmatter_pass(repo: Path) -> None:
     _write(
         repo,
-        "ava_builtins/skills/ava-goal/SKILL.md",
+        "ava_builtins/skills/coordination/ava-goal/SKILL.md",
         "---\nname: ava-goal\ndescription: d\n---\n",
     )
     assert lint.main() == 0

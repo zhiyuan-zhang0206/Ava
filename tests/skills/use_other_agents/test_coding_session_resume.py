@@ -20,7 +20,9 @@ import pytest
 from ava.shell.coding_tools import _claude_checks, _common, claude, codex
 from base.sessions import coding_session_owner
 
-_SKILL_DIR = Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents"
+_SKILL_DIR = (
+    Path(__file__).parents[3] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
+)
 _SESSION = "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5"
 _OTHER = "01a0e1eb-472f-7832-81f6-77c7d2e47d75"
 _STATUS_CARD = f"│  Directory:  /ws\n│  Session:                     {_SESSION}   │\n"
