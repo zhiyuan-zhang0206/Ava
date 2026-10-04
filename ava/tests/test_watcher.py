@@ -25,6 +25,7 @@ import ava
 from ava import watcher
 from ava.shell import background
 from base.native_process.os_platform import IS_WINDOWS
+from tests.path_scoped.pty_shells import wait_for
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
@@ -465,7 +466,8 @@ def test_launch_carries_agent_and_session_to_child(
     captured: dict[str, Any] = {}
     monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
     wid = watcher.launch("import ava\n", timeout="1h", name="test-watcher")
-    assert f"AVA_WATCHER_SESSION_ID={wid} " in captured["cmd"]
+    launch = (watcher._watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
+    assert f"AVA_WATCHER_SESSION_ID={wid} " in launch
     boot = _boot_text(wid)
     # Identity is inlined; ava is imported for init_globals
     assert f'os.environ["AVA_AGENT_ID"] = "{_agent_row}"' in boot
@@ -501,7 +503,8 @@ def test_launch_writes_script_verbatim_and_runs_via_runpy(
     assert "import ava" in boot
     assert "init_globals" in boot
     assert f"watcher_{wid}.py" in boot
-    assert f"watcher_{wid}_boot.py" in captured["cmd"]
+    launch = (watcher._watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
+    assert f"watcher_{wid}_boot.py" in launch
 
 
 # -- Completion notice (shell-level, fires on every exit path) -----------------
@@ -520,7 +523,11 @@ def test_spawn_line_tees_and_notifies(_agent_row: int, monkeypatch: pytest.Monke
     monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
     wid = watcher.launch("import ava\n", timeout="1h", name="test-notice")
 
-    cmd = captured["cmd"]
+    import shlex
+
+    sent = captured["cmd"]
+    assert shlex.split(sent) == [".", str(watcher._watchers_dir() / f"watcher_{wid}_launch.sh")]
+    cmd = (watcher._watchers_dir() / f"watcher_{wid}_launch.sh").read_text().splitlines()[1]
     assert ".shell_logs" in cmd  # output is teed to the workspace log dir
     assert "2>&1 | tee" in cmd
     assert "_ec=${PIPESTATUS[0]}" in cmd
@@ -566,6 +573,43 @@ def test_watcher_completion_notice_e2e(
     while time.time() < deadline and wid in ava.shell.sessions.list():
         time.sleep(0.3)
     assert wid not in ava.shell.sessions.list()
+
+
+def test_watcher_launch_during_shell_startup_with_long_paths(
+    _agent_row: int,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    unit_home: pathlib.Path,
+) -> None:
+    """Long notice paths must survive the shell's startup canonical input mode."""
+    # Delay readline startup deterministically; a new PTY is initially canonical.
+    (unit_home / ".bash_profile").write_text("sleep 1\n")
+    # Darwin's canonical input limit is smaller than Linux's; stay below
+    # each platform's filesystem path limit while exceeding its input line.
+    depth = 1 if sys.platform == "darwin" else 6
+    carrier_dir = tmp_path / "carrier with 'quotes'"
+    carrier_dir.mkdir()
+    monkeypatch.setattr(watcher, "_watchers_dir", lambda: carrier_dir)
+    long_dir = tmp_path.joinpath(*("long-path-" + "a" * 180 for _ in range(depth)))
+    long_dir.mkdir(parents=True)
+    argv_file = long_dir / "argv.txt"
+    fake_cli = long_dir / "fake-ava"
+    fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argv_file}'\n")
+    fake_cli.chmod(0o755)
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
+    monkeypatch.setattr(background, "output_dir", lambda: long_dir)
+    wid = watcher.launch("raise SystemExit(7)\n", timeout="1h", name="test-long-path")
+    assert wait_for(argv_file.exists, timeout=15), ava.shell.sessions.capture(wid, lines=30)
+    argv = argv_file.read_text().splitlines()
+    assert "exited with code 7." in argv[3]
+    assert f"watcher:{wid}" in argv
+    output_path = long_dir / f"{wid}_test-long-path.log"
+    assert f"Full output at {output_path}." in argv[3]
+    assert str(output_path) == argv[argv.index("--tail-file") + 1]
+    assert wait_for(lambda: wid not in ava.shell.sessions.list(), timeout=10)
+    assert not (watcher._watchers_dir() / f"watcher_{wid}_launch.sh").exists()
+    assert not (watcher._watchers_dir() / f"watcher_{wid}_boot.py").exists()
+    assert not (watcher._watchers_dir() / f"watcher_{wid}.py").exists()
 
 
 # -- Agent identity in the child (Task #964 regression) ----------------------

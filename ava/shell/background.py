@@ -79,6 +79,7 @@ def allocate_output_path(session_id: int, name: str) -> Path:
         if sid.isdigit() and int(sid) in live:
             continue
         old.unlink(missing_ok=True)
+        old.with_suffix(".sh").unlink(missing_ok=True)
     return path
 
 
@@ -100,6 +101,19 @@ def validate_notify(notify: str | None) -> str | None:
     if notify is not None and notify not in _NOTIFY_POLICIES:
         raise ValueError(f"notify must be one of {list(_NOTIFY_POLICIES)}, got {notify!r}")
     return notify
+
+
+def write_launch_file(line: str, path: Path) -> str:
+    """Put a notification pipeline on disk and return a short shell source command.
+
+    Fresh PTYs can still be canonical during login-shell startup, when input
+    buffers truncate long lines. Source in the same shell to retain PIPESTATUS,
+    `keep`/exit behavior and the watcher's orphan-guard parent. The sourced file
+    removes itself before running; callers prune any never-started carrier.
+    """
+    quoted = shlex.quote(str(path))
+    path.write_text(f"command rm -f -- {quoted}\n{line}\n")
+    return f". {quoted}"
 
 
 def notified_line(
