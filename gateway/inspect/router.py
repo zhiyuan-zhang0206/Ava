@@ -32,6 +32,7 @@ from gateway.inspect.schemas import (
 )
 from gateway.schemas.stats import StatsWindowHours
 from ops import cluster_rpc as _cluster_rpc
+from ops.deploy_window import deploy_in_flight
 from ops.rpc_schemas import ShellInfo
 
 router = APIRouter()
@@ -105,7 +106,11 @@ async def _probe_agent_shells(
 
     Known RPC failures return an unavailable observation, not a successful
     empty set. Malformed successful responses fail rather than invent data.
+    An open deploy window (read per request, task #4986) explains the
+    unreachability — the machine is mid-maintenance, not broken — so this
+    report and the RPC client's line drop to INFO for that poke.
     """
+    window = await asyncio.to_thread(deploy_in_flight, database)
     try:
         result = await _cluster_rpc.dispatch_to_machine(
             database,
@@ -113,12 +118,23 @@ async def _probe_agent_shells(
             "shell_probe",
             {"agent_id": agent_id},
             timeout_s=_SHELL_PROBE_TIMEOUT_S,
+            quiet_unreachable=bool(window),
         )
     except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
         _shell_probe_failures.add(1, {"reason": type(exc).__name__})
-        _log.warning(
-            "shell observation unavailable agent_id=%s reason=%s", agent_id, type(exc).__name__
-        )
+        if window:
+            _log.info(
+                "shell observation unavailable agent_id=%s reason=%s — a deploy window is open (%s)",
+                agent_id,
+                type(exc).__name__,
+                window.detail,
+            )
+        else:
+            _log.warning(
+                "shell observation unavailable agent_id=%s reason=%s",
+                agent_id,
+                type(exc).__name__,
+            )
         return [], False
     shells = [ShellInfo.model_validate(s) for s in result["shells"]]
     if shells:

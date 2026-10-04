@@ -1923,6 +1923,8 @@ export interface paths {
          *     An agent view always dials the machine recorded on ``agents_meta`` (including
          *     the gateway's own machine).  A missing/offline/version-skewed runner falls
          *     back to the historical gateway-local catalog so autocomplete remains usable.
+         *     An open deploy window (read per request, task #4986) explains the
+         *     unreachability — the fallback report drops to INFO for that request.
          */
         get: operations["get_commands_api_commands_get"];
         put?: never;

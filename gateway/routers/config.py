@@ -47,6 +47,7 @@ from base.host.env import runtime_config
 from base.host.env.audit import check_env_integrity
 from ops import cluster_rpc as _cluster_rpc
 from ops import host_config
+from ops.deploy_window import deploy_in_flight
 from ops.host_config import SENSITIVE_MASK
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
 
@@ -181,12 +182,17 @@ async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditRead
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
+        # Per-request deploy-window read (task #4986): a runner mid-restart is
+        # expected unreachable while maintenance owns the cluster, so the
+        # engine's exhausted-retry line drops to DEBUG for this dispatch.
+        window = await asyncio.to_thread(deploy_in_flight, app.state.db)
         try:
             wire = await _cluster_rpc.dispatch_to_machine(
                 app.state.db,
                 target_machine=target,
                 kind="config_audit_read",
                 payload={"last": last},
+                quiet_unreachable=bool(window),
             )
         except _cluster_rpc.ClusterOpUnreachable:
             raise HTTPException(

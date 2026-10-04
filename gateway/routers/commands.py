@@ -16,6 +16,7 @@ from fastapi import APIRouter, Request
 
 from gateway.schemas.commands import CommandItem
 from ops import cluster_rpc as _cluster_rpc
+from ops.deploy_window import deploy_in_flight
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
     An agent view always dials the machine recorded on ``agents_meta`` (including
     the gateway's own machine).  A missing/offline/version-skewed runner falls
     back to the historical gateway-local catalog so autocomplete remains usable.
+    An open deploy window (read per request, task #4986) explains the
+    unreachability — the fallback report drops to INFO for that request.
     """
     if agent_id is None:
         return _local_commands()
@@ -59,6 +62,7 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
     if machine is None:
         _log.warning("commands: agent %s has no agents_meta row; using local fallback", agent_id)
         return _local_commands()
+    window = await asyncio.to_thread(deploy_in_flight, request.app.state.db)
     try:
         result = await _cluster_rpc.dispatch_to_machine(
             request.app.state.db,
@@ -66,13 +70,23 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
             "agent_skill_view",
             {"agent_id": agent_id},
             timeout_s=_AGENT_SKILL_VIEW_TIMEOUT_S,
+            quiet_unreachable=bool(window),
         )
     except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
-        _log.warning(
-            "commands: agent %s command view unavailable on %s; using local fallback: %s",
-            agent_id,
-            machine,
-            exc,
-        )
+        if window:
+            _log.info(
+                "commands: agent %s command view unavailable on %s — a deploy window is open "
+                "(%s); using local fallback",
+                agent_id,
+                machine,
+                window.detail,
+            )
+        else:
+            _log.warning(
+                "commands: agent %s command view unavailable on %s; using local fallback: %s",
+                agent_id,
+                machine,
+                exc,
+            )
         return _local_commands()
     return [CommandItem.model_validate(command) for command in result["commands"]]
