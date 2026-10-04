@@ -34,7 +34,14 @@ from base.sessions.pty import allocation_freeze, client
 from base.sessions.pty.paths import service_socket_path
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import output_until, screen, shell_process, type_line, wait_for
+from tests.path_scoped.pty_shells import (
+    gone,
+    output_until,
+    screen,
+    shell_process,
+    type_line,
+    wait_for,
+)
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
 
@@ -151,14 +158,26 @@ def test_send_types_text_without_enter(unit_home: Path) -> None:
     output_until(_NAME, "typed-marker")
 
 
+def _comm(process: psutil.Process) -> str:
+    try:
+        return process.name()
+    except psutil.NoSuchProcess:
+        return ""
+
+
 @pytest.mark.usefixtures("pty_service")
 def test_send_keys_names_become_key_presses(unit_home: Path) -> None:
     _new(_NAME, unit_home)
     type_line(_NAME, "cat")
     # `cat` runs with the terminal in its default mode: C-c interrupts it, then the
     # shell takes the next line.
-    assert wait_for(lambda: bool(shell_process(_NAME).children()))
+    shell = shell_process(_NAME)
+    # A forked child is not yet `cat` in the foreground (the interrupt would reach the
+    # shell instead), so wait for the exec; and the interrupt flushes the terminal's
+    # input queue, so type the next line only once `cat` is gone.
+    assert wait_for(lambda: any(_comm(child) == "cat" for child in shell.children()))
     _backend().send_keys(_NAME, "C-c")
+    assert wait_for(lambda: not shell.children())
     _backend().send(_NAME, "echo after-interrupt")
     _backend().send_keys(_NAME, "Enter")
     output_until(_NAME, "after-interrupt")
@@ -196,8 +215,23 @@ def test_kill_session_force(unit_home: Path) -> None:
     _new(_NAME, unit_home)
     shell = shell_process(_NAME)
     assert _backend().kill_session(_NAME, graceful=False) == (True, "forced")
-    assert wait_for(lambda: not shell.is_running() or shell.status() == psutil.STATUS_ZOMBIE)
+    assert wait_for(lambda: gone(shell))
     assert not _backend().has_session(_NAME)
+
+
+def test_gone_reads_a_process_reaped_between_two_polls_as_gone() -> None:
+    """The service reaps a killed shell on its own schedule, so a status read can land
+    after the reap: that is `gone`, not an error (the CI flake of `test_kill_session_force`
+    polled `is_running()` and then `status()`, and the reap fell between the two)."""
+
+    class ReapedBetweenPolls:
+        def is_running(self) -> bool:
+            return True
+
+        def status(self) -> str:
+            raise psutil.NoSuchProcess(1)
+
+    assert gone(ReapedBetweenPolls())  # type: ignore[arg-type]
 
 
 @pytest.mark.usefixtures("pty_service")
