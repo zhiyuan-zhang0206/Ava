@@ -2,9 +2,6 @@
   "complexity": {
     "scripts/tcc-onboard-helper-grants.py::main": 45
   },
-  "directories": {
-    "scripts": 31
-  },
   "files": {
     "scripts/ci_utils.py": 1561
   }
