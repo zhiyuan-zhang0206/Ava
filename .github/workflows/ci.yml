@@ -329,6 +329,33 @@ jobs:
       - name: Scan repository history and working tree
         run: gitleaks detect --source . --config .gitleaks.toml --redact
 
+  no-silent-resurrection:
+    # A PR may not silently resurrect lines main deleted in the last 30 days
+    # (decision 2026-10-04): #4207 (151bc92fe) replayed a stale branch and
+    # carried back content #4245 (6ecfe14c3) had deleted; the resurrected code
+    # compiled and its tests passed, so every existing gate stayed green. The
+    # gate diffs the PR's added lines against main's deletions in the window
+    # (full history, like classify). A match fails unless a commit message
+    # carries `Resurrects: <reason>` or reverts the deleting commit.
+    # Classify-independent like repo-language above: a docs-only or
+    # frontend-only PR can resurrect deleted lines too. PR-only: the
+    # comparison needs a base branch, which a push event does not have.
+    name: no silent resurrection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Draft PRs skip CI except Trunk test branches
+    # (trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/')) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Compare added lines against recently deleted main lines
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: python3 scripts/ci/no_silent_resurrection.py --base "$BASE_REF"
+
   dependency-audit:
     # Informational first: dependency findings are visible in every CI run but
     # do not block delivery until the remediation policy is ready to enforce.
