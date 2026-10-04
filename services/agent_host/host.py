@@ -113,9 +113,7 @@ from services.agent_host.pending_wakes import scan_rows
 from services.agent_host.runtime import (
     HostStats,
     TurnOutcome,
-    _active_turn_config_fingerprint,
     _AgentRuntime,
-    _copy_active_turn_context,
     _StoredConfig,
     admit_stored_model,
 )
@@ -157,6 +155,9 @@ class AgentHost:
         self._control_pool = control_pool if control_pool is not None else pool
         self._checkpointer = checkpointer
         self._graph = graph
+        self._peek_lock = (
+            asyncio.Lock()
+        )  # one optional interrupt peek on the control pool at a time
         self._machine = machine if machine is not None else machine_name()
         self._owner = uuid4()
         self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
@@ -168,6 +169,8 @@ class AgentHost:
         # pay a cold build, which is the opposite of what a cache is for.
         self._in_flight: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
+        # Each agent's latest turn's config fingerprint (scheduler crash report); cleared per turn.
+        self.turn_fingerprints: dict[int, str] = {}
         self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
         self.database_waits = DatabaseWaits()
         self.stats = HostStats()
@@ -184,11 +187,8 @@ class AgentHost:
 
         resources = HostedTurnResources()
         with bind_hosted_resources(resources):
-            # Keep the child's Context so its config fingerprint can be copied
-            # back to the scheduler task before a crash is re-raised. A normal
-            # create_task copy would isolate the value from the crash logger.
-            turn_context = _copy_active_turn_context()
-            work = asyncio.create_task(self._run_turn(agent_id), context=turn_context)
+            self.turn_fingerprints.pop(agent_id, None)
+            work = asyncio.create_task(self._run_turn(agent_id))
         cancelled = False
         try:
             while not work.done():
@@ -201,7 +201,6 @@ class AgentHost:
             await maintenance_receipts.record_failure(agent_id, exc, self._maintenance_failed)
             raise
         finally:
-            _active_turn_config_fingerprint.set(turn_context.get(_active_turn_config_fingerprint))
             from base.agents.incarnation.hosted_force import original_host_force
 
             if resources.unresolved:
@@ -277,7 +276,7 @@ class AgentHost:
         if stored is None or not self._is_runnable(agent_id, stored):
             self.stats.wakes_skipped += 1
             return
-        _active_turn_config_fingerprint.set(stored.fingerprint)
+        self.turn_fingerprints[agent_id] = stored.fingerprint
 
         if await maintenance_receipts.run_held(
             agent_id, stored.status, self._maintenance_failed, self._run_held_controls
@@ -729,6 +728,7 @@ class AgentHost:
                     graph=self._graph,
                     incarnation=incarnation,
                     database_waits=self.database_waits,
+                    peek_lock=self._peek_lock,
                 )
             except Exception as exc:
                 ended = await force_termination_outcome(exc, self._control_pool, agent_id)

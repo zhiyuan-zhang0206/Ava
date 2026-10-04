@@ -62,7 +62,6 @@ from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
-from services.agent_host.runtime import _active_turn_config_fingerprint
 from services.agent_host.turn_gates import (
     admission_waiting,
     database_waiting,
@@ -142,9 +141,11 @@ class TurnScheduler:
         run_turn: Callable[[int], Awaitable[None]],
         *,
         activity_clock: Callable[[int], Awaitable[datetime | None]] | None = None,
+        config_fingerprint: Callable[[int], str | None] | None = None,
     ) -> None:
         self._run_turn = run_turn
         self._activity_clock = activity_clock
+        self._config_fingerprint = config_fingerprint
         self._tasks: dict[int, asyncio.Task[None]] = {}
         self._reaped_successors: dict[int, asyncio.Task[None]] = {}
         self._pending: set[int] = set()
@@ -241,7 +242,9 @@ class TurnScheduler:
             # that agent: log it, drop the task, and let the next wake start a
             # fresh one. The turn's own state is checkpointed, so the retry
             # resumes rather than restarts.
-            fingerprint = _active_turn_config_fingerprint.get()
+            fingerprint = (
+                self._config_fingerprint(agent_id) if self._config_fingerprint is not None else None
+            )
             logger.exception(
                 "hosted turn crashed — dropping the task; the next wake retries",
                 event="host_turn_crashed",

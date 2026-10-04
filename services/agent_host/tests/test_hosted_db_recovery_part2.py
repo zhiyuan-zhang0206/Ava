@@ -1,5 +1,6 @@
 """Database loss preserves the original continuation and its ownership fence."""
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -239,6 +240,7 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
             checkpointer=saver,
             incarnation=incarnation,
             database_waits=DatabaseWaits(),
+            peek_lock=asyncio.Lock(),
         )
     assert repairs == 2
     assert flushes == (2 if write_before_retry else 1)
