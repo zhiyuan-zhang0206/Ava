@@ -23,13 +23,13 @@ from urllib.parse import urlsplit
 from base.cluster.machine import GatewayApiTokenMissing, gateway_api_base, gateway_bearer
 from base.config import settings
 from base.log import logger
-from services.browser.mcp_upstream import _await_stop_or_timeout
+from services.browser.mcp_upstream import _await_stop_or_timeout, contained
 from services.browser.session import gateway_session_is_valid, inject_session_cookie
 
 # Gateway session cookie refresh: the default server-side lifetime is 24h;
 # refreshing every 6h leaves a comfortable margin and self-heals a lost,
 # expired, or revoked managed-browser session. A navigation to a gateway URL
-# additionally triggers an immediate validity check (_spawn_verify), so a
+# additionally triggers an immediate validity check (`spawn_verify`), so a
 # revoked session heals on the next gateway page instead of waiting out the
 # interval.
 _SESSION_REFRESH_INTERVAL_S = 6 * 3600
@@ -95,15 +95,34 @@ class GatewaySession:
     it with the gateway after a gateway-URL navigation, so a revoked or expired
     managed session heals immediately instead of waiting out the next refresh
     tick), the verify lock that collapses concurrent verifies, and the
-    fire-and-forget tasks (tracked so the event loop never reaps them before
-    they finish, RUF006; each removes itself on completion).
+    fire-and-forget tasks, which live in the root's `TaskGroup` (`tasks`, owned by
+    ``mcp_daemon.run``) and are tracked here so shutdown can cancel them (each removes
+    itself on completion).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, tasks: asyncio.TaskGroup) -> None:
         self.cookie: tuple[str, str] | None = None
         self.inject_tasks: set[asyncio.Task[None]] = set()
         self.verify_tasks: set[asyncio.Task[None]] = set()
+        self._tasks = tasks
         self._verify_lock = asyncio.Lock()
+
+    def spawn_inject(self) -> None:
+        """Schedule a one-shot gateway-session injection (best effort)."""
+        task = self._tasks.create_task(contained(self.inject_once(), "gateway session injection"))
+        self.inject_tasks.add(task)
+        task.add_done_callback(self.inject_tasks.discard)
+
+    def spawn_verify(self) -> None:
+        """Schedule a one-shot gateway-session validity check (best effort)."""
+        task = self._tasks.create_task(contained(self.verify_once(), "gateway session verify"))
+        self.verify_tasks.add(task)
+        task.add_done_callback(self.verify_tasks.discard)
+
+    def cancel_one_shots(self) -> None:
+        """Cancel every in-flight one-shot so the owning group can close at shutdown."""
+        for task in (*self.inject_tasks, *self.verify_tasks):
+            task.cancel()
 
     async def inject_once(self) -> None:
         """Log in + inject the gateway session cookie into Chrome (best effort).
@@ -167,36 +186,11 @@ class GatewaySession:
                 await self.inject_once()
 
 
-def _spawn_inject(session: GatewaySession) -> None:
-    """Schedule a one-shot gateway-session injection (best effort)."""
-    task = asyncio.create_task(session.inject_once())
-    session.inject_tasks.add(task)
-    task.add_done_callback(session.inject_tasks.discard)
-
-
-def _spawn_verify(session: GatewaySession) -> None:
-    """Schedule a one-shot gateway-session validity check (best effort)."""
-    task = asyncio.create_task(session.verify_once())
-    session.verify_tasks.add(task)
-    task.add_done_callback(session.verify_tasks.discard)
-
-
-async def _start_session_maintenance(
-    session: GatewaySession,
-) -> tuple[asyncio.Event, asyncio.Task[None]]:
-    """SIGTERM/SIGINT stop event + the long-lived session-refresh task.
-
-    The refresh loop keeps a valid gateway session cookie in the shared
-    Chrome: inject at startup, then refresh before the server-side row
-    expires. It is independent of the upstream session — a Chrome restart
-    that drops the upstream does not lose the cookie (the profile persists),
-    and the periodic tick heals anything that did change (fresh profile,
-    revocation, expiry).
-    """
+def stop_on_signals() -> asyncio.Event:
+    """The event SIGTERM/SIGINT set; every loop of the daemon waits on it."""
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         with suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
-    session_task = asyncio.create_task(session.refresh_loop(stop))
-    return stop, session_task
+    return stop

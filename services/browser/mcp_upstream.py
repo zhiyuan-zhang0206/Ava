@@ -133,26 +133,46 @@ async def _initialize_until_stop_or_timeout(session: ClientSession, stop: asynci
     out the full connect timeout; a timeout cancels the initialize task so the
     failed connect's stack close can tear the child down cleanly.
     """
-    init_task = asyncio.create_task(session.initialize())
-    stop_task = asyncio.create_task(stop.wait())
-    try:
-        await asyncio.wait(
-            {init_task, stop_task},
-            return_when=asyncio.FIRST_COMPLETED,
-            timeout=settings.sandbox.mcp_connect_timeout_seconds,
-        )
-    finally:
-        stop_task.cancel()
-        with suppress(BaseException):
-            await stop_task
+    async with asyncio.TaskGroup() as race:
+        init_task = race.create_task(_initialize_outcome(session))
+        stop_task = race.create_task(stop.wait())
+        try:
+            await asyncio.wait(
+                {init_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=settings.sandbox.mcp_connect_timeout_seconds,
+            )
+        finally:
+            stop_task.cancel()
+        if stop.is_set() or not init_task.done():
+            init_task.cancel()
+    # Raised after the group: an exception leaving the body would arrive wrapped.
     if stop.is_set():
-        init_task.cancel()
-        with suppress(BaseException):
-            await init_task
         raise _StoppingError
-    if not init_task.done():
-        init_task.cancel()
-        with suppress(BaseException):
-            await init_task
+    if init_task.cancelled():
         raise TimeoutError("upstream session.initialize() timed out")
-    await init_task  # re-raise the initialize outcome, or return cleanly
+    outcome = init_task.result()
+    if outcome is not None:
+        raise outcome  # the initialize failure
+
+
+async def _initialize_outcome(session: ClientSession) -> Exception | None:
+    """``session.initialize()``'s failure as a value, so it settles the race instead of
+    aborting the group that owns the race's tasks."""
+    try:
+        await session.initialize()
+    except Exception as exc:
+        return exc
+    return None
+
+
+async def contained(work: Awaitable[object], what: str) -> None:
+    """Run one long-lived helper of the daemon so its failure ends it, never the daemon.
+
+    A helper's task lives in a `TaskGroup` whose first failure would abort the daemon;
+    this keeps the older meaning of a helper that dies alone — logged, not fatal.
+    """
+    try:
+        await work
+    except Exception:
+        logger.exception("[browser-mcp] {} failed", what)

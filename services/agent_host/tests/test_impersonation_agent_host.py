@@ -44,6 +44,7 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     host._machine = "local"
     host._owner = uuid4()
     host._maintenance_failed = {}
+    host.turn_fingerprints = {}
     host._control_pool = MagicMock()
     host._db = MagicMock()
     host._bus = MagicMock()

@@ -191,6 +191,7 @@ async def recover_database(
     graph: CompiledStateGraph[Any, Any, Any, Any],
     incarnation: RuntimeIncarnation,
     database_waits: DatabaseWaits,
+    peek_lock: asyncio.Lock,
 ) -> None:
     """Recover inside the original single-flight task, without an inbound wake.
 
@@ -210,7 +211,7 @@ async def recover_database(
     if current_incarnation(incarnation.agent_id) != incarnation:
         raise RuntimeOwnershipLostError("database recovery needs the original bound incarnation")
     backoff = _INITIAL_BACKOFF_SECONDS
-    interrupt = RecoveryInterrupt(pool, incarnation)
+    interrupt = RecoveryInterrupt(pool, incarnation, peek_lock)
     attempt = 0
     phase = "owner_probe"
     last_error_type: str | None = None

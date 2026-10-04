@@ -33,7 +33,6 @@ from services.agent_host.dispatcher import (
     TurnScheduler,
     agent_id_from_channel,
 )
-from services.agent_host.runtime import _active_turn_config_fingerprint
 
 
 class _Recorder:
@@ -222,10 +221,11 @@ class TestFailureIsolation:
         monkeypatch.setattr(dispatcher.logger, "exception", _capture)
 
         async def boom(_agent_id: int) -> None:
-            _active_turn_config_fingerprint.set("stored-config-fingerprint")
             raise ValueError("turn exploded")
 
-        sched = TurnScheduler(boom)
+        sched = TurnScheduler(
+            boom, config_fingerprint=lambda _agent_id: "stored-config-fingerprint"
+        )
         sched.wake(7)
         await _settle()
 

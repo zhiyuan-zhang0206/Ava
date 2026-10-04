@@ -118,7 +118,7 @@ def _err(text: str) -> types.CallToolResult:
 def _new_daemon(upstream: Any, pages: PageRegistry | None = None) -> ChromeMcpDaemon:
     """A daemon the way ``run()`` builds one: its own registry unless the caller
     passes the one an earlier daemon used (an upstream reconnect)."""
-    return ChromeMcpDaemon(upstream, pages or PageRegistry(), GatewaySession())
+    return ChromeMcpDaemon(upstream, pages or PageRegistry(), GatewaySession(asyncio.TaskGroup()))
 
 
 def _daemon() -> tuple[ChromeMcpDaemon, FakeUpstream]:

@@ -94,6 +94,7 @@ def _recovery_run(
                     checkpointer=saver,
                     incarnation=incarnation,
                     database_waits=waits,
+                    peek_lock=asyncio.Lock(),
                 )
             recovered.set()
             await asyncio.Event().wait()

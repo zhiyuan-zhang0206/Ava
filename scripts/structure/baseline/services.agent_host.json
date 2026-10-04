@@ -3,8 +3,6 @@
     "services/agent_host/daemon.py::asyncio-task:run": 1,
     "services/agent_host/dispatcher.py::asyncio-task:TurnScheduler._start": 1,
     "services/agent_host/host.py::asyncio-task:AgentHost.run_turn": 2,
-    "services/agent_host/recovery_interrupt.py::ambient-container:_PEEK_LOCKS": 1,
-    "services/agent_host/runtime.py::contextvar:_active_turn_config_fingerprint": 1,
     "services/agent_host/stall_guard.py::asyncio-task:run_invocation_with_stall_guard": 1
   },
   "files": {
