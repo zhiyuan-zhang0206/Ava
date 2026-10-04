@@ -1139,7 +1139,8 @@ async def test_task_usage_failure_does_not_break_completed_turn(
     assert fake_llm.astream.call_count == 1
     assert any(
         record["extra"].get("label") == "task-usage"
-        and record["extra"].get("body") == "failed to record usage for task 42"
+        and record["extra"].get("body")
+        == "failed to record usage for task 42: OSError('task database unavailable')"
         and record["extra"].get("event") == "task_usage_record_failed"
         for record in loguru_records
     )
