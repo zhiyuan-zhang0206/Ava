@@ -1,25 +1,19 @@
 """Coverage-note routing for the inspector metrics read model (task #3869).
 
-Expected limits (historical coverage, legacy archive
-precision) log — cooldown-deduped — and never open an instance. An unexpected
-limit (``missing_turn_durations`` on a window inside the collection era) opens
-one alerts-store episode through the standard writers; both its edges derive
-from the store, so a later read — or a restarted process — resolves a cleared
-condition while a re-fire reuses the stored instance. The note is best-effort:
-it must never raise into the statistics read path.
+Expected limits (historical coverage, legacy archive precision) log at DEBUG
+and emit no event. An unexpected limit (``missing_turn_durations`` on a window
+inside the collection era) emits the ``inspect_metrics_coverage_gap`` WARNING
+event on every read that still shows it. The note is best-effort: it must
+never raise into the statistics read path.
 """
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-import psycopg
 import pytest
 
-from base.events.live.bus import EventBus
 from gateway.inspect import _metrics_health as imh
 from gateway.inspect.schemas import InspectMetricsMetadata, MetricEvidence
 
@@ -62,116 +56,21 @@ def _md(
     )
 
 
-class _SpyPool:
-    """Raises if anything tries to open a connection (the note must swallow it)."""
-
-    def __init__(self) -> None:
-        self.used = False
-
-    @contextmanager
-    def connection(self, timeout: float | None = None) -> Generator[Any, None, None]:
-        self.used = True
-        raise AssertionError("the DB must not be touched for expected coverage limits")
-        yield  # pragma: no cover
+def _gap_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in records if r["extra"].get("event") == "inspect_metrics_coverage_gap"]
 
 
-class _ConnPool:
-    """Stub pool over one live test connection (reads and writes borrow it)."""
-
-    def __init__(self, conn: psycopg.Connection) -> None:
-        self.conn = conn
-        self.borrows = 0
-
-    @contextmanager
-    def connection(self, timeout: float | None = None) -> Generator[Any, None, None]:
-        self.borrows += 1
-        yield self.conn
-
-
-@pytest.fixture(autouse=True)
-def _reset_health_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(imh, "_last_logged", {})
-    monkeypatch.setattr(imh.settings.alerts, "im_notify_enabled", False)
-
-
-@pytest.fixture
-def published(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-
-    def publish(_bus: object, published: list[dict[str, Any]]) -> None:
-        rows.extend(published)
-
-    monkeypatch.setattr("gateway.alerts.publish.publish_alert_rows", publish)
-    return rows
-
-
-@pytest.fixture
-def sent(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    texts: list[str] = []
-
-    def _fake_notify(text: str) -> bool:
-        texts.append(text)
-        return True
-
-    monkeypatch.setattr(imh, "notify_im", _fake_notify)
-    return texts
-
-
-def _coverage_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [r for r in records if "coverage limit" in str(r["message"])]
-
-
-def _alerts_rows(conn: psycopg.Connection, agent_id: int = 42) -> list[tuple[Any, ...]]:
-    return conn.execute(
-        "SELECT status, severity, alertname, source, labels, notified_at, ends_at, starts_at "
-        "FROM alerts WHERE source = 'inspect-metrics' AND labels->>'agent_id' = %s "
-        "ORDER BY starts_at",
-        (str(agent_id),),
-    ).fetchall()
-
-
-# ── expected limits: log once (cooldown), open no instance ────────────────────
-
-
-def test_expected_limit_logs_once_and_opens_no_instance(
-    db_conn: psycopg.Connection,
-    published: list[dict[str, Any]],
-    sent: list[str],
+def test_expected_limit_logs_at_debug_and_emits_no_event(
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    pool = _ConnPool(db_conn)
     md = _md(cost=_ev("partial", "historical_coverage_unknown"))
-    note = imh.note_inspect_metrics_coverage
-    note(
-        pool, EventBus.from_settings(), 42, md, spawned_at=T0
-    )  # window reaches before collection -> historical
-    note(pool, EventBus.from_settings(), 42, md, spawned_at=T0)  # within cooldown: deduped
-    records = _coverage_records(loguru_records)
-    assert len(records) == 1
-    extra = records[0]["extra"]
-    assert extra["condition"] == "historical_coverage_unknown"
-    assert extra["family"] == "cost"
-    assert extra["expected"] is True
-    assert _alerts_rows(db_conn) == []  # log-only: no instance, no notification
-    assert published == [] and sent == []
-    # One bounded store read per call (the resolve reconcile), nothing else.
-    assert pool.borrows == 2
-
-
-def test_cooldown_elapsed_logs_again(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    monkeypatch.setattr(imh, "_cooldown_seconds", lambda: 0.0)
-    md = _md(lifecycle=_ev("partial", "historical_coverage_unknown"))
-    pool = _ConnPool(db_conn)
-    imh.note_inspect_metrics_coverage(pool, EventBus.from_settings(), 42, md, spawned_at=T0)
-    imh.note_inspect_metrics_coverage(pool, EventBus.from_settings(), 42, md, spawned_at=T0)
-    assert len(_coverage_records(loguru_records)) == 2
-
-
-# ── condition classification ──────────────────────────────────────────────────
+    imh.note_inspect_metrics_coverage(42, md, spawned_at=T0)  # window reaches before collection
+    limits = [r for r in loguru_records if "coverage limit" in str(r["message"])]
+    assert len(limits) == 1
+    assert limits[0]["level"].name == "DEBUG"
+    assert limits[0]["extra"]["condition"] == "historical_coverage_unknown"
+    assert limits[0]["extra"]["family"] == "cost"
+    assert _gap_events(loguru_records) == []
 
 
 @pytest.mark.parametrize(
@@ -195,94 +94,45 @@ def test_condition_classification(evidence: MetricEvidence, condition: str) -> N
     assert imh._conditions(_md(turns=evidence)) == [("turns", condition, evidence.availability)]
 
 
-# ── unexpected limit: store episode, resolve on clear ─────────────────────────
-
-
-def test_unexpected_missing_durations_opens_episode_and_resolves(
-    db_conn: psycopg.Connection,
-    published: list[dict[str, Any]],
-    sent: list[str],
+def test_unexpected_missing_durations_emits_the_gap_event_on_every_read(
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    pool = _ConnPool(db_conn)
     # Window starts inside the collection era -> the gap is live (unexpected).
     bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
-    note = imh.note_inspect_metrics_coverage
-    note(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
-
-    rows = _alerts_rows(db_conn)
-    assert len(rows) == 1
-    status, severity, alertname, source, labels, notified_at, ends_at, _starts = rows[0]
-    assert (status, severity, source) == ("unresolved", "warning", "inspect-metrics")
-    assert alertname == "inspect metrics coverage"
-    assert labels["condition"] == "missing_turn_durations" and labels["family"] == "turns"
-    assert notified_at is not None and ends_at is None
-    assert len(published) == 1 and len(sent) == 1
-    assert "limited by missing_turn_durations" in sent[0]
-
-    # Same read within cooldown: no duplicate row, no duplicate IM.
-    note(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
-    assert len(_alerts_rows(db_conn)) == 1
-    assert len(sent) == 1
-
-    # A later read without the condition resolves the episode.
-    note(pool, EventBus.from_settings(), 42, _md(window_start=T1), spawned_at=T0)
-    rows = _alerts_rows(db_conn)
-    assert len(rows) == 1 and rows[0][0] == "resolved" and rows[0][6] is not None
-    assert len(sent) == 2 and "recovered from missing_turn_durations" in sent[1]
+    imh.note_inspect_metrics_coverage(42, bad, spawned_at=T0)
+    imh.note_inspect_metrics_coverage(42, bad, spawned_at=T0)  # still true: emitted again
+    events = _gap_events(loguru_records)
+    assert len(events) == 2
+    assert events[0]["level"].name == "WARNING"
+    extra = events[0]["extra"]
+    assert (extra["agent_id"], extra["family"], extra["condition"]) == (
+        42,
+        "turns",
+        "missing_turn_durations",
+    )
+    assert extra["availability"] == "partial"
 
 
-def test_restart_never_strands_or_duplicates_a_stored_episode(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    published: list[dict[str, Any]],
-    sent: list[str],
+def test_missing_durations_in_a_historical_window_is_not_a_gap(
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    """#2790 review probe: the old in-process episode map stranded rows on a
-    cold process — re-fire must reuse the stored instance and a cleared
-    condition must resolve it with no in-process memory of the firing."""
-    pool = _ConnPool(db_conn)
-    bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
-    note = imh.note_inspect_metrics_coverage
-    note(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
-    starts_at = _alerts_rows(db_conn)[0][7]
-
-    # A gateway restart loses every in-process trace of the episode.
-    monkeypatch.setattr(imh, "_last_logged", {})
-    monkeypatch.setattr(imh, "_cooldown_seconds", lambda: 0.0)
-
-    # Re-fire (still broken): reuses the stored instance — no duplicate row,
-    # no new notification, the original starts_at.
-    note(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
-    rows = _alerts_rows(db_conn)
-    assert len(rows) == 1 and rows[0][7] == starts_at
-    assert len(sent) == 1
-
-    # Condition cleared on the cold process: the store-derived reconcile
-    # resolves the instance the in-process map alone would have stranded.
-    note(pool, EventBus.from_settings(), 42, _md(window_start=T1), spawned_at=T0)
-    rows = _alerts_rows(db_conn)
-    assert len(rows) == 1 and rows[0][0] == "resolved" and rows[0][6] is not None
-    assert len(sent) == 2 and "recovered from missing_turn_durations" in sent[1]
+    md = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T0)
+    imh.note_inspect_metrics_coverage(42, md, spawned_at=T0)
+    assert _gap_events(loguru_records) == []
 
 
-def test_condition_still_present_is_not_resolved_by_the_reconcile(
-    db_conn: psycopg.Connection,
-    published: list[dict[str, Any]],
-    sent: list[str],
+def test_a_clean_read_emits_nothing(loguru_records: list[dict[str, Any]]) -> None:
+    imh.note_inspect_metrics_coverage(42, _md(window_start=T1), spawned_at=T0)
+    assert _gap_events(loguru_records) == []
+    assert not [r for r in loguru_records if "coverage limit" in str(r["message"])]
+
+
+def test_note_never_raises_into_the_read_path(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
-    pool = _ConnPool(db_conn)
-    bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
-    imh.note_inspect_metrics_coverage(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
-    imh.note_inspect_metrics_coverage(
-        pool, EventBus.from_settings(), 42, bad, spawned_at=T0
-    )  # still broken
-    rows = _alerts_rows(db_conn)
-    assert len(rows) == 1 and rows[0][0] == "unresolved"
+    def boom(*_a: object, **_k: object) -> bool:
+        raise RuntimeError("boom")
 
-
-def test_note_never_raises_into_the_read_path(loguru_records: list[dict[str, Any]]) -> None:
-    bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
-    imh.note_inspect_metrics_coverage(
-        _SpyPool(), EventBus.from_settings(), 42, bad, spawned_at=T0
-    )  # DB blows up
+    monkeypatch.setattr(imh, "_historical", boom)
+    imh.note_inspect_metrics_coverage(42, _md(), spawned_at=T0)
     assert any("note failed" in str(r["message"]) for r in loguru_records)

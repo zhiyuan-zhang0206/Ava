@@ -36,11 +36,12 @@ Per-agent merge (`liveness_state`):
 #1). A machine coming back is self-healing: its host resumes pending work
 and the next pass re-marks the identities online.
 
-Machine alerting uses a separate episode clock: `machine_probe.transition_since`
-is set on the first failed probe and cleared on success. The shared transition
-policy stays silent through normal recovery, then fires WARNING and escalates
-the same alert instance to ERROR. This pass reads no deploy context, so a
-runner offline across an update grades from its true start like any other outage.
+Every pass in which an unpaused rollout-target machine fails its probe emits
+one `machine_probe_failed` event (machine + `consecutive_failures`); the
+Grafana rules over that stream own the grace window and the WARNING -> ERROR
+grading. A paused machine is not in the target list (`list_agent_runners`
+excludes the pause latch), so it emits nothing: an expected absence is silent
+at the source.
 
 The probe path is injectable (`probe` argument) so tests can run the full
 DB merge without dialing real ops servers.
@@ -51,12 +52,12 @@ import functools
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, cast
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
 from base.agents.observation.evidence import (
     LIVENESS_PASS_INTERVAL_S,
     MACHINE_OFFLINE_AFTER_FAILURES,
@@ -65,7 +66,6 @@ from base.cluster.machines import list_agent_runners, list_roster_agent_runners
 from base.config import settings
 from base.db import Database
 from base.db.transaction import write_transaction
-from base.deploy.transition import transition_severity
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from ops import cluster_rpc
@@ -135,174 +135,36 @@ async def _probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> 
         return _UNREACHED
 
 
-def _fire_machine_offline(
-    conn: Any,
-    name: str,
-    *,
-    new_cf: int,
-    transition_since: datetime | None,
-    now: datetime,
-) -> None:
-    """Fire (or escalate) the open "machine offline" alert for a failed probe."""
-    from base.telemetry.alerts import (
-        display_language,
-        fingerprint,
-        notify_im,
-        notify_text,
-        stamp_notified,
-        upsert_alert,
-    )
-
-    identity_labels = {"alertname": "machine offline", "machine": name}
-    stable_fp = fingerprint(identity_labels)
-    assert transition_since is not None  # noqa: S101 — every failed probe persists it
-    severity = transition_severity(
-        transition_since,
-        now,
-        warning_after_s=settings.alerts.transition_warning_seconds,
-        error_after_s=settings.alerts.transition_error_seconds,
-    )
-    if severity is None:
-        return
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT starts_at, severity, notified_at FROM alerts "
-            "WHERE labels->>'alertname' = 'machine offline' "
-            "AND labels->>'machine' = %s AND status = 'unresolved' "
-            "ORDER BY starts_at DESC LIMIT 1",
-            (name,),
-        )
-        open_row = cur.fetchone()
-    if open_row is not None and open_row[1] == severity and open_row[2] is not None:
-        return
-    starts_at = open_row[0] if open_row is not None else transition_since
-    labels = {**identity_labels, "severity": severity}
-    elapsed_minutes = max(0.0, (now - transition_since).total_seconds()) / 60.0
-    alert = {
-        "status": "firing",
-        "labels": labels,
-        "annotations": {
-            "summary": (
-                f"machine {name} offline for {elapsed_minutes:.1f} minutes: "
-                f"{new_cf} consecutive failed probes"
-            )
-        },
-        "starts_at": starts_at.isoformat(),
-        "fingerprint": stable_fp,
-    }
-    key, _did_insert, should_notify, _row = upsert_alert(conn, alert, source="machine-probe")
-    lang = display_language(conn)
-    if should_notify and notify_im(notify_text(alert, lang)):
-        stamp_notified(conn, [key])
-
-
-def _resolve_machine_offline(conn: Any, name: str, *, now: datetime) -> None:
-    """Resolve every open "machine offline" alert of a machine that is back online."""
-    from base.telemetry.alerts import (
-        display_language,
-        notify_im,
-        notify_text,
-        stamp_notified,
-        upsert_alert,
-    )
-
-    identity_labels = {"alertname": "machine offline", "machine": name}
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT starts_at, fingerprint, severity FROM alerts "
-            "WHERE labels->>'alertname' = 'machine offline' "
-            "AND labels->>'machine' = %s AND status = 'unresolved' "
-            "ORDER BY starts_at DESC",
-            (name,),
-        )
-        open_rows = cur.fetchall()
-    if not open_rows:
-        return
-    lang = display_language(conn)
-    for starts_at, fp, severity in open_rows:
-        alert = {
-            "status": "resolved",
-            "labels": {**identity_labels, "severity": severity},
-            "annotations": {"summary": f"machine {name} back online"},
-            "starts_at": starts_at.isoformat(),
-            "ends_at": now.isoformat(),
-            "fingerprint": fp,
-        }
-        key, _did_insert, should_notify, _row = upsert_alert(conn, alert, source="machine-probe")
-        if should_notify and notify_im(notify_text(alert, lang)):
-            stamp_notified(conn, [key])
-
-
-def _machine_alert_edges(
-    conn: Any,
-    name: str,
-    *,
-    ok: bool,
-    old_online: bool | None,
-    new_cf: int,
-    transition_since: datetime | None,
-    now: datetime,
-) -> None:
-    """Grade one machine transition and persist its firing/recovery edges.
-
-    Direct write, ``source="machine-probe"`` — the liveness pass runs on the
-    gateway with the DB at hand. The stable fingerprint excludes severity, so
-    WARNING -> ERROR updates one instance and the shared notification gate
-    treats the increase as a new firing transition. Open rows are discovered
-    by stable identity labels so rows written before that convention still
-    recover.
-
-    Best-effort: alerting is a side channel and must never break the pass
-    (DB errors propagate to the caller's per-pass catch, IM errors are
-    swallowed by ``notify_im``).
-    """
-    if not ok:
-        _fire_machine_offline(conn, name, new_cf=new_cf, transition_since=transition_since, now=now)
-    elif old_online is False:
-        _resolve_machine_offline(conn, name, now=now)
-
-
 async def _record_probe(
     pool: ConnectionPool, name: str, *, ok: bool, host_online: bool | None
 ) -> None:
     """UPSERT one probe outcome into machine_probe, bumping the consecutive
-    failure count on failure and resetting it on success — and record the
-    offline/online edge as an alerts row (see ``_machine_alert_edges``)."""
-    with write_transaction(pool) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT online, consecutive_failures FROM machine_probe WHERE machine_name = %s",
-                (name,),
-            )
-            old = cur.fetchone()
-        old_online: bool | None = old[0] if old else None
-        new_cf = 0 if ok else (1 if old is None else old[1] + 1)
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO machine_probe "
-                "(machine_name, online, agent_host_online, consecutive_failures, last_probe_at, transition_since) "
-                "VALUES (%s, %s, %s, %s, now(), CASE WHEN %s THEN NULL ELSE now() END) "
-                "ON CONFLICT (machine_name) DO UPDATE SET "
-                "  online = EXCLUDED.online, "
-                "  agent_host_online = EXCLUDED.agent_host_online, "
-                "  consecutive_failures = EXCLUDED.consecutive_failures, "
-                "  last_probe_at = now(), "
-                "  transition_since = CASE WHEN EXCLUDED.online THEN NULL "
-                "    ELSE COALESCE(machine_probe.transition_since, EXCLUDED.transition_since) END "
-                "RETURNING transition_since, last_probe_at",
-                (name, ok, host_online, new_cf, ok),
-            )
-            probe_row = cast("tuple[datetime | None, datetime] | None", cur.fetchone())
-            assert probe_row is not None  # noqa: S101 — UPSERT RETURNING always yields one row
-            transition_since, now = probe_row
-        _machine_alert_edges(
-            conn,
-            name,
-            ok=ok,
-            old_online=old_online,
-            new_cf=new_cf,
-            transition_since=transition_since,
-            now=now,
+    failure count on failure and resetting it on success; a failed probe also
+    emits the `machine_probe_failed` signal."""
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO machine_probe "
+            "(machine_name, online, agent_host_online, consecutive_failures, last_probe_at) "
+            "VALUES (%s, %s, %s, CASE WHEN %s THEN 0 ELSE 1 END, now()) "
+            "ON CONFLICT (machine_name) DO UPDATE SET "
+            "  online = EXCLUDED.online, "
+            "  agent_host_online = EXCLUDED.agent_host_online, "
+            "  consecutive_failures = CASE WHEN EXCLUDED.online THEN 0 "
+            "    ELSE machine_probe.consecutive_failures + 1 END, "
+            "  last_probe_at = now() "
+            "RETURNING consecutive_failures",
+            (name, ok, host_online, ok),
+        )
+        row = cast("tuple[int] | None", cur.fetchone())
+        assert row is not None  # noqa: S101 — UPSERT RETURNING always yields one row
+        consecutive_failures = row[0]
+    if not ok:
+        telemetry.emit(
+            "telemetry",
+            "machine_probe_failed",
+            level="warning",
+            source="system",
+            attributes={"machine": name, "consecutive_failures": consecutive_failures},
         )
 
 

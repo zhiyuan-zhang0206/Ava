@@ -123,9 +123,9 @@ def test_reconcile_open_grafana_alerts_resolves_only_snapshot_misses(
         starts_at=old,
         updated_at=old,
     )
-    direct_probe_id = _insert_alert(
+    retired_writer_id = _insert_alert(
         db_conn,
-        fingerprint="direct-probe",
+        fingerprint="retired-writer",
         starts_at=old,
         updated_at=old,
         source="health-probe",
@@ -153,7 +153,7 @@ def test_reconcile_open_grafana_alerts_resolves_only_snapshot_misses(
     )
     db_conn.commit()
 
-    assert {row["id"] for row in rows} == {stale_episode_id, missing_id}
+    assert {row["id"] for row in rows} == {stale_episode_id, missing_id, retired_writer_id}
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT id, status, ends_at, annotations->>'reconciliation', updated_at"
@@ -174,7 +174,8 @@ def test_reconcile_open_grafana_alerts_resolves_only_snapshot_misses(
         resolved_at,
     )
     assert by_id[active_episode_id][0] == "unresolved"
-    assert by_id[direct_probe_id][0] == "unresolved"
+    # A row a retired in-process writer left open is not in Grafana's set either: it closes too.
+    assert by_id[retired_writer_id][0] == "resolved"
     assert by_id[concurrent_ingest_id][0] == "unresolved"
     assert by_id[already_resolved_id][0] == "resolved"
 

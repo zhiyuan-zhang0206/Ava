@@ -14,15 +14,14 @@ from cli.commands.cluster.tests.test_cluster_health import (
     _home as _home,
 )
 from cli.commands.cluster.tests.test_cluster_health import (
-    _no_deploy_in_flight as _no_deploy_in_flight,
-)
-from cli.commands.cluster.tests.test_cluster_health import (
     _provider_guard_healthy as _provider_guard_healthy,
 )
 from cli.commands.cluster.tests.test_cluster_health import (
-    _sent_alerts as _sent_alerts,
+    _ran as _ran,
 )
-from cli.commands.cluster.tests.test_cluster_health import _write_aged_alert_state
+from cli.commands.cluster.tests.test_cluster_health import (
+    _signals as _signals,
+)
 
 
 @pytest.mark.parametrize(
@@ -48,7 +47,7 @@ def test_repeated_observations_never_mutate_release_state(
     def population_failure(_minimum: int) -> str:
         return "code"
 
-    def provider_failure(_home: Path, *, alert_failure: object) -> int:
+    def provider_failure(*, report: object) -> int:
         return 1
 
     monkeypatch.setattr(subprocess, "run", forbidden)
@@ -74,19 +73,15 @@ def test_full_disk_is_reported_when_gateway_is_down(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Disk pressure must explain the gateway outage without being short-circuited."""
-    message = "FAIL: disk usage — data volume 92.4% used (watermark 90%)"
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(
         cluster_health, "_disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
     )
-    _write_aged_alert_state(_home, message)
 
     assert cluster_health.run_health_probe() == 1
-    assert message in capsys.readouterr().err
-    assert len(_sent_alerts) == 1
-    assert "disk usage" in _sent_alerts[0]
-    assert "gateway liveness" not in _sent_alerts[0]
+    assert "FAIL: disk usage — data volume 92.4% used (watermark 90%)" in capsys.readouterr().err
+    assert [signal["check"] for signal in _signals] == ["disk_usage"]

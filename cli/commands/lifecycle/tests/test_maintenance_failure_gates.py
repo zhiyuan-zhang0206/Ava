@@ -167,22 +167,15 @@ class _StartHarness:
         from base.deploy.lifecycle import start_serving
 
         self.woken: list[int] = []
-        self.alerts: list[dict[str, object]] = []
         self.logger = MagicMock()
         monkeypatch.setattr(start_serving, "is_serving", lambda: True)
         monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
         monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", self._record_wake)
         monkeypatch.setattr("cli.commands.lifecycle._failed_receipts.logger", self.logger)
-        monkeypatch.setattr("cli.commands._probe._alert_db_connect", MagicMock())
-        monkeypatch.setattr("cli.commands._probe._alert_upsert_and_maybe_im", self._record_alert)
 
     def _record_wake(self, _db: object, _bus: object, agent: int, _payload: str) -> bool:
         self.woken.append(agent)
         return True
-
-    def _record_alert(self, _conn: object, alert: dict[str, object], *, im_enabled: bool) -> None:
-        assert im_enabled
-        self.alerts.append(alert)
 
     def start(self, rc: int = 0) -> int:
         from cli.commands.lifecycle._pause_resume import resume_after_start
@@ -203,7 +196,7 @@ class _StartHarness:
 def test_start_redelivers_a_failed_continuation_and_releases_the_hold(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    """The failed member's restart pointer is intact: no error, no notice; the release wakes it."""
+    """The failed member's restart pointer is intact: no error; the release wakes it."""
     agent, command = _pending_restart(db_conn)
     _publish(MaintenanceHold("draining", {agent: command}, failures={agent: "RuntimeError"}))
     harness = _StartHarness(monkeypatch)
@@ -213,13 +206,12 @@ def test_start_redelivers_a_failed_continuation_and_releases_the_hold(
     assert pause_owner.read().status == "resumed"
     assert harness.woken == [agent]
     harness.logger.error.assert_not_called()
-    assert harness.alerts == []
 
 
 def test_start_reports_and_notifies_a_continuation_it_cannot_redeliver(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    """A restart pointer that is gone is logged at ERROR and told to the owner; start still goes."""
+    """A restart pointer that is gone is logged at ERROR as an `agent_continuation_lost` event; start still goes."""
     lost, lost_command = _pending_restart(db_conn)
     kept, kept_command = _pending_restart(db_conn)
     db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (lost_command,))
@@ -239,11 +231,9 @@ def test_start_reports_and_notifies_a_continuation_it_cannot_redeliver(
     assert sorted(harness.woken) == sorted([lost, kept])
     harness.logger.error.assert_called_once()
     assert harness.logger.error.call_args.kwargs["agent_id"] == lost
-    assert harness.logger.error.call_args.kwargs["category"] == "RuntimeError"
-    assert [alert["labels"]["agent"] for alert in harness.alerts] == [str(lost)]  # type: ignore[index]
-    summary = harness.alerts[0]["annotations"]["summary"]  # type: ignore[index]
-    assert f"agent {lost}" in summary
-    assert f"agent {kept}" not in summary
+    assert harness.logger.error.call_args.kwargs["failure_category"] == "RuntimeError"
+    # The event is the owner's signal; a Grafana rule alerts on it.
+    assert harness.logger.error.call_args.kwargs["event"] == "agent_continuation_lost"
 
 
 def test_start_does_not_revive_a_terminated_agent_whose_continuation_failed(
@@ -259,7 +249,6 @@ def test_start_does_not_revive_a_terminated_agent_whose_continuation_failed(
 
     assert pause_owner.read().status == "resumed"
     harness.logger.error.assert_not_called()
-    assert harness.alerts == []
 
 
 def test_failed_start_keeps_the_hold_and_its_receipts(

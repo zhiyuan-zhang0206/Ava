@@ -559,25 +559,25 @@ async def test_a_sweep_round_runs_every_database_phase(
         assert cur.fetchone() == ("expired",)
 
 
-async def test_a_sweep_round_runs_the_impersonation_seal_stuck_alert_pass(
+async def test_a_sweep_round_runs_the_impersonation_incomplete_event_log_signal_pass(
     reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    """The seal-stuck monitor rides the sweep round, after the lease reap."""
+    """The incomplete-event-log signal rides the sweep round, after the lease reap."""
     order: list[str] = []
 
     def reap(_pool: object, _db: Database, _bus: EventBus) -> int:
         order.append("reap")
         return 0
 
-    def alert(_pool: object) -> int:
-        order.append("alert")
+    def signal(_pool: object) -> int:
+        order.append("signal")
         return 0
 
     monkeypatch.setattr(sweep, "reap_impersonations", reap)
-    monkeypatch.setattr(sweep, "alert_stuck_event_logs", alert)
+    monkeypatch.setattr(sweep, "signal_incomplete_event_logs", signal)
 
     await sweep.sweep_round(
         reaper_pool, database, EventBus.from_settings(), LoopProgress("test", 60.0)
     )
 
-    assert order == ["reap", "alert"]
+    assert order == ["reap", "signal"]

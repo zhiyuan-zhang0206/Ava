@@ -29,8 +29,8 @@ from base.native_process.root_control.ipc import (
     ok_response,
 )
 from services.ava_root import intent_store
-from services.ava_root.alerts import UnitAlertFacts
 from services.ava_root.custody import require_clear
+from services.ava_root.failure_state import UnitFailureFacts
 from services.ava_root.group_scope import group_closed, record_survivors
 from services.ava_root.intent_store import (
     IntentRecord,
@@ -379,8 +379,8 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
             return "policy never"
         return None
 
-    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
-        """The alert-relevant facts of one unit: intent, recorded failure, custody.
+    def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
+        """The failure-state facts of one unit: intent, recorded failure, custody.
 
         `custody_held` reads `revival_deferral`'s reconciliation clause — a
         retained generation that is not active holds revival until reconciled.
@@ -388,7 +388,7 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
         runtime = self._units.get(unit_id)
         if runtime is None:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
-        return UnitAlertFacts(
+        return UnitFailureFacts(
             intent_running=runtime.intent is UnitIntent.RUNNING,
             restart_failed=runtime.restart_failed,
             custody_held=runtime.generation is not None and not self._is_active(runtime),

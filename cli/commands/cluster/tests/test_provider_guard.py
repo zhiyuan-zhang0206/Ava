@@ -1,16 +1,12 @@
 """Provider account guard — health-probe checks 9-10 (`cli/commands/cluster/_provider_guard.py`).
 
-Two invariants shape these tests:
+Failure messages name the configured threshold, never a live reading (a
+ticking balance, a growing halted count); live readings ride stderr detail
+lines only. Read trouble is fail-OPEN: a missing key, an unreadable balance, or
+an unreachable agent table means "cannot judge", not "unhealthy".
 
-- Failure messages are STABLE across runs — the probe's episode key is the
-  exact message text, so a live reading in it (a ticking balance, a growing
-  halted count) would reset the episode every tick and never grade. Live
-  readings ride stderr detail lines only.
-- Read trouble is fail-OPEN: a missing key, an unreadable balance, or an
-  unreachable agent table means "cannot judge", not "unhealthy".
-
-The probe-level wiring (alert edge fired, recovery resolved from the on-disk
-episode store, no rollback counting) is pinned in `cli/commands/cluster/tests/test_cluster_health.py`
+The probe-level wiring (the `health_probe_failing` signal, no rollback
+counting) is pinned in `cli/commands/cluster/tests/test_cluster_health.py`
 next to the other checks' integration tests.
 """
 
@@ -306,15 +302,37 @@ def test_provider_guard_failure_reports_balance_before_blocked(
     monkeypatch.setattr(_provider_guard, "_balance_failure", _balance)
     monkeypatch.setattr(_provider_guard, "_blocked_agents_failure", _blocked)
 
-    assert (
-        _provider_guard.provider_guard_failure() == "FAIL: provider balance \u2014 balance detail"
+    assert _provider_guard.provider_guard_failure() == (
+        "provider_balance",
+        "FAIL: provider balance \u2014 balance detail",
     )
 
     def _fine() -> None:
         return None
 
     monkeypatch.setattr(_provider_guard, "_balance_failure", _fine)
-    assert (
-        _provider_guard.provider_guard_failure()
-        == "FAIL: provider blocked agents \u2014 blocked detail"
+    assert _provider_guard.provider_guard_failure() == (
+        "provider_blocked_agents",
+        "FAIL: provider blocked agents \u2014 blocked detail",
     )
+
+
+def test_run_provider_guard_reports_the_failing_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure is handed to the probe's report seam with its check name; a pass reports nothing."""
+    reported: list[tuple[str, str]] = []
+
+    def _failing() -> tuple[str, str]:
+        return "provider_balance", "FAIL: provider balance \u2014 low"
+
+    monkeypatch.setattr(_provider_guard, "provider_guard_failure", _failing)
+    assert _provider_guard.run_provider_guard(report=lambda c, m: reported.append((c, m))) == 1
+    assert reported == [("provider_balance", "FAIL: provider balance \u2014 low")]
+
+    def _passing() -> None:
+        return None
+
+    monkeypatch.setattr(_provider_guard, "provider_guard_failure", _passing)
+    assert _provider_guard.run_provider_guard(report=lambda c, m: reported.append((c, m))) is None
+    assert len(reported) == 1

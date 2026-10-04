@@ -5,7 +5,6 @@ import json
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, NamedTuple, TypeVar, cast
 from weakref import WeakKeyDictionary
 
@@ -19,12 +18,9 @@ from base.db import ALIVE_STATUSES, Database, InboundRow, publish_inbound_wake
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
-from base.paths import run_dir
 
-# The slow-borrow threshold and its host-wide cooldown are
-# settings.agent.db_pool_slow_acquire_warn_seconds /
-# _warn_cooldown_seconds: a slow-but-served borrow is visible below the
-# acquire timeout, and one host stall is one WARNING, not one per agent.
+# The slow-borrow threshold is settings.agent.db_pool_slow_acquire_warn_seconds: a
+# slow-but-served borrow is visible below the acquire timeout.
 
 
 # Claim is a hot scheduling boundary, not a general database query. Bound both
@@ -36,35 +32,6 @@ def _claim_db_acquire_timeout_s() -> float:
 
 
 _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
-
-
-def _slow_acquire_warn_marker() -> Path:
-    """The host-wide slow-borrow warning marker; its mtime is the last WARNING.
-
-    Every agent process on the host shares this one file under `$AVA_HOME/run`,
-    so a host stall that slows every agent's pool yields one WARNING rather
-    than a line per agent (2026-10-03 triage #8)."""
-    return run_dir() / "db-pool-slow-acquire.warn"
-
-
-def _slow_acquire_warn_due(cooldown_s: float) -> bool:
-    """Whether a slow borrow may WARN now; stamps the marker when it may.
-
-    `False` means another slow borrow on this host warned within `cooldown_s`
-    — the caller logs DEBUG with the same fields. Fail-open: a marker that
-    cannot be read or stamped warns rather than muting the signal."""
-    marker = _slow_acquire_warn_marker()
-    try:
-        recent = time.time() - marker.stat().st_mtime < cooldown_s
-    except OSError:
-        recent = False  # no marker yet (first slow borrow on this host)
-    if recent:
-        return False
-    try:
-        marker.touch()
-    except OSError:
-        return True  # cannot stamp: muting the next borrow would be worse
-    return True
 
 
 @dataclass
@@ -81,8 +48,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
     default is a silent multi-second block — which is exactly why a transiently
     unresponsive Postgres reads as a mystery node stall rather than a DB
     problem. This override times every borrow: a slow-but-served one logs a
-    WARNING (host-coalesced — repeats within the cooldown are DEBUG), a
-    `PoolTimeout` an ERROR, both tagged with `pool_name`, so a degraded pg
+    WARNING, a `PoolTimeout` an ERROR, both tagged with `pool_name`, so a degraded pg
     surfaces in the agent log at the moment it happens. Behaviour is otherwise
     identical to the base pool (the exception still propagates).
     """
@@ -155,22 +121,16 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
             elapsed = time.monotonic() - t0
             if elapsed >= settings.agent.db_pool_slow_acquire_warn_seconds:
                 stats = self._acquire_stats()
-                due = _slow_acquire_warn_due(
-                    settings.agent.db_pool_slow_acquire_warn_cooldown_seconds
-                )
-                log = logger.warning if due else logger.debug
-                log(
+                logger.warning(
                     "[db pool] {name} acquire took {elapsed:.1f}s "
                     "(size={pool_size}, available={pool_available}, "
-                    "waiting={requests_waiting}, connection_errors={connections_errors})"
-                    + ("" if due else " — host-coalesced"),
+                    "waiting={requests_waiting}, connection_errors={connections_errors})",
                     event="db_pool_acquire_slow",
                     name=self._pool_name,
                     elapsed=elapsed,
                     slot_wait_ms=span.slot_wait_ms,
                     check_ms=span.check_ms,
                     check_attempts=span.check_attempts,
-                    coalesced=not due,
                     **stats,
                 )
             return conn

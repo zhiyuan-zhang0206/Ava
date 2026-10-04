@@ -129,8 +129,8 @@ template into a running cluster without a restart of the manager, run
   against in-development code. `--check-file PATH` checks one script file
   instead of the table (the falsification hook); `--rows-file PATH` sweeps a
   JSON dump of the table (`[[id, name, script], ...]`) with no database access and
-  no alert; a non-clean sweep of the live table posts one
-  alert through `/api/alerts` (`--no-notify` suppresses that for a dry run).
+  no signal; a non-clean sweep of the live table emits one `schedule_verify_failed`
+  event for the Grafana rule to read (`--no-notify` suppresses that for a dry run).
 - Deploy a one-off schedule with:
 
 ```bash

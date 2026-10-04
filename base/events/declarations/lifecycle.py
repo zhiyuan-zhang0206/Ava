@@ -37,6 +37,20 @@ class AgentSpawned(TypedDict):
     forked_from: int | None
 
 
+class AgentContinuationLost(TypedDict):
+    """`agent_continuation_lost` payload — cli/commands/lifecycle/_failed_receipts.py.
+
+    One row per agent whose continuation failed during a stop's drain and whose
+    durable restart pointer is gone, so `ava start` cannot re-deliver it.
+    ``failure_category`` is the drain's failure class, ``holder`` the maintenance
+    hold, ``reason`` why the pointer is lost.
+    """
+
+    failure_category: str
+    holder: str | None
+    reason: str
+
+
 class NodeExitEntry(TypedDict):
     """One node's exit inside an aggregated per-turn `node_exit` event."""
 
@@ -68,6 +82,13 @@ class AgentBootFailed(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
+    "agent_continuation_lost": telemetry_event(
+        "agent_continuation_lost",
+        "an agent's continuation failed at a maintenance hold and its restart pointer is gone, "
+        "so `ava start` cannot re-deliver it",
+        payload=AgentContinuationLost,
+        tier="anomaly",
+    ),
     # node / process lifecycle
     "node_enter": telemetry_event(
         "node_enter",

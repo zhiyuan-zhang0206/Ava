@@ -152,7 +152,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
             "pause",
             "[cluster] temporarily pull a machine out of the cluster: drain its tasks "
             "(reassign in_progress to #405 with a note), terminate its agents, then "
-            "hide it from roster/probe/fan-out/spawn (no offline alerts). Registration "
+            "hide it from roster/probe/fan-out/spawn (no offline signal). Registration "
             "kept for `ava cluster resume`",
             True,
         ),

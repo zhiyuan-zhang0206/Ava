@@ -4,7 +4,7 @@ A receipt is latched when an agent's continuation raised during the stop's drain
 (`services/agent_host/maintenance.py`). The agent's restart pointer is durable in
 Postgres, so the failure is crash-equivalent: the agent continues from its last
 durable checkpoint once the hold releases and its restart is delivered. `ava start`
-re-delivers each failed continuation, reports and notifies for any whose pointer
+re-delivers each failed continuation, reports (an ERROR event the alert rules read) any whose pointer
 is gone, then releases the hold like any other.
 """
 
@@ -16,8 +16,6 @@ from collections.abc import Mapping
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import logger
-
-_ALERTNAME = "agent continuation lost at ava start"
 
 
 def _lost_pointers(failed: Mapping[int, str], commands: Mapping[int, int]) -> dict[int, str]:
@@ -73,11 +71,14 @@ def settle_failed_receipts() -> None:
             file=sys.stderr,
         )
     for agent, reason in sorted(lost.items()):
+        # The `agent_continuation_lost` event is the owner's signal: the
+        # `ava-ops-agent-continuation-lost` Grafana rule alerts on it.
         logger.error(
-            "agent {agent_id}: continuation failed ({category}) at maintenance hold {holder} "
-            "and cannot be re-delivered: {reason}",
+            "agent {agent_id}: continuation failed ({failure_category}) at maintenance hold "
+            "{holder} and cannot be re-delivered: {reason}",
+            event="agent_continuation_lost",
             agent_id=agent,
-            category=cleared.get(agent, "unknown"),
+            failure_category=cleared.get(agent, "unknown"),
             holder=current.holder,
             reason=reason,
         )
@@ -86,44 +87,3 @@ def settle_failed_receipts() -> None:
             f"cannot be re-delivered: {reason}",
             file=sys.stderr,
         )
-    if lost:
-        _notify_owner(lost, cleared, holder=current.holder or "")
-
-
-def _notify_owner(lost: Mapping[int, str], cleared: Mapping[int, str], *, holder: str) -> None:
-    """One alert per agent whose continuation could not be re-delivered, pushed to the owner's IM.
-
-    The same channel `ava start` uses for a non-critical service that missed its
-    window: an alerts row plus the IM push. A delivery failure is printed, never
-    raised: the start's verdict does not depend on the notice.
-    """
-    from datetime import UTC, datetime
-
-    import cli.commands._probe as _probe_commands
-    from base.telemetry.alerts import fingerprint
-
-    now = datetime.now(UTC).isoformat()
-    for agent, reason in sorted(lost.items()):
-        labels = {"alertname": _ALERTNAME, "severity": "error", "agent": str(agent)}
-        alert: dict[str, object] = {
-            "status": "firing",
-            "labels": labels,
-            "annotations": {
-                "summary": (
-                    f"agent {agent}: its continuation failed ({cleared.get(agent, 'unknown')}) "
-                    f"at maintenance hold {holder} and cannot be re-delivered: {reason}"
-                )
-            },
-            "starts_at": now,
-            "fingerprint": fingerprint({"alertname": _ALERTNAME, "agent": str(agent)}),
-        }
-        try:
-            with _probe_commands._alert_db_connect() as conn:
-                _probe_commands._alert_upsert_and_maybe_im(conn, alert, im_enabled=True)
-                conn.commit()
-        except Exception as exc:
-            print(
-                f"  ! owner notice for agent {agent} failed ({type(exc).__name__}): "
-                "see the start log",
-                file=sys.stderr,
-            )

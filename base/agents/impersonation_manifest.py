@@ -27,7 +27,6 @@ from base.agents.impersonation.event_log import (
     locked_receipt_state,
     refresh_completed_export,
 )
-from base.agents.impersonation_event_alerts import alert_capture_failed
 from base.db import Database
 from base.log import logger
 from base.telemetry import Event
@@ -306,7 +305,6 @@ def _mark_participant_failed(participant: LocalParticipant) -> None:
     if gate is not None:
         with gate.condition:
             gate.capture_failure_pending = False
-    _alert_capture_failure(participant)
 
 
 def _persist_capture_failure(participant: LocalParticipant) -> None:
@@ -328,18 +326,9 @@ def _persist_capture_failure(participant: LocalParticipant) -> None:
             )
         elif state != "failed":
             raise RuntimeError("Cannot record a capture failure after receipt sealing")
-        # Keep ``lease`` live so its dict-row shape is checked before alerting.
+        # Keep ``lease`` live so its dict-row shape is checked.
         if str(lease["id"]) != participant.lease_id:
             raise RuntimeError("Local receipt belongs to another lease")
-
-
-def _alert_capture_failure(participant: LocalParticipant) -> None:
-    """Best-effort alert after the failed receipt is committed independently."""
-    try:
-        with participant.db.write_transaction() as conn:
-            alert_capture_failed(conn, lock_lease(conn, participant.lease_id))
-    except Exception:
-        logger.exception("Could not alert on impersonation event capture failure")
 
 
 def seal_local_participant(participant: LocalParticipant) -> None:

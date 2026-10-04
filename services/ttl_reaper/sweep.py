@@ -15,7 +15,8 @@ phase is a bounded batch, and a backlog drains over successive rounds:
   cleanup does not depend on the next login.
 - **Notices** — ``agent_notices`` past ``expire_at`` auto-resolve.
 - **Impersonation** — expiring leases are reminded, expired ones reaped, and ended
-  leases still waiting for an open event source raise (or clear) their seal-stuck alert.
+  leases still waiting for an open event source (or with a failed one) emit the
+  ``impersonation_event_log_incomplete`` signal.
 - **Schedule fire log** — ``schedule_fire_log`` claims older than the configured
   retention window (30 days by default) are deleted once per day, keeping the
   newest claim per schedule so the catch-up baseline never regresses.
@@ -43,9 +44,9 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.impersonation.maintenance import (
-    alert_stuck_event_logs,
     reap_impersonations,
     remind_expiring_impersonations,
+    signal_incomplete_event_logs,
 )
 from base.config import settings
 from base.daemon import round_loop
@@ -259,7 +260,7 @@ async def sweep_round(
     reminded = await asyncio.to_thread(remind_expiring_impersonations, pool, db, bus)
     progress.beat()
     impersonations = await asyncio.to_thread(reap_impersonations, pool, db, bus)
-    await asyncio.to_thread(alert_stuck_event_logs, pool)
+    await asyncio.to_thread(signal_incomplete_event_logs, pool)
     progress.beat()
     pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool, db, bus)
     progress.beat()

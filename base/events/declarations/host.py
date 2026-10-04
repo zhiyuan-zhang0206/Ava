@@ -37,7 +37,30 @@ class HostDispatcherScanFailed(TypedDict):
     backoff_s: float
 
 
+class ImpersonationEventLogIncomplete(TypedDict):
+    """`impersonation_event_log_incomplete` payload — base/agents/impersonation_event_signals.py.
+
+    One event per lease and condition on every TTL-reaper pass while the row
+    fact holds (state, not edge): `seal_stuck` is an ended lease still waiting
+    on an open event source (clears when it seals), `capture_failed` a lease
+    with a failed source (permanent — a failed source never completes its
+    lease). The agent is the event's `agent_id`."""
+
+    condition: Literal["seal_stuck", "capture_failed"]
+    lease_id: str
+    lease_machine: str
+    pending_reason: str
+    session: str
+
+
 EVENTS: dict[str, EventSpec] = {
+    "impersonation_event_log_incomplete": telemetry_event(
+        "impersonation_event_log_incomplete",
+        "an impersonation event log cannot complete on its own (ended lease with an "
+        "open source, or a failed capture source); re-emitted every reaper pass while it holds",
+        payload=ImpersonationEventLogIncomplete,
+        tier="anomaly",
+    ),
     # Hosted runner dispatcher and turns (future/infra/agent-runner-as-server.md).
     "host_stale_running_settled": telemetry_event(
         "host_stale_running_settled",
@@ -312,13 +335,12 @@ EVENTS: dict[str, EventSpec] = {
         "cancellation — cancelling it would only re-queue it at the tail",
         tier="anomaly",
     ),
-    "hosted_boot_recovery_stalled": telemetry_event(
-        "hosted_boot_recovery_stalled",
-        "hosted boot recovery was deferred for the same agent on three "
-        "consecutive boots — retained exec request evidence is not clearing on "
-        "its own, so the ordinary per-boot warning is escalated to this "
-        "counted anomaly event; inspect the named evidence and its disposition "
-        "commands",
+    "hosted_boot_recovery_deferred": telemetry_event(
+        "hosted_boot_recovery_deferred",
+        "hosted boot recovery was deferred for an agent: retained exec request "
+        "evidence is not disposable yet. Emitted once per deferred agent per "
+        "boot; repeats across boots mean the evidence is not clearing on its "
+        "own — inspect the named evidence and its disposition commands",
         tier="anomaly",
     ),
     "host_turn_stall_detected": telemetry_event(

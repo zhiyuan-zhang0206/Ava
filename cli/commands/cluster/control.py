@@ -81,9 +81,8 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     Thin client: POSTs /api/cluster/machines/{name}/pause on the gateway,
     which drains (reassigns in_progress tasks of the machine's agents to
     the drain owner #405, with a note on each), terminates every live agent on
-    the machine, resolves any open "machine offline" alert for it and sets the
-    pause latch. From then on the machine is hidden from the roster / cluster
-    panel / `ava.agents.list_machines()`, is not probed (no offline alerts),
+    the machine and sets the pause latch. From then on the machine is hidden from the roster / cluster
+    panel / `ava.agents.list_machines()`, is not probed (no offline signal),
     is skipped by cluster fan-outs and refuses spawns — the cluster shows only
     its active members. The registration row (URL/role) is preserved for resume.
     Exit 1 when the gateway reports no such machine or refuses (own gateway).

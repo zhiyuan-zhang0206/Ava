@@ -75,7 +75,6 @@ from base.config import settings
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.log import logger
 
-from ._alerts import maybe_alert_exec_boot_failure
 from ._result import (
     _ExecCancelled,
     _ExecCrashed,
@@ -219,6 +218,17 @@ async def _run_agent_code(
     return result, plugin_state_update, exec_ms, findings, attachments, sdk_calls
 
 
+def _emit_exec_boot_failed(agent_id: int, exc: BaseException) -> None:
+    """The `exec_child_boot_failed` signal: the child died before the agent's code ran."""
+    logger.warning(
+        "[exec-boot-failed] exec child crashed before running code: {exc_type}: {exc_msg}",
+        event="exec_child_boot_failed",
+        agent_id=agent_id,
+        exc_type=getattr(exc, "exc_type", None) or type(exc).__name__,
+        exc_msg=(getattr(exc, "exc_msg", None) or str(exc))[:200],
+    )
+
+
 def _dispatch_exec_result(
     result: _ExecResult,
     ctx: AvaContext,
@@ -342,9 +352,9 @@ def _dispatch_exec_result(
             if code_reached is False:
                 # Bootstrap-class failure: the child died before the agent's
                 # code ever ran — the class that used to vanish as "(no
-                # output)". Alert the operator (best-effort, rate-limited)
-                # so an outage that silently strands agents is seen (P2 #2102).
-                maybe_alert_exec_boot_failure(agent_id, exc)
+                # output)". A distinct WARNING event is the operator signal
+                # (P2 #2102); the alert rule reads it from the event stream.
+                _emit_exec_boot_failed(agent_id, exc)
         case _ExecDone(output=output):
             halted = False
             result_text = wrap_code_output(

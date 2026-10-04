@@ -1,7 +1,5 @@
 {
   "ambient_state": {
-    "agent/graph/exec/_alerts.py::ambient-container:_last_posted_at": 1,
-    "agent/graph/exec/_alerts.py::thread:maybe_alert_exec_boot_failure": 1,
     "agent/graph/exec/_owned_run.py::asyncio-task:run_owned": 2,
     "agent/graph/exec/_owned_run.py::asyncio-task:run_owned.attached_completion": 1,
     "agent/graph/exec/_owned_run.py::thread:run_owned": 1,

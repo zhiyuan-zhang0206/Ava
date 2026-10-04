@@ -1,31 +1,23 @@
-"""Alert ingest core — the alerts-store + IM-notification logic, shared.
+"""Alert ingest core — the alerts-store + IM-notification logic.
 
-One implementation serves every writer of the ``alerts`` table (Task #1224,
-user design 2026-08-12: Alert fully separate from Notice — own table, own UI,
-own IM channel):
-
-- the gateway router (gateway/alerts/router.py) ingests the Grafana
-  embedded-Alertmanager webhook on ``POST /api/alerts``;
-- the cluster health probe (cli/commands/cluster/health_alerts.py) posts its
-  time-graded health alerts through that endpoint too
-  (``source="health-probe"``) — and when the gateway is unreachable, it runs
-  these same functions locally against its own DB connection, so one health
-  alert = one alerts row + one IM notification even mid-outage;
-- the heartbeat liveness pass (services/heartbeat/liveness.py) writes its
-  machine offline/online edges straight to the table (``source="machine-probe"``).
+Alert is fully separate from Notice (Task #1224, user design 2026-08-12: own
+table, own UI, own IM channel), and there is one way in: the gateway router
+(gateway/alerts/router.py) ingests the Grafana embedded-Alertmanager webhook
+on ``POST /api/alerts``. Every rule, grouping, repetition and window silence
+is Grafana's (decisions/2026-10-04-alerting-on-grafana-alerting.md); no other
+process writes the ``alerts`` table or pushes an alert to IM.
 
 The functions take the Alertmanager webhook *alert shape as a plain dict*
 (status/labels/annotations/starts_at/ends_at/fingerprint/generator_url) so
-this module stays below both the gateway layer and the CLI layer; callers own
-their transport (router: pydantic + the app's DB pool; probes: their own
-payload dict + ``base.db.connect``).
+this module stays below the gateway layer (the events-maintenance
+reconciliation shares its key parsing); the router owns the transport.
 
 Dedup key (fingerprint, starts_at): Alertmanager may re-send the same instance
 while it is firing and sends it once more on resolution — the
 upsert updates the row instead of duplicating it; a resolved row that fires
 again (new starts_at) starts a fresh instance. ``fingerprint`` is the
 Alertmanager-standard fnv-1a hash over sorted labels; the ingest computes it
-when a direct writer omits it, using the exact Alertmanager algorithm so a
+when a payload omits it, using the exact Alertmanager algorithm so a
 computed hash and a Grafana-sent hash agree for the same label set. The IM
 fan-out goes through the local im_bridge daemon's health-port ``/send`` RPC,
 gated by the transition logic in ``upsert_alert`` — every severity pushes,
@@ -97,25 +89,15 @@ def parse_ts(raw: str) -> datetime | None:
     return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
 
 
-# Legacy P0-P3 vocabulary (the pre-Task-#1224 ops-alerts rules.yml labels)
-# maps onto the new classes so a rule not yet updated lands at the right
-# tier instead of silently downgrading to ``warning``. Same mapping the
-# data migration uses.
-_LEGACY_SEVERITY_MAP = {"P0": "critical", "P1": "error", "P2": "warning", "P3": "warning"}
-
-
 def parse_severity(labels: dict[str, str]) -> str:
     """Normalize a rule's severity label to critical/warning/error.
 
-    Accepts the new vocabulary plus the legacy P0-P3 labels (compat shim —
-    see ``_LEGACY_SEVERITY_MAP``). ``warning`` when absent/unparseable —
-    the quietest default, so an unlabelled rule never spams the user."""
+    ``warning`` when absent/unparseable — the quietest default, so an
+    unlabelled rule never spams the user."""
 
     raw = str(labels.get("severity") or "").strip()
     lower = raw.lower()
-    if lower in _SEVERITIES:
-        return lower
-    return _LEGACY_SEVERITY_MAP.get(raw.upper(), "warning")
+    return lower if lower in _SEVERITIES else "warning"
 
 
 def parse_alertname(labels: dict[str, str]) -> str:
@@ -266,10 +248,10 @@ def upsert_alert(
     """Upsert one alert instance; return (key, did_insert, should_notify, row).
 
     ``alert`` is the Alertmanager-webhook alert shape as a dict (the model
-    dump / a probe's payload dict). ``source`` tags the row's provenance
-    ('grafana' | 'health-probe' | 'machine-probe'); it is set on insert and
-    never overwritten by a conflict re-send — a repeated webhook or probe
-    edge for the same instance must not rewrite history.
+    dump). ``source`` tags the row's provenance (``grafana``, the webhook's
+    default); it is set on insert and never overwritten by a conflict
+    re-send — a repeated webhook for the same instance must not rewrite
+    history.
 
     ``should_notify`` — the notification gate (every severity pushes unless
     ``notify_im`` is exactly ``"false"``; transition rules still prevent a

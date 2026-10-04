@@ -113,6 +113,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `heartbeat_nudged` | heartbeat reminder | noise | idle_minutes | — | events | — |
 | `heartbeat_backoff_raised` | no-op nudge backoff level raised | noise | level, interval_seconds | — | events | — |
 | `heartbeat_backoff_reset` | nudge backoff reset by real inbound or pause | noise | previous_level, reason | — | events | — |
+| `machine_probe_failed` | agent-runner machine unreachable — one event per failed liveness probe | anomaly | machine, consecutive_failures | — | events | — |
 | `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events | — |
 | `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events | — |
 | `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events | — |
@@ -126,7 +127,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | events | — |
 | `db_recovered` | db recovered | anomaly | — | — | events | — |
 | `db_pool_acquire_timeout` | db pool acquire timeout | anomaly | — | — | events | — |
-| `db_pool_acquire_slow` | db pool acquire slow | anomaly | — | — | events | — |
+| `db_pool_acquire_slow` | db pool acquire slow | anomaly | name, elapsed, slot_wait_ms, check_ms, check_attempts, pool_size, pool_available, requests_waiting, connections_errors | — | events | — |
 | `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events | — |
 | `trace` | otel span export | noise | — | — | events | — |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events | — |
@@ -146,6 +147,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events | ✓ |
 | `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events | — |
 | `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events | — |
+| `exec_child_boot_failed` | exec child crashed before running the agent's code (bootstrap-class failure) | anomaly | exc_type, exc_msg | — | events | — |
 | `exec_request_quarantine` | stale exec request evidence preserved under the explicit quarantine | observation | reason, event_dir, sources, vanished | — | events | — |
 | `exec_request_bounded_quarantine` | an unreadable exec request envelope past the bounded-disposition bound (twice the exec node timeout, no live process reference, no live host process) was quarantined without review — the bytes are preserved with a receipt and the recovery path no longer defers on it; off via AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED restores unbounded retention | anomaly | — | — | events | — |
 | `exec_cancelled` | execute_code cancelled | anomaly | — | — | events | ✓ |
@@ -163,6 +165,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `editable_pth_repaired` | poisoned editable-install pointer repaired to the prod source root | anomaly | — | — | events | — |
 | `editable_direct_url_repaired` | poisoned editable-install direct_url repaired to the prod source root | anomaly | — | — | events | — |
 | `exec_editable_install_poisoned` | poisoned editable install repaired before an exec child spawn | anomaly | — | — | events | — |
+| `inspect_metrics_coverage_gap` | inspector statistics read shows a live recorder gap (turns without durations inside the collection era); re-emitted on every read while it holds | anomaly | family, condition, availability | — | events | — |
 | `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | events | — |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events | ✓ |
 | `page_restore_alive` | page restore alive | noise | — | — | events | — |
@@ -181,6 +184,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
 | `fleet_graph_stale` | the fleet-graph route served the stale/last-good graph after a degraded upstream read — one event per degradation episode, not per poll | anomaly | route, reason | — | events | — |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |
+| `impersonation_event_log_incomplete` | an impersonation event log cannot complete on its own (ended lease with an open source, or a failed capture source); re-emitted every reaper pass while it holds | anomaly | condition, lease_id, lease_machine, pending_reason, session | — | events | — |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events | — |
 | `host_recovery_wake_started` | hosted recovery wake started a turn and occupied an in-flight pacing slot | noise | — | — | events | — |
@@ -217,7 +221,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `host_turn_reconcile_failed` | the immediate inbound reconcile at a finished hosted turn raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events | — |
 | `impersonation_aborted` | the native impersonation supervisor detected a dead core component (the executor's recorded process chain all dead/reused, or the bound relay's heartbeat stale past the exception window) and closed the lease: carries the agent, lease, session, the dead component (executor | relay) and its detail; the end note is delivered through the resume chain | anomaly | — | — | events | — |
 | `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (AVA_HOST_MAX_CONCURRENT_TURNS) for at least AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events | — |
-| `hosted_boot_recovery_stalled` | hosted boot recovery was deferred for the same agent on three consecutive boots — retained exec request evidence is not clearing on its own, so the ordinary per-boot warning is escalated to this counted anomaly event; inspect the named evidence and its disposition commands | anomaly | — | — | events | — |
+| `hosted_boot_recovery_deferred` | hosted boot recovery was deferred for an agent: retained exec request evidence is not disposable yet. Emitted once per deferred agent per boot; repeats across boots mean the evidence is not clearing on its own — inspect the named evidence and its disposition commands | anomaly | — | — | events | — |
 | `host_turn_stall_detected` | the hosted dispatcher's durable scan found an in-flight turn whose turn-progress clock (agent/turn/progress.py: node enters, completed LLM steps, streamed LLM chunks) has been silent past the wedged budget while NO pending inbound exists — the turn-level fake-alive shape (process alive, turn dead) that pending-row and pid-based detectors cannot see. The turn task is cancelled and the agent rescheduled; a turn that refuses to unwind instead escalates to a daemon restart | anomaly | — | — | events | — |
 | `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | anomaly | — | — | events | — |
 | `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | anomaly | — | — | events | — |
@@ -228,6 +232,9 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `pause_orphan_claim_settled` | preparation settled an ordinary claim without a live runtime | anomaly | agent, message_id, age_s, outcome | — | events | — |
 | `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events | — |
 | `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events | — |
+| `im_push_failed` | an IM bridge outbound send failed after its single retry (failures = the adapter's consecutive-failure count) | anomaly | channel, failures | — | events | — |
+| `im_feishu_owner_seed_failed` | the feishu owner chat could not be restored at bridge boot; feishu notifications are blind until the user messages the bot | anomaly | reason, chats | — | events | — |
+| `agent_continuation_lost` | an agent's continuation failed at a maintenance hold and its restart pointer is gone, so `ava start` cannot re-deliver it | anomaly | failure_category, holder, reason | — | events | — |
 | `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file | — |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events | — |
 | `process_exit` | agent process exited | noise | reason, pid | — | events | — |
@@ -321,16 +328,20 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `root_restart_failed` | root unit replacement failed at its down|up half — explicit failure state recorded; intent stays running and the health monitor retries under its backoff (task #4872) | anomaly | unit, stage, detail | — | events | — |
 | `root_restart_cleared` | root unit replacement succeeded — the recorded failure state was cleared (task #4872) | noise | unit, failed_for_s | — | events | — |
 | `custody_reconcile` | custody record reconcile pass — releases always report; a retained record reports on first sight and evidence change — with its birth and process-group evidence (task #4872) | observation | unit, checked, found, decision, evidence | — | events | — |
-| `root_unit_alert_fired` | root unit entered an alertable failure state (intent running, and restart_failed, breaker open, or retained custody) — one firing per episode; delivery records the user-channel post (task #4872) | anomaly | unit, kind, since_timestamp_seconds, detail, delivery | — | events | — |
-| `root_unit_alert_resolved` | root unit alert episode closed — the failure state cleared and the episode resolved (task #4872) | noise | unit, kind, since_timestamp_seconds, failed_for_s, delivery | — | events | — |
+| `root_unit_failure_state` | root unit sits in an explicit failure state (intent running, and restart_failed, breaker open, or retained custody) — emitted every health round while it holds (task #4872) | anomaly | unit, kind, detail | — | events | — |
+| `root_unit_not_revivable` | root health round observed a terminal probe verdict the unit cannot revive (unknown identity, inspection error, foreign listener) — emitted every round it is observed, WARNING | anomaly | unit, detail | — | events | — |
 | `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events | — |
 | `schedule_stalled` | enabled non-completed schedule has had no live session for more than two hours | anomaly | schedule_id, status, stalled_seconds | — | events | — |
 | `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events | — |
-| `root_diagnostic` | root diagnostic verdict changed; observation only, no recovery authority | anomaly | — | — | events | — |
+| `root_diagnostic` | root diagnostic sampled non-alive (every sample while it persists, WARNING) or recovered (once, INFO); observation only, no recovery authority | anomaly | diagnostic, verdict, detail, consecutive_failures | — | events | — |
 | `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events | — |
 | `backup_operation_custody` | backup operation quarantined, blocked on unproven closure, or retired | anomaly | operation, custody, detail | — | events | — |
 | `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events | — |
 | `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events | — |
+| `health_probe_failing` | the cluster health probe found a failing check; repeated on every unhealthy run | anomaly | check, failure_class, message | — | events | — |
+| `health_probe_ran` | the cluster health probe completed a run, healthy or not (its own heartbeat) | observation | unhealthy_checks | — | events | — |
+| `service_start_unready` | a non-critical service missed its readiness window at ava start | anomaly | service | — | events | — |
+| `schedule_verify_failed` | ava schedules verify found in-store schedule scripts that fail dry-import or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events | — |
 
 ## 4. Log (bare logs, category=log)
 

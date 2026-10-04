@@ -6,8 +6,7 @@ deploy/lgtm/config/grafana/provisioning/alerting/rules.yml, delivered through th
 the gateway receives webhook POSTs on /api/alerts, stores them in ``alerts``,
 publishes them on the SSE stream, and fans firing/resolved notifications out
 to the IM channels the user has connected (services/im_bridge daemon) — every
-severity pushes (critical/warning/error, no severity gate). The health probe
-and the machine liveness pass write rows directly. This domain is
+severity pushes (critical/warning/error, no severity gate). This domain is
 gateway-owned: only the gateway process reads it. The provider-guard
 thresholds (``provider_guard_*``) are read by the cluster health probe's
 provider-account checks (``cli/commands/cluster/_provider_guard.py``) — same
@@ -22,42 +21,12 @@ from base.config.base import EnvSettings
 
 
 class AlertsSettings(EnvSettings):
-    transition_warning_seconds: float = Field(
-        default=180.0,
-        alias="AVA_ALERTS_TRANSITION_WARNING_SECONDS",
-        description=(
-            "Seconds an outage transition may remain unexplained before WARNING. "
-            "The 2026-08-04 user ruling reserves this window for normal node, "
-            "rollout, watchdog self-heal, and network recovery."
-        ),
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    transition_error_seconds: float = Field(
-        default=600.0,
-        alias="AVA_ALERTS_TRANSITION_ERROR_SECONDS",
-        description=(
-            "Seconds an unrecovered outage transition may remain open before ERROR. "
-            "The 2026-08-04 user ruling grades the preceding interval as WARNING."
-        ),
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     grafana_admin_password: SecretStr | None = Field(
         default=None,
         alias="GRAFANA_ADMIN_PASSWORD",
         description=(
-            "Admin password for the co-located Grafana API. When set, the "
+            "Admin password for the co-located Grafana API, also used for alert "
+            "silences. When set, the "
             "events-maintenance service periodically reconciles stored Grafana "
             "alert instances against Grafana's active Alertmanager view."
         ),
@@ -85,25 +54,6 @@ class AlertsSettings(EnvSettings):
             "restart_required": "gateway",
             "writable": False,
             "sensitive": True,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    inspect_metrics_degraded_cooldown_seconds: float = Field(
-        default=3600.0,
-        alias="AVA_ALERTS_INSPECT_METRICS_DEGRADED_COOLDOWN_SECONDS",
-        description=(
-            "Per-(agent, family, condition) cooldown for the inspector-metrics "
-            "coverage warnings the gateway logs, and for re-emission of an open "
-            "degradation alert (task #3869). The condition is read-path evaluated: "
-            "without a cooldown every statistics request would re-log and re-send "
-            "the same chronic limit; an hour keeps the record visible while "
-            "holding the volume to one line per condition."
-        ),
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
             "scope": "cluster-pinned",
         },
     )

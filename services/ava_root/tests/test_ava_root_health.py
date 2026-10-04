@@ -21,8 +21,8 @@ import pytest
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.ava_root import health as health_mod
-from services.ava_root.alerts import UnitAlertFacts
 from services.ava_root.custody import ReconcileOutcome
+from services.ava_root.failure_state import UnitFailureFacts
 from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry, UnknownUnitError
@@ -73,7 +73,7 @@ class StubSupervisor:
         self.unknown_units: set[str] = set(unknown_units or ())
         self.on_restart: Callable[[], None] | None = None
         self.generation = (OwnedProcess(42, 100.0, None), 0.0)
-        self.alert_facts = UnitAlertFacts(
+        self.failure_facts = UnitFailureFacts(
             intent_running=True, restart_failed=None, custody_held=False
         )
 
@@ -93,10 +93,10 @@ class StubSupervisor:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
         return self.deferrals.get(unit_id)
 
-    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
+    def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         if unit_id in self.unknown_units:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
-        return self.alert_facts
+        return self.failure_facts
 
     async def reconcile_custody(self) -> list[ReconcileOutcome]:
         return []
@@ -254,10 +254,7 @@ async def test_breaker_opens_once_then_holds(
     assert monitor.snapshot()["svc"].breaker_since is not None
 
 
-async def test_terminal_verdict_reports_and_resets(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.ava_root.health")
+async def test_terminal_verdict_reports_and_resets(clock: FakeClock, recorder: _Recorder) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
     monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(breaker_rounds=5))
@@ -273,13 +270,13 @@ async def test_terminal_verdict_reports_and_resets(
     assert state.breaker_since is None
     assert state.last_verdict == "port-taken"
     assert stub.restart_calls == ["svc"]  # only the first round's attempt
-    assert "NOT REVIVABLE" in caplog.text
+    reports = recorder.events("root_unit_not_revivable")
+    assert [(r["unit"], r["detail"]) for r in reports] == [("svc", "alien daemon")]
 
 
 async def test_probe_raise_is_unavailable_and_round_continues(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
+    clock: FakeClock, recorder: _Recorder
 ) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.ava_root.health")
 
     def raising() -> DaemonProbe:
         raise RuntimeError("boom")
@@ -295,7 +292,9 @@ async def test_probe_raise_is_unavailable_and_round_continues(
     assert snapshot["unit-a"].last_verdict == "unavailable"
     assert snapshot["unit-a"].last_detail.startswith("probe raised RuntimeError")
     assert snapshot["unit-b"].last_verdict == "alive"  # the round continued
-    assert "probe raised" in caplog.text
+    reports = recorder.events("root_unit_not_revivable")
+    assert [r["unit"] for r in reports] == ["unit-a"]
+    assert str(reports[0]["detail"]).startswith("probe raised RuntimeError")
 
 
 async def test_unresolvable_probe_is_no_action(

@@ -25,7 +25,6 @@ from collections import deque
 from typing import Any
 
 from base.log import logger
-from services.im_bridge import copy
 from services.im_bridge.adapters import feishu_poll_cursor as cursors
 from services.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.im_bridge.config import FeishuCredentialsConfig
@@ -141,7 +140,7 @@ class FeishuAdapter(IMAdapter):
         """Seed the owner open id lost by a restart from the persisted switch state.
 
         Exactly one ``feishu:<open_id>`` entry restores it, never overwriting an
-        owner already known; anything else keeps it empty and alerts via telegram.
+        owner already known; anything else keeps it empty and emits the failure event.
         """
         if self._last_open_id:
             return
@@ -155,16 +154,12 @@ class FeishuAdapter(IMAdapter):
             self._last_open_id = keys[0][len(prefix) :]
             logger.info("FeishuAdapter: seeded owner open id: {}", self._last_open_id)
             return
-        text = copy.FEISHU_OWNER_SEED_NO_SOURCE
-        if len(keys) > 1:
-            text = copy.FEISHU_OWNER_SEED_AMBIGUOUS.format(count=len(keys))
-        logger.error("FeishuAdapter: owner seed failed; feishu notifications are blind")
-        telegram = self.core.adapters.get("telegram")
-        if telegram is not None:
-            try:
-                await telegram.send_to_owner(text)
-            except Exception as exc:
-                logger.warning("FeishuAdapter: owner-seed alert not sent: {!r}", exc)
+        logger.error(
+            "FeishuAdapter: owner seed failed; feishu notifications are blind",
+            event="im_feishu_owner_seed_failed",
+            reason="ambiguous" if len(keys) > 1 else "no_source",
+            chats=len(keys),
+        )
 
     async def stop(self) -> None:
         """Close the ws connection (the SDK has no public stop; its private
