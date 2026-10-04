@@ -72,8 +72,12 @@ async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, ada
 
     try:
         await attempt()
-    except Exception:
-        _log.exception("send failed channel=%s chat=%s", channel, chat_id)
+    except Exception as exc:
+        # The first failure is the transient norm (the measured ~0.65s connect
+        # window, a flaky link): WARNING with the one-line cause, no traceback.
+        # The single retry decides whether it was real — its failure logs at
+        # ERROR and escalates (2026-10-03 triage, E3).
+        _log.warning("send failed channel=%s chat=%s: %r — retrying once", channel, chat_id, exc)
         try:
             await retry_once_after_backoff(attempt, core.config)
         except Exception:
