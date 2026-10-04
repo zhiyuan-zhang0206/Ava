@@ -30,8 +30,8 @@ Classifications (advisory only -- nothing here acts):
   executor dies before the start leg (the 2026-09-17 blackout, task #3719).
 - ``owned``: an active hold whose recorded shepherd is alive; something is
   still driving it.
-- ``stranded``: an active hold with failed receipts -- the repair path, not
-  ``cancel``.
+- ``stranded``: an active hold with failed receipts -- ``ava start`` re-delivers
+  their continuations and notifies the owner of any it cannot.
 - ``undetermined``: evidence missing or unreadable; the alert degrades to the
   plain copy plus ``hold=undetermined``.
 
@@ -66,14 +66,13 @@ _DEFAULT_COMMAND_TIMEOUT_S = 10.0
 # The two bounded reads, primary then fallback (spec part 2 v1.1.1 B2): the
 # status verb is the only source carrying the shepherd's liveness; the raw
 # journal is the degraded read that still shows phase and state.
-_STATUS_COMMAND = 'cd "$HOME/.ava/source" && .venv/bin/ava maintenance status'
+_STATUS_COMMAND = 'cd "$HOME/.ava/source" && .venv/bin/ava status --json'
 _JOURNAL_COMMAND = 'cat "$HOME/.ava/run/deploy-pause-owner.json"'
 
-# The official recovery table (spec part 2 v1.1.1 B4), one row per phase class:
-# a pre-stop hold is cancelled back to serving, a stop-class hold is restarted
-# end-to-end. _RESUME_PHASES mirrors ops.strand_hold.PRE_STOP_PHASES.
-_RESUME_PHASES = ("preparing", "draining", "drained")
-_START_PHASES = ("stopping", "stopped", "starting")
+# The official recovery (spec part 2 v1.1.1 B4): `ava start` ends a hold in any
+# phase before `ready` -- it re-delivers failed continuations, brings the
+# services back and releases the hold.
+_START_PHASES = ("preparing", "draining", "drained", "stopping", "stopped", "starting")
 
 # Vocabulary mirrors base.deploy.maintenance.pause_owner / base.deploy.maintenance.hold_driver /
 # base.deploy.maintenance.state; an unknown value is a structural surprise and the
@@ -83,10 +82,9 @@ _STATES = ("paused", "resumed")
 _LIVENESS = ("alive", "dead", "missing", "unreadable")
 
 # The desensitization whitelist (spec part 2 v1.1.1 B5): only strings matching
-# these shapes may leave the process; a value that fails renders as `?`. First
+# these shapes may leave the process; a value that fails renders as none. First
 # characters exclude `-` throughout: a value reaching an argv tail
-# (`--operation <OP>`, `--acquired-at <TS>`, `ssh <host>`) must never read as
-# an option.
+# (`ssh <host>`) must never read as an option.
 _OPERATION_PATTERN = re.compile(r"[A-Za-z0-9:._][A-Za-z0-9:._-]{0,119}")
 _TIMESTAMP_PATTERN = re.compile(r"[0-9][0-9T:.+Z-]{0,39}")
 _HOST_PATTERN = re.compile(r"[A-Za-z0-9._@][A-Za-z0-9._@-]{0,252}")
@@ -183,24 +181,15 @@ def _age_seconds(acquired_at: str | None, now: float) -> int | None:
     return max(0, int(now - acquired.timestamp()))
 
 
-def render_command(
-    host: str, phase: str | None, operation: str | None, acquired_at: str | None
-) -> str | None:
+def render_command(host: str, phase: str | None) -> str | None:
     """The one official recovery command for a phase (spec part 2 v1.1.1 B4).
 
-    Two rows only: a pre-stop hold is cancelled; a stop-class hold is
-    restarted end-to-end. An uncovered or unknown phase renders none. A value
-    that failed the whitelist renders as ``?`` -- visibly incomplete, never
-    remote free text. An invalid host renders none too (defense in depth;
-    `triage` validates earlier).
+    `ava start` for every phase it ends. An uncovered or unknown phase renders
+    none. An invalid host renders none too (defense in depth; `triage`
+    validates earlier).
     """
     if not _HOST_PATTERN.fullmatch(host):
         return None
-    if phase in _RESUME_PHASES:
-        return (
-            f"ssh {host} 'cd ~/.ava/source && .venv/bin/ava maintenance cancel"
-            f" --operation {operation or '?'} --acquired-at {acquired_at or '?'}'"
-        )
     if phase in _START_PHASES:
         return f"ssh {host} 'cd ~/.ava/source && .venv/bin/ava start'"
     return None
@@ -251,7 +240,7 @@ def classify_unreadable(*, host: str) -> Triage:
 
 
 def classify_status(payload: Payload, *, host: str, now: float | None = None) -> Triage:
-    """Classify one `ava maintenance status` reading (the primary source).
+    """Classify one `ava status --json` hold reading (the primary source).
 
     The status payload is the only source carrying the shepherd's liveness
     (`driver.liveness`, judged by base.deploy.maintenance.hold_driver), so it is the only source
@@ -324,7 +313,7 @@ def classify_status(payload: Payload, *, host: str, now: float | None = None) ->
         age_seconds=_age_seconds(acquired_at, now),
         classification=classification,
         line=f"hold=present phase={phase or '?'} driver={driver} state={status}",
-        command=render_command(host, phase, operation, acquired_at),
+        command=render_command(host, phase),
     )
 
 
@@ -364,7 +353,7 @@ def classify_journal(payload: Payload, *, host: str, now: float | None = None) -
         age_seconds=_age_seconds(acquired_at, now),
         classification="undetermined",
         line=f"hold=present phase={phase or '?'} driver=? state={state}",
-        command=render_command(host, phase, operation, acquired_at),
+        command=render_command(host, phase),
     )
 
 
@@ -429,7 +418,7 @@ def triage(
 ) -> Triage:
     """Read the two sources within bounds and classify (the degradation matrix).
 
-    Primary read is `ava maintenance status`; when it fails or surprises, the
+    Primary read is `ava status --json`; when it fails or surprises, the
     raw journal is read; when that fails too, the degraded line. A failed read
     never blocks producing a triage; an invalid host raises ValueError before
     any read.
@@ -439,7 +428,8 @@ def triage(
     status_payload = reader(host, _STATUS_COMMAND)
     if status_payload is not None:
         with contextlib.suppress(KeyError, TypeError, ValueError):
-            return classify_status(status_payload, host=host, now=now)
+            hold_payload = _mapping(status_payload["hold"], "hold")
+            return classify_status(hold_payload, host=host, now=now)
     journal_payload = reader(host, _JOURNAL_COMMAND)
     if journal_payload is not None:
         with contextlib.suppress(KeyError, TypeError, ValueError):

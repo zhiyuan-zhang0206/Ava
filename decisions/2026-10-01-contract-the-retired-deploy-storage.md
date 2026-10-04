@@ -123,3 +123,5 @@ is fix-forward. The expand-contract ordering the Context describes still
 stands.
 
 Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).
+
+Forward link (2026-10-04): `ava maintenance` is deleted entirely; the exits are now `ava status` (read) and `ava start`. See [delete ava maintenance](2026-10-04-delete-ava-maintenance.md).

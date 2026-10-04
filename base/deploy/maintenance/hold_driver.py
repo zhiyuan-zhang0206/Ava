@@ -42,8 +42,7 @@ import psutil
 
 DriverLiveness = Literal["alive", "dead", "missing", "unreadable"]
 
-# The evidence recorded for humans reading the journal (`ava maintenance
-# status`): the first couple of argv elements, bounded. Identity never depends
+# The evidence recorded for humans reading the journal (`ava status`): the first couple of argv elements, bounded. Identity never depends
 # on argv -- it is the pid + birth pair -- this is only what the operator sees.
 _ARGV_HEAD = 120
 

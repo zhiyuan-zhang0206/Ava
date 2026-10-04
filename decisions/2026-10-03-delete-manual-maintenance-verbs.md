@@ -61,3 +61,6 @@ release of a hold that has not started stopping, without launching anything.
   enforced only by the fleet update.
 - A script or runbook step that ran a deleted verb fails at argument parsing. None exists in the
   repository.
+
+Forward link (2026-10-04): the three verbs this left are gone too; `ava status` reads the hold and
+`ava start` ends it. See [delete-ava-maintenance](2026-10-04-delete-ava-maintenance.md).

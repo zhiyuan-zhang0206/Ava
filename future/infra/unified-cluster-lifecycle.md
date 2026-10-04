@@ -71,9 +71,9 @@ state.
      cutover record.
    - Do not remove `$AVA_HOME/run/deploy-pause-owner.json` on a host while a
      legacy updater, rollout, cluster-restart or hold-recovery session, an `ava
-     stop`, or an `ava maintenance` command may still be alive there. No current
+     stop` may still be alive there. No current
      code spawns a legacy session, and no command clears a `paused` record one
-     left: once `ava maintenance status` shows no live owner, the operator
+     left: once `ava status` shows no live owner, the operator
      removes the journal by hand.
    - `$AVA_HOME/run/updater-handoff.json`, `updater-handoff.lock`,
      `updater-bootstrap-recovery.json` and `updater-spawn/` have no reader or

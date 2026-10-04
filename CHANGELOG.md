@@ -44,7 +44,19 @@ and the matching GitHub Releases.
   only logs
   ([decision](decisions/2026-10-04-pty-crash-notices.md)).
 
+- `ava start` settles a maintenance hold's failed continuation receipts instead of refusing
+  to run: once the unit serves, each failed agent's restart pointer is re-delivered with the
+  hold's release, an agent whose pointer is gone is logged at ERROR and its owner told (alert
+  row plus IM push), and the hold releases. `ava start` is also the exit for a hold that never
+  stopped services. `ava status` prints the maintenance hold, and `ava status --json` prints
+  only it as one JSON object (`{"hold": {...}}`)
+  ([decision](decisions/2026-10-04-delete-ava-maintenance.md)).
+
 ### Removed
+- `ava maintenance` in full (`status`, `repair`, `cancel`), with `repair`'s operator-identity
+  record in the hold journal (`repaired`, `repair_record`; a journal that carries them still
+  reads) and the agent-host absence probe only it used
+  ([decision](decisions/2026-10-04-delete-ava-maintenance.md)).
 - Zero-effect CLI surfaces: `restart --force-reap` (identical to `--mode force`), the
   unreachable `boot` lite-verbs entry, the `mcp ls` / `plugins ls` aliases, the no-op
   `stop --stop-browser`, and `cluster health-probe`'s `--agent-min` /
@@ -71,8 +83,8 @@ and the matching GitHub Releases.
   ([decision](decisions/2026-10-03-deletion-sweep.md)).
 - `ava maintenance prepare`, `drain`, `stop`, `start`, `resume` and `stop-data-plane`, with
   `--keep-terminals` and `--gateway-last`: the same kernel as `ava stop` and `ava start`, taken
-  one step at a time, with no caller. `ava maintenance` keeps `status`, `repair` and `cancel`
-  (formerly `resume --cancel`)
+  one step at a time, with no caller. `ava maintenance` kept `status`, `repair` and `cancel`
+  (formerly `resume --cancel`) until it was deleted whole
   ([decision](decisions/2026-10-03-delete-manual-maintenance-verbs.md)).
 - The per-session pty hosts with their records, orphan reaper, envfile handoff and CLI transport,
   `ava restart` no longer keeps shells; the generic `--keep-service pty-sessions` does.

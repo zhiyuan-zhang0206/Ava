@@ -85,21 +85,21 @@ failure. A drain that hits its deadline reports every unfinished agent — its
 restart command's delivery state, the row's owner/lease/resource facts, the
 agent's last activity and the live host's view — and names the predecessor-owner
 fence explicitly when a successor boot is looking at a row its predecessor left:
-that one needs `ava maintenance status` plus an explicit `ava maintenance cancel`
-or `repair`, never a retry loop. A rollout's own pause no longer defers the held
+that one is ended by `ava start`, never a retry loop. A rollout's own pause no longer defers the held
 continuation it requires, so the ordinary update drain consumes and certifies.
 For ordinary local maintenance, retry the command or run `ava start` to restore
 services and release the hold after readiness succeeds. A failed start keeps
 admission closed.
-A recorded checkpoint/continuation failure blocks ordinary start and resume
-before services are launched; repair and inspect that failure first. A healthy
-service probe cannot prove that a failed checkpoint became durable.
+A recorded checkpoint/continuation failure keeps the hold and fails every
+other gate (the drain, the phase transitions, a bare resume); `ava start` is its
+exit, and settles it as described under "Holds and their exits". A healthy
+service probe cannot prove that a failed checkpoint became durable: the agent
+continues from its last durable checkpoint, as after a crash.
 `GET /api/health` and ops `status_probe` remain available during this hold, so
 start can measure real readiness before opening business requests or native
 admission. Public health still verifies identity and database access; status
 and resume retain their existing authentication requirements.
-Resume is refused before readiness or after a recorded continuation
-failure. Every selected
+Resume is refused before readiness. Every selected
 service must pass readiness; normal start exposes no readiness waiver.
 Normal commands manage their own operation identity; there is no operation ID
 or timestamp to copy between machines.
@@ -166,18 +166,20 @@ for eligibility, stale cutoff, and retry semantics.
 
 `ava stop` and `ava restart` take the hold and walk it through drain and stop;
 `ava start` releases it after readiness. No command runs those steps one at a
-time. `ava maintenance` is only the journal's reader and its two exits, each
-local and taking the journal's exact `--operation` and timezone-aware
-`--acquired-at`: `status` prints the hold, `repair` releases failed receipts
-(below), and `cancel` abandons preparation/drain while services are usable. It is
-not for bypassing a partial stop or a failed startup.
+time, and no command reads or ends a hold except these: `ava status` prints the
+hold (phase, operation, acquired-at, recorded failures, the shepherd's
+liveness), `ava status --json` prints only it as one JSON object (the fleet
+update's start-of-work refusal and the out-of-band triage read that; it probes
+nothing, so it answers with everything else down), and `ava start` ends it.
 
-`cancel` releases the hold; it does not retract restarts already
-issued (durable per-agent intents). Members not yet at their boundary still
-complete that restart, with its cold recovery, on next admission.
+`ava start` over a hold in any phase brings the unit's services up (a unit whose
+services are already running is left as it is), then releases the hold. It does
+not retract restarts already issued (durable per-agent intents): members not yet
+at their boundary still complete that restart, with its cold recovery, on
+admission.
 
-A drain aborted by failed receipts keeps the hold, and `cancel`
-refuses while blocked failures remain. Receipts whose turn raised a
+A drain aborted by failed receipts keeps the hold, and `ava stop` and `ava
+restart` refuse to continue past them. Receipts whose turn raised a
 database-outage exception (`psycopg.OperationalError`, `PoolTimeout` — the
 crash-equivalent family; every database channel hang surfaces as one of
 these) do not block: they are recorded
@@ -186,23 +188,24 @@ held-control path (explicit re-flush, then restart claim) before the drain can
 certify. A failed wake of an agent with no continuation left in the hold
 records no receipt at all: one outside the captured cohort (another machine's:
 every runner receives every wake), or a drained or parked member once the
-hold reached `drained`. For genuinely blocking failures, fix the root cause
-first, then run
-the sanctioned repair:
+hold reached `drained`.
 
-```
-ava maintenance repair --operation <operation> --acquired-at <timestamp> [--operator "Ava #1234"]
-```
+A blocking failure is a continuation that raised, so its final checkpoint may
+not be durable. The agent's restart pointer is: it survives in Postgres exactly
+as after a crash, and the agent continues from its last durable checkpoint
+(`ava stop --force` and a host crash give the same guarantee, no more). Once the
+unit serves, `ava start` settles each failed receipt before it releases the hold:
 
-Repair requires the exact generation capability, works on a
-`preparing`/`draining`/`drained` hold (a failure latched after the cohort
-landed has no other exit), refuses while the agent-host still has active
-continuations. Only independent service, PID and home-scoped process checks
-can establish host absence and skip its identity probe; a refused health
-connection alone is insufficient. Repair records operator identity (timestamp,
-operator label, OS user/uid/pid, parent process, machine) in the journal — both sides of the
-repair CAS stay visible via `ava maintenance status`. A partial release after
-a successful repair is completed by `cancel`.
+- the restart pointer is still pending or claimed: the release's resume
+  re-delivers it, with every other member's;
+- the pointer is gone (its command finished, or the agent row is): the failure
+  is logged at ERROR with the agent, category and hold, and an alert row plus an
+  IM push tells the owner through the same channel `ava start` uses for a service
+  that missed its window. The agent has no continuation left to deliver;
+- the agent is terminated: nothing is owed, nothing is revived.
+
+A start that fails before the unit serves settles nothing and keeps the receipts
+for the retry. Undelivered receipts are left in the journal for audit.
 
 ## Recovering a stuck maintenance operation
 
@@ -211,43 +214,32 @@ does not expire. There is no pause-controller or OS hold-watchdog recovery job.
 A failed or unreadable ownership observation never permits an independent
 restart or release of admission.
 
-First identify what owns the home: `ava maintenance status` names the operation
-and phase. Do not apply the manual table below over a `cli.fleet_update` half
-that is still running; rerun that half after its failure is fixed instead.
-
-For ordinary maintenance, read the exact generation and phase:
-
-```bash
-ava maintenance status
-```
-
-`cancel` and `repair` use the journal's same `--operation` and timezone-aware
-`--acquired-at`. Status includes recorded process identity and judged liveness;
-a refused connection alone does not establish that the owner is absent.
+First identify what owns the home: `ava status` names the operation and phase.
+Do not apply the table below over a `cli.fleet_update` half that is still
+running; rerun that half after its failure is fixed instead. Status includes the
+recorded process identity and its judged liveness; a refused connection alone
+does not establish that the owner is absent.
 
 | Phase found | Recovery after confirming there is no competing owner |
 | --- | --- |
-| `preparing`, `draining` | `ava maintenance cancel` abandons the drain while services are usable. |
-| `drained` | `ava maintenance cancel`, or re-run `ava stop`. |
+| `preparing`, `draining`, `drained` | `ava start` abandons the drain and releases the hold; or re-run `ava stop`. |
 | `stopping` | Re-run `ava stop` to verify and finish closure, then `ava start`; or `ava start` directly. |
 | `stopped`, `starting`, `ready` | `ava start` brings services back, verifies readiness and releases the hold. |
 
 An unreadable journal, or a `paused` record with no maintenance hold (what the
-retired updater's stop left), has no exact generation for these commands to
-match, and no command clears it. After confirming no `ava stop` or `ava
-maintenance` command is in flight for this home (`ava maintenance status`
-reports what it can read), remove `$AVA_HOME/run/deploy-pause-owner.json` by
-hand and run `ava start`.
+retired updater's stop left), has no exact generation to match, and no command
+clears it. After confirming no `ava stop` is in flight for this home (`ava
+status` reports what it can read), remove `$AVA_HOME/run/deploy-pause-owner.json`
+by hand and run `ava start`.
 
 A failed stop retains its process inventory and hold. Force remains an explicit
 owned-process escalation, not an inference from a timeout or a way to
 manufacture a drain receipt.
 
-An ordinary `ava start` can complete ordinary stopped/starting recovery and
-resume after full readiness. Blocking checkpoint/continuation failures refuse
-before services launch. Repair those through the exact-generation
-`maintenance repair` procedure above. A successful service probe cannot make
-an unflushed checkpoint durable.
+An ordinary `ava start` completes stopped/starting recovery and resumes after
+full readiness, settling recorded continuation failures as above. A successful
+service probe cannot make an unflushed checkpoint durable; that is why the
+agent continues from the last durable one.
 
 ## Supervision and recovery ownership
 

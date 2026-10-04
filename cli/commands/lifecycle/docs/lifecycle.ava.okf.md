@@ -13,8 +13,8 @@ tags:
 
 `cli/commands/lifecycle/` holds the local host lifecycle verbs and the machinery
 they share. The verbs are `start.py` (`ava start`), `stop.py` (`ava stop`,
-`ava restart`), `maintenance.py` (`ava maintenance status|repair|cancel`) and
-`status.py` (`ava status`). Every one of them reaches the single application
+`ava restart`) and `status.py` (`ava status`, with `hold_report.py` reading the
+maintenance hold for it). Every one of them reaches the single application
 root through `root_driver.py`, and every stopping verb goes through the same
 native drain boundary (`_temporary_stop`, `service_stop`) — which is why they
 form one package rather than one per verb.
@@ -54,11 +54,12 @@ helper exit and removal of its definition. Start recreates that definition.
 Root owns Gate and native LGTM application services. `_pause_resume` releases
 normal startup admission only after readiness.
 
-`cli/parsers/maintenance.py` exposes only the hold journal's reader and exits
-(`status`, `repair`, `cancel`); the holds themselves are taken by `ava stop` and
-`ava restart` and released by `ava start`. `maintenance.py` reads its generation's hold through the maintenance
-journal's own door (`base.deploy.maintenance.admission.require_operation`) and the agent-host
-probes from `ops.agent_pause.probe`. They reuse the
+No command reads or ends a hold except `ava status` (and `ava status --json`, the
+hold alone as one JSON object, settings-lite) and `ava start`: the holds are taken
+by `ava stop` and `ava restart` and released by `ava start`. `_pause_resume`
+settles a hold's failed continuation receipts through `_failed_receipts`
+(re-delivering each one, reporting and notifying the owner for any it cannot)
+once the unit serves and before the hold releases. These reuse the
 [durable maintenance journal](../../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../../../conventions/graceful-maintenance.md).
 

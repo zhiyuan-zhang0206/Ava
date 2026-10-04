@@ -169,7 +169,6 @@ _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/commands/lifecycle/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit stop? No execution is routed elsewhere.",
     "ops/agent_pause/__init__.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
-    "cli/commands/lifecycle/maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
     "base/cluster/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
     "base/telemetry/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
     "services/healthchecks/otel_collector.py": "does this unit own the LGTM collector healthcheck, preserving pure-runner relay behavior (what do I serve)",

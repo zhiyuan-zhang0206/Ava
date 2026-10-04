@@ -179,3 +179,27 @@ def test_windows_read_an_unreadable_owner_as_held(
     monkeypatch.setattr(admission, "snapshot", _unreadable)
     assert admission.quiesced()
     assert admission.in_stop_leg()
+
+
+def test_clear_failures_drops_blocking_receipts_and_keeps_the_rest() -> None:
+    first = pause_owner.begin_maintenance("migration", WHEN).snapshot
+    assert first.maintenance is not None
+    hold = MaintenanceHold(
+        "draining",
+        {1: 11, 2: 22},
+        drained=(2,),
+        failures={1: "RuntimeError"},
+        undelivered={2: "PoolTimeout"},
+    )
+    pause_owner.change_maintenance("migration", WHEN, first.maintenance, hold)
+
+    assert admission.clear_failures() == {1: "RuntimeError"}
+
+    current = admission.snapshot()
+    assert current is not None
+    assert current.maintenance == replace(hold, failures={})
+    assert admission.clear_failures() == {}
+
+
+def test_clear_failures_outside_a_hold_is_a_no_op() -> None:
+    assert admission.clear_failures() == {}

@@ -38,20 +38,16 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
         current = admission.snapshot()
         if current is None:
             return start(*args, **kwargs)
-        if current.maintenance is not None and current.maintenance.failures:
-            assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-            raise RuntimeError(
-                "start cannot release failed continuation/flush receipts; hold retained — "
-                "fix the root cause, then ava maintenance repair --operation "
-                f"{current.holder} --acquired-at {current.acquired_at.isoformat()}"
-            )
         if admission.start_authorized():
             return start(*args, **kwargs)
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
         with admission.authorized_start(current.holder, current.acquired_at):
             result = start(*args, **kwargs)
         if result == 0 and start_serving.is_serving():
+            from cli.commands.lifecycle._failed_receipts import settle_failed_receipts
             from ops.cluster_pause import unpause_local_cluster
+
+            settle_failed_receipts()
 
             unpause_local_cluster(Database.from_settings(), EventBus.from_settings())
             # start()'s status snapshot was taken under the hold, so it read paused.

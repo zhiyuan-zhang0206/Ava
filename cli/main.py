@@ -170,10 +170,6 @@ def _normalize_process_profile() -> None:
 
 def _opt_into_lite_config(args_in: list[str]) -> None:
     """Verbs that must run without the config fetch build settings-lite instead."""
-    # `maintenance status` builds settings-lite: it only reads the local journal.
-    # `repair` and `cancel` dial this unit's real database, so they fetch like
-    # every other verb -- start, converge, update, trace-ship -- and every
-    # daemon/agent process fetches per its own role at Settings build.
     # base.sessions.env_forwarding does not forward this var, so processes a
     # lite verb spawns never inherit the opt-out.
     from cli.preflight import unit_already_stopped
@@ -183,8 +179,6 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
         and args_in[0] in _LITE_VERBS
         and (args_in[0] != "stop" or "--force" in args_in or unit_already_stopped())
     ):
-        os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
-    if args_in[:2] == ["maintenance", "status"]:
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
 
 
