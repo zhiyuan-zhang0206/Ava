@@ -64,8 +64,9 @@ def _repo_with_project_skill(tmp_path: Path) -> Path:
 async def test_after_exec_hook_injects_cwd_and_project_skills_notes(tmp_path: Path):
     """After an exec's `ava.cwd.set(repo)`, the host-side hook consumes `cwd_note` (clears it) and
     injects the cwd-change note plus the project-skills listing."""
-    from ava_builtins.plugins.ava_code.agent_runtime import inject_cwd_notes_after_exec
+    from ava_builtins.plugins.ava_code import agent_runtime
 
+    hook = agent_runtime.contribute().after_exec[0]
     repo = _repo_with_project_skill(tmp_path)
     ava.state = _make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
@@ -77,7 +78,7 @@ async def test_after_exec_hook_injects_cwd_and_project_skills_notes(tmp_path: Pa
 
     with pytest.raises(AttributeError):
         _ = ava.state
-    result = await inject_cwd_notes_after_exec(committed, None, None)
+    result = await hook(committed, None, None)
 
     notes = _hook_notes(result)
     assert [tag for tag, _ in notes] == ["context", "project_skills"]
@@ -91,8 +92,9 @@ async def test_after_exec_hook_injects_cwd_and_project_skills_notes(tmp_path: Pa
 async def test_after_exec_hook_reinjects_project_skills_only_after_compact(tmp_path: Path):
     """The skills listing is injected once per compaction: a state that already saw this compact
     version gets nothing; a compaction bumps the version and re-surfaces it."""
-    from ava_builtins.plugins.ava_code.agent_runtime import inject_cwd_notes_after_exec
+    from ava_builtins.plugins.ava_code import agent_runtime
 
+    hook = agent_runtime.contribute().after_exec[0]
     state_cls = type(_make_state_with_cwd(str(tmp_path)))
     note = "Skills available in this repo (1):\n  - demo-proj"
 
@@ -106,8 +108,8 @@ async def test_after_exec_hook_reinjects_project_skills_only_after_compact(tmp_p
             messages=[], halted=False, compact=CompactState(version=compact_version), **fields
         )
 
-    assert await inject_cwd_notes_after_exec(state_at(0, 0), None, None) is None
-    result = await inject_cwd_notes_after_exec(state_at(1, 0), None, None)
+    assert await hook(state_at(0, 0), None, None) is None
+    result = await hook(state_at(1, 0), None, None)
     assert [tag for tag, _ in _hook_notes(result)] == ["project_skills"]
     assert result is not None
     assert result["ava_code__project_skills_seen_compact"] == 1
@@ -115,17 +117,17 @@ async def test_after_exec_hook_reinjects_project_skills_only_after_compact(tmp_p
 
 
 async def test_after_exec_hook_is_noop_without_pending_notes(tmp_path: Path):
-    from ava_builtins.plugins.ava_code.agent_runtime import inject_cwd_notes_after_exec
+    from ava_builtins.plugins.ava_code import agent_runtime
 
-    assert (
-        await inject_cwd_notes_after_exec(_make_state_with_cwd(str(tmp_path)), None, None) is None
-    )
+    hook = agent_runtime.contribute().after_exec[0]
+    assert await hook(_make_state_with_cwd(str(tmp_path)), None, None) is None
 
 
 async def test_after_exec_hook_on_a_state_without_the_plugin_fields_fails_loudly():
     """No swallowed errors: a graph state that lacks the plugin's channels is a wiring bug and
     surfaces as one."""
-    from ava_builtins.plugins.ava_code.agent_runtime import inject_cwd_notes_after_exec
+    from ava_builtins.plugins.ava_code import agent_runtime
 
+    hook = agent_runtime.contribute().after_exec[0]
     with pytest.raises(AttributeError):
-        await inject_cwd_notes_after_exec(BaseAgentState(), None, None)
+        await hook(BaseAgentState(), None, None)

@@ -415,3 +415,15 @@ def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_regis
 
     install.uninstall()
     assert install.expansions() == ()
+
+
+def test_the_turn_state_slot_belongs_to_the_installation() -> None:
+    """The installation owns its turn-state slot: `install()` creates it,
+    `install.turn_state()` reads it back, and `uninstall()` drops it."""
+    assert install.turn_state() is None
+
+    install.install(_registry())
+    assert install.turn_state() is not None
+
+    install.uninstall()
+    assert install.turn_state() is None
