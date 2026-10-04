@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import ast
 import os
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import cast
@@ -267,26 +268,44 @@ _FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {
 }
 
 
-@lru_cache
-def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
-    """Modules (repo-internal) transitively imported by the gateway-side roots."""
+_GATEWAY_CLOSURE_PACKAGES = (
+    "base",
+    "gateway",
+    "services",
+    "agent",
+    "ops",  # gateway HTTP routes execute ops/* in-process (task #3956)
+)
+
+
+def _module_name_of(path: Path) -> str:
+    return str(path.relative_to(_repo_root()).with_suffix("")).replace("/", ".")
+
+
+def _resolve_module_file(name: str) -> Path | None:
+    """The repo file a dotted module name resolves to, or None if it is external."""
     root = _repo_root()
+    as_module = root / (name.replace(".", "/") + ".py")
+    if as_module.exists():
+        return as_module
+    as_package = root / name.replace(".", "/") / "__init__.py"
+    if as_package.exists():
+        return as_package
+    return None
 
-    def module_of(path: Path) -> str:
-        return str(path.relative_to(root).with_suffix("")).replace("/", ".")
 
-    def resolve_import(name: str) -> Path | None:
-        cand = root / (name.replace(".", "/") + ".py")
-        if cand.exists():
-            return cand
-        cand2 = root / name.replace(".", "/") / "__init__.py"
-        if cand2.exists():
-            return cand2
-        return None
+def _walk_import_closure(
+    roots: tuple[str, ...],
+    imported_modules: Callable[[ast.AST], list[str]],
+) -> set[Path]:
+    """Root .py files + every repo file they transitively import.
 
+    `imported_modules` maps one AST node to the dotted module names it pulls in
+    (empty for non-import nodes), so each closure scan owns its import policy.
+    """
+    root = _repo_root()
     frontier: list[str] = []
     for prefix in roots:
-        frontier.extend(module_of(py) for py in _production_py_files(root, prefix))
+        frontier.extend(_module_name_of(py) for py in _production_py_files(root, prefix))
     seen: set[str] = set()
     closure: set[Path] = set()
     while frontier:
@@ -294,7 +313,7 @@ def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
         if m in seen:
             continue
         seen.add(m)
-        p = resolve_import(m)
+        p = _resolve_module_file(m)
         if p is None:
             continue
         closure.add(p)
@@ -303,30 +322,28 @@ def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
         except (OSError, SyntaxError):
             continue
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.module
-                and node.module.split(".")[0]
-                in (
-                    "base",
-                    "gateway",
-                    "services",
-                    "agent",
-                    "ops",  # gateway HTTP routes execute ops/* in-process (task #3956)
-                )
-            ):
-                frontier.append(node.module)
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.split(".")[0] in (
-                        "base",
-                        "gateway",
-                        "services",
-                        "agent",
-                        "ops",
-                    ):
-                        frontier.append(alias.name)
+            frontier.extend(imported_modules(node))
     return closure
+
+
+def _gateway_closure_imports(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.ImportFrom):
+        if node.module and node.module.split(".")[0] in _GATEWAY_CLOSURE_PACKAGES:
+            return [node.module]
+        return []
+    if isinstance(node, ast.Import):
+        return [
+            alias.name
+            for alias in node.names
+            if alias.name.split(".")[0] in _GATEWAY_CLOSURE_PACKAGES
+        ]
+    return []
+
+
+@lru_cache
+def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
+    """Modules (repo-internal) transitively imported by the gateway-side roots."""
+    return _walk_import_closure(roots, _gateway_closure_imports)
 
 
 def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
@@ -442,62 +459,27 @@ _CLOSURE_PACKAGES = (
 )
 
 
+def _kind_closure_imports(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.ImportFrom):
+        if node.module and node.module.split(".")[0] in _CLOSURE_PACKAGES and node.level == 0:
+            # `from base import telemetry` names a MODULE inside the
+            # package — push the package AND the full dotted path, or the
+            # submodule never enters the frontier (the existing gateway
+            # closure scan had this blind spot: base/log/__init__.py's lazy
+            # `from base import telemetry` did not pull telemetry.py in).
+            return [node.module] + [
+                f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*"
+            ]
+        return []
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names if alias.name.split(".")[0] in _CLOSURE_PACKAGES]
+    return []
+
+
 @lru_cache
 def _kind_closure(roots: tuple[str, ...]) -> set[Path]:
     """Root .py files + the repo-internal import closure, for one process kind."""
-    root = _repo_root()
-
-    def module_of(path: Path) -> str:
-        return str(path.relative_to(root).with_suffix("")).replace("/", ".")
-
-    def resolve_import(name: str) -> Path | None:
-        cand = root / (name.replace(".", "/") + ".py")
-        if cand.exists():
-            return cand
-        cand2 = root / name.replace(".", "/") / "__init__.py"
-        if cand2.exists():
-            return cand2
-        return None
-
-    frontier: list[str] = []
-    for prefix in roots:
-        frontier.extend(module_of(py) for py in _production_py_files(root, prefix))
-    seen: set[str] = set()
-    closure: set[Path] = set()
-    while frontier:
-        m = frontier.pop()
-        if m in seen:
-            continue
-        seen.add(m)
-        p = resolve_import(m)
-        if p is None:
-            continue
-        closure.add(p)
-        try:
-            tree = ast.parse(p.read_text(errors="replace"))
-        except (OSError, SyntaxError):
-            continue
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.module
-                and node.module.split(".")[0] in _CLOSURE_PACKAGES
-            ):
-                # `from base import telemetry` names a MODULE inside the
-                # package — push the package AND the full dotted path, or the
-                # submodule never enters the frontier (the existing gateway
-                # closure scan had this blind spot: base/log/__init__.py's lazy
-                # `from base import telemetry` did not pull telemetry.py in).
-                if node.level == 0:
-                    frontier.append(node.module)
-                    for alias in node.names:
-                        if alias.name != "*":
-                            frontier.append(f"{node.module}.{alias.name}")
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.split(".")[0] in _CLOSURE_PACKAGES:
-                        frontier.append(alias.name)
-    return closure
+    return _walk_import_closure(roots, _kind_closure_imports)
 
 
 def _closure_domains(closure: set[Path]) -> set[str]:

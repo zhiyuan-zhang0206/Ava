@@ -164,38 +164,48 @@ def _wait_for(predicate: Callable[[], bool], message: str) -> None:
     raise AssertionError(message)
 
 
+def _assert_first_status_and_unit_pid(
+    client: RootClient, proc: subprocess.Popen[bytes], run_dir: Path
+) -> int:
+    """The freshly ready daemon reports itself and one running `svc`; returns that unit's pid."""
+    # K3 face: the control socket is owner-only.
+    assert stat.S_IMODE((run_dir / _SOCKET_NAME).stat().st_mode) == 0o600
+
+    response = client.status()
+    result = cast("dict[str, object]", response.get("result"))
+    root = cast("dict[str, object]", result["root"])
+    assert root["pid"] == proc.pid
+    units = _units_of(response)
+    assert [u["id"] for u in units] == ["svc"]
+    assert units[0]["state"] == "running"
+    assert (run_dir / "logs" / "svc" / "output.log").exists()
+    return cast(int, units[0]["pid"])
+
+
+def _assert_down_up_restart_cycle(client: RootClient, unit_pid: int) -> None:
+    """`down` stops the unit, `up` starts a different process, `restart` succeeds."""
+    response = client.down("svc")
+    assert response["ok"] is True
+    assert _units_of(response)[0]["action"] == "stopped"
+    _wait_dead(unit_pid)
+
+    response = client.up("svc")
+    assert response["ok"] is True
+    revived = _units_of(response)[0]
+    assert revived["action"] == "started"
+    assert cast(int, revived["pid"]) != unit_pid
+
+    response = client.restart("svc")
+    assert response["ok"] is True
+
+
 def test_daemon_end_to_end(short_tmp: Path) -> None:
     run_dir = short_tmp / "nested" / "run"  # the daemon creates its run dir
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
     with _daemon(run_dir, manifests) as (proc, log_path):
         client = _wait_ready(run_dir, proc, log_path)
-        # K3 face: the control socket is owner-only.
-        assert stat.S_IMODE((run_dir / _SOCKET_NAME).stat().st_mode) == 0o600
-
-        response = client.status()
-        result = cast("dict[str, object]", response.get("result"))
-        root = cast("dict[str, object]", result["root"])
-        assert root["pid"] == proc.pid
-        units = _units_of(response)
-        assert [u["id"] for u in units] == ["svc"]
-        assert units[0]["state"] == "running"
-        unit_pid = cast(int, units[0]["pid"])
-        assert (run_dir / "logs" / "svc" / "output.log").exists()
-
-        response = client.down("svc")
-        assert response["ok"] is True
-        assert _units_of(response)[0]["action"] == "stopped"
-        _wait_dead(unit_pid)
-
-        response = client.up("svc")
-        assert response["ok"] is True
-        revived = _units_of(response)[0]
-        assert revived["action"] == "started"
-        revived_pid = cast(int, revived["pid"])
-        assert revived_pid != unit_pid
-
-        response = client.restart("svc")
-        assert response["ok"] is True
+        unit_pid = _assert_first_status_and_unit_pid(client, proc, run_dir)
+        _assert_down_up_restart_cycle(client, unit_pid)
 
     # SIGTERM ran the graceful stop: process exited 0, tree is down, socket gone.
     assert proc.returncode == 0

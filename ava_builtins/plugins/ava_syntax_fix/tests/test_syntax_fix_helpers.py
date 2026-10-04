@@ -4,7 +4,7 @@ deterministic fixers.
 The five high-complexity fixers (radon cc 16-19) were split into small pure
 helpers. These fixers rewrite user code byte-by-byte and their output feeds
 the release pipeline, so the input/output contract is sacred: the
-differential tests embed the pre-refactor implementations verbatim (git HEAD)
+differential tests use the pre-refactor implementations (`legacy_fixers_support`)
 as an oracle and assert the refactored fixers produce byte-identical output
 and change counts across a corpus of edge cases.
 
@@ -19,7 +19,6 @@ import random
 import pytest
 
 from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
-    _STRING_PREFIX_CHARS,
     _compiles,
     _escape_interior_quotes,
     _escape_interior_triples,
@@ -28,15 +27,11 @@ from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
     _first_compiling_closer,
     _first_compiling_escape,
     _first_compiling_line_escape,
-    _is_raw_prefixed,
-    _line_starts,
-    _quote_is_string_boundary,
     _quote_positions,
     _scan_cross_line_opener,
     _scan_unbalanced_brackets,
     _string_advance,
     _syntax_error_lineno,
-    _triple_quote_is_string_boundary,
     _unterminated_error,
     _unterminated_opener_pos,
     fix_bracket_matching,
@@ -45,352 +40,13 @@ from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
     fix_string_newlines,
     fix_unterminated_to_triple,
 )
-
-
-# ---------------------------------------------------------------------------
-def _legacy_fix_string_newlines(code: str) -> tuple[str, int]:  # noqa: PLR0915
-    """Detect single/double-quoted strings that span multiple lines (literal
-    newline between delimiters) and convert them to triple-quoted strings.
-
-    Python tokenize fails on this pattern (unterminated string literal), so
-    we operate at the source-text level with a line-by-line scan. Regular
-    escape sequences like \\n inside a single-line string are left alone.
-
-    Handles plain and f-prefixed strings (f'...', f"...").
-    """
-    lines = code.split("\n")
-    changes = 0
-
-    # Track string state: (original_delim, triple_delim) when inside a converted string.
-    in_string_info: tuple[str, str] | None = None
-
-    for i in range(len(lines)):
-        line = lines[i]
-
-        if in_string_info is None:
-            # Not inside a string -- scan for an opening quote that does not
-            # close on the same line.
-            j = 0
-            while j < len(line):
-                ch = line[j]
-
-                if ch == "#":
-                    break
-
-                prefix_end = j
-                while prefix_end < len(line) and line[prefix_end] in (
-                    "f",
-                    "r",
-                    "b",
-                    "u",
-                    "F",
-                    "R",
-                    "B",
-                    "U",
-                ):
-                    prefix_end += 1
-
-                if prefix_end < len(line) and line[prefix_end] in ("'", '"'):
-                    quote_char = line[prefix_end]
-                    triple_delim = quote_char * 3
-
-                    if line[prefix_end : prefix_end + 3] == triple_delim:
-                        after_open = line[prefix_end + 3 :]
-                        close_pos = after_open.find(triple_delim)
-                        if close_pos >= 0:
-                            j = prefix_end + 3 + close_pos + 3
-                        else:
-                            in_string_info = (triple_delim, triple_delim)
-                            j = len(line)
-                        continue
-
-                    k = prefix_end + 1
-                    closed = False
-                    while k < len(line):
-                        if line[k] == "\\":
-                            k += 2
-                            continue
-                        if line[k] == quote_char:
-                            closed = True
-                            j = k + 1
-                            break
-                        k += 1
-
-                    if closed:
-                        continue
-
-                    # Cross-line pattern: upgrade opener to triple-quote.
-                    lines[i] = line[:prefix_end] + triple_delim + line[prefix_end + 1 :]
-                    in_string_info = (quote_char, triple_delim)
-                    changes += 1
-                    j = len(line)
-                    continue
-
-                j += 1
-
-        else:
-            # Inside a converted string -- find and upgrade the closer.
-            orig_delim, triple_delim = in_string_info
-
-            close_pos = -1
-            k = 0
-            while k < len(line):
-                if line[k] == "\\":
-                    k += 2
-                    continue
-                if line[k] == orig_delim:
-                    close_pos = k
-                    break
-                k += 1
-
-            if close_pos >= 0:
-                lines[i] = line[:close_pos] + triple_delim + line[close_pos + 1 :]
-                changes += 1
-                in_string_info = None
-
-    return "\n".join(lines), changes
-
-
-def _legacy_fix_bracket_matching(code: str) -> tuple[str, int]:
-    """Detect and fix unbalanced parentheses, brackets, and braces using a
-    simple stack-based matching algorithm.
-
-    When an unbalanced bracket is found, attempts a minimal fix:
-    - Missing closing bracket: append at the end of the source.
-    - Extra closing bracket: remove it.
-    """
-    pairs = {"(": ")", "[": "]", "{": "}"}
-    closers = {")": "(", "]": "[", "}": "{"}
-
-    stack: list[tuple[str, int]] = []
-    changes = 0
-
-    # Scan character by character, skipping string literals heuristically.
-    in_string: str | None = None
-    in_triple: bool = False
-    i = 0
-    while i < len(code):
-        ch = code[i]
-
-        if not in_string and ch in ('"', "'"):
-            if code[i : i + 3] in ('"""', "'" * 3):
-                in_string = code[i : i + 3]
-                in_triple = True
-                i += 3
-                continue
-            in_string = ch
-            i += 1
-            continue
-        if in_string:
-            if in_triple:
-                if code[i : i + 3] == in_string:
-                    in_string = None
-                    in_triple = False
-                    i += 3
-                    continue
-            else:
-                if ch == "\\":
-                    i += 2
-                    continue
-                if ch == in_string:
-                    in_string = None
-                    i += 1
-                    continue
-            i += 1
-            continue
-
-        if ch in pairs:
-            stack.append((ch, i))
-        elif ch in closers:
-            if stack and closers[ch] == stack[-1][0]:
-                stack.pop()
-            else:
-                code = code[:i] + code[i + 1 :]
-                changes += 1
-                i -= 1
-        i += 1
-
-    if stack:
-        suffix = "".join(pairs[op] for op, _ in reversed(stack))
-        code = code.rstrip() + suffix + "\n"
-        changes += len(stack)
-
-    return code, changes
-
-
-def _legacy_fix_unterminated_to_triple(code: str) -> tuple[str, int]:
-    """Convert an unterminated single/double-quoted (or f-) string into a
-    triple-quoted one.
-
-    The dominant production case is a multi-line shell command written as a
-    one-line string: ``ava.shell.run("git commit -m 'msg line 1`` where the
-    content (a heredoc, a commit body, a PR description) flows onto the next
-    physical lines. Python reports an unterminated string because a plain
-    string cannot span newlines.
-
-    The SyntaxError offset pins the opening quote exactly (more reliable than a
-    forward line scan, which the existing fix_string_newlines uses and which
-    mis-fires when the body contains the same quote char). The matching closer
-    is the author's intended closing quote, somewhere on a later line; it is
-    found by trying each subsequent same-char quote and keeping the first whose
-    conversion (opener + that quote both upgraded to triple) makes the whole
-    source compile. Preferring the nearest compiling closer keeps the string as
-    small as the parse allows.
-    """
-    try:
-        compile(code, "<guard>", "exec")
-        return code, 0
-    except SyntaxError as e:
-        msg = e.msg or ""
-        lineno, offset = e.lineno, e.offset
-    if "unterminated string literal" not in msg and "unterminated f-string literal" not in msg:
-        return code, 0
-    if not lineno or not offset:
-        return code, 0
-
-    op = _line_starts(code)[lineno - 1] + (offset - 1)
-    # The offset may point at a string prefix (f / r / b / u) rather than the
-    # quote itself; skip the prefix letters to land on the opening quote.
-    while op < len(code) and code[op] in _STRING_PREFIX_CHARS:
-        op += 1
-    if op >= len(code) or code[op] not in ("'", '"'):
-        return code, 0
-
-    quote = code[op]
-    triple = quote * 3
-
-    i = op + 1
-    while i < len(code):
-        ch = code[i]
-        if ch == "\\":
-            i += 2
-            continue
-        if ch == quote and "\n" in code[op:i]:
-            candidate = code[:op] + triple + code[op + 1 : i] + triple + code[i + 1 :]
-            if _compiles(candidate):
-                return candidate, 1
-        i += 1
-    return code, 0
-
-
-def _legacy_fix_nested_triple_quote(code: str) -> tuple[str, int]:
-    """Escape interior triple-quotes inside a triple-quoted string.
-
-    Agents frequently build a file/string whose body is itself Python or
-    markdown containing ``\"\"\"`` docstrings, e.g.
-    ``ava.files.write(path, \"\"\"...def f(): \"\"\"doc\"\"\"...\"\"\")``. The
-    first inner ``\"\"\"`` closes the outer string, so the rest of the body is
-    parsed as code and the file fails with an assortment of downstream errors
-    (invalid character, unexpected indent, unterminated string).
-
-    The fix preserves the author's intent: the real opener and closer stay
-    triple-quoted and every triple-quote strictly between them is escaped
-    (``\"\"\"`` -> ``\\"\\"\\"``), which leaves the runtime string content
-    byte-for-byte identical. Opener/closer are chosen by trying candidate pairs
-    and keeping the first whose escaped result compiles. Raw-prefixed openers
-    are skipped because a raw string cannot escape its own delimiter.
-
-    A candidate pair is rejected when any triple-quote it would escape sits at a
-    string-boundary position (hugging ``+ , ( [ {`` / ``+ , ) ] }``). Such a
-    triple-quote is a real delimiter of a separate adjacent literal -- e.g. the
-    closer of ``files.edit(old=\"\"\"...\"\"\", new=\"\"\"...\"\"\")``'s first
-    argument -- and escaping it would silently merge two arguments into one
-    string that compiles but means something else. Those cases are left for the
-    repair step, where intent can be inferred, rather than corrupted here.
-    """
-    if _compiles(code):
-        return code, 0
-
-    for delim in ('"""', "'''"):
-        escaped = "\\" + delim[0] + "\\" + delim[0] + "\\" + delim[0]
-        positions: list[int] = []
-        i = 0
-        while i < len(code) - 2:
-            if code[i : i + 3] == delim:
-                positions.append(i)
-                i += 3
-            else:
-                i += 1
-        if len(positions) < 3:
-            continue
-
-        for oi in range(len(positions)):
-            if _is_raw_prefixed(code, positions[oi]):
-                continue
-            for ci in range(len(positions) - 1, oi, -1):
-                opener, closer = positions[oi], positions[ci]
-                interior = [p for p in positions if opener < p < closer]
-                if not interior:
-                    continue
-                if any(_triple_quote_is_string_boundary(code, p) for p in interior):
-                    continue
-                out = code[:opener] + delim
-                last = opener + 3
-                for p in interior:
-                    out += code[last:p] + escaped
-                    last = p + 3
-                out += code[last:closer] + delim + code[closer + 3 :]
-                if _compiles(out):
-                    return out, len(interior)
-    return code, 0
-
-
-def _legacy_fix_escape_inner_quotes(code: str) -> tuple[str, int]:
-    """Escape unescaped same-char quotes nested inside a single-line string.
-
-    Pattern: ``ava.shell.run("grep -n "pattern" file")`` -- the inner ``"``
-    closes the literal early, so the shell argument is parsed as code. The fix
-    escapes the interior quotes (``"pattern"`` -> ``\\"pattern\\"``).
-
-    Restricted to interior quotes that hug content. An interior quote adjacent
-    to ``+ , ( [`` is a genuine string boundary (concatenation, list, call
-    argument) -- escaping it would silently merge separate literals into one
-    wrong-but-compiling string, so such candidates are rejected and the error
-    is left for the repair step instead.
-    """
-    try:
-        compile(code, "<guard>", "exec")
-        return code, 0
-    except SyntaxError as e:
-        lineno = e.lineno
-    if not lineno:
-        return code, 0
-    lines = code.split("\n")
-    if lineno > len(lines):
-        return code, 0
-    line = lines[lineno - 1]
-
-    for quote in ('"', "'"):
-        positions: list[int] = []
-        i = 0
-        while i < len(line):
-            if line[i] == "\\":
-                i += 2
-                continue
-            if line[i] == quote:
-                positions.append(i)
-            i += 1
-        if len(positions) < 3:
-            continue
-        for oi in range(len(positions)):
-            opener = positions[oi]
-            for ci in range(len(positions) - 1, oi, -1):
-                interior = positions[oi + 1 : ci]
-                if not interior:
-                    continue
-                if any(_quote_is_string_boundary(line, p) for p in interior):
-                    continue
-                new_line = line[: opener + 1]
-                last = opener + 1
-                for p in interior:
-                    new_line += line[last:p] + "\\" + quote
-                    last = p + 1
-                new_line += line[last:]
-                candidate = "\n".join([*lines[: lineno - 1], new_line, *lines[lineno:]])
-                if _compiles(candidate):
-                    return candidate, len(interior)
-    return code, 0
-
+from ava_builtins.plugins.ava_syntax_fix.tests.legacy_fixers_support import (
+    legacy_fix_bracket_matching,
+    legacy_fix_escape_inner_quotes,
+    legacy_fix_nested_triple_quote,
+    legacy_fix_string_newlines,
+    legacy_fix_unterminated_to_triple,
+)
 
 # ---------------------------------------------------------------------------
 # Helper unit tests
@@ -631,15 +287,15 @@ class TestFirstCompilingLineEscape:
 
 
 # ---------------------------------------------------------------------------
-# Differential behavior lock: refactored fixers vs verbatim legacy oracles
+# Differential behavior lock: refactored fixers vs legacy oracles
 # ---------------------------------------------------------------------------
 
 LEGACY = {
-    "fix_string_newlines": _legacy_fix_string_newlines,
-    "fix_bracket_matching": _legacy_fix_bracket_matching,
-    "fix_unterminated_to_triple": _legacy_fix_unterminated_to_triple,
-    "fix_nested_triple_quote": _legacy_fix_nested_triple_quote,
-    "fix_escape_inner_quotes": _legacy_fix_escape_inner_quotes,
+    "fix_string_newlines": legacy_fix_string_newlines,
+    "fix_bracket_matching": legacy_fix_bracket_matching,
+    "fix_unterminated_to_triple": legacy_fix_unterminated_to_triple,
+    "fix_nested_triple_quote": legacy_fix_nested_triple_quote,
+    "fix_escape_inner_quotes": legacy_fix_escape_inner_quotes,
 }
 
 NEW = {

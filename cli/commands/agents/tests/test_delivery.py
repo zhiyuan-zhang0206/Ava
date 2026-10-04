@@ -95,6 +95,22 @@ def elapse(db_conn: psycopg.Connection, lease: dict[str, Any], seconds: int = 18
     db_conn.commit()
 
 
+def assert_message_pending(db_conn: psycopg.Connection, message_id: int) -> None:
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (message_id,)
+    ).fetchone() == ("pending",)
+
+
+def assert_expiry_note_explains_pending_messages(
+    db_conn: psycopg.Connection, summary_inbound_id: int
+) -> None:
+    note = db_conn.execute(
+        "SELECT content FROM inbound_messages WHERE id=%s", (summary_inbound_id,)
+    ).fetchone()
+    assert note is not None
+    assert "did not ACK" in note[0] and "Unacknowledged messages remain pending" in note[0]
+
+
 def test_two_attempts_each_get_a_full_window_then_native_observes_expiry(
     db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
@@ -122,14 +138,8 @@ def test_two_attempts_each_get_a_full_window_then_native_observes_expiry(
     assert f"did not ACK message {mid} after 2 delivery attempts" in ended["rejection_reason"]
     assert ended["reason"] == "Test ACK exhaustion"
     assert reserve(lease, mid) == set()
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE id=%s", (mid,)
-    ).fetchone() == ("pending",)
-    note = db_conn.execute(
-        "SELECT content FROM inbound_messages WHERE id=%s", (ended["summary_inbound_id"],)
-    ).fetchone()
-    assert note is not None
-    assert "did not ACK" in note[0] and "Unacknowledged messages remain pending" in note[0]
+    assert_message_pending(db_conn, mid)
+    assert_expiry_note_explains_pending_messages(db_conn, ended["summary_inbound_id"])
 
 
 def test_delivery_reservation_that_expires_lease_refreshes_roster(
@@ -258,6 +268,65 @@ def test_exhausted_message_outside_page_still_ends_lease(
     assert f"message {other}" in ended["rejection_reason"]
 
 
+class ClockListener:
+    """Relay listener whose every wait advances the DB clock by one ACK window.
+
+    Each wait first checks the lease is still inside the window (nothing due,
+    still active), then ages the delivery past it.
+    """
+
+    closed = False
+    waits = 0
+
+    def __init__(
+        self,
+        db_conn: psycopg.Connection,
+        lease: dict[str, Any],
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        self._db_conn = db_conn
+        self._lease = lease
+        self._database = database
+        self._event_bus = event_bus
+
+    async def ensure_listening(self) -> None:
+        pass
+
+    async def wait_one(self, timeout: float) -> None:
+        lease, window = self._lease, self._lease["ack_window_seconds"]
+        self.waits += 1
+        assert (
+            self.waits <= lease["max_delivery_attempts"]
+        )  # ignore-config regressions fail, not hang
+        elapse(self._db_conn, lease, window - 1)
+        inbox = leases.relay_inbox(self._database, lease["id"], lease["relay_token"])
+        assert not inbox[0]["delivery_due"]
+        status = leases.relay_get(
+            self._database, self._event_bus, lease["id"], lease["relay_token"]
+        )
+        assert status["status"] == "active"
+        elapse(self._db_conn, lease, window + 1)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def assert_pushes_follow_snapshotted_budget(
+    pushes: list[str], mid: int, window: int, attempts: int
+) -> None:
+    deliveries = [push for push in pushes if f"[id={mid}]" in push]
+    assert len(deliveries) == attempts
+    for count, push in enumerate(deliveries, 1):
+        assert f"ACK within {window}s" in push
+        assert f"Delivery attempt {count}/{attempts}" in push
+        assert ("final delivery" in push) == (count == attempts)
+    assert f"Each message has {attempts} delivery attempts" in pushes[0]
+    assert f"with {window}s to ACK each" in pushes[0]
+    assert "Ava control expired" in pushes[-1]
+    assert "did not ACK" in pushes[-1]
+
+
 @pytest.mark.parametrize("active", [(180, 2), (7, 1), (60, 3)], indirect=True)
 @pytest.mark.parametrize("crash_after_first_submission", [False, True])
 async def test_real_relay_uses_snapshotted_config_across_restart(
@@ -297,29 +366,6 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
             database, event_bus, lease["id"], lease["relay_token"], ids
         )
 
-    class ClockListener:
-        closed = False
-        waits = 0
-
-        async def ensure_listening(self) -> None:
-            pass
-
-        async def wait_one(self, timeout: float) -> None:
-            self.waits += 1
-            assert self.waits <= attempts  # ignore-config regressions must fail, not hang
-            elapse(db_conn, lease, window - 1)
-            assert not leases.relay_inbox(database, lease["id"], lease["relay_token"])[0][
-                "delivery_due"
-            ]
-            assert (
-                leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])["status"]
-                == "active"
-            )
-            elapse(db_conn, lease, window + 1)
-
-        async def close(self) -> None:
-            self.closed = True
-
     if crash_after_first_submission:
 
         def crash(push: str) -> None:
@@ -327,7 +373,7 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
             if f"[id={mid}]" in push:
                 raise RuntimeError("host accepted but relay died")
 
-        first_listener = ClockListener()
+        first_listener = ClockListener(db_conn, lease, database, event_bus)
         with pytest.raises(RuntimeError, match="relay died"):
             await relay.relay_inbox(
                 owner.agent_id,
@@ -344,7 +390,7 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
             == 1
         )
 
-    listener = ClockListener()
+    listener = ClockListener(db_conn, lease, database, event_bus)
     await relay.relay_inbox(
         owner.agent_id,
         0,
@@ -354,17 +400,6 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
         emit=pushes.append,
         debounce=0,
     )
-    deliveries = [push for push in pushes if f"[id={mid}]" in push]
-    assert len(deliveries) == attempts
-    for count, push in enumerate(deliveries, 1):
-        assert f"ACK within {window}s" in push
-        assert f"Delivery attempt {count}/{attempts}" in push
-        assert ("final delivery" in push) == (count == attempts)
-    assert f"Each message has {attempts} delivery attempts" in pushes[0]
-    assert f"with {window}s to ACK each" in pushes[0]
-    assert "Ava control expired" in pushes[-1]
-    assert "did not ACK" in pushes[-1]
+    assert_pushes_follow_snapshotted_budget(pushes, mid, window, attempts)
     assert listener.closed and listener.waits == attempts
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE id=%s", (mid,)
-    ).fetchone() == ("pending",)
+    assert_message_pending(db_conn, mid)

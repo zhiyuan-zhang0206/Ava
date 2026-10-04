@@ -31,18 +31,10 @@ from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.host import AgentHost, kill_terminating_agent_shells
 
 
-@pytest.mark.parametrize("kind", ["restart", "terminate"])
-async def test_hosted_applies_only_after_continuation_returns(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    kind: str,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    agent_id = _agent(db_conn)
-    old = await _admit(aops_pool, agent_id)
-    inbound = _command(db_conn, agent_id, kind)
-    entered, release = asyncio.Event(), asyncio.Event()
+def _graph_blocked_until_released(
+    kind: str, entered: asyncio.Event, release: asyncio.Event
+) -> Mock:
+    """A graph whose ainvoke parks until `release`, then returns the lifecycle request."""
 
     async def graph_return(*args: object, **kwargs: object) -> dict[str, bool]:
         entered.set()
@@ -55,10 +47,63 @@ async def test_hosted_applies_only_after_continuation_returns(
 
     graph = Mock()
     graph.ainvoke = AsyncMock(side_effect=graph_return)
+    return graph
+
+
+def _assert_command_unapplied_while_continuation_runs(
+    db_conn: psycopg.Connection,
+    host: AgentHost,
+    old: RuntimeIncarnation,
+    *,
+    agent_id: int,
+    inbound: int,
+) -> None:
+    assert db_conn.execute(
+        "SELECT runtime_generation,runtime_owner,status FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone() == (old.generation, old.owner, "running")
+    assert db_conn.execute(
+        "SELECT applied_at,observed_at FROM inbound_messages WHERE id=%s", (inbound,)
+    ).fetchone() == (None, None)
+    assert agent_id in host._runtimes
+
+
+async def _assert_restart_observed_by_next_admission(
+    db_conn: psycopg.Connection,
+    pool: AsyncConnectionPool,
+    old: RuntimeIncarnation,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    agent_id: int,
+    inbound: int,
+) -> None:
+    assert not await settle_hosted_runtime(pool, old, bus=event_bus)
+    new = await admit_hosted_runtime(
+        pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database
+    )
+    assert new is not None and new.generation != old.generation
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (inbound,)
+    ).fetchone() == ("done", True)
+
+
+@pytest.mark.parametrize("kind", ["restart", "terminate"])
+async def test_hosted_applies_only_after_continuation_returns(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    kind: str,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    agent_id = _agent(db_conn)
+    old = await _admit(aops_pool, agent_id)
+    inbound = _command(db_conn, agent_id, kind)
+    entered, release = asyncio.Event(), asyncio.Event()
     host = AgentHost(
         pool=aops_pool,
         checkpointer=Mock(),
-        graph=graph,
+        graph=_graph_blocked_until_released(kind, entered, release),
         machine="claim-test",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
@@ -82,14 +127,9 @@ async def test_hosted_applies_only_after_continuation_returns(
         )
         await asyncio.wait_for(entered.wait(), 2)
         try:
-            assert db_conn.execute(
-                "SELECT runtime_generation,runtime_owner,status FROM agents_meta WHERE id=%s",
-                (agent_id,),
-            ).fetchone() == (old.generation, old.owner, "running")
-            assert db_conn.execute(
-                "SELECT applied_at,observed_at FROM inbound_messages WHERE id=%s", (inbound,)
-            ).fetchone() == (None, None)
-            assert agent_id in host._runtimes
+            _assert_command_unapplied_while_continuation_runs(
+                db_conn, host, old, agent_id=agent_id, inbound=inbound
+            )
         finally:
             release.set()
             await asyncio.wait_for(task, 3)
@@ -102,14 +142,9 @@ async def test_hosted_applies_only_after_continuation_returns(
         assert record[0] == "done" and record[2] is not None
     else:
         assert record[0] == "claimed" and record[2] is None
-        assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus)
-        new = await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database
+        await _assert_restart_observed_by_next_admission(
+            db_conn, aops_pool, old, database, event_bus, agent_id=agent_id, inbound=inbound
         )
-        assert new is not None and new.generation != old.generation
-        assert db_conn.execute(
-            "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (inbound,)
-        ).fetchone() == ("done", True)
     assert db_conn.execute(
         "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (None,)

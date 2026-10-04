@@ -137,6 +137,42 @@ def _mirror_keys(tmp_path: Path) -> set[tuple[str, object, object]]:
     return keys
 
 
+def _otlp_attributes(record: Any) -> dict[str, Any]:
+    """The OTLP log record's string/int attributes keyed by name."""
+    attrs: dict[str, Any] = {}
+    for kv in record.attributes:
+        if kv.value.HasField("string_value"):
+            attrs[kv.key] = kv.value.string_value
+        elif kv.value.HasField("int_value"):
+            attrs[kv.key] = kv.value.int_value
+    return attrs
+
+
+def _record_key(record: Any) -> tuple[str, object, object]:
+    """`(event_name, envelope, op)` of one OTLP log record."""
+    attrs = _otlp_attributes(record)
+    payload: dict[str, Any] = {}
+    if record.body.string_value:
+        with contextlib.suppress(Exception):
+            payload = json.loads(record.body.string_value).get("attributes") or {}
+    return (str(attrs.get("event_name")), payload.get("envelope"), payload.get("op"))
+
+
+def _batch_keys(raw: bytes) -> set[tuple[str, object, object]]:
+    """Envelope keys of every log record in one OTLP/HTTP logs request body."""
+    from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
+
+    request = logs_service_pb2.ExportLogsServiceRequest()
+    with contextlib.suppress(Exception):
+        request.ParseFromString(raw)
+    return {
+        _record_key(record)
+        for resource_logs in request.resource_logs
+        for scope_logs in resource_logs.scope_logs
+        for record in scope_logs.log_records
+    }
+
+
 def _sent_keys() -> set[tuple[str, object, object]]:
     """Decode the receiver's OTLP/HTTP log batches into envelope keys.
 
@@ -145,37 +181,13 @@ def _sent_keys() -> set[tuple[str, object, object]]:
     the mirror-shape JSON (`base/telemetry/otlp/telemetry_otlp_logs`), so `envelope`/`op`
     come from `body["attributes"]`.
     """
-    from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
-
     keys: set[tuple[str, object, object]] = set()
     with _POSTS_LOCK:
         posts = list(_POSTS)
     for path, raw in posts:
         if not path.endswith("/v1/logs") or len(raw) < 4:
             continue  # the reachability probe posts a 2-byte JSON body
-        request = logs_service_pb2.ExportLogsServiceRequest()
-        with contextlib.suppress(Exception):
-            request.ParseFromString(raw)
-        for resource_logs in request.resource_logs:
-            for scope_logs in resource_logs.scope_logs:
-                for record in scope_logs.log_records:
-                    attrs: dict[str, Any] = {}
-                    for kv in record.attributes:
-                        if kv.value.HasField("string_value"):
-                            attrs[kv.key] = kv.value.string_value
-                        elif kv.value.HasField("int_value"):
-                            attrs[kv.key] = kv.value.int_value
-                    payload: dict[str, Any] = {}
-                    if record.body.string_value:
-                        with contextlib.suppress(Exception):
-                            payload = json.loads(record.body.string_value).get("attributes") or {}
-                    keys.add(
-                        (
-                            str(attrs.get("event_name")),
-                            payload.get("envelope"),
-                            payload.get("op"),
-                        )
-                    )
+        keys |= _batch_keys(raw)
     return keys
 
 

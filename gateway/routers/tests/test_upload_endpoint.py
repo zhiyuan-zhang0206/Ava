@@ -56,6 +56,33 @@ def _spawn_agent() -> int:
         return resp.json()["id"]
 
 
+def _assert_hello_world_upload_listed(files: list[dict[str, object]]) -> None:
+    assert len(files) == 1
+    assert files[0]["filename"] == "hello.txt"
+    assert files[0]["size"] == 13
+    assert files[0]["content_type"] == "text/plain"
+
+
+def _assert_saved_privately(dest: Path, body: bytes) -> None:
+    assert dest.exists()
+    assert dest.read_bytes() == body
+    assert dest.parent.stat().st_mode & 0o777 == 0o700
+    assert dest.stat().st_mode & 0o777 == 0o600
+
+
+def _assert_one_local_path_inbound(
+    rows: list[tuple[str, str, str]], dest: Path, size_text: str
+) -> None:
+    assert len(rows) == 1
+    content, kind, source = rows[0]
+    # The agent runs on this gateway (single-box), so the message carries
+    # its LOCAL absolute path — the address it can act on directly.
+    assert str(dest) in content
+    assert size_text in content
+    assert kind == "chat"
+    assert source == "user"
+
+
 class TestUploadFile:
     def test_upload_single_file_saves_and_inserts_one_inbound(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -71,27 +98,11 @@ class TestUploadFile:
             )
 
         assert resp.status_code == 200
-        files = resp.json()["files"]
-        assert len(files) == 1
-        assert files[0]["filename"] == "hello.txt"
-        assert files[0]["size"] == 13
-        assert files[0]["content_type"] == "text/plain"
+        _assert_hello_world_upload_listed(resp.json()["files"])
 
         dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
-        assert dest.exists()
-        assert dest.read_bytes() == b"Hello, world!"
-        assert dest.parent.stat().st_mode & 0o777 == 0o700
-        assert dest.stat().st_mode & 0o777 == 0o600
-
-        rows = _inbound_rows(db_conn, agent_id)
-        assert len(rows) == 1
-        content, kind, source = rows[0]
-        # The agent runs on this gateway (single-box), so the message carries
-        # its LOCAL absolute path — the address it can act on directly.
-        assert str(dest) in content
-        assert "13 bytes" in content
-        assert kind == "chat"
-        assert source == "user"
+        _assert_saved_privately(dest, b"Hello, world!")
+        _assert_one_local_path_inbound(_inbound_rows(db_conn, agent_id), dest, "13 bytes")
 
     def test_upload_multiple_files_one_batch_inbound(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

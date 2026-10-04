@@ -6,6 +6,7 @@ The e2e tests run through a real pty-sessions service + real bash
 
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -212,6 +213,24 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert cmd.endswith("; exit $_ec")
 
 
+def _poll_until(condition: Callable[[], bool], seconds: float) -> None:
+    """Poll every 0.3s until `condition()` holds or `seconds` elapse."""
+    deadline = time.time() + seconds
+    while time.time() < deadline and not condition():
+        time.sleep(0.3)
+
+
+def _assert_completion_notice_argv(argv: list[str], handle: Any) -> None:
+    assert argv[0] == "agents"
+    assert argv[1] == "send"
+    assert argv[2] == str(ava.self.AGENT_ID)
+    assert "exited with code 3" in argv[3]  # subshell exit code, ${_ec} expanded
+    assert f"shell:{handle.session_id}" in argv
+    assert handle.output_path in argv  # --tail-file target
+    assert "--completion-exit-code" in argv
+    assert "3" in argv
+
+
 @pytest.mark.flaky  # real pty session + time.sleep polling (15s deadline)
 def test_run_background_e2e_notice_log_and_close(
     _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -229,27 +248,15 @@ def test_run_background_e2e_notice_log_and_close(
         "echo hello-bg; exit 3", name="test-bg", cwd=str(tmp_path), ttl=120
     )
 
-    deadline = time.time() + 15
-    while time.time() < deadline and not argv_file.exists():
-        time.sleep(0.3)
+    _poll_until(argv_file.exists, 15)
     assert argv_file.exists(), "completion notice never fired"
 
     assert "hello-bg" in Path(handle.output_path).read_text()
-    argv = argv_file.read_text().splitlines()
-    assert argv[0] == "agents"
-    assert argv[1] == "send"
-    assert argv[2] == str(ava.self.AGENT_ID)
-    assert "exited with code 3" in argv[3]  # subshell exit code, ${_ec} expanded
-    assert f"shell:{handle.session_id}" in argv
-    assert handle.output_path in argv  # --tail-file target
-    assert "--completion-exit-code" in argv
-    assert "3" in argv
+    _assert_completion_notice_argv(argv_file.read_text().splitlines(), handle)
 
     # Default keep=False: the session closes unconditionally after the notice
     # (delivery is best-effort; a failed send must not leave the shell behind).
-    deadline = time.time() + 10
-    while time.time() < deadline and handle.session_id in ava.shell.sessions.list():
-        time.sleep(0.3)
+    _poll_until(lambda: handle.session_id not in ava.shell.sessions.list(), 10)
     assert handle.session_id not in ava.shell.sessions.list()
 
 

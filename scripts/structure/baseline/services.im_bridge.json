@@ -9,9 +9,6 @@
     "services/im_bridge/core.py::asyncio-task:IMBridgeCore.ensure_outbox_replay": 1,
     "services/im_bridge/daemon.py::asyncio-task:run": 3
   },
-  "complexity": {
-    "services/im_bridge/tests/test_im_bridge_core.py::test_spawn_menu_layers_render_with_summary_button": 22
-  },
   "files": {
     "services/im_bridge/adapters/tests/test_feishu_adapter.py": 1255,
     "services/im_bridge/tests/test_im_bridge_core.py": 1423

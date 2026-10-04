@@ -365,6 +365,45 @@ class TestDispatchWakes:
             await listener.close()
 
 
+def _delivery_poisoned_events(agent_id: int) -> list[dict[str, object]]:
+    """The `delivery_poisoned` telemetry lines for `agent_id` in today's JSONL mirror."""
+    import json
+    from datetime import UTC, datetime
+
+    from base.paths import logs_dir
+
+    telemetry.flush()
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    path = logs_dir() / f"events-{day}.jsonl"
+    if not path.exists():
+        return []
+    events: list[dict[str, object]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if (
+            event.get("event_name") == "delivery_poisoned"
+            and event.get("agent_id") == agent_id
+            and event.get("category") == "telemetry"
+        ):
+            events.append(event)
+    return events
+
+
+def _wait_for_poisoned_events(agent_id: int) -> list[dict[str, object]]:
+    """Poll briefly: the emitter drains asynchronously, so the line may land late."""
+    events: list[dict[str, object]] = []
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        events = _delivery_poisoned_events(agent_id)
+        if events:
+            break
+        time.sleep(0.05)
+    return events
+
+
 class TestDispatchBackoffAndPoison:
     @staticmethod
     def _dispatch(pool: ConnectionPool) -> int:
@@ -525,11 +564,6 @@ class TestDispatchBackoffAndPoison:
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import json
-        from datetime import UTC, datetime
-
-        from base.paths import logs_dir
-
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
@@ -561,33 +595,7 @@ class TestDispatchBackoffAndPoison:
             row = cur.fetchone()
         assert row == (_MAX_DISPATCH_COUNT, True, "pending")
 
-        def poisoned_events() -> list[dict[str, object]]:
-            telemetry.flush()
-            day = datetime.now(UTC).strftime("%Y%m%d")
-            path = logs_dir() / f"events-{day}.jsonl"
-            if not path.exists():
-                return []
-            events: list[dict[str, object]] = []
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    continue
-                if (
-                    event.get("event_name") == "delivery_poisoned"
-                    and event.get("agent_id") == aid
-                    and event.get("category") == "telemetry"
-                ):
-                    events.append(event)
-            return events
-
-        events: list[dict[str, object]] = []
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            events = poisoned_events()
-            if events:
-                break
-            time.sleep(0.05)
+        events = _wait_for_poisoned_events(aid)
         assert len(events) == 1
         assert events[0]["level"] == "warning"
         attributes = events[0]["attributes"]
@@ -600,7 +608,7 @@ class TestDispatchBackoffAndPoison:
         while time.monotonic() < deadline:
             telemetry.flush()
             time.sleep(0.05)
-        assert len(poisoned_events()) == 1
+        assert len(_delivery_poisoned_events(aid)) == 1
 
     def test_poisoned_row_is_not_dispatched_after_backoff(
         self,
