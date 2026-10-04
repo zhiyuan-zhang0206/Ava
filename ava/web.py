@@ -110,13 +110,6 @@ _WALL_MARKERS = (
 )
 _WALL_MAX_LEN = 2_000
 
-# Domains whose wall is a hard login gate that no server-side reader can pass
-# (per-request signed requests + login-only content). For these the agent must
-# use the matching logged-in-browser skill instead of reading the URL here.
-_GATED_SITE_SKILLS = {
-    # zhihu / xiaohongshu / douyin adapters moved to private install
-}
-
 
 @dataclass
 class SearchResult:
@@ -283,24 +276,15 @@ def _raise_if_wall(url: str, title: str, content: str) -> None:
     rather than the page itself, so the caller never answers a prompt from
     verification-page text.
 
-    For a host whose wall is a hard login gate, the message names the
-    logged-in-browser skill to reach it instead.
-
     Raises:
         FetchError: the body matched a known wall (short page + wall marker).
     """
     blob = f"{title}\n{content}".lower()
     if len(content) > _WALL_MAX_LEN or not any(marker in blob for marker in _WALL_MARKERS):
         return
-    host = urllib.parse.urlparse(url).netloc.lower()
-    hint = ""
-    for domain, skill in _GATED_SITE_SKILLS.items():
-        if host == domain or host.endswith(f".{domain}"):
-            hint = f" This host is login-gated — use the {skill} skill instead."
-            break
     raise FetchError(
         f"The reader returned a bot-challenge or login wall for {url} instead of "
-        f"the page content (title={title!r}).{hint}"
+        f"the page content (title={title!r})."
     )
 
 

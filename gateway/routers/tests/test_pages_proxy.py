@@ -40,9 +40,7 @@ from gateway.routers import pages as pages_router
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
 
-def test_machine_dial_host_cache_evicts_least_recently_used_machine(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_machine_dial_host_cache_evicts_least_recently_used_machine() -> None:
     """The page-proxy allowlist cache remains bounded while preserving recent hosts."""
 
     class _Cursor:
@@ -74,18 +72,14 @@ def test_machine_dial_host_cache_evicts_least_recently_used_machine(
         def connection(self) -> _Connection:
             return _Connection()
 
-    pages_router.reset_page_host_cache_for_tests()
-    monkeypatch.setattr(pages_router, "_PAGE_HOST_CACHE_MAX_ENTRIES", 2)
+    cache = pages_router.PageHostCache(max_entries=2)
     pool = _Pool()
-    try:
-        pages_router._machine_dial_hosts(pool, "first")  # pyright: ignore[reportArgumentType]
-        pages_router._machine_dial_hosts(pool, "second")  # pyright: ignore[reportArgumentType]
-        pages_router._machine_dial_hosts(pool, "first")  # pyright: ignore[reportArgumentType]
-        pages_router._machine_dial_hosts(pool, "third")  # pyright: ignore[reportArgumentType]
+    cache.dial_hosts(pool, "first")  # pyright: ignore[reportArgumentType]
+    cache.dial_hosts(pool, "second")  # pyright: ignore[reportArgumentType]
+    cache.dial_hosts(pool, "first")  # pyright: ignore[reportArgumentType]
+    cache.dial_hosts(pool, "third")  # pyright: ignore[reportArgumentType]
 
-        assert list(pages_router._page_host_cache) == ["first", "third"]
-    finally:
-        pages_router.reset_page_host_cache_for_tests()
+    assert list(cache._hosts) == ["first", "third"]
 
 
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -495,7 +489,6 @@ def test_proxy_revalidates_nonloopback_registry_target_before_dialing(
     db_conn: psycopg.Connection,
 ) -> None:
     """Rows inserted outside registration cannot turn the proxy into SSRF."""
-    pages_router.reset_page_host_cache_for_tests()
     aid = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))

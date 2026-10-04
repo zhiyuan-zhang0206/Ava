@@ -13,11 +13,6 @@ from enum import StrEnum
 
 from loguru import logger
 
-# Core owns no provider-specific effort vocabularies; plugins declare them on
-# their bindings. The empty compatibility table remains as a cross-provider
-# import surface.
-_PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {}
-
 # The cross-provider AVA_REASONING_EFFORT vocabulary, ordered weakest →
 # strongest. Superset of the public `ReasoningEffort` enum — the extra
 # "minimal" is a gemini-only thinking_level that some paths still accept as

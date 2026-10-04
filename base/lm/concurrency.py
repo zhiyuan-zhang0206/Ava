@@ -43,14 +43,6 @@ import asyncio
 import threading
 from collections.abc import AsyncGenerator, Generator, Mapping
 from contextlib import asynccontextmanager, contextmanager
-from functools import lru_cache
-
-
-@lru_cache(maxsize=1)
-def _provider_keys() -> frozenset[str]:
-    from base.lm.factory import provider_key_map
-
-    return frozenset(prefix.rstrip("-") for prefix in provider_key_map())
 
 
 def known_provider_keys() -> frozenset[str]:
@@ -59,28 +51,14 @@ def known_provider_keys() -> frozenset[str]:
     dash stripped when present), the provider registry's single source
     (audit 2026-08-08 P2: the old explicit list drifted in exactly the one
     direction a config parse cannot catch — factory gained a provider and the
-    limiter silently passed it through). Lazy import + lru_cache:
-    `_concurrency` is a leaf on hot paths and must not pull the model catalog
-    at module scope. The cache is invalidated on every provider-plugin
-    registration (provider_api.register_invalidator), so a plugin provider's
-    key becomes a legal `AVA_LLM_MAX_CONCURRENT` key without a second
-    mechanism.
+    limiter silently passed it through). Derived at each call, so a plugin
+    provider's key is a legal `AVA_LLM_MAX_CONCURRENT` key as soon as it
+    registers. The factory import is lazy: `_concurrency` is a leaf on hot
+    paths and must not pull the model catalog at module scope.
     """
-    return _provider_keys()
+    from base.lm.factory import provider_key_map
 
-
-def _invalidate_known_provider_keys_cache() -> None:
-    """Clear the lru_cache behind `known_provider_keys` — called by
-    provider_api after every plugin registration (registered via
-    register_invalidator)."""
-    _provider_keys.cache_clear()
-
-
-# Register the invalidator eagerly: `_concurrency` is imported by hot call
-# paths, and provider_api must not import it back (layering + cycle).
-from base.lm import provider_api  # noqa: E402
-
-provider_api.REGISTRY.register_invalidator(_invalidate_known_provider_keys_cache)
+    return frozenset(prefix.rstrip("-") for prefix in provider_key_map())
 
 
 # A provider Retry-After longer than this is treated as a misconfiguration

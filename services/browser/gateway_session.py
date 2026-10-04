@@ -24,11 +24,7 @@ from base.cluster.machine import GatewayApiTokenMissing, gateway_api_base, gatew
 from base.config import settings
 from base.log import logger
 from services.browser.mcp_upstream import _await_stop_or_timeout
-from services.browser.session import (
-    gateway_session_is_valid,
-    inject_session_cookie,
-    last_injected_cookie,
-)
+from services.browser.session import gateway_session_is_valid, inject_session_cookie
 
 # Gateway session cookie refresh: the default server-side lifetime is 24h;
 # refreshing every 6h leaves a comfortable margin and self-heals a lost,
@@ -66,48 +62,6 @@ def _gateway_session_params() -> tuple[str, str] | None:
     return gateway_url, credential
 
 
-async def _inject_gateway_session_once() -> None:
-    """Log in + inject the gateway session cookie into Chrome (best effort).
-
-    Never raises: every failure is logged and left for the next tick / the
-    next upstream connect to retry.
-    """
-    params = _gateway_session_params()
-    if params is None:
-        return
-    gateway_url, secret = params
-    try:
-        await inject_session_cookie(settings.services.browser_cdp_port, gateway_url, secret)
-    except Exception as e:
-        logger.warning(f"[browser-mcp] gateway session cookie injection failed: {e}")
-        return
-    logger.info(f"[browser-mcp] gateway session cookie injected for {gateway_url}")
-
-
-async def _gateway_session_loop(stop: asyncio.Event) -> None:
-    """Refresh the gateway session cookie every _SESSION_REFRESH_INTERVAL_S.
-
-    The refresh cadence stays inside the configured session lifetime and
-    self-heals a lost/revoked cookie within one interval. The loop never
-    raises — failures are logged and retried on the next tick.
-    """
-    while not stop.is_set():
-        await _inject_gateway_session_once()
-        await _await_stop_or_timeout(stop, _SESSION_REFRESH_INTERVAL_S)
-
-
-# Fire-and-forget injection tasks are tracked so the event loop never reaps
-# them before they finish (RUF006); each task removes itself on completion.
-_inject_tasks: set[asyncio.Task[None]] = set()
-
-
-def _spawn_inject() -> None:
-    """Schedule a one-shot gateway-session injection (best effort)."""
-    task = asyncio.create_task(_inject_gateway_session_once())
-    _inject_tasks.add(task)
-    task.add_done_callback(_inject_tasks.discard)
-
-
 def _navigates_to_gateway(name: str, args: dict[str, Any]) -> bool:
     """True when the call opens a URL under the gateway's own origin.
 
@@ -132,53 +86,104 @@ def _navigates_to_gateway(name: str, args: dict[str, Any]) -> bool:
     )
 
 
-_verify_lock = asyncio.Lock()
+class GatewaySession:
+    """State of the gateway session cookie the daemon keeps in the shared Chrome.
 
-
-async def _verify_gateway_session_once() -> None:
-    """Re-inject the gateway session cookie when the stored one no longer
-    authenticates (revoked or expired), so a 401 heals on the next gateway
-    navigation instead of waiting out the refresh interval.
-
-    Best effort like ``_inject_gateway_session_once``: failures are logged and
-    left for the next trigger to retry. With no stored cookie (fresh daemon)
-    this falls back to a plain injection. Concurrent verifies are collapsed
-    onto the in-flight one — a single re-injection is enough.
+    Built once by the daemon's composition root (``mcp_daemon.run``) and handed
+    to every ``ChromeMcpDaemon`` it creates, so it survives upstream reconnects:
+    the cookie most recently handed to Chrome (the early-refresh check compares
+    it with the gateway after a gateway-URL navigation, so a revoked or expired
+    managed session heals immediately instead of waiting out the next refresh
+    tick), the verify lock that collapses concurrent verifies, and the
+    fire-and-forget tasks (tracked so the event loop never reaps them before
+    they finish, RUF006; each removes itself on completion).
     """
-    if _verify_lock.locked():
-        return
-    async with _verify_lock:
+
+    def __init__(self) -> None:
+        self.cookie: tuple[str, str] | None = None
+        self.inject_tasks: set[asyncio.Task[None]] = set()
+        self.verify_tasks: set[asyncio.Task[None]] = set()
+        self._verify_lock = asyncio.Lock()
+
+    async def inject_once(self) -> None:
+        """Log in + inject the gateway session cookie into Chrome (best effort).
+
+        Never raises: every failure is logged and left for the next tick / the
+        next upstream connect to retry.
+        """
         params = _gateway_session_params()
         if params is None:
             return
-        gateway_url, _ = params
-        cookie = last_injected_cookie()
-        if cookie is None:
-            await _inject_gateway_session_once()
-            return
-        _, value = cookie
+        gateway_url, secret = params
         try:
-            valid = await gateway_session_is_valid(gateway_url, value)
+            self.cookie = await inject_session_cookie(
+                settings.services.browser_cdp_port, gateway_url, secret
+            )
         except Exception as e:
-            logger.warning(f"[browser-mcp] gateway session validity check failed: {e}")
+            logger.warning(f"[browser-mcp] gateway session cookie injection failed: {e}")
             return
-        if not valid:
-            logger.info("[browser-mcp] gateway session no longer valid — refreshing early")
-            await _inject_gateway_session_once()
+        logger.info(f"[browser-mcp] gateway session cookie injected for {gateway_url}")
+
+    async def refresh_loop(self, stop: asyncio.Event) -> None:
+        """Refresh the gateway session cookie every _SESSION_REFRESH_INTERVAL_S.
+
+        The refresh cadence stays inside the configured session lifetime and
+        self-heals a lost/revoked cookie within one interval. The loop never
+        raises — failures are logged and retried on the next tick.
+        """
+        while not stop.is_set():
+            await self.inject_once()
+            await _await_stop_or_timeout(stop, _SESSION_REFRESH_INTERVAL_S)
+
+    async def verify_once(self) -> None:
+        """Re-inject the gateway session cookie when the stored one no longer
+        authenticates (revoked or expired), so a 401 heals on the next gateway
+        navigation instead of waiting out the refresh interval.
+
+        Best effort like ``inject_once``: failures are logged and left for the
+        next trigger to retry. With no stored cookie (fresh daemon) this falls
+        back to a plain injection. Concurrent verifies are collapsed onto the
+        in-flight one — a single re-injection is enough.
+        """
+        if self._verify_lock.locked():
+            return
+        async with self._verify_lock:
+            params = _gateway_session_params()
+            if params is None:
+                return
+            gateway_url, _ = params
+            cookie = self.cookie
+            if cookie is None:
+                await self.inject_once()
+                return
+            _, value = cookie
+            try:
+                valid = await gateway_session_is_valid(gateway_url, value)
+            except Exception as e:
+                logger.warning(f"[browser-mcp] gateway session validity check failed: {e}")
+                return
+            if not valid:
+                logger.info("[browser-mcp] gateway session no longer valid — refreshing early")
+                await self.inject_once()
 
 
-# Fire-and-forget verify tasks are tracked like injections (RUF006).
-_verify_tasks: set[asyncio.Task[None]] = set()
+def _spawn_inject(session: GatewaySession) -> None:
+    """Schedule a one-shot gateway-session injection (best effort)."""
+    task = asyncio.create_task(session.inject_once())
+    session.inject_tasks.add(task)
+    task.add_done_callback(session.inject_tasks.discard)
 
 
-def _spawn_verify() -> None:
+def _spawn_verify(session: GatewaySession) -> None:
     """Schedule a one-shot gateway-session validity check (best effort)."""
-    task = asyncio.create_task(_verify_gateway_session_once())
-    _verify_tasks.add(task)
-    task.add_done_callback(_verify_tasks.discard)
+    task = asyncio.create_task(session.verify_once())
+    session.verify_tasks.add(task)
+    task.add_done_callback(session.verify_tasks.discard)
 
 
-async def _start_session_maintenance() -> tuple[asyncio.Event, asyncio.Task[None]]:
+async def _start_session_maintenance(
+    session: GatewaySession,
+) -> tuple[asyncio.Event, asyncio.Task[None]]:
     """SIGTERM/SIGINT stop event + the long-lived session-refresh task.
 
     The refresh loop keeps a valid gateway session cookie in the shared
@@ -193,5 +198,5 @@ async def _start_session_maintenance() -> tuple[asyncio.Event, asyncio.Task[None
     for sig in (signal.SIGTERM, signal.SIGINT):
         with suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
-    session_task = asyncio.create_task(_gateway_session_loop(stop))
+    session_task = asyncio.create_task(session.refresh_loop(stop))
     return stop, session_task

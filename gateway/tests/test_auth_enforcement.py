@@ -433,18 +433,17 @@ def test_middleware_bounds_session_touch_bookkeeping(
 
     with TestClient(app) as client:
         token = _login(client)
-        gateway_app._session_last_touch["stale"] = now - 3601
-        gateway_app._session_last_touch.update(
-            {f"recent-{index}": now - index for index in range(1025)}
-        )
+        last_touch = app.state.session_touch.last_touch
+        last_touch["stale"] = now - 3601
+        last_touch.update({f"recent-{index}": now - index for index in range(1025)})
         monkeypatch.setattr(gateway_app.time, "monotonic", lambda: now)
 
         response = client.get("/api/agents")
 
     assert response.status_code == 200
-    assert "stale" not in gateway_app._session_last_touch
-    assert token in gateway_app._session_last_touch
-    assert len(gateway_app._session_last_touch) == 1024
+    assert "stale" not in last_touch
+    assert token in last_touch
+    assert len(last_touch) == 1024
 
 
 # ── Wrong secret gets 401 ─────────────────────────────────────────────

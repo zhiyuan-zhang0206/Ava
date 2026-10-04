@@ -179,7 +179,6 @@ class TestFrontendTelemetryIngest:
     ) -> None:  # type: ignore[no-untyped-def]
         """Over the per-session budget: accepted up to the cap, the rest
         dropped — the event stream cannot be flooded by one tab."""
-        ft_router._session_windows.clear()
         session = _session()
         events = [_one(element=f"e{i}") for i in range(ft_router._MAX_EVENTS_PER_MINUTE + 10)]
         with TestClient(app) as client:
@@ -189,7 +188,6 @@ class TestFrontendTelemetryIngest:
         assert len(rows) == ft_router._MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
 
     def test_second_session_gets_own_budget(self) -> None:  # type: ignore[no-untyped-def]
-        ft_router._session_windows.clear()
         session = _session()
         other = _session()
         with TestClient(app) as client:

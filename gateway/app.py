@@ -85,12 +85,14 @@ from gateway.auth import rejection_log
 from gateway.auth import router as auth_router
 from gateway.auth.cors import cors_allowed_origins
 from gateway.auth.rejection_log import log_auth401_rejection
-from gateway.auth.session_store import SessionStore, touch_session
+from gateway.auth.request_principal import SessionKeys
+from gateway.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import ops_monitor as ops_monitor_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
+from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
 from gateway.events import agent_events as agent_events_router
 from gateway.events import computer_traces as computer_traces_router
@@ -200,12 +202,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.bus = EventBus.from_settings()
     app.state.telemetry_staleness = TelemetryStaleness()
     app.state.status_cache = StatusCache()
+    app.state.identity_mismatch_log = IdentityMismatchLog()
     app.state.inspect_query_cache = inspect_router.build_query_cache()
     app.state.upload_locks = uploads_router.AgentUploadLocks()
     app.state.memory_search_gate = memory_router.build_search_gate()
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.db_pool = app.state.db.pool(max_size=8)
     app.state.sessions = SessionStore(app.state.db_pool)
+    app.state.session_keys = SessionKeys()
+    app.state.session_touch = SessionTouchThrottle()
+    app.state.page_host_cache = pages_router.PageHostCache()
+    app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
     app.state.idempotency = idempotency.IdempotencyService(
         idempotency.IdempotencyStore(app.state.db_pool)
     )
@@ -369,25 +376,6 @@ _AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
 )
 _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-_SESSION_TOUCH_INTERVAL_S = 60.0
-_SESSION_TOUCH_MAX_ENTRIES = 1024
-_session_last_touch: dict[str, float] = {}
-
-
-def _prune_session_last_touch(now: float) -> None:
-    """Drop expired bookkeeping and cap the map by oldest touch time."""
-    if len(_session_last_touch) <= _SESSION_TOUCH_MAX_ENTRIES:
-        return
-    stale_before = now - settings.gateway.session_ttl_seconds
-    for session_id, touched_at in tuple(_session_last_touch.items()):
-        if touched_at < stale_before:
-            _session_last_touch.pop(session_id, None)
-    overflow = len(_session_last_touch) - _SESSION_TOUCH_MAX_ENTRIES
-    if overflow > 0:
-        oldest = sorted(_session_last_touch, key=_session_last_touch.__getitem__)[:overflow]
-        for session_id in oldest:
-            _session_last_touch.pop(session_id, None)
-
 
 async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | None:
     """The request's session cookie and its credential fact, when it authenticates.
@@ -403,7 +391,11 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
     if not cookie_token:
         return None
     fact = await asyncio.to_thread(
-        current_session_fact, request.app.state.sessions, cookie_token, secret
+        current_session_fact,
+        request.app.state.sessions,
+        request.app.state.session_keys,
+        cookie_token,
+        secret,
     )
     return None if fact is None else (cookie_token, fact)
 
@@ -479,12 +471,8 @@ async def _cluster_auth_middleware(
                 headers={"Vary": "Origin"},
             )
         now = time.monotonic()
-        last_touch = _session_last_touch.get(cookie_token)
-        touch_due = last_touch is None or now - last_touch >= _SESSION_TOUCH_INTERVAL_S
-        if touch_due:
-            _session_last_touch[cookie_token] = now
-        _prune_session_last_touch(now)
-        if touch_due:
+        touch: SessionTouchThrottle = request.app.state.session_touch
+        if touch.due(cookie_token, now, stale_after_s=settings.gateway.session_ttl_seconds):
             await asyncio.to_thread(
                 touch_session,
                 request.app.state.db_pool,

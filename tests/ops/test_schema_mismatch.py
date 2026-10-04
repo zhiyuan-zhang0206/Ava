@@ -168,14 +168,16 @@ def test_gateway_probe_preserves_degraded_schema_status(
     async def probe(_name: str, _url: str) -> dict[str, object]:
         return response.model_dump(mode="json")
 
-    def reachable(_name: str) -> None:
-        pass
-
     monkeypatch.setattr(roster_probe, "dispatch_status_probe", probe)
-    monkeypatch.setattr(roster_probe, "note_identity_match", reachable)
     row = asyncio.run(
         status_route._probe_agent_runner(
-            "gateway", ["gateway"], "http://inert.invalid", datetime.now(UTC), None, None
+            roster_probe.IdentityMismatchLog(),
+            "gateway",
+            ["gateway"],
+            "http://inert.invalid",
+            datetime.now(UTC),
+            None,
+            None,
         )
     )
     assert row.online is True

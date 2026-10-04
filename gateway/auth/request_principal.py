@@ -72,45 +72,55 @@ def cluster_credential(authorization: str | None, secret: str) -> str | None:
 SESSION_KEY_NAME = "web-session.key"
 _SESSION_KEY = re.compile(r"^[0-9a-f]{64}$")
 _MINT_FACTS = {"human": "user_session", "runner": "machine_session:runner"}
-_session_key_cache: dict[Path, tuple[tuple[int, int, int], bytes]] = {}
 
 
 def session_key_path(home: Path) -> Path:
     return home / SESSION_KEY_NAME
 
 
-def _session_key(home: Path, *, create: bool) -> bytes | None:
-    """This gateway's session-mint MAC key: minted once, at the first login.
+class SessionKeys:
+    """This gateway's session-mint MAC keys, read once per file revision.
 
-    None when absent and `create` is false (then no session authenticates).
-    Losing the file ends every session; the next login mints a new key.
+    Owned by the gateway app (`app.state.session_keys`). The cache is keyed by
+    the key file's identity (inode, mtime, size), so a replaced or rewritten
+    file is re-read and re-validated.
     """
-    from base.deploy.release.verified_file import regular_bytes
-    from base.host.private_storage import create_private_bytes, private_file_problem
 
-    path = session_key_path(home)
-    if create and not path.exists():
-        with suppress(FileExistsError):
-            create_private_bytes(path, (secrets.token_hex(32) + "\n").encode())
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        return None
-    identity = (info.st_ino, info.st_mtime_ns, info.st_size)
-    cached = _session_key_cache.get(home)
-    if cached is not None and cached[0] == identity:
-        return cached[1]
-    problem = private_file_problem(path)
-    if problem is None and os.name != "nt" and info.st_mode & 0o077:
-        problem = "is not owner-only"
-    if problem is not None:
-        raise RuntimeError(f"{path}: {problem}")
-    value = regular_bytes(path, max_bytes=4096).decode().strip()
-    if _SESSION_KEY.fullmatch(value) is None:
-        raise RuntimeError(f"{path} does not hold a session key")
-    key = bytes.fromhex(value)
-    _session_key_cache[home] = (identity, key)
-    return key
+    def __init__(self) -> None:
+        self._cache: dict[Path, tuple[tuple[int, int, int], bytes]] = {}
+
+    def key(self, home: Path, *, create: bool) -> bytes | None:
+        """The session-mint MAC key: minted once, at the first login.
+
+        None when absent and `create` is false (then no session authenticates).
+        Losing the file ends every session; the next login mints a new key.
+        """
+        from base.deploy.release.verified_file import regular_bytes
+        from base.host.private_storage import create_private_bytes, private_file_problem
+
+        path = session_key_path(home)
+        if create and not path.exists():
+            with suppress(FileExistsError):
+                create_private_bytes(path, (secrets.token_hex(32) + "\n").encode())
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return None
+        identity = (info.st_ino, info.st_mtime_ns, info.st_size)
+        cached = self._cache.get(home)
+        if cached is not None and cached[0] == identity:
+            return cached[1]
+        problem = private_file_problem(path)
+        if problem is None and os.name != "nt" and info.st_mode & 0o077:
+            problem = "is not owner-only"
+        if problem is not None:
+            raise RuntimeError(f"{path}: {problem}")
+        value = regular_bytes(path, max_bytes=4096).decode().strip()
+        if _SESSION_KEY.fullmatch(value) is None:
+            raise RuntimeError(f"{path} does not hold a session key")
+        key = bytes.fromhex(value)
+        self._cache[home] = (identity, key)
+        return key
 
 
 def _mint(key: bytes, kind: str, credential_digest: str) -> str:
@@ -118,7 +128,7 @@ def _mint(key: bytes, kind: str, credential_digest: str) -> str:
     return f"{kind}-{mac.hexdigest()[:32]}"
 
 
-def login_mint(password: str, secret: str) -> str | None:
+def login_mint(keys: SessionKeys, password: str, secret: str) -> str | None:
     """The mint of the credential a login `password` presents, else None.
 
     The human secret, or the ACTIVE generation's runner API token (a unit's
@@ -136,13 +146,13 @@ def login_mint(password: str, secret: str) -> str | None:
         if bearer_class(f"Bearer {password}", accepted) != "runner":
             return None
         kind, digest = "runner", accepted["runner"]
-    key = _session_key(home, create=True)
+    key = keys.key(home, create=True)
     if key is None:
         raise RuntimeError(f"{session_key_path(home)} vanished while minting a session")
     return _mint(key, kind, digest)
 
 
-def session_mints(secret: str) -> dict[str, str]:
+def session_mints(keys: SessionKeys, secret: str) -> dict[str, str]:
     """{mint: credential fact} of the credentials that may back a session now.
 
     The fact is `user_session` for the human secret and `machine_session:runner`
@@ -153,7 +163,7 @@ def session_mints(secret: str) -> dict[str, str]:
     from base.paths import ava_home
 
     home = ava_home().resolve()
-    key = _session_key(home, create=False)
+    key = keys.key(home, create=False)
     if key is None:
         return {}
     mints: dict[str, str] = {}
@@ -193,7 +203,9 @@ def require_human_credential(request: Request) -> None:
         )
 
 
-def current_session_fact(sessions: Any, session_id: str | None, secret: str) -> str | None:
+def current_session_fact(
+    sessions: Any, keys: SessionKeys, session_id: str | None, secret: str
+) -> str | None:
     """The credential fact of a valid session whose minting credential is
     current (`user_session` / `machine_session:runner`), else None: the one
     session check the auth middleware and `/api/auth/check` share."""
@@ -202,7 +214,7 @@ def current_session_fact(sessions: Any, session_id: str | None, secret: str) -> 
     mint = None if session_id is None else session_mint(session_id)
     if mint is None:
         return None
-    mints = session_mints(secret)
+    mints = session_mints(keys, secret)
     if not sessions.is_valid(session_id, admitted=mints):
         return None
     return mints[mint]
