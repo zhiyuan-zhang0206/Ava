@@ -1,6 +1,0 @@
-{
-  "ambient_state": {
-    "agent/turn/progress.py::ambient-container:_ADMISSION_WAIT": 1,
-    "agent/turn/progress.py::ambient-container:_PROGRESS": 1
-  }
-}

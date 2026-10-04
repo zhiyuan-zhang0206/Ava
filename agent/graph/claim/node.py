@@ -224,6 +224,7 @@ async def claim_node(
         ops_pool=runtime.context.ops_pool,
         event_publisher=event_publisher,
         agent_id=agent_id,
+        turn_progress=runtime.context.turn_progress,
         full_window=will_idle,
     ):
         return await _claim_node_impl(state, runtime, config)

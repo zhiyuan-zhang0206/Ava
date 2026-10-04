@@ -51,7 +51,7 @@ from langchain_core.messages import AIMessageChunk
 from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.utils.json import parse_partial_json
 
-from agent.turn.progress import mark_turn_progress
+from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.coalescer import DeltaCoalescer
 from base.events.live.projection import (
     ChatDelta,
@@ -89,9 +89,11 @@ class RedisStreamHandler:
         event_publisher: AgentEventPublisher,
         agent_id: int,
         msg_idx: int,
+        turn_progress: TurnProgress,
     ) -> None:
         self._publisher = event_publisher
         self._agent_id = agent_id
+        self._turn_progress = turn_progress
         self._msg_idx = msg_idx
         # Set by llm._stream._stream_with_cache_retry after the successful
         # attempt: True when the request rode the Gemini explicit cache (the
@@ -192,7 +194,7 @@ class RedisStreamHandler:
         # streams one long reasoning/text block for longer than the stall
         # budget — no node completes, no LLM step finishes — would read as
         # "no progress" and be aborted by the hosted stall guard mid-stream.
-        mark_turn_progress(self._agent_id)
+        self._turn_progress.mark(self._agent_id)
         self._process_content(chunk.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         self._process_additional_reasoning(chunk.additional_kwargs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         # tool_call_chunks is list[ToolCallChunk] TypedDict (not list[dict]),

@@ -61,7 +61,6 @@ async def test_replacement_host_adopts_held_agent_without_model(
     )
     # A window no process age can exceed: the fresh-start carve-out is open.
     monkeypatch.setattr("base.config.settings.agent.impersonation_reprovision_window_seconds", 1e9)
-    impersonation._relay_children.clear()
     graph = MagicMock()
     host = AgentHost(
         pool=aops_pool,
@@ -134,4 +133,3 @@ async def test_replacement_host_adopts_held_agent_without_model(
             == "active"
         )
     graph.ainvoke.assert_not_called()
-    impersonation._relay_children.clear()

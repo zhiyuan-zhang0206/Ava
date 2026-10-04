@@ -28,6 +28,7 @@ from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.messages.envelope import wrap_inbound
+from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
@@ -74,7 +75,7 @@ async def claim_gate(
     """Present consent once, or end the invocation without claiming input."""
     db, bus = ctx.require_db(), ctx.require_bus()
     session = await native_status(db, bus, agent_id)
-    await supervise_relay(db, bus, session, agent_id)
+    await supervise_relay(db, bus, session, agent_id, ctx.relays)
     if session is None:
         return None
     if session["status"] == "requested" and session["automatic"]:
@@ -166,6 +167,7 @@ async def _activate_accepted(
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
+    relays: RelaySupervision,
 ) -> dict[str, Any] | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
     from base.agents.impersonation import activate
@@ -180,7 +182,7 @@ async def _activate_accepted(
     # The bound relay must be live before the takeover stands. On failure
     # the lease is rolled back to 'rejected' with a loud reason and the
     # native agent resumes — no silent half-takeover.
-    if not await asyncio.to_thread(establish_relay, db, bus, session, incarnation):
+    if not await asyncio.to_thread(establish_relay, db, bus, session, incarnation, relays):
         return None
     return await asyncio.to_thread(activate, db, bus, session["id"], incarnation)
 
@@ -223,6 +225,7 @@ async def settle_checkpoint(
     db: Database,
     bus: EventBus,
     agent_id: int,
+    relays: RelaySupervision,
     *,
     activate_accepted: bool = True,
 ) -> bool:
@@ -235,7 +238,7 @@ async def settle_checkpoint(
     if session["status"] == "accepted":
         if not activate_accepted:
             return False
-        activated = await _activate_accepted(graph, db, bus, session, incarnation)
+        activated = await _activate_accepted(graph, db, bus, session, incarnation, relays)
         if activated is None:
             return False
         session = activated
@@ -263,52 +266,6 @@ async def settle_checkpoint(
 
 _RELAY_READY_TIMEOUT_S = 30.0
 _RELAY_READY_POLL_S = 1.0
-
-# Fresh-start plumbing (task #3998): captured at import, i.e. at this process's
-# start. Monotonic for the window age; wall-clock for comparing DB heartbeat
-# timestamps against this process's own boot.
-_PROCESS_STARTED_MONOTONIC = time.monotonic()
-_PROCESS_STARTED_WALL = datetime.now(UTC)
-
-# Agents whose current lease saw one not-alive pass with unreadable
-# (denied/unknown) anchors: the second consecutive pass aborts. Keyed to the
-# lease id it was recorded for, so a successor lease never inherits a verdict.
-_anchor_obscured: dict[int, str] = {}
-
-
-class _RelayChild:
-    """The native runtime's bound relay for one lease, spawned at activation."""
-
-    __slots__ = ("lease_id", "process", "spawned_at", "token")
-
-    def __init__(
-        self,
-        lease_id: str,
-        process: subprocess.Popen[bytes],
-        token: str,
-        spawned_at: float,
-    ) -> None:
-        self.lease_id = lease_id
-        self.process = process
-        self.token = token
-        self.spawned_at = spawned_at
-
-
-# Keyed by agent: the agent-host service drives several agents in one process.
-# A module slot per agent keeps each bound relay separate. Entries die with the
-# process or are popped when the native agent regains control.
-_relay_children: dict[int, _RelayChild] = {}
-
-
-def drop_relay_supervision(agent_id: int) -> None:
-    """Host drop_agent hook: forget supervision state for a departed agent.
-
-    The relay process itself is not killed here — it self-exits as soon as the
-    lease reaches a terminal status (the terminate trigger revokes it), and a
-    relay that keeps running until then is still delivering real messages.
-    """
-    _relay_children.pop(agent_id, None)
-    _anchor_obscured.pop(agent_id, None)
 
 
 def _spawn_codex_relay(
@@ -362,7 +319,7 @@ def _spawn_codex_relay(
     return process
 
 
-def _terminate_relay(child: _RelayChild) -> None:
+def _terminate_relay(child: RelayChild) -> None:
     process = child.process
     if process.poll() is not None:
         return
@@ -386,7 +343,11 @@ def _heartbeat_fresh(heartbeat: datetime | None, *, now: datetime | None = None)
 
 
 def establish_relay(
-    db: Database, bus: EventBus, session: dict[str, Any], incarnation: RuntimeIncarnation
+    db: Database,
+    bus: EventBus,
+    session: dict[str, Any],
+    incarnation: RuntimeIncarnation,
+    relays: RelaySupervision,
 ) -> bool:
     """Activation gate: the bound relay must be up before the takeover stands.
 
@@ -407,7 +368,7 @@ def establish_relay(
         return _roll_back_relay_failure(
             db, bus, session, incarnation, fail_acceptance, "request has no relay binding"
         )
-    return _establish_codex_relay(db, bus, session, incarnation)
+    return _establish_codex_relay(db, bus, session, incarnation, relays)
 
 
 def _await_session_relay(
@@ -439,7 +400,11 @@ def _await_session_relay(
 
 
 def _establish_codex_relay(
-    db: Database, bus: EventBus, session: dict[str, Any], incarnation: RuntimeIncarnation
+    db: Database,
+    bus: EventBus,
+    session: dict[str, Any],
+    incarnation: RuntimeIncarnation,
+    relays: RelaySupervision,
 ) -> bool:
     """codex: provision the scoped credential, spawn the relay here, wait for its first heartbeat."""
     from base.agents.impersonation import (
@@ -454,7 +419,7 @@ def _establish_codex_relay(
         provision_relay(db, session["id"], incarnation, relay_token)
     except ImpersonationError:
         return False  # the lease is no longer native-held accepted state
-    child = _RelayChild(
+    child = RelayChild(
         session["id"],
         _spawn_codex_relay(
             incarnation.agent_id,
@@ -467,11 +432,11 @@ def _establish_codex_relay(
         relay_token,
         time.monotonic(),
     )
-    _relay_children[incarnation.agent_id] = child
+    relays.children[incarnation.agent_id] = child
     deadline = time.monotonic() + _RELAY_READY_TIMEOUT_S
     while time.monotonic() < deadline:
         if child.process.poll() is not None:
-            _relay_children.pop(incarnation.agent_id, None)
+            relays.children.pop(incarnation.agent_id, None)
             return _roll_back_relay_failure(
                 db,
                 bus,
@@ -498,7 +463,7 @@ def _establish_codex_relay(
             return True
         time.sleep(_RELAY_READY_POLL_S)
     _terminate_relay(child)
-    _relay_children.pop(incarnation.agent_id, None)
+    relays.children.pop(incarnation.agent_id, None)
     return _roll_back_relay_failure(
         db, bus, session, incarnation, fail_acceptance, "relay did not become ready in time"
     )
@@ -526,15 +491,15 @@ def _provider_anchor_states(process_metadata: object) -> list[str]:
     return provider_anchor_states(process_metadata)
 
 
-def _reprovision_window_active() -> bool:
+def _reprovision_window_active(relays: RelaySupervision) -> bool:
     """Whether the fresh-start window for the codex re-provision carve-out is open."""
     from base.config import settings
 
     window = float(settings.agent.impersonation_reprovision_window_seconds)
-    return window > 0 and (time.monotonic() - _PROCESS_STARTED_MONOTONIC) <= window
+    return window > 0 and (time.monotonic() - relays.started_monotonic) <= window
 
 
-def _relay_beat_predates_boot(heartbeat: datetime | None) -> bool:
+def _relay_beat_predates_boot(heartbeat: datetime | None, relays: RelaySupervision) -> bool:
     """No heartbeat, or the last beat predates this process start.
 
     A relay that beat after this process booted died under our watch; the
@@ -544,7 +509,7 @@ def _relay_beat_predates_boot(heartbeat: datetime | None) -> bool:
         return True
     if heartbeat.tzinfo is None:
         heartbeat = heartbeat.replace(tzinfo=UTC)
-    return heartbeat < _PROCESS_STARTED_WALL
+    return heartbeat < relays.started_wall
 
 
 async def _abort_for_death(
@@ -582,7 +547,11 @@ async def _abort_for_death(
 
 
 async def supervise_relay(
-    db: Database, bus: EventBus, session: dict[str, Any] | None, agent_id: int
+    db: Database,
+    bus: EventBus,
+    session: dict[str, Any] | None,
+    agent_id: int,
+    relays: RelaySupervision,
 ) -> None:
     """Stop the takeover when a core component died -- the native supervision seam.
 
@@ -610,46 +579,55 @@ async def supervise_relay(
     Only a stale heartbeat escalates: at most one provision write, one relay
     spawn, and the rate-limited failure stamp.
     """
-    child = _relay_children.get(agent_id)
+    child = relays.children.get(agent_id)
     if session is None or session["status"] not in ("requested", "accepted", "active"):
         # Native control returned (release/expiry): the relay self-exits on
         # terminal status; this kill is the explicit symmetric teardown.
         if child is not None:
-            _relay_children.pop(agent_id, None)
+            relays.children.pop(agent_id, None)
             await asyncio.to_thread(_terminate_relay, child)
         return
     if session["status"] != "active":
         return
-    if await _executor_verdict_stops(db, bus, session, agent_id):
+    if await _executor_verdict_stops(db, bus, session, agent_id, relays):
         return
     if _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
-    await _handle_stale_relay(db, bus, session, agent_id, child)
+    await _handle_stale_relay(db, bus, session, agent_id, child, relays)
 
 
 async def _executor_verdict_stops(
-    db: Database, bus: EventBus, session: dict[str, Any], agent_id: int
+    db: Database,
+    bus: EventBus,
+    session: dict[str, Any],
+    agent_id: int,
+    relays: RelaySupervision,
 ) -> bool:
     """Component A: the executor's recorded process chain. True when supervision ends here."""
     states = _provider_anchor_states(session.get("process_metadata"))
     if not states:
         return False
     if "alive" in states:
-        _anchor_obscured.pop(agent_id, None)
+        relays.anchor_obscured.pop(agent_id, None)
         return False
-    if set(states) <= {"dead", "reused"} or _anchor_obscured.get(agent_id) == session["id"]:
-        _anchor_obscured.pop(agent_id, None)
+    if set(states) <= {"dead", "reused"} or relays.anchor_obscured.get(agent_id) == session["id"]:
+        relays.anchor_obscured.pop(agent_id, None)
         await _abort_for_death(
             db, bus, session, agent_id, "executor", "the executor process is gone"
         )
         return True
     # Unreadable or unknown anchors: one more pass before the verdict.
-    _anchor_obscured[agent_id] = session["id"]
+    relays.anchor_obscured[agent_id] = session["id"]
     return True
 
 
 async def _handle_stale_relay(
-    db: Database, bus: EventBus, session: dict[str, Any], agent_id: int, child: _RelayChild | None
+    db: Database,
+    bus: EventBus,
+    session: dict[str, Any],
+    agent_id: int,
+    child: RelayChild | None,
+    relays: RelaySupervision,
 ) -> None:
     """Component B: the bound relay stopped heartbeating -- stop the lease or re-provision."""
     from base.agents.impersonation import record_relay_failure
@@ -674,7 +652,7 @@ async def _handle_stale_relay(
         # relay still stopped:
         # stop the lease (no respawn). A live-but-silent relay is terminated
         # here; a dead one is already gone, so the handle is simply dropped.
-        _relay_children.pop(agent_id, None)
+        relays.children.pop(agent_id, None)
         await asyncio.to_thread(_terminate_relay, child)
         await _abort_for_death(
             db, bus, session, agent_id, "relay", "the bound relay stopped heartbeating"
@@ -693,7 +671,8 @@ async def _handle_stale_relay(
         )
         return
     if not (
-        _reprovision_window_active() and _relay_beat_predates_boot(session["relay_heartbeat_at"])
+        _reprovision_window_active(relays)
+        and _relay_beat_predates_boot(session["relay_heartbeat_at"], relays)
     ):
         # Outside the fresh-start window, or the relay demonstrably beat after
         # this process started: the loss is not restart-shaped -- stop.
@@ -701,11 +680,15 @@ async def _handle_stale_relay(
             db, bus, session, agent_id, "relay", "the bound relay stopped heartbeating"
         )
         return
-    await _reprovision_relay(db, session, agent_id, incarnation)
+    await _reprovision_relay(db, session, agent_id, incarnation, relays)
 
 
 async def _reprovision_relay(
-    db: Database, session: dict[str, Any], agent_id: int, incarnation: RuntimeIncarnation
+    db: Database,
+    session: dict[str, Any],
+    agent_id: int,
+    incarnation: RuntimeIncarnation,
+    relays: RelaySupervision,
 ) -> None:
     """Carve-out: this process never minted the relay, an earlier incarnation did, the loss
     predates our boot and we are inside the fresh-start window: re-provision (which also
@@ -723,7 +706,7 @@ async def _reprovision_relay(
         await asyncio.to_thread(_stamp_relay_failure, db, session, agent_id, record_relay_failure)
         return
     spawned_at = time.monotonic()
-    _relay_children[agent_id] = _RelayChild(
+    relays.children[agent_id] = RelayChild(
         session["id"],
         _spawn_codex_relay(
             agent_id,

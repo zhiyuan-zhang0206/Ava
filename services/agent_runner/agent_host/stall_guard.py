@@ -30,18 +30,34 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from agent.state import BaseAgentState
-from agent.turn.progress import reset_turn_progress, turn_progress_age_s
 from agent.turn.runloop import emit_error_event
 from base.agents.context import AvaContext
 from base.config import settings
 from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.log import logger
-from services.agent_runner.agent_host.dispatcher import (
-    HostRestartRequiredError,
-    TurnStallTimeoutError,
-)
 
 _Graph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
+
+
+class HostRestartRequiredError(RuntimeError):
+    """A hosted turn refused its bounded cancellation and owns the task slot.
+
+    Rescheduling beside it would violate one-turn-per-agent. Letting the daemon
+    exit hands recovery to its supervisor, which restarts from the durable
+    checkpoint instead.
+    """
+
+
+class TurnStallTimeoutError(RuntimeError):
+    """A hosted turn was aborted by the no-progress stall guard (host.py).
+
+    Its ``graph.ainvoke`` made no progress for
+    ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` and was cancelled; the turn
+    task ends (the task DID unwind — that is the whole point of the bounded
+    abort) and the next wake resumes from the checkpoint. Distinct from
+    ``HostRestartRequiredError``, which is raised when the cancel refuses to
+    unwind: the daemon there must exit, here it must not.
+    """
 
 
 async def run_invocation_with_stall_guard(
@@ -68,7 +84,7 @@ async def run_invocation_with_stall_guard(
     exactly the unwinding semantics it had before this guard existed — when
     the graph task WAS the turn task.
     """
-    reset_turn_progress(agent_id)
+    ctx.turn_progress.reset(agent_id)
     invoke_task = asyncio.create_task(
         graph.ainvoke(  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
             input_update,  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
@@ -86,7 +102,7 @@ async def run_invocation_with_stall_guard(
             )
             if invoke_task in done:
                 return invoke_task.result()
-            age = turn_progress_age_s(agent_id)
+            age = ctx.turn_progress.age_s(agent_id)
             if age is not None and age >= settings.daemon.host_turn_no_progress_timeout_seconds:
                 return await _abort_stalled_invocation(agent_id, ctx, invoke_task, age)
     except asyncio.CancelledError:

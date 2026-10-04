@@ -25,6 +25,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 
 from agent.graph._callbacks import RedisStreamHandler
+from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.projection import (
     EVENT_ADAPTER,
     ChatDelta,
@@ -98,7 +99,7 @@ async def test_streams_code_coalesced_from_partial_json():
     """args incremental fragments accumulate into valid JSON, each intermediate publish of current code delta.
     No preceding content blocks → code lands on block 0."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_tool_args_chunk('{"co'))
     handler.process_chunk(_tool_args_chunk('de":"pri'))
@@ -115,7 +116,7 @@ async def test_streams_code_coalesced_from_partial_json():
 async def test_decodes_json_escapes():
     """JSON escapes (\\n / \\\") auto-decoded before publish — frontend gets native Python."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_tool_args_chunk('{"code":"print(\\"hi\\")\\n"}'))
     _flush(handler)
@@ -127,7 +128,7 @@ async def test_decodes_json_escapes():
 async def test_text_block_publishes_chat_streaming():
     """text content block → ChatStart (first time for block) + ChatDelta (each block delta)."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_text_chunk("hello "))
     handler.process_chunk(_text_chunk("user"))
@@ -145,7 +146,7 @@ async def test_string_content_publishes_chat_streaming():
     Unit test constructs `AIMessageChunk(content="hello")` for simplicity — handler must still
     publish ChatDelta (block_idx=0)."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(AIMessageChunk(content="hello "))
     handler.process_chunk(AIMessageChunk(content="user"))
@@ -161,7 +162,7 @@ async def test_string_content_publishes_chat_streaming():
 async def test_empty_text_block_no_chat_publish():
     """Empty text content (tool_call-only chunk) does not emit ChatStart — avoids empty agent_chat block."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_tool_args_chunk('{"code":"x"}'))
 
@@ -173,7 +174,7 @@ async def test_empty_text_block_no_chat_publish():
 async def test_streams_reasoning_progressively():
     """thinking content blocks are chunk-level text incrementals, directly published."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_thinking_chunk("Let me "))
     handler.process_chunk(_thinking_chunk("think... "))
@@ -216,7 +217,7 @@ async def test_reasoning_ms_measures_first_to_last_thinking_token(monkeypatch: p
     _scripted_monotonic(monkeypatch, [100.0, 100.5, 108.2])
 
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
     assert handler.reasoning_ms_by_block == {}
 
     handler.process_chunk(_thinking_chunk("a"))  # ts 100.0
@@ -233,7 +234,7 @@ async def test_reasoning_ms_per_block_independent(monkeypatch: pytest.MonkeyPatc
     _scripted_monotonic(monkeypatch, [100.0, 102.0, 105.0, 106.5])
 
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
     handler.process_chunk(_thinking_chunk("a", index=0))  # 100.0
     handler.process_chunk(_thinking_chunk("b", index=0))  # 102.0
     handler.process_chunk(_thinking_chunk("c", index=2))  # 105.0
@@ -244,7 +245,7 @@ async def test_reasoning_ms_per_block_independent(monkeypatch: pytest.MonkeyPatc
 async def test_reasoning_ms_empty_without_thinking():
     """A code-only turn (no thinking) leaves reasoning_ms_by_block empty."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
     handler.process_chunk(_tool_args_chunk('{"code":"x"}'))
     assert handler.reasoning_ms_by_block == {}
 
@@ -253,7 +254,7 @@ async def test_signature_delta_skipped():
     """signature_delta block (type=thinking but only carries signature field) skipped —
     server-signed opaque verifier, not user-visible text."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_thinking_chunk("Let me think"))
     handler.process_chunk(_signature_chunk("opaque-sig-bytes"))
@@ -270,7 +271,7 @@ async def test_reasoning_then_code_independent_streams():
     """reasoning phase comes first, then code phase — two independent streams, code offset past thinking blocks.
     thinking@0 → code lands on block 1."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_thinking_chunk("planning..."))
     handler.process_chunk(_tool_args_chunk('{"code":"x"}'))
@@ -287,7 +288,7 @@ async def test_reasoning_then_code_independent_streams():
 async def test_finish_flushes_remaining_code_and_publishes_llm_done():
     """At stream end, partial JSON finally becomes valid → finish() publish remainder as fallback, then LLMDone."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_tool_args_chunk('{"code":""'))
     pub.emit.assert_not_called()
@@ -310,7 +311,7 @@ async def test_finish_flushes_remaining_code_and_publishes_llm_done():
 async def test_finish_publishes_llm_done_even_when_no_code():
     """No tool_call (text-only / reasoning-only / no output) should still publish LLMDone."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_text_chunk("just chatting"))
     handler.finish()
@@ -328,7 +329,7 @@ async def test_multi_block_chunk_dispatches_both():
     """Same chunk carries both text + thinking multiple blocks (rare but legal) → each block_idx
     different *Start, item_id distinct."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     chunk = AIMessageChunk(
         content=[
@@ -352,8 +353,8 @@ async def test_multi_block_chunk_dispatches_both():
 async def test_handler_agent_id_carried_per_instance():
     """Two handler instances don't interfere — agent_id + msg_idx bound to instance."""
     pub = MagicMock()
-    h1 = RedisStreamHandler(pub, agent_id=1, msg_idx=3)
-    h2 = RedisStreamHandler(pub, agent_id=2, msg_idx=3)
+    h1 = RedisStreamHandler(pub, agent_id=1, msg_idx=3, turn_progress=TurnProgress())
+    h2 = RedisStreamHandler(pub, agent_id=2, msg_idx=3, turn_progress=TurnProgress())
 
     h1.process_chunk(_tool_args_chunk('{"code":"a"}'))
     h2.process_chunk(_tool_args_chunk('{"code":"b"}'))
@@ -374,7 +375,7 @@ async def test_anthropic_thinking_text_then_tool_offsets_code():
     """anthropic shape: thinking@0 + text@1 + tool_use (index=2) → code lands on block 2,
     matching content_block_index (tool_use always after narration/reasoning)."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=7, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=7, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_thinking_chunk("plan", index=0))
     handler.process_chunk(_text_chunk("hi", index=1))
@@ -392,7 +393,7 @@ async def test_gemini_text_then_tool_index_none_offsets_code():
     """gemini shape: text@0 + one tool_call_chunk (index=None, full args) → code lands on
     block 1, not colliding with text's block 0 id."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=8, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=8, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_text_chunk("Let me compute that.", index=0))
     handler.process_chunk(_gemini_tool_chunk('{"code": "print(2 + 3)"}', "call-0"))
@@ -411,7 +412,7 @@ async def test_gemini_thinking_then_text_then_tool_publishes_reasoning():
     thinking-block path", if handler degenerates to anthropic-only this test will red.
     Shape taken from real gemini-3.5-flash astream trace."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=8, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=8, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_thinking_chunk("**Analyzing the Snail's Ascent**\n", index=0))
     handler.process_chunk(_thinking_chunk("It reaches the top on day 8.", index=0))
@@ -437,7 +438,7 @@ async def test_gemini_multiple_tools_index_none_distinct_blocks():
     """gemini shape: multiple tool calls at once, all index=None, distinguished by id → each independent code
     block (0/1/2), args not concatenated into illegal JSON (regression: old impl collapsed all into block 0 making bad JSON)."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=9, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=9, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_gemini_tool_chunk('{"code": "print(1)"}', "c0"))
     handler.process_chunk(_gemini_tool_chunk('{"code": "print(2)"}', "c1"))
@@ -457,7 +458,7 @@ async def test_openai_string_content_then_incremental_tool_args():
     incremental across chunks (index=0, first chunk carries id, subsequent empty). chat lands block 0, code offset to
     block 1, and code progressively streamed (unlike gemini that gives full args at once)."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=11, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=11, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(AIMessageChunk(content="Hi"))
     handler.process_chunk(AIMessageChunk(content="!"))
@@ -503,7 +504,7 @@ async def test_openai_responses_reasoning_summary_publishes_reasoning():
     turn order: reasoning@0 → text@1 → tool@2, code offset past both content
     blocks (so the streamed item_id matches the committed snapshot)."""
     pub = MagicMock()
-    handler = RedisStreamHandler(pub, agent_id=11, msg_idx=MSG_IDX)
+    handler = RedisStreamHandler(pub, agent_id=11, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     handler.process_chunk(_openai_reasoning_chunk("**Plan**\n", index=0))
     handler.process_chunk(_openai_reasoning_chunk("Compute it.", index=0))
@@ -527,7 +528,7 @@ async def test_reset_restores_fresh_stream_state_for_retry():
     stalls). After reset(), a second stream must be byte-identical to a
     fresh handler's."""
     pub = MagicMock()
-    h1 = RedisStreamHandler(pub, 42, MSG_IDX)
+    h1 = RedisStreamHandler(pub, 42, MSG_IDX, turn_progress=TurnProgress())
     h1.process_chunk(_text_chunk("Hello"))
     h1.process_chunk(_tool_args_chunk('{"code": "print(1)"}'))
     _flush(h1)  # drain the coalescer so the compare covers deltas, not just starts
@@ -550,7 +551,7 @@ async def test_without_reset_streaming_duplicates_content():
     """The bug reset() fixes: re-streaming through a used handler re-appends
     deltas to already-started blocks (frontend sees 'HelloHello')."""
     pub = MagicMock()
-    h = RedisStreamHandler(pub, 42, MSG_IDX)
+    h = RedisStreamHandler(pub, 42, MSG_IDX, turn_progress=TurnProgress())
     h.process_chunk(_text_chunk("Hello"))
     pub.reset_mock()
     h.process_chunk(_text_chunk("Hello"))  # no reset — the old retry behavior

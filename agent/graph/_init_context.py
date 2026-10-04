@@ -65,6 +65,7 @@ async def init_context_node(
         ops_pool=runtime.context.ops_pool,
         event_publisher=event_publisher,
         agent_id=agent_id_from_config(config),
+        turn_progress=runtime.context.turn_progress,
     ):
         reset = state.context_reset
         if state.messages:

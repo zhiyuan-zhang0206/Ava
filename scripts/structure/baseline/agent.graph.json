@@ -12,8 +12,7 @@
     "agent/graph/exec/_subprocess.py::thread:_run_legacy_subprocess": 1,
     "agent/graph/interrupt.py::asyncio-task:interruptible_model": 2,
     "agent/graph/interrupt.py::asyncio-task:subscribe_interrupt": 1,
-    "agent/graph/prompt/capabilities.py::ambient-container:_warned_unresolved": 1,
-    "agent/graph/recall/_memory_filter.py::import-time-read:_RECALL_LOG_HMAC_KEY": 1
+    "agent/graph/prompt/capabilities.py::ambient-container:_warned_unresolved": 1
   },
   "files": {
     "agent/graph/tests/test_llm_helpers.py": 1146

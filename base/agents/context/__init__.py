@@ -10,18 +10,24 @@ dependencies as `runtime.context.X`:
   the eval driver and tests populate only the ones their path needs;
 - **`agent`**: the agent's resolved per-turn configuration (`AgentSlices`, see
   `base.host.env.agent_slices`), built by the host when the turn starts;
-- **`extensions`**: the plugins' contributions, held by the host that loaded them.
+- **`extensions`**: the plugins' contributions, held by the host that loaded them;
+- **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`,
+  `recall_log_key`. The host builds each once and hands the same object to every turn it runs;
+  a context built without them (the eval driver, a test) carries private ones.
 
 `frozen=True`: context is read-only during a run. If you need mutable state, split it into a
 separate dataclass.
 """
 
-from dataclasses import dataclass
+import secrets
+from dataclasses import dataclass, field
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.observation.relay_supervision import RelaySupervision
+from base.agents.observation.turn_progress import TurnProgress
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
@@ -85,6 +91,19 @@ class AvaContext:
     extensions: ExtensionRegistry = EMPTY
     """What the enabled plugins contribute (prompt sections, context notes), as the loader built it
     for this host. Empty for the eval driver and tests that run no plugins."""
+
+    turn_progress: TurnProgress = field(default_factory=TurnProgress)
+    """The turn-progress clock: graph nodes and the LLM stream mark activity on it, the host's
+    stall guard, dispatcher and heartbeat read it."""
+
+    relays: RelaySupervision = field(default_factory=RelaySupervision)
+    """The impersonation relays this process spawned and its start clock, read by the claim gate
+    and the host's supervision."""
+
+    recall_log_key: bytes = field(default_factory=lambda: secrets.token_bytes(32))
+    """The key behind the passive-recall log's query HMAC. One per host process, so repeated
+    filter decisions can be joined within it without making low-entropy conversation text
+    dictionary-reversible from telemetry."""
 
     def require_db(self) -> Database:
         """The cluster database handle; a context built without one fails here."""
