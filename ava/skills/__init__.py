@@ -17,10 +17,6 @@ if TYPE_CHECKING:
     # stack stays off every exec child (task #3816; _TYPE_CHECKING_ALLOWED).
     from base.packages.skills.index import SkillFile
 
-_recorded_skill_invocations: set[tuple[int, str]] = set()
-# Per-agent-run dedup set: (agent_id, skill_identifier) tuples — one row per
-# skill per run; "loaded" is the only depth the producer writes.
-
 # Attribution timing: a `skill_invoked` row at depth `"loaded"` — the only
 # depth the producer writes — means the agent CONSUMED a skill's SKILL.md body
 # (a `help()` render, a direct `__doc__` read, or an `ava.files.read` of the
@@ -501,8 +497,7 @@ class _LazySkillDoc:
     def _load_skill_doc(self) -> str:
         """Read the SKILL.md body, record the `skill_invoked` attribution, and
         cache the result in `_doc`. Runs at most once per proxy (the cache
-        makes later reads free; the per-(agent, skill) dedup in
-        `_record_skill_invoked` keeps repeated proxies to one row)."""
+        makes later reads free, so one proxy records once)."""
         self._doc = _consume_skill_body(self._info)
         return self._doc
 
@@ -590,8 +585,8 @@ def _consume_skill_body(skill: Skill) -> str:
     """Read one skill's SKILL.md body, record the `skill_invoked` attribution,
     and return the consumed shape — a path line (tilde-shortened) then the raw
     body, the shape a proxy's `__doc__` carries. The one body-consumption
-    point shared by the lazy proxies and `read()` (dedup is in
-    `_record_skill_invoked`), so every access path records identically."""
+    point shared by the lazy proxies and `read()`, so every access path records
+    identically."""
     from pathlib import Path as _Path
 
     info = skill
@@ -641,11 +636,17 @@ def read(name: str) -> str:
 
 
 def _record_skill_invoked(skill: Skill) -> None:
-    """Best-effort record that this agent opened this skill (a hard signal for
-    skill attribution) — the `"loaded"` depth, the only depth the producer
-    writes. Deduplicates: repeated `ava.skills.X` access within the same agent
-    run only emits one event per skill. Skipped silently outside an agent
-    process; a write failure is logged and swallowed.
+    """Record that this agent opened this skill: one `skill_invoked` audit event
+    at the `"loaded"` depth (the only depth the producer writes), written at the
+    moment of consumption through the audit-event path (`audit_events` row in
+    Postgres, then the unified stream). Nothing is buffered or deduplicated in
+    this process: every body consumption is one event, and the consumer
+    (`ava_self_evolution`'s `_skills_touched`) reads the set of skills, not row
+    counts. Skipped outside an agent process (no identity to attribute to).
+
+    Attribution must never take an agent down, so the write is the *reported*
+    kind: a failed write logs an error with its traceback and emits an
+    `audit_write_failed` anomaly event instead of raising.
     """
     from ava.agent_identity import require_agent_id
 
@@ -654,65 +655,28 @@ def _record_skill_invoked(skill: Skill) -> None:
     except RuntimeError:
         return
 
-    key = (agent, identifier(skill))
-    if key in _recorded_skill_invocations:
-        return
-    # Dedup only on a write that landed: marking first turns one swallowed DB
-    # blip into a permanent "already recorded" for the rest of the agent run.
-    if _insert_skill_events(agent, [skill]):
-        _recorded_skill_invocations.add(key)
+    # Function-local: ava._settings is the composition root and pulls the shell stack; only
+    # recording needs it, and the gateway's import closure must not (test_gateway_consumer_guard).
+    from ava._settings import database
+    from base.telemetry.audit_events import (
+        SkillInvokedPayload,
+        prepare_event_log,
+        record_audit_reported,
+    )
 
-
-def clear_recorded_skill_invocations() -> None:
-    """Forget which skills this agent run already recorded, so the next
-    consumption of each one records again (the dedup is per-run state)."""
-    _recorded_skill_invocations.clear()
-
-
-def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
-    """Record one `skill_invoked` audit event per skill; return whether the write
-    landed. Callers key their dedup on that return, so a failed write is retried
-    rather than remembered as done.
-
-    The single write path, so per-skill and batch callers cannot drift in what they record.
-    The batch is one `audit_events` transaction; the events reach the unified stream after commit.
-
-    Attribution must never take an agent down: a failed write is logged with its
-    traceback and returns False instead of raising, and the dedup retries it.
-    """
-    if not skills:
-        return True
-    try:
-        # Function-local: ava._settings is the composition root and pulls the shell stack; only
-        # recording needs it, and the gateway's import closure must not (test_gateway_consumer_guard).
-        from ava._settings import database
-        from base.telemetry.audit_events import (
-            SkillInvokedPayload,
-            prepare_event_log,
-            record_audit_standalone_many,
-        )
-
-        record_audit_standalone_many(
-            database(),
-            [
-                prepare_event_log(
-                    event_type="skill_invoked",
-                    agent_id=agent,
-                    source="self",
-                    payload=SkillInvokedPayload(
-                        skill=skill["name"],
-                        identifier=identifier(skill),
-                        invocation_depth="loaded",
-                    ).model_dump(),
-                )
-                for skill in skills
-            ],
-        )
-    except Exception as e:
-        names = ", ".join(s["name"] for s in skills)
-        logger.exception("skill_invoked event write failed for {}: {}", names, e)
-        return False
-    return True
+    record_audit_reported(
+        database(),
+        prepare_event_log(
+            event_type="skill_invoked",
+            agent_id=agent,
+            source="self",
+            payload=SkillInvokedPayload(
+                skill=skill["name"],
+                identifier=identifier(skill),
+                invocation_depth="loaded",
+            ).model_dump(),
+        ),
+    )
 
 
 def _node_to_obj(path: str, node: _Leaf | _NS) -> _SkillProxy | _Namespace:

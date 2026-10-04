@@ -107,7 +107,6 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert payload.kind == "done"
     assert payload.code_reached is True  # P0 #2100: the code really ran
     assert payload.state_update is None
-    assert payload.findings == []
     assert payload.attachments == []
     assert payload.sdk_calls == []  # ran, executed no SDK calls
 
@@ -547,7 +546,6 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava.ensure_plugins_loaded", fake_ensure_plugins_loaded)
-    monkeypatch.setattr("ava.security.take_findings", list)
     monkeypatch.setattr("ava.attachment_transport.take_attachments", list)
 
     try:
@@ -645,9 +643,6 @@ def test_child_overlay_phases_framework_then_plugin(
     def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
         return None
 
-    def fake_take_findings() -> list[object]:
-        return []
-
     def fake_plugins_loaded(*, surface: bool = True) -> None:
         # Stateless request (fake_read_request: state=None) -> the surface load.
         assert surface is True
@@ -660,7 +655,6 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr("ava.security.take_findings", fake_take_findings)
     monkeypatch.setattr("ava.ensure_plugins_loaded", fake_plugins_loaded)
 
     def fake_apply_scope(

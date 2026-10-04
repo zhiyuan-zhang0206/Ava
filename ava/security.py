@@ -7,16 +7,18 @@ matched", not "safe".
 """
 
 import re
-from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from base.agents.messages.security_finding import SecurityFindingEntry
+from base.log import logger
 
 __all_for_ava__ = [
     "SecurityFindingEntry",
     "is_flagged",
     "scan_content",
-    "take_findings",
 ]
+
+# The graph-state channel a finding is appended to (`BaseAgentState.security_findings`).
+_FINDINGS_CHANNEL = "security_findings"
 
 # Structural markup an attacker uses to forge a system message or a tool call.
 # Matched case-insensitively as a plain substring; these strings do not occur in
@@ -84,65 +86,56 @@ def _triggers(content: str) -> list[str]:
     return hits
 
 
-class SecurityFindingEntry(BaseModel):
-    """An injection pattern matched in some ingested content (no file body)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    type: Literal["security"] = "security"
-    source: str
-    triggers: list[str]
-
-
-# ── exec-child findings buffer ───────────────────────────────────────────
-# scan_content() findings accumulate in this process-global list while agent
-# SDK code runs inside an exec child — a fresh process per execute_code, the
-# only place the turn's state slot is bound (`ava.in_exec_turn()`). The child drains the list with take_findings()
-# into its result envelope; the exec node re-validates each entry and injects it
-# as a SECURITY system note in the same exec's messages delta, after the
-# exec-result ToolMessage (the tool_use -> tool_result adjacency invariant
-# forbids interleaving notes between the AIMessage and its ToolMessage).
-#
-# The agent host is a different shape: one process serves many agents'
-# concurrent turns, so it holds no findings buffer. scan_content() drops its
-# finding there (`_in_exec_turn()` is False), and a claim-side inbound scan
-# hands its finding straight back to the claim node (scan_inbound_content),
-# which puts the note in that claim's own messages delta.
-_pending_findings: list[SecurityFindingEntry] = []
-
-
-def _in_exec_turn() -> bool:
-    """True when scan_content runs inside an exec child — the only place a
-    finding can be delivered (there is a messages delta to inject into)."""
-    import ava  # lazy: same-layer, avoids import cycle at module load
-
-    return ava.in_exec_turn()
-
-
 def _record_finding(source: str, triggers: list[str]) -> None:
-    """Buffer one security finding for the exec child's result envelope. No-op
-    when security scanning is disabled, or outside an exec child (no messages
-    delta exists to inject into, and a host-wide buffer would be shared by
-    every agent the host serves)."""
+    """Hand one security finding to the exec turn's state update.
+
+    The finding is appended to `ava.state_update["security_findings"]` — the
+    delta the exec child returns and the exec node commits through the channel's
+    reducer. The agent host's after_exec hook turns it into a SECURITY system
+    note right behind the exec-result ToolMessage and clears the channel (the
+    tool_use -> tool_result adjacency invariant forbids interleaving the note
+    between the AIMessage and its ToolMessage). Nothing is kept in this process.
+
+    No-op when security scanning is disabled. Outside an exec turn no state
+    update exists to carry the finding: the finding is dropped, and says so in
+    the log (the agent host's claim-side inbound scan uses
+    `scan_inbound_content`, whose caller owns the finding).
+    """
     from base.config import settings
 
     if not settings.agent.security_scan_enabled:
         return
-    if not _in_exec_turn():
+    import ava
+
+    if not ava.in_exec_turn():
+        logger.warning(
+            "prompt-injection finding from {} ({}) not delivered: scan_content ran outside an "
+            "exec turn, which has no state update to carry it",
+            source,
+            ", ".join(triggers),
+        )
         return
-    _pending_findings.append(SecurityFindingEntry(source=source, triggers=triggers))
+    update = ava.state_update
+    if not isinstance(update, dict):
+        raise TypeError(
+            f"ava.state_update must stay a dict, got {type(update).__name__} (security finding)"
+        )
+    update[_FINDINGS_CHANNEL] = [
+        *update.get(_FINDINGS_CHANNEL, []),
+        SecurityFindingEntry(source=source, triggers=triggers),
+    ]
 
 
 def scan_content(content: str, source: str = "unknown") -> str:
     """Return `content` unchanged.
 
-    When a prompt-injection pattern is present, the finding is buffered
-    in-memory for the exec node to deliver as a SECURITY system note in this
-    exec's messages delta. Outside an exec turn the finding is deliberately
-    dropped: there is no delta to own it. Claim-side inbound construction must
-    call scan_inbound_content() instead, whose caller owns the finding. The
-    returned content is always clean — no warning is prepended.
+    When a prompt-injection pattern is present, a SECURITY system note follows
+    the tool result. Outside an agent turn there is nothing to attach a note to:
+    the finding is dropped with a logged warning. Claim-side inbound
+    construction must call scan_inbound_content() instead, whose caller owns the
+    finding. The returned content is always clean — no warning is prepended.
     """
+    # The finding rides the exec turn's state update (see `_record_finding`); the SDK keeps none.
     hits = _triggers(content)
     if hits:
         _record_finding(source, hits)
@@ -165,24 +158,11 @@ def scan_inbound_content(content: str, source: str) -> SecurityFindingEntry | No
     return SecurityFindingEntry(source=source, triggers=hits) if hits else None
 
 
-def take_findings() -> list[SecurityFindingEntry]:
-    """Return all pending exec-child findings and clear the buffer.
-
-    The exec child drains its findings into the result envelope when the run
-    ends. Returns an empty list when nothing was flagged. Clearing on read
-    means each finding is delivered exactly once — there is no file to
-    truncate.
-    """
-    out = list(_pending_findings)
-    _pending_findings.clear()
-    return out
-
-
 def is_flagged(content: str) -> bool:
     """True when `content` carries injection patterns.
 
     Findings are delivered as SECURITY system notes (exec-child findings by the
-    exec node, inbound findings by the claim node), never as a marker inside the
+    after_exec hook, inbound findings by the claim node), never as a marker inside the
     content, so this checks `_triggers` directly: does the content contain
     injection patterns?
     """

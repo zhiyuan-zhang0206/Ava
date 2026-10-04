@@ -135,8 +135,8 @@ _sys.modules[__name__].__class__ = _SdkModule
 def in_exec_turn() -> bool:
     """Whether this process is running an exec turn — the framework has bound its state slot.
 
-    The one explicit answer for the SDK's own call sites (cwd-aware wraps, the findings
-    buffer): true in an exec child while agent code runs and in an attached external
+    The one explicit answer for the SDK's own call sites (cwd-aware wraps, the security
+    scan): true in an exec child while agent code runs and in an attached external
     controller, false in the agent host and in bare scripts. Framework-internal — not in the
     `ava.help()` view.
     """

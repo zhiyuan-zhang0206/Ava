@@ -15,8 +15,8 @@ Core mechanisms:
     cannot strand an ordinary descendant holding stdout. Cancellation returns
     only after the direct child is reaped and the pipe reader gets its bounded
     join. The child rebuilds the state snapshot from the request envelope; the
-    plugin state-update delta and drained security findings ride the result
-    envelope back and are validated here.
+    state-update delta (plugin fields, security findings) rides the result
+    envelope back and is validated here.
   - Halt signal uses exception type rather than exit code: agent code raising
     `LifecycleExit` (AgentTermination / AgentRestart / SystemHalt) → captured
     in result_holder["lifecycle"] → exec_node decides halted + writes marker
@@ -54,7 +54,7 @@ from typing import Any, Literal
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
-from langgraph.types import Command
+from langgraph.types import Command, Overwrite
 
 from agent import state as _state
 from agent.graph._attach_drain import build_attach_message
@@ -67,7 +67,6 @@ from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
-from ava.security import SecurityFindingEntry
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
@@ -168,7 +167,6 @@ async def _run_agent_code(
     _ExecResult,
     dict[str, Any],
     int,
-    list[SecurityFindingEntry],
     list[dict[str, Any]] | None,
     list[dict[str, Any]] | None,
 ]:
@@ -176,11 +174,11 @@ async def _run_agent_code(
 
     The parent does not touch the ava.state slot — the child rebuilds the
     snapshot from the request envelope (`agent/exec_child.py`), and the
-    plugin's state-update delta + drained security findings ride the result
+    state-update delta (plugin fields, security findings) rides the result
     envelope back. Validation is fail-fast on a tampered slot, and the child
     receives the bound turn's config maps so its SDK calls
     resolve the same settings. Returns
-    (result, plugin_state_update, exec_ms, findings, attachments, sdk_calls)."""
+    (result, plugin_state_update, exec_ms, attachments, sdk_calls)."""
     config_overlay = ctx.require_agent().overlay()
     exec_started = time.monotonic()
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
@@ -209,14 +207,9 @@ async def _run_agent_code(
         raise TypeError(payload.state_update_error)
     delta = payload.state_update if payload is not None else None
     plugin_state_update = _validate_plugin_state_keys(dict(delta), state.__class__) if delta else {}
-    findings = (
-        [SecurityFindingEntry.model_validate(f) for f in payload.findings]
-        if payload is not None and payload.findings
-        else []
-    )
     attachments = payload.attachments if payload is not None else None
     sdk_calls = payload.sdk_calls if payload is not None else None
-    return result, plugin_state_update, exec_ms, findings, attachments, sdk_calls
+    return result, plugin_state_update, exec_ms, attachments, sdk_calls
 
 
 def _dispatch_exec_result(
@@ -411,7 +404,6 @@ async def _exec_single_call(
         result,
         plugin_state_update,
         exec_ms,
-        findings,
         envelope_attachments,
         envelope_sdk_calls,
     ) = await _run_agent_code(
@@ -434,7 +426,12 @@ async def _exec_single_call(
     # Compact path (SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
     compact_halt = isinstance(result, _ExecLifecycle) and isinstance(result.exc, SystemHalt)
-    if not compact_halt:
+    if compact_halt:
+        # Findings annotate the history claim is about to wipe; the rest of the delta (plugin
+        # fields) is written back as before, and the findings otherwise ride the spread below
+        # into `state.security_findings` for the after_exec hook.
+        plugin_state_update.pop("security_findings", None)
+    else:
         # The UI shows exactly what the agent sees in exec output — same blob
         # fed back to the LLM below (ExecOutput shares item_id with the chunk).
         ctx.event_publisher.emit(
@@ -457,10 +454,10 @@ async def _exec_single_call(
         )
         state_messages_update.append(msg)
 
-        # In-memory system-note injection (user ruling 2026-08-11): security
-        # findings + plugin context notes merge into this exec's delta after
-        # the ToolMessage (ordering rationale: _notes.py).
-        state_messages_update = merge_exec_notes(state_messages_update, plugin_messages, findings)
+        # In-memory system-note injection (user ruling 2026-08-11): plugin
+        # context notes merge into this exec's delta after the ToolMessage
+        # (ordering rationale: _notes.py).
+        state_messages_update = merge_exec_notes(state_messages_update, plugin_messages)
     update: dict[str, Any] = {
         "messages": state_messages_update,
         "halted": halted,
@@ -544,13 +541,14 @@ async def _exec_node_impl(
     )
     if compacted:
         delta["pending_exec_notes"] = []
+        # Findings raised by earlier calls of this batch annotate the history claim wipes.
+        delta["security_findings"] = Overwrite([])
         return Command[ExecGoto](update=delta, goto=AFTER_EXEC)
 
     results = [message for message in delta["messages"] if isinstance(message, ToolMessage)]
     notes = merge_exec_notes(
         state.pending_exec_notes,
         [message for message in delta["messages"] if not isinstance(message, ToolMessage)],
-        [],
     )
     if delta["halted"]:
         results.extend(
