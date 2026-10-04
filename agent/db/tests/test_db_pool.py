@@ -10,7 +10,10 @@ live pg by stubbing the base `getconn` and the clock.
 
 from __future__ import annotations
 
+import os
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, cast
 
 import psycopg
@@ -18,7 +21,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import db
-from agent.db import _SLOW_ACQUIRE_WARN_S, LoggingConnectionPool, claim_inbound_batch
+from agent.db import LoggingConnectionPool, claim_inbound_batch
+from base.config import settings
 
 
 def _pool() -> LoggingConnectionPool[psycopg.AsyncConnection]:
@@ -34,6 +38,15 @@ def _pool() -> LoggingConnectionPool[psycopg.AsyncConnection]:
 
 def _acquire_records(records):
     return [r for r in records if r["extra"].get("event", "").startswith("db_pool_acquire")]  # pyright: ignore[reportUnknownMemberType]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_warn_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep the host-wide slow-borrow marker out of the real `$AVA_HOME/run`
+    and out of the next test's view; cooldown tests get this path back."""
+    marker = tmp_path / "db-pool-slow-acquire.warn"
+    monkeypatch.setattr(db, "_slow_acquire_warn_marker", lambda: marker)
+    return marker
 
 
 async def test_fast_acquire_is_quiet(loguru_records, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,10 +74,11 @@ async def test_slow_acquire_warns(loguru_records, monkeypatch: pytest.MonkeyPatc
     # `t0` is the first read; every later read (ours + any loguru-internal one)
     # returns a value past the threshold, so the stub is robust to extra calls.
     reads = {"n": 0}
+    threshold = settings.agent.db_pool_slow_acquire_warn_seconds
 
     def _clock() -> float:
         reads["n"] += 1
-        return 0.0 if reads["n"] == 1 else _SLOW_ACQUIRE_WARN_S + 1.0
+        return 0.0 if reads["n"] == 1 else threshold + 1.0
 
     monkeypatch.setattr(db.time, "monotonic", _clock)
 
@@ -80,10 +94,48 @@ async def test_slow_acquire_warns(loguru_records, monkeypatch: pytest.MonkeyPatc
     assert recs[0]["level"].name == "WARNING"  # pyright: ignore[reportUnknownMemberType]
 
 
+async def test_slow_acquires_coalesce_per_host_within_the_cooldown(
+    loguru_records, monkeypatch: pytest.MonkeyPatch, _isolated_warn_marker: Path
+) -> None:
+    """One host stall is one WARNING: the first slow borrow stamps the marker,
+    further slow borrows log DEBUG with the same fields, and the next WARNING
+    comes only after the cooldown passes."""
+
+    async def _ok(self, timeout=None):
+        return object()
+
+    pool = _pool()  # construct under the real clock, before we stub it
+    monkeypatch.setattr(AsyncConnectionPool, "getconn", _ok)
+    clock = [0.0]
+
+    def _monotonic() -> float:
+        clock[0] += 100.0
+        return clock[0]
+
+    monkeypatch.setattr(db.time, "monotonic", _monotonic)
+
+    await pool.getconn()
+    await pool.getconn()
+    assert [r["level"].name for r in _acquire_records(loguru_records)] == [  # pyright: ignore[reportUnknownMemberType]
+        "WARNING",
+        "DEBUG",
+    ]
+
+    aged = time.time() - settings.agent.db_pool_slow_acquire_warn_cooldown_seconds - 1.0
+    os.utime(_isolated_warn_marker, (aged, aged))
+    await pool.getconn()
+
+    recs = _acquire_records(loguru_records)  # pyright: ignore[reportUnknownMemberType]
+    assert [r["level"].name for r in recs] == ["WARNING", "DEBUG", "WARNING"]  # pyright: ignore[reportUnknownMemberType]
+    assert [r["extra"]["coalesced"] for r in recs] == [False, True, False]
+    assert recs[0]["extra"]["check_ms"] >= 0
+
+
 async def test_slow_acquire_separates_slot_wait_and_check(
     loguru_records, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pool = _pool()
+    monkeypatch.setattr(settings.agent, "db_pool_slow_acquire_warn_seconds", 3.0)
     clock = [0.0]
     sentinel = object()
 

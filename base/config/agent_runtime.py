@@ -76,6 +76,30 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
+    db_pool_slow_acquire_warn_seconds: float = Field(
+        default=10.0,
+        alias="AVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS",
+        description="A successful connection borrow at least this slow is reported. A healthy borrow takes milliseconds, so seconds mean the host is stalled or Postgres is reconnecting; 3s warned on every host-stall check spike (2026-10-03 triage #8: 39 of 41 lines had check_ms == elapsed, a normal reset check being ~30ms). Stays below db_pool_acquire_timeout_seconds so a slow-but-served borrow is visible before it becomes a hard timeout.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    db_pool_slow_acquire_warn_cooldown_seconds: float = Field(
+        default=300.0,
+        alias="AVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS",
+        description="Host-wide cooldown between slow-borrow WARNINGs (seconds): the first slow borrow on the host warns and stamps a per-host marker; further slow borrows stay DEBUG with the same fields until the window passes, so one host stall is one WARNING instead of one per agent.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     impersonation_ack_window_seconds: int = Field(
         default=180,
         alias="AVA_IMPERSONATION_ACK_WINDOW_SECONDS",
