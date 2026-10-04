@@ -19,7 +19,11 @@ again under that name — task #4143): the row terminalizes with the
 One round groups the expired rows by home machine: machines are reclaimed
 concurrently, the rows of one machine one after another, so a slow machine holds
 up only its own rows. Each dispatch runs under a deadline sized from the RPC
-client's own budget.
+client's own budget. While a deploy window is open on the cluster the round
+defers as one and dispatches nothing: the machines mid-restart are the
+expected-unreachable ones, so dialing them would only log what the window
+already explains, and every row waits for the first round after the window
+closes.
 
 The owner's ``ava.shell.sessions.renew()`` extends a live session's deadline
 before it passes; each kill dispatch re-checks the row is still expired first
@@ -55,6 +59,7 @@ from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from ops import cluster_rpc
+from ops.deploy_window import deploy_in_flight
 from services.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
 
 _log = logging.getLogger(__name__)
@@ -309,10 +314,20 @@ async def reap_expired_shells(
     """Kill every TTL-expired shell session on its home machine; return the
     (agent, session) pairs whose rows were settled.
 
-    Machines run concurrently, the rows of one machine in order. A row whose
-    owner has no usable home machine is left for the next round. All DB work
-    runs via to_thread: the event loop never blocks on psycopg.
+    A deploy window defers the whole round before anything is dialed: the
+    window is the expected account for unreachability, and the rows wait for
+    the first round after it closes. Machines run concurrently, the rows of
+    one machine in order. A row whose owner has no usable home machine is left
+    for the next round. All DB work runs via to_thread: the event loop never
+    blocks on psycopg.
     """
+    window = await asyncio.to_thread(deploy_in_flight, db)
+    if window:
+        _log.debug(
+            "[ttl-reaper] shell reaping deferred: a deploy window is open (%s)",
+            window.detail,
+        )
+        return []
     rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
     by_machine: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
