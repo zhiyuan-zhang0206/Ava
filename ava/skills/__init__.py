@@ -683,15 +683,17 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
     if not skills:
         return True
     try:
-        from ava._settings import database
         from base.telemetry.audit_events import (
             SkillInvokedPayload,
             prepare_event_log,
             record_audit_standalone_many,
         )
 
+        # `ava._settings` is loaded with the `ava` package; reaching it through sys.modules (as
+        # `ava._settings` does for `ava.external`) keeps this write-path edge out of the gateway's
+        # import closure: the gateway imports ava.skills for /api/commands, never to record.
         record_audit_standalone_many(
-            database(),
+            sys.modules["ava._settings"].database(),
             [
                 prepare_event_log(
                     event_type="skill_invoked",
