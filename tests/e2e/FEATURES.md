@@ -1,0 +1,174 @@
+# Feature inventory and e2e coverage
+
+What Ava offers, and which of it has an end-to-end test. Built from `docs/introduction.md`, the
+package OKF docs, `ava_builtins/` plugins and skills, the public `ava.*` SDK and the gateway REST
+surface. Each row names a real entry point.
+
+**Coverage rule.** A feature counts as covered only when a test runs it across real processes (real
+gateway, agent host, exec child) and asserts an observable result: the messages the model received,
+files on disk, checkpoint or database state, the timeline. Unit or in-process tests, and tests that
+only check "no error", do not count; they appear in the Notes column instead. This is the rule that
+the ava_code after_exec bug broke: every test passed because none asserted the effect.
+
+**Harness.** `tests/e2e/conftest.py` starts gateway, agent-ops, agent-host, pty-sessions, the Next.js
+frontend and Playwright, with a scripted fake model (`AVA_LLM_OVERRIDE`) and gateway auth off, on one
+machine. Not in the stack: heartbeat, delivery-watchdog, schedule-manager, im-bridge, page-server,
+memory-search/indexer, ttl-reaper, mcp-daemon, browser-mcp. Browser-free tests use the
+`spawned_agent` fixture and `tests/e2e/_db.py` helpers; the recording model in
+`fakes/scenarios/ava_code.py` shows what the model was handed.
+
+**Priority.** P0 core path or public contract, a break is user-visible at once; P1 important; P2
+peripheral or needs external credentials or hardware.
+
+## 0. ava_code plugin
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| A1 | `ava.cwd.set` queues a cwd-change note and a project-skills note that reach the next model input once, after the tool result, and are consumed | `ava_builtins/plugins/ava_code/agent_runtime.py` (after_exec hook) | `plugins/test_ava_code_effects.py::test_cwd_switch_puts_cwd_note_and_project_skills_in_the_next_model_input` | P0 | Failed on main before the after_exec hook fix (#4249) |
+| A2 | Reading a file injects the AGENTS.md / CLAUDE.md found up to the repo root once (path and content-hash dedup, direct read exempt, oversize head+tail with archive) | `ava_builtins/plugins/ava_code/plugin.py` (`files.read` wrap) | `plugins/test_ava_code_effects.py::test_reading_a_file_injects_agents_and_claude_md_once` | P0 | |
+| A3 | Relative paths in `ava.files.*` and `ava.shell.run` follow the logical cwd; `ava.cwd.set` rejects missing paths and files | `ava_builtins/plugins/ava_code/plugin.py` (wraps), `_code_namespace.py` | `plugins/test_ava_code_effects.py::test_sdk_calls_resolve_relative_paths_against_the_logical_cwd` | P0 | `ava.understand` and `ava.ui.serve` wraps not covered |
+| A4 | The logical cwd survives restart; a vanished cwd falls back to the workspace | `ava_builtins/plugins/ava_code/agent_runtime.py` (after_init hook) | `plugins/test_ava_code_effects.py::test_cwd_survives_a_restart`, `::test_a_vanished_cwd_falls_back_to_the_workspace_after_restart` | P0 | |
+| A5 | The system prompt carries the coding conventions (worktree and PR workflow, AGENTS.md first, `ava.cwd`) | `ava_builtins/plugins/ava_code/agent_runtime.py` (`_coding_tools_section`) | `plugins/test_ava_code_effects.py::test_system_prompt_carries_the_coding_conventions` | P1 | The opt-in `ava_code_workflow` section is not covered |
+| A6 | After compaction the project-skills note and context files resurface | `ava_builtins/plugins/ava_code/` | `plugins/test_ava_code_effects.py::test_compaction_resurfaces_context_files`, `::test_compaction_resurfaces_project_skills` | P1 | |
+| A7 | Project-local skills (`.claude/skills`, `.agents/skills`, `.ava/skills`) are listed under `ava.skills` after `ava.cwd.set` | `ava_builtins/plugins/ava_code/_walk.py` | indirect: A1 asserts the note lists the skill | P1 | `ava.skills.<name>` resolution for a project skill is not asserted |
+
+## 1. Agent lifecycle
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| L1 | Create an agent (idle, or with a first prompt) over REST and have the agent host launch it | `gateway/agents/router.py` (`POST /api/agents`), `services/agent_runner/agent_ops/daemon.py` | implicit: `tests/e2e/conftest.py::spawned_agent` (every e2e test); with prompt: `tests/e2e/lifecycle/test_fork_identity.py` | P0 | No test targets spawn args (machine/model/preset/config overlay) directly. Unit: `gateway/tests/test_agents_endpoints.py`, `gateway/tests/test_spawn_fork_config.py` |
+| L2 | One user message becomes a full turn: claim, LLM (reasoning), `execute_code`, reply, committed to checkpoint and timeline | `gateway/agents/state.py` (`POST /api/agents/{id}/messages`), `agent/graph/claim/node.py`, `agent/graph/llm/node.py` | `tests/e2e/flow/test_message_flow.py` | P0 | Multi-message batching in one claim and message idempotency are not covered. Unit: `gateway/tests/test_agent_messages.py`, `gateway/tests/test_idempotency_http.py` |
+| L3 | Agent-to-agent message: `ava.agents.send_message(id, text)` arrives as an inbound with `agent:N` source, receiver wakes and answers | `ava/agents/__init__.py:522`, `gateway/agents/state.py`, `gateway/agents/delivery.py` | none | P0 | Unit: `gateway/tests/test_agents_sdk.py`, `gateway/tests/test_messages.py` |
+| L4 | An agent spawns a child from `execute_code`: `ava.agents.spawn(prompt, label, machine, config_overlay/preset)` returns the id, child runs the prompt | `ava/agents/__init__.py:374`, `ava_builtins/plugins/ava_fleet/plugin.py` (`_spawn_with_label` wrap) | none | P0 | The SDK spawn path is never run in e2e (only REST spawn). Unit: `gateway/agents/tests/test_spawn_forward.py`, `gateway/tests/test_agents_sdk.py` |
+| L5 | Fork: new agent gets a copy of the source checkpoint, an identity marker and the prompt before its first turn | `gateway/agents/router.py` (`fork_from`), `ops/agents/spawn.py` | `tests/e2e/lifecycle/test_fork_identity.py` (REST path) | P0 | `ava.agents.spawn(fork_from=...)` SDK path, `ForkSourceEmpty`, and "overlay may only add inject/expand skills" rule not covered. Unit: `gateway/tests/test_spawn_fork_config.py`, `ava_builtins/plugins/ava_memory/tests/test_fork_notes_memory.py` |
+| L6 | Self terminate: `ava.self.terminate()` ends the process, status `terminated`, inbound `source=self` | `ava/self.py:217`, `agent/graph/claim/node.py` | `tests/e2e/lifecycle/test_self_terminate.py` | P0 | |
+| L7 | External terminate: `POST /api/agents/{id}/terminate` and `ava.agents.terminate(id, message, force, kill_all_shell_sessions)`; force interrupts a running turn | `gateway/agents/lifecycle.py`, `ava/agents/__init__.py:456`, `ops/lifecycle/termination.py` | none | P0 | The conftest teardown calls the route but asserts nothing; `test_self_terminate.py` states it only covers the SDK path. Unit: `gateway/tests/test_terminate_forward.py`, `services/agent_runner/agent_host/tests/test_hosted_force_quiescence.py`, `ops/lifecycle/tests/test_termination_message.py` |
+| L8 | Resurrect: a message to a terminated agent auto-revives it on the same id; explicit resurrect with a prompt | `gateway/agents/lifecycle.py`, `ops/agents/wake.py`, `agent/graph/claim/node.py` | `tests/e2e/lifecycle/test_self_resurrect.py` (parametrized auto and explicit) | P0 | Explicit variant goes through `ops.cluster_rpc.dispatch_to_machine`, so the HTTP route `POST /api/agents/{id}/resurrect` itself is not hit. Unit: `tests/agent/test_claim_auto_resurrect.py`, `tests/ops/test_resurrection_admission.py` |
+| L9 | Self restart: `ava.self.restart(config_overlay)` replaces the process, same agent id, new PID | `ava/self.py:162`, `services/agent_runner/agent_host/host.py` | `tests/e2e/lifecycle/test_self_restart.py` | P0 | |
+| L10 | External restart of an idle agent (`POST /api/agents/{id}/restart`): silent (no model call), plugin state preserved, config overlay persisted and validated (422 on bad value) | `gateway/agents/lifecycle.py`, `ops/lifecycle/` | `tests/e2e/lifecycle/test_idle_restart_silent.py`, `tests/e2e/lifecycle/test_restart_config_overlay.py` | P0 | Restart of an agent in the middle of a turn is not covered |
+| L11 | Cancel: `POST /api/cancel` interrupts the running LLM or exec node, agent stays alive and resumable | `gateway/agents/lifecycle.py:132`, `agent/graph/interrupt.py` | none | P1 | Unit: `gateway/tests/test_cancel_endpoint.py`, `agent/graph/exec/tests/test_cancel.py` |
+| L12 | Forced compact from the UI: `POST /api/agents/{id}/compact` runs the compaction LLM, history replaced by summary, timeline envelope renders | `gateway/agents/lifecycle.py`, `agent/hooks/compact.py` | `tests/e2e/flow/test_compact_flow.py`, `tests/e2e/state/test_compact_transition.py`, `tests/e2e/state/test_parked_compact_switch_back.py` | P0 | |
+| L13 | Agent-initiated compact: `ava.self.compact(summary)` inside `execute_code` | `ava/self.py:283` | none | P1 | Unit: `ava/tests/test_self_compact_publish.py`, `tests/agent/test_compact_contract.py` |
+| L14 | Auto-compact when the token threshold is crossed, with emergency fallback summary and halt-on-failure | `agent/hooks/compact.py`, `agent/hooks/framework.py` | none | P1 | Unit: `tests/agent/test_compact_contract.py` |
+| L15 | Fatal LLM error: turn aborts with SSE `error`, nothing half-committed, next message recovers without restart | `agent/graph/llm/_retry.py`, `agent/graph/llm/node.py` | `tests/e2e/flow/test_error_recovery.py` | P1 | Transient-error retry policy not covered. Unit: `agent/graph/llm/tests/` |
+| L16 | Idle heartbeat: daemon nudges idle agents; `ava.self.pause_heartbeat(duration)` suppresses it, real wakes still arrive | `services/wake/heartbeat/daemon.py`, `ava/self.py:234` | none | P1 | Daemon is not in the e2e stack. Unit: `services/wake/heartbeat/tests/test_heartbeat_daemon.py` |
+| L17 | Crash recovery: a dead agent host or killed agent is reaped and the agent is resurrected, stalled deliveries re-driven | `services/wake/delivery_watchdog/daemon.py`, `services/agent_runner/agent_host/crash_recovery.py`, `services/agent_runner/agent_host/stall_guard.py`, `agent/ownership/corpse_reap.py` | none | P0 | Killing the host mid-turn is never done in e2e. Unit: `services/wake/delivery_watchdog/tests/`, `tests/agent/test_corpse_reap.py`, `services/agent_runner/agent_host/tests/test_crash_recovery.py` |
+| L18 | Agent directory SDK: `ava.agents.list_agents/get_status/get_last_message/get_neighbors/get_ancestors/list_machines` | `ava/agents/__init__.py`, `gateway/inspect/neighbors.py` | none | P1 | Unit: `ava/agents/tests/test_agents_scan.py`, `gateway/tests/test_agents_sdk_queries.py`, `gateway/tests/test_agent_neighbors.py` |
+| L19 | Impersonation takeover of an agent by an external coding agent: lease, consent via `ava.impersonation.accept/reject`, relay, force-expire from the sidebar | `ava/impersonation/__init__.py`, `agent/impersonation.py`, `gateway/agents/lifecycle.py` | partial: `tests/e2e/lifecycle/test_force_expire_impersonation.py` (force-expire and resume only; lease seeded via SQL) | P1 | accept/reject/relay not run for real. Unit: `services/agent_runner/agent_host/tests/test_impersonation_integration_agent_host.py`, `cli/commands/agents/tests/test_impersonation_bridge.py`, `tests/integration/test_impersonation_notifications.py` |
+
+## 2. execute_code and the SDK
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| E1 | `execute_code`: Python runs in a fresh disposable child, `import ava` works, stdout streams over SSE, ToolMessage returned to the model | `agent/graph/exec/node.py`, `agent/exec_child.py` | `tests/e2e/flow/test_message_flow.py` (and every scenario using `execute_code`) | P0 | |
+| E2 | Exec timeout (`exec_timeout_seconds`, node timeout) kills the child tree and returns a `timed_out` marker | `agent/graph/exec/_subprocess.py`, `agent/graph/exec/output.py` | none | P1 | Unit with real children but no gateway: `agent/tests/test_exec_subprocess.py`, `agent/graph/exec/tests/test_exec_process.py` |
+| E3 | Exec crash: exception or boot failure becomes a `crashed` envelope with traceback, agent keeps going | `agent/graph/exec/node.py`, `agent/graph/exec/_result.py` | none | P1 | Unit: `agent/tests/test_exec_child.py` |
+| E4 | `ava.files` read/write/append/edit/glob/delete (exact-match edit with diff hint, injection scan on read) | `ava/files.py` | partial: `tests/e2e/plugins/test_ava_code_effects.py` (cwd-relative write/append/edit/glob/delete/read on disk) | P1 | Edit-mismatch hint, `replace_all`, injection flagging not covered. Unit: `ava/tests/test_files.py` |
+| E5 | `ava.web.search` / `ava.web.fetch` (concurrent, result kinds, fetch with prompt) | `ava/web.py` | none | P1 | Needs a search provider or a fake; unit: `ava/tests/test_web.py`, `ava/tests/test_web_search.py` |
+| E6 | `ava.understand([...])`: batch model call over text or files, ordered answers | `ava/understand.py` | none | P1 | Unit: `ava/tests/test_understand.py`, `ava/tests/test_understand_batch.py` |
+| E7 | Media attachments: `ava.self.attach(path)` reaches the next turn natively, model-capability gating, size limits | `ava/attachment_transport.py`, `agent/graph/_attach_drain.py` | none | P1 | Unit: `ava/tests/test_attachment_transport.py` |
+| E8 | User file upload to an agent (`POST /api/agents/{id}/uploads`, `GET .../uploads/{filename}`) becomes a chat inbound | `gateway/routers/uploads.py` | none | P1 | Unit: `gateway/routers/tests/test_upload_endpoint.py` |
+| E9 | Composer commands: `/name text` expands in the agent claim node (chain in one message), `GET /api/commands`, `ava.agents.commands()` | `ava/composer_commands.py`, `gateway/routers/commands.py`, `agent/graph/claim/node.py` | none | P1 | Unit: `ava/tests/test_composer_commands.py`, `gateway/routers/tests/test_commands.py` |
+
+## 3. Shell sessions, watchers, pages
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| S1 | `ava.shell.run(cmd, cwd, timeout)`: stdout string with `.returncode`/`.stderr`, timeout raises | `ava/shell/__init__.py:66` | partial: `tests/e2e/plugins/test_ava_code_effects.py` (`pwd` under logical cwd only) | P1 | Returncode, stderr and timeout not asserted. Unit: `ava/shell/tests/test_shell.py` (real subprocess, no gateway) |
+| S2 | `ava.shell.run_background(cmd, name, ttl, notify)`: returns at once, on exit a completion message (exit code, log path, tail) wakes the agent, `completion_notice_policy` respected | `ava/shell/__init__.py:127`, `ava/shell/background.py` | none | P0 | Unit: `ava/shell/tests/test_shell_background.py` (real pty-sessions service and bash, no agent or gateway) |
+| S3 | Persistent sessions `ava.shell.sessions.new/send/send_keys/capture/kill/kill_all/renew/list` driving an interactive shell | `ava/shell/sessions.py`, `services/agent_runner/pty_sessions/service.py`, `base/sessions/pty/client.py` | partial: `tests/e2e/state/test_shell_history_state.py` (only `new` + `send`; asserts UI scroll, not output) | P0 | capture/send_keys/kill/renew/list never asserted. Unit: `ava/shell/tests/test_shell.py`, `services/agent_runner/pty_sessions/tests/test_sessions.py` (real service, no agent) |
+| S4 | Sessions outlive agent restart, agent-host restart and gateway restart (held by the pty-sessions service) | `services/agent_runner/pty_sessions/service.py` | none | P0 | Existing e2e restart tests do not create a session first. Integration: `services/agent_runner/pty_sessions/tests/test_survival.py` |
+| S5 | Session TTL reaping and owner notification only when a running job is interrupted | `services/upkeep/ttl_reaper/`, `ava/shell/sessions.py` | none | P1 | Unit: `ava/shell/tests/test_shell_ttl.py` |
+| S6 | Shell monitor API and page: `GET /api/agents/{id}/shell/{sid}`, `/shell/N/S` | `gateway/routers/shell.py`, `ui/web/` | partial: `tests/e2e/state/test_shell_history_state.py` (scroll and history state only) | P1 | Unit: `gateway/tests/test_agent_shell.py` |
+| S7 | Watchers: `ava.watcher.at/cron/launch` wake the owner as `watcher:N` source, timeout exit 124, orphan guard, owner auto-resurrect | `ava/watcher.py`, `ava/shell/background.py` | none | P0 | Unit with real pty service: `ava/tests/test_watcher.py`, `ava/tests/test_watcher_commands.py` |
+| S8 | Serve a page: `ava.ui.serve/show/close`, page-server daemon, gateway reverse proxy `/pages/{key}/...`, `GET /api/pages` | `ava/ui.py`, `services/agent_runner/page_server/server.py`, `gateway/routers/pages.py` | none | P1 | Unit: `services/agent_runner/page_server/tests/test_page_server_daemon.py`, `gateway/routers/tests/test_pages_proxy.py`, `gateway/tests/test_pages.py` |
+
+## 4. Schedules
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| SC1 | Schedule CRUD over REST (create/list/get/update/delete, start/stop/restart, `draft`, runs and logs) and the `ava schedules` CLI | `gateway/schedules/router.py`, `cli/commands/management/schedules.py` | none | P1 | Unit: `gateway/tests/test_schedules_api.py`, `gateway/schedules/tests/test_session_control.py` |
+| SC2 | ScheduleManager reconcile: enabled schedule gets a session running `gateway.schedule_runner`; exit 0 = completed, crash = backoff then breaker; sync requests apply start/stop/edit | `services/wake/schedule_manager/manager.py`, `gateway/schedule_runner.py` | none | P0 | Closest: `services/wake/schedule_manager/tests/test_manager_pty.py` (real pty service + DB + runner entrypoint, but no gateway or agent) |
+| SC3 | A schedule script drives agents under the `schedule:<id>` actor: spawn, resurrect or wake an agent, `catch_up` after downtime | `base/daemon/schedules/`, `schedules/catchup.py`, `gateway/schedule_runner.py` | none | P0 | `gateway/tests/test_schedule_runner.py` docstring says the spawn/resurrect/wake ladder is "covered end-to-end elsewhere"; no such e2e found. Unit: `tests/schedules/test_catchup.py` |
+| SC4 | Built-in schedules provisioned at manager start and by `ava schedules provision` (idempotent, resync script/command, preserve `enabled`) | `base/daemon/schedules/builtin_schedules.py`, `schedules/manifest.json` | none | P1 | Unit: `gateway/schedules/tests/test_builtin_schedules_schedules.py` |
+
+## 5. IM channels (IM bridge)
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| IM1 | Chat commands `/list /switch /status /spawn /commands /help /notice`, per-chat switch state persisted across daemon restart, spawn menu | `services/entrypoints/im_bridge/core.py`, `.../state.py`, `.../spawn_menu.py` | none | P1 | Daemon not in e2e stack. Unit with fake adapter: `services/entrypoints/im_bridge/tests/test_im_bridge_core.py` |
+| IM2 | Inbound chat becomes an agent message; the agent reply is pushed back to that chat (SSE dialog push, watermark catch-up after reconnect, long-message split) | `services/entrypoints/im_bridge/core.py`, `.../gateway_client.py`, `.../cursor_store.py` | none | P1 | Unit: `test_im_bridge_watermark.py`, `test_im_bridge_durable_cursors.py`, `test_im_bridge_daemon.py` (same dir) |
+| IM3 | Channel adapters Telegram and Feishu (WS events plus poll fallback, keyed idempotent delivery); Weixin adapter is dormant in prod | `services/entrypoints/im_bridge/adapters/telegram.py`, `.../adapters/feishu.py` | none | P2 | Needs external IM APIs or a fake server. Unit: `services/entrypoints/im_bridge/adapters/tests/` |
+| IM4 | Notice bridge and ops-alert fan-out: agent notices appear in IM and can be resolved there; P0/P1 alerts go to the owner chat | `services/entrypoints/im_bridge/notice_bridge.py`, `gateway/alerts/router.py` | none | P1 | Unit: `services/entrypoints/im_bridge/tests/test_notice_bridge.py`, `test_im_bridge_notify.py` |
+
+## 6. Plugins and hook injection
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| PL1 | Graph-edge hooks (`after_init`, `before_llm`, `before_exec`, `after_exec`) run at their graph positions; same-key writes merge by reducer or fail fast | `agent/hooks/_registry.py`, `agent/hooks/framework.py` | indirect only: `tests/e2e/plugins/test_ava_code_effects.py` exercises after_init, before_llm, after_exec through ava_code | P0 | `before_exec` has no e2e witness (only ava_syntax_fix uses it). Unit: `agent/hooks/tests/` |
+| PL2 | Plugin typed state is a checkpoint channel: written in an exec turn, persisted, survives restart | `agent/state_channels.py`, `agent/state.py`, `base/packages/plugins/extensions.py` | indirect: `tests/e2e/lifecycle/test_idle_restart_silent.py` (asserts `ava_code__cwd` after restart) | P0 | Only one plugin's field is witnessed. Unit: `agent/tests/test_checkpoint_serde.py` |
+| PL3 | Plugin SDK contributions: new namespaces (`ava.tasks`, `ava.memory`), members on existing ones (`ava.ui.notify`), wraps (spawn label); disabling a plugin removes them | `base/packages/plugins/extensions.py`, `ava/sdk_surface/plugins.py` | indirect: `ava.cwd` via ava_code only | P1 | Unit: `ava/sdk_surface/tests/test_wraps.py`, `ava/sdk_surface/tests/test_lazy_plugin_load.py` |
+| PL4 | Plugin management: `ava plugins` install/enable/disable, plugin config registration and overlay validation, load containment of a broken plugin | `cli/commands/extensions/plugins.py`, `base/packages/plugins/config_registration.py`, `agent/extensions/registry.py` | none | P1 | Unit: `agent/tests/test_plugin_load_containment.py`, `ava/tests/test_plugin_config_ava.py` |
+| PL5 | `ava_syntax_fix`: before_exec pipeline repairs syntax errors (punctuation, imports, escapes, ruff, deterministic fixes, LLM repair) and executes the fixed code; unfixable code returns an error without spawning exec | `ava_builtins/plugins/ava_syntax_fix/plugin.py` | none | P1 | Unit: `ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py` |
+| PL6 | `ava_sdk_reminder`: after_exec hints when the model uses subprocess/sleep/open/requests, NameError-across-cells explanation, plain-text-reply-to-agent reminder | `ava_builtins/plugins/ava_sdk_reminder/` | none | P2 | No unit tests directory under the plugin |
+| PL7 | `ava_silent_idle`: reasoning-only turn loops back and gets a "produce text or tool call" nudge, bounded by a guard | `ava_builtins/plugins/ava_silent_idle/`, `agent/graph/llm/node.py` | none | P2 | Unit: `ava_builtins/plugins/ava_silent_idle/tests/test_ava_silent_idle_plugin.py` |
+| PL8 | `ava_fleet` human-facing surface: `ava.ui.notify/edit_notice/dismiss_notice` land in the aggregated queue (`GET /api/notices*`, resolve, `require_response`/`blocking`); `ava.self.set_label` sets the label shown in the UI | `ava_builtins/plugins/ava_fleet/plugin.py`, `gateway/agents/notices.py` | none | P0 | Unit: `gateway/tests/test_notices_endpoint.py`, `gateway/tests/test_notices_resolve_history_live.py` |
+| PL10 | `ava_fleet` task graph: `ava.tasks.create/update/list/get/log`, owner notifications, progress reminders, budget, `GET /api/tasks` | `ava_builtins/plugins/ava_fleet/task_registry.py`, `gateway/routers/tasks.py` | none | P1 | Unit: `ava_builtins/plugins/ava_fleet/tests/test_task_registry.py`, `gateway/routers/tests/test_tasks_router.py` |
+| PL11 | `ava_memory`: `ava.memory.write/search` on the shared note pool, standing `MEMORY.md` injected at cold start and after compact | `ava_builtins/plugins/ava_memory/sdk.py`, `ava_builtins/plugins/ava_memory/agent_runtime.py` | none | P1 | Needs memory-search service. Unit: `ava_builtins/plugins/ava_memory/tests/test_memory.py`, `.../test_claim_memory_index.py` |
+| PL12 | `ava_memory` passive recall: before_llm injects matching notes on fresh inbound, once per session, skipped for watcher/shell wakes | `ava_builtins/plugins/ava_memory/agent_runtime.py`, `agent/graph/memory_recall.py` | none | P2 | Unit: `ava_builtins/plugins/ava_memory/tests/test_ava_memory_recall_hook.py` |
+| PL13 | Model provider plugins (`lm_anthropic/openai/google/deepseek/moonshot/zhipu/xiaomi/alibaba`): model roster, per-agent model at spawn, real provider streaming | `ava_builtins/plugins/lm_*/plugin.py`, `base/lm/factory.py`, `gateway/agents/router.py` (`GET /api/models`) | none | P2 | e2e replaces the model with a fake, so no real provider adapter runs. Unit: `gateway/tests/test_provider_startup.py` |
+
+## 7. Skills
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| K1 | Installed skills are listed as description lines in the system prompt; `skills_to_inject_into_system_prompt` / `skills_to_expand_at_start`; newly installed skills are named by the capabilities drift note | `ava/skills.py`, `agent/graph/system_prompt.py`, `agent/hooks/capabilities.py` | none (project-skills note belongs to ava_code) | P1 | Unit: `ava/tests/test_skills.py`, `ava/tests/test_skills_mount.py` |
+| K2 | `ava.skills.<path>` / `ava.help(skill)` loads a SKILL.md body lazily, `skill_invoked` attribution events | `ava/skills.py` | none | P1 | Unit: `ava/tests/test_skills_attribution.py` |
+| K3 | Install skills from git URL or local path unmodified (Agent Skills standard), trust-tier scan, refresh; `GET/PUT /api/skills` | `cli/commands/extensions/skill.py`, `cli/commands/extensions/external_skills.py`, `gateway/extensions/skills.py` | none | P1 | Unit: `cli/commands/extensions/tests/test_skills_sync.py`, `cli/commands/extensions/tests/test_skill_supply_chain.py` |
+| K4 | Goal-supervision flow: `ava-goal` / `ava-watcher` `watch_idle.py` watches a worker's idle points and wakes the supervisor | `ava_builtins/skills/ava-goal/scripts/watch_idle.py`, `ava_builtins/skills/ava-watcher/scripts/watch_idle.py` | none | P1 | Intro calls it a candidate with one recorded real run. Unit: `tests/test_goal_watch_filter.py`, `tests/skills/test_watcher_send_retry.py` |
+| K5 | Bundled skills that run external tools (`ava-use-other-agents` spawn_claude/spawn_codex, `ava-dynamic-workflow`, `gmail`, `sms`, `telegram-send-file`, `web-ai`, `web-sources`, `audio-transcribe`) | `ava_builtins/skills/*/scripts/` | none | P2 | Need credentials or external binaries; most skills are prose only. Unit: `tests/skills/use_other_agents/`, `tests/skills/test_impersonation_launch.py` |
+
+## 8. MCP
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| M1 | Agent calls `ava.mcps.<server>.<tool>(...)` (and `.raw`, `servers()`, `description()`, `help()`) through the per-machine MCP daemon | `ava/mcps/__init__.py`, `ava/mcps/_daemon.py` | none | P1 | mcp-daemon not in e2e stack. Unit: `ava/mcps/tests/test_mcps.py`, `ava/mcps/tests/test_daemon.py` |
+| M2 | MCP config layers (builtin, plugin, installed, machine, enabled overlay), `ava mcp install/add/list`, remote HTTP servers with static headers or OAuth 2.1 + PKCE | `ava/mcp_config.py`, `cli/commands/extensions/mcp.py`, `ava/mcps/_remote.py`, `ava/mcps/_oauth.py` | none | P2 | Unit: `ava/tests/test_mcp_config.py`, `ava/mcps/tests/test_mcps_remote.py`, `ava/mcps/tests/test_oauth.py` |
+| M3 | Builtin `chrome` (browser automation) and `computer_use` MCP servers | `ava_builtins/mcps/chrome/`, `ava_builtins/mcps/computer_use/`, `services/desktop/browser/` | none | P2 | Needs a display and browser. Unit: `ava/mcps/tests/test_browser.py`, `ava/mcps/tests/test_computer.py` |
+| M4 | Gateway `/mcp` control-plane server (Streamable HTTP, bearer client token): `spawn_agent`, `send_message`, `list_agents`, `get_agent`, `get_messages`, `terminate_agent`, `cluster_status`; client token create/list/revoke | `gateway/mcp_server/endpoint.py`, `gateway/mcp_server/router.py` (`/api/mcp/clients`) | none | P0 | Public contract advertised in `docs/introduction.md`. Unit: `gateway/tests/test_mcp_endpoint.py`, `gateway/tests/test_mcp_clients.py` |
+
+## 9. Gateway and UI
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| G1 | Authentication: login/logout/check, session cookies and revoke, machine/API token enforcement, fail-closed | `gateway/auth/router.py`, `gateway/auth/request_principal.py` | none | P0 | The e2e gateway runs with auth disabled, so no auth path is exercised. Unit: `gateway/tests/test_auth.py`, `gateway/tests/test_auth_enforcement.py`, `gateway/tests/test_login_endpoint.py` |
+| G2 | Live event streams: per-agent events SSE, `/api/system`, `/api/system/all`, `/api/alerts/stream`; reply rendered in the browser without reload | `gateway/events/agent_events.py`, `gateway/events/system.py`, `gateway/events/sse.py` | `tests/e2e/flow/test_message_flow.py` (agent stream), `tests/e2e/state/test_sse_share.py` (shared sockets across tabs) | P0 | Reconnect/resume and event-kind completeness not covered. Unit: `gateway/tests/test_sse.py` |
+| G3 | Timeline REST: `GET /api/agents/{id}/timeline` item fan-out, load-older paging, `conversation-snapshot`, `run-timeline` | `gateway/agents/timeline.py`, `gateway/agents/conversation.py`, `gateway/run_timeline/router.py` | `tests/e2e/flow/test_message_flow.py`, `tests/e2e/state/test_load_older_anchor.py`, `tests/e2e/state/test_compact_transition.py` | P0 | `run-timeline` not covered. Unit: `gateway/agents/tests/test_timeline.py`, `gateway/tests/test_conversation_snapshot.py` |
+| G4 | Agent list and fleet views: `GET /api/agents`, `/api/agents/roster`, `/api/fleet/graph`, born-chain, neighbors | `gateway/agents/router.py`, `gateway/routers/fleet_graph.py` | partial: roster used in `tests/e2e/lifecycle/test_force_expire_impersonation.py`; fleet page layout tests stub the API | P1 | Unit: `gateway/routers/tests/test_fleet_graph.py`, `gateway/tests/test_agent_born_chain.py` |
+| G5 | Spawn from the UI (SpawnButton machine/model/preset picker posts `POST /api/agents`) | `ui/web/` SpawnButton, `gateway/agents/router.py` | none | P1 | `tests/e2e/visual/test_spawn_button_mobile.py` stubs the API and only checks the popover opens |
+| G6 | Config, settings and presets APIs: `GET/PUT /api/config` (full replace, audit, resolved), `PUT /api/settings/{key}`, default-model API, `/api/presets` CRUD with `ava.agents.presets.list/get` | `gateway/routers/config.py`, `gateway/routers/settings.py`, `gateway/routers/default_model.py`, `gateway/routers/presets.py` | none | P1 | `PUT /api/config` is full-replace, so a partial payload silently drops keys. Unit: `gateway/routers/tests/test_config_api.py`, `gateway/tests/test_default_model_api.py` |
+| G8 | Alerts API: `POST/GET /api/alerts`, alert list in the UI | `gateway/alerts/router.py` | none | P1 | `tests/e2e/visual/test_alerts_no_horizontal_overflow.py` stubs `GET /api/alerts` (layout only). Unit: `tests/gateway/test_alerts_api.py` |
+| G9 | Cluster endpoints: `/api/cluster/status|roster|machines`, machine pause/resume, `/api/bootstrap`, 503 pause policy during maintenance | `gateway/cluster/router.py`, `gateway/cluster/machine_pause.py`, `gateway/middleware/pause_policy.py` | none | P1 | Single-machine e2e stack. Unit: `tests/gateway/test_cluster_endpoints.py`, `gateway/tests/test_status_cluster.py` |
+| G10 | Observation APIs: inspector (`/inspect/live|statistics|metrics|widgets`), `token-usage`, `context-breakdown`, `/api/metrics`, memory pool API (`/api/memory/*`), plugin UI contributions | `gateway/inspect/router.py`, `gateway/events/metrics.py`, `gateway/routers/memory.py`, `gateway/extensions/ui_contributions.py` | none | P2 | Unit: `gateway/tests/test_agent_inspect.py`, `gateway/tests/test_token_usage.py`, `gateway/routers/tests/test_memory_search.py` |
+| G11 | Browser layout, accessibility and visual regression (home, fleet, mobile, compare view, keyboard) | `ui/web/src/`, `tests/e2e/visual/` | `tests/e2e/visual/*` (render checks; most stub the API or fake EventSource) | P2 | Counts as UI regression, not feature e2e |
+
+## 10. Other
+
+| ID | Feature | Source | Existing e2e | Pri | Notes |
+|---|---|---|---|---|---|
+| O1 | Cluster lifecycle CLI: `ava init/start/stop/restart/status`, `python -m cli.fleet_update down/up`, maintenance pause and drain at turn boundary | `cli/commands/lifecycle/start.py`, `cli/commands/lifecycle/stop.py`, `cli/fleet_update.py`, `ops/cluster_pause.py` | none | P1 | e2e harness starts processes directly, never via `ava start`. Unit: `cli/commands/lifecycle/tests/test_stop.py`, `tests/agent/test_maintenance.py` |
+| O2 | `ava agents` CLI (`ls/send/cancel/restart/terminate`) and `ava notices`; the watcher completion notice itself uses `ava agents send --source watcher:N` | `cli/parsers/agents.py`, `cli/commands/agents/control.py`, `cli/commands/agents/notices.py` | none | P1 | Unit: `cli/commands/agents/tests/test_delivery.py`, `cli/commands/agents/tests/test_notices_cmd.py` |
+| O3 | Multi-machine: agent-runner joins a gateway, `spawn(machine=...)`, cross-machine lifecycle forwarding over ops RPC | `ops/cluster_rpc.py`, `gateway/agents/forward.py`, `ava/agents/__init__.py:326` | partial: `dispatch_to_machine` to the same machine in `tests/e2e/lifecycle/test_self_resurrect.py` | P1 | No second machine in e2e. Unit: `gateway/agents/tests/test_resurrect_forward.py`, `tests/integration/test_cluster_instance.py` |
+| O4 | Observability and backup: per-turn OTel trace mirror and `ava trace ship`, event export to Loki/Prometheus, WAL-G backup scheduler | `base/telemetry/otlp/`, `cli/commands/observability/trace.py`, `services/backup/` | none | P2 | Unit: `cli/tests/`, `services/backup/tests/test_backup.py` |
+
+## Batches
+
+Each batch is one PR, ordered by importance; a batch adds the tests and flips the rows above.
+
+1. Agent lifecycle: L3 agent-to-agent message, L4 SDK spawn, L7 external terminate, L11 cancel, L13 agent-initiated compact, L17 crash recovery.
+2. `execute_code` and SDK: E2 timeout, E3 crash, E4 files edge cases, E7/E8 attachments and uploads, E9 composer commands.
+3. Shell sessions: S2 `run_background` completion wake, S3 session verbs with asserted output, S4 survival across agent restart, agent-host restart and gateway restart, S7 watchers.
+4. Schedules: SC1 REST CRUD, SC2/SC3 manager plus runner driving an agent (needs schedule-manager in the stack).
+5. IM: IM1/IM2 bridge with a fake adapter (needs im-bridge in the stack).
+6. Plugin hook injection beyond ava_code: PL1 `before_exec`, PL5 syntax-fix, PL8 notices and labels, PL10 tasks, PL11 memory.
+7. Public control plane: M4 gateway `/mcp` server, G1 auth (needs an auth-enabled gateway variant).
