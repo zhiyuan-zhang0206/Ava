@@ -20,20 +20,18 @@ from ava.security import is_flagged, scan_content
 from base.log import logger
 from base.paths import ava_home, workspace_dir
 
-# Module-load invariant assert: if `Path.home()` is unavailable
-# (container / sandbox without $HOME returns Path("") or a nonexistent
-# path), blow up at import time, avoiding silent runtime re-fallback to
-# process cwd — which would break this module's core contract.
-#
-# Don't capture `_HOME` at module level: per-call `Path.home()` lets
-# runtime $HOME env changes (test fixture / `ava.user`-style isolation)
-# take effect immediately; the per-call cost of `os.environ.get("HOME")`
-# is negligible.
-_home_at_load = Path.home()
-assert _home_at_load.is_absolute() and _home_at_load.is_dir(), (  # noqa: S101
-    f"$HOME unavailable at module load (Path.home() = {_home_at_load!r})"
-)
-del _home_at_load
+
+def _home() -> Path:
+    """`$HOME`, the documented pre-bootstrap base for relative paths.
+
+    Read per call, so a changed `$HOME` (test fixture / `ava.user`-style isolation)
+    takes effect immediately. A container / sandbox without `$HOME` yields
+    `Path("")` or a nonexistent path; raising here beats silently falling back
+    to the process cwd, which would break this module's core contract."""
+    home = Path.home()
+    if not (home.is_absolute() and home.is_dir()):
+        raise RuntimeError(f"$HOME unavailable (Path.home() = {home!r})")
+    return home
 
 
 def resolve(path: str | Path) -> Path:
@@ -51,7 +49,7 @@ def resolve(path: str | Path) -> Path:
     if not p.is_absolute():
         aid = agent_identity.agent_id()
         # agent id is typed int but is None until a bootstrap establishes it.
-        base = workspace_dir(aid) if aid is not None else Path.home()  # pyright: ignore[reportUnnecessaryComparison]
+        base = workspace_dir(aid) if aid is not None else _home()  # pyright: ignore[reportUnnecessaryComparison]
         p = base / p
     return p
 

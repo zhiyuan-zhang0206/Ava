@@ -70,7 +70,8 @@ async def _daemon_call(
     writer.write.side_effect = chunks.append
     writer.drain = AsyncMock()
     writer.wait_closed = AsyncMock()
-    await daemon._handle_client(reader, cast(asyncio.StreamWriter, writer), {}, {}, {})
+    scope = daemon._Scope(local=daemon._Buckets(), shared=daemon._Buckets(), oauth_locks={})
+    await daemon._handle_client(reader, cast(asyncio.StreamWriter, writer), scope)
     return json.loads(b"".join(chunks))
 
 

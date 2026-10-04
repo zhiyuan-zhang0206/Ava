@@ -32,6 +32,7 @@ import os
 import signal
 import sys
 from contextlib import AsyncExitStack, suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -81,27 +82,59 @@ def _shared_kind(server: str) -> Any:
     return spec.get("shared") if spec else None
 
 
-def _session_buckets(
-    shared: Any,
-    sessions: dict[str, Any],
-    stacks: dict[str, AsyncExitStack],
-    session_locks: dict[str, asyncio.Lock],
-) -> tuple[dict[str, Any], dict[str, AsyncExitStack], dict[str, asyncio.Lock]]:
-    """Which (sessions, stacks, locks) a server's sessions live in.
+@dataclass
+class _Buckets:
+    """One set of cached MCP sessions: the session per server, the transport stack
+    that closes it, and the lock that serializes its (re)connect."""
 
-    `"shared": true` servers use the daemon-wide buckets (one child for every
-    agent connection, released only at daemon shutdown). Everything else —
-    including `"shared": "browser"` / `"shared": "computer_use"`, which dial the
-    per-machine browser-mcp / computer-mcp services directly — uses the
-    caller's per-connection buckets: each connection keeps its own socket, so
-    the service's per-connection affinity (page context / agent identity)
-    still isolates agents (a single daemon-wide socket would both collapse
-    every agent onto one context and let concurrent connections corrupt each
-    other's request-id stream).
+    sessions: dict[str, Any] = field(default_factory=dict[str, Any])
+    stacks: dict[str, AsyncExitStack] = field(default_factory=dict[str, AsyncExitStack])
+    locks: dict[str, asyncio.Lock] = field(default_factory=dict[str, asyncio.Lock])
+
+    async def close(self) -> None:
+        """Close every cached session's transport and forget them all."""
+        for stack in self.stacks.values():
+            with suppress(Exception):
+                await stack.aclose()
+        self.sessions.clear()
+        self.stacks.clear()
+
+
+@dataclass
+class _Scope:
+    """What one client connection reaches: its own buckets, plus the daemon-wide
+    state every connection shares. `run_daemon` builds the shared half once;
+    `_handle_connection` pairs it with a fresh `local` per connection.
+
+    `"shared": true` servers use `shared` (one child for every agent connection,
+    released only at daemon shutdown). Everything else, including
+    `"shared": "browser"` / `"shared": "computer_use"`, which dial the per-machine
+    browser-mcp / computer-mcp services directly, uses `local`: each connection
+    keeps its own socket, so the service's per-connection affinity (page context
+    / agent identity) still isolates agents (a single daemon-wide socket would
+    both collapse every agent onto one context and let concurrent connections
+    corrupt each other's request-id stream).
+
+    `oauth_locks` serializes one in-flight authorization flow per server across
+    connections (other connections wait while a flow runs, then find the stored
+    tokens).
     """
-    if shared is True:
-        return shared_sessions, shared_stacks, shared_locks
-    return sessions, stacks, session_locks
+
+    local: _Buckets
+    shared: _Buckets
+    oauth_locks: dict[str, asyncio.Lock]
+
+    def buckets_for(self, shared: Any) -> _Buckets:
+        """Which buckets a server's sessions live in, from its `shared` declaration."""
+        return self.shared if shared is True else self.local
+
+
+@dataclass
+class _DaemonWide:
+    """The state every connection of one daemon shares; `run_daemon` builds it once."""
+
+    shared: _Buckets = field(default_factory=_Buckets)
+    oauth_locks: dict[str, asyncio.Lock] = field(default_factory=dict[str, asyncio.Lock])
 
 
 class _SerialSession:
@@ -141,28 +174,24 @@ def _is_transport_error(exc: BaseException) -> bool:
 
 async def _invalidate_session(
     server: str,
-    sessions: dict[str, Any],
-    stacks: dict[str, AsyncExitStack],
-    session_locks: dict[str, asyncio.Lock],
+    scope: _Scope,
 ) -> None:
     """Remove *server*'s dead cached session and close its resources (under
     the session lock to avoid racing a concurrent reconnect). Resolves the
     shared daemon-wide buckets for shared servers, per-connection otherwise."""
-    s_sessions, s_stacks, s_locks = _session_buckets(
-        _shared_kind(server), sessions, stacks, session_locks
-    )
-    lock = s_locks.get(server)
+    buckets = scope.buckets_for(_shared_kind(server))
+    lock = buckets.locks.get(server)
     if lock is None:
         return
     async with lock:
-        s_sessions.pop(server, None)
-        stack = s_stacks.pop(server, None)
+        buckets.sessions.pop(server, None)
+        stack = buckets.stacks.pop(server, None)
         if stack is not None:
             with suppress(Exception):
                 await stack.aclose()
 
 
-async def _connect_server(server: str) -> Any:
+async def _connect_server(server: str, oauth_locks: dict[str, asyncio.Lock]) -> Any:
     """Start MCP server and return (session, AsyncExitStack).
 
     A `"shared": "browser"` server needs no child process: the daemon dials
@@ -183,7 +212,11 @@ async def _connect_server(server: str) -> Any:
     url = server_url(spec)
     if url is not None:
         return await _connect_http(
-            url, spec.get("headers"), oauth=bool(spec.get("oauth")), server=server
+            url,
+            spec.get("headers"),
+            oauth=bool(spec.get("oauth")),
+            server=server,
+            oauth_locks=oauth_locks,
         )
     shared = spec.get("shared")
     if shared == "browser":
@@ -229,7 +262,12 @@ async def _connect_server(server: str) -> Any:
 
 
 async def _connect_http(
-    url: str, headers: dict[str, str] | None, *, oauth: bool = False, server: str = ""
+    url: str,
+    headers: dict[str, str] | None,
+    *,
+    oauth: bool = False,
+    server: str = "",
+    oauth_locks: dict[str, asyncio.Lock],
 ) -> tuple[Any, AsyncExitStack]:
     """Connect to a remote Streamable HTTP MCP server — no child process.
 
@@ -255,7 +293,7 @@ async def _connect_http(
         if oauth:
             from ._oauth import oauth_http_client
 
-            http_client = await oauth_http_client(url, server)
+            http_client = await oauth_http_client(url, server, oauth_locks)
         else:
             http_client = create_mcp_http_client(headers=headers) if headers else None
         read, write = await asyncio.wait_for(
@@ -280,12 +318,10 @@ async def _handle_ping(req_id: Any) -> dict[str, Any]:
 async def _handle_list_tools(
     req_id: Any,
     server: str,
-    sessions: dict[str, Any],
-    stacks: dict[str, AsyncExitStack],
-    session_locks: dict[str, asyncio.Lock],
+    scope: _Scope,
 ) -> dict[str, Any]:
     """List the configured server's tools in the daemon wire format."""
-    session = await _get_session(server, sessions, stacks, session_locks)
+    session = await _get_session(server, scope)
     result = await session.list_tools()
     tools = [
         {
@@ -303,14 +339,12 @@ async def _handle_call_tool(
     req_id: Any,
     params: dict[str, Any],
     server: str,
-    sessions: dict[str, Any],
-    stacks: dict[str, AsyncExitStack],
-    session_locks: dict[str, asyncio.Lock],
+    scope: _Scope,
 ) -> dict[str, Any]:
     """Call one MCP tool and serialize its result for the daemon wire protocol."""
     tool = params.get("tool", "")
     args = params.get("args") or {}
-    session = await _get_session(server, sessions, stacks, session_locks)
+    session = await _get_session(server, scope)
     # The computer-mcp direct-dial session carries the calling agent's identity
     # to the computer daemon (governance + audit). Duck-typed: only
     # ComputerLineSession has the attribute.
@@ -321,7 +355,7 @@ async def _handle_call_tool(
     except Exception as e:
         if not _is_transport_error(e):
             raise
-        await _invalidate_session(server, sessions, stacks, session_locks)
+        await _invalidate_session(server, scope)
         raise MCPCallError(
             f"MCP tool result unknown for {server}.{tool}; request may have executed: "
             f"{type(e).__name__}: {e}"
@@ -358,25 +392,21 @@ async def _dispatch_request(
     method: Any,
     params: dict[str, Any],
     server: str,
-    sessions: dict[str, Any],
-    stacks: dict[str, AsyncExitStack],
-    session_locks: dict[str, asyncio.Lock],
+    scope: _Scope,
 ) -> dict[str, Any]:
     """Dispatch one parsed client request to its protocol method handler."""
     if method == "ping":
         return await _handle_ping(req_id)
     if method == "list_tools":
-        return await _handle_list_tools(req_id, server, sessions, stacks, session_locks)
+        return await _handle_list_tools(req_id, server, scope)
     if method == "call_tool":
-        return await _handle_call_tool(req, req_id, params, server, sessions, stacks, session_locks)
+        return await _handle_call_tool(req, req_id, params, server, scope)
     return {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}
 
 
 async def _dispatch_with_retry(
     req: dict[str, Any],
-    sessions: dict[str, Any],
-    stacks: dict[str, AsyncExitStack],
-    session_locks: dict[str, asyncio.Lock],
+    scope: _Scope,
 ) -> dict[str, Any]:
     """Serve one request; one bad call becomes an error response, not a dropped connection."""
     req_id = req.get("id")
@@ -389,13 +419,11 @@ async def _dispatch_with_retry(
         # transport failure to MCPCallError before reaching here.
         for _attempt in range(3):
             try:
-                return await _dispatch_request(
-                    req, req_id, method, params, server, sessions, stacks, session_locks
-                )
+                return await _dispatch_request(req, req_id, method, params, server, scope)
             except Exception as e:
                 if _attempt == 2 or not _is_transport_error(e):
                     raise
-                await _invalidate_session(server, sessions, stacks, session_locks)
+                await _invalidate_session(server, scope)
                 await asyncio.sleep(min(2**_attempt, 8))
     except Exception as e:
         return {"id": req_id, "ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -405,9 +433,7 @@ async def _dispatch_with_retry(
 async def _handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
-    sessions: dict[str, Any],
-    stacks: dict[str, AsyncExitStack],
-    session_locks: dict[str, asyncio.Lock],
+    scope: _Scope,
 ) -> None:
     """Handle one Unix socket client connection."""
     try:
@@ -422,7 +448,7 @@ async def _handle_client(
                     writer.write((json.dumps(resp) + "\n").encode())
                     await writer.drain()
                     continue
-                resp = await _dispatch_with_retry(req, sessions, stacks, session_locks)
+                resp = await _dispatch_with_retry(req, scope)
                 writer.write((json.dumps(resp, ensure_ascii=False) + "\n").encode())
                 await writer.drain()
     finally:
@@ -433,9 +459,7 @@ async def _handle_client(
 
 async def _get_session(
     server: str,
-    sessions: dict[str, Any],
-    stacks: dict[str, AsyncExitStack],
-    session_locks: dict[str, asyncio.Lock],
+    scope: _Scope,
 ) -> Any:
     """Get or create MCP server session (thread-safe).
 
@@ -444,41 +468,34 @@ async def _get_session(
     shares one stdio child instead of spawning its own; non-shared servers
     keep the per-connection isolation contract."""
     shared = _shared_kind(server)
-    s_sessions, s_stacks, s_locks = _session_buckets(shared, sessions, stacks, session_locks)
-    if server in s_sessions:
-        return s_sessions[server]
+    buckets = scope.buckets_for(shared)
+    if server in buckets.sessions:
+        return buckets.sessions[server]
 
-    lock = s_locks.get(server)
+    lock = buckets.locks.get(server)
     if lock is None:
         lock = asyncio.Lock()
-        s_locks[server] = lock
+        buckets.locks[server] = lock
 
     async with lock:
-        if server in s_sessions:
-            return s_sessions[server]
+        if server in buckets.sessions:
+            return buckets.sessions[server]
 
         cfg = _load_config()
         if server not in cfg:
             raise ValueError(f"Server {server!r} not configured")
 
-        session, stack = await _connect_server(server)
+        session, stack = await _connect_server(server, scope.oauth_locks)
         if shared is True:
             session = _SerialSession(session, lock)
-        s_sessions[server] = session
-        s_stacks[server] = stack
+        buckets.sessions[server] = session
+        buckets.stacks[server] = stack
         return session
 
 
-async def _cleanup(sessions: dict, stacks: dict) -> None:
-    """Close all MCP sessions."""
-    for stack in stacks.values():
-        with suppress(Exception):
-            await stack.aclose()
-    sessions.clear()
-    stacks.clear()
-
-
-async def _handle_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+async def _handle_connection(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, daemon: _DaemonWide
+) -> None:
     """One client connection = one agent's session space.
 
     The shared daemon serves every agent on the machine; each connection gets
@@ -489,13 +506,11 @@ async def _handle_connection(reader: asyncio.StreamReader, writer: asyncio.Strea
     `"shared"` servers live in the daemon-wide buckets instead: they outlive
     the connection by design and are released at daemon shutdown.
     """
-    sessions: dict[str, Any] = {}
-    stacks: dict[str, AsyncExitStack] = {}
-    session_locks: dict[str, asyncio.Lock] = {}
+    scope = _Scope(local=_Buckets(), shared=daemon.shared, oauth_locks=daemon.oauth_locks)
     try:
-        await _handle_client(reader, writer, sessions, stacks, session_locks)
+        await _handle_client(reader, writer, scope)
     finally:
-        await _cleanup(sessions, stacks)
+        await scope.local.close()
 
 
 # ── socket ownership guards (Task #1142) ───────────────────────────────────
@@ -643,7 +658,12 @@ async def run_daemon(socket_path: str) -> None:
     # `socket_path` here is a dead file, safe to clear.
     _prepare_socket(socket_path)
 
-    server = await asyncio.start_unix_server(_handle_connection, path=socket_path)
+    daemon = _DaemonWide()
+
+    async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await _handle_connection(reader, writer, daemon)
+
+    server = await asyncio.start_unix_server(_serve, path=socket_path)
     # The inode WE bound: an exit cleanup must not unlink a later occupant's
     # socket file (Task #1142).
     self_ino = Path(socket_path).stat().st_ino
@@ -673,23 +693,8 @@ async def run_daemon(socket_path: str) -> None:
         # Per-connection buckets are cleaned by _handle_connection as each
         # client disconnects; the daemon-wide shared buckets outlive every
         # connection and are released only here.
-        await _cleanup(shared_sessions, shared_stacks)
-        await _cleanup(sessions, stacks)
+        await daemon.shared.close()
         _unlink_own_socket(socket_path, self_ino)
-
-
-# Per-connection session buckets — one set per client connection, created in
-# `_handle_connection`, released on disconnect (PR #1273 isolation contract).
-sessions: dict[str, Any] = {}
-stacks: dict[str, AsyncExitStack] = {}
-session_locks: dict[str, asyncio.Lock] = {}
-
-# Daemon-wide session buckets — `"shared": true` servers live here: one stdio
-# child serves every agent connection (serialized via _SerialSession) and is
-# released only at daemon shutdown.
-shared_sessions: dict[str, Any] = {}
-shared_stacks: dict[str, AsyncExitStack] = {}
-shared_locks: dict[str, asyncio.Lock] = {}
 
 
 def main() -> None:

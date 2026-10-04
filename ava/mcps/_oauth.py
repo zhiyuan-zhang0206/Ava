@@ -190,12 +190,6 @@ class _CallbackServer:
         return f"http://127.0.0.1:{self.port}{_OAUTH_CALLBACK_PATH}"
 
 
-# One in-flight authorization per server (the daemon is single-process, so
-# module state is daemon state). Other connections wait on the lock while a
-# flow runs; after it completes the tokens are stored and they proceed.
-_oauth_locks: dict[str, asyncio.Lock] = {}
-
-
 async def _open_browser(auth_url: str) -> None:
     """Open the authorization URL in the user's browser (their logged-in Chrome).
 
@@ -286,7 +280,7 @@ def _install_token_auth_basic_shim() -> None:
     _oauth2.OAuthContext.prepare_token_auth = _patched  # type: ignore[attr-defined]
 
 
-async def oauth_http_client(url: str, server: str) -> Any:
+async def oauth_http_client(url: str, server: str, locks: dict[str, asyncio.Lock]) -> Any:
     """Build an httpx2.AsyncClient whose auth is the MCP OAuth provider.
 
     Serialized per server: while one connection is running the authorization
@@ -307,7 +301,7 @@ async def oauth_http_client(url: str, server: str) -> Any:
 
     _install_issuer_normalization()
     _install_token_auth_basic_shim()
-    lock = _oauth_locks.setdefault(server, asyncio.Lock())
+    lock = locks.setdefault(server, asyncio.Lock())
     async with lock:
         storage = _FileTokenStorage(server)
         callback = _CallbackServer()
