@@ -66,11 +66,9 @@ assert (
 def _reset_state_slot():
     """Before/after each test, force reset slots back to None — do not restore previous (would mask test
     leaks). Module-level slots should default to None; any leftover value is a bug."""
-    ava.state = None
-    ava.state_update = None
+    ava.unbind_exec_turn()
     yield
-    ava.state = None
-    ava.state_update = None
+    ava.unbind_exec_turn()
     # The exec-child findings buffer is process-global; a failed test must not
     # leak findings into the next test.
     import ava.security as _security
@@ -497,19 +495,19 @@ async def test_exec_node_merges_plugin_state_update_into_command(fake_cancel_eve
     assert "halted" in update
 
 
-async def test_exec_node_resets_state_slot_after_turn(fake_cancel_event):
-    """After exec_node exits, ava.state / ava.state_update must be reset to None."""
+async def test_exec_node_never_binds_the_slot_in_the_parent(fake_cancel_event):
+    """The exec runs in a child process: the parent (host) process never has a bound slot,
+    and reading `ava.state` there raises rather than returning None."""
     state = BaseAgentState(messages=[_ai_message_with_code("pass")], halted=False)
     runtime, config = _make_runtime_and_config(AsyncMock())
 
     await _exec_node_impl(state, runtime, config)
-    assert ava.state is None
-    assert ava.state_update is None
+    assert not ava.in_exec_turn()
 
 
-async def test_exec_node_resets_state_slot_even_on_crash(fake_cancel_event):
+async def test_exec_node_leaves_parent_unbound_even_on_crash(fake_cancel_event):
     """user code raises exception → exec_node takes the _ExecCrashed path, not raising —
-    slot still reset. Try/finally ensures."""
+    the parent still holds no slot."""
     state = BaseAgentState(
         messages=[_ai_message_with_code("raise RuntimeError('boom')")],
         halted=False,
@@ -518,8 +516,7 @@ async def test_exec_node_resets_state_slot_even_on_crash(fake_cancel_event):
 
     cmd = await _exec_node_impl(state, runtime, config)
     assert cmd is not None
-    assert ava.state is None
-    assert ava.state_update is None
+    assert not ava.in_exec_turn()
 
 
 async def test_plugin_cannot_overwrite_base_field_via_ava_state(fake_cancel_event):
@@ -680,8 +677,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
     update = cast(dict, cmd.update)
     assert update.get("plugin__progress") == "before-cancel"  # pyright: ignore[reportUnknownMemberType]
     assert update["halted"] is True  # cancel path halted=True
-    assert ava.state is None
-    assert ava.state_update is None
+    assert not ava.in_exec_turn()
 
 
 async def test_exec_node_preserves_state_update_on_lifecycle(fake_cancel_event):
@@ -711,7 +707,7 @@ async def test_exec_node_preserves_state_update_on_lifecycle(fake_cancel_event):
     update = cast(dict, cmd.update)
     assert update.get("plugin__last_action") == "about-to-terminate"  # pyright: ignore[reportUnknownMemberType]
     assert update["halted"] is True
-    assert ava.state is None
+    assert not ava.in_exec_turn()
 
 
 # ── exec-side system-note injection (user ruling 2026-08-11) ────────────────

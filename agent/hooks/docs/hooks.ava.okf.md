@@ -26,7 +26,7 @@ Together with SDK wraps (a plugin's declared `SdkWrap`, applied by `ava/sdk_surf
 
 ## Key Dependencies
 
-- [[agent/docs/state.ava.okf.md]] — The hook's `state` parameter is the `AgentState` passed by LangGraph; the returned dict goes through standard LangGraph reducer merging; hooks do **not** go through `PluginStateHandle`—that is the channel for agent code inside execute_code to read/write plugin state (`ava.state` / `ava.state_update` are only injected inside exec_node), whereas hooks run at the graph-node level and directly receive/return the whole state
+- [[agent/docs/state.ava.okf.md]] — The hook's `state` parameter is the `AgentState` passed by LangGraph; the returned dict goes through standard LangGraph reducer merging; hooks run at the graph-node level and directly receive/return the whole state. A plugin hook reads its own fields with the handle's pure `view(state)` and returns writes through `delta({...})`; `read` / `update` are the exec child's channel (`ava.state` / `ava.state_update` exist only there). A hook module imports no `ava` (`scripts/lint/plugins/no_ava_in_hooks.py`)
 - [[agent/graph/docs/graph.ava.okf.md]] — Placement of hook container nodes in the 8-node topology
 
 ## Entry Points

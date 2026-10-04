@@ -1,6 +1,6 @@
 """Forbid bare monkey-patching of `ava.*` in plugins — wraps must be declared as `SdkWrap`.
 
-Run: `.venv/bin/python scripts/lint/no_plugin_wrap.py [path ...]` (defaults to scanning
+Run: `.venv/bin/python scripts/lint/plugins/no_plugin_wrap.py [path ...]` (defaults to scanning
 `ava_builtins/plugins/`, the built-in plugins; a missing default dir is an error;
 an explicit path that does not exist is an error (stderr + exit 1) rather than a
 silent no-op). Also run automatically via pre-commit hook before commit.
@@ -51,7 +51,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeGuard
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import lint_common  # noqa: E402 - standalone script
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} bare-wrap violation(s). Route SDK wraps through "
-            "`SdkWrap`; see scripts/lint/no_plugin_wrap.py for the "
+            "`SdkWrap`; see scripts/lint/plugins/no_plugin_wrap.py for the "
             "`# wrap-ok:` exemption.",
             file=sys.stderr,
         )

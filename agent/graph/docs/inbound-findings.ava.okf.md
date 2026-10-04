@@ -19,7 +19,7 @@ One agent host process serves many agents' turns on one event loop. A finding th
 | Raised by | Where | Delivered by |
 |---|---|---|
 | An inbound chat or system-note row (`inbound.chat:<source>`, `inbound.system_note:<source>`) | the claim node, in the host: `scan_inbound_content` **returns** the finding | the claim node itself: `_BatchState.append_scanned` appends the note right behind the flagged message in claim's own messages delta |
-| `scan_content` inside agent code (files, web, MCP, shell, context files) | the exec child process: `ava.state` is set there, and each `execute_code` is a fresh process | the child drains `take_findings()` into its result envelope; the exec node merges the notes after the exec-result ToolMessage |
+| `scan_content` inside agent code (files, web, MCP, shell, context files) | the exec child process: the turn's state slot is bound there (`ava.in_exec_turn()`), and each `execute_code` is a fresh process | the child drains `take_findings()` into its result envelope; the exec node merges the notes after the exec-result ToolMessage |
 
 `scan_content` in the host drops its finding, since no delta of its own exists there. The host holds no findings buffer at all.
 

@@ -133,7 +133,7 @@ CASES = [
         patches={"_stale_allowlist_entries": list},
     ),
     Case(
-        "scripts.lint.no_plugin_wrap",
+        "scripts.lint.plugins.no_plugin_wrap",
         "ava_builtins/plugins/demo/plugin.py",
         "ava.files.read = my_read\n",
     ),

@@ -25,12 +25,12 @@ repeating reducers after an acknowledgement failure. See [[base/agents/impersona
   - Field names disjoint → automatically prefixed with `<plugin>__<field>`, becoming plugin-private channels
   - Two plugins declare fields with same name and type → fail-fast error, force rename
 - **Dynamic class construction**: `build_agent_state(extensions)` creates `AgentState` (subclass of BaseAgentState + all plugin fields) at graph build time; the class carries its own schema (`__plugin_namespace_fields__`, `__plugin_base_declared__`, `__plugin_state_classes__`), so two registries give two independent classes
-- **Type safety**: `PluginStateHandle` provides `.read()` / `.update()` methods, full Pydantic validation throughout
+- **Type safety**: `PluginStateHandle` validates fully; it has a pure host side (`view` / `delta`, for graph hooks) and an exec side (`read` / `update`, for SDK functions in the exec child) — [[agent/docs/plugin-state-handle.ava.okf.md]]
 
 ## Key Dependencies
 
 - [[graph.ava.okf.md]] — `build_agent_state(extensions)` called at graph build time
-- [[hooks.ava.okf.md]] — graph edge hooks receive and return the whole `state` parameter (via LangGraph reducer), **not** through `PluginStateHandle` — handle is only available to agent code inside execute_code (`ava.state` / `ava.state_update`)
+- [[hooks.ava.okf.md]] — graph edge hooks receive and return the whole `state` parameter (via LangGraph reducer); a plugin hook uses the handle's pure `view` / `delta`
 
 ## Entry Points
 
@@ -42,7 +42,7 @@ repeating reducers after an acknowledgement failure. See [[base/agents/impersona
 ## Notes
 
 - Design allows **multiple plugins declaring the same base field** (e.g., messages), because reducers naturally merge — this is more flexible than "exclusive fields"
-- Plugins never access `ava.state` / `ava.state_update` directly (framework internal slots); all reads/writes go through `PluginStateHandle`
+- `ava.state` / `ava.state_update` exist only inside an exec turn (elsewhere they raise, never None), and hook modules import no `ava` — [[agent/docs/plugin-state-handle.ava.okf.md]]
 - Prefix mechanism avoids field name conflicts between plugins, no global registry coordination needed
 - **Nested sub-state writing**: `compact` and `attach` are last-value channels. `attach.pending` holds resolved path + optional label entries from completed exec calls until claim drains them into one message, then clears it; duplicate paths retain their first position and latest label. `memory` is a union-reducer channel, recall hook only writes fresh paths for the current turn; reducer accumulates and deduplicates across turns (see `agent/hooks/compact.py`, `plugins/ava_memory/plugin.py`)
 - **`capabilities.indexed`** is the record of what the rendered `# Capabilities` index actually lists — written by `init_context` when it builds the prompt, advanced by the drift check in `agent/hooks/capabilities.py`. Its `None` default is load-bearing and distinct from an empty set: `None` = a checkpoint written before the field existed, where the drift check adopts the live catalog silently rather than announcing the whole catalog as newly installed. See [[agent/graph/docs/system-prompt.ava.okf.md]]

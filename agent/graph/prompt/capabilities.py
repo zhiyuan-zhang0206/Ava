@@ -221,6 +221,13 @@ def indexed_skill_identifiers(prompt: Prompt) -> set[str]:
     return {ava.skills.identifier(s) for s in indexed_skills(prompt)}
 
 
+def skill_identifiers(skills: Sequence[Any]) -> list[str]:
+    """The display identifiers of `skills` (full `Skill` records), in order."""
+    import ava
+
+    return [ava.skills.identifier(s) for s in skills]
+
+
 class IndexDrift(NamedTuple):
     """What the capability index covers now, against a snapshot of what it
     covered when it was last rendered.

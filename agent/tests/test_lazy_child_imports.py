@@ -397,7 +397,7 @@ child = exec_child._import_runtime(0.0)  # the child boot's step that binds the 
 def _snap(tag):
     return {{
         "tag": tag,
-        "state_is_none": ava.state is None,
+        "state_is_none": not ava.in_exec_turn(),
         "agent_state": "agent.state" in sys.modules,
         "faces": any(
             name.endswith(".agent_runtime")

@@ -282,10 +282,19 @@ repos:
       # Ban bare `ava.x.y = ...` / setattr monkey-patching in plugins — SDK wraps
       # go through `ava.extend.wrap` so the stack stays introspectable + reversible.
       # Deliberate exceptions use an inline `# wrap-ok: <reason>`; see
-      # scripts/lint/no_plugin_wrap.py header.
+      # scripts/lint/plugins/no_plugin_wrap.py header.
       - id: lint-no-plugin-wrap
         name: lint no plugin wrap (force ava.extend.wrap)
-        entry: .venv/bin/python scripts/lint/no_plugin_wrap.py --only
+        entry: .venv/bin/python scripts/lint/plugins/no_plugin_wrap.py --only
+        language: system
+        types: [python]
+
+      # Hook modules (agent/hooks/, agent_runtime.py faces, any module defining a `Hook`
+      # subclass) may not import `ava`: hooks run in the agent host and operate on the graph
+      # state they are handed. No exemption; see scripts/lint/plugins/no_ava_in_hooks.py.
+      - id: lint-no-ava-in-hooks
+        name: lint hook modules (no `import ava`)
+        entry: .venv/bin/python scripts/lint/plugins/no_ava_in_hooks.py --only
         language: system
         types: [python]
 
