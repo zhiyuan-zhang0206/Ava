@@ -78,6 +78,27 @@ def test_hard_exit_flushes_sinks_in_order_before_exiting(
     assert calls == ["loguru", "logging", "stdout", "stderr", "exit:7"]
 
 
+def test_hard_exit_reports_a_failed_step_on_stderr_and_still_exits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from loguru import logger as loguru_logger
+
+    def broken_remove() -> None:
+        raise RuntimeError("sink close failed")
+
+    def exit_process(code: int) -> None:
+        raise SystemExit(code)
+
+    monkeypatch.setattr(loguru_logger, "remove", broken_remove)
+    monkeypatch.setattr(shutdown.os, "_exit", exit_process)
+    with pytest.raises(SystemExit) as stopped:
+        shutdown.hard_exit(3)
+    assert stopped.value.code == 3
+    err = capsys.readouterr().err
+    assert "closing the loguru sinks failed" in err
+    assert "sink close failed" in err
+
+
 def test_shutdown_line_avoids_the_unregistered_event_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

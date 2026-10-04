@@ -69,21 +69,20 @@ def annotate(**detail: Any) -> None:
     about this specific invocation (drawn from the real arguments) — e.g. a shell helper
     recording the sub-command it dispatched. Targets the innermost active call frame, so
     a nested SDK call annotates its own (discarded) frame, never the outer event. A no-op
-    outside any metered call. Pure side channel: swallows all errors, never raises into
-    the SDK call, never changes its result."""
-    with contextlib.suppress(Exception):
-        frames = _frames.get()
-        if frames:
-            frames[-1].detail.update(detail)
+    outside any metered call. Pure side channel: never changes the call's result."""
+    frames = _frames.get()
+    if frames:
+        frames[-1].detail.update(detail)
 
 
 def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | None = None) -> None:
-    """Write one ``sdk_call`` event. Pure side channel — a broken log sink is swallowed
-    and never raises into the SDK call path. ``detail`` is omitted from the payload when
-    empty, so a plain call stays ``{fn}``; ``duration`` (seconds, measured by
-    ``run_metered``) rides as a top-level payload key — the registry declares it
-    (``contract.SdkCall``), so a reader may reference ``attributes->>'duration'``."""
-    with contextlib.suppress(Exception):
+    """Write one ``sdk_call`` event. Pure side channel — a broken log sink never raises
+    into the SDK call path; its first failure (and its recovery) is logged once.
+    ``detail`` is omitted from the payload when empty, so a plain call stays ``{fn}``;
+    ``duration`` (seconds, measured by ``run_metered``) rides as a top-level payload
+    key — the registry declares it (``contract.SdkCall``), so a reader may reference
+    ``attributes->>'duration'``."""
+    try:
         from base.agents.sdk.call_policy import policy
 
         current = policy()
@@ -101,6 +100,10 @@ def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | Non
         from base import telemetry
 
         telemetry.emit("telemetry", SDK_CALL_EVENT, attributes=extra, **(_identity.get() or {}))
+    except Exception as exc:
+        from base.telemetry import report_sink_failure
+
+        report_sink_failure("SDK call event emit (sdk_call events are dropped)", exc)
 
 
 @contextlib.contextmanager
@@ -108,9 +111,12 @@ def _event_capture_admission() -> Generator[None, None, None]:
     """Use the optional local capture gate without changing SDK call behavior."""
     try:
         from base.agents.impersonation_manifest import admitted_local_sdk_call
-    except Exception:
+    except Exception as exc:
         # Event capture is a side channel. An unavailable settings
         # bootstrap must never turn an SDK operation into a new hard failure.
+        from base.telemetry import report_sink_failure
+
+        report_sink_failure("SDK call local-capture admission (calls run uncaptured)", exc)
         yield
         return
     with admitted_local_sdk_call():

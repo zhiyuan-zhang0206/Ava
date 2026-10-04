@@ -178,6 +178,27 @@ def test_emit_swallows_sink_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     sdk_usage_telemetry.emit("ns.fn", {"k": 1})
 
 
+def test_emit_sink_failure_is_reported_with_its_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken sink never raises into the SDK call, and is never silent either."""
+    reports: list[tuple[str, BaseException]] = []
+
+    def fail(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("sink down")
+
+    monkeypatch.setattr(telemetry, "emit", fail)
+
+    def record(sink: str, exc: BaseException) -> None:
+        reports.append((sink, exc))
+
+    monkeypatch.setattr(telemetry, "report_sink_failure", record)
+    sdk_usage_telemetry.emit("ns.fn")
+    assert len(reports) == 1
+    assert "sdk_call" in reports[0][0]
+    assert isinstance(reports[0][1], RuntimeError)
+
+
 # ── full tally: per-recording, unsampled, top-level only ──────────────────────
 
 

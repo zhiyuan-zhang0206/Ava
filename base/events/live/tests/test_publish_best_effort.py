@@ -91,6 +91,21 @@ class TestPublishBestEffortSync:
         assert hits, "expected a best-effort DEBUG skip line"
         assert all(r["level"].no < 30 for r in hits), "transient failure must be DEBUG, not WARNING"  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
+    def test_non_transport_failure_warns_with_traceback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        loguru_records: list[dict],
+    ) -> None:
+        """An exception that is not a redis/transport error is a bug in the publish path:
+        swallowed → None (best-effort), but WARNING with the traceback, never DEBUG."""
+        redis_client._warn_last.clear()
+        patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(AttributeError("bug")))
+        result = _bus.publish_best_effort_sync("{}", channel="ava:bug", context="unit")
+        assert result is None
+        hits = [r for r in loguru_records if "failed unexpectedly" in r["message"]]
+        assert hits
+        assert all(r["level"].no >= 30 and r["exception"] is not None for r in hits)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
     def test_never_raises_and_warns_on_noperm(
         self,
         monkeypatch: pytest.MonkeyPatch,
