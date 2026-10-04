@@ -78,4 +78,4 @@ The rest of `ava_builtins/skills/` (e.g. `ai-capability-timescale`,
 OKF node — `SKILL.md` in each is the reference.
 
 ## Key dependencies
-- [[ava/docs/skills.ava.okf.md|Skill System]] — skill mechanism and core-vs-instance origin axis
+- [[ava/skills/docs/skills.ava.okf.md|Skill System]] — skill mechanism and core-vs-instance origin axis

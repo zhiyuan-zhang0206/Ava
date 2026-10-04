@@ -20,5 +20,5 @@ Output data lands in `$AVA_HOME/self_evolution/` (per-deployment private), not i
 
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava/docs/skills.ava.okf.md|Skill System]] — the target of mining regressions is the skill library itself
+- [[ava/skills/docs/skills.ava.okf.md|Skill System]] — the target of mining regressions is the skill library itself
 - [[ava_builtins/skills/skill-creator/docs/skill-creator.ava.okf.md|skill-creator]] — found fixes land via creating/modifying skills

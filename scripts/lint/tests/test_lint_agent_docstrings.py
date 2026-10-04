@@ -124,7 +124,7 @@ def test_skill_reference_flagged_outside_skills_module() -> None:
 
 
 def test_skill_reference_allowed_when_rule_absent() -> None:
-    # _check_file drops the rule for ava/skills.py — modeled here by passing
+    # _check_file drops the rule for ava/skills/__init__.py — modeled here by passing
     # no extra patterns.
     out = _function_violations(
         '''

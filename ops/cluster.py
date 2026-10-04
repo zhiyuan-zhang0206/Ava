@@ -166,9 +166,9 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     project skills into a later agent's result.  The
     result also carries this runner's enabled MCP names as phase-2 groundwork.
     """
-    from ava.composer_commands import discover_commands
     from ava.mcp_config import load_mcp_config
     from ava.sdk_surface import skill_sources
+    from ava.skills.composer_commands import discover_commands
     from base.packages.plugins.mcp_enabled import read_enabled
 
     cwd, wanted = _agent_skill_view_inputs(pool, agent_id)

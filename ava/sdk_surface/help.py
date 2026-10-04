@@ -251,7 +251,7 @@ def _skill_aware_children(mod: Any) -> list[tuple[str, Any]]:
     `ava.skills.<name>` takes — but only to print each one's heading and
     one-line description, never a body. Resolution records no `skill_invoked`
     attribution at all: the signal fires on first SKILL.md body consumption
-    (the lazy `__doc__` loaders in `ava/skills.py`), and this walk reads only
+    (the lazy `__doc__` loaders in `ava/skills/__init__.py`), and this walk reads only
     frontmatter `_description`s, so no suppression scope is needed.
 
     The module is looked up through `globals()` rather than the bound name:

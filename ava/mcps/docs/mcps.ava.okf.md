@@ -35,7 +35,7 @@ at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one da
 
 
 ## See Also
-- [[ava/docs/skills.ava.okf.md|Skill System]] — skills vs MCP servers
+- [[ava/skills/docs/skills.ava.okf.md|Skill System]] — skills vs MCP servers
 
 # ava.mcps — MCP Tool Server
 

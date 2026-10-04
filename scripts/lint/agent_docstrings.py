@@ -39,7 +39,7 @@ siblings are out of scope (legitimate cross-refs like cron -> launch).
 ### 4. SDK<->skill coupling (2026-06-10)
 
 An agent-visible docstring referencing skills — skill discovery belongs to
-the skills index section, not the SDK layer. `ava/skills.py` (whose subject
+the skills index section, not the SDK layer. `ava/skills/__init__.py` (whose subject
 IS skills) is exempt.
 
 ### 5. Markdown emphasis (2026-07-24)
@@ -278,7 +278,7 @@ def _is_in_scope(
 
 
 # SDK docstrings must not name skills (layering: SDK below, skills above —
-# the skills index section owns skill discovery). `ava/skills.py` is the one
+# the skills index section owns skill discovery). `ava/skills/__init__.py` is the one
 # module whose subject IS skills, so it is exempt.
 _SKILL_REF_RE = re.compile(r"\bskills?\b", re.IGNORECASE)
 
@@ -499,11 +499,11 @@ def _check_file(path: Path) -> list[tuple[Path, int, str]]:
 
     out: list[tuple[Path, int, str]] = []
 
-    # ava/skills.py is the one module whose subject IS skills; everywhere else
+    # ava/skills/__init__.py is the one module whose subject IS skills; everywhere else
     # an SDK docstring naming a skill couples the layers (skill discovery is
     # the skills index section's job).
     extra: list[tuple[re.Pattern[str], str]] = []
-    if path.name != "skills.py":
+    if not (path.name == "__init__.py" and path.parent.name == "skills"):
         extra.append(
             (
                 _SKILL_REF_RE,

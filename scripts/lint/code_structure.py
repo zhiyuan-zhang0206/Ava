@@ -234,7 +234,7 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # Boot-path trim: the skill-index stack is a heavy import every exec
         # child pays; `SkillFile` is annotation-only on the mount helpers
         # (script/module-level imports removed for task #3816).
-        "ava/skills.py",
+        "ava/skills/__init__.py",
         # Boot-path trim: the fleet plugin (autoloaded into every exec child)
         # keeps psycopg off its module import graph — `psycopg` is
         # annotation-only here, imported at the raise sites (task #3816).

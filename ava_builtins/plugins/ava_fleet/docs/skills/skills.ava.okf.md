@@ -20,4 +20,4 @@ The `ava_fleet` plugin, besides registering SDK surfaces (notify / tasks / self 
 ## Notes
 
 - `ava-fleet` is indexed in every agent's prompt, like every other loaded skill (`skills_to_inject_into_system_prompt` defaults to `*`) — fleet collaboration conventions are one `ava.help` away from any agent; bodies are always pulled on demand.
-- For the skill mechanism and origin axis (origin=plugin), see [[ava/docs/skills.ava.okf.md|Skill System]]; for the plugin overview, see [[ava_builtins/plugins/ava_fleet/docs/ava_fleet.ava.okf.md|Ava Fleet]].
+- For the skill mechanism and origin axis (origin=plugin), see [[ava/skills/docs/skills.ava.okf.md|Skill System]]; for the plugin overview, see [[ava_builtins/plugins/ava_fleet/docs/ava_fleet.ava.okf.md|Ava Fleet]].

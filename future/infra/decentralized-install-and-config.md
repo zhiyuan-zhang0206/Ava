@@ -46,7 +46,7 @@ server lives on GUI machines because you only **install** it there.
   is a packaging/distribution mechanism, not a fundamental unit.
 - **Repo-local agent skill folders:** beyond static plugin-bundled skills, a plugin
   can contribute skill roots resolved at scan time
-  (`ava/skills.py:register_skill_source`). The `ava_code` plugin uses it to load the
+  (`ava/skills/__init__.py:register_skill_source`). The `ava_code` plugin uses it to load the
   working repo's own `.claude/skills` (Claude Code compat), `.agents/skills` (the
   open Agent Skills standard directory) and `.ava/skills` (Ava's, scanned last so it
   wins) as the agent points `ava.cwd` at a project — so a repo ships skills specific
