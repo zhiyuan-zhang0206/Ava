@@ -557,8 +557,8 @@ source = ["agent", "ava", "cli", "gateway", "base", "ui", "ops", "services", "av
 omit = [
     "*/__main__.py",
     "*/tests/*",
-    "ava_builtins/skills/*/scripts/*",
-    "ava_builtins/skills/*/references/*",
+    "ava_builtins/skills/*/*/scripts/*",
+    "ava_builtins/skills/*/*/references/*",
 ]
 
 [tool.coverage.report]
