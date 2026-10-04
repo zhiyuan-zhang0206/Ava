@@ -275,7 +275,8 @@ def debrief(state: dict, skill_name: str) -> list[dict]:
                 "Be concrete: point to steps, prompt wording, missing context, "
                 "or ambiguous instructions. Reply in 3-5 lines.",
             )
-        except Exception:
+        except Exception as exc:
+            print(f"debrief to eval agent {eval_agent_id} failed: {exc!r}", file=sys.stderr)
             continue
         entry["debrief_sent"] = True
         results.append(

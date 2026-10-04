@@ -24,6 +24,7 @@ from base.cluster.machine import machine_name
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
+from base.log import logger
 from gateway.agents import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
 from ops.lifecycle import force_mark_terminated
@@ -199,6 +200,12 @@ async def pause_cluster_machine(
             if was_live:
                 terminated += 1
         except Exception:
+            logger.opt(exception=True).warning(
+                "machine {} pause: terminating agent {} through the machine failed; "
+                "force-marking its row terminated",
+                name,
+                agent_id,
+            )
             await asyncio.to_thread(
                 _force_mark_terminated_blocking,
                 request.app.state.db,

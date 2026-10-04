@@ -147,7 +147,7 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
     """Close one browser-mcp socket connection; the service reads this as the
     connection ending (releasing its page-affinity context for this agent)."""
     writer.close()
-    with suppress(Exception):
+    with suppress(OSError):  # the socket is already gone: reset / broken pipe on close
         await writer.wait_closed()
 
 
@@ -215,9 +215,9 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
     leave its tab (usually a dev-server page pointing at a dead localhost port)
     in the user's shared Chrome. The service closes exactly the agent's
     affinity page — never another agent's or the user's — and is idempotent.
-    Never raises: a machine without the browser service (no socket), a daemon
-    that is down, or any protocol error returns False for the caller to log;
-    deaths that never reach the exit hook are covered by the service's periodic
+    A machine without the browser service (no socket), a daemon that is down
+    (`OSError`) or one that does not answer in time returns False; a protocol
+    error propagates. Deaths that never reach the exit hook are covered by the service's periodic
     dead-page reaper.
     """
     try:
@@ -227,7 +227,7 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
             _release_roundtrip(str(chrome_mcp_socket()), agent_id),
             timeout=_RELEASE_TIMEOUT_S,
         )
-    except Exception:
+    except (OSError, TimeoutError):
         return False
 
 

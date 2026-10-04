@@ -31,6 +31,8 @@ from typing import Annotated, Any, LiteralString, NamedTuple
 
 from fastapi import APIRouter, Query, Request
 from psycopg import errors as pg_errors
+from pydantic import ValidationError
+from redis.exceptions import RedisError
 
 from base import telemetry
 from base.config import settings
@@ -86,7 +88,7 @@ def _read_graph(bus: EventBus, key: str, *, cache_name: str) -> FleetGraphRespon
             cached = redis.get(key)
         if cached is not None:
             return FleetGraphResponse.model_validate_json(cached)
-    except Exception as exc:
+    except (RedisError, OSError, ValidationError) as exc:
         logger.debug(
             "fleet_graph {} read failed — falling back to direct query: {}", cache_name, exc
         )
@@ -127,8 +129,10 @@ def _finalize_graph_response(
     """Cache a successful graph while reporting heartbeat health separately."""
     try:
         telemetry_stale = staleness.check_and_report(pool)
-    except Exception as exc:
-        logger.debug("fleet_graph telemetry staleness guard failed open: {}", exc)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "fleet_graph telemetry staleness guard raised; reporting telemetry_stale=False"
+        )
         telemetry_stale = False
 
     response = FleetGraphResponse(
@@ -144,7 +148,7 @@ def _finalize_graph_response(
             serialized = response.model_dump_json()
             redis.set(key, serialized, ex=_CACHE_TTL_SECONDS)
             redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
-    except Exception as exc:
+    except (RedisError, OSError) as exc:
         # Fail-open: a cache write failure must not fail the response.
         logger.debug("fleet_graph cache write failed: {}", exc)
     return response

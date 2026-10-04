@@ -142,7 +142,7 @@ def _mask_literals(code: str) -> str:
     """
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
-    except Exception:
+    except (tokenize.TokenError, SyntaxError):
         return code
     lines = code.splitlines(keepends=True)
     offsets: list[int] = []

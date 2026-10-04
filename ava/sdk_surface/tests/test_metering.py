@@ -433,3 +433,26 @@ def test_install_does_not_evaluate_dynamic_namespace_directory(
     monkeypatch.setattr(ava.mcps, "__dir__", dynamic_names)
     metering.install()
     metering.uninstall()
+
+
+def test_a_failing_identity_snapshot_is_reported_and_the_call_goes_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The snapshot runs on every SDK call: a failure is reported, never silent, and never
+    changes the call."""
+    reports: list[tuple[str, BaseException]] = []
+
+    def record(sink: str, exc: BaseException) -> None:
+        reports.append((sink, exc))
+
+    def _boom() -> None:
+        raise RuntimeError("identity unreadable")
+
+    monkeypatch.setattr(metering, "report_sink_failure", record)
+    monkeypatch.setattr(metering.agent_identity, "_try_establish_from_env", _boom)
+    with metering._caller():
+        pass
+
+    assert len(reports) == 1
+    assert "caller-identity" in reports[0][0]
+    assert isinstance(reports[0][1], RuntimeError)

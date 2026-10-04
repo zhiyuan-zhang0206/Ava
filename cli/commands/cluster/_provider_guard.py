@@ -39,6 +39,8 @@ import sys
 from collections.abc import Callable
 from typing import Any, cast
 
+import psycopg
+
 from base.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 from base.config import settings
 
@@ -222,6 +224,6 @@ def _halted_agents_count(window_hours: float) -> int | None:
                 (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, window_hours * 3600.0),
             )
             row = cur.fetchone()
-    except Exception:
+    except (psycopg.Error, OSError):
         return None
     return int(row[0]) if row is not None else None

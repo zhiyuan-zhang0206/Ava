@@ -223,8 +223,10 @@ def _own_label(agent_id: int) -> str | None:
         with ava.DB.cursor() as cur:
             cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
             row = cur.fetchone()
-    except Exception as exc:  # fail-soft by design: the identity line outranks the label clause
-        logger.debug("[context-notes] agent-id label read failed: {!r}", exc)
+    except Exception:  # fail-soft by design: the identity line outranks the label clause
+        logger.opt(exception=True).warning(
+            "[context-notes] agent-id label read failed; the identity line renders without a label"
+        )
         return None
     if row is None or not row[0]:
         return None
@@ -236,12 +238,11 @@ def _machine_clause() -> str | None:
 
     Fail-soft like the label: a host whose machine name cannot be resolved
     still states the agent's identity line."""
-    from base.cluster.machine import machine_name
+    from base.cluster.machine import MachineNameMissing, machine_name
 
     try:
         name = machine_name()
-    except Exception as exc:  # fail-soft by design: a missing machine clause must not sink the head
-        logger.debug("[context-notes] agent-id machine read failed: {!r}", exc)
+    except MachineNameMissing:  # an unset machine name only drops the machine clause
         return None
     return " ".join(name.split()) or None
 
