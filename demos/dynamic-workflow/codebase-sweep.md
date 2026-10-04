@@ -42,7 +42,7 @@ write JSON file → `ava.self.terminate()`. Silent — no `send_message`.
 
 Orchestrator: one checkpoint per wave. The checkpoint is the same `gather_files`
 file-polling watcher as every other dynamic workflow (see
-`ava_builtins/skills/ava-dynamic-workflow/references/`) — here it watches the
+`ava_builtins/skills/coordination/ava-dynamic-workflow/references/`) — here it watches the
 wave's status file: all agents reported terminated = wave complete → read the
 result files for the data.
 

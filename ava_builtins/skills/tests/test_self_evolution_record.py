@@ -1,5 +1,5 @@
 """Unit tests for the self-evolution record builder
-(ava_builtins/skills/ava-self-evolution/scripts/record.py).
+(ava_builtins/skills/platform/ava-self-evolution/scripts/record.py).
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import pytest
 
 from tests.skills import load_skill_script
 
-record_module = load_skill_script("ava-self-evolution", "scripts", "record.py")
+record_module = load_skill_script("platform", "ava-self-evolution", "scripts", "record.py")
 
 
 @pytest.fixture()

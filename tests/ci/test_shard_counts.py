@@ -53,8 +53,8 @@ def _case(file: str, name: str = "test_it", outcome: str = "") -> str:
         ("base/packages/tests/test_a.py", "base/packages/tests"),
         ("base/packages/tests/area/test_b.py", "base/packages/tests"),
         (
-            "ava_builtins/skills/gmail/scripts/tests/test_g.py",
-            "ava_builtins/skills/gmail/scripts/tests",
+            "ava_builtins/skills/integrations/gmail/scripts/tests/test_g.py",
+            "ava_builtins/skills/integrations/gmail/scripts/tests",
         ),
         ("base/x/tests/tests/test_nested.py", "base/x/tests"),
     ],

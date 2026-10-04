@@ -43,7 +43,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 #   - ~/.ava/skills/                          → tree root (install-registry gated)
 #   - provider roots (a plugin's declared skill_sources)  → tree root (runtime, project-local)
 #
-# `~/.ava/skills/` is THE load dir: repo skills (`<repo>/ava_builtins/skills/*`) and plugin
+# `~/.ava/skills/` is THE load dir: repo skills (`<repo>/ava_builtins/skills/<group>/*`) and plugin
 # skills (`<repo>/ava_builtins/plugins/<p>/skills/*`, `~/.ava/plugins/<p>/skills/*`) are
 # synced into it by the skills converge step (`cli/commands/extensions/skills_sync.py`,
 # run by `ava start` / the fleet update / `ava converge`); they are not mounted from
