@@ -93,7 +93,9 @@ sys.path.insert(0, {str(root)!r})
 import agent.exec_child as exec_child
 
 exec_child._init_logger(999999)  # the real arm path (task #3816 M4b)
-exec_child._emit_child_boot_timing()  # the record that used to bring OTLP up
+# The boot clock is all the record reads; the SDK modules stay unimported.
+child = exec_child._ChildContext(ava=None, agent_identity=None, boot_started_at=time.perf_counter())
+exec_child._emit_child_boot_timing(child)  # the record that used to bring OTLP up
 
 from base.telemetry.otlp import telemetry_otlp
 

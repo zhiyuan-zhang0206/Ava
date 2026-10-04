@@ -74,9 +74,6 @@ class _BorrowSpan:
     check_attempts: int = 0
 
 
-_borrow_spans: WeakKeyDictionary[asyncio.Task[Any], _BorrowSpan] = WeakKeyDictionary()
-
-
 class LoggingConnectionPool(AsyncConnectionPool[_CT]):
     """`AsyncConnectionPool` that names a slow or timed-out connection borrow.
 
@@ -92,6 +89,9 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
 
     def __init__(self, *args: Any, pool_name: str, **kwargs: Any) -> None:
         self._pool_name = pool_name
+        # The borrow in flight on each task of THIS pool: `_getconn_unchecked` and
+        # `_check_connection` run inside that task and add their share to its span.
+        self._borrow_spans: WeakKeyDictionary[asyncio.Task[Any], _BorrowSpan] = WeakKeyDictionary()
         super().__init__(*args, **kwargs)
 
     def _acquire_stats(self) -> dict[str, int]:
@@ -111,7 +111,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
             return await super()._getconn_unchecked(timeout)
         finally:
             task = asyncio.current_task()
-            span = _borrow_spans.get(task) if task is not None else None
+            span = self._borrow_spans.get(task) if task is not None else None
             if span is not None:
                 span.slot_wait_ms += (time.monotonic() - started) * 1000
 
@@ -121,7 +121,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
             await super()._check_connection(conn)
         finally:
             task = asyncio.current_task()
-            span = _borrow_spans.get(task) if task is not None else None
+            span = self._borrow_spans.get(task) if task is not None else None
             if span is not None:
                 span.check_ms += (time.monotonic() - started) * 1000
                 span.check_attempts += 1
@@ -131,7 +131,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
         span = _BorrowSpan()
         task = asyncio.current_task()
         assert task is not None  # noqa: S101 — async pool borrow runs in a task
-        _borrow_spans[task] = span
+        self._borrow_spans[task] = span
         try:
             conn = await super().getconn(timeout=timeout)
         except PoolTimeout:
@@ -175,7 +175,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
                 )
             return conn
         finally:
-            del _borrow_spans[task]
+            del self._borrow_spans[task]
 
 
 class ClaimedInbound(NamedTuple):

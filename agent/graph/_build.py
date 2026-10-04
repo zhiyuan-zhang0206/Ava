@@ -21,11 +21,15 @@ wrapped version too. Config decides what is imported; not imported = not
 declared.
 """
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.runtime import Runtime
+from langgraph.types import Command
 
+from agent.graph.llm_errors import LlmLedger
 from agent.hooks import make_hook_runner
 from agent.hooks.framework import framework_hooks
 from agent.impersonation import protect_native_hooks
@@ -47,7 +51,7 @@ from base.packages.plugins.extensions import ExtensionRegistry, GraphHook, HookP
 from ._init_context import init_context_node
 from .claim.node import claim_node
 from .exec.node import exec_node
-from .llm.node import llm_node
+from .llm.node import LlmGoto, llm_node
 
 
 def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
@@ -126,6 +130,15 @@ def build_graph(
     """
     state_cls = build_agent_state(extensions)
     g = StateGraph(state_cls, context_schema=AvaContext)
+    # What the llm node remembers per agent between tries and turns belongs to this graph: one
+    # ledger per compiled graph, so two graphs in one process never share failure counts.
+    ledger = LlmLedger()
+
+    async def llm(
+        state: BaseAgentState, runtime: Runtime[AvaContext], config: RunnableConfig
+    ) -> Command[LlmGoto]:
+        return await llm_node(state, runtime, config, ledger=ledger)
+
     g.add_node(  # type: ignore[arg-type]
         AFTER_INIT,
         protect_native_hooks(
@@ -148,7 +161,7 @@ def build_graph(
         ),
         input_schema=state_cls,
     )
-    g.add_node(LLM, llm_node, input_schema=state_cls)  # type: ignore[arg-type]
+    g.add_node(LLM, llm, input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         BEFORE_EXEC,
         protect_native_hooks(

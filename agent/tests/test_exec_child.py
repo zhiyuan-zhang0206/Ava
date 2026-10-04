@@ -526,7 +526,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     ) -> bool:
         return False
 
-    def fake_build_state_slot(_state: dict[str, Any] | None) -> None:
+    def fake_build_state_slot(_child: exec_child._ChildContext, _payload: RequestPayload) -> None:
         return None
 
     def fake_run_code(_code: str, _payload: ResultPayload) -> None:
@@ -551,7 +551,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr("ava.attachment_transport.take_attachments", list)
 
     try:
-        exec_child._run("request.json", "result.json")
+        exec_child._run("request.json", "result.json", 0.0)
     finally:
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)
@@ -563,10 +563,9 @@ def test_child_boot_timing_emits_ready_duration(
     """The child emits its own ready boundary, separating bootstrap cost from user code."""
     from agent import exec_child
 
-    monkeypatch.setattr(exec_child, "_CHILD_BOOT_STARTED_AT", 100.0)
     monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
 
-    exec_child._emit_child_boot_timing()
+    exec_child._emit_child_boot_timing(exec_child._import_runtime(100.0))
 
     [record] = [
         record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
@@ -637,7 +636,7 @@ def test_child_overlay_phases_framework_then_plugin(
     def fake_sdk_disable() -> None:
         events.append("sdk_disable")
 
-    def fake_build_state_slot(_state: dict[str, Any] | None) -> None:
+    def fake_build_state_slot(_child: exec_child._ChildContext, _payload: RequestPayload) -> None:
         return None
 
     def fake_run_code(_code: str, _payload: ResultPayload) -> None:

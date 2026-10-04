@@ -57,13 +57,9 @@ from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
+    LlmLedger,
     LLMRetryBudgetExceededError,
     LLMStreamStallPairError,
-    _check_consecutive_error_cap,
-    _check_stall_pair_cap,
-    _clear_consecutive_errors,
-    _reset_stall_pair_streak,
-    _stall_pair_streak_active,
 )
 from agent.graph.node_log import node_lifecycle
 from agent.graph.tool_calls import code_from_args
@@ -89,17 +85,6 @@ from ._stream import _stream_with_cache_retry
 # llm_node normal → BEFORE_EXEC; cancel / no-tool-call halt → AFTER_EXEC
 # (halted=True makes after_exec route back to claim). Type narrow catches illegal goto.
 LlmGoto = Literal["before_exec", "after_exec", "init_context", "claim"]
-
-
-_silent_idle_output_tokens: dict[str, int] = {}
-"""thread_id -> output-token budget units across consecutive silent-idle turns.
-
-Separate from _consecutive_errors because a silent idle is a successful stream.
-Every silent idle consumes at least one unit, so a provider that reports
-reasoning content with zero output tokens cannot bypass the bound. The budget
-resets on the first turn that produces text or a tool call; process lifecycle
-resets it naturally on restart.
-"""
 
 
 def _log_llm_retry_duration(
@@ -212,8 +197,12 @@ async def llm_node(
     state: _state.AgentState,
     runtime: Runtime[AvaContext],
     config: RunnableConfig,
+    *,
+    ledger: LlmLedger,
 ) -> Command[LlmGoto]:
     """Invoke the LLM, retrying a failed try on the schedule `_retry.retry_wait` decides.
+
+    `ledger` is the graph's `LlmLedger`: what the node remembers per agent between tries and turns.
 
     The node retries itself rather than through a graph-level policy: the host's one graph
     serves every agent, and only the node knows whose model and id the schedule is for.
@@ -224,12 +213,14 @@ async def llm_node(
     failed = 0
     while True:
         try:
-            return await llm_attempt(state, runtime, config, Attempt(failed + 1, first_started_at))
+            return await llm_attempt(
+                state, runtime, config, Attempt(failed + 1, first_started_at), ledger
+            )
         except GraphBubbleUp:
             raise
         except Exception as exc:
             failed += 1
-            wait = retry_wait(exc, failed, model=model, agent_id=agent_id)
+            wait = retry_wait(exc, failed, model=model, agent_id=agent_id, ledger=ledger)
             if wait is None:
                 raise
             await asyncio.sleep(wait)
@@ -241,13 +232,13 @@ async def llm_node(
             )
 
 
-def _enforce_retry_budget(attempt: Attempt, agent_id: int) -> None:
+def _enforce_retry_budget(attempt: Attempt, agent_id: int, ledger: LlmLedger) -> None:
     if (
         attempt.elapsed_seconds() >= settings.lm.llm_retry_max_total_seconds
         # The transient-retry budget is sized for seconds-scale
         # backoffs; while a delayed stall sequence is active its own
         # schedule (streak cap) owns the bound — see _retry.
-        and not _stall_pair_streak_active(str(agent_id))
+        and not ledger.stall_pair_streak_active(str(agent_id))
     ):
         _log_llm_retry_duration(attempt, outcome="budget_exhausted")
         _raise_retry_budget_exhausted(attempt.number)
@@ -281,6 +272,7 @@ async def llm_attempt(
     runtime: Runtime[AvaContext],
     config: RunnableConfig,
     attempt: Attempt,
+    ledger: LlmLedger,
 ) -> Command[LlmGoto]:
     """One try of the llm node: invoke LLM + streaming token publish + RAII cancel. See module
     docstring for details.
@@ -303,8 +295,8 @@ async def llm_attempt(
         agent_id=agent_id,
     ):
         try:
-            _enforce_retry_budget(attempt, agent_id)
-            result = await _llm_node_impl(state, runtime, config)
+            _enforce_retry_budget(attempt, agent_id, ledger)
+            result = await _llm_node_impl(state, runtime, config, ledger)
         except BaseException as exc:
             # A settled (failed) attempt is real activity: mark the turn clock
             # now so the following retry sleep is the ONLY silence the hosted
@@ -378,18 +370,18 @@ def _is_silent_idle(final_msg: AIMessage) -> bool:
 
 
 def _silent_idle_command(
-    final_msg: AIMessage, agent_id: int, model: str
+    final_msg: AIMessage, agent_id: int, model: str, ledger: LlmLedger
 ) -> Command[LlmGoto] | None:
     """Continue-loop vs guard-halt decision for a silent-idle turn.
 
     Keeps the reasoning in context and loops straight back to the LLM
     (halted=False -> claim's multi-step continue path) so the ava_silent_idle
-    plugin can inject a Continue nudge before the next turn. A per-process
+    plugin can inject a Continue nudge before the next turn. The ledger's
     output-token budget bounds a model that habitually reasons without acting:
     each silent idle consumes at least one unit, even when its provider reports
     zero output tokens. At the cap, halt to idle instead of spending another
     model call. The budget resets on the first non-silent-idle turn (the caller
-    pops it). Returns None when the turn is not a silent idle.
+    resets it). Returns None when the turn is not a silent idle.
     """
     if not _is_silent_idle(final_msg):
         return None
@@ -397,14 +389,14 @@ def _silent_idle_command(
     usage = final_msg.usage_metadata or {}
     output_tokens = int(usage.get("output_tokens", 0) or 0)
     budget_tokens = max(output_tokens, 1)
-    cumulative_output_tokens = _silent_idle_output_tokens.get(tid, 0) + budget_tokens
+    cumulative_output_tokens = ledger.silent_idle_output_tokens(tid) + budget_tokens
     cap = settings.lm.llm_silent_idle_max_output_tokens
     from base.lm.pricing import quote
 
     priced = quote(model, 0, output_tokens, 0)
     estimated_cost_usd = priced.cost_usd if priced is not None else None
     if cap > 0 and cumulative_output_tokens >= cap:
-        _silent_idle_output_tokens.pop(tid, None)
+        ledger.reset_silent_idle(tid)
         logger.warning(
             "[{label}] {body}",
             label="silent-idle",
@@ -422,7 +414,7 @@ def _silent_idle_command(
             update={"messages": [final_msg], "halted": True},
             goto=AFTER_EXEC,
         )
-    _silent_idle_output_tokens[tid] = cumulative_output_tokens
+    ledger.record_silent_idle_output_tokens(tid, cumulative_output_tokens)
     logger.info(
         "[{label}] {body}",
         label="silent-idle",
@@ -499,6 +491,7 @@ async def _llm_node_impl(
     state: _state.AgentState,
     runtime: Runtime[AvaContext],
     config: RunnableConfig,
+    ledger: LlmLedger,
 ) -> Command[LlmGoto]:
     """Stream the LLM turn: race streaming vs cancel, assemble + validate the
     final message, persist activity, then dispatch the post-stream command."""
@@ -518,11 +511,11 @@ async def _llm_node_impl(
     # Consecutive same-error retry cap: if the same LLMStreamError has occurred
     # N times across retries, fail fast with FatalLLMStreamError instead of
     # wasting another 30-480s retry cycle on a deterministic error.
-    _check_consecutive_error_cap(str(agent_id))
+    ledger.check_consecutive_error_cap(str(agent_id))
     # Stall-pair cap: a spent delayed stall-retry streak (default 4 pairs) ends
     # the turn here as a fatal abort — the next attempt would only burn another
     # stalled pair while the provider is still degraded.
-    _check_stall_pair_cap(str(agent_id))
+    ledger.check_stall_pair_cap(str(agent_id))
 
     # Streaming forwarding (chat / reasoning / code) is isolated in
     # RedisStreamHandler — process_chunk is called in the chunk loop; after
@@ -559,6 +552,7 @@ async def _llm_node_impl(
             llm, list(state.messages), chunks=chunks, handler=handler, agent=ctx.require_agent()
         ),
         handler,
+        ledger,
     )
     if cancelled_cmd is not None:
         return cancelled_cmd
@@ -567,8 +561,8 @@ async def _llm_node_impl(
     # transient error (different type) starts from 1, not accumulated. The
     # stall-pair streak resets with it: a served request proves the provider
     # recovered, so a later stall pair starts a fresh delayed schedule.
-    _clear_consecutive_errors(str(agent_id))
-    _reset_stall_pair_streak(str(agent_id))
+    ledger.clear_consecutive_errors(str(agent_id))
+    ledger.reset_stall_pair_streak(str(agent_id))
 
     if not chunks:
         # LLM returned empty — extremely rare; return empty code per historical
@@ -592,12 +586,14 @@ async def _llm_node_impl(
         ctx.require_agent().brain.llm_model,
     )
 
-    silent_idle_cmd = _silent_idle_command(final_msg, agent_id, ctx.require_agent().brain.llm_model)
+    silent_idle_cmd = _silent_idle_command(
+        final_msg, agent_id, ctx.require_agent().brain.llm_model, ledger
+    )
     if silent_idle_cmd is not None:
         return silent_idle_cmd
 
     # Any non-silent-idle turn ends the streak — a single real action clears it.
-    _silent_idle_output_tokens.pop(str(agent_id), None)
+    ledger.reset_silent_idle(str(agent_id))
 
     if not final_msg.tool_calls:
         # No tool_call = stop turn — halted=True makes after_exec route back
