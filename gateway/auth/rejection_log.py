@@ -33,6 +33,16 @@ def _is_sse_poll_path(path: str) -> bool:
     return path.endswith(("/stream", "/system")) or path == "/api/system/all"
 
 
+def _is_browser_user_agent(user_agent: str) -> bool:
+    """Return whether the UA names a browser engine (the console's own tabs).
+
+    A rollout invalidates the browser session, and every open console tab
+    retries its requests once with a 401 the UI itself surfaces — expected
+    post-rollout noise, not a client misconfiguration (2026-10-03 triage #7).
+    Scripted clients (curl / httpx / wget) do not carry `Mozilla/`."""
+    return "Mozilla/" in user_agent
+
+
 def _prune_auth401_throttle(now: float) -> None:
     """Forget client/path keys idle for more than two warning windows."""
     stale_before = now - (2 * _AUTH401_WARN_COOLDOWN_S)
@@ -60,7 +70,7 @@ def log_auth401_rejection(request: Request) -> None:
     path = request.url.path
     client = request.client.host if request.client else "unknown"
     user_agent = request.headers.get("user-agent", "-")
-    if _is_sse_poll_path(path):
+    if _is_sse_poll_path(path) or _is_browser_user_agent(user_agent):
         _log.debug(
             "auth 401: path=%s client=%s ua=%s",
             path,
