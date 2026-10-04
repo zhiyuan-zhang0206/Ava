@@ -484,6 +484,50 @@ describe("stats / config / timeline / system status", () => {
     expect(calls[0].url).toMatch(/\/api\/stats\/dashboard\?hours=168$/);
   });
 
+  it("getAlertClasses GETs the window's classes", async () => {
+    await api.getAlertClasses(6);
+    expect(calls[0].url).toMatch(/\/api\/stats\/alert-classes\?hours=6$/);
+  });
+
+  it("getAlertClassSamples addresses one class by its full identity and unwraps the samples", async () => {
+    await api.getAlertClassSamples(
+      { level: "error", event_name: "turn failed", source: "runner", process: "" },
+      24,
+    );
+    const query = new URL(calls[0].url).searchParams;
+    expect(new URL(calls[0].url).pathname).toBe("/api/stats/alert-classes/samples");
+    expect(Object.fromEntries(query)).toEqual({
+      level: "error",
+      event_name: "turn failed",
+      source: "runner",
+      process: "",
+      hours: "24",
+    });
+  });
+
+  it("dismissAlertClass POSTs the class identity and reopenAlertClass POSTs the dismissal id", async () => {
+    await api.dismissAlertClass({
+      category: "log",
+      level: "warning",
+      event_name: "disk_pressure",
+      source: "svc",
+      process: "gateway",
+    });
+    expect(calls[0].url).toMatch(/\/api\/event-resolutions$/);
+    expect(calls[0].init?.method).toBe("POST");
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual({
+      category: "log",
+      level: "warning",
+      event_name: "disk_pressure",
+      source: "svc",
+      process: "gateway",
+    });
+
+    await api.reopenAlertClass(12);
+    expect(calls[1].url).toMatch(/\/api\/event-resolutions\/12\/reopen$/);
+    expect(calls[1].init?.method).toBe("POST");
+  });
+
   it("getConfig GETs /api/config", async () => {
     await api.getConfig();
     expect(calls[0].url).toMatch(/\/api\/config$/);

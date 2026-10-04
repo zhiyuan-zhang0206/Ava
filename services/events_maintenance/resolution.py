@@ -12,15 +12,16 @@ valve: a renewed burst reopens the class before it can hide a new incident.
 
 The class arithmetic is window-agnostic: :func:`level_splits` turns any
 window's per-class counts plus the active dismissals into per-level
-total / dismissed / net triples. The daemon's :func:`run_resolution_slice`
+total / dismissed / net triples; the daemon's :func:`run_resolution_slice`
 applies it to its fixed six-hour window and publishes the unresolved and
-dismissed gauges; the gateway stats dashboard (``gateway/cluster/status.py``)
-applies the same arithmetic to the frontend-selected window, so the two
-surfaces agree class for class.
+dismissed gauges. The gateway's alert-class surface
+(``gateway/cluster/alert_classes.py``) reads the same classes over the
+frontend-selected window with :func:`alert_classes` and resolves each one's
+dismissal with :func:`matching_dismissal`, the same match the arithmetic uses.
 
 The counts are read from `telemetry_events` by :func:`class_counts`. The public seams are
-:func:`run_resolution_slice`, :func:`level_splits`, :func:`class_counts` and
-:func:`active_dismissals`.
+:func:`run_resolution_slice`, :func:`level_splits`, :func:`class_counts`,
+:func:`alert_classes`, :func:`matching_dismissal` and :func:`active_dismissals`.
 """
 
 from __future__ import annotations
@@ -104,21 +105,65 @@ class LevelSplit:
     net: int
 
 
+@dataclass(frozen=True)
+class AlertClass:
+    """One warning/error class over a window: the dismissal identity plus its tally.
+
+    The identity is ``(level, event_name, source, process)`` — the emission
+    category is not part of it (see :func:`_is_dismissed`), so ``category`` here is the one
+    to store on a dismissal made from this class (the greatest category the class was
+    emitted under in the window).
+    """
+
+    level: str
+    event_name: str
+    source: str
+    process: str
+    category: str
+    count: int
+    first_seen: datetime
+    last_seen: datetime
+
+
 _last_auto_dismiss_day: list[date | None] = [None]
 
 
-def class_counts(
-    conn: Any, *, start: datetime, end: datetime, cluster: str | None = None
-) -> dict[EventClass, int]:
+def class_counts(conn: Any, *, start: datetime, end: datetime) -> dict[EventClass, int]:
     """Counts of the warning, error and critical event classes over `(start, end]`.
 
-    Read from `telemetry_events`; `category` is always telemetry or log there. ``cluster``
-    keeps the rows of that cluster and the rows with no label (the same acceptance as the
-    other dashboard reads). The level predicate is a literal so the partial index on those
-    levels applies.
+    Read from `telemetry_events`; `category` is always telemetry or log there. The level
+    predicate is a literal so the partial index on those levels applies.
+    """
+    rows = conn.execute(
+        """
+        SELECT category, level, event_name, source, process, count(*)
+        FROM telemetry_events
+        WHERE level IN ('warning', 'error', 'critical')
+          AND ts > %s AND ts <= %s
+        GROUP BY category, level, event_name, source, process
+        """,
+        (start, end),
+    ).fetchall()
+    return {
+        EventClass(
+            category=row[0], level=row[1], event_name=row[2], source=row[3], process=row[4]
+        ): int(row[5])
+        for row in rows
+    }
+
+
+def alert_classes(
+    conn: Any, *, start: datetime, end: datetime, cluster: str | None = None
+) -> list[AlertClass]:
+    """The warning, error and critical classes over `(start, end]`, most frequent first.
+
+    One class per ``(level, event_name, source, process)``; the grouped columns and the
+    timestamps all live in the partial index on those levels, so the read is an index-only
+    scan (the level predicate is a literal so the index applies). ``cluster`` keeps the rows of
+    that cluster and the rows with no label, the acceptance of every dashboard read.
     """
     query = """
-        SELECT category, level, event_name, source, process, count(*)
+        SELECT level, event_name, source, process, max(category), count(*), min(ts), max(ts)
         FROM telemetry_events
         WHERE level IN ('warning', 'error', 'critical')
           AND ts > %s AND ts <= %s
@@ -127,13 +172,20 @@ def class_counts(
     if cluster is not None:
         query += " AND (cluster = %s OR cluster = '')"
         params.append(cluster)
-    query += " GROUP BY category, level, event_name, source, process"
-    return {
-        EventClass(
-            category=row[0], level=row[1], event_name=row[2], source=row[3], process=row[4]
-        ): int(row[5])
+    query += " GROUP BY level, event_name, source, process ORDER BY count(*) DESC, event_name, source, process, level"
+    return [
+        AlertClass(
+            level=row[0],
+            event_name=row[1],
+            source=row[2],
+            process=row[3],
+            category=row[4],
+            count=int(row[5]),
+            first_seen=row[6],
+            last_seen=row[7],
+        )
         for row in conn.execute(query, params).fetchall()
-    }
+    ]
 
 
 def active_dismissals(conn: Any) -> list[Dismissal]:
@@ -320,6 +372,22 @@ def _is_dismissed(event_class: EventClass, active: set[EventClass]) -> bool:
         _same_base(candidate, event_class) and candidate.process in (event_class.process, "")
         for candidate in active
     )
+
+
+def matching_dismissal(event_class: EventClass, active: list[Dismissal]) -> Dismissal | None:
+    """The active dismissal that cancels this counted class, or None.
+
+    The match is :func:`_is_dismissed`'s; an exact (same process) row wins over a wildcard
+    row, so reopening the returned row is the narrowest undo.
+    """
+
+    candidates = [
+        dismissal
+        for dismissal in active
+        if _same_base(dismissal.event_class, event_class)
+        and dismissal.event_class.process in (event_class.process, "")
+    ]
+    return min(candidates, key=lambda d: d.event_class.process == "", default=None)
 
 
 def _burst_count_for(event_class: EventClass, burst_counts: dict[EventClass, int]) -> int:

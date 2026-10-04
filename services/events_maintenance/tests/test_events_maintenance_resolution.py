@@ -154,19 +154,68 @@ def test_class_counts_group_the_warning_error_and_critical_rows_of_the_window(
     }
 
 
-def test_class_counts_cluster_filter_keeps_the_home_cluster_and_unlabelled_rows(
+def test_alert_classes_tally_one_class_per_identity_with_first_and_last_seen(
     db_conn: psycopg.Connection[Any],
 ) -> None:
-    _record(db_conn, cluster="home")
-    _record(db_conn, cluster="")
-    _record(db_conn, cluster="elsewhere")
+    _record(db_conn, event_name="a", minutes_ago=50, category="log")
+    _record(db_conn, event_name="a", minutes_ago=10, category="telemetry")
+    _record(db_conn, event_name="a", minutes_ago=5)
+    _record(db_conn, event_name="a", process="q", minutes_ago=3)
+    _record(db_conn, level="critical", event_name="b", minutes_ago=2)
+    _record(db_conn, level="info", event_name="a")  # not a problem level
+    _record(db_conn, event_name="old", minutes_ago=400)  # outside the window
+
+    start, end = _window(360)
+    classes = resolution.alert_classes(db_conn, start=start, end=end)
+
+    # The emission category is not part of the identity: the log and telemetry rows of "a" are
+    # one class, tallied together, carrying the greater category for a dismissal made from it.
+    assert [(c.level, c.event_name, c.process, c.category, c.count) for c in classes] == [
+        ("warning", "a", "p", "telemetry", 3),
+        ("warning", "a", "q", "telemetry", 1),
+        ("critical", "b", "p", "telemetry", 1),
+    ]
+    first = classes[0]
+    assert (first.last_seen - first.first_seen).total_seconds() == pytest.approx(45 * 60, abs=1)
+
+
+def test_alert_classes_cluster_filter_keeps_the_home_cluster_and_unlabelled_rows(
+    db_conn: psycopg.Connection[Any],
+) -> None:
+    _record(db_conn, cluster="home", event_name="a")
+    _record(db_conn, cluster="", event_name="b")
+    _record(db_conn, cluster="elsewhere", event_name="c")
 
     start, end = _window(10)
 
-    home = resolution.class_counts(db_conn, start=start, end=end, cluster="home")
-    everything = resolution.class_counts(db_conn, start=start, end=end)
-    assert sum(home.values()) == 2
-    assert sum(everything.values()) == 3
+    home = resolution.alert_classes(db_conn, start=start, end=end, cluster="home")
+    everything = resolution.alert_classes(db_conn, start=start, end=end)
+    assert {c.event_name for c in home} == {"a", "b"}
+    assert {c.event_name for c in everything} == {"a", "b", "c"}
+
+
+def test_matching_dismissal_prefers_the_exact_process_row_over_the_wildcard() -> None:
+    wildcard = resolution.Dismissal(
+        id=1, event_class=_event_class(process=""), dismissed_by=0, note=""
+    )
+    exact = resolution.Dismissal(
+        id=2, event_class=_event_class(process="agent-host"), dismissed_by=0, note=""
+    )
+    other_name = resolution.Dismissal(
+        id=3, event_class=_event_class(event_name="other"), dismissed_by=0, note=""
+    )
+    active = [wildcard, exact, other_name]
+
+    assert resolution.matching_dismissal(_event_class(process="agent-host"), active) is exact
+    assert resolution.matching_dismissal(_event_class(process="gateway"), active) is wildcard
+    # A counted class with no process matches only the wildcard, never an exact row.
+    assert resolution.matching_dismissal(_event_class(process=""), [exact]) is None
+    # The emission category never takes part in the match.
+    assert (
+        resolution.matching_dismissal(_event_class(category="log", process="gateway"), active)
+        is wildcard
+    )
+    assert resolution.matching_dismissal(_event_class(event_name="unseen"), active) is None
 
 
 def test_unresolved_math_excludes_active_classes(
