@@ -681,7 +681,8 @@ class FeishuAdapter(IMAdapter):
 
         del markdown  # platform contract: accepted, not rendered
         if not self._last_open_id:
-            raise RuntimeError("feishu: no known user chat yet")
+            # NotImplementedError: the notify fan-out skips (no retry fixes it; #4964).
+            raise NotImplementedError("feishu: no known user chat yet")
         await self.send(self._last_open_id, text)
 
     def _send_card(
