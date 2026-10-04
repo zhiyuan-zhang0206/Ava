@@ -18,7 +18,7 @@ async def test_gateway_startup_propagates_zero_provider_failure(
     def _fail_provider_load() -> None:
         raise failure
 
-    monkeypatch.setattr(gateway_app, "ensure_provider_plugins_loaded", _fail_provider_load)
+    monkeypatch.setattr(gateway_app, "model_catalog", _fail_provider_load)
     app = FastAPI()
 
     with pytest.raises(RuntimeError, match="no provider plugins enabled") as exc_info:

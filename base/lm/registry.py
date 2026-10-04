@@ -1,25 +1,18 @@
-"""Single per-model registry — every per-model fact and per-model tunable
-default lives in one ``MODELS: dict[id, ModelSpec]`` table.
+"""Per-model facts and tunable defaults: `ModelSpec`, `ModelTuning` and their resolution.
 
-Replaces the parallel per-model-id tables that had accumulated across
-``factory.py`` / ``effort.py`` (``SUPPORTED_MODELS``,
-``MODEL_CONTEXT_WINDOW``, ``MODEL_KNOWLEDGE_CUTOFF``, ``_MODEL_DEFAULT_STREAMING``,
-``_CLAUDE_MAX_TOKENS``, ``_DEEPSEEK_MAX_TOKENS``, ``_CLAUDE_EFFORT_LEVELS``,
-``_CLAUDE_EXTENDED_THINKING_ONLY``, ``_CLAUDE_EXTENDED_THINKING_EFFORT_LEVELS``)
-— their membership had drifted apart because adding a model
-meant editing up to a dozen dicts. Here a model is one entry; the legacy table
-names survive as derived views (below) so existing import sites keep working.
-Core registers no provider or model rows: provider plugins are the sole source
-of chat ``ModelSpec`` entries, per-provider bindings, and complete runtime price
-lattices. ``pricing_catalog_archive.json`` is the reviewed reconciliation ledger
-and catalog-only source; selection lives in ``base.lm.pricing``.
+Every per-model fact and per-model tunable default lives in one ``ModelSpec`` per model id; the
+table of them is ``ModelCatalog.models`` (``base/lm/catalog.py``), built once per process by the
+provider loader (``base/lm/plugin_providers.py:model_catalog``). Core registers no provider or
+model rows: provider plugins are the sole source of chat ``ModelSpec`` entries, per-provider
+bindings, and complete runtime price lattices. ``pricing_catalog_archive.json`` is the reviewed
+reconciliation ledger and catalog-only source; selection lives in ``base.lm.pricing``.
 
 ## Config layering — how a per-model default takes effect
 
 Everything tunable is per-model by default, with a shared fallback::
 
     code shared default            (DEFAULT_TUNING — the fully-populated floor)
-    < per-model default            (MODELS[id].tuning — code table, None = no opinion)
+    < per-model default            (the model's ModelSpec.tuning — code table, None = no opinion)
     < .env / env explicit value    (the user's deliberate global choice)
     < per-agent overlay            (spawn/restart config_overlay via set_field)
 
@@ -53,7 +46,7 @@ from dataclasses import fields as dataclass_fields
 from typing import Any
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.pricing import PriceBook
 
 # ---------------------------------------------------------------------------
 # ModelTuning — per-model DEFAULTS for settings fields
@@ -176,7 +169,7 @@ class ModelSpec:
     tables had.
     """
 
-    provider: str  # SUPPORTED_MODELS group key == build_chat_model prefix
+    provider: str  # supported-models group key == build_chat_model prefix
     spawnable: bool = False  # offered in the frontend spawn dropdown
     unavailable_fallback: str | None = None  # temporarily withdraw this id from new selections
     # while preserving existing configurations: build_chat_model resolves the
@@ -220,91 +213,9 @@ class ModelSpec:
     so the native matrix is the default contract — None means "no attach-specific
     opinion; follow `media_types`". Empty frozenset = attach is unavailable even
     though the endpoint could receive media. A declared set must be a subset of
-    `media_types` (enforced by `_validate_spec`): a model cannot attach a
+    `media_types` (enforced by `validate_spec`): a model cannot attach a
     modality its endpoint cannot receive."""
     tuning: ModelTuning = field(default_factory=ModelTuning)
-
-
-# Filled by provider plugins through `register_models`; core registers no rows.
-MODELS: dict[str, ModelSpec] = {}
-
-
-# ---------------------------------------------------------------------------
-# Derived views — the legacy table names, computed from MODELS
-# ---------------------------------------------------------------------------
-
-# Models offered in the frontend spawn dropdown + per-agent overlay, grouped by
-# provider in registry order. Adding a model to MODELS with spawnable=True is
-# the only edit needed for it to appear in the UI; provider availability still
-# depends on the corresponding API key being set on the agent-runner.
-# Rebuilt in place so plugin registration remains visible to imported readers.
-SUPPORTED_MODELS: dict[str, list[str]] = {}
-
-# Model context window sizes (max input tokens). Used by the token-usage
-# endpoint and the compact machinery; a model without a known window is absent
-# (the frontend hides the max segment).
-MODEL_CONTEXT_WINDOW: dict[str, int] = {}
-
-# Knowledge cutoff dates (YYYY-MM), appended to the system prompt so the agent
-# knows the temporal boundary of its training data. A model without one simply
-# gets no cutoff line.
-MODEL_KNOWLEDGE_CUTOFF: dict[str, str] = {}
-
-# Model identity — a per-model note injected before the knowledge cutoff
-# in the system prompt so the model knows what it is running on.
-MODEL_IDENTITY: dict[str, str] = {}
-
-
-def _rebuild_derived_views() -> None:
-    """Recompute the derived views from MODELS, in place.
-
-    The views are module-level names imported across ~36 files; mutating the
-    same dict objects (clear + update) keeps every existing import site
-    working unchanged after a plugin registration.
-    """
-    SUPPORTED_MODELS.clear()
-    for _model_id, _spec in MODELS.items():
-        if _spec.spawnable:
-            SUPPORTED_MODELS.setdefault(_spec.provider, []).append(_model_id)
-
-    MODEL_CONTEXT_WINDOW.clear()
-    MODEL_CONTEXT_WINDOW.update(
-        {
-            _model_id: _spec.context_window
-            for _model_id, _spec in MODELS.items()
-            if _spec.context_window is not None
-        }
-    )
-    MODEL_KNOWLEDGE_CUTOFF.clear()
-    MODEL_KNOWLEDGE_CUTOFF.update(
-        {
-            _model_id: _spec.knowledge_cutoff
-            for _model_id, _spec in MODELS.items()
-            if _spec.knowledge_cutoff is not None
-        }
-    )
-    MODEL_IDENTITY.clear()
-    MODEL_IDENTITY.update(
-        {
-            _model_id: _spec.model_identity
-            for _model_id, _spec in MODELS.items()
-            if _spec.model_identity is not None
-        }
-    )
-
-
-# ---------------------------------------------------------------------------
-# Media-capability resolution — data-leaf queries over MODELS / provider
-# bindings. Lives here (not in factory.py) so the boot path (the exec child's
-# media gate, `ava/attachment_transport.py`) resolves without importing the LangChain-heavy
-# factory; factory re-exports the same entry points (startup-path laziness,
-# task #3585).
-# ---------------------------------------------------------------------------
-
-# The legacy core vision-prefix fallback is empty. Registered plugin models are
-# authoritative through `ModelSpec.media_types`; unregistered ids under a
-# plugin prefix use `ProviderBinding.vision`.
-_VISION_MODEL_PREFIXES: tuple[str, ...] = ()
 
 
 def media_types_for_model(model: str) -> frozenset[str]:
@@ -314,19 +225,15 @@ def media_types_for_model(model: str) -> frozenset[str]:
     unregistered id under a plugin prefix gets the binding's v1 image-only
     ``vision`` capability. No match means text-only.
     """
-    ensure_provider_plugins_loaded()
-    spec = MODELS.get(model)
+    from base.lm.plugin_providers import model_catalog  # the catalog module imports this one
+
+    catalog = model_catalog()
+    spec = catalog.models.get(model)
     if spec is not None:
         return spec.media_types
-    # Function-level: provider_api imports this module, so a module-level
-    # import would be a cycle (and only the unregistered-prefix tier needs it).
-    from base.lm import provider_api
-
-    for prefix, binding in provider_api.REGISTRY.bindings.items():
+    for prefix, binding in catalog.bindings.items():
         if model.startswith(prefix):
             return frozenset({"image"}) if binding.vision else frozenset()
-    if model.startswith(_VISION_MODEL_PREFIXES):
-        return frozenset({"image"})
     return frozenset()
 
 
@@ -343,8 +250,9 @@ def attach_modalities_for_model(model: str) -> frozenset[str]:
 
     Raw-entry semantics: a withdrawn id answers with its declared set; the
     registration gates resolve the effective model first (task #3212)."""
-    ensure_provider_plugins_loaded()
-    spec = MODELS.get(model)
+    from base.lm.plugin_providers import model_catalog  # the catalog module imports this one
+
+    spec = model_catalog().models.get(model)
     if spec is not None:
         if spec.attach_modalities is not None:
             return spec.attach_modalities
@@ -352,11 +260,12 @@ def attach_modalities_for_model(model: str) -> frozenset[str]:
     return media_types_for_model(model)
 
 
-def _validate_spec(
+def validate_spec(
     model_id: str,
     spec: ModelSpec,
     *,
     anthropic_protocol: bool,
+    prices: PriceBook,
     pending_price_models: Collection[str] = (),
 ) -> None:
     """Fail fast on a registry gap for one spawnable model entry.
@@ -375,8 +284,6 @@ def _validate_spec(
         )
     if not spec.spawnable:
         return
-    from base.lm.pricing import rates_at
-
     missing = [
         fact
         for fact in ("context_window", "knowledge_cutoff", "effort_levels")
@@ -387,7 +294,7 @@ def _validate_spec(
             f"spawnable model {model_id!r} is missing registry facts {missing} — "
             "fill them in its ModelSpec"
         )
-    if model_id not in pending_price_models and rates_at(model_id, input_tokens=0) is None:
+    if model_id not in pending_price_models and prices.rates_at(model_id, input_tokens=0) is None:
         raise RuntimeError(
             f"spawnable model {model_id!r} has no current price — a catalog-priced "
             "model needs an archive entry; a plugin model needs a price in its "
@@ -425,45 +332,12 @@ def _validate_spec(
         )
 
 
-def register_models(
-    provider: str,
+def validate_models(
     models: Mapping[str, ModelSpec],
     *,
-    anthropic_protocol: bool = False,
-    pending_price_models: Collection[str] = (),
+    prices: PriceBook,
+    anthropic_protocol_by_model: Mapping[str, bool] | None = None,
 ) -> None:
-    """Merge a plugin provider's ModelSpec entries into MODELS.
-
-    Called by ``base.lm/provider_api.py:register`` — not by core code.
-    Mutates the same MODELS dict object (every imported reference sees it) and
-    rebuilds the derived views in place; validates each new spawnable entry
-    with the same facts/price/effort checks for every provider. A duplicate
-    model id from another plugin is an error, never a precedence order.
-    `pending_price_models` names prices from the same provider registration
-    that are validated and installed immediately after this model pass.
-    """
-    for model_id, spec in models.items():
-        if spec.provider != provider:
-            raise ValueError(
-                f"plugin model {model_id!r} declares provider {spec.provider!r}, "
-                f"but it is registering under {provider!r} — fix ModelSpec.provider"
-            )
-        if model_id in MODELS:
-            raise RuntimeError(
-                f"model id {model_id!r} is already registered by an earlier plugin — "
-                "model ids are flat and a duplicate is an error"
-            )
-        _validate_spec(
-            model_id,
-            spec,
-            anthropic_protocol=anthropic_protocol,
-            pending_price_models=pending_price_models,
-        )
-    MODELS.update(models)
-    _rebuild_derived_views()
-
-
-def _validate_registry(*, anthropic_protocol_by_model: Mapping[str, bool] | None = None) -> None:
     """Validate shared defaults and the complete registered model graph."""
     for tuning_field in dataclass_fields(ModelTuning):
         if getattr(DEFAULT_TUNING, tuning_field.name) is None:
@@ -471,8 +345,8 @@ def _validate_registry(*, anthropic_protocol_by_model: Mapping[str, bool] | None
                 f"DEFAULT_TUNING.{tuning_field.name} is None — the shared-default floor "
                 f"must be fully populated (it is the last resort of resolve_setting)"
             )
-    for model_id, spec in MODELS.items():
-        _validate_spec(
+    for model_id, spec in models.items():
+        validate_spec(
             model_id,
             spec,
             anthropic_protocol=(
@@ -480,16 +354,17 @@ def _validate_registry(*, anthropic_protocol_by_model: Mapping[str, bool] | None
                 if anthropic_protocol_by_model is None
                 else anthropic_protocol_by_model[model_id]
             ),
+            prices=prices,
         )
-    _validate_supersession_links()
-    _validate_supersession_chains()
-    _validate_unavailable_fallbacks()
+    _validate_supersession_links(models)
+    _validate_supersession_chains(models)
+    _validate_unavailable_fallbacks(models)
 
 
-def _validate_supersession_links() -> None:
+def _validate_supersession_links(models: Mapping[str, ModelSpec]) -> None:
     # The supersession chain must stay coherent — a broken link would hide a
     # model from the picker while its replacement is absent or invisible.
-    for model_id, spec in MODELS.items():
+    for model_id, spec in models.items():
         replacement_id = spec.superseded_by
         if replacement_id is None:
             continue
@@ -498,12 +373,12 @@ def _validate_supersession_links() -> None:
                 f"model {model_id!r} lists itself as its own replacement — "
                 "fix superseded_by in its provider plugin register() call"
             )
-        if replacement_id not in MODELS:
+        if replacement_id not in models:
             raise RuntimeError(
                 f"model {model_id!r} is superseded by {replacement_id!r}, which is "
-                f"not in MODELS — point superseded_by at a registered model id"
+                f"not in models — point superseded_by at a registered model id"
             )
-        target = MODELS[replacement_id]
+        target = models[replacement_id]
         if not target.spawnable:
             raise RuntimeError(
                 f"model {model_id!r} is superseded by {replacement_id!r}, which is "
@@ -511,10 +386,10 @@ def _validate_supersession_links() -> None:
             )
 
 
-def _validate_supersession_chains() -> None:
+def _validate_supersession_chains(models: Mapping[str, ModelSpec]) -> None:
     # After every link is known-good, follow each chain to guarantee it ends
     # at a visible model instead of cycling through hidden models forever.
-    for model_id, spec in MODELS.items():
+    for model_id, spec in models.items():
         seen = {model_id}
         replacement_id = spec.superseded_by
         while replacement_id is not None:
@@ -524,14 +399,14 @@ def _validate_supersession_chains() -> None:
                     f"point the chain at a visible model"
                 )
             seen.add(replacement_id)
-            replacement_id = MODELS[replacement_id].superseded_by
+            replacement_id = models[replacement_id].superseded_by
 
 
-def _validate_unavailable_fallbacks() -> None:
+def _validate_unavailable_fallbacks(models: Mapping[str, ModelSpec]) -> None:
     # A temporary withdrawal is an explicit routing decision, not a general
     # provider-error fallback. Keep both ends concrete so an existing config
     # can safely resolve to the model the picker offers instead.
-    for model_id, spec in MODELS.items():
+    for model_id, spec in models.items():
         fallback_id = spec.unavailable_fallback
         if fallback_id is None:
             continue
@@ -540,20 +415,16 @@ def _validate_unavailable_fallbacks() -> None:
                 f"temporarily unavailable model {model_id!r} remains spawnable — "
                 "remove it from the picker before assigning unavailable_fallback"
             )
-        if fallback_id not in MODELS:
+        if fallback_id not in models:
             raise RuntimeError(
                 f"temporarily unavailable model {model_id!r} falls back to {fallback_id!r}, "
-                "which is not in MODELS"
+                "which is not in models"
             )
-        if not MODELS[fallback_id].spawnable:
+        if not models[fallback_id].spawnable:
             raise RuntimeError(
                 f"temporarily unavailable model {model_id!r} falls back to {fallback_id!r}, "
                 "which is not spawnable"
             )
-
-
-_rebuild_derived_views()
-_validate_registry()
 
 
 def resolve_available_model(model: str) -> str:
@@ -565,14 +436,9 @@ def resolve_available_model(model: str) -> str:
     plugin-declared withdrawal resolves on the first call of a fresh process
     too (task #3212).
     """
-    from base.lm.plugin_providers import ensure_provider_plugins_loaded
+    from base.lm.plugin_providers import model_catalog  # the catalog module imports this one
 
-    # Registry-consulting call: make it self-sufficient. MODELS starts empty
-    # and is filled by the provider-plugin loader; without this, a process
-    # whose first registry use is this resolve returned a plugin-declared
-    # withdrawal unresolved (task #3212).
-    ensure_provider_plugins_loaded()
-    spec = MODELS.get(model)
+    spec = model_catalog().models.get(model)
     return spec.unavailable_fallback if spec and spec.unavailable_fallback else model
 
 
@@ -647,8 +513,10 @@ def explain_setting(setting: str, *, model: str, explicit: Any) -> ResolvedSetti
     implementation for both, so the displayed resolution cannot drift from the
     one the agent actually gets.
     """
+    from base.lm.plugin_providers import model_catalog  # the catalog module imports this one
+
     floor = getattr(DEFAULT_TUNING, setting)
-    spec = MODELS.get(model)
+    spec = model_catalog().models.get(model)
     tuned = getattr(spec.tuning, setting) if spec is not None else None
     if explicit is not None:
         return ResolvedSetting(setting, explicit, "explicit", floor, tuned, explicit)

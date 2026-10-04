@@ -30,7 +30,7 @@ from base.lm.effort import (
 # Provider split by modality is config-driven: settings.lm.understand_text_model
 # (default deepseek-flash) handles literal strings / text files;
 # settings.lm.understand_media_model (default gemini-3.5-flash) handles binary
-# media. The default IDs live in base/lm/factory.py:SUPPORTED_MODELS. The media
+# media. The default IDs live in the model catalog (`base/lm/catalog.py`). The media
 # model goes through the SAME provider factory as every other LLM path
 # (`build_chat_model`); the Gemini client is the default media provider.
 
@@ -362,9 +362,9 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     default calls behave exactly as before. (The path is Gemini-only for now —
     see the module docstring — so the knob always applies.)
     """
-    from base.lm import provider_api
     from base.lm.call import invoke_text
     from base.lm.factory import build_chat_model, provider_key_of_model
+    from base.lm.plugin_providers import model_catalog
 
     model = settings.lm.understand_media_model
     # The media part shape is Gemini-specific (see the module docstring); only
@@ -389,7 +389,7 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     if effort != ReasoningEffort.MAX:
         binding = next(
             binding
-            for prefix, binding in provider_api.REGISTRY.bindings.items()
+            for prefix, binding in model_catalog().bindings.items()
             if model.startswith(prefix)
         )
         levels = binding.effort_levels

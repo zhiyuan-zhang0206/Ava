@@ -9,6 +9,7 @@ import pytest
 
 from ava.attachment_transport import attach, take_attachments
 from base.lm.attach_constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
+from tests.fixtures.model_catalog import AddModels
 
 
 @pytest.fixture(autouse=True)
@@ -131,27 +132,25 @@ def test_rejects_text_only_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
 
 def test_rejects_model_withdrawn_to_its_text_only_fallback(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, add_models: AddModels
 ) -> None:
     """A withdrawn vision pin is gated as its text-only fallback (task #3212)."""
     from dataclasses import replace
 
     from base.config import settings
-    from base.lm.plugin_providers import ensure_provider_plugins_loaded
-    from base.lm.registry import MODELS
+    from base.lm.plugin_providers import model_catalog
 
     _exec_child(monkeypatch, tmp_path)
-    ensure_provider_plugins_loaded()
     model = "deepseek-vision-fixture"
-    monkeypatch.setitem(
-        MODELS,
-        model,
-        replace(
-            MODELS["deepseek-flash"],
-            spawnable=False,
-            unavailable_fallback="deepseek-flash",
-            media_types=frozenset({"image"}),
-        ),
+    add_models(
+        {
+            model: replace(
+                model_catalog().models["deepseek-flash"],
+                spawnable=False,
+                unavailable_fallback="deepseek-flash",
+                media_types=frozenset({"image"}),
+            )
+        }
     )
     monkeypatch.setattr(settings.lm, "llm_model", model)
     image = tmp_path / "result.png"

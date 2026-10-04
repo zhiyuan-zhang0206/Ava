@@ -25,19 +25,19 @@ retryable after the enable configuration is fixed.
 
 - A plugin's `provider.py` registers nothing: it exports `contribute()` returning
   `PluginContributions(providers=(ProviderContribution(binding, models, pricing),))`.
-  The loader (`base/lm/plugin_providers.py`) is the one writer of the model catalog: it checks
+  The loader (`base/lm/plugin_providers.py`) builds the model catalog: it checks
   the plugin's manifest `providers` key against the declaration (a mismatch is a fail-soft load
-  failure of that plugin), then installs it with `install_provider`.
+  failure of that plugin), then installs it into a `CatalogBuilder` (`base/lm/catalog.py`).
   The prefix map is flat: duplicate or nested prefixes fail at load time, and a
   model id must begin with its binding prefix. Prices must name a registered
   model; they must be finite, non-negative, HTTPS-provenanced, and carry a
   YYYY-MM-DD source-check date.
-- `ModelSpec` entries merge into the initially empty `MODELS` table in place and
-  receive the same facts/price/effort validation. The derived
-  `SUPPORTED_MODELS`, `MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, and
-  `MODEL_IDENTITY` views rebuild in place, so existing import sites see the
-  plugin. Provider registration also invalidates `concurrency`'s known-key
-  cache.
+- `ModelSpec` entries collect in the builder and receive the same facts/price/effort
+  validation; `build()` freezes them into an immutable `ModelCatalog` whose derived
+  views (`supported_models`, `context_windows`, `knowledge_cutoffs`, `identities`) are
+  computed from it. The process holds one catalog, handed out by
+  `plugin_providers.model_catalog()`; readers take it from there. `concurrency`'s
+  known-key set is derived from the catalog's bindings at each call.
 - Plugin rates are the runtime source for chat models. Registration removes an
   overlapping archive row from the in-memory catalog view; `rates_at` therefore
   selects plugin rates for bound chat models, archive rates for catalog-only

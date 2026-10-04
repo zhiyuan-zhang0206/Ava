@@ -344,9 +344,9 @@ def _user_tone_section(slices: AgentSlices) -> str:
     """Independent from ``agent_communication_style`` (narration volume vs tone), with a per-family strength gradient; every Claude model defaults off unless explicitly enabled."""
     if not _resolved("prompt_user_tone_enabled", slices):
         return ""
-    from base.lm.registry import MODELS
+    from base.lm.plugin_providers import model_catalog
 
-    spec = MODELS.get(slices.brain.llm_model)
+    spec = model_catalog().models.get(slices.brain.llm_model)
     return f"# Communicating with the user\n\n{_USER_TONE_SECTIONS.get(spec.provider if spec is not None else '', _LIGHT_USER_TONE)}"
 
 
@@ -745,9 +745,9 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
                 ),
             )
     # Model identity — per-model note telling the model what it runs on.
-    from base.lm.factory import MODEL_IDENTITY
+    from base.lm.plugin_providers import model_catalog
 
-    identity = MODEL_IDENTITY.get(slices.brain.llm_model)
+    identity = model_catalog().identities.get(slices.brain.llm_model)
     if identity:
         parts.append(identity)
     # Knowledge cutoff — tail line so the agent knows its training-data
@@ -756,9 +756,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
     # Suppressible because temporal metadata is noise in a benchmark run, where
     # the task is dated by its repo state rather than by wall-clock time.
     if settings.agent.prompt_knowledge_cutoff_enabled:
-        from base.lm.factory import MODEL_KNOWLEDGE_CUTOFF
-
-        cutoff = MODEL_KNOWLEDGE_CUTOFF.get(slices.brain.llm_model)
+        cutoff = model_catalog().knowledge_cutoffs.get(slices.brain.llm_model)
         if cutoff:
             parts.append(f"Knowledge cutoff: {cutoff}")
     # Exactly one trailing newline regardless of which section lands last, so

@@ -9,7 +9,7 @@ finish/stop reason — each provider keeps its own key + vocabulary:
   google_genai  -> response_metadata["finish_reason"] (STOP / MAX_TOKENS / SAFETY / RECITATION / ...)
 
 `classify_stop` maps any of them to a provider-agnostic StopCategory, dispatched
-on model_provider. Core pre-declares no vocabularies: provider plugins register
+on model_provider. Core pre-declares no vocabularies: provider plugins declare
 them through their ProviderBinding, and an unknown provider fails fast.
 """
 
@@ -37,8 +37,8 @@ class StopCategory(enum.Enum):
     CORRUPTED = "corrupted"  # terminal reason missing -> protocol drift / lost final frame
 
 
-# Populated only by provider-plugin registration. The key is the model_provider
-# value a bound client class emits, so one owner registration covers every
+# A vocabulary is declared only by a provider plugin's `ProviderBinding.stop_spec`. The key is
+# the model_provider value a bound client class emits, so one owner declaration covers every
 # binding that reuses that client class.
 class StopSpec(NamedTuple):
     """How to read + classify one provider's terminal reason.
@@ -59,26 +59,6 @@ class StopSpec(NamedTuple):
     status_map: Mapping[str, StopCategory] | None = None
 
 
-_BY_PROVIDER: dict[str, StopSpec] = {}
-
-
-def register_stop_spec(spec: StopSpec, *, plugin: str = "<unknown>") -> None:
-    """Register a plugin provider's terminal-reason vocabulary.
-
-    Core pre-declares no entries. The plugin that owns a client class registers
-    its emitted ``model_provider`` string once; other bindings reusing that
-    class omit ``stop_spec`` and share the registered vocabulary. A second
-    owner for the same key is an error, never a precedence rule.
-    """
-    if spec.provider_key in _BY_PROVIDER:
-        raise ValueError(
-            f"provider plugin {plugin!r}: stop vocabulary key {spec.provider_key!r} already "
-            "registered — bind the existing client class's entry instead of "
-            "re-declaring it"
-        )
-    _BY_PROVIDER[spec.provider_key] = spec
-
-
 def classify_stop(final_msg: AIMessage) -> tuple[StopCategory, str | None]:
     """Return (category, raw_reason) for the message's terminal reason.
 
@@ -86,16 +66,17 @@ def classify_stop(final_msg: AIMessage) -> tuple[StopCategory, str | None]:
         ValueError: model_provider is missing or not one build_chat_model emits —
             its provider plugin must register a terminal-reason vocabulary.
     """
+    from base.lm.plugin_providers import model_catalog
+
     metadata = message_response_metadata(final_msg) or {}
     provider = metadata.get("model_provider")
     # provider is a runtime string; a value outside the ProviderKey literal simply
-    # misses the dict (spec stays None) and is rejected just below.
-    spec = _BY_PROVIDER.get(provider) if isinstance(provider, str) else None  # pyright: ignore[reportArgumentType]
+    # misses the mapping (spec stays None) and is rejected just below.
+    spec = model_catalog().stops.get(provider) if isinstance(provider, str) else None  # pyright: ignore[reportArgumentType]
     if spec is None:
         raise ValueError(
             f"unknown model_provider {provider!r} (metadata keys={list(metadata.keys())!r}); "
-            "register its terminal-reason vocabulary with register_stop_spec "
-            "via ProviderBinding.stop_spec"
+            "declare its terminal-reason vocabulary in ProviderBinding.stop_spec"
         )
     raw = metadata.get(spec.key)
     if raw is None:

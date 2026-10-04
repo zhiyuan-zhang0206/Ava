@@ -10,28 +10,26 @@ existing plugin discovery + enable config, and imports only ``provider.py``
 (shared-only dependencies), the same standalone-by-path idiom as
 ``default_config.py`` (``base/packages/plugins/enable_config.py:update_all_disk_images``).
 
-Loaded once per process, on the first registry-consulting call
-(``build_chat_model`` / ``validate_model_config`` / ``get_models`` /
-``resolve_context_budget`` / ``resolve_available_model`` / the config-overlay
-validation / the gateway's per-model views). Import order is sorted plugin names — deterministic
-rather than filesystem-order. A provider.py whose module body raises is
-contained with a loud report (``base.packages.plugins.load_report``): the failure is
-recorded, the rest of that module is abandoned, and the remaining providers
-still load — the fail-soft contract (user ruling 2026-09-11): one broken
-plugin's provider code must not take down every process that builds a model.
-The half-executed module is dropped from ``sys.modules``, so a later attempt
-re-executes the module body from the top — note ``register()`` is not
-transactional, so prefixes a failing attempt registered before the raise stay
-bound and surface on that retry as a fail-closed registration-contract error
-rather than binding twice. One exception, deliberately fail-closed: a
-`register()` contract violation (`provider_api.ProviderRegistrationError` —
-duplicate/nested prefix, mismatched model, bad price data) propagates, because
-the flat prefix and model-id maps cannot pick a winner between two claimants.
+Loaded once per process, on the first catalog-consulting call (`model_catalog()`:
+``build_chat_model`` / ``validate_model_config`` / ``get_models`` / ``resolve_context_budget`` /
+``resolve_available_model`` / the config-overlay validation / the gateway's per-model views). Import
+order is sorted plugin names — deterministic rather than filesystem-order. A provider.py whose module
+body raises is contained with a loud report (``base.packages.plugins.load_report``): the failure is
+recorded, the rest of that module is abandoned, and the remaining providers still load — the
+fail-soft contract (user ruling 2026-09-11): one broken plugin's provider code must not take down
+every process that builds a model. The half-executed module is dropped from ``sys.modules``, so a
+later attempt re-executes the module body from the top. One exception, deliberately fail-closed: a
+registration-contract violation (`provider_api.ProviderRegistrationError` — duplicate/nested prefix,
+mismatched model, bad price data) propagates, because the flat prefix and model-id maps cannot pick a
+winner between two claimants. The catalog is built in a throwaway `CatalogBuilder`, so a failed
+attempt leaves nothing behind and a retry starts clean.
 
-Core registers no providers. At least one enabled provider plugin must bind at
-load time; an empty registry still raises before the once flag is set (a
-configuration failure is not contained), so correcting the enable
-configuration can be retried in the same process.
+Core registers no providers. At least one enabled provider plugin must bind at load time; an empty
+catalog still raises before the process's catalog is set (a configuration failure is not
+contained), so correcting the enable configuration can be retried in the same process.
+
+The process's catalog lives in one slot here, written only by `_CatalogSlot.swap`: `model_catalog()`
+fills it, `use_catalog` lends a different one for the duration of a block (tests and tooling).
 """
 
 from __future__ import annotations
@@ -39,30 +37,71 @@ from __future__ import annotations
 import importlib.util
 import sys
 import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
+from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.packages.plugins import load_report
 
-_lock = threading.Lock()
 
-
-class _LoaderState:
-    """Mutable loader state kept off the module global namespace."""
+class _CatalogSlot:
+    """Holder of the process's model catalog, kept off the module global namespace."""
 
     def __init__(self) -> None:
-        self.loaded = False
+        self.catalog: ModelCatalog | None = None
+
+    def swap(self, catalog: ModelCatalog | None) -> ModelCatalog | None:
+        """Set the slot and return what it held: its only writer."""
+        previous, self.catalog = self.catalog, catalog
+        return previous
 
 
-_STATE = _LoaderState()
+_lock = threading.Lock()
+_STATE = _CatalogSlot()
 
 
-def _load_one(name: str, provider_py: Path, *, is_builtin: bool) -> None:
-    """Import one plugin's `provider.py`, take its declaration and install it.
+def model_catalog() -> ModelCatalog:
+    """The process's model catalog, built from the enabled provider plugins on first call.
+
+    Idempotent and thread-safe (the gateway serves spawn endpoints from a thread pool; two
+    concurrent first calls must not build twice). Core contributes no fallback binding, so
+    loading zero providers is a retryable startup error.
+    """
+    catalog = _STATE.catalog
+    if catalog is not None:
+        return catalog
+    with _lock:
+        catalog = _STATE.catalog
+        if catalog is None:
+            catalog = _build_catalog()
+            _STATE.swap(catalog)
+        return catalog
+
+
+@contextmanager
+def use_catalog(catalog: ModelCatalog | None) -> Generator[None]:
+    """Run a block against `catalog` instead of the process's own, then restore it.
+
+    `None` empties the slot, so the block's first `model_catalog()` loads the provider plugins
+    afresh (the provider-plugin tests). Test and tooling seam: no production path calls this.
+    """
+    with _lock:
+        previous = _STATE.swap(catalog)
+    try:
+        yield
+    finally:
+        with _lock:
+            _STATE.swap(previous)
+
+
+def _load_one(builder: CatalogBuilder, name: str, provider_py: Path, *, is_builtin: bool) -> None:
+    """Import one plugin's `provider.py`, take its declaration and install it into `builder`.
 
     The module registers nothing: it exports `contribute()` returning a `PluginContributions` whose
     `providers` are `ProviderContribution`s. The declaration passes the manifest gate (the
     `providers` key of the plugin's `ava-plugin.json`, when it ships one) before anything is
-    installed. This function is the one writer of the process's model catalog.
+    installed.
     """
     from base.lm import provider_api
     from base.packages.plugins.data_registry import declaration_of
@@ -92,7 +131,7 @@ def _load_one(name: str, provider_py: Path, *, is_builtin: bool) -> None:
         raise RuntimeError(f"provider plugin {name!r} failed to load ({provider_py})") from e
     try:
         for contribution in contributions.providers:
-            provider_api.install_provider(name, contribution)
+            builder.install(name, contribution)
     except provider_api.ProviderRegistrationError:
         # Fail-closed by design — the loader lets this class propagate instead
         # of containing it (a flat prefix/model map cannot pick a winner).
@@ -101,76 +140,44 @@ def _load_one(name: str, provider_py: Path, *, is_builtin: bool) -> None:
         raise
 
 
-def ensure_provider_plugins_loaded() -> None:
-    """Import every enabled plugin's ``provider.py``, once per process.
+def _build_catalog() -> ModelCatalog:
+    """Import every enabled plugin's ``provider.py`` into a fresh builder and build it."""
+    from base import paths
+    from base.lm import provider_api
+    from base.packages.plugins import enable_config
 
-    Idempotent and thread-safe (the gateway serves spawn endpoints from a
-    thread pool; two concurrent first calls must not double-register). Core
-    contributes no fallback binding, so loading zero providers is a retryable
-    startup error.
-    """
-    with _lock:
-        if _STATE.loaded:
-            return
-        from base import paths
-        from base.lm import provider_api
-        from base.lm import registry as model_registry
-        from base.lm.factory import _MODEL_KEY_MAP
-        from base.packages.plugins import enable_config
-
-        # Bootstrap can be the first provider consumer. Importing factory here
-        # applies the same core-prefix reservation contract before any plugin
-        # registers; the set is empty once every provider is plugin-owned.
-        provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
-
-        discovered = enable_config.discover_plugins()
-        known = set(discovered)
-        config = enable_config.load_for_runtime(known)
-        repo_dir = str(paths.repo_plugins_dir())
-        for name in sorted(config.plugins):
-            if not config.plugins[name].enabled:
-                continue
-            plugin_dir = discovered.get(name)
-            if plugin_dir is None:
-                continue
-            provider_py = plugin_dir / "provider.py"
-            if not provider_py.exists():
-                continue
-            is_builtin = repo_dir in str(plugin_dir.resolve())
-            try:
-                _load_one(name, provider_py, is_builtin=is_builtin)
-            except (KeyboardInterrupt, SystemExit):
-                raise
-            except provider_api.ProviderRegistrationError:
-                # Registration-contract violation — fail-closed, not contained
-                # (the flat maps cannot pick a winner between two claimants).
-                # Skip+loud is for code-load failures below.
-                raise
-            except BaseException as exc:
-                # Fail-soft contract (user ruling 2026-09-11): report this
-                # provider loudly and keep the others. `_load_one` already
-                # dropped the half-executed module from sys.modules.
-                load_report.report_plugin_load_failure(name, exc)
-        if not provider_api.REGISTRY.bindings:
-            raise RuntimeError(
-                "no provider plugins enabled — enable at least one provider plugin "
-                "(the repo ships the lm_* default set; check the plugin enable config)"
-            )
-        anthropic_protocol_by_model = {
-            model_id: binding.anthropic_protocol
-            for prefix, binding in provider_api.REGISTRY.bindings.items()
-            for model_id in model_registry.MODELS
-            if model_id.startswith(prefix)
-        }
-        model_registry._validate_registry(anthropic_protocol_by_model=anthropic_protocol_by_model)
-        _STATE.loaded = True
-
-
-def _reset_loaded_for_tests() -> None:
-    """Clear the once-per-process flag — test support only.
-
-    Tests that exercise the loader against fixture plugin dirs reset between
-    cases; no production path calls this.
-    """
-    with _lock:
-        _STATE.loaded = False
+    builder = CatalogBuilder()
+    discovered = enable_config.discover_plugins()
+    known = set(discovered)
+    config = enable_config.load_for_runtime(known)
+    repo_dir = str(paths.repo_plugins_dir())
+    for name in sorted(config.plugins):
+        if not config.plugins[name].enabled:
+            continue
+        plugin_dir = discovered.get(name)
+        if plugin_dir is None:
+            continue
+        provider_py = plugin_dir / "provider.py"
+        if not provider_py.exists():
+            continue
+        is_builtin = repo_dir in str(plugin_dir.resolve())
+        try:
+            _load_one(builder, name, provider_py, is_builtin=is_builtin)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except provider_api.ProviderRegistrationError:
+            # Registration-contract violation — fail-closed, not contained
+            # (the flat maps cannot pick a winner between two claimants).
+            # Skip+loud is for code-load failures below.
+            raise
+        except BaseException as exc:
+            # Fail-soft contract (user ruling 2026-09-11): report this
+            # provider loudly and keep the others. `_load_one` already
+            # dropped the half-executed module from sys.modules.
+            load_report.report_plugin_load_failure(name, exc)
+    if not builder.has_bindings:
+        raise RuntimeError(
+            "no provider plugins enabled — enable at least one provider plugin "
+            "(the repo ships the lm_* default set; check the plugin enable config)"
+        )
+    return builder.build()

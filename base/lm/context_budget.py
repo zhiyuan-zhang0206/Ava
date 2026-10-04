@@ -55,8 +55,8 @@ from dataclasses import dataclass
 from langchain_core.messages import AIMessage, BaseMessage
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
-from base.lm.registry import MODELS, resolve_setting
+from base.lm.plugin_providers import model_catalog
+from base.lm.registry import resolve_setting
 
 
 class UnknownModelWindowError(ValueError):
@@ -97,17 +97,11 @@ def resolve_context_budget(model: str, overrides: ModelOverrides | None = None) 
         RuntimeError: no provider plugin is enabled — the loader's fail-loud
             startup error, surfaced here when this call triggers the load.
     """
-    # Registry-consulting call: make it self-sufficient. MODELS starts empty and
-    # is filled by the provider-plugin loader; without this, a process whose
-    # first registry use is the budget (a test process, the compact gate before
-    # any model build, an endpoint) raised UnknownModelWindowError for a model
-    # that is registered (task #3138).
-    ensure_provider_plugins_loaded()
-    spec = MODELS.get(model)
+    spec = model_catalog().models.get(model)
     if spec is None or spec.context_window is None:
         raise UnknownModelWindowError(
             f"model {model!r} has no context_window in the model registry — add "
-            f"it in base/lm/registry.py:MODELS so its compaction thresholds "
+            f"it in its provider plugin's ModelSpec so its compaction thresholds "
             f"can be derived"
         )
     window = spec.context_window

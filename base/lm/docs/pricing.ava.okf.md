@@ -11,7 +11,7 @@ tags:
 
 # LLM Billing Catalog
 
-`base/lm/pricing.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `pricing_catalog.json` remains an empty placeholder that runtime never loads; `_load_catalog` reads `pricing_catalog_archive.json`.
+`base/lm/pricing.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `pricing_catalog.json` remains an empty placeholder that runtime never loads; `load_archive` reads `pricing_catalog_archive.json`.
 
 ## Selection
 

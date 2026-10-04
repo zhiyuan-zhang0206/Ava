@@ -72,7 +72,7 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.system.cron import register_os_cron
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from gateway._server import main as _run_gateway
 from gateway.agents import conversation as conversation_router
 from gateway.agents import lifecycle as agents_lifecycle_router
@@ -184,7 +184,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     The agent host handles native lifecycle work. Auto label generation
     runs in the separate services/labeler daemon.
     """
-    ensure_provider_plugins_loaded()
+    model_catalog()  # load the provider plugins now: a broken provider setup fails the boot
 
     # Runtime consumer -> `Database.pool()` dials the pooled URL (PgBouncer when
     # enabled, else direct) and decides the connection kwargs in one place:

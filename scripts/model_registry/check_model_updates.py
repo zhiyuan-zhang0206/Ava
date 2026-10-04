@@ -29,8 +29,7 @@ from urllib3.poolmanager import PoolManager
 
 from base.host.env.runtime_config import read_env_aliases
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
-from base.lm.registry import MODELS
+from base.lm.plugin_providers import model_catalog
 from base.paths import ava_home
 
 _USER_AGENT = "Ava model-update tracker"
@@ -466,7 +465,7 @@ def _identity(source: SourceDescriptor, model_id: str) -> tuple[str, tuple[int, 
 def compare_models(
     source: SourceDescriptor,
     upstream_ids: list[str],
-    registry: Mapping[str, Any] = MODELS,
+    registry: Mapping[str, Any],
 ) -> Comparison:
     registry_ids = [
         model_id for model_id, spec in registry.items() if spec.provider == source.provider
@@ -643,12 +642,11 @@ def _record_status(entry: dict[str, object], status: str) -> bool:
 def check_sources(
     file_aliases: Mapping[str, str], state: dict[str, dict[str, dict[str, object]]]
 ) -> dict[str, ProviderReport]:
-    # The comparison consults MODELS twice over — a registered id is skipped, a
-    # same-series older id is suppressed against registered versions — and MODELS
-    # stays empty until a registry-consulting call loads the enabled provider
-    # plugins. Without this, the daily run compared against nothing and re-reported
-    # every registered id as new (deduped only by its own state file).
-    ensure_provider_plugins_loaded()
+    # The comparison consults the registered models twice over — a registered id is
+    # skipped, a same-series older id is suppressed against registered versions — so it
+    # compares against the catalog the enabled provider plugins build. Comparing against
+    # nothing would re-report every registered id as new (deduped only by its own state file).
+    registry = model_catalog().models
     reports: dict[str, ProviderReport] = {}
     providers = state["providers"]
     for provider, source in SOURCES.items():
@@ -664,7 +662,7 @@ def check_sources(
             )
             continue
         try:
-            comparison = compare_models(source, fetch_provider_models(source, api_key))
+            comparison = compare_models(source, fetch_provider_models(source, api_key), registry)
         except Exception as exc:
             status = f"error: {str(exc) or type(exc).__name__}"
             reports[provider] = ProviderReport(

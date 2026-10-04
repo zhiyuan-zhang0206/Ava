@@ -10,7 +10,6 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from PIL import Image
 
-from base.lm import provider_api
 from base.lm.attach import (
     AttachEntry,
     pack_attachments,
@@ -21,20 +20,17 @@ from base.lm.attach_constants import (
     ATTACH_MAX_TOTAL_BYTES,
 )
 from base.lm.factory import media_types_for_model
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import AttachPolicy, ProviderBinding
-from base.lm.registry import MODELS
+from tests.fixtures.model_catalog import AddBindings, AddModels
 
 
 @pytest.fixture
-def deepseek_vision_model(monkeypatch: pytest.MonkeyPatch) -> str:
+def deepseek_vision_model(add_models: AddModels) -> str:
     """Exercise DeepSeek's attachment policy without a retired registry id."""
-    ensure_provider_plugins_loaded()
     model = "deepseek-vision-fixture"
-    monkeypatch.setitem(
-        MODELS,
-        model,
-        replace(MODELS["deepseek-flash"], media_types=frozenset({"image"})),
+    add_models(
+        {model: replace(model_catalog().models["deepseek-flash"], media_types=frozenset({"image"}))}
     )
     return model
 
@@ -248,18 +244,18 @@ def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
 
 
 def test_builtin_provider_bindings_own_attach_policy() -> None:
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_api.REGISTRY.bindings["claude-"].attach == AttachPolicy(
+    assert model_catalog().bindings["claude-"].attach == AttachPolicy(
         file_size_limits={"image": 10 * 1024 * 1024, "pdf": 32 * 1024 * 1024},
         image_dimension_tiers=((1, 8000),),
         pdf_document_block=True,
     )
-    assert provider_api.REGISTRY.bindings["deepseek-"].attach == AttachPolicy(
+    assert model_catalog().bindings["deepseek-"].attach == AttachPolicy(
         file_size_limits={"image": 32 * 1024 * 1024},
         image_dimension_tiers=((1, 8192), (15, 4096)),
     )
-    assert provider_api.REGISTRY.bindings["gpt-"].attach is None
+    assert model_catalog().bindings["gpt-"].attach is None
 
 
 def test_per_turn_file_count_and_total_byte_caps_keep_first_entries(tmp_path: Path) -> None:
@@ -365,9 +361,7 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(tmp_path: Path) 
     assert "not delivered: your model cannot receive image" in pack.text
 
 
-def test_media_types_use_registry_then_plugin_vision_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_media_types_use_registry_then_plugin_vision_fallback(add_bindings: AddBindings) -> None:
     binding = ProviderBinding(
         prefix="attachment-plugin-",
         display_name="Attachment plugin",
@@ -375,7 +369,7 @@ def test_media_types_use_registry_then_plugin_vision_fallback(
         build=lambda _ctx: FakeListChatModel(responses=["unused"]),
         vision=True,
     )
-    monkeypatch.setitem(provider_api.REGISTRY.bindings, binding.prefix, binding)
+    add_bindings({binding.prefix: binding})
 
     assert media_types_for_model("gemini-3.8-flash") == frozenset(
         {"image", "pdf", "audio", "video"}

@@ -11,7 +11,6 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from base.lm import provider_api
 from base.lm.attach_constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_FILES_PER_TURN,
@@ -20,7 +19,7 @@ from base.lm.attach_constants import (
     ATTACH_MEDIA_MIME,
 )
 from base.lm.factory import attach_modalities_for_model
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import AttachPolicy
 
 # Keep the notice bare: attachments persist in the message history, so any
@@ -281,8 +280,7 @@ def _file_size_limit(model: str, media_type: str) -> int:
 
 
 def _attach_policy(model: str) -> AttachPolicy | None:
-    ensure_provider_plugins_loaded()
-    for prefix, binding in provider_api.REGISTRY.bindings.items():
+    for prefix, binding in model_catalog().bindings.items():
         if model.startswith(prefix):
             return binding.attach
     return None

@@ -14,9 +14,8 @@ from collections.abc import Callable
 from typing import Any
 
 from base import paths
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import ProviderBinding, ProviderContribution
-from base.lm.registry import MODELS
 from base.lm.tests.provider_plugin_support import provider_plugin as provider_plugin
 from base.packages.plugins.extensions import PluginContributions
 
@@ -40,9 +39,9 @@ def test_a_manifest_that_matches_the_declared_prefix_installs_the_provider(
     plugin_dir = paths.plugins_dir() / "matching_provider"
     (plugin_dir / "ava-plugin.json").write_text(_manifest("matching_provider", ["kept-"]))
 
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert "kept-1" in MODELS
+    assert "kept-1" in model_catalog().models
 
 
 def test_a_manifest_that_disagrees_refuses_that_provider_and_the_rest_load(
@@ -53,10 +52,10 @@ def test_a_manifest_that_disagrees_refuses_that_provider_and_the_rest_load(
     gated_dir = paths.plugins_dir() / "gated_provider"
     (gated_dir / "ava-plugin.json").write_text(_manifest("gated_provider", ["other-"]))
 
-    ensure_provider_plugins_loaded()  # a gate failure is fail-soft: must not raise
+    model_catalog()  # a gate failure is fail-soft: must not raise
 
-    assert "kept-1" in MODELS
-    assert "gated-1" not in MODELS
+    assert "kept-1" in model_catalog().models
+    assert "gated-1" not in model_catalog().models
     assert any("gated_provider" in r["message"] for r in loguru_records)
 
 
@@ -69,9 +68,9 @@ def test_a_provider_py_without_contribute_is_a_load_failure(
     (legacy / "plugin.py").write_text("# provider plugin stub")
     (legacy / "provider.py").write_text("X = 1\n")
 
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert "kept-1" in MODELS
+    assert "kept-1" in model_catalog().models
     assert any("legacy_provider" in r["message"] for r in loguru_records)
 
 

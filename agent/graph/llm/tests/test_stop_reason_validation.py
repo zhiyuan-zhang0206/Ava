@@ -37,9 +37,9 @@ from agent.graph.llm_errors import (
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 
-ensure_provider_plugins_loaded()
+model_catalog()
 
 
 def test_validate_passes_on_end_turn() -> None:

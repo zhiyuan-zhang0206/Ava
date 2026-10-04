@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from base.lm import pricing
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from base.lm.pricing import CostQuote, Rates, _parse_catalog, quote, rates_at
 
 _ARCHIVE_PATH = Path(__file__).resolve().parents[3] / "base/lm/pricing_catalog_archive.json"
@@ -18,13 +18,13 @@ _PEAK_WINDOW = datetime(2026, 9, 5, 2, tzinfo=UTC)
 _FUTURE = datetime(2027, 1, 5, tzinfo=UTC)
 
 
-def _archive_catalog() -> dict[str, pricing._ModelPrice]:
+def _archive_catalog() -> dict[str, pricing.ModelPrice]:
     raw = cast(dict[str, Any], json.loads(_ARCHIVE_PATH.read_text(encoding="utf-8")))
     return _parse_catalog(raw)
 
 
 def setup_module() -> None:
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
 
 def test_qa_pricing_scenarios_use_plugin_runtime_semantics() -> None:
@@ -42,8 +42,8 @@ def test_qa_pricing_scenarios_use_plugin_runtime_semantics() -> None:
 def test_all_plugin_models_match_archive_at_four_instant_classes() -> None:
     archive = _archive_catalog()
 
-    assert pricing._PLUGIN_PRICES, "no plugin prices loaded"
-    for model, plugin_price in sorted(pricing._PLUGIN_PRICES.items()):
+    assert model_catalog().prices.plugin, "no plugin prices loaded"
+    for model, plugin_price in sorted(model_catalog().prices.plugin.items()):
         assert model in archive
         input_tokens = 200_001 if model == "gemini-3.1-pro-preview" else 1_000_000
         for instant in (_HISTORICAL, _CURRENT, _PEAK_WINDOW, _FUTURE):
@@ -79,19 +79,21 @@ def test_future_plugin_period_is_used_by_quote_without_bot_sync() -> None:
 
 def test_flat_plugin_price_remains_an_unbounded_compatibility_shortcut() -> None:
     model = "fixture-flat-price"
-    try:
-        pricing.register_plugin_price(
-            model,
-            cache_miss=1.0,
-            cache_hit=0.1,
-            output=3.0,
-            source_url="https://example.com/pricing",
-            source_checked_at="2026-09-05",
-            vendor="fixture",
-            plugin="fixture",
-        )
+    price = pricing.plugin_model_price(
+        model,
+        cache_miss=1.0,
+        cache_hit=0.1,
+        output=3.0,
+        source_url="https://example.com/pricing",
+        source_checked_at="2026-09-05",
+        vendor="fixture",
+        plugin="fixture",
+    )
+    book = pricing.PriceBook({}, {model: price})
 
-        assert rates_at(model, datetime(1900, 1, 1, 2, tzinfo=UTC), 300_000) == Rates(1.0, 0.1, 3.0)
-        assert rates_at(model, datetime(2100, 1, 1, 2, tzinfo=UTC), 300_000) == Rates(1.0, 0.1, 3.0)
-    finally:
-        pricing._PLUGIN_PRICES.pop(model, None)
+    assert book.rates_at(model, datetime(1900, 1, 1, 2, tzinfo=UTC), 300_000) == Rates(
+        1.0, 0.1, 3.0
+    )
+    assert book.rates_at(model, datetime(2100, 1, 1, 2, tzinfo=UTC), 300_000) == Rates(
+        1.0, 0.1, 3.0
+    )

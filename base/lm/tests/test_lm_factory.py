@@ -17,7 +17,8 @@ import pytest
 
 from base.config import settings
 from base.lm.factory import model_supports_vision, provider_key_map, validate_model_config
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
+from tests.fixtures.model_catalog import AddModels
 
 
 @pytest.fixture
@@ -40,7 +41,7 @@ def test_plugin_key_env_injection_authorizes_without_env_file(
     injection; cluster facts are not materialized into the runner's .env)."""
     env_file.write_text("")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env")
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     assert validate_model_config(model="deepseek-flash", config={}) == "deepseek-flash"
 
@@ -51,7 +52,7 @@ def test_plugin_key_missing_in_both_channels_raises(
     """Neither the process env nor the .env file carries the key — fail fast."""
     env_file.write_text("")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
         validate_model_config(model="deepseek-flash", config={})
@@ -63,9 +64,9 @@ def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_key_map()["deepseek-"] == ("DeepSeek", None, "DEEPSEEK_API_KEY")
+    assert provider_key_map()["deepseek-"] == ("DeepSeek", "DEEPSEEK_API_KEY")
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
         validate_model_config(model="deepseek-flash", config={})
 
@@ -78,9 +79,9 @@ def test_gemini_plugin_key_ignores_legacy_settings_field(
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_key_map()["gemini-"] == ("Google", None, "GEMINI_API_KEY")
+    assert provider_key_map()["gemini-"] == ("Google", "GEMINI_API_KEY")
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
         validate_model_config(model="gemini-3.5-flash", config={})
 
@@ -93,9 +94,9 @@ def test_anthropic_plugin_key_ignores_legacy_settings_field(
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_key_map()["claude-"] == ("Anthropic", None, "ANTHROPIC_API_KEY")
+    assert provider_key_map()["claude-"] == ("Anthropic", "ANTHROPIC_API_KEY")
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
         validate_model_config(model="claude-sonnet-5", config={})
 
@@ -108,9 +109,9 @@ def test_openai_plugin_key_ignores_legacy_settings_field(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_key_map()["gpt-"] == ("OpenAI", None, "OPENAI_API_KEY")
+    assert provider_key_map()["gpt-"] == ("OpenAI", "OPENAI_API_KEY")
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         validate_model_config(model="gpt-5.6-sol", config={})
 
@@ -123,9 +124,9 @@ def test_qwen_plugin_key_ignores_legacy_settings_field(
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_key_map()["qwen"] == ("Alibaba", None, "DASHSCOPE_API_KEY")
+    assert provider_key_map()["qwen"] == ("Alibaba", "DASHSCOPE_API_KEY")
     with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
         validate_model_config(model="qwen3.8-max", config={})
 
@@ -138,9 +139,9 @@ def test_glm_plugin_key_ignores_legacy_settings_field(
     monkeypatch.delenv("GLM_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_key_map()["glm-"] == ("Zhipu", None, "GLM_API_KEY")
+    assert provider_key_map()["glm-"] == ("Zhipu", "GLM_API_KEY")
     with pytest.raises(ValueError, match="GLM_API_KEY"):
         validate_model_config(model="glm-5.2", config={})
 
@@ -153,9 +154,9 @@ def test_kimi_plugin_key_ignores_legacy_settings_field(
     monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_key_map()["kimi-"] == ("Moonshot", None, "MOONSHOT_API_KEY")
+    assert provider_key_map()["kimi-"] == ("Moonshot", "MOONSHOT_API_KEY")
     with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
         validate_model_config(model="kimi-k3", config={})
 
@@ -168,9 +169,9 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
     monkeypatch.delenv("MIMO_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
-    assert provider_key_map()["mimo-"] == ("Xiaomi", None, "MIMO_API_KEY")
+    assert provider_key_map()["mimo-"] == ("Xiaomi", "MIMO_API_KEY")
     with pytest.raises(ValueError, match="MIMO_API_KEY"):
         validate_model_config(model="mimo-v2.5-pro", config={})
 
@@ -190,20 +191,21 @@ def test_missing_key_still_fails(env_file: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(
-    env_file: Path, monkeypatch: pytest.MonkeyPatch
+    env_file: Path, add_models: AddModels
 ) -> None:
     """A synthetic withdrawal preserves fallback coverage at both spawn inputs."""
     from dataclasses import replace
 
-    from base.lm.registry import MODELS
-
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
-    ensure_provider_plugins_loaded()
     model = "deepseek-retired-fixture"
-    monkeypatch.setitem(
-        MODELS,
-        model,
-        replace(MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"),
+    add_models(
+        {
+            model: replace(
+                model_catalog().models["deepseek-flash"],
+                spawnable=False,
+                unavailable_fallback="deepseek-flash",
+            )
+        }
     )
     assert validate_model_config(model=model, config={}) == "deepseek-flash"
     assert validate_model_config(model=None, config={"llm_model": model}) == "deepseek-flash"

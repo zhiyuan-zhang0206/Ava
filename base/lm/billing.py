@@ -38,9 +38,9 @@ def vendor_of_model(model: str) -> str | None:
     if _is_qwen_family(model):
         return "alibaba"
 
-    from base.lm import provider_api
+    from base.lm.plugin_providers import model_catalog
 
-    for prefix, binding in provider_api.REGISTRY.bindings.items():
+    for prefix, binding in model_catalog().bindings.items():
         if model.startswith(prefix):
             return binding.display_name.lower()
     return None

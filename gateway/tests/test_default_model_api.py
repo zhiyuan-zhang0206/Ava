@@ -19,20 +19,16 @@ from fastapi.testclient import TestClient
 
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
-from base.lm.registry import MODELS
+from base.lm.plugin_providers import model_catalog
 from gateway.app import app
+from tests.fixtures.model_catalog import AddModels
 
 
 @pytest.fixture
-def withdrawn_model(monkeypatch: pytest.MonkeyPatch) -> str:
-    ensure_provider_plugins_loaded()
+def withdrawn_model(add_models: AddModels) -> str:
     model = "deepseek-retired-fixture"
-    monkeypatch.setitem(
-        MODELS,
-        model,
-        replace(MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"),
-    )
+    base = model_catalog().models["deepseek-flash"]
+    add_models({model: replace(base, spawnable=False, unavailable_fallback="deepseek-flash")})
     return model
 
 

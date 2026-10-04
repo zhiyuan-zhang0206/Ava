@@ -8,6 +8,7 @@ import socket
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -24,10 +25,9 @@ def _load_script() -> Any:
     spec.loader.exec_module(module)
     # `check_sources` loads the host's provider plugins; these tests drive every
     # comparison with a registry of their own, so keep the suite independent of
-    # the machine's plugin configuration (and of the shared MODELS table other
-    # test files assert against). The load path itself is covered by
-    # test_check_sources_loads_the_provider_registry_before_comparing.
-    module.ensure_provider_plugins_loaded = lambda: None
+    # the machine's plugin configuration. The load path itself is covered by
+    # test_check_sources_compares_against_the_provider_catalog.
+    module.model_catalog = lambda: SimpleNamespace(models={})
     return module
 
 
@@ -44,7 +44,9 @@ def _write_env_file(tracker: Any, path: Path, *, missing: str | None = None) -> 
 
 def _known_models(tracker: Any, source: Any) -> list[str]:
     return [
-        model_id for model_id, spec in tracker.MODELS.items() if spec.provider == source.provider
+        model_id
+        for model_id, spec in tracker.model_catalog().models.items()
+        if spec.provider == source.provider
     ][:1]
 
 
@@ -308,20 +310,20 @@ def test_candidate_is_reported_once_then_recorded_in_state(
     assert state["providers"]["glm"]["reported"] == ["glm-5.4"]
 
 
-def test_check_sources_loads_the_provider_registry_before_comparing(
+def test_check_sources_compares_against_the_provider_catalog(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The comparison must see the registry the enabled provider plugins fill:
-    an id that load registers is skipped, not surfaced as a new candidate.
-    Without the load in `check_sources` the daily run compared against an empty
-    MODELS and re-reported every registered id once."""
+    """The comparison must see the catalog the enabled provider plugins build:
+    a registered id is skipped, not surfaced as a new candidate. Comparing
+    against nothing re-reported every registered id once."""
     tracker = _load_script()
     registered = type("Spec", (), {"provider": "gemini"})()
 
-    def load_providers() -> None:
-        monkeypatch.setitem(tracker.MODELS, "gemini-3.5-flash-lite", registered)
-
-    monkeypatch.setattr(tracker, "ensure_provider_plugins_loaded", load_providers)
+    monkeypatch.setattr(
+        tracker,
+        "model_catalog",
+        lambda: SimpleNamespace(models={"gemini-3.5-flash-lite": registered}),
+    )
     monkeypatch.setattr(
         tracker,
         "fetch_provider_models",
