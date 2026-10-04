@@ -26,7 +26,6 @@ from agent.graph import claim_node
 from agent.graph import node_log as _node_log
 from agent.messages import NoteTag
 from agent.state import AgentState
-from ava import security
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.config import settings
@@ -102,7 +101,6 @@ async def test_flagged_chat_note_rides_right_behind_its_message(
     assert _is_security_note(note)
     assert note.content == _USER_NOTE
     assert "Please" not in str(note.content)
-    assert security.take_findings() == []
 
 
 async def test_flagged_system_note_inbound_note_rides_behind_it(

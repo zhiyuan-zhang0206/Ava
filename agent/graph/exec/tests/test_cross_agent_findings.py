@@ -49,8 +49,8 @@ def _scan_on_with_exec_child_stubbed(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def _child_that_prints_ok(
         *_args: object, **_kwargs: object
-    ) -> tuple[_ExecDone, dict[str, Any], int, list[object], None, None]:
-        return _ExecDone(output="ok"), {}, 5, [], None, None
+    ) -> tuple[_ExecDone, dict[str, Any], int, None, None]:
+        return _ExecDone(output="ok"), {}, 5, None, None
 
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", _child_that_prints_ok)
 

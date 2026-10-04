@@ -60,6 +60,7 @@ Usage (in a plugin's agent_runtime.py):
         return PluginContributions(state=(MyPluginState,))
 """
 
+import operator
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -93,7 +94,12 @@ from agent.state_channels import (
     _memory_state_merge,
 )
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from base.packages.plugins.extensions import PLUGIN_WRITABLE_BASE_FIELDS, ExtensionRegistry
+from base.agents.messages.security_finding import SecurityFindingEntry
+from base.packages.plugins.extensions import (
+    PLUGIN_WRITABLE_BASE_FIELDS,
+    SDK_WRITTEN_BASE_FIELDS,
+    ExtensionRegistry,
+)
 
 AttachEntry = _AttachEntry
 
@@ -129,6 +135,12 @@ class BaseAgentState(BaseModel):
     messages: Annotated[list[AnyMessage], _MESSAGES_DELTA_CHANNEL] = Field(default_factory=list)
     pending_exec_notes: list[AnyMessage] = Field(default_factory=list)
     """Notes/media deferred until all tool results; recovery drains after repair."""
+    security_findings: Annotated[list[SecurityFindingEntry], operator.add] = Field(
+        default_factory=list
+    )
+    """Prompt-injection findings the exec child raised, awaiting delivery: `ava.security` appends
+    through `ava.state_update`; the after_exec hook (`agent/hooks/security.py`) turns them into
+    SECURITY notes and resets the channel with `Overwrite([])`."""
     halted: bool = False
     turn_active: bool = False
     """This invocation is mid-turn (claim routed work). One invocation = one
@@ -208,32 +220,21 @@ class PluginStateSchema:
     classes: frozenset[type[BaseModel]]
 
 
-# Core keys a plugin may declare/write: only `messages` (its add_messages
-# reducer defines the merge contract; exec._notes.merge_exec_notes combines a
-# plugin's messages delta with the exec ToolMessage — tool result first,
-# notes after, per the Anthropic-compat adjacency constraint). Every other
-# BaseAgentState field is framework-managed per turn (halted / turn_active /
-# exit_requested / turn_idle / restart_requested / update_initiated / compact / memory / context_reset /
-# capabilities):
-# declaring one is rejected by `plugin_state_schema`, and a direct
-# ava.state_update write to one is rejected by _validate_plugin_state_keys.
+# Core keys a plugin may declare/write: only `messages` (its add_messages reducer defines the
+# merge contract; exec._notes.merge_exec_notes combines a plugin's messages delta with the exec
+# ToolMessage — tool result first, notes after, per the Anthropic-compat adjacency constraint).
+# Every other BaseAgentState field is framework-managed per turn: declaring one is rejected by
+# `plugin_state_schema`, and a direct ava.state_update write to one is rejected by
+# _validate_plugin_state_keys (except `SDK_WRITTEN_BASE_FIELDS`, which the SDK itself writes).
 _PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = PLUGIN_WRITABLE_BASE_FIELDS
 
-# BaseAgentState built-in fields — plugins can modify exactly one of them:
-# `messages` (only when the plugin declares it in its own BaseModel with the
-# exact BaseAgentState annotation, including the add_messages reducer;
-# plugin_state_schema checks). Every other core key (halted / turn_active /
-# exit_requested / turn_idle / restart_requested / update_initiated / compact / memory / context_reset /
-# capabilities) is framework-managed every turn: declaring one raises at
-# registration, and
-# PluginStateSchema.base_declared tracks the declared (messages-only) set so a direct
-# write to any other base channel = plugin missing a prefix typo (writing
-# "compact" instead of "ava_myplugin__compact"), which would silent-clobber
-# this turn's ToolMessage / lifecycle signal / compaction state (Python dict
-# literal duplicate-key: last write wins); must blow up immediately.
-#
-# Derived from BaseAgentState.model_fields (via state._BASE_FIELDS) so the guard
-# tracks the base as it grows/shrinks — no hardcoded list to drift (I-8).
+# BaseAgentState built-in fields. `messages` is the one a plugin may modify (only when it declares
+# it in its own BaseModel with the exact BaseAgentState annotation; plugin_state_schema checks, and
+# PluginStateSchema.base_declared tracks the declared set). A direct write to any other base channel
+# = plugin missing a prefix typo (writing "compact" instead of "ava_myplugin__compact"), which would
+# silent-clobber this turn's ToolMessage / lifecycle signal / compaction state; must blow up.
+# Derived from BaseAgentState.model_fields (via state._BASE_FIELDS) so the guard tracks the base as
+# it grows/shrinks — no hardcoded list to drift (I-8).
 _BASE_STATE_FIELDS: frozenset[str] = _BASE_FIELDS
 
 
@@ -256,7 +257,7 @@ def _validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) ->
         return update
     base_clash = set(update) & _BASE_STATE_FIELDS
     base_declared: frozenset[str] = getattr(state_cls, "__plugin_base_declared__", frozenset())
-    illegal_base = base_clash - base_declared
+    illegal_base = base_clash - base_declared - SDK_WRITTEN_BASE_FIELDS
     if illegal_base:
         raise ValueError(
             f"plugin wrote undeclared base field to ava.state_update: {sorted(illegal_base)} — "

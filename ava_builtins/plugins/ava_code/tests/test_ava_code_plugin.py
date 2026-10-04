@@ -35,11 +35,6 @@ def _load_ava_code_plugin():
     yield
 
     install.uninstall()
-    # The in-memory security-findings buffer is process-global; a test that
-    # flags content must not leak findings into the next test's exec.
-    import ava.security as _security
-
-    _security._pending_findings = []
 
 
 def _make_state_with_cwd(
@@ -1517,11 +1512,11 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
         ava.unbind_exec_turn()
 
 
-def test_read_wrap_flagged_agents_md_buffers_security_finding(tmp_path: Path):
+def test_read_wrap_flagged_agents_md_writes_security_finding(tmp_path: Path):
     """A context file carrying injection patterns is scanned: the content note
-    is injected as usual AND a SECURITY finding is buffered in-memory for the
-    exec node to deliver as a warning note (no file, no inline marker)."""
-    from ava import security
+    is injected as usual AND a SECURITY finding is written to the turn's state
+    update for the after_exec hook to deliver as a warning note (no file, no
+    inline marker)."""
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1540,8 +1535,8 @@ def test_read_wrap_flagged_agents_md_buffers_security_finding(tmp_path: Path):
         notes = _get_injected_context_notes(ava.state_update)
         assert len(notes) == 1
         assert "Conventions." in notes[0]["content"]
-        # SECURITY finding buffered with the context-file source
-        findings = security.take_findings()
+        # SECURITY finding carried by the state update, with the context-file source
+        findings = ava.state_update["security_findings"]
         assert len(findings) == 1
         agents_path = str((repo / "AGENTS.md").resolve())
         assert findings[0].source == f"context-file:{agents_path}"

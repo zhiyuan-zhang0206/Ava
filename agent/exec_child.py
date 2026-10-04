@@ -15,8 +15,8 @@ files + signals:
   (`init_subprocess_logger` adds no stderr handler), and stdout/stderr are
   reconfigured to line buffering so `print(..., end="")` still streams.
 - Result envelope: `AVA_EXEC_RESULT_FILE` — outcome kind, plugin state-update
-  delta, security findings, attachments, the run's SDK-call tally, and (for a
-  crash) the full traceback text. Written on every exit path except `os._exit`
+  delta (plugin fields, security findings), attachments, the run's SDK-call
+  tally, and (for a crash) the full traceback text. Written on every exit path except `os._exit`
   (watchdog / the agent's own call) and SIGKILL — the parent classifies those
   from its own cancel/timeout flags.
 - POSIX signals: SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError, both raised
@@ -480,7 +480,6 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     from agent.graph.exec.protocol import ResultPayload, read_request, write_result
     from ava.attachment_transport import own_media_gated_members, take_attachments
     from ava.sdk_surface.discovery import hidden_surface_members
-    from ava.security import take_findings
 
     _line_buffered_output()
     _install_signal_handlers()
@@ -546,7 +545,6 @@ def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
         return
     finally:
         _take_result_state_update(child, payload, state_injected=request.state_raw is not None)
-        payload.findings = [f.model_dump() for f in take_findings()]
         payload.attachments = take_attachments()
     # Outside the try: a boot-phase exception (config fetch, request read,
     # plugin load) propagates to main(), which writes the crash envelope with
@@ -604,7 +602,6 @@ def _write_crashed_result(
         "full_traceback": full_traceback,
         "code_reached": code_reached,
         "state_update_error": None,
-        "findings": None,
         "attachments": None,
         "sdk_calls": None,
     }

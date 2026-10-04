@@ -3,12 +3,14 @@
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 import ava.skills as skills_mod
 from ava.tests._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests._skills_helpers import _write_skill
 from ava.tests._skills_helpers import fake_skills_dir as fake_skills_dir
+from base.log import logger
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
 # default, so the real ~/.agents/skills/ never leaks into a scan; the
@@ -69,8 +71,7 @@ def test_resolution_is_not_consumption(
     glanced at the catalog (or named a skill in planning without ever opening
     it) claimed a fake "loaded" row (measured: ~70% of rows had no usage trace
     in the transcript). The signal fires on first SKILL.md body consumption —
-    help() or a direct `__doc__` read — and the dedup keeps it one row per
-    skill per run."""
+    help() or a direct `__doc__` read."""
     import ava
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
@@ -101,7 +102,7 @@ def test_resolution_is_not_consumption(
     dir(ns)
     assert recorded == []
 
-    # First body consumption is the signal — and only once (dedup + cache).
+    # First body consumption is the signal — and only once (the proxy caches its body).
     _ = leaf.__doc__
     assert [n for n, _d in recorded] == ["alpha"]
     _ = leaf.__doc__  # cached
@@ -235,35 +236,32 @@ def test_files_read_other_files_do_not_record(
     assert recorded == []
 
 
-def test_files_read_skill_md_attribution_deduped_per_run(
+def test_every_consumption_records_one_event_and_nothing_is_remembered(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two files.read of the same SKILL.md in one agent run emit one row — the
-    per-(agent, skill) dedup in `_record_skill_invoked` covers the direct-read
-    path too, so repeated loads (re-reads during one turn) do not stack."""
+    """Attribution is an event written at the moment of consumption, not a
+    per-run dedup: the SDK keeps no record of what it already wrote, so each
+    consumption — a direct SKILL.md read, the same skill through the proxy, a
+    second read — emits its own `skill_invoked` event. The consumer reads the
+    set of skills, so repeats are harmless; remembering them was the buffer."""
     import ava
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    monkeypatch.setattr(skills_mod, "_recorded_skill_invocations", set[tuple[int, str]]())
     monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
-    attempts: list[int] = []
+    written: list[Any] = []
 
-    def _ok(agent: int, skills: list[object]) -> bool:
-        attempts.append(len(skills))
-        return True
+    def _capture(_db: object, event: Any) -> None:
+        written.append(event)
 
-    monkeypatch.setattr(skills_mod, "_insert_skill_events", _ok)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", _capture)
 
     path = ava.skills.alpha.path + "/SKILL.md"
     ava.files.read(path)
     ava.files.read(path)
-    ava.help(ava.skills.alpha)  # the same skill through the proxy — one row total
-    assert attempts == [1]
-
-    skills_mod.clear_recorded_skill_invocations()  # the public reset starts the run over
-    ava.files.read(path)
-    assert attempts == [1, 1]
+    ava.help(ava.skills.alpha)  # the same skill through the proxy
+    assert [e.attributes["skill"] for e in written] == ["alpha"] * 3
+    assert not hasattr(skills_mod, "_recorded_skill_invocations")
 
 
 def test_files_read_skill_md_silent_outside_agent(fake_skills_dir: Path) -> None:
@@ -306,28 +304,6 @@ def test_skills_read_consumes_and_records(
     # Display identifier and its underscore/dot projection fold to one skill.
     assert skills_mod.read("grp:beta") == skills_mod.read("grp.beta")
     assert recorded[-1] == ("beta", "loaded")
-
-
-def test_skills_read_deduped_across_spellings(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`read()` spelled three ways for one skill still writes ONE row — the
-    per-(agent, skill) dedup, not the spelling, decides attribution."""
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    monkeypatch.setattr(skills_mod, "_recorded_skill_invocations", set[tuple[int, str]]())
-    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
-
-    attempts: list[int] = []
-
-    def _ok(_agent: int, skills: list[object]) -> bool:
-        attempts.append(len(skills))
-        return True
-
-    monkeypatch.setattr(skills_mod, "_insert_skill_events", _ok)
-
-    skills_mod.read("alpha")
-    skills_mod.read("alpha")  # same spelling — deduped
-    assert attempts == [1]
 
 
 def test_skills_read_returns_same_shape_as_proxy_doc(
@@ -381,78 +357,58 @@ def test_help_skills_index_lists_read(
     assert "read" in dir(ava.skills)
 
 
-# ─── attribution dedup is gated on the write landing ─────────────────────────
+# ─── the event is written for real, and a failed write is loud ───────────────
 
 
-def test_a_failed_write_is_retried_not_remembered(
+def test_consuming_a_skill_lands_a_skill_invoked_row(
+    fake_skills_dir: Path, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end with a real database: consuming a skill body leaves a
+    `skill_invoked` row in `audit_events` for the consuming agent, carrying the
+    `loaded` depth the self-evolution collector scores — one row per
+    consumption, written at the call, with nothing held in this process."""
+    from tests.fixtures.units import spawn_agent
+
+    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    agent_id = spawn_agent()
+    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: agent_id)
+
+    skills_mod.read("alpha")
+    skills_mod.read("alpha")
+
+    rows = db_conn.execute(
+        "SELECT source, attributes FROM audit_events "
+        "WHERE agent_id = %s AND event_name = 'skill_invoked'",
+        (agent_id,),
+    ).fetchall()
+    assert (
+        rows
+        == [("self", {"skill": "alpha", "identifier": "alpha", "invocation_depth": "loaded"})] * 2
+    )
+
+
+def test_a_failed_write_is_reported_and_does_not_fail_the_read(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The dedup set exists so a whole agent run emits one row per skill. Marking
-    a skill recorded BEFORE the INSERT lands turns one swallowed DB blip into a
-    permanent "already attributed" — and the write path swallows everything by
-    design, so nothing downstream would ever notice. The set is updated only on a
-    write that reported success, so the next access retries."""
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
-    monkeypatch.setattr(skills_mod, "_recorded_skill_invocations", set[tuple[int, str]]())
+    """Attribution must never take an agent down, and must never go quiet
+    either: a failed `audit_events` write does not raise out of the read, and is
+    reported through the audit module's loud path (error log with traceback plus
+    an `audit_write_failed` anomaly event)."""
+    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
-
-    attempts: list[int] = []
-
-    def _failing(agent: int, skills: list[str]) -> bool:
-        attempts.append(len(skills))
-        return False
-
-    monkeypatch.setattr(skills_mod, "_insert_skill_events", _failing)
-    (skill,) = skills_mod.names()
-    skills_mod._record_skill_invoked(skill)
-    assert attempts == [1]
-    assert skills_mod._recorded_skill_invocations == set()  # nothing remembered
-
-    def _ok(agent: int, skills: list[str]) -> bool:
-        attempts.append(len(skills))
-        return True
-
-    monkeypatch.setattr(skills_mod, "_insert_skill_events", _ok)
-    skills_mod._record_skill_invoked(skill)
-    assert attempts == [1, 1]  # retried, not skipped
-    assert skills_mod._recorded_skill_invocations == {(1, "alpha")}
-
-    skills_mod._record_skill_invoked(skill)
-    assert attempts == [1, 1]  # now deduped — no third write
-
-
-def test_a_swallowed_db_error_reports_failure(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`_insert_skill_events` keeps swallowing (attribution must never take an
-    agent down) but the caller has to be able to tell — otherwise the dedup gate
-    above is gated on nothing. A failed `audit_events` write must surface as
-    False so the dedup retries it."""
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
 
     def _boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("database down")
 
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone_many", _boom)
-    (skill,) = skills_mod.names()
-    assert skills_mod._insert_skill_events(1, [skill]) is False
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone", _boom)
 
+    errors: list[str] = []
+    sink = logger.add(lambda m: errors.append(str(m)), level="ERROR")
+    try:
+        assert skills_mod.read("alpha").endswith("# A\n")  # the read itself succeeds
+    finally:
+        logger.remove(sink)
 
-def test_insert_skill_events_writes_only_the_loaded_depth(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The producer has exactly one invocation depth left: `"loaded"`. The
-    `prompt_injected` tier is gone (55K rows of baseline exposure drowned the
-    real signal), so the payload the write path emits must never carry any
-    other value — attribution consumers branch on this field."""
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
-
-    captured: list[dict[str, str]] = []
-
-    def _capture(_db: object, events: list[Any]) -> None:
-        captured.extend(event.attributes for event in events)
-
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone_many", _capture)
-    (skill,) = skills_mod.names()
-    assert skills_mod._insert_skill_events(1, [skill]) is True
-    assert captured == [{"skill": "alpha", "identifier": "alpha", "invocation_depth": "loaded"}]
+    (report,) = errors
+    assert "skill_invoked could not be recorded" in report
+    assert "RuntimeError: database down" in report  # the traceback rides along

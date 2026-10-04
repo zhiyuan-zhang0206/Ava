@@ -17,7 +17,6 @@ from typing import Any
 
 import pytest
 
-import ava
 from agent.graph.prompt.system_prompt import (
     _CAPABILITY_SURFACES,
     _discover_all_namespaces,
@@ -59,28 +58,16 @@ def _no_plugin_expansions() -> Iterator[None]:
         install.install(prior.registry)
 
 
-@pytest.fixture(autouse=True)
-def _fresh_attribution_dedup() -> Iterator[None]:
-    """The attribution dedup is per-agent-RUN state in a module global, so it
-    leaks between tests: whichever test records (agent, skill, depth) first
-    makes every later write a silent no-op — which would let the two "records
-    nothing" assertions below pass without the guard they are pinning. Same
-    fixture as agent/graph/tests/test_capabilities_index.py."""
-    ava.skills.clear_recorded_skill_invocations()
-    yield
-    ava.skills.clear_recorded_skill_invocations()
-
-
 @pytest.fixture
 def skill_writes(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Every batch handed to the audit-event writer — the ONE path a skill
+    """Every event handed to the audit-event writer — the ONE path a skill
     attribution row takes — for the "records nothing" assertions."""
     writes: list[dict[str, Any]] = []
 
-    def _record(_db: object, events: list[Any]) -> None:
-        writes.append({"events": events})
+    def _record(_db: object, event: Any) -> None:
+        writes.append({"event": event})
 
-    monkeypatch.setattr(audit_events, "record_audit_standalone_many", _record)
+    monkeypatch.setattr(audit_events, "record_audit_reported", _record)
     return writes
 
 
