@@ -32,16 +32,16 @@ class _IdleScheduler:
     def restart_required(self) -> bool:
         return False
 
-    def wake(self, _agent_id: int) -> asyncio.Task[None] | None:
+    def wake(self, agent_id: int) -> asyncio.Task[None] | None:
         raise AssertionError("the reconnect path must not wake an agent")
 
-    def task_for(self, _agent_id: int) -> asyncio.Task[None] | None:
+    def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
         return None
 
-    def reaped_successor(self, _agent_id: int) -> asyncio.Task[None] | None:
+    def reaped_successor(self, agent_id: int) -> asyncio.Task[None] | None:
         return None
 
-    async def cancel_agent(self, _agent_id: int) -> bool:
+    async def cancel_agent(self, agent_id: int) -> bool:
         raise AssertionError("the reconnect path must not cancel an agent")
 
 

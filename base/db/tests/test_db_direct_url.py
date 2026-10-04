@@ -174,7 +174,7 @@ def test_direct_db_url_split_runner_falls_back_with_an_info_line(
     got = db_module.direct_db_url()
     assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
     lines = [r for r in loguru_records if "this home's record" in r["message"]]
-    assert [r["level"].name for r in lines] == ["INFO"]
+    assert [r["level"].name for r in lines] == ["INFO"]  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_direct_db_url_unknown_port_stays_silent_when_pooling_off(

@@ -44,23 +44,41 @@ class _LoopHarness:
         monkeypatch.setattr(settings.daemon, "delivery_watchdog_alert_grace_seconds", grace_s)
         monkeypatch.setattr(daemon, "_DEPLOY_WINDOW_RECHECK_S", 0.001)
         monkeypatch.setattr(admission, "quiesced", lambda: self.quiesced)
-        monkeypatch.setattr(daemon, "deploy_in_flight", lambda _db: self.window[0])
-        monkeypatch.setattr(
-            daemon, "dispatch_wakes", lambda *_a, **_kw: self.calls.append("dispatch") or 0
-        )
-        monkeypatch.setattr(
-            daemon, "select_alerted_ids", lambda _pool: self.calls.append("reload") or set()
-        )
 
-        def scan(_pool: object, _threshold: float, alerted: set[int]) -> tuple[int, set[int]]:
+        def read_window(_db: Database) -> DeployWindow:
+            return self.window[0]
+
+        def dispatch(*_a: object, **_kw: object) -> int:
+            self.calls.append("dispatch")
+            return 0
+
+        def reload(_pool: ConnectionPool) -> set[int]:
+            self.calls.append("reload")
+            return set()
+
+        def scan(
+            _pool: ConnectionPool, _threshold: float, alerted: set[int]
+        ) -> tuple[int, set[int]]:
             self.calls.append("scan")
             return 0, alerted
 
+        def noop(*_a: object, **_kw: object) -> None:
+            return None
+
+        def gc(*_a: object, **_kw: object) -> int:
+            return 0
+
+        def sweep(*_a: object, **_kw: object) -> float:
+            return 0.0
+
+        monkeypatch.setattr(daemon, "deploy_in_flight", read_window)
+        monkeypatch.setattr(daemon, "dispatch_wakes", dispatch)
+        monkeypatch.setattr(daemon, "select_alerted_ids", reload)
         monkeypatch.setattr(daemon, "scan_once", scan)
-        monkeypatch.setattr(daemon, "persist_alerted", lambda *_a: None)
-        monkeypatch.setattr(daemon, "prune_alerted", lambda *_a: None)
-        monkeypatch.setattr(daemon, "gc_alerted", lambda *_a: 0)
-        monkeypatch.setattr(daemon, "_maybe_sweep_stale_inbounds", lambda *_a: 0.0)
+        monkeypatch.setattr(daemon, "persist_alerted", noop)
+        monkeypatch.setattr(daemon, "prune_alerted", noop)
+        monkeypatch.setattr(daemon, "gc_alerted", gc)
+        monkeypatch.setattr(daemon, "_maybe_sweep_stale_inbounds", sweep)
 
         async def short_sleep(_progress: LoopProgress, _total_s: float) -> None:
             await asyncio.sleep(0.005)

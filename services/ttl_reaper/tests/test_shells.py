@@ -181,7 +181,11 @@ async def test_reap_expired_shells_defers_during_a_deploy_window(
     window = DeployWindow(
         active=True, detail="machine 'macmini' is mid-deploy (posture=stop, started 40s ago)"
     )
-    monkeypatch.setattr(shells, "deploy_in_flight", lambda _db: window)
+
+    def _window(_db: Database) -> DeployWindow:
+        return window
+
+    monkeypatch.setattr(shells, "deploy_in_flight", _window)
     with caplog.at_level(logging.DEBUG, logger=shells._log.name):
         assert await _reap(reaper_pool) == []
     assert "deploy window is open" in caplog.text
@@ -197,12 +201,11 @@ async def test_reap_expired_shells_defers_during_a_deploy_window(
     ) -> dict[str, object]:
         return ShellKillResult(mode="killed", interrupted=False).model_dump()
 
+    def _idle_window(_db: Database) -> DeployWindow:
+        return DeployWindow(active=False, detail="no deploy in flight")
+
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _kill)
-    monkeypatch.setattr(
-        shells,
-        "deploy_in_flight",
-        lambda _db: DeployWindow(active=False, detail="no deploy in flight"),
-    )
+    monkeypatch.setattr(shells, "deploy_in_flight", _idle_window)
     assert await _reap(reaper_pool) == [(aid, 7)]
 
 

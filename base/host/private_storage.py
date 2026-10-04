@@ -113,9 +113,9 @@ _SUMMARY_EXAMPLE_LIMIT = 3
 class _SkipReport:
     """Per-tree tally of the nodes converge skipped, for the summary warning."""
 
-    symlinks: list[Path] = field(default_factory=list)
-    foreign_owned: list[Path] = field(default_factory=list)
-    non_regular: list[Path] = field(default_factory=list)
+    symlinks: list[Path] = field(default_factory=list[Path])
+    foreign_owned: list[Path] = field(default_factory=list[Path])
+    non_regular: list[Path] = field(default_factory=list[Path])
     node_modules_dirs: int = 0
 
     @property
