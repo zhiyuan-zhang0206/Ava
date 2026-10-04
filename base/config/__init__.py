@@ -374,20 +374,29 @@ _boot_state = _lite.boot_state
 
 def __getattr__(name: str) -> Any:
     """Eager-only names (Settings, BOOTSTRAP_FIELDS, the metadata /
-    service-read / turn-view re-exports) are reached by upgrading once and
-    re-reading this module's namespace (PEP 562, the `ava/__init__` latch
-    shape).
+    service-read / turn-view re-exports) are reached through the same
+    boot-lite gate as every other full-chain read — `_lite._maybe_upgrade`: a
+    read that races another thread's in-flight build waits for it (bounded),
+    only the building thread's own re-entrant read raises the window error,
+    and a name the build never installs stays an AttributeError (PEP 562,
+    the `ava/__init__` latch shape).
 
-    The two registry-backed field faces (`_FIELDS`, `FIELD_INFOS`) are served
-    WITHOUT the upgrade: building the registry is construction-free — it
-    never loads `.env` or constructs Settings — and the settings-lite repair
-    paths (`ava config set` → `validate_env_patch_for_write`) import them in
+    The two registry-backed field faces (`_FIELDS`, `FIELD_INFOS`) and the
+    write-path metadata pair (`CONFIG_UNCHANGED_SENTINEL`, `ConfigFieldMeta`)
+    are served WITHOUT the upgrade and ahead of the gate, because they never
+    depend on it: building the registry is construction-free — it never
+    loads `.env` or constructs Settings — and the settings-lite repair paths
+    (`ava config set` → `validate_env_patch_for_write`) import them in
     exactly the states where a broken `.env` makes Settings unable to
     construct (task #3621) — the pre-boot-lite import-time registry served
-    the same surfaces. First access is not free: it imports the registry
-    stack (~220 modules including `pydantic_settings`), while the boot state
-    stays lite and the upgrade counter does not move."""
-    if name.startswith("__") or _lite.is_upgrading():
+    the same surfaces. Gating them on the process-global build flag turned a
+    concurrent `from base.config import _FIELDS` into a spurious ImportError
+    whenever any other thread's ~1s build was in flight (task #4964: the
+    delivery_outbox keyed send lost its idempotency key). First access is
+    not free: it imports the registry stack (~220 modules including
+    `pydantic_settings`), while the boot state stays lite and the upgrade
+    counter does not move."""
+    if name.startswith("__"):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     if name in ("_FIELDS", "FIELD_INFOS"):
         from base.host.env.config_registry import field_infos, fields
@@ -403,7 +412,8 @@ def __getattr__(name: str) -> Any:
 
         _metadata = importlib.import_module(f"{__name__}.metadata")
         return getattr(_metadata, name)
-    _lite.upgrade(f"module attribute {name!r}")
+    if not _lite._maybe_upgrade(f"module attribute {name!r}"):
+        raise AttributeError(_lite._build_window_message(f"module attribute {name!r}"))
     try:
         return globals()[name]
     except KeyError:

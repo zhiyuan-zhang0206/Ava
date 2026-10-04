@@ -692,12 +692,6 @@ def is_full() -> bool:
     return _state.mode == _FULL
 
 
-def is_upgrading() -> bool:
-    """Whether the eager build is in flight right now (a re-entrant read must
-    not start a second one)."""
-    return _state.upgrading
-
-
 def boot_state() -> dict[str, Any]:
     """Private test/acceptance hook: the boot-lite state machine snapshot."""
     return {
