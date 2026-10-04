@@ -97,6 +97,13 @@ class HealthConfig:
     breaker_rounds: int = 5
     """Consecutive non-alive rounds that open the hold-forever breaker."""
 
+    terminal_escalate_rounds: int = 2
+    """Consecutive terminal rounds before the NOT REVIVABLE report escalates to ERROR.
+
+    A single terminal round is usually a one-round inspection race (a psutil gap
+    mapping to UNAVAILABLE, alive again next round); only a streak means the unit
+    is genuinely unresolvable (2026-10-03 triage, E7)."""
+
     def __post_init__(self) -> None:
         if not math.isfinite(self.startup_grace_s) or self.startup_grace_s < 0:
             raise ValueError("startup_grace_s must be nonnegative")
@@ -119,6 +126,8 @@ class HealthConfig:
             # would open the breaker on the very round the threshold is met and
             # hold without a single restart attempt (same rule as run_keepalive).
             raise ValueError("breaker_rounds must be greater than failures_before_restart")
+        if self.terminal_escalate_rounds < 1:
+            raise ValueError("terminal_escalate_rounds must be at least 1")
 
 
 @dataclass(slots=True)
@@ -148,6 +157,9 @@ class UnitHealth:
 
     last_detail: str = ""
     """Detail string of the last probe verdict."""
+
+    terminal_rounds: int = 0
+    """Consecutive terminal verdicts since the last non-terminal round."""
 
 
 # The supervisor's deferral reason for a unit whose explicit intent is stopped
@@ -312,6 +324,7 @@ class HealthMonitor:
                 "startup_remaining_s": self._startup_remaining(unit_id, state),
                 "generation_ready": state.generation_ready,
                 "consecutive_failures": state.consecutive_failures,
+                "terminal_rounds": state.terminal_rounds,
                 "respawn_attempts": state.respawn_attempts,
                 "breaker_open": state.breaker_since is not None,
                 "breaker_for_s": (
@@ -354,10 +367,12 @@ class HealthMonitor:
 
     # ── one unit ─────────────────────────────────────────────────────────────
 
-    async def _check_unit(self, unit_id: str) -> None:
-        state = self._unit_state(unit_id)
+    def _resolvable_probe(
+        self, unit_id: str, state: UnitHealth
+    ) -> tuple[Callable[[], DaemonProbe] | None]:
+        """Resolve the unit's probe, or report the no-verdict case and answer None."""
         try:
-            probe = self._registry.resolve(unit_id)
+            return (self._registry.resolve(unit_id),)
         except ProbeError as exc:
             state.last_verdict = "unavailable"
             state.last_detail = str(exc)
@@ -366,10 +381,17 @@ class HealthMonitor:
                 unit_id,
                 exc,
             )
+            return (None,)
+
+    async def _check_unit(self, unit_id: str) -> None:
+        state = self._unit_state(unit_id)
+        (probe,) = self._resolvable_probe(unit_id, state)
+        if probe is None:
             return
         result = await self._probe(unit_id, probe)
         state.last_verdict = result.verdict.value
         state.last_detail = result.detail
+        self._track_terminal_streak(state, result)
 
         if result.alive:
             self._reset(state)
@@ -392,13 +414,7 @@ class HealthMonitor:
             return
 
         if result.terminal:
-            self._reset(state)
-            _log.error(
-                "[health] unit %s: NOT REVIVABLE by this unit (%s) — not restarting; "
-                "resolve the reported ownership or inspection failure before retrying",
-                unit_id,
-                result.detail,
-            )
+            self._report_terminal(unit_id, state, result.detail)
             return
 
         startup_remaining = self._startup_remaining(unit_id, state)
@@ -466,6 +482,41 @@ class HealthMonitor:
             )
             return
         self._report_unready_restart(unit_id, state, after.detail, delay_s)
+
+    @staticmethod
+    def _track_terminal_streak(state: UnitHealth, result: DaemonProbe) -> None:
+        """Maintain the consecutive-terminal streak for the NOT REVIVABLE escalation.
+
+        The single writer of `terminal_rounds`: a terminal verdict extends the
+        streak, any other verdict re-arms it — so the escalation sees exactly
+        CONSECUTIVE terminal rounds.
+        """
+        state.terminal_rounds = state.terminal_rounds + 1 if result.terminal else 0
+
+    def _report_terminal(self, unit_id: str, state: UnitHealth, detail: str) -> None:
+        """Report one terminal verdict, escalating only after a streak.
+
+        One flaky inspection round (a psutil race mapping to UNAVAILABLE, or a
+        replacement's ownership gap) is alive again next round and is not an
+        incident: WARNING. Only `terminal_escalate_rounds` CONSECUTIVE terminal
+        rounds mean the unit is genuinely unresolvable and escalate to ERROR
+        (2026-10-03 triage, E7). The restart machinery resets either way —
+        terminal never restarts.
+        """
+        self._reset(state)
+        report = (
+            _log.error
+            if state.terminal_rounds >= self._config.terminal_escalate_rounds
+            else _log.warning
+        )
+        report(
+            "[health] unit %s: NOT REVIVABLE by this unit (%s, terminal round %d) — "
+            "not restarting; resolve the reported ownership or inspection failure "
+            "before retrying",
+            unit_id,
+            detail,
+            state.terminal_rounds,
+        )
 
     def _report_unready_restart(
         self, unit_id: str, state: UnitHealth, detail: str, delay_s: float

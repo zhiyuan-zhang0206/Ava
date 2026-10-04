@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from base.log import logger
@@ -96,16 +97,79 @@ def private_file_problem(path: Path) -> str | None:
     return _file_refusal(current)
 
 
+# A `node_modules` directory anywhere in a private tree is third-party
+# package content: nothing under it is a secret this converge must repair, and
+# a pnpm store buries tens of thousands of symlinks there — descending is pure
+# per-converge cost plus per-node log noise (2026-10-03 alert triage).
+_NODE_MODULES_DIRNAME = "node_modules"
+
+# Skipped-path examples carried by the one-summary-per-tree warning: enough to
+# name what the flood is, small enough to stay readable (the full count is in
+# the same line).
+_SUMMARY_EXAMPLE_LIMIT = 3
+
+
+@dataclass(slots=True)
+class _SkipReport:
+    """Per-tree tally of the nodes converge skipped, for the summary warning."""
+
+    symlinks: list[Path] = field(default_factory=list[Path])
+    foreign_owned: list[Path] = field(default_factory=list[Path])
+    non_regular: list[Path] = field(default_factory=list[Path])
+    node_modules_dirs: int = 0
+
+    @property
+    def total(self) -> int:
+        return len(self.symlinks) + len(self.foreign_owned) + len(self.non_regular)
+
+    def examples(self) -> str:
+        """The first few skipped paths, each tagged with its reason."""
+        tagged = (
+            [(path, "symlink") for path in self.symlinks]
+            + [(path, "foreign-owned") for path in self.foreign_owned]
+            + [(path, "non-regular") for path in self.non_regular]
+        )
+        shown = "; ".join(f"{path} ({reason})" for path, reason in tagged[:_SUMMARY_EXAMPLE_LIMIT])
+        return f"{shown}; …" if len(tagged) > _SUMMARY_EXAMPLE_LIMIT else shown
+
+
 def converge_private_tree(path: Path) -> Path:
     """Recursively converge a private directory tree to owner-only modes.
 
     A unit's logs, workspaces, and memory checkout can predate the private
     storage convention. Converge owns their durable permission repair, but it
     must never follow a symlink out of the tree while doing so, and a node it
-    cannot repair — a symlink, a foreign owner, a socket or FIFO — is warned
-    about and skipped: one unexpected node must not abort the run, because the
-    abort takes the updater (and with it the host) down (2026-09-12).
+    cannot repair — a symlink, a foreign owner, a socket or FIFO — is skipped:
+    one unexpected node must not abort the run, because the abort takes the
+    updater (and with it the host) down (2026-09-12).
+
+    A skipped node keeps a per-node DEBUG line; the run reports ONE summary
+    WARNING per tree (counts plus a few examples). A pnpm workspace tree holds
+    tens of thousands of expected symlinks, so per-node warnings drowned every
+    other signal (18,516 warning rows in one deploy window — 2026-10-03
+    triage). `node_modules` subtrees are not descended at all; the directory
+    itself is still converged like any other child.
     """
+    skips = _SkipReport()
+    _converge_tree(path, skips)
+    if skips.total:
+        logger.warning(
+            "private storage convergence skipped {n} node(s) under {path} "
+            "(symlink={symlinks}, foreign_owned={foreign_owned}, "
+            "non_regular={non_regular}; node_modules dirs not descended={node_modules}) "
+            "— first: {examples}",
+            n=skips.total,
+            path=path,
+            symlinks=len(skips.symlinks),
+            foreign_owned=len(skips.foreign_owned),
+            non_regular=len(skips.non_regular),
+            node_modules=skips.node_modules_dirs,
+            examples=skips.examples(),
+        )
+    return path
+
+
+def _converge_tree(path: Path, skips: _SkipReport) -> None:
     try:
         current = path.lstat()
     except FileNotFoundError:
@@ -115,34 +179,38 @@ def converge_private_tree(path: Path) -> Path:
         # converge — warn and leave it (and its subtree) alone instead of
         # aborting the whole converge run (wsl 2026-09-02 boot loop).
         logger.warning("private storage convergence skipped foreign-owned path {path}", path=path)
-        return path
+        return
     ensure_private_dir(path)
     for child in path.iterdir():
         current = child.lstat()
         if stat.S_ISLNK(current.st_mode):
             # Workspace trees can link tooling outside AVA_HOME; private-tree
             # convergence must not recurse into or alter those targets.
-            logger.warning("private storage convergence skipped symlink {path}", path=child)
+            logger.debug("private storage convergence skipped symlink {path}", path=child)
+            skips.symlinks.append(child)
             continue
         if _is_foreign_owned(current):
-            logger.warning(
+            logger.debug(
                 "private storage convergence skipped foreign-owned path {path}", path=child
             )
+            skips.foreign_owned.append(child)
             continue
         if stat.S_ISDIR(current.st_mode):
-            converge_private_tree(child)
+            if child.name == _NODE_MODULES_DIRNAME:
+                ensure_private_dir(child)
+                skips.node_modules_dirs += 1
+                continue
+            _converge_tree(child, skips)
             continue
         if not stat.S_ISREG(current.st_mode):
             # Unix sockets and FIFOs are live-service plumbing, not storage:
             # there is no permission converge could repair, and raising over a
             # dead workspace socket aborted the whole converge — and with it
             # the updater and the host (macmini 2026-09-12). Skip like symlinks.
-            logger.warning(
-                "private storage convergence skipped non-regular file {path}", path=child
-            )
+            logger.debug("private storage convergence skipped non-regular file {path}", path=child)
+            skips.non_regular.append(child)
             continue
         ensure_private_file(child)
-    return path
 
 
 def private_tree_root_problem(path: Path) -> str | None:
@@ -168,12 +236,12 @@ def scan_non_regular_nodes(root: Path) -> list[Path]:
 
     Sockets, FIFOs, and device nodes are live-service plumbing, not storage:
     converge has no permission repair for them and skips them (macmini
-    2026-09-12). The walk mirrors that traversal — symlinks and foreign-owned
-    paths are not descended, exactly as converge does not follow them — so the
-    pre-stop report and the converge log cannot disagree about what will be
-    skipped. A missing or unsuitable root yields [] (converge handles the root
-    itself; `private_tree_root_problem` is its predicate). Read-only; the
-    returned paths are in traversal order.
+    2026-09-12). The walk mirrors that traversal — symlinks, foreign-owned
+    paths and `node_modules` subtrees are not descended, exactly as converge
+    does not follow or descend them — so the pre-stop report and the converge
+    log cannot disagree about what will be skipped. A missing or unsuitable
+    root yields [] (converge handles the root itself; `private_tree_root_problem`
+    is its predicate). Read-only; the returned paths are in traversal order.
     """
     out: list[Path] = []
     try:
@@ -189,6 +257,8 @@ def scan_non_regular_nodes(root: Path) -> list[Path]:
         if stat.S_ISLNK(child_stat.st_mode) or _is_foreign_owned(child_stat):
             continue
         if stat.S_ISDIR(child_stat.st_mode):
+            if child.name == _NODE_MODULES_DIRNAME:
+                continue
             out += scan_non_regular_nodes(child)
         elif not stat.S_ISREG(child_stat.st_mode):
             out.append(child)

@@ -583,10 +583,17 @@ class InboundWakeDispatcher:
                     event="host_dispatcher_restart_required",
                 )
                 raise
-            except Exception:
-                logger.exception(
+            except Exception as exc:
+                # A dropped subscription read (a host stall outliving the
+                # read deadline) is expected and self-healing: the loop
+                # reconnects after `_reconnect_delay_s` and re-scans, the
+                # delivery watchdog re-publishes wakes missed meanwhile. The
+                # event is declared noise: WARNING without the traceback
+                # (2026-10-03 triage, E1).
+                logger.warning(
                     "hosted dispatcher subscription dropped — reconnecting",
                     event="host_dispatcher_reconnect",
+                    exception_type=type(exc).__name__,
                 )
                 await asyncio.sleep(self._reconnect_delay_s)
             finally:

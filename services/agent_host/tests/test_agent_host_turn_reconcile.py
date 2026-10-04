@@ -104,7 +104,11 @@ async def test_unresolved_turn_resources_skip(
     with bind_hosted_resources(resources):
         await _run_pass(_incarnation())
     assert reconcile_spy.calls == []
-    assert [r["extra"]["reason"] for r in _skips(loguru_records)] == ["resources_unsettled"]
+    skips = _skips(loguru_records)
+    assert [r["extra"]["reason"] for r in skips] == ["resources_unsettled"]
+    # A fail-closed skip is expected, not an anomaly: INFO keeps it out of the
+    # warning surfaces (2026-10-03 triage).
+    assert [r["level"].name for r in skips] == ["INFO"]
 
 
 async def test_replaced_runtime_is_a_logged_noop(
@@ -116,7 +120,9 @@ async def test_replaced_runtime_is_a_logged_noop(
     reconcile_spy.fail_with = RuntimeOwnershipLostError("runtime replaced")
     await _run_pass(_incarnation())
     assert len(reconcile_spy.calls) == 1
-    assert [r["extra"]["reason"] for r in _skips(loguru_records)] == ["ownership_lost"]
+    skips = _skips(loguru_records)
+    assert [r["extra"]["reason"] for r in skips] == ["ownership_lost"]
+    assert [r["level"].name for r in skips] == ["INFO"]
 
 
 async def test_unexpected_failure_is_logged_not_raised(
