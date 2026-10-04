@@ -1256,7 +1256,9 @@ itself (its own public key in its own `authorized_keys`):
   `--dry-run` — runs NEW's `ava schedules verify` against the running gateway's
   schedule table (every stored script, agent-written ones included) from a
   throwaway worktree of NEW at `$HOME/.ava/pre-update-verify` on the host's current
-  interpreter. A red row (a moved module, a call that no longer binds), or a check that
+  interpreter. The table is read by the home's own (OLD) source checkout — the only code
+  the database authority admits — and handed to the worktree as a rows file
+  (`--rows-file`), so NEW checks it offline and never dials the database. A red row (a moved module, a call that no longer binds), or a check that
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
   scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
   crash-loop after `up` until fixed). A host that has not fetched NEW (a dry run does

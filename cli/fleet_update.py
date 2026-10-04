@@ -95,18 +95,24 @@ sys.exit(0 if out["completed"] and out["terminate"] < 300 else 2)
 """
 
 
-# Before anything stops: NEW's `ava schedules verify` against the running gateway's schedule table
-# (read-only; every stored script, agent-written ones included). NEW's source comes from a throwaway
-# worktree and runs on the host's current interpreter (cwd wins sys.path, so NEW's modules are the
-# ones imported); no service is touched. `VERIFY_RC` is the verdict, so a crashed check (new
-# dependency missing, DB unreachable) is told apart from a red.
+# Before anything stops: NEW's `ava schedules verify` over the running gateway's schedule table
+# (every stored script, agent-written ones included). The table is read by the home's own source
+# checkout (OLD), the only code the database authority admits; NEW's source, from a throwaway
+# worktree, receives the rows as a file and checks them offline on the host's current interpreter
+# (cwd wins sys.path, so NEW's modules are the ones imported). Nothing dials the database from the
+# worktree and no service is touched. `VERIFY_RC` is the verdict, so a crashed check (unreadable
+# table, new dependency missing) is told apart from a red.
 _PRE_VERIFY = """{home}
-W="$H/pre-update-verify"; trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1' EXIT
+W="$H/pre-update-verify"; R="$W.rows"
+trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"' EXIT
 git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
 git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
+(umask 077; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
+  'import json, sys; from cli.commands.management.schedules_verify import _read_schedule_rows as rows; json.dump(rows(), open(sys.argv[1], "w"))' "$R") \\
+  || {{ echo "VERIFY_RC=2"; exit 0; }}
 git -C "$S" worktree add -q "$W" {new} || {{ echo "VERIFY_RC=2"; exit 0; }}
 cd "$W" && AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
-  'import sys; from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(notify=False))'
+  'import sys; from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(notify=False, rows_file=sys.argv[1]))' "$R"
 echo "VERIFY_RC=$?"; exit 0"""
 
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +90,12 @@ def _read_schedule_rows() -> list[tuple[int, str, str]]:
         return [(row[0], row[1], row[2] or "") for row in cur.fetchall()]
 
 
+def _read_rows_file(path: str) -> list[tuple[int, str, str]]:
+    """The rows `_read_schedule_rows` returned, dumped as a JSON list of `[id, name, script]`."""
+    data: Any = json.loads(Path(path).read_text(encoding="utf-8"))
+    return [(int(row[0]), str(row[1]), str(row[2])) for row in data]
+
+
 @dataclass(frozen=True)
 class VerifyPorts:
     """What a verify sweep reads and does: the schedule rows, the per-script dry
@@ -148,9 +156,13 @@ def _verify_file(path: str) -> int:
 
 
 def cmd_schedules_verify(
-    *, check_file: str | None = None, notify: bool = True, ports: VerifyPorts | None = None
+    *,
+    check_file: str | None = None,
+    rows_file: str | None = None,
+    notify: bool = True,
+    ports: VerifyPorts | None = None,
 ) -> int:
-    """`ava schedules verify [--check-file PATH] [--no-notify]` — the dry-import and call-signature sweep.
+    """`ava schedules verify [--check-file PATH | --rows-file PATH] [--no-notify]` — the dry-import and call-signature sweep.
 
     Read-only one-shot check of every in-store script (stopped rows included):
     py_compile, a top-level-imports-only execution in this checkout's runner
@@ -162,12 +174,19 @@ def cmd_schedules_verify(
     crash-loops. Line contract: one `RESULT ts=... checked=... green=... red=...
     rc=...` line, one `RED id=... name=... missing=...` per red, `TOOL-ERROR
     ...` on rc=2; exit codes 0 all clean / 1 red / 2 tool error. `--check-file`
-    checks one file off-DB (the falsification hook); a non-clean sweep alerts
-    through `/api/alerts` unless `--no-notify`."""
+    checks one file off-DB (the falsification hook); `--rows-file` sweeps a JSON
+    dump of the table (`[[id, name, script], ...]`) instead of reading it, so
+    this checkout never dials the database, and never alerts (the alert funnel
+    reports the live table); otherwise a non-clean sweep alerts through
+    `/api/alerts` unless `--no-notify`."""
     if check_file is not None:
         return _verify_file(check_file)
+    if rows_file is not None:
+        notify = False
     ports = ports or VerifyPorts(
-        read_rows=_read_schedule_rows, check_script=_check_script, alert=_alert_verify
+        read_rows=partial(_read_rows_file, rows_file) if rows_file else _read_schedule_rows,
+        check_script=_check_script,
+        alert=_alert_verify,
     )
     return _verify_sweep(notify=notify, ports=ports)
 
@@ -281,4 +300,6 @@ def _post_verify_alert(alert: dict[str, Any]) -> None:
 
 
 def h_schedules_verify(args: argparse.Namespace) -> int:
-    return cmd_schedules_verify(check_file=args.check_file, notify=not args.no_notify)
+    return cmd_schedules_verify(
+        check_file=args.check_file, rows_file=args.rows_file, notify=not args.no_notify
+    )

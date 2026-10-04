@@ -162,6 +162,9 @@ class Cluster:
         self.effects.append((kind, alias))
         if kind == "pre-verify":
             assert alias == "gw" and self.new in command
+            # The home's own checkout reads the table first; the worktree only sees the dump.
+            assert command.index("_read_schedule_rows") < command.index("worktree add")
+            assert command.index("worktree add") < command.index("rows_file=")
             assert all(h["up"] for h in self.hosts.values()), "checked after a service stopped"
             code, lines = self.stored_schedules
             for line in [*lines, f"VERIFY_RC={code}"]:
