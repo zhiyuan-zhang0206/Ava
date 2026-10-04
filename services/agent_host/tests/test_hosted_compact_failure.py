@@ -83,6 +83,90 @@ async def _receive_error(subscription: PubSub) -> Error:
                 return Error.model_validate_json(data)
 
 
+def _queue_compact_request(db_conn: psycopg.Connection, agent: int) -> int:
+    row = db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES(%s,'','compact_request','user') RETURNING id",
+        (agent,),
+    ).fetchone()
+    assert row is not None
+    db_conn.commit()
+    return row[0]
+
+
+def _build_host_driving_invoke_until_done(
+    pool: AsyncConnectionPool[Any],
+    saver: AsyncPostgresSaver,
+    graph: Any,
+    ctx: AvaContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AgentHost:
+    host = AgentHost(
+        pool=pool,
+        checkpointer=saver,
+        graph=graph,
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
+    monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
+    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
+
+    async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
+        return await host._invoke_until_done(target, ctx)
+
+    monkeypatch.setattr(host, "_drive_turns", drive)
+    return host
+
+
+def _inbound_status(db_conn: psycopg.Connection, inbound_id: int) -> tuple[Any, ...] | None:
+    return db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (inbound_id,)
+    ).fetchone()
+
+
+def _agent_status(db_conn: psycopg.Connection, agent: int) -> tuple[Any, ...] | None:
+    return db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone()
+
+
+async def _assert_failure_is_visible_and_durable(
+    db_conn: psycopg.Connection,
+    pool: AsyncConnectionPool[Any],
+    subscription: PubSub,
+    config: RunnableConfig,
+    *,
+    agent: int,
+    compact_id: int,
+    history: list[HumanMessage | AIMessage],
+) -> None:
+    event = await _receive_error(subscription)
+    assert event.agent_id == agent
+    assert "CompactionFailedError" in event.content and "history was preserved" in event.content
+    cold = await _cold_reader(pool).aget_tuple(config)
+    assert cold is not None
+    persisted = cold.checkpoint["channel_values"]
+    assert persisted["halted"] is True
+    assert persisted["messages"] == history
+    assert _inbound_status(db_conn, compact_id) == ("done",)
+    assert _agent_status(db_conn, agent) == ("idling",)
+
+
+async def _assert_new_inbound_resumes_with_history(
+    db_conn: psycopg.Connection,
+    pool: AsyncConnectionPool[Any],
+    config: RunnableConfig,
+    *,
+    compact_id: int,
+    history: list[HumanMessage | AIMessage],
+) -> None:
+    resumed = await _cold_reader(pool).aget_tuple(config)
+    assert resumed is not None
+    messages = resumed.checkpoint["channel_values"]["messages"]
+    assert messages[:2] == history
+    assert any(message.content == "continued" for message in messages)
+    assert _inbound_status(db_conn, compact_id) == ("done",)
+
+
 @pytest.mark.parametrize("interval", [1, 100])
 async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound(
     db_conn: psycopg.Connection,
@@ -98,14 +182,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     replies: list[str] = []
 
     graph, saver, config, history = await _prepare_graph(aops_pool, agent, interval, replies)
-    row = db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
-        "VALUES(%s,'','compact_request','user') RETURNING id",
-        (agent,),
-    ).fetchone()
-    assert row is not None
-    compact_id = row[0]
-    db_conn.commit()
+    compact_id = _queue_compact_request(db_conn, agent)
 
     redis = open_async_redis(settings.data_plane.redis_url)
     channel = f"{settings.data_plane.events_channel}:compact-proof:{agent}"
@@ -118,45 +195,23 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
     )
-    host = AgentHost(
-        pool=aops_pool,
-        checkpointer=saver,
-        graph=graph,
-        machine="claim-test",
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(),
-    )
-    monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
-    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
-
-    async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
-        return await host._invoke_until_done(target, ctx)
-
-    monkeypatch.setattr(host, "_drive_turns", drive)
+    host = _build_host_driving_invoke_until_done(aops_pool, saver, graph, ctx, monkeypatch)
     try:
         async with redis.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType] — redis stubs
             await subscription.subscribe(channel)
             await publisher.start()
             await asyncio.wait_for(host.run_turn(agent), 5)
-            event = await _receive_error(subscription)
-            assert event.agent_id == agent
-            assert (
-                "CompactionFailedError" in event.content
-                and "history was preserved" in event.content
+            await _assert_failure_is_visible_and_durable(
+                db_conn,
+                aops_pool,
+                subscription,
+                config,
+                agent=agent,
+                compact_id=compact_id,
+                history=history,
             )
             assert not replies
             assert summary.await_count == COMPACT_MAX_ATTEMPTS
-            cold = await _cold_reader(aops_pool).aget_tuple(config)
-            assert cold is not None
-            persisted = cold.checkpoint["channel_values"]
-            assert persisted["halted"] is True
-            assert persisted["messages"] == history
-            assert db_conn.execute(
-                "SELECT status FROM inbound_messages WHERE id=%s", (compact_id,)
-            ).fetchone() == ("done",)
-            assert db_conn.execute(
-                "SELECT status FROM agents_meta WHERE id=%s", (agent,)
-            ).fetchone() == ("idling",)
 
             insert_inbound_message(
                 db_conn,
@@ -169,14 +224,9 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
             await asyncio.wait_for(host.run_turn(agent), 5)
             assert replies == ["continued"]
             assert summary.await_count == COMPACT_MAX_ATTEMPTS
-            resumed = await _cold_reader(aops_pool).aget_tuple(config)
-            assert resumed is not None
-            messages = resumed.checkpoint["channel_values"]["messages"]
-            assert messages[:2] == history
-            assert any(message.content == "continued" for message in messages)
-            assert db_conn.execute(
-                "SELECT status FROM inbound_messages WHERE id=%s", (compact_id,)
-            ).fetchone() == ("done",)
+            await _assert_new_inbound_resumes_with_history(
+                db_conn, aops_pool, config, compact_id=compact_id, history=history
+            )
     finally:
         await publisher.aclose()
         await redis.aclose()

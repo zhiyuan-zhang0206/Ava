@@ -26,6 +26,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import numpy as np
 import pytest
@@ -211,9 +212,7 @@ def test_process_paths_deletes_missing_files(tmp_path: Path, store_backend: Stor
 
 
 def test_event_handler_pushes_md_paths_only() -> None:
-    import queue as q
-
-    dirty: q.Queue[Path] = q.Queue()
+    dirty: queue.Queue[Path] = queue.Queue()
     handler = daemon._MarkdownEventHandler(dirty)
 
     class E:
@@ -233,9 +232,7 @@ def test_event_handler_pushes_md_paths_only() -> None:
 
 
 def test_event_handler_on_moved_pushes_both_ends() -> None:
-    import queue as q
-
-    dirty: q.Queue[Path] = q.Queue()
+    dirty: queue.Queue[Path] = queue.Queue()
     handler = daemon._MarkdownEventHandler(dirty)
 
     class MoveEvent:
@@ -628,8 +625,6 @@ def test_refresh_gateway_checkout_fast_forwards(
 ) -> None:
     """Safety net: pulls origin/main into the gateway checkout and logs
     loudly when HEAD moved (a post-merge refresh was missed)."""
-    import logging
-
     subprocess.run(  # noqa: S603 — fixed argv, test sandbox
         ["git", "init", "-q", str(tmp_path)], check=True
     )
@@ -666,8 +661,6 @@ def test_refresh_gateway_checkout_failure_logs_and_does_not_raise(
 ) -> None:
     """A failed pull is logged at ERROR and never raised — the drain loop
     retries next cycle instead of letting the daemon die."""
-    import logging
-
     from base.deploy.git import memory_repo
 
     monkeypatch.setattr(memory_repo, "gateway_memory_dir", lambda: tmp_path)
@@ -965,33 +958,42 @@ def test_complete_file_still_commits_when_another_fails(
     assert str(partial.resolve()) not in meta
 
 
-def test_reconcile_retry_schedule_backoff_and_reset() -> None:
-    now = 100.0
-    retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=9.0, clock=lambda: now)
+def _assert_retry_idle(retry: daemon._ReconcileRetrySchedule) -> None:
     assert not retry.pending
     assert not retry.due()
     assert retry.retry_in_s() is None
+
+
+def _assert_one_ladder_rung(
+    retry: daemon._ReconcileRetrySchedule, clock: SimpleNamespace, delay: float
+) -> None:
+    """One incomplete signal arms the rung; repeated drain failures cannot postpone it."""
+    assert retry.record_incomplete() == delay
+    assert retry.pending
+    assert not retry.due()
+    assert retry.retry_in_s() == delay
+    clock.now += delay - 0.25
+    assert retry.ensure_scheduled() is None
+    assert retry.retry_in_s() == 0.25
+    assert not retry.due()
+    clock.now += 0.25
+    assert retry.due()
+    clock.now += 1.0
+    assert retry.retry_in_s() == 0.0
+
+
+def test_reconcile_retry_schedule_backoff_and_reset() -> None:
+    clock = SimpleNamespace(now=100.0)
+    retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=9.0, clock=lambda: clock.now)
+    _assert_retry_idle(retry)
     # Each incomplete signal advances the ladder, including an idle drain failure.
     for delay in [2.0, 4.0, 8.0, 9.0, 9.0]:
-        assert retry.record_incomplete() == delay
-        assert retry.pending
-        assert not retry.due()
-        assert retry.retry_in_s() == delay
-        now += delay - 0.25
-        assert retry.ensure_scheduled() is None
-        assert retry.retry_in_s() == 0.25  # repeated drain failures cannot postpone it
-        assert not retry.due()
-        now += 0.25
-        assert retry.due()
-        now += 1.0
-        assert retry.retry_in_s() == 0.0
+        _assert_one_ladder_rung(retry, clock, delay)
     # A quota outage may last indefinitely; the capped backoff must not overflow.
     for _ in range(1100):
         assert retry.record_incomplete() == 9.0
     retry.record_pass_complete()
-    assert not retry.pending
-    assert not retry.due()
-    assert retry.retry_in_s() is None
+    _assert_retry_idle(retry)
     assert retry.ensure_scheduled() == 2.0  # an idle drain failure takes the base rung
     assert retry.record_incomplete() == 4.0  # its incomplete follow-up takes the next
 
@@ -1025,14 +1027,38 @@ class _FlakyProvider(_FakeProvider):
         return super().embed_batch(texts)
 
 
+async def _cancel_quietly(task: asyncio.Task[None]) -> None:
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+
+async def _assert_gap_closed(
+    backend: StoreBackend,
+    files: set[Path],
+    retry: daemon._ReconcileRetrySchedule,
+    liveness: Liveness,
+    reconcile: Mock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert liveness.is_alive()
+    assert set(await asyncio.to_thread(backend.all_meta)) == {str(p) for p in files}
+    assert not retry.pending
+    assert retry.retry_in_s() is None
+    passes = reconcile.call_count
+    assert passes == 4  # startup, two incomplete retries, then completion
+    await asyncio.sleep(0.15)  # no extra pass after the cap-sized wait elapses
+    assert reconcile.call_count == passes
+    assert "gap closed; retries cleared" in caplog.text
+    assert "reconcile incomplete; retry scheduled in 0.1s" in caplog.text
+
+
 async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from unittest.mock import Mock
-
     reconcile = Mock(wraps=daemon._reconcile)
     monkeypatch.setattr(daemon, "_reconcile", reconcile)
     # More than one reconcile chunk: recovery must fill the entire original gap.
@@ -1056,20 +1082,9 @@ async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
                     assert not task.done()
                     assert liveness.is_alive()
                     await asyncio.sleep(0.01)
-            assert liveness.is_alive()
-            assert set(await asyncio.to_thread(backend.all_meta)) == {str(p) for p in files}
-            assert not retry.pending
-            assert retry.retry_in_s() is None
-            passes = reconcile.call_count
-            assert passes == 4  # startup, two incomplete retries, then completion
-            await asyncio.sleep(0.15)  # no extra pass after the cap-sized wait elapses
-            assert reconcile.call_count == passes
-            assert "gap closed; retries cleared" in caplog.text
-            assert "reconcile incomplete; retry scheduled in 0.1s" in caplog.text
+            await _assert_gap_closed(backend, files, retry, liveness, reconcile, caplog)
         finally:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+            await _cancel_quietly(task)
 
 
 async def test_reconcile_retry_drain_failure_arms_schedule(
@@ -1105,17 +1120,13 @@ async def test_reconcile_retry_drain_failure_arms_schedule(
         assert provider.attempts == 2
         assert not retry.pending
     finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        await _cancel_quietly(task)
 
 
 async def test_reconcile_retry_beats_between_failed_pass_and_batch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from unittest.mock import Mock
-
     completed = {"reconcile": 0, "batch": 0}
 
     def slow_reconcile(*args: Any) -> bool:
@@ -1147,16 +1158,12 @@ async def test_reconcile_retry_beats_between_failed_pass_and_batch(
         assert completed["reconcile"] >= 1
         assert completed["batch"] == 1
     finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        await _cancel_quietly(task)
 
 
 async def test_run_unknown_provider_fails_before_health_server(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from unittest.mock import AsyncMock
-
     start_health_server = AsyncMock()
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
     monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
@@ -1175,8 +1182,6 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from unittest.mock import AsyncMock, Mock
-
     from services.memory_indexer.backends.probe import ProbeResult
 
     backend = Mock()
@@ -1218,8 +1223,6 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
 async def test_reconcile_retry_wait_keeps_liveness_and_cancels_promptly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from unittest.mock import Mock
-
     monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
     # Wait far longer than the heartbeat ceiling while keeping the test bounded.
     retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=2.0)
@@ -1249,7 +1252,6 @@ async def test_reconcile_retry_inflight_pass_cancels_promptly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from threading import Event
-    from unittest.mock import Mock
 
     entered, release, finished = Event(), Event(), Event()
 
@@ -1281,7 +1283,5 @@ async def test_reconcile_retry_inflight_pass_cancels_promptly(
         assert not finished.is_set()  # cancellation does not stop the executor thread
     finally:
         release.set()
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        await _cancel_quietly(task)
         assert await asyncio.to_thread(finished.wait, 1.0)

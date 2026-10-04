@@ -65,6 +65,58 @@ async def _admitted_descendant(
     return ancestor, agent, await _admit(pool, agent)
 
 
+def _published_errors(publisher: MagicMock) -> list[dict[str, Any]]:
+    payloads = [json.loads(call.args[0]) for call in publisher.emit.call_args_list]
+    return [payload for payload in payloads if payload["role"] == "error"]
+
+
+async def _cold_channel_values(pool: AsyncConnectionPool[Any], config: RunnableConfig) -> Any:
+    reader = AsyncPostgresSaver(pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget(config)
+    assert cold is not None
+    return cold["channel_values"]
+
+
+class _DatabaseOutages:
+    """Makes the first two graph state writes hit a closed connection first."""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+
+async def _inject_database_outages_into_state_writes(
+    monkeypatch: pytest.MonkeyPatch, graph: Any
+) -> _DatabaseOutages:
+    broken = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)
+    await broken.close()
+    original_update = graph.aupdate_state
+    outages = _DatabaseOutages()
+
+    async def interrupted_update(*args: Any, **kwargs: Any) -> Any:
+        if outages.count < 2:
+            outages.count += 1
+            await broken.execute("SELECT 1")
+        return await original_update(*args, **kwargs)
+
+    monkeypatch.setattr(graph, "aupdate_state", interrupted_update)
+    return outages
+
+
+def _assert_ancestor_report(
+    db_conn: psycopg.Connection, *, ancestor: int, agent: int, expected: int
+) -> None:
+    reports = db_conn.execute(
+        "SELECT content,source,payload FROM inbound_messages "
+        "WHERE agent_id=%s AND kind='system_note'",
+        (ancestor,),
+    ).fetchall()
+    assert len(reports) == expected
+    if reports:
+        assert reports[0][0].startswith(f"Descendant agent {agent} is blocked")
+        assert reports[0][1:] == ("system", {"note_tag": "agent_reply"})
+
+
 @pytest.mark.parametrize("failure", ["compaction", "provider"])
 async def test_abort_survives_database_loss_before_halted_state_write(
     db_conn: psycopg.Connection,
@@ -92,19 +144,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
             (agent,),
         )
         db_conn.commit()
-    broken = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)
-    await broken.close()
-    original_update = graph.aupdate_state
-    outages = 0
-
-    async def interrupted_update(*args: Any, **kwargs: Any) -> Any:
-        nonlocal outages
-        if outages < 2:
-            outages += 1
-            await broken.execute("SELECT 1")
-        return await original_update(*args, **kwargs)
-
-    monkeypatch.setattr(graph, "aupdate_state", interrupted_update)
+    outages = await _inject_database_outages_into_state_writes(monkeypatch, graph)
     host = AgentHost(
         pool=aops_pool,
         checkpointer=saver,
@@ -123,17 +163,9 @@ async def test_abort_survives_database_loss_before_halted_state_write(
     )
     with bind_turn_identity(agent, incarnation=owner):
         assert not (await host._invoke_until_done(agent, ctx)).exited
-    assert outages == 2 and len(model_calls) == (0 if failure == "compaction" else 1)
-    errors = [
-        json.loads(call.args[0])
-        for call in publisher.emit.call_args_list
-        if json.loads(call.args[0])["role"] == "error"
-    ]
-    reader = AsyncPostgresSaver(aops_pool)
-    wrap_saver_reads_with_delta_reconstruction(reader)
-    cold = await reader.aget(config)
-    assert cold is not None
-    values = cold["channel_values"]
+    assert outages.count == 2 and len(model_calls) == (0 if failure == "compaction" else 1)
+    errors = _published_errors(publisher)
+    values = await _cold_channel_values(aops_pool, config)
     assert values["halted"] is True and values["messages"] == history
     if failure == "compaction":
         assert summary.await_count == COMPACT_MAX_ATTEMPTS
@@ -143,15 +175,12 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         ).fetchone() == ("done",)
     else:
         assert values["circuit"].open and values["circuit"].reason == "auth"
-    reports = db_conn.execute(
-        "SELECT content,source,payload FROM inbound_messages "
-        "WHERE agent_id=%s AND kind='system_note'",
-        (ancestor,),
-    ).fetchall()
-    assert len(reports) == (0 if failure == "compaction" else 1)
-    if reports:
-        assert reports[0][0].startswith(f"Descendant agent {agent} is blocked")
-        assert reports[0][1:] == ("system", {"note_tag": "agent_reply"})
+    _assert_ancestor_report(
+        db_conn,
+        ancestor=ancestor,
+        agent=agent,
+        expected=0 if failure == "compaction" else 1,
+    )
     assert len(errors) == 1 and errors[0]["agent_id"] == agent
 
 

@@ -320,10 +320,23 @@ print("__HELP_OUTPUTS__" + json.dumps(outputs, sort_keys=True))
     )
     outputs = json.loads(output_line.removeprefix("__HELP_OUTPUTS__"))
 
+    _assert_help_shim_installed_beside_builtin(outputs)
+    _assert_ava_targets_render_ava_help(outputs)
+    _assert_foreign_targets_render_builtin_help(outputs)
+
+
+def _assert_help_shim_installed_beside_builtin(outputs: dict[str, Any]) -> None:
     assert outputs["shim_is_global_builtin"] is False
     assert outputs["global_builtin_type"] == "_sitebuiltins._Helper"
+
+
+def _assert_ava_targets_render_ava_help(outputs: dict[str, Any]) -> None:
     assert outputs["ava_files"] == outputs["expected_ava_files"]
     assert outputs["agent_status"] == outputs["expected_agent_status"]
+    assert outputs["two_ava"] == outputs["expected_two_ava"]
+
+
+def _assert_foreign_targets_render_builtin_help(outputs: dict[str, Any]) -> None:
     assert outputs["str"] == outputs["expected_str"]
     assert outputs["os_path"] == outputs["expected_os_path"]
     assert outputs["no_args"] == outputs["expected_no_args"]
@@ -334,7 +347,6 @@ print("__HELP_OUTPUTS__" + json.dumps(outputs, sort_keys=True))
         "output": f"{outputs['expected_ava_files']['output']}\n"
         f"{outputs['expected_os_path']['output']}",
     }
-    assert outputs["two_ava"] == outputs["expected_two_ava"]
 
 
 def test_help_is_ava_target_accepts_only_agent_visible_sdk_objects() -> None:

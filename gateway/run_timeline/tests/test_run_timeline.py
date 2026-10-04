@@ -12,6 +12,7 @@ from base.db import ChatInboundFact, Database
 from gateway.run_timeline.router import (
     _ANOMALY_EVENTS,
     _TURN_EVENTS,
+    TurnTimelineAggregate,
     _inbounds_for_window,
     _narrative_for_window,
     aggregate_turn_timeline,
@@ -48,9 +49,8 @@ def _event(
     }
 
 
-def test_aggregate_turn_timeline_joins_usage_and_marks_compact_boundary() -> None:
-    start = datetime(2026, 8, 29, 8, tzinfo=UTC)
-    events = [
+def _two_turns_split_by_compact(start: datetime) -> list[dict[str, object]]:
+    return [
         _event("agent_spawned", start),
         _event(
             "llm_usage",
@@ -92,23 +92,37 @@ def test_aggregate_turn_timeline_joins_usage_and_marks_compact_boundary() -> Non
         ),
     ]
 
-    timeline = aggregate_turn_timeline(events, start, start + timedelta(seconds=16))
 
+def _assert_meta_and_boundaries_cover_both_turns(timeline: TurnTimelineAggregate) -> None:
     assert timeline.meta.n_turns == 2
     assert timeline.meta.tokens_in == 360
     assert timeline.meta.tokens_out == 36
     assert timeline.meta.n_exec_failed == 1
     assert timeline.boundaries.initialize_turn == 1
     assert timeline.boundaries.last_before_compact_turn == 1
-    assert timeline.rows[0].start == start
-    assert timeline.rows[0].llm.in_total == 120
-    assert timeline.rows[0].llm.cache_read == 100
-    assert timeline.rows[0].model_dump(mode="json")["execs"] == [
-        {"tool": "execute_code", "ok": False}
-    ]
-    assert timeline.rows[0].active_s == 1.5
     assert timeline.meta.active_s == 1.5
-    assert timeline.rows[0].anomalies == ["exec_failed"]
+
+
+def _assert_first_turn_joins_usage_and_failed_exec(
+    timeline: TurnTimelineAggregate, start: datetime
+) -> None:
+    row = timeline.rows[0]
+    assert row.start == start
+    assert row.llm.in_total == 120
+    assert row.llm.cache_read == 100
+    assert row.model_dump(mode="json")["execs"] == [{"tool": "execute_code", "ok": False}]
+    assert row.active_s == 1.5
+    assert row.anomalies == ["exec_failed"]
+
+
+def test_aggregate_turn_timeline_joins_usage_and_marks_compact_boundary() -> None:
+    start = datetime(2026, 8, 29, 8, tzinfo=UTC)
+    events = _two_turns_split_by_compact(start)
+
+    timeline = aggregate_turn_timeline(events, start, start + timedelta(seconds=16))
+
+    _assert_meta_and_boundaries_cover_both_turns(timeline)
+    _assert_first_turn_joins_usage_and_failed_exec(timeline, start)
     assert timeline.rows[1].ok is False
 
 

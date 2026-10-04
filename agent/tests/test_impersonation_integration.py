@@ -1,5 +1,6 @@
 """Real PostgreSQL + compiled graph + exec child cooperative handoff."""
 
+import json
 from pathlib import Path
 from typing import Annotated, Any
 from unittest.mock import MagicMock, Mock
@@ -160,6 +161,80 @@ async def _prepare_graph(
     return graph, saver, ctx, config, reset, owner, requested, model_calls
 
 
+async def _assert_consent_tool_result_checkpointed(
+    saver: AsyncPostgresSaver, config: RunnableConfig
+) -> None:
+    checkpoint = await saver.aget(config)
+    assert checkpoint is not None
+    assert any(
+        getattr(message, "tool_call_id", None) == "consent"
+        for message in checkpoint["channel_values"]["messages"]
+    )
+
+
+def _deliver_peers_and_ack_first(
+    db_conn: psycopg.Connection[Any],
+    database: Database,
+    event_bus: EventBus,
+    requested: dict[str, Any],
+    agent_id: int,
+) -> int:
+    """Queue two peer messages, ACK the first through the lease; the still-pending id."""
+    first_peer = insert_inbound_message(
+        db_conn,
+        agent_id,
+        "Peer message acknowledged",
+        source="agent:99",
+        bus=event_bus,
+        database=database,
+    )
+    second_peer = insert_inbound_message(
+        db_conn,
+        agent_id,
+        "Peer message still pending",
+        source="agent:99",
+        bus=event_bus,
+        database=database,
+    )
+    inbox = leases.inbox(database, requested["id"], attested_caller(requested))
+    assert {row["id"] for row in inbox} == {first_peer, second_peer}
+    leases.ack(database, event_bus, requested["id"], attested_caller(requested), [first_peer])
+    return second_peer
+
+
+def _end_external_session(
+    db_conn: psycopg.Connection[Any],
+    database: Database,
+    event_bus: EventBus,
+    requested: dict[str, Any],
+    finish: str,
+) -> None:
+    """End the external lease by release or by letting it expire."""
+    if finish == "release":
+        leases.release(
+            database,
+            event_bus,
+            requested["id"],
+            attested_caller(requested),
+            "External work complete",
+        )
+        return
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
+        (requested["id"],),
+    )
+    db_conn.commit()
+    with pytest.raises(leases.ImpersonationError, match="expired"):
+        leases.require_active(database, requested["id"], attested_caller(requested))
+
+
+def _assert_resumed_transcript(resumed: dict[str, Any], finish: str) -> None:
+    transcript = "\n".join(str(message.content) for message in resumed["messages"])
+    assert ("External work complete" if finish == "release" else "expired") in transcript
+    assert "Peer message still pending" in transcript
+    assert "Peer message acknowledged" not in transcript
+
+
 @pytest.mark.parametrize("finish", ["release", "expire"])
 @pytest.mark.usefixtures("runner_exec_env")
 async def test_consent_exec_inbox_release_and_resume(
@@ -206,32 +281,10 @@ async def test_consent_exec_inbox_release_and_resume(
             (requested["id"],),
         )
         db_conn.commit()
-        checkpoint = await saver.aget(config)
-        assert checkpoint is not None
-        assert any(
-            getattr(message, "tool_call_id", None) == "consent"
-            for message in checkpoint["channel_values"]["messages"]
+        await _assert_consent_tool_result_checkpointed(saver, config)
+        second_peer = _deliver_peers_and_ack_first(
+            db_conn, database, event_bus, requested, agent_id
         )
-
-        first_peer = insert_inbound_message(
-            db_conn,
-            agent_id,
-            "Peer message acknowledged",
-            source="agent:99",
-            bus=event_bus,
-            database=database,
-        )
-        second_peer = insert_inbound_message(
-            db_conn,
-            agent_id,
-            "Peer message still pending",
-            source="agent:99",
-            bus=event_bus,
-            database=database,
-        )
-        inbox = leases.inbox(database, requested["id"], attested_caller(requested))
-        assert {row["id"] for row in inbox} == {first_peer, second_peer}
-        leases.ack(database, event_bus, requested["id"], attested_caller(requested), [first_peer])
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, agent_id)
         assert len(model_calls) == 1
@@ -247,34 +300,65 @@ async def test_consent_exec_inbox_release_and_resume(
             encode_plugin_delta({"handoff__total": 7}, graph.builder.state_schema),
             expected_version=0,
         )
-        if finish == "release":
-            leases.release(
-                database,
-                event_bus,
-                requested["id"],
-                attested_caller(requested),
-                "External work complete",
-            )
-        else:
-            db_conn.execute(
-                "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
-                (requested["id"],),
-            )
-            db_conn.commit()
-            with pytest.raises(leases.ImpersonationError, match="expired"):
-                leases.require_active(database, requested["id"], attested_caller(requested))
+        _end_external_session(db_conn, database, event_bus, requested, finish)
         assert not await settle_checkpoint(graph, database, event_bus, agent_id)
         resumed = await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, agent_id)
         assert resumed["handoff__total"] == 7
         assert len(model_calls) == 2
-        transcript = "\n".join(str(message.content) for message in resumed["messages"])
-        assert ("External work complete" if finish == "release" else "expired") in transcript
-        assert "Peer message still pending" in transcript
-        assert "Peer message acknowledged" not in transcript
+        _assert_resumed_transcript(resumed, finish)
         # A second resume-boundary pass cannot double an additive reducer.
         assert not await settle_checkpoint(graph, database, event_bus, agent_id)
         assert (await graph.aget_state(config)).values["handoff__total"] == 7
+
+
+def _executor_acks_says_and_releases(
+    database: Database,
+    event_bus: EventBus,
+    requested: dict[str, Any],
+    inbound_id: int,
+) -> None:
+    """The external executor reads and ACKs the queued input, reports, then releases."""
+    from base.agents.impersonation import history as history
+
+    leases.inbox(database, requested["id"], attested_caller(requested))
+    leases.ack(database, event_bus, requested["id"], attested_caller(requested), [inbound_id])
+    history.say(
+        database,
+        event_bus,
+        requested["id"],
+        attested_caller(requested),
+        "Work completed",
+        message_key="result",
+    )
+    leases.release(
+        database,
+        event_bus,
+        requested["id"],
+        attested_caller(requested),
+        "Fixed login and verified the result.",
+    )
+
+
+def _assert_end_note_and_handoff_document(last: Any, workspace: Path) -> None:
+    handoff_path = workspace / "impersonation" / "0.json"
+    assert last.additional_kwargs["ava_note_tag"] == "impersonation"
+    assert "Fixed login and verified" in last.content
+    document = json.loads(handoff_path.read_text())
+    assert [m["payload"]["content"] for m in document["messages"]] == [
+        "During takeover",
+        "Work completed",
+    ]
+    assert document["messages"][0]["acknowledged"]
+    assert str(handoff_path) in last.content
+
+
+def _assert_handoff_precedes_queued_input(messages: list[Any]) -> None:
+    handoff_index = next(
+        i for i, m in enumerate(messages) if m.id.startswith("impersonation-handoff:")
+    )
+    next_index = next(i for i, m in enumerate(messages) if "Next task" in m.content)
+    assert handoff_index < next_index
 
 
 async def test_automatic_takeover_handoff_precedes_queued_input(
@@ -285,9 +369,6 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    import json
-    from pathlib import Path
-
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
@@ -320,23 +401,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
             database=database,
         )
         db_conn.commit()
-        leases.inbox(database, requested["id"], attested_caller(requested))
-        leases.ack(database, event_bus, requested["id"], attested_caller(requested), [inbound_id])
-        history.say(
-            database,
-            event_bus,
-            requested["id"],
-            attested_caller(requested),
-            "Work completed",
-            message_key="result",
-        )
-        leases.release(
-            database,
-            event_bus,
-            requested["id"],
-            attested_caller(requested),
-            "Fixed login and verified the result.",
-        )
+        _executor_acks_says_and_releases(database, event_bus, requested, inbound_id)
         later = insert_inbound_message(
             db_conn, owner.agent_id, "Next task", source="user", bus=event_bus, database=database
         )
@@ -346,16 +411,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         await flush_checkpoint(saver, owner.agent_id)
         assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         snapshot = await graph.aget_state(config)
-        last = snapshot.values["messages"][-1]
-        assert last.additional_kwargs["ava_note_tag"] == "impersonation"
-        assert "Fixed login and verified" in last.content
-        document = json.loads((tmp_path / "impersonation" / "0.json").read_text())
-        assert [m["payload"]["content"] for m in document["messages"]] == [
-            "During takeover",
-            "Work completed",
-        ]
-        assert document["messages"][0]["acknowledged"]
-        assert str(Path(tmp_path) / "impersonation" / "0.json") in last.content
+        _assert_end_note_and_handoff_document(snapshot.values["messages"][-1], tmp_path)
         assert db_conn.execute(
             "SELECT status FROM inbound_messages WHERE id=%s", (later,)
         ).fetchone() == ("pending",)
@@ -363,12 +419,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         await graph.ainvoke(reset, config, context=ctx)
         assert len(model_calls) == 1
-        messages = model_calls[0].messages
-        handoff_index = next(
-            i for i, m in enumerate(messages) if m.id.startswith("impersonation-handoff:")
-        )
-        next_index = next(i for i, m in enumerate(messages) if "Next task" in m.content)
-        assert handoff_index < next_index
+        _assert_handoff_precedes_queued_input(model_calls[0].messages)
 
 
 async def test_accepted_session_repairs_missing_start_checkpoint(
@@ -582,6 +633,56 @@ async def test_end_note_resumes_an_empty_queue(
         assert resumed["impersonation_handoff_id"] == f"{owner.agent_id}:0"
 
 
+async def _stop_takeover_with_lost_relay(
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    owner: RuntimeIncarnation,
+) -> str:
+    """A lost relay outside the fresh-start window stops the takeover; the death detail."""
+    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(
+        impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic() - 1000.0
+    )
+    session = leases.native_status(database, event_bus, owner.agent_id, owner)
+    assert session is not None
+    await impersonation.supervise_relay(database, event_bus, session, owner.agent_id)
+    return "the bound relay stopped heartbeating"
+
+
+def _stop_takeover_with_exhausted_ack(
+    db_conn: psycopg.Connection[Any], requested: dict[str, Any], owner: RuntimeIncarnation
+) -> str:
+    """Stage an input whose ACK window ran out twice; the death detail the supervisor names."""
+    row = db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,kind,source,content) "
+        "VALUES(%s,'chat','user','Preserve this unacknowledged input') RETURNING id",
+        (owner.agent_id,),
+    ).fetchone()
+    assert row is not None
+    db_conn.execute(
+        "INSERT INTO agent_impersonation_messages(lease_id,inbound_id,delivery_attempts,last_delivery_at) "
+        "VALUES(%s,%s,2,clock_timestamp()-interval '181 seconds')",
+        (requested["id"], row[0]),
+    )
+    db_conn.commit()
+    return (
+        f"the executor did not ACK message {row[0]} after 2 delivery attempts (180s per ACK window)"
+    )
+
+
+def _assert_death_cause_note(note: Any, agent_id: int, detail: str) -> None:
+    assert note.id == f"impersonation-handoff:{agent_id}:0"
+    assert f"This session was stopped early: {detail}." in note.content
+    assert "structured handoff" not in note.content
+
+
+def _assert_unacknowledged_input_preserved(workspace: Path) -> None:
+    handoff = (workspace / "impersonation/0.json").read_text()
+    assert "Preserve this unacknowledged input" in handoff
+    assert '"acknowledged": false' in handoff
+
+
 @pytest.mark.parametrize("cause", ["relay_death", "ack_exhaustion"])
 async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
     cause: str,
@@ -619,31 +720,9 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         assert not model_calls
         if cause == "relay_death":
-            # A lost relay outside the fresh-start window stops the takeover.
-            monkeypatch.setattr(
-                impersonation, "_provider_anchor_states", Mock(return_value=["alive"])
-            )
-            monkeypatch.setattr(
-                impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic() - 1000.0
-            )
-            session = leases.native_status(database, event_bus, owner.agent_id, owner)
-            assert session is not None
-            await impersonation.supervise_relay(database, event_bus, session, owner.agent_id)
-            detail = "the bound relay stopped heartbeating"
+            detail = await _stop_takeover_with_lost_relay(monkeypatch, database, event_bus, owner)
         else:
-            row = db_conn.execute(
-                "INSERT INTO inbound_messages(agent_id,kind,source,content) "
-                "VALUES(%s,'chat','user','Preserve this unacknowledged input') RETURNING id",
-                (owner.agent_id,),
-            ).fetchone()
-            assert row is not None
-            db_conn.execute(
-                "INSERT INTO agent_impersonation_messages(lease_id,inbound_id,delivery_attempts,last_delivery_at) "
-                "VALUES(%s,%s,2,clock_timestamp()-interval '181 seconds')",
-                (requested["id"], row[0]),
-            )
-            db_conn.commit()
-            detail = f"the executor did not ACK message {row[0]} after 2 delivery attempts (180s per ACK window)"
+            detail = _stop_takeover_with_exhausted_ack(db_conn, requested, owner)
         died = leases.get(database, event_bus, requested["id"], attested_caller(requested))
         assert died["status"] == "expired"
         assert died["rejection_reason"] == f"aborted: {detail}"
@@ -657,12 +736,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         resumed = await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
         assert len(model_calls) == 1
-        note = model_calls[0].messages[-1]
-        assert note.id == f"impersonation-handoff:{owner.agent_id}:0"
-        assert f"This session was stopped early: {detail}." in note.content
+        _assert_death_cause_note(model_calls[0].messages[-1], owner.agent_id, detail)
         if cause == "ack_exhaustion":
-            handoff = (tmp_path / "impersonation/0.json").read_text()
-            assert "Preserve this unacknowledged input" in handoff
-            assert '"acknowledged": false' in handoff
-        assert "structured handoff" not in note.content
+            _assert_unacknowledged_input_preserved(tmp_path)
         assert resumed["impersonation_handoff_id"] == f"{owner.agent_id}:0"

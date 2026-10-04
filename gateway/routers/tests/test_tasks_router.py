@@ -539,6 +539,41 @@ class _TaskQueryRecordingPool:
         return self.recording_connection
 
 
+_TASK_SUMMARY_FIELDS = frozenset(
+    {
+        "id",
+        "parent_id",
+        "title",
+        "status",
+        "priority",
+        "owner",
+        "owner_label",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "remind_interval_seconds",
+        "last_reminded_at",
+        "reminder_count",
+        "token_budget",
+        "usd_budget",
+        "token_used",
+        "usd_used",
+        "ghost",
+    }
+)
+_TASK_FULL_FIELDS = _TASK_SUMMARY_FIELDS | {"description", "results"}
+
+
+def _list_tasks_ok(client: TestClient, **params: str) -> dict[str, Any]:
+    response = client.get("/api/tasks", params=params)
+    assert response.status_code == 200
+    return response.json()
+
+
+def _task_row(body: dict[str, Any], task_id: int) -> dict[str, Any]:
+    return next(t for t in body["tasks"] if t["id"] == task_id)
+
+
 class TestGetTaskFields:
     def test_full_is_backward_compatible_and_summary_is_metadata_only(
         self, db_conn: psycopg.Connection
@@ -548,62 +583,19 @@ class TestGetTaskFields:
         results = "r" * 301
         tid = _make_task(db_conn, owner=owner, description=description, results=results)
         with TestClient(app) as client:
-            default = client.get("/api/tasks")
-            full = client.get("/api/tasks", params={"fields": "full"})
-            summary = client.get("/api/tasks", params={"fields": "summary"})
+            default = _list_tasks_ok(client)
+            full = _list_tasks_ok(client, fields="full")
+            summary = _list_tasks_ok(client, fields="summary")
 
-        assert default.status_code == 200
-        assert full.status_code == 200
-        assert summary.status_code == 200
-        assert full.json() == default.json()
+        assert full == default
 
-        full_row = next(t for t in full.json()["tasks"] if t["id"] == tid)
-        assert set(full_row) == {
-            "id",
-            "parent_id",
-            "title",
-            "description",
-            "results",
-            "status",
-            "priority",
-            "owner",
-            "owner_label",
-            "created_by",
-            "created_at",
-            "updated_at",
-            "remind_interval_seconds",
-            "last_reminded_at",
-            "reminder_count",
-            "token_budget",
-            "usd_budget",
-            "token_used",
-            "usd_used",
-            "ghost",
-        }
+        full_row = _task_row(full, tid)
+        assert set(full_row) == _TASK_FULL_FIELDS
         assert full_row["description"] == description
         assert full_row["results"] == results
 
-        summary_row = next(t for t in summary.json()["tasks"] if t["id"] == tid)
-        assert set(summary_row) == {
-            "id",
-            "parent_id",
-            "title",
-            "status",
-            "priority",
-            "owner",
-            "owner_label",
-            "created_by",
-            "created_at",
-            "updated_at",
-            "remind_interval_seconds",
-            "last_reminded_at",
-            "reminder_count",
-            "token_budget",
-            "usd_budget",
-            "token_used",
-            "usd_used",
-            "ghost",
-        }
+        summary_row = _task_row(summary, tid)
+        assert set(summary_row) == _TASK_SUMMARY_FIELDS
         assert "description" not in summary_row
         assert "results" not in summary_row
 

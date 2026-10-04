@@ -5,10 +5,6 @@
     "services/ava_root/selfcheck.py::asyncio-task:TreeSelfCheck.start": 1,
     "services/ava_root/supervisor.py::asyncio-task:Supervisor._spawn": 1
   },
-  "complexity": {
-    "services/ava_root/tests/test_ava_root_daemon.py::test_daemon_end_to_end": 15,
-    "services/ava_root/tests/test_ava_root_selfcheck.py::test_missing_process_opens_one_event_per_episode": 15
-  },
   "patch_targets": {
     "services/ava_root/tests/test_ava_root_ipc.py::base.deploy.lifecycle.start_serving._lock_path": 1
   }

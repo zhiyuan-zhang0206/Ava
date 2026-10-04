@@ -1,8 +1,5 @@
 {
   "ambient_state": {
     "gateway/run_timeline/strip.py::ambient-instance:_STRIP_CACHE": 1
-  },
-  "complexity": {
-    "gateway/run_timeline/tests/test_run_timeline.py::test_aggregate_turn_timeline_joins_usage_and_marks_compact_boundary": 15
   }
 }

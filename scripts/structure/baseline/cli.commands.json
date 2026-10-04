@@ -4,22 +4,11 @@
     "cli/commands/extensions/_external_skill_fs.py::host-fact:_POSIX": 1,
     "cli/commands/lifecycle/root_driver.py::global-rebind:_direct_root_child": 1
   },
-  "complexity": {
-    "cli/commands/agents/tests/test_delivery.py::test_real_relay_uses_snapshotted_config_across_restart": 17,
-    "cli/commands/agents/tests/test_delivery.py::test_two_attempts_each_get_a_full_window_then_native_observes_expiry": 16,
-    "cli/commands/extensions/tests/test_packages_refresh.py::test_refresh_applies_only_the_changed_package": 17,
-    "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 18,
-    "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_repo_internal_import_closure": 15,
-    "cli/commands/observability/tests/test_lgtm_native.py::test_ensure_renders_configs_with_native_paths_and_loopback": 24
-  },
   "files": {
     "cli/commands/agents/tests/test_impersonation_bridge.py": 808,
     "cli/commands/cluster/tests/test_cluster_health.py": 2115,
     "cli/commands/management/tests/test_config_cmd.py": 804,
     "cli/commands/observability/tests/test_converge_otel_collector.py": 1249
-  },
-  "nesting": {
-    "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 6
   },
   "patch_targets": {
     "cli/commands/converge/tests/test_converge_firewall.py::base.host.macos_firewall._VERIFY_RETRY_S": 2,

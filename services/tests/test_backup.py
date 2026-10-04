@@ -8,6 +8,7 @@ to the host's timezone would pass or fail by which machine ran it.
 
 from __future__ import annotations
 
+import gzip
 import os
 import subprocess
 import sys
@@ -448,8 +449,6 @@ def test_run_backup_real_dump_and_prune(
     assert not (bdir / "test-20260601T100000Z.dump").exists()
     # The fresh dump is restorable input: decrypt, then list its TOC directly
     # (current artifacts are raw custom dumps — no gzip layer).
-    import subprocess
-
     restored = bdir / "listed.dump"
     cast(Any, backup).decrypt_artifact(path, restored)
     backup.gunzip_if_needed(restored)  # no-op on the new format; proves the contract
@@ -461,6 +460,31 @@ def test_run_backup_real_dump_and_prune(
         check=False,
     )
     assert listing.returncode == 0, listing.stderr
+
+
+def _assert_pg_dump_keeps_checkpoints_and_hides_password(
+    cmds: list[list[str]], envs: list[dict[str, str]], password: str
+) -> list[str]:
+    """The pg_dump child excludes no table and gets the password only via its env."""
+    pg_dump_cmd = next(cmd for cmd in cmds if cmd[0].endswith("pg_dump"))
+    assert "--exclude-table" not in pg_dump_cmd
+    dbname = pg_dump_cmd[pg_dump_cmd.index("--dbname") + 1]
+    assert password not in " ".join(pg_dump_cmd)
+    expected = {"dbname": "whatever", "host": "db.example", "port": "5432", "user": "backup"}
+    assert conninfo_to_dict(dbname) == expected
+    assert envs[cmds.index(pg_dump_cmd)]["PGPASSWORD"] == password
+    return pg_dump_cmd
+
+
+def _assert_dump_compresses_in_dump_then_encrypts(
+    cmds: list[list[str]], pg_dump_cmd: list[str]
+) -> None:
+    """The archive compresses in-dump (zstd); there is no second gzip pass."""
+    assert all(cmd[0] != "gzip" for cmd in cmds)
+    assert "--compress=zstd:3" in pg_dump_cmd
+    assert "--format=custom" in pg_dump_cmd
+    openssl_cmd = next(cmd for cmd in cmds if cmd[0].endswith("openssl"))
+    assert {"enc", "-aes-256-cbc", "-pbkdf2", "-salt", "-kfile"}.issubset(openssl_cmd)
 
 
 def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
@@ -507,25 +531,9 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
     assert bdir.stat().st_mode & 0o777 == 0o700
 
     cmds = cast(list[list[str]], captured["cmds"])
-    pg_dump_cmd = next(cmd for cmd in cmds if cmd[0].endswith("pg_dump"))
-    assert "--exclude-table" not in pg_dump_cmd
-    dbname = pg_dump_cmd[pg_dump_cmd.index("--dbname") + 1]
-    assert password not in " ".join(pg_dump_cmd)
-    assert conninfo_to_dict(dbname) == {
-        "dbname": "whatever",
-        "host": "db.example",
-        "port": "5432",
-        "user": "backup",
-    }
     envs = cast(list[dict[str, str]], captured["envs"])
-    assert envs[cmds.index(pg_dump_cmd)]["PGPASSWORD"] == password
-
-    # The archive compresses in-dump (zstd); there is no second gzip pass.
-    assert all(cmd[0] != "gzip" for cmd in cmds)
-    assert "--compress=zstd:3" in pg_dump_cmd
-    assert "--format=custom" in pg_dump_cmd
-    openssl_cmd = next(cmd for cmd in cmds if cmd[0].endswith("openssl"))
-    assert {"enc", "-aes-256-cbc", "-pbkdf2", "-salt", "-kfile"}.issubset(openssl_cmd)
+    pg_dump_cmd = _assert_pg_dump_keeps_checkpoints_and_hides_password(cmds, envs, password)
+    _assert_dump_compresses_in_dump_then_encrypts(cmds, pg_dump_cmd)
     assert captured["timeout"] == backup._DUMP_TIMEOUT_S
 
 
@@ -623,8 +631,6 @@ def test_gunzip_if_needed_decompresses_legacy_artifact_layer(
 ) -> None:
     """A legacy `.dump.gz.enc` artifact decrypts to gzip bytes; the helper
     strips that layer in place so the restore procedure stays uniform."""
-    import gzip
-
     raw = b"custom-format-pg-dump\x00contents"
     layered = bdir / "legacy.dump"
     layered.write_bytes(gzip.compress(raw))

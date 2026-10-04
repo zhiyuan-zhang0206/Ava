@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -273,14 +274,9 @@ def test_download_retry_preserves_final_error_and_chain(
     )
 
 
-def test_ensure_renders_configs_with_native_paths_and_loopback(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    home = tmp_path / "home"
-    _mark_current(home)
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    # Pin the listen-host and read-URL settings to their defaults so the
-    # rendered bytes are deterministic regardless of the runner's environment.
+def _pin_default_listen_hosts_and_read_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the listen-host and read-URL settings to their defaults so the
+    rendered bytes are deterministic regardless of the runner's environment."""
     monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "127.0.0.1")
     monkeypatch.setattr(
         "base.config.settings.observability.lgtm_grafana_listen_host",
@@ -299,14 +295,8 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
         "base.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
 
-    lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(lgtm_native.BACKENDS))
 
-    config_dir = _native_dir(home) / "config"
-    loki = (config_dir / "loki.yaml").read_text(encoding="utf-8")
-    prometheus = (config_dir / "prometheus.yml").read_text(encoding="utf-8")
-    loki_config = yaml.safe_load(loki)
-    prometheus_config = yaml.safe_load(prometheus)
-    assert "{{AVA_HOME}}" not in loki
+def _assert_rendered_config_dir_layout(config_dir: Path) -> None:
     assert {path.name for path in config_dir.iterdir()} == {
         "grafana.ini",
         "loki.yaml",
@@ -325,6 +315,11 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     assert (config_dir / "provisioning/dashboards/ava-ops-main.json").read_text(
         encoding="utf-8"
     ) == _STUB_RENDER
+
+
+def _assert_loki_renders_native_paths_and_loopback(
+    loki: str, loki_config: dict[str, Any], home: Path
+) -> None:
     assert loki_config["common"]["path_prefix"] == f"{home}/lgtm/native/data/loki"
     assert loki_config["frontend"]["address"] == "127.0.0.1"
     assert (
@@ -343,6 +338,9 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     assert "query_timeout: 50s" in loki
     assert "max_entries_limit_per_query: 50001" in loki
     assert "split_queries_by_interval: 24h" in loki
+
+
+def _assert_prometheus_scrapes_loopback_backends(prometheus_config: dict[str, Any]) -> None:
     targets = {
         job["job_name"]: job["static_configs"][0]["targets"]
         for job in prometheus_config["scrape_configs"]
@@ -358,6 +356,26 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
         job for job in prometheus_config["scrape_configs"] if job["job_name"] == "grafana"
     )
     assert grafana_job["metrics_path"] == "/grafana/metrics"
+
+
+def test_ensure_renders_configs_with_native_paths_and_loopback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    _mark_current(home)
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    _pin_default_listen_hosts_and_read_urls(monkeypatch)
+
+    lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(lgtm_native.BACKENDS))
+
+    config_dir = _native_dir(home) / "config"
+    loki = (config_dir / "loki.yaml").read_text(encoding="utf-8")
+    prometheus = (config_dir / "prometheus.yml").read_text(encoding="utf-8")
+    loki_config = yaml.safe_load(loki)
+    assert "{{AVA_HOME}}" not in loki
+    _assert_rendered_config_dir_layout(config_dir)
+    _assert_loki_renders_native_paths_and_loopback(loki, loki_config, home)
+    _assert_prometheus_scrapes_loopback_backends(yaml.safe_load(prometheus))
 
 
 def test_lgtm_prometheus_copies_keep_the_late_sample_window() -> None:

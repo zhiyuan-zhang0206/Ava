@@ -176,6 +176,25 @@ def test_due_math_and_backoff() -> None:
 # ── integration: one changed package applies, idempotent ────────────────────
 
 
+def _installed_skill_text(name: str) -> str:
+    return (_home() / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+
+
+def _assert_only_foo_content_changed_on_disk() -> None:
+    assert "# v2" in _installed_skill_text("foo")
+    assert "# v1" in _installed_skill_text("bar")
+    assert (_home() / "skills" / ".foo.prev" / "SKILL.md").is_file()
+
+
+def _assert_registry_advanced_to_core_head(c2: str) -> None:
+    foo = _row("foo")
+    assert foo.update.applied_rev == c2
+    assert foo.update.mode == "auto" and foo.update.interval_seconds == 86400
+    assert foo.update.channel == "core" and foo.update.failures == 0
+    assert _row("bar").update.applied_rev == c2
+    assert reg.load().channels["core"].last_seen_sha == c2
+
+
 def test_refresh_applies_only_the_changed_package(core_repo: Path) -> None:
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
@@ -190,20 +209,10 @@ def test_refresh_applies_only_the_changed_package(core_repo: Path) -> None:
     assert by_name["bar"].result == "up_to_date"
     assert report.channel_line is not None and c2[:7] in report.channel_line
 
-    home = _home()
-    assert "# v2" in (home / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
-    assert "# v1" in (home / "skills" / "bar" / "SKILL.md").read_text(encoding="utf-8")
-    assert (home / "skills" / ".foo.prev" / "SKILL.md").is_file()
+    _assert_only_foo_content_changed_on_disk()
     # the checkout is never written
     assert _git(core_repo, "status", "--porcelain") == ""
-
-    foo = _row("foo")
-    assert foo.update.applied_rev == c2
-    assert foo.update.mode == "auto" and foo.update.interval_seconds == 86400
-    assert foo.update.channel == "core" and foo.update.failures == 0
-    assert _row("bar").update.applied_rev == c2
-    channels = reg.load().channels
-    assert channels["core"].last_seen_sha == c2
+    _assert_registry_advanced_to_core_head(c2)
 
     # idempotent second run: nothing to do, no content change
     again = run_refresh(repo=core_repo)
@@ -211,7 +220,7 @@ def test_refresh_applies_only_the_changed_package(core_repo: Path) -> None:
         "foo": "up_to_date",
         "bar": "up_to_date",
     }
-    assert (home / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8") == (
+    assert _installed_skill_text("foo") == (
         (core_repo / "ava_builtins" / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
     )
 

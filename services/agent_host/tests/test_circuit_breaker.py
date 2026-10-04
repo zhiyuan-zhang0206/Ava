@@ -721,6 +721,41 @@ async def _reject_turn(
     )
 
 
+def _spawn_child_under_idling_ancestor(db_conn: psycopg.Connection) -> tuple[int, int]:
+    """A live idling ancestor and its child; returns (ancestor_id, child_id)."""
+    ancestor_id = spawn_agent(spawner="user")
+    child_id = spawn_agent(spawner=f"agent:{ancestor_id}")
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'idling', "
+            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
+            (ancestor_id,),
+        )
+    db_conn.commit()
+    return ancestor_id, child_id
+
+
+def _ancestor_halt_notes(db_conn: psycopg.Connection, ancestor_id: int) -> list[str]:
+    reports = [
+        r[0]
+        for r in db_conn.execute(
+            "SELECT content FROM inbound_messages WHERE agent_id = %s AND kind = 'system_note' "
+            "ORDER BY id",
+            (ancestor_id,),
+        ).fetchall()
+    ]
+    return [note for note in reports if "reason=permanent_provider_reject" in note]
+
+
+def _recovery_halt_errors(publisher: _RecordingPublisher) -> list[dict[str, Any]]:
+    errors = [json.loads(payload) for payload in publisher.payloads]
+    return [
+        err
+        for err in errors
+        if err.get("blocked") and "Automatic recovery is halted" in err.get("content", "")
+    ]
+
+
 async def test_two_permanent_rejections_trip_the_recovery_breaker(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -731,15 +766,7 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     the wake suppression names the reason, the metadata-only report reaches
     the nearest live ancestor, and the frontend gets a blocked Error — while
     ONE rejection alone changes none of it."""
-    ancestor_id = spawn_agent(spawner="user")
-    child_id = spawn_agent(spawner=f"agent:{ancestor_id}")
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET status = 'idling', "
-            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
-            (ancestor_id,),
-        )
-    db_conn.commit()
+    ancestor_id, child_id = _spawn_child_under_idling_ancestor(db_conn)
     publisher = _RecordingPublisher()
 
     await _reject_turn(aops_pool, child_id, publisher=publisher)
@@ -762,15 +789,7 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     assert reason == "permanent_provider_reject"
     assert window_s > 300 * 24 * 3600.0  # until-human, far past any timer
 
-    reports = [
-        r[0]
-        for r in db_conn.execute(
-            "SELECT content FROM inbound_messages WHERE agent_id = %s AND kind = 'system_note' "
-            "ORDER BY id",
-            (ancestor_id,),
-        ).fetchall()
-    ]
-    halt_notes = [note for note in reports if "reason=permanent_provider_reject" in note]
+    halt_notes = _ancestor_halt_notes(db_conn, ancestor_id)
     assert len(halt_notes) == 1
     assert "do not replay" not in halt_notes[0]  # metadata only, never the text
 
@@ -780,14 +799,7 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
         if r["extra"].get("event") == "recovery_breaker_halt"  # pyright: ignore[reportUnknownMemberType]
     ]
     assert len(halt_logs) == 1
-
-    errors = [json.loads(payload) for payload in publisher.payloads]
-    halt_errors = [
-        err
-        for err in errors
-        if err.get("blocked") and "Automatic recovery is halted" in err.get("content", "")
-    ]
-    assert len(halt_errors) == 1
+    assert len(_recovery_halt_errors(publisher)) == 1
 
 
 async def test_transient_rejection_does_not_count_or_trip(

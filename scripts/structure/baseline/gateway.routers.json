@@ -4,10 +4,6 @@
     "gateway/routers/frontend_telemetry.py::ambient-container:_session_windows": 1,
     "gateway/routers/pages.py::ambient-container:_page_host_cache": 1
   },
-  "complexity": {
-    "gateway/routers/tests/test_tasks_router.py::TestGetTaskFields.test_full_is_backward_compatible_and_summary_is_metadata_only": 15,
-    "gateway/routers/tests/test_upload_endpoint.py::TestUploadFile.test_upload_single_file_saves_and_inserts_one_inbound": 15
-  },
   "files": {
     "gateway/routers/tests/test_config_api.py": 1004,
     "gateway/routers/tests/test_fleet_graph.py": 841,
