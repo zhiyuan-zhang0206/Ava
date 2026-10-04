@@ -167,6 +167,7 @@ ALLOWED: dict[str, str] = {
     "ava_builtins/plugins/ava_memory/sdk.py::hidden-cache:_documented_pool": "wraps one home's pool path in a documented constant",
     "base/agents/history/hierarchy/tokens.py::hidden-singleton:_encoder": "loads the fixed tiktoken vocabulary",
     "base/api_contracts/contracts.py::hidden-cache:_template_regex": "a regex compiled from a template string",
+    "base/api_contracts/contracts.py::hidden-singleton:_route_index": "the lookup index of the static ROUTE_CONTRACTS table: an immutable derivation of a literal",
     "base/config/candidate.py::hidden-cache:_candidate_validation_model": "builds a validation subclass of a given Settings class",
     "base/config/service_read.py::hidden-singleton:domain_model_classes": "the static table of Settings domain classes",
     "base/host/env/audit.py::hidden-singleton:_load_alias_metadata": "static alias metadata of the env registry",

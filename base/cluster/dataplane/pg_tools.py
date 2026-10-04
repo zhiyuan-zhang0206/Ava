@@ -26,7 +26,6 @@ import sys
 import tempfile
 from collections.abc import Generator
 from contextlib import closing, contextmanager
-from functools import cache
 from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
 
@@ -151,7 +150,6 @@ _THROWAWAY_PREFIX = "ava-pg-"
 # module under its line ceiling.
 
 
-@cache
 def brew_prefix(formula: str = "") -> Path:
     """`brew --prefix [formula]`. Bare form → the Homebrew root (`/opt/homebrew`
     on Apple Silicon, `/usr/local` on Intel); with a formula → that keg's path.

@@ -25,8 +25,8 @@ tags:
 - `ErrorReason` (StrEnum) is the error identifier on the SDK ↔ gateway HTTP wire. `agent_launch_failed` is the post-commit spawn case: the envelope and SDK exception preserve the committed `agent_id`, current state, and ID-based retry path.
 - Gateway side: catches `AvaAgentError` subclasses → response body `{"detail": str(exc), "reason": exc.reason}` + `exc.http_status`.
 - SDK side: parses the response `reason` → looks up `EXCEPTION_BY_REASON` to reconstruct the same exception type and throw to caller (preserving the original message).
-- `AvaAgentError.__init_subclass__` auto-registers subclasses into `EXCEPTION_BY_REASON` at declaration and enforces both `reason`/`http_status` ClassVars (missing → `TypeError` at import)—the table is the single source of truth. New error = enum value + exception class; registration is automatic.
-- End-of-module assertion `set(EXCEPTION_BY_REASON) == set(ErrorReason)` (`raise`, not `assert`, so it survives `-O`), closing the "added enum, forgot class" gap.
+- `AvaAgentError.__init_subclass__` enforces both `reason`/`http_status` ClassVars (missing → `TypeError` at import). `EXCEPTION_BY_REASON` is a literal table at the module end. New error = enum value + exception class + one table row.
+- End-of-module check (`raise`, not `assert`, so it survives `-O`) requires the table to cover every `ErrorReason` and every `AvaAgentError` subclass, each under its own `reason` — closing the "added enum, forgot class" and "added class, forgot row" gaps.
 - `gateway/middleware/tests/test_agent_error_wire_equivalence.py` parameterizes `EXCEPTION_BY_REASON.values()` to lock down end-to-end roundtrips.
 
 ## Key dependencies

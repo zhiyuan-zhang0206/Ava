@@ -250,12 +250,11 @@ def test_backend_route_matrix(
     monkeypatch.setattr(session_backend, "IS_MACOS", is_macos)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(settings.services, "permissions_helper_spawn", spawn)
-    monkeypatch.setattr(session_backend, "_backend", None)
 
     backend = session_backend.get_backend()
     assert type(backend).__name__ == expected
     if expected == "HelperProcSessionBackend":
-        assert session_backend.native_proc() is backend
+        assert type(session_backend.native_proc()) is type(backend)
 
 
 def test_backend_route_fails_closed_when_settings_are_unreadable(
@@ -271,7 +270,6 @@ def test_backend_route_fails_closed_when_settings_are_unreadable(
 
     monkeypatch.setattr(session_backend, "IS_MACOS", True)
     monkeypatch.setattr(base.config, "settings", BrokenSettings())
-    monkeypatch.setattr(session_backend, "_backend", None)
 
     assert type(session_backend.get_backend()).__name__ == "PosixProcSessionBackend"
 

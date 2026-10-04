@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.turn import progress
 from base.agents.observation import db_wait
-from base.agents.observation.db_wait import database_wait_snapshot
+from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
@@ -74,6 +74,7 @@ def _mark_agent_stale_with_pending_cause(
 
 
 def _recovery_run(
+    waits: DatabaseWaits,
     control: AsyncConnectionPool,
     graph: Any,
     saver: Any,
@@ -88,7 +89,11 @@ def _recovery_run(
         try:
             with bind_turn_identity(agent, incarnation=incarnation):
                 await db_recovery.recover_database(
-                    pool=control, graph=graph, checkpointer=saver, incarnation=incarnation
+                    pool=control,
+                    graph=graph,
+                    checkpointer=saver,
+                    incarnation=incarnation,
+                    database_waits=waits,
                 )
             recovered.set()
             await asyncio.Event().wait()
@@ -98,9 +103,9 @@ def _recovery_run(
     return run
 
 
-async def _wait_until_database_wait_is_visible(agent: int) -> None:
+async def _wait_until_database_wait_is_visible(waits: DatabaseWaits, agent: int) -> None:
     async with asyncio.timeout(2):
-        while database_wait_snapshot(agent) is None:
+        while waits.snapshot(agent) is None:
             await asyncio.sleep(0.001)
 
 
@@ -118,28 +123,29 @@ async def _assert_automatic_scan_spares_the_database_wait(
 
 
 async def _assert_explicit_force_cancels_the_database_wait(
-    scheduler: TurnScheduler, agent: int, cancelled: asyncio.Event
+    waits: DatabaseWaits, scheduler: TurnScheduler, agent: int, cancelled: asyncio.Event
 ) -> None:
     async def validate(_agent: int, _command: int) -> bool:
         return True
 
     assert await scheduler.cancel_exact_force(agent, 1, validate)
     assert cancelled.is_set()
-    assert database_wait_snapshot(agent) is None
+    assert waits.snapshot(agent) is None
 
 
 async def _assert_stale_handling_resumes_after_recovery(
+    waits: DatabaseWaits,
     dispatcher: InboundWakeDispatcher,
     recovered: asyncio.Event,
     cancelled: asyncio.Event,
     agent: int,
 ) -> None:
     await asyncio.wait_for(recovered.wait(), 2)
-    assert database_wait_snapshot(agent) is not None
+    assert waits.snapshot(agent) is not None
     await dispatcher.scan_once()
     assert not cancelled.is_set(), "finite success handoff also protects the next DB stage"
-    db_wait._WAITING[agent].deadline = time.monotonic() - 1
-    assert database_wait_snapshot(agent) is None
+    waits._waiting[agent].deadline = time.monotonic() - 1
+    assert waits.snapshot(agent) is None
     await dispatcher.scan_once()
     assert cancelled.is_set(), "normal stale handling must resume after DB recovery"
 
@@ -174,38 +180,40 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
         db_conn, agent, incarnation, held=held, event_bus=event_bus, database=database
     )
     recovered, cancelled = asyncio.Event(), asyncio.Event()
+    waits = DatabaseWaits()
     progress._PROGRESS[agent] = [time.monotonic() - 100]
     async with AsyncConnectionPool[psycopg.AsyncConnection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
     ) as control:
         scheduler = TurnScheduler(
-            _recovery_run(control, graph, saver, incarnation, recovered, cancelled)
+            _recovery_run(waits, control, graph, saver, incarnation, recovered, cancelled)
         )
         dispatcher = InboundWakeDispatcher(
             scheduler=scheduler,
             bus=EventBus.from_settings(),
             pending_scan=host.pending_inbound_wakes,
+            database_waits=waits,
             stale_after_s=1.0,
         )
         try:
             async with control.connection():
                 scheduler.wake(agent)
-                await _wait_until_database_wait_is_visible(agent)
+                await _wait_until_database_wait_is_visible(waits, agent)
                 await _assert_automatic_scan_spares_the_database_wait(
                     dispatcher, scheduler, agent, cancelled
                 )
                 if force:
                     await _assert_explicit_force_cancels_the_database_wait(
-                        scheduler, agent, cancelled
+                        waits, scheduler, agent, cancelled
                     )
             if not force:
                 await _assert_stale_handling_resumes_after_recovery(
-                    dispatcher, recovered, cancelled, agent
+                    waits, dispatcher, recovered, cancelled, agent
                 )
         finally:
             await scheduler.aclose()
             progress._PROGRESS.pop(agent, None)
-        assert database_wait_snapshot(agent) is None
+        assert waits.snapshot(agent) is None
 
 
 @pytest.mark.parametrize(
@@ -290,25 +298,26 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
             writes.append(json.loads(value))
 
     patch_async_redis(monkeypatch, CaptureRedis)
+    waits = DatabaseWaits()
     try:
-        with db_wait.database_wait(incarnation) as waiting:
+        with waits.wait(incarnation) as waiting:
             waiting.renew()
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}
+                EventBus.from_settings(), machine_name(), {agent}, waits
             )
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}
+                EventBus.from_settings(), machine_name(), {agent}, waits
             )
             assert writes[0][str(agent)]["db_wait"] == writes[1][str(agent)]["db_wait"]
             assert writes[0][str(agent)]["age_s"] >= 100
             assert writes[0][str(agent)]["last_marks"] == progress._PROGRESS[agent]
             waiting.deadline = time.monotonic() - 1
-            assert database_wait_snapshot(agent) is None
+            assert waits.snapshot(agent) is None
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}
+                EventBus.from_settings(), machine_name(), {agent}, waits
             )
             assert "db_wait" not in writes[-1][str(agent)]
-        assert database_wait_snapshot(agent) is None
+        assert waits.snapshot(agent) is None
     finally:
         progress._PROGRESS.pop(agent, None)
 
@@ -326,20 +335,21 @@ async def test_success_handoff_clears_on_actual_node_progress(
             writes.append(json.loads(value))
 
     patch_async_redis(monkeypatch, CaptureRedis)
+    waits = DatabaseWaits()
     try:
-        with db_wait.database_wait(incarnation) as waiting:
+        with waits.wait(incarnation) as waiting:
             waiting.renew()
             waiting.complete()
         await daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), machine_name(), {agent}
+            EventBus.from_settings(), machine_name(), {agent}, waits
         )
         assert "db_wait" in writes[-1][str(agent)]
         progress.mark_turn_progress(agent)
         await daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), machine_name(), {agent}
+            EventBus.from_settings(), machine_name(), {agent}, waits
         )
         assert "db_wait" not in writes[-1][str(agent)]
-        assert database_wait_snapshot(agent) is None
+        assert waits.snapshot(agent) is None
     finally:
         progress._PROGRESS.pop(agent, None)
 

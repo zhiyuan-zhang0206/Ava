@@ -9,13 +9,13 @@ from __future__ import annotations
 import asyncio
 
 from agent.turn.progress import admission_wait_age_s, turn_progress_snapshot
-from base.agents.observation.db_wait import database_wait_snapshot
+from base.agents.observation.db_wait import DatabaseWaits
 
 
-def database_waiting(agent_id: int) -> bool:
+def database_waiting(database_waits: DatabaseWaits, agent_id: int) -> bool:
     progress = turn_progress_snapshot(agent_id)
     last = progress["last_marks"][-1] if progress is not None else None
-    return database_wait_snapshot(agent_id, last_progress=last) is not None
+    return database_waits.snapshot(agent_id, last_progress=last) is not None
 
 
 def admission_waiting(agent_id: int) -> bool:

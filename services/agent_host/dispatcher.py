@@ -55,6 +55,7 @@ from functools import partial
 from typing import Protocol, cast
 
 from agent.turn.progress import turn_progress_age_s
+from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster import redis_channel_prefix
 from base.deploy.maintenance import admission
 from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
@@ -496,6 +497,7 @@ class InboundWakeDispatcher:
         scheduler: _WakeScheduler,
         *,
         pending_scan: Callable[[float], Awaitable[list[PendingInboundWake]]] | None = None,
+        database_waits: DatabaseWaits | None = None,
         stale_after_s: float | None = None,
         scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         recovery_wake_batch: int = 4,
@@ -508,6 +510,7 @@ class InboundWakeDispatcher:
         self._bus = bus
         self._scheduler = scheduler
         self._pending_scan = pending_scan
+        self._database_waits = database_waits if database_waits is not None else DatabaseWaits()
         self._stale_after_s = stale_after_s
         self._scan_interval_s = scan_interval_s
         self._recovery_wake_batch = recovery_wake_batch
@@ -726,7 +729,7 @@ class InboundWakeDispatcher:
         return (
             candidate.stale
             and candidate.agent_id in self._scheduler.active_agents
-            and not database_waiting(candidate.agent_id)
+            and not database_waiting(self._database_waits, candidate.agent_id)
             and not admission_waiting(candidate.agent_id)
             and (age := turn_progress_age_s(candidate.agent_id)) is not None
             and age >= stale_after_s
@@ -740,7 +743,11 @@ class InboundWakeDispatcher:
         # (2026-09-04 incident, agent 2998).
         for agent_id in self._scheduler.active_agents:
             # Do not apply an old clock to a task this scan just started.
-            if agent_id in started or database_waiting(agent_id) or admission_waiting(agent_id):
+            if (
+                agent_id in started
+                or database_waiting(self._database_waits, agent_id)
+                or admission_waiting(agent_id)
+            ):
                 continue
             age = turn_progress_age_s(agent_id)
             if age is None or age < stale_after_s:

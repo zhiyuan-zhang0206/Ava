@@ -1,7 +1,5 @@
 {
   "ambient_state": {
-    "base/agents/contract.py::ambient-container:EXCEPTION_BY_REASON": 1,
-    "base/agents/history/checkpoint_postgres_walks.py::ambient-container:_installed_descriptor": 1,
     "base/agents/history/delta_read_compat.py::ambient-container:_async_spans": 1,
     "base/agents/history/delta_read_compat.py::contextvar:_recovery_scope": 1,
     "base/agents/history/delta_read_compat.py::import-time-call:base.agents.history.checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch": 1,
@@ -11,7 +9,6 @@
     "base/agents/impersonation_manifest.py::global-rebind:_active_participant": 2,
     "base/agents/messages/delivery_outbox.py::ambient-container:_registry": 1,
     "base/agents/messages/delivery_outbox.py::global-rebind:_send_path_cache": 2,
-    "base/agents/observation/db_wait.py::ambient-container:_WAITING": 1,
     "base/agents/sdk/call_policy.py::ambient-instance:_cache": 1,
     "base/agents/sdk/call_policy.py::thread:_PolicyCache.read": 1,
     "base/agents/sdk/telemetry.py::contextvar:_frames": 1,
