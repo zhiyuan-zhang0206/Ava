@@ -830,6 +830,8 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     src.write_text("// swift")
     info = tmp_path / "Info.plist"
     info.write_bytes(b"<plist/>")
+    entitlements = tmp_path / "helper.entitlements"
+    entitlements.write_bytes(b"<plist/>")
     build = tmp_path / "installed-helper"
     app = build / "AvaPermissionsHelper.app"
     if exe_present:
@@ -846,6 +848,7 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     (zh_lproj / "Localizable.strings").write_text('"panel.title" = "zh";')
     monkeypatch.setattr(lifecycle, "_SOURCE", src)
     monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
+    monkeypatch.setattr(lifecycle, "_ENTITLEMENTS", entitlements)
     monkeypatch.setattr(lifecycle, "_LOCALES", locales)
     monkeypatch.setattr("base.paths.permissions_helper_app_dir", lambda: build)
     return app
@@ -1151,6 +1154,10 @@ def test_fresh_build_signs_with_the_stable_certificate(
         # Hardened runtime: dyld ignores DYLD_* for the helper (review P2-A).
         "--options",
         "runtime",
+        # AppleEvents: the entitlement tccd needs to build an attribution
+        # chain for helper-spawned osascript/AE children.
+        "--entitlements",
+        str(lifecycle._ENTITLEMENTS),
         "--identifier",
         lifecycle._BUNDLE_ID,
         "--requirements",
@@ -1160,6 +1167,25 @@ def test_fresh_build_signs_with_the_stable_certificate(
     state = json.loads((app.parent / "build-state.json").read_text())
     assert state["source_hash"] == lifecycle._source_content_hash()
     assert state["dr"] == _test_dr()
+
+
+def test_entitlements_request_apple_events_for_spawned_children() -> None:
+    """Exactly the AppleEvents entitlement, in the file production signs with.
+
+    The helper is the TCC attribution ancestor of what it spawns: with this
+    entitlement a helper-spawned osascript/AE child reaches a normal Automation
+    dialog, and without it tccd refuses the chain and the request dies as
+    -1712 (exec) / -609 (pty) before any prompt can appear."""
+    entitlements_path = (
+        Path(__file__).resolve().parents[3]
+        / "services"
+        / "permissions_helper"
+        / "helper"
+        / "helper.entitlements"
+    )
+    with entitlements_path.open("rb") as handle:
+        entitlements = plistlib.load(handle)
+    assert entitlements == {"com.apple.security.automation.apple-events": True}
 
 
 def test_source_mtime_change_does_not_rebuild_identical_content(
@@ -1205,6 +1231,24 @@ def test_locale_content_change_forces_rebuild(
     _write_current_build_state(app, lifecycle._source_content_hash())
     locale_file = lifecycle._LOCALES / "en.lproj" / "Localizable.strings"
     locale_file.write_text('"panel.title" = "Changed";')
+
+    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    with pytest.raises(RuntimeError, match="still in use"):
+        lifecycle.build_and_sign()
+    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+
+
+def test_entitlements_content_change_forces_rebuild(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The entitlements file is a build input: editing it must rebuild the artifact."""
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
+    _write_current_build_state(app, lifecycle._source_content_hash())
+    lifecycle._ENTITLEMENTS.write_bytes(b"<plist><dict/></plist>")
 
     before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):

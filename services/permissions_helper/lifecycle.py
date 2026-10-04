@@ -48,6 +48,10 @@ _BUNDLE_ID = HELPER_BUNDLE_ID  # alias: the job identity lives in launchd_job
 _SERVICE_DIR = Path(__file__).resolve().parent
 _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
+# The AppleEvents entitlement: what lets tccd build an attribution chain for
+# helper-spawned `osascript`/AE children; without it the request dies as
+# -1712/-609 before any prompt can appear.
+_ENTITLEMENTS = _SERVICE_DIR / "helper" / "helper.entitlements"
 _LOCALES = _SERVICE_DIR / "helper" / "locales"
 _HELPER_PING_ATTEMPTS = 10
 _HELPER_PING_SETTLE_S = 0.5
@@ -293,6 +297,7 @@ def _source_content_hash() -> str:
     digest = hashlib.sha256()
     digest.update(_SOURCE.read_bytes())
     digest.update(_INFO_PLIST.read_bytes())
+    digest.update(_ENTITLEMENTS.read_bytes())
     for path in sorted(p for p in _LOCALES.rglob("*") if p.is_file()):
         digest.update(path.relative_to(_LOCALES).as_posix().encode() + path.read_bytes())
     digest.update(_expected_dr().encode())
@@ -567,6 +572,8 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
                 "--sign",
                 _CERT_CN,
                 *hardened_runtime.SIGNING_OPTIONS,
+                "--entitlements",
+                str(_ENTITLEMENTS),
                 "--identifier",
                 _BUNDLE_ID,
                 "--requirements",
