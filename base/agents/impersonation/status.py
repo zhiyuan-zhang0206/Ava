@@ -51,6 +51,8 @@ class LeaseRecord(TypedDict):
     process_metadata: Any
     source: Any
     summary_inbound_id: Any
+    summary: Any
+    rejection_reason: Any
     ttl_seconds: Any
 
 
