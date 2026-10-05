@@ -30,6 +30,7 @@ from base.native_process.root_control.ipc import (
     ok_response,
     parse_request,
     parse_response,
+    parse_status_response,
 )
 from services.supervision.ava_root.server import ControlServer
 
@@ -40,7 +41,7 @@ def _root_row() -> dict[str, object]:
 
 
 async def _echo_handler(request: RequestPayload) -> ResponsePayload:
-    return ok_response({"echo": request["verb"], "root": _root_row()})
+    return ok_response({"echo": request["verb"], "root": _root_row(), "units": []})
 
 
 class TestEncode:
@@ -135,7 +136,10 @@ class TestServerClientRoundtrip:
         try:
             client = RootClient(sock_path, timeout=5.0)
             response = await asyncio.to_thread(client.call, "status")
-            assert response == {"ok": True, "result": {"echo": "status", "root": _root_row()}}
+            assert response == {
+                "ok": True,
+                "result": {"echo": "status", "root": _root_row(), "units": []},
+            }
         finally:
             await server.close()
         assert not sock_path.exists()
@@ -150,7 +154,7 @@ class TestServerClientRoundtrip:
                 *(asyncio.to_thread(client.call, "status") for _ in range(16))
             )
             assert all(
-                r == {"ok": True, "result": {"echo": "status", "root": _root_row()}}
+                r == {"ok": True, "result": {"echo": "status", "root": _root_row(), "units": []}}
                 for r in responses
             )
         finally:
@@ -271,7 +275,7 @@ async def test_serving_reads_bound_runtime_from_native_peer(
         root["running"] = False
 
     async def status(_request: RequestPayload) -> ResponsePayload:
-        return ok_response({"root": root})
+        return ok_response({"root": root, "units": []})
 
     path = short_tmp / "run/ava-root/ava-root.sock"
     server = ControlServer(path, status)
@@ -452,3 +456,78 @@ class TestConnectionChurn:
         finally:
             loop.set_exception_handler(previous)
             await server.close()
+
+
+@pytest.mark.parametrize("state", [None, "unknown", 7, [], {}])
+async def test_owned_process_rejects_uncertain_unit_state(
+    short_tmp: Path, monkeypatch: pytest.MonkeyPatch, state: object
+) -> None:
+    from base import paths
+    from base.native_process.root_control.client import owned_process
+
+    unit: dict[str, object] = {"id": "gateway"}
+    if state is not None:
+        unit["state"] = state
+
+    async def status(_request: RequestPayload) -> ResponsePayload:
+        return ok_response({"root": _root_row(), "units": [unit]})
+
+    monkeypatch.setattr(paths, "root_run_dir", lambda: short_tmp)
+    server = ControlServer(short_tmp / "ava-root.sock", status)
+    await server.start()
+    try:
+        with pytest.raises(RootClientError, match="unit state"):
+            await asyncio.to_thread(owned_process, "gateway")
+    finally:
+        await server.close()
+
+
+@pytest.mark.parametrize("state", ["running", "stopped", "absent"])
+async def test_owned_process_preserves_known_state_semantics(
+    short_tmp: Path, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    from base import paths
+    from base.native_process.root_control.client import owned_process
+
+    units = [] if state == "absent" else [{"id": "gateway", "state": state, **_root_row()}]
+
+    async def status(_request: RequestPayload) -> ResponsePayload:
+        return ok_response({"root": _root_row(), "units": units})
+
+    monkeypatch.setattr(paths, "root_run_dir", lambda: short_tmp)
+    server = ControlServer(short_tmp / "ava-root.sock", status)
+    await server.start()
+    try:
+        result = await asyncio.to_thread(owned_process, "gateway")
+        if state == "running":
+            assert result == OwnedProcess.capture(psutil.Process())
+        else:
+            assert result is None
+    finally:
+        await server.close()
+
+
+async def test_status_validates_all_units_before_absence_is_classified(short_tmp: Path) -> None:
+    async def status(_request: RequestPayload) -> ResponsePayload:
+        return ok_response({"root": _root_row(), "units": [{"id": "other", "state": "future"}]})
+
+    server = ControlServer(short_tmp / "root.sock", status)
+    await server.start()
+    try:
+        with pytest.raises(RootClientError, match="unit state"):
+            await asyncio.to_thread(RootClient(short_tmp / "root.sock").status)
+    finally:
+        await server.close()
+
+
+@pytest.mark.parametrize(
+    "body", [None, {}, {"units": None}, {"units": [None]}, {"units": [{"state": "running"}]}]
+)
+def test_status_requires_a_valid_unit_roster(body: object) -> None:
+    with pytest.raises(ProtocolError):
+        parse_status_response(encode(ok_response(body)))
+
+
+def test_failed_status_does_not_require_a_roster() -> None:
+    failure = error_response(ErrorCode.INTERNAL, "status unavailable")
+    assert parse_status_response(encode(failure)) == failure

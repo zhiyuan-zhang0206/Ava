@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from time import monotonic
 
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
+from base.native_process.root_control.ipc import UnitState
 from services.supervision.ava_root.custody import ServiceCustody
 from services.supervision.ava_root.group_scope import (
     capture_group,
@@ -27,7 +28,6 @@ from services.supervision.ava_root.group_scope import (
     recorded_living,
     unproven_group,
 )
-from services.supervision.ava_root.manifest import UnitState
 from services.supervision.ava_root.unit_records import _Generation, _UnitRuntime
 
 _log = logging.getLogger("services.supervision.ava_root.supervisor")
