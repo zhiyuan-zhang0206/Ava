@@ -198,17 +198,12 @@ from the preflight re-read, not from the child's own output.
   denied row without a use. L3-only; verify on a machine that actually needs
   it.
 
-## Per-machine requirements (state as of 2026-09-14; first audit 2026-09-12)
+## Deployment inventory
 
-| Machine | Helper | Folder rows | SR / AX | Notes |
-|---|---|---|---|---|
-| macmini | running, spawn wire OK (rebuilt 2026-09-13, same signing identity) | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified. Rebuild 2026-09-13 kept every grant (stable identity); re-verified 2026-09-14: spawn-chain PASS, preflight matrix green. Target tier: L2 (user 2026-09-17). Extended states (appdata/media/icloud) read granted 2026-09-19 (preflight; the AppData row was reset by the 2026-09-18 rebuild and re-allowed the same day -- see the trigger-method archive). |
-| company-mini | running, build predates `spawn` | to onboard after rebuild | granted | Rebuild first, same signing identity (an identity change silently drops the Accessibility grant) |
-| macbook-air | running, build predates `spawn` | to onboard after rebuild | granted | Same as company-mini |
-| company-air | not installed | all first-time | first-time | Fresh install + sign + first grants in one user-present session |
-
-The owning evidence for the inventory side: the four-machine audit matrix
-recorded with task #3202 (workspace `3202-tcc-audit/summary.md`).
+Each deployment keeps its own machine roster and current grant state outside
+this contributor guide. Before onboarding a unit, inspect its helper build,
+required access tier and folder/screen/accessibility grants with the user
+present. A historical grant on another machine is not evidence for this unit.
 
 ## Interface with the migration matrix (#3195 P7)
 
