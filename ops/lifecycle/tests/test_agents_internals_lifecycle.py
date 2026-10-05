@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 import base.db
 from base.agents import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
 from base.agents.messages.envelope import wrap_inbound
+from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -210,7 +211,7 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
-                trigger_inbound_kind="chat",
+                trigger_inbound_kind=InboundKind.CHAT,
             )
 
         row = _agents_row(db_conn, agent_id)
@@ -261,7 +262,7 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
-                trigger_inbound_kind="chat",
+                trigger_inbound_kind=InboundKind.CHAT,
             )
 
         row = _agents_row(db_conn, agent_id)
@@ -298,7 +299,7 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
-                trigger_inbound_kind="chat",
+                trigger_inbound_kind=InboundKind.CHAT,
             )
 
         row = _agents_row(db_conn, agent_id)
@@ -332,7 +333,7 @@ class TestResurrectAgent:
             agent_id,
             resurrected_by="system",
             trigger_inbound_id=trigger_id,
-            trigger_inbound_kind="chat",
+            trigger_inbound_kind=InboundKind.CHAT,
         )
 
         assert returned == agent_id
@@ -371,7 +372,7 @@ class TestResurrectAgent:
             agent_id,
             resurrected_by="system",
             trigger_inbound_id=compact_id,
-            trigger_inbound_kind="compact_request",
+            trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
         )
 
         assert returned == agent_id
@@ -411,7 +412,7 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
-                trigger_inbound_kind="chat",
+                trigger_inbound_kind=InboundKind.CHAT,
             )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -426,7 +427,7 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
-                trigger_inbound_kind="compact_request",
+                trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
             )
 
         assert _agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
@@ -467,7 +468,7 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
-                trigger_inbound_kind="compact_request",
+                trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
             )
         assert _agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
 

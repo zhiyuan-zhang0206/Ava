@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from base.agents.messages.inbound import InboundKind
 from base.agents.observation.db_wait import database_wait_matches
 from base.config.service_read import current_field_values
 from base.daemon import round_loop
@@ -242,7 +243,7 @@ async def _recover_hosted_turn(
             bus,
             wedge.agent_id,
             trigger_inbound_id=trigger_id,
-            trigger_inbound_kind="chat",
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         _log.info(
             "[delivery] hosted turn recovery for agent %s queued trigger %s -> status %s",

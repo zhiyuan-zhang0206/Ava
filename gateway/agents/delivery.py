@@ -25,6 +25,7 @@ from base.agents.messages.chat_delivery import (
     insert_chat_inbound_once,
     reconcile_chat_inbound,
 )
+from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db import Database, publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
@@ -150,7 +151,7 @@ async def deliver_chat_inbound(
             bus,
             agent_id,
             trigger_inbound_id=inbound_id,
-            trigger_inbound_kind="chat",
+            trigger_inbound_kind=InboundKind.CHAT,
         )
     else:
         # The durable row was already claimed/done. Reconciliation is a receipt
@@ -200,7 +201,7 @@ async def reconcile_chat_delivery(
         bus,
         agent_id,
         trigger_inbound_id=receipt.inbound_id,
-        trigger_inbound_kind="chat",
+        trigger_inbound_kind=InboundKind.CHAT,
     )
     return ChatDelivery(status, receipt.inbound_id)
 

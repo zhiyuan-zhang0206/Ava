@@ -25,7 +25,9 @@ from pydantic import (
     model_validator,
 )
 
+from base.agents import RestartResult, ResurrectResult
 from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
 from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 
@@ -282,7 +284,7 @@ class RestartAgentResponse(BaseModel):
         resurrect.
     """
 
-    status: Literal["enqueued", "already_terminated"]
+    status: RestartResult
 
 
 class ResurrectAgentResponse(BaseModel):
@@ -298,7 +300,7 @@ class ResurrectAgentResponse(BaseModel):
         not apply.
     """
 
-    status: Literal["spawned", "already_alive"]
+    status: ResurrectResult
 
 
 class RecoverCrashMarkedResponse(BaseModel):
@@ -439,7 +441,7 @@ class LifecyclePayload(BaseModel):
     path: str
     body: dict[str, Any] = Field(default_factory=dict)
     trigger_inbound_id: int | None = Field(default=None, gt=0)
-    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None
+    trigger_inbound_kind: WakeTriggerKind | None = None
 
 
 class ConfigWritePayload(BaseModel):
