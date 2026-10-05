@@ -245,7 +245,11 @@ def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
         "ended_at": ended_at,
     }
     snapshot = relay.InboxSnapshot(
-        frozenset(), {}, datetime.now(UTC), ImpersonationStatus.EXPIRED, terminal_notice_snapshot=terminal
+        frozenset(),
+        {},
+        datetime.now(UTC),
+        ImpersonationStatus.EXPIRED,
+        terminal_notice_snapshot=terminal,
     )
     emitted: list[str] = []
     # A delayed old snapshot must not borrow the caller's replacement lease scope.
@@ -255,7 +259,9 @@ def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
     assert f"Notice ID: impersonation-ended:{LEASE_ID}" in emitted[0]
     assert "does not end or cancel any newer" in emitted[0]
     assert "no active native runtime is implied" in emitted[0]
-    assert relay._ended(replace(snapshot, status=ImpersonationStatus.RELEASED), 42, 0, emitted.append)
+    assert relay._ended(
+        replace(snapshot, status=ImpersonationStatus.RELEASED), 42, 0, emitted.append
+    )
     assert len(emitted) == 1  # Release injection remains solely host-owned.
 
 
