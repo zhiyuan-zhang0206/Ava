@@ -34,3 +34,5 @@ URLs. Co-located station homes need distinct ports, including Loki gRPC. Tempo i
 remote. `AVA_LGTM_STORAGE_DIR` chooses the retained observation data volume.
 Grafana provisioning resolves its database endpoint through the shared direct-DB
 mapping and never derives credentials from the cluster bearer.
+
+Operator selection, label verification and replay are in [observability operations](operations.md); local rotation and retention are in [log maintenance](log-maintenance.md).

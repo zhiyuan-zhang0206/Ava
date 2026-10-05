@@ -1,5 +1,12 @@
 # Process / service lifecycle final state — design record (task #3195)
 
+**Current ownership:** the P1-P7 cutover and booked migration window below are
+historical evidence, not pending operator instructions. Current behavior belongs
+to [lifecycle](../../cli/commands/lifecycle/docs/lifecycle.ava.okf.md),
+[start identity](../../cli/docs/start_identity.ava.okf.md) and
+[ava-root](../../services/supervision/ava_root/docs/ava_root.ava.okf.md).
+The original proposal, measured evidence and decision links are retained below.
+
 > Superseded implementation plan: follow
 > [Unified cluster lifecycle](unified-cluster-lifecycle.md) for the September 25
 > revision. This earlier proposal is retained for its link to the frozen decision

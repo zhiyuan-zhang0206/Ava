@@ -42,8 +42,10 @@ acquisition and editable builds.
 The import proof runs the selected virtualenv interpreter in isolated mode from
 a temporary directory and checks the actual `agent.exec_child` path. A successful
 package-manager exit alone does not prove that the install is usable. Discovery
-covers POSIX `lib`/`lib64` and Windows `Lib` layouts. See the runbook's manual
-editable-install recovery procedure for an explicitly selected installation.
+covers POSIX `lib`/`lib64` and Windows `Lib` layouts. Inspection and repair must
+name the intended checkout and virtualenv explicitly;
+[development setup](../../../docs/conventions/dev-setup.md#development-in-a-worktree)
+owns environment isolation and dependency commands.
 
 ## Invariants
 

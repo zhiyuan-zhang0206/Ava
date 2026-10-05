@@ -3,10 +3,10 @@
 
 Two tables are checked, both by set equality in both directions:
 
-1. the runbook daemon roster (`docs/conventions/runbook.md`) against
-   `ops/spec.py:build_services()` (re-exported by `cli/commands/_repo.py`) —
+1. the service domain roster (`ops/docs/service-roster.md`) against
+   `ops/roster/__init__.py:build_services()` (re-exported by `cli/commands/_repo.py`) —
    the single source of truth for the long-running sessions the cluster runs.
-   The runbook carries a human-readable roster
+   The service domain carries a human-readable roster
    table documenting the same set. Nothing kept the two in sync, so a PR could
    delete (or add) a daemon and silently leave the table wrong — exactly what
    happened in #728, which removed the `scheduler` daemon but left its roster
@@ -58,7 +58,7 @@ if __name__ == "__main__":
 from cli.commands._repo import build_services
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_RUNBOOK = _REPO_ROOT / "docs" / "conventions" / "runbook.md"
+_SERVICE_ROSTER = _REPO_ROOT / "ops" / "docs" / "service-roster.md"
 
 _SENTINEL = "<!-- lint:roster-table -->"
 
@@ -72,7 +72,7 @@ _FIRST_CODE_SPAN = re.compile(r"^\|\s*`([^`]+)`")
 
 
 class RosterSentinelMissingError(Exception):
-    """The `<!-- lint:roster-table -->` sentinel was not found in the runbook."""
+    """The `<!-- lint:roster-table -->` sentinel was not found in the service roster."""
 
 
 def parse_roster(text: str) -> set[str]:
@@ -110,13 +110,13 @@ def check() -> int:
     """Compare the parsed roster against build_services(); return 0/1 exit code."""
     registered = {spec.session for spec in build_services()}
 
-    text = _RUNBOOK.read_text(encoding="utf-8")
+    text = _SERVICE_ROSTER.read_text(encoding="utf-8")
     try:
         parsed = parse_roster(text)
     except RosterSentinelMissingError:
         print(
             f"roster lint failed: sentinel {_SENTINEL!r} not found in "
-            f"{_RUNBOOK.name} — place it on its own line "
+            f"{_SERVICE_ROSTER.name} — place it on its own line "
             f"immediately above the roster table.",
             file=sys.stderr,
         )
@@ -128,7 +128,7 @@ def check() -> int:
     missing = registered - documented
     if extra or missing:
         print(
-            "roster lint failed: runbook roster does not match build_services().", file=sys.stderr
+            "roster lint failed: service roster does not match build_services().", file=sys.stderr
         )
         if extra:
             print(
@@ -147,7 +147,7 @@ def check() -> int:
 
 
 # ── healthcheck roster (issue #192) ─────────────────────────────────────────
-# The same failure class as the runbook roster, found in the 2026-08-21
+# The same failure class as the service roster, found in the 2026-08-21
 # healthcheck audit: `check-roster.ava.okf.md` documented a phantom module
 # (`task_maintenance.py`) and missed seven real ones. The three sources of
 # truth are all structured data — the module directory, the ServiceSpec
@@ -208,7 +208,7 @@ def spec_healthchecks() -> set[str]:
 
 def parse_healthcheck_roster(text: str) -> set[str]:
     """Extract the healthcheck roster table's first-column module names
-    (`browser.py`, …) — sentinel-anchored like the runbook roster; the `.py`
+    (`browser.py`, …) — sentinel-anchored like the service roster; the `.py`
     suffix is stripped so the set compares against module stems."""
     idx = text.find(_HEALTHCHECK_SENTINEL)
     if idx < 0:

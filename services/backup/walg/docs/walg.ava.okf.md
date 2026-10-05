@@ -85,5 +85,5 @@ proves it are [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]].
 - `cli/commands/cluster/health.py` — the probe hook, a check beside disk usage
 
 ## Notes
-- Operator procedure (enable, disable, the daily tick, lifecycle rule, escrow): `docs/conventions/runbook.md`, "WAL-G archiving". Why WAL-G and why launch arguments: [decision](../../../../docs/decisions/2026-10-02-walg-physical-backup.md).
+- Operator procedure (enable, disable, the daily tick, lifecycle rule, escrow): [WAL-G operations](operations.md). Why WAL-G and why launch arguments: [decision](../../../../docs/decisions/2026-10-02-walg-physical-backup.md).
 - Gateway capability only; a remote-managed data plane is refused at converge.

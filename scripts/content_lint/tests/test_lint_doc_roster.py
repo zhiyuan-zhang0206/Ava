@@ -36,7 +36,7 @@ def _load_lint(monkeypatch, registered, runbook_text, tmp_path):
     monkeypatch.setattr(lint, "build_services", lambda: tuple(_FakeSpec(s) for s in registered))
     runbook = tmp_path / "runbook.md"
     runbook.write_text(runbook_text, encoding="utf-8")
-    monkeypatch.setattr(lint, "_RUNBOOK", runbook)
+    monkeypatch.setattr(lint, "_SERVICE_ROSTER", runbook)
     return lint
 
 

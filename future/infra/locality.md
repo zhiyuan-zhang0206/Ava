@@ -14,6 +14,17 @@ observable"). The sweeper's `locality` class (`scripts/structure/cochange.py`)
 indexes per-change package spread and cross-package co-change pairs. This page
 tracks what is **left**.
 
+## Current verification boundary
+
+The calibration and ordered checklist below are retained source evidence, not a
+fresh census. The unified lifecycle work referenced as #3479 is on main;
+`base/native_process/ownership.py` owns native identity and
+`scripts/structure/cochange.py` supplies the existing co-change index. Current
+package layout is described by the component docs. Recheck remaining owner
+bypasses and private-import entries against the enforced structure baseline
+and [debt ledger](../tech-debt/ledger.md) before marking any item resolved;
+the old directory counts and wait conditions do not establish current debt.
+
 ## Calibration snapshot (2026-09-26)
 
 Squash commits on `main` since the 2026-08-19 public cutover (2284), source files

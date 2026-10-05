@@ -398,7 +398,7 @@ repos:
         files: '((\.ava/)?skills|plugins)/.*/SKILL\.md$'
         pass_filenames: false
 
-      # Runbook daemon roster <-> build_services() must agree (both directions).
+      # Service-domain roster <-> build_services() must agree (both directions).
       # Catches "deleted a daemon but left it documented" (#728's scheduler row)
       # and "added a daemon, forgot the roster". Parses the table under the
       # <!-- lint:roster-table --> sentinel; reads both sides itself. Also pins the
@@ -407,7 +407,7 @@ repos:
         name: lint-doc-roster
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_roster.py
-        files: ^(cli/commands/_repo\.py|docs/conventions/runbook\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
+        files: ^(ops/roster/.*\.py|cli/commands/_repo\.py|ops/docs/service-roster\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
         pass_filenames: false
 
       # Every `ava.<name>` reference in the procedural docs — conventions and
