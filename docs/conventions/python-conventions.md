@@ -27,7 +27,8 @@ A script shipped with a skill or plugin gets no exemption. When one outgrows
 the budget, its logic moves into a governed package the script imports
 normally (the Claude/Codex launchers live in `ava/shell/coding_tools/`, their
 `spawn_*.py` scripts only parse arguments). Splitting it into path-imported
-siblings is refused by Rule 6 below.
+siblings is refused by Rule 6 below. Moving implementation into a governed
+package does not make it a public SDK capability; see [SDK and skill ownership](#sdk-and-skill-ownership).
 
 Existing over-limit files are frozen in the structure baseline,
 `scripts/structure/baseline/*.json`: one shard per directory area, named after
@@ -286,6 +287,22 @@ Agent + backend code stays glyph-free. Enforced by
 (deliberate-UX surfaces), prose/content (`skills/`, the doc axes, `ui/web/`).
 Plain text marks (✓ ✗) are allowed. A line that genuinely needs the character
 uses inline `# emoji-ok: <reason>`.
+
+## SDK and skill ownership
+
+The SDK owns reusable Ava domain operations and their execution contracts, such
+as identity attachment, message delivery and file access. A skill owns how to
+combine those operations for a particular workflow: preparation, context
+selection, briefing assembly and handoff procedures belong in its instructions
+or bundled scripts. One skill needing a convenient wrapper is not sufficient
+reason to add a capability to the SDK.
+
+Choose the owner from the operation's contract and actual consumers before
+adding a public API. A script may reuse existing internal readers and runtime
+primitives without turning its selected output or procedure into a new SDK
+method. If size limits or shared implementation require a governed module,
+keep the workflow entry in the skill and the helper internal; placement under
+`ava/` alone does not justify adding it to `__all_for_ava__`.
 
 ## Import layering
 

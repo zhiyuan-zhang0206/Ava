@@ -1,5 +1,10 @@
 # SDK docstring discipline (audience = agent, not developer)
 
+Before documenting a new capability, decide whether it belongs in the SDK using
+[SDK and skill ownership](python-conventions.md#sdk-and-skill-ownership). A
+workflow helper does not become a public API merely because its implementation
+lives in a governed Python package.
+
 Three hard rules: all English, no impl-detail leak, no Markdown wrapping. This
 doc is the full spec: coverage scope, what counts as an impl-detail leak, the
 `help()` rendering model, and the per-section writing rules. Enforced by
