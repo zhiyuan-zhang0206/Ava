@@ -341,7 +341,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `health_probe_failing` | the cluster health probe found a failing check; repeated on every unhealthy run | anomaly | check, failure_class, message | — | events | — |
 | `health_probe_ran` | the cluster health probe completed a run, healthy or not (its own heartbeat) | observation | unhealthy_checks | — | events | — |
 | `service_start_unready` | a non-critical service missed its readiness window at ava start | anomaly | service | — | events | — |
-| `schedule_verify_failed` | ava schedules verify found in-store schedule scripts that fail dry-import or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events | — |
+| `schedule_verify_failed` | ava schedules verify found in-store schedule scripts that fail dry-import, an undefined-name read or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events | — |
 
 ## 4. Log (bare logs, category=log)
 

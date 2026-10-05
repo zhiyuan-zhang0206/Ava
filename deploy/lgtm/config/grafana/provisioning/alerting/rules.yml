@@ -3971,10 +3971,11 @@ groups:
           metric: schedule_verify_failed
           team: ava-ops
         annotations:
-          summary: "In-store schedule scripts fail dry-import or call-signature binding ({{ $values.C }} failed sweep(s) in 1h)"
+          summary: "In-store schedule scripts fail dry-import, a name read or call-signature binding ({{ $values.C }} failed sweep(s) in 1h)"
           description: >-
-            `ava schedules verify` found DB-embedded schedule scripts that no longer import or bind against
-            the checkout (a module move or signature change), or the sweep itself failed. The event's
+            `ava schedules verify` found DB-embedded schedule scripts that no longer import, read only
+            names they bind, or bind their calls against the checkout (a module move, a rename leftover
+            or a signature change), or the sweep itself failed. The event's
             attributes.detail lists `id=... name=... missing=...` per script. Re-sync the built-in schedules
             from the repo (`ava schedules provision`) or fix the agent-written script, then re-run `ava
             schedules verify`.
