@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from agent.ownership.corpse_reap import ReapedCorpse
+from base.agents.messages.inbound import InboundKind
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -45,7 +46,7 @@ async def recover_reaped_corpses(
                 bus,
                 corpse.agent_id,
                 trigger_inbound_id=wake_id,
-                trigger_inbound_kind="chat",
+                trigger_inbound_kind=InboundKind.CHAT,
             )
         except Exception:
             logger.exception(

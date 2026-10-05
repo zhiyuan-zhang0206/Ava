@@ -10,6 +10,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database
@@ -109,7 +110,7 @@ def test_the_wake_resurrects_the_agent_through_the_final_cas(
         agent_id,
         resurrected_by="system",
         trigger_inbound_id=wake_id,
-        trigger_inbound_kind="chat",
+        trigger_inbound_kind=InboundKind.CHAT,
     )
 
     status = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
@@ -144,7 +145,7 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
             agent_id,
             resurrected_by="system",
             trigger_inbound_id=row[0],
-            trigger_inbound_kind="chat",
+            trigger_inbound_kind=InboundKind.CHAT,
         )
 
 
@@ -264,7 +265,7 @@ def test_a_resurrection_records_its_audit_fact(
         agent_id,
         resurrected_by="system",
         trigger_inbound_id=wake_id,
-        trigger_inbound_kind="chat",
+        trigger_inbound_kind=InboundKind.CHAT,
     )
 
     assert [source for source, _ in _audit_rows(db_conn, agent_id, "resurrect")] == ["system"]

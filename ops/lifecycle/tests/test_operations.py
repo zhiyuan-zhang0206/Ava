@@ -16,6 +16,8 @@ import psycopg
 import pytest
 from pydantic import ValidationError
 
+from base.agents import ResurrectResult, TerminateResult
+from base.agents.messages.inbound import InboundKind
 from base.db import Database
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
@@ -334,7 +336,7 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
         9,
         ResurrectAgentRequest(resurrected_by="system"),
         trigger_inbound_id=123,
-        trigger_inbound_kind="chat",
+        trigger_inbound_kind=InboundKind.CHAT,
     )
     assert resp.status == "already_alive"
 
@@ -374,7 +376,7 @@ async def test_lifecycle_op_parses_path_to_terminate(
         captured["force"] = body.force  # pyright: ignore[reportUnknownMemberType]
         from ops.rpc_schemas import TerminateAgentResponse
 
-        return TerminateAgentResponse(status="enqueued")
+        return TerminateAgentResponse(status=TerminateResult.ENQUEUED)
 
     monkeypatch.setattr(lifecycle, "terminate_agent_op", _fake_terminate)
     result = await lifecycle.lifecycle_op(
@@ -451,7 +453,7 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
             {"resurrected_by": "system"},
             stub_pool,  # type: ignore[arg-type]
             trigger_inbound_id=99,
-            trigger_inbound_kind="chat",
+            trigger_inbound_kind=InboundKind.CHAT,
         )
 
 
@@ -495,7 +497,7 @@ async def test_explicit_v2_resurrect_dispatches_manual_op(
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
-        return ResurrectAgentResponse(status="spawned")
+        return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 
     monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_resurrect)
 
@@ -549,7 +551,7 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind="chat"
+            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.TERMINATED
 
@@ -570,7 +572,7 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind="chat"
+            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.TERMINATED
 
@@ -602,7 +604,7 @@ class TestResurrectIfTerminatedPlacement:
             called["resurrected_by"] = body.resurrected_by
             called["trigger_inbound_id"] = trigger_inbound_id
             called["trigger_inbound_kind"] = trigger_inbound_kind
-            return ResurrectAgentResponse(status="spawned")
+            return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 
         monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_resurrect_op)
         cleared: list[int] = []
@@ -623,7 +625,7 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind="chat"
+            _db(), event_bus, 5, trigger_inbound_id=88, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.IDLING
         # Dispatch was attempted (HTTP-uniform path)
@@ -672,7 +674,7 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind="chat"
+            _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.IDLING
         assert captured["target"] == "wsl"
@@ -702,7 +704,7 @@ class TestResurrectIfTerminatedPlacement:
 
         with caplog.at_level("INFO"):
             status = await lifecycle.resurrect_if_terminated(
-                _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind="chat"
+                _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
             )
         assert status is AgentStatus.TERMINATED
         assert "home machine unreachable" in caplog.text
@@ -724,7 +726,7 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind="chat"
+            _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.TERMINATED
 
@@ -742,7 +744,7 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=99, trigger_inbound_kind="chat"
+            _db(), event_bus, 5, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.RUNNING
 
@@ -777,7 +779,7 @@ class TestResurrectIfTerminatedNotificationGuard:
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=207124, trigger_inbound_kind="chat"
+            _db(), event_bus, 5, trigger_inbound_id=207124, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.TERMINATED
 
@@ -806,7 +808,7 @@ class TestResurrectIfTerminatedNotificationGuard:
             trigger_inbound_kind: str | None = None,
         ) -> ResurrectAgentResponse:
             calls.append(agent_id)
-            return ResurrectAgentResponse(status="spawned")
+            return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 
         monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_op)
 
@@ -816,7 +818,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, 5, trigger_inbound_id=10**12, trigger_inbound_kind="chat"
+            _db(), event_bus, 5, trigger_inbound_id=10**12, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.IDLING
         assert calls == [5]
@@ -838,7 +840,11 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(lifecycle, "_system_notice_source_of_trigger", _boom)
         with pytest.raises(RuntimeError, match="trigger read failed"):
             await lifecycle.resurrect_if_terminated(
-                _db(), event_bus, 5, trigger_inbound_id=207124, trigger_inbound_kind="chat"
+                _db(),
+                event_bus,
+                5,
+                trigger_inbound_id=207124,
+                trigger_inbound_kind=InboundKind.CHAT,
             )
 
     def test_trigger_guard_reads_row_kind_source_and_payload(
@@ -977,7 +983,7 @@ class TestResurrectIfTerminatedNotificationGuard:
             trigger_inbound_kind: str | None = None,
         ) -> ResurrectAgentResponse:
             calls.append((agent_id, trigger_inbound_id))
-            return ResurrectAgentResponse(status="spawned")
+            return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 
         monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_op)
 
@@ -987,7 +993,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(), event_bus, aid, trigger_inbound_id=rec_iid, trigger_inbound_kind="chat"
+            _db(), event_bus, aid, trigger_inbound_id=rec_iid, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.IDLING
         assert calls == [(aid, rec_iid)]
@@ -1024,7 +1030,11 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _spawn_on_home)
 
     status = await lifecycle.resurrect_if_terminated(
-        _db(), event_bus, agent_id, trigger_inbound_id=trigger_id, trigger_inbound_kind="chat"
+        _db(),
+        event_bus,
+        agent_id,
+        trigger_inbound_id=trigger_id,
+        trigger_inbound_kind=InboundKind.CHAT,
     )
 
     assert status is AgentStatus.IDLING

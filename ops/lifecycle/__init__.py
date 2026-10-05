@@ -27,14 +27,18 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Literal
+from typing import Any
 
 from psycopg_pool import ConnectionPool
 
 from base.agents import (
     AgentStatus,
+    RestartResult,
     ResurrectAlreadyAlive,
+    ResurrectResult,
+    TerminateResult,
 )
+from base.agents.messages.inbound import WakeTriggerKind
 from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
@@ -194,7 +198,7 @@ async def terminate_agent_op(
         )
         # Neither HTTP delivery nor Task.cancel proves resource quiescence.
         return TerminateAgentResponse(
-            status="enqueued",
+            status=TerminateResult.ENQUEUED,
             shell_sessions=await _kill_shell_sessions_now(
                 agent_id, kill=body.kill_all_shell_sessions
             ),
@@ -203,7 +207,7 @@ async def terminate_agent_op(
     s = await asyncio.to_thread(get_agent_status, db, agent_id)
     if s is AgentStatus.TERMINATED:
         return TerminateAgentResponse(
-            status="already_terminated",
+            status=TerminateResult.ALREADY_TERMINATED,
             shell_sessions=await _kill_shell_sessions_now(
                 agent_id, kill=body.kill_all_shell_sessions
             ),
@@ -213,12 +217,12 @@ async def terminate_agent_op(
     if iid is None:
         # The kill-requesting enqueue found the row terminated under its lock.
         return TerminateAgentResponse(
-            status="already_terminated",
+            status=TerminateResult.ALREADY_TERMINATED,
             shell_sessions=await _kill_shell_sessions_now(agent_id, kill=True),
         )
     await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
-        status="enqueued",
+        status=TerminateResult.ENQUEUED,
         shell_sessions=ShellSessionsKill(when="at_exit") if body.kill_all_shell_sessions else None,
     )
 
@@ -319,7 +323,7 @@ async def resurrect_agent_op(
     body: ResurrectAgentRequest,
     *,
     trigger_inbound_id: int | None = None,
-    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
+    trigger_inbound_kind: WakeTriggerKind | None = None,
 ) -> ResurrectAgentResponse:
     """Commit hosted resurrection intent, then publish a wake to the home host.
 
@@ -328,7 +332,7 @@ async def resurrect_agent_op(
     """
     s = await asyncio.to_thread(get_agent_status, db, agent_id)
     if s is not AgentStatus.TERMINATED:
-        return ResurrectAgentResponse(status="already_alive")
+        return ResurrectAgentResponse(status=ResurrectResult.ALREADY_ALIVE)
     try:
         # Keep the synchronous row-lock transaction and wake publication off
         # the gateway event loop. The agent host admits the successor later.
@@ -343,8 +347,8 @@ async def resurrect_agent_op(
             trigger_inbound_kind=trigger_inbound_kind,
         )
     except (ResurrectAlreadyAlive, ResurrectTriggerStaleError):
-        return ResurrectAgentResponse(status="already_alive")
-    return ResurrectAgentResponse(status="spawned")
+        return ResurrectAgentResponse(status=ResurrectResult.ALREADY_ALIVE)
+    return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 
 
 async def resurrect_if_terminated(
@@ -353,7 +357,7 @@ async def resurrect_if_terminated(
     agent_id: int,
     *,
     trigger_inbound_id: int,
-    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"],
+    trigger_inbound_kind: WakeTriggerKind,
 ) -> AgentStatus:
     """Resurrect `agent_id` when it is terminated, so a just-delivered inbound is
     handled by a live process instead of sitting unclaimed forever.
@@ -548,9 +552,9 @@ async def restart_agent_op(
     """Local-target restart — INSERT one kind='restart' inbound."""
     iid = await asyncio.to_thread(_restart_blocking, db, bus, agent_id, body, db_pool)
     if iid is None:
-        return RestartAgentResponse(status="already_terminated")
+        return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
     await publish_inbound_arrived(bus, agent_id, iid, "restart", body.source, "")
-    return RestartAgentResponse(status="enqueued")
+    return RestartAgentResponse(status=RestartResult.ENQUEUED)
 
 
 async def recover_crash_marked_op(
@@ -644,7 +648,7 @@ async def lifecycle_op(
     db_pool: ConnectionPool,
     *,
     trigger_inbound_id: int | None = None,
-    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
+    trigger_inbound_kind: WakeTriggerKind | None = None,
 ) -> (
     TerminateAgentResponse
     | ResurrectAgentResponse

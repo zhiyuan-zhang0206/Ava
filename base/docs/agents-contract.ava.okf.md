@@ -18,8 +18,10 @@ tags:
 
 ### Status and result enums
 - `AgentStatus` (StrEnum) lifecycle states: `RUNNING` (claimed process, including boot) → `IDLING` (waiting for wakeup between turns or unclaimed before boot) → `TERMINATED`.
+- `LivenessState` (StrEnum) owns observed reachability (`online` / `offline` / `unknown`), independently of lifecycle intent. Directory, snapshot, inspector, and fleet projections validate database values against this contract; absence is not an `unknown` observation. Its values match the `agents_meta.liveness_state` CHECK.
 - `TerminationSource` (StrEnum) — who wrote `status='terminated'`: `USER`/`EXIT`/`REAPER`/`LAUNCH_CONFIRM`/`INTEGRITY`, stamped by EVERY terminated-write in the same statement (NULL is permanently unresurrectable — `scripts/lint/termination_source.py` enforces it). Historical termination-source values remain readable after retiring per-agent process supervision. There is no closed state: a terminated agent may be resurrected by any new message ([decision](../../docs/decisions/2026-09-27-terminate-has-no-closed-state.md)).
-- Operation result enums: `TerminateResult` / `RestartResult` / `ResurrectResult` — encode idempotent operation outcomes (enqueued / already_terminated / already_alive …) as wire strings.
+- Operation result enums: `TerminateResult` / `RestartResult` / `ResurrectResult` — encode idempotent operation outcomes (enqueued / already_terminated / already_alive …) as wire strings. RPC response models reuse the corresponding operation enum.
+- `base/agents/messages/inbound.py:WakeTriggerKind` is the exact `InboundKind` subset `CHAT` / `COMPACT_REQUEST` / `SYSTEM_NOTE` for pending-work resurrection. RPC validation and the direct wake boundary reject other inbound kinds before lifecycle work.
 
 ### Wire error protocol
 - `ErrorReason` (StrEnum) is the error identifier on the SDK ↔ gateway HTTP wire. `agent_launch_failed` is the post-commit spawn case: the envelope and SDK exception preserve the committed `agent_id`, current state, and ID-based retry path.

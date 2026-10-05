@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
+from base.agents.messages.inbound import InboundKind
 from base.db import Database, agent_exists, insert_compact_request_inbound
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
@@ -123,7 +124,7 @@ async def post_compact(
         request.app.state.bus,
         agent_id,
         trigger_inbound_id=inbound_id,
-        trigger_inbound_kind="compact_request",
+        trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
     )
 
     return CompactEnqueued(agent_id=agent_id, status="enqueued")

@@ -7,12 +7,12 @@ Directory cards and the live tree have their own bounded read contract in
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
 import psycopg
 from pydantic import BaseModel, Field
 
-from base.agents import AgentStatus
+from base.agents import AgentStatus, LivenessState
 from base.agents.observation.evidence import (
     AgentAvailability,
     AgentObservation,
@@ -167,7 +167,7 @@ class AgentSnapshot(BaseModel):
     # unregistered machine), never evidence of a healthy owner. Written only
     # by the gateway heartbeat daemon's liveness pass; `status` stays lifecycle
     # intent. `last_probe_at` preserves the actual machine observation time.
-    liveness_state: Literal["online", "offline", "unknown"]
+    liveness_state: LivenessState
     last_probe_at: datetime | None
     availability: AgentAvailability | None = None
     observation: AgentObservation | None = None

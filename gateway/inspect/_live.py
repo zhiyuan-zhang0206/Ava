@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Literal, NamedTuple, cast
+from typing import Any, NamedTuple
 
 from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
-from base.agents import AgentStatus
+from base.agents import AgentStatus, LivenessState
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
 from base.config import settings
@@ -34,7 +34,7 @@ class InspectDbRows(NamedTuple):
     pending_inbound: bool
     config_overlay: dict[str, Any]
     preset_name: str | None
-    liveness_state: Literal["online", "offline", "unknown"]
+    liveness_state: LivenessState
     last_probe_at: Any
     observation: AgentObservation
 
@@ -74,10 +74,7 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             pending_inbound=bool(pending_row[0]),
             config_overlay=row[0] if row[0] is not None else {},
             preset_name=row[1],
-            liveness_state=cast(
-                Literal["online", "offline", "unknown"],
-                row[9] if row[9] is not None else "unknown",
-            ),
+            liveness_state=LivenessState(row[9]),
             last_probe_at=row[10],
             observation=observation(row[12], row[11]),
         )

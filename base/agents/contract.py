@@ -34,6 +34,14 @@ class AgentStatus(StrEnum):
     TERMINATED = "terminated"
 
 
+class LivenessState(StrEnum):
+    """Observed reachability, separate from agent lifecycle intent."""
+
+    ONLINE = "online"
+    OFFLINE = "offline"
+    UNKNOWN = "unknown"
+
+
 class TerminationSource(StrEnum):
     """WHO/WHAT wrote `agents_meta.status='terminated'` — stamped by EVERY code path
     that writes it, and the sole input to "may this corpse be auto-resurrected".
