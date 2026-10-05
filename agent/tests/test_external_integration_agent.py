@@ -5,13 +5,14 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
+from agent.messages import NoteTag, system_note_message
 from ava import agent_identity, external
 from ava.external.state import decode_plugin_delta, load_snapshot
 from base.agents import impersonation as leases
@@ -66,7 +67,11 @@ def native_checkpoint(
     db_conn.commit()
     checkpoint = empty_checkpoint()
     checkpoint["channel_values"] = {
-        "messages": [HumanMessage(content="Native task")],
+        "messages": [
+            SystemMessage(content="Native core and plugin rules"),
+            system_note_message(content="Configured skill rules", tag=NoteTag.PRELOADED_SKILLS),
+            HumanMessage(content="Native task"),
+        ],
         "integration__seen": {"native"},
     }
     versions: dict[str, str | int | float] = {"messages": "1", "integration__seen": "1"}
@@ -103,10 +108,14 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     leases.accept(database, event_bus, lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
-    with external.attach(lease["id"]):
+    with external.attach(lease["id"]) as attachment:
+        assert (
+            attachment.instructions()
+            == "Native core and plugin rules\n\n[system] Configured skill rules"
+        )
         assert agent_id == ava.self.AGENT_ID
         assert agent_identity.require_actor() == f"agent:{agent_id}"
-        assert ava.state.messages[0].content == "Native task"
+        assert ava.state.messages[-1].content == "Native task"
         assert handle.read().seen == {"native"}
         handle.update({"seen": {"external"}})
     updated = leases.get(database, event_bus, lease["id"], attested_caller(lease))

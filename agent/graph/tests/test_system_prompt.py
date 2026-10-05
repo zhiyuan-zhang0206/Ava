@@ -93,6 +93,8 @@ def test_wildcard_excludes_functions_and_private_names(
     result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert "help" not in result
     assert "understand" not in result
+    assert "external" not in result
+    assert "## ava.external" not in _sdk_expand_section(AgentSlices.resolve())
     assert not any(name.startswith("_") for name in result)
 
 

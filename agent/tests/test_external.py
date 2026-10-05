@@ -10,12 +10,13 @@ from threading import Event, Thread, Timer
 from typing import Annotated, Any
 
 import pytest
-from langchain_core.messages import AnyMessage, HumanMessage, RemoveMessage
+from langchain_core.messages import AnyMessage, HumanMessage, RemoveMessage, SystemMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
+from agent.messages import NoteTag, system_note_message
 from ava import _settings, agent_identity, external, gateway_client
 from ava._settings import agent_setting
 from ava.external import state
@@ -699,3 +700,86 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
     assert not staged
     assert _borrowed_agent_id() is None
     assert snapshot.messages == [HumanMessage(content="Native history", id="native")]
+
+
+def test_instructions_preserve_native_prompt_and_preloaded_skills_only(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    lease, snapshot, _ = attached_runtime
+    prompt = "Core rules\n\nPlugin collaboration rules\n"
+    snapshot.messages = [
+        SystemMessage(content=prompt),
+        system_note_message(content="Memory index", tag=NoteTag.MEMORY),
+        system_note_message(content="Configured skill body", tag=NoteTag.PRELOADED_SKILLS),
+        HumanMessage(content="Task history"),
+        system_note_message(content="Fork-added skill body", tag=NoteTag.PRELOADED_SKILLS),
+    ]
+    lease["plugin_delta"] = [
+        encode_plugin_delta({"messages": [SystemMessage(content="External rules")]}, ExampleState)
+    ]
+    with external.attach("lease") as attachment:
+        assert attachment.instructions() == (
+            prompt + "\n\n[system] Configured skill body\n\n[system] Fork-added skill body"
+        )
+        ava.state.messages[0].content = "Locally changed rules"
+        assert attachment.instructions().startswith(prompt)
+
+
+@pytest.mark.parametrize("content", [None, "", [{"type": "text", "text": "rules"}]])
+def test_instructions_refuse_missing_or_invalid_native_prompt(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]], content: Any
+) -> None:
+    _, snapshot, _ = attached_runtime
+    snapshot.messages = [] if content is None else [SystemMessage(content=content)]
+    with (
+        external.attach("lease") as attachment,
+        pytest.raises((RuntimeError, ValueError), match=r"system prompt|nonempty text"),
+    ):
+        attachment.instructions()
+
+
+@pytest.mark.parametrize("invalidated", ["expiry", "version"])
+def test_instructions_revalidate_the_lease_and_refuse_after_close(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]], invalidated: str
+) -> None:
+    lease, snapshot, _ = attached_runtime
+    snapshot.messages = [SystemMessage(content="Borrowed rules")]
+    attachment = external.attach("lease")
+    error = _invalidate_lease(lease, invalidated)
+    with pytest.raises(RuntimeError, match=error):
+        attachment.instructions()
+    with pytest.raises(RuntimeError, match=error):
+        attachment.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        attachment.instructions()
+
+
+def test_attachment_reuses_clients_and_restores_original_context(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    original = process_context.peek()
+    assert original is not None
+    with external.attach("lease"):
+        assert ava.context.clients is original.clients
+        assert ava.context.identity is not None
+        assert ava.context.identity.lease is not None
+        assert ava.context.identity.lease.agent_id == 405
+        assert ava.context.sql is ava.DB
+        assert ava.context.redis is ava.REDIS
+    assert process_context.peek() is original
+
+
+def test_external_controls_stay_out_of_native_prompt(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent.graph.prompt.system_prompt import build_system_prompt
+    from base.host.env.agent_slices import AgentSlices
+    from base.packages.plugins.extensions import ExtensionRegistry
+
+    prompt = build_system_prompt(ExtensionRegistry(()), AgentSlices.resolve())
+    assert "external" not in ava.__all_for_ava__
+    assert "ava.external.attach" not in prompt
+    assert "## ava.external" not in prompt
+    ava.help(external.Attachment)
+    assert "def instructions(self) -> str:" in capsys.readouterr().out

@@ -50,6 +50,8 @@ def _assert_takeover_protocol_uses_say_and_own_summary_release(message: str) -> 
     assert "transport acceptance is not host receipt" in message
     assert "as soon as you receive it" in message
     assert "never substitute new-agent assumptions" in message
+    assert "attachment.instructions() through ava.external.attach" in message
+    assert "system prompt and configured preloaded skills" in message
     assert "process and ACK inbound messages" not in message
 
 
@@ -494,3 +496,13 @@ def test_dsh_plugin_takeover_runner_submits_and_consumes_the_launch_message(
     assert [m["content"][0]["text"] for m in followed] == ["You will take over Ava agent 42."]
     assert followed[0]["source"] == {"kind": "user"}
     assert result["launchGone"]
+
+
+def test_impersonator_sdk_reference_covers_instruction_read_and_direct_python() -> None:
+    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    text = guide.read_text(encoding="utf-8")
+    assert "attachment.instructions()" in text
+    assert "reference/sdk.md" in text
+    sdk_text = (guide.parent / "reference/sdk.md").read_text(encoding="utf-8")
+    assert "print(attachment.instructions())" in sdk_text
+    assert "Use direct Python as the normal SDK path" in sdk_text
