@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Never, cast
+from typing import Literal, Never, cast, get_args
 
 from base.host.atomic_io import fsync_parent, write_text_atomic
 
@@ -38,11 +38,7 @@ class CodingSessionStatus(StrEnum):
 PersistedStatus = Literal[
     CodingSessionStatus.LAUNCHING, CodingSessionStatus.ACTIVE, CodingSessionStatus.TERMINAL
 ]
-PERSISTED_STATUSES = (
-    CodingSessionStatus.LAUNCHING,
-    CodingSessionStatus.ACTIVE,
-    CodingSessionStatus.TERMINAL,
-)
+PERSISTED_STATUSES = cast(tuple[PersistedStatus, ...], tuple(get_args(PersistedStatus)))
 
 
 class InvalidCodingSessionOwnerError(RuntimeError):

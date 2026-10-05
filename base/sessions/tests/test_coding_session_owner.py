@@ -518,3 +518,12 @@ def test_observation_outcomes_cannot_be_written(tmp_path: Path, status: str) -> 
 def test_owner_snapshot_rejects_unknown_status(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         record_codec.CodingSessionOwner(key=_key(tmp_path), status=cast(Any, "unexpected"))
+
+
+@pytest.mark.parametrize("status", list(record_codec.CodingSessionStatus))
+def test_valid_legacy_strings_normalize_without_wire_changes(
+    tmp_path: Path, status: record_codec.CodingSessionStatus
+) -> None:
+    snapshot = record_codec.CodingSessionOwner(key=_key(tmp_path), status=cast(Any, status.value))
+    assert snapshot.status is status
+    assert json.loads(json.dumps(record_codec._payload(snapshot)))["status"] == status.value
