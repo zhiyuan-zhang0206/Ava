@@ -455,8 +455,12 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
     )
     assert len(emitted) == 2
     assert emitted[0].startswith("Handoff brief\n\nAva control active:")
-    assert "Ava impersonation interrupted" in emitted[1]
+    assert f"Ava impersonation lease {session['session_id']}" in emitted[1]
+    assert session["id"] in emitted[1]
+    assert "Ended at:" in emitted[1]
+    assert "does not end or cancel any newer" in emitted[1]
     assert "The agent was terminated" in emitted[1]
+    assert "no active native runtime is implied" in emitted[1]
     assert listener.closed
 
 
