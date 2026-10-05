@@ -228,9 +228,10 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> list[str]:
 def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     """Refuse to stop a cluster whose stored schedule scripts NEW's code cannot run.
 
-    A schedule script lives in the database, not the checkout: a library change (a moved module, a
-    changed signature) leaves it crash-looping the moment `up` starts the schedule-manager, and the
-    gateway's own `ava schedules verify` only exists after that start. Run NEW's verify first."""
+    A schedule script lives in the database, not the checkout: a library change (a moved module, an
+    undefined name, a changed signature) leaves it crash-looping the moment `up` starts the
+    schedule-manager, and the gateway's own `ava schedules verify` only exists after that start.
+    Run NEW's verify first."""
     out = s.run(args.gateway, _PRE_VERIFY.format(home=_HOME, new=new), effect=False)
     lines = out.splitlines()
     if any(line.startswith("SKIPPED") for line in lines):
