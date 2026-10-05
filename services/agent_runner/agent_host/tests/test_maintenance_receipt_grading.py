@@ -10,7 +10,7 @@ from psycopg_pool import PoolTimeout
 
 from base.db import Database
 from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import maintenance as receipts
 from tests.agent.test_maintenance import WHEN
@@ -21,7 +21,10 @@ def _held() -> None:
     before = pause_owner.begin_maintenance("grade", WHEN).snapshot
     assert before.maintenance is not None
     pause_owner.change_maintenance(
-        "grade", WHEN, before.maintenance, MaintenanceHold("draining", {7: 11, 8: 12})
+        "grade",
+        WHEN,
+        before.maintenance,
+        MaintenanceHold(MaintenancePhase.DRAINING, {7: 11, 8: 12}),
     )
 
 

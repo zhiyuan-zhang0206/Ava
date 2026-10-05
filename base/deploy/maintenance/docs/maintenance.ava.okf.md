@@ -61,7 +61,9 @@ path (no failure fence), and certification still requires the applied
 restart, so a drain never certifies an un-flushed tail. Other failures block.
 
 Phases are `preparing → draining → drained → stopping → stopped → starting →
-ready`; `ava stop` / `ava restart` walk the first five, and no command enters
+ready`, owned by `state.MaintenancePhase`. Journal decoding restores this enum
+and rejects unknown values; the certified drain subset is shared by receipt
+classification and the quiesced admission gate. `ava stop` / `ava restart` walk the first five, and no command enters
 `starting` or `ready` any more (they remain in the journal vocabulary so an
 older journal still decodes). A failed prepare/drain/stop keeps the hold. Ordinary
 `ava start` authorizes the existing operation for bring-up and resumes after

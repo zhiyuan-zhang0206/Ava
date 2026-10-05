@@ -121,14 +121,14 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
     `ava start` releases it after readiness; unpausing now would reopen the host
     while its services are half stopped."""
     from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
-    from base.deploy.maintenance.state import MaintenanceHold
+    from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 
     _paused_posture(monkeypatch)
     held = PauseOwnerSnapshot(
         status="paused",
         holder="stop",
         acquired_at=datetime.now(UTC),
-        maintenance=MaintenanceHold(phase="stopped"),
+        maintenance=MaintenanceHold(phase=MaintenancePhase.STOPPED),
     )
     monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: held)
     unpaused: list[bool] = []

@@ -19,7 +19,7 @@ from base.daemon.http_transport import start_daemon_http
 from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops import maintenance as activity
@@ -53,7 +53,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
     monkeypatch.setattr(daemon, "_dispatch", dispatch)
     before = pause_owner.begin_maintenance("ops", WHEN).snapshot
     assert before.maintenance is not None
-    draining = MaintenanceHold("draining")
+    draining = MaintenanceHold(MaintenancePhase.DRAINING)
     pause_owner.change_maintenance("ops", WHEN, before.maintenance, draining)
     tasks = [
         asyncio.create_task(daemon._ops_route(b'{"kind":"config_read","payload":{}}'))
@@ -65,7 +65,9 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
         finishes[0].set()
         await tasks[0]
         assert activity.progress()["requests"] == 1
-        pause_owner.change_maintenance("ops", WHEN, draining, MaintenanceHold("stopping"))
+        pause_owner.change_maintenance(
+            "ops", WHEN, draining, MaintenanceHold(MaintenancePhase.STOPPING)
+        )
         status, body, _ = await daemon._ops_route(b'{"kind":"config_read","payload":{}}')
         assert status == 200
         assert b'"status": "failed"' in body
@@ -158,7 +160,9 @@ def held(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database) ->
     """A stopped generation: the update hold is published and the host is paused."""
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
     pause_owner.begin_maintenance("update", WHEN)
-    pause_owner.change_maintenance("update", WHEN, MaintenanceHold(), MaintenanceHold("stopped"))
+    pause_owner.change_maintenance(
+        "update", WHEN, MaintenanceHold(), MaintenanceHold(MaintenancePhase.STOPPED)
+    )
     host_deploy_state.set_posture(database, "paused")
     start_serving.begin_start()
 

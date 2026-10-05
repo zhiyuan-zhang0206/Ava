@@ -25,7 +25,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from ops import agent_pause
 from ops.agent_pause.probe import HostIdentity
@@ -126,7 +126,7 @@ async def test_member_collision_is_waitable_and_freezes_nothing(
     # The collision ran before the capture: the journal still holds a clean
     # preparing boundary, so the retry re-derives the cohort from scratch.
     hold = admission.require_operation("move", WHEN).maintenance
-    assert hold is not None and hold.phase == "preparing" and hold.commands == {}
+    assert hold is not None and hold.phase == MaintenancePhase.PREPARING and hold.commands == {}
 
     # The competing terminate resolves; preparation proceeds without the agent.
     _resolve_lifecycle_command(db_conn, command)
@@ -139,7 +139,7 @@ async def test_member_collision_is_waitable_and_freezes_nothing(
         holder="move",
         acquired_at=WHEN,
     )
-    assert hold.phase == "draining"
+    assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == {other}
 
 
@@ -182,7 +182,7 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
     await asyncio.to_thread(agent_pause.prepare, database, event_bus, "move", WHEN)
 
     hold = agent_pause._hold("move", WHEN)
-    assert hold.phase == "draining"
+    assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == {agent}
     assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
     attributes = events[0]["attributes"]
@@ -219,7 +219,7 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
     hold = agent_pause._hold("move", WHEN)
-    assert hold.phase == "preparing" and hold.commands == {}
+    assert hold.phase == MaintenancePhase.PREPARING and hold.commands == {}
     assert [event["attributes"]["outcome"] for event in events] == ["exceeded"]
     assert events[0]["attributes"]["agents"] == [agent]
     assert events[0]["attributes"]["waited_s"] > 0
@@ -239,7 +239,7 @@ async def test_collision_free_prepare_is_unchanged(
 
     agent_pause.prepare(database, event_bus, "move", WHEN)
     hold = agent_pause._hold("move", WHEN)
-    assert hold.phase == "draining"
+    assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == {agent}
     assert events == []
 
@@ -331,7 +331,9 @@ def test_parked_claimed_ordinary_work_settles(
         holder="move",
         acquired_at=WHEN,
     )
-    assert hold.phase == "draining" and hold.parked == (agent,) and hold.commands == {}
+    assert (
+        hold.phase == MaintenancePhase.DRAINING and hold.parked == (agent,) and hold.commands == {}
+    )
     assert db_conn.execute(
         "SELECT status,applied_at FROM inbound_messages WHERE id=%s", (message,)
     ).fetchone() == (expected, None)
@@ -361,7 +363,7 @@ def test_parked_claimed_work_prepares_without_wait(
     agent_pause.prepare(database, event_bus, "move", WHEN)
 
     hold = agent_pause._hold("move", WHEN)
-    assert hold.phase == "draining"
+    assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == set()
     assert hold.parked == (agent,)
     assert [event["event_name"] for event in events] == ["pause_orphan_claim_settled"]
@@ -396,7 +398,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
     hold = agent_pause._hold("move", WHEN)
-    assert hold.phase == "preparing" and hold.commands == {} and hold.parked == ()
+    assert hold.phase == MaintenancePhase.PREPARING and hold.commands == {} and hold.parked == ()
     assert [event["attributes"]["outcome"] for event in events] == ["exceeded"]
     assert events[0]["attributes"]["agents"] == [agent]
     assert events[0]["attributes"]["waited_s"] > 0
@@ -435,7 +437,7 @@ def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
     assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
     assert events[0]["attributes"]["outcome"] == "refused"
     hold = agent_pause._hold("move", WHEN)
-    assert hold.phase == "preparing" and hold.parked == ()
+    assert hold.phase == MaintenancePhase.PREPARING and hold.parked == ()
 
 
 def test_orphan_cas_miss_accepts_concurrent_settlement(
@@ -467,7 +469,7 @@ def test_orphan_cas_miss_accepts_concurrent_settlement(
         holder="move",
         acquired_at=WHEN,
     )
-    assert hold.phase == "draining" and hold.parked == (agent,)
+    assert hold.phase == MaintenancePhase.DRAINING and hold.parked == (agent,)
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (message,)
     ).fetchone() == ("done",)
