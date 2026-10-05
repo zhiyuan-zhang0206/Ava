@@ -1,4 +1,5 @@
-"""`ava schedules verify` — the dry-import + call-signature sweep over every in-store schedule script."""
+"""`ava schedules verify` — the dry-import, undefined-name and call-signature sweep over every
+in-store schedule script."""
 
 from __future__ import annotations
 
@@ -26,13 +27,15 @@ _CHILD_VERDICTS = (
     ("CHILD-COMPILE-ERROR:", "compile-error:"),
     ("CHILD-MODULE:", ""),
     ("CHILD-EXC:", ""),
+    ("CHILD-UNDEF:", "undefined-name:"),
     ("CHILD-SIG:", "call-signature:"),
 )
 
 
 def _check_script(script: str) -> str | None:
-    """Dry-import one in-store script and bind its repo-API call sites; None = clean, else the
-    RED detail (`<module>` / `compile-error:<l>:<m>` / `<Exc>:<msg>` / `call-signature:<l> <call>: <why>`).
+    """Dry-import one in-store script, check its name reads and bind its repo-API call sites;
+    None = clean, else the RED detail (`<module>` / `compile-error:<l>:<m>` / `<Exc>:<msg>` /
+    `undefined-name:<l> <name>` / `call-signature:<l> <call>: <why>`).
 
     Runs the check child (`schedule_verify_child`) with this CLI's interpreter from the repo
     root: every sanctioned `ava` invocation is the checkout's own venv — the same
@@ -155,12 +158,15 @@ def cmd_schedules_verify(
 
     Read-only one-shot check of every in-store script (stopped rows included):
     py_compile, a top-level-imports-only execution in this checkout's runner
-    venv, and a `inspect.signature().bind` of every call the script makes into
-    repo code — nothing is started, stopped, or written. Catches the drift
-    classes where a repo module move (task #4800: #2678, the 2026-09-25 R3
-    Wave-2 regression) or a changed signature (2026-10-03: `catch_up()` gained
-    a required `db`) leaves a DB-embedded script stale and the next (re)start
-    crash-loops. Line contract: one `RESULT ts=... checked=... green=... red=...
+    venv, a static read of every name the script uses (any scope) against the
+    names it binds, and a `inspect.signature().bind` of every call the script
+    makes into repo code — nothing is started, stopped, or written. Catches the
+    drift classes where a repo module move (task #4800: #2678, the 2026-09-25 R3
+    Wave-2 regression), a rename leaving a top-level statement reading a name
+    nothing imports (2026-10-01 audit: `base.__file__` after `shared` -> `base`),
+    or a changed signature (2026-10-03: `catch_up()` gained a required `db`)
+    leaves a DB-embedded script stale and the next (re)start crash-loops.
+    Line contract: one `RESULT ts=... checked=... green=... red=...
     rc=...` line, one `RED id=... name=... missing=...` per red, `TOOL-ERROR
     ...` on rc=2; exit codes 0 all clean / 1 red / 2 tool error. `--check-file`
     checks one file off-DB (the falsification hook); `--rows-file` sweeps a JSON

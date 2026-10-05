@@ -359,8 +359,8 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "schedule_verify_failed": telemetry_event(
         "schedule_verify_failed",
-        "ava schedules verify found in-store schedule scripts that fail dry-import or "
-        "call-signature binding, or the sweep itself failed",
+        "ava schedules verify found in-store schedule scripts that fail dry-import, an "
+        "undefined-name read or call-signature binding, or the sweep itself failed",
         payload=ScheduleVerifyFailed,
         tier="anomaly",
         site="cli/commands/management/schedules_verify.py:_report_verify telemetry.emit",
