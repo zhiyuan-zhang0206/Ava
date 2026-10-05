@@ -92,13 +92,9 @@ def test_stage_contract() -> None:
         hook = hooks[name]
         assert hook["stages"] == ["pre-push"]
         assert hook["verbose"] is True  # pre-commit hides output on PASS otherwise.
-        assert "bash scripts/prepush-guard.sh " in hook["entry"]
-    vitest = hooks["frontend-vitest"]
-    assert vitest["entry"] == (
-        "bash scripts/prepush-guard.sh vitest -- bash -c 'cd ui/web && npx --no-install vitest run'"
-    )
-    assert vitest["files"] == r"^ui/web/.*\.(ts|tsx)$"
-    assert vitest["pass_filenames"] is False
+        assert hook["entry"].startswith(".venv/bin/python scripts/provision/prepush_frontend.py ")
+        assert hook["always_run"] is True
+        assert hook["pass_filenames"] is False
     check = hooks["check-git-hooks-install"]
     assert check["stages"] == ["pre-commit"]
     assert check["always_run"] is True
@@ -175,7 +171,7 @@ def test_artifact_freshness_hook_list_matches_config() -> None:
         )
 
 
-def test_branch_lint_skips_without_origin_main(checkout: Path) -> None:
+def test_branch_lint_rejects_unknown_scope(checkout: Path) -> None:
     result = subprocess.run(
         ["bash", str(BRANCH_LINT)],
         cwd=checkout,
@@ -184,8 +180,8 @@ def test_branch_lint_skips_without_origin_main(checkout: Path) -> None:
         check=False,
         timeout=10,
     )
-    assert result.returncode == 0
-    assert "PRE-PUSH SKIPPED [branch-lint]: origin/main is not resolvable locally" in result.stderr
+    assert result.returncode != 0
+    assert "requires local origin/main" in result.stderr
 
 
 def _init_probe_repo(path: Path) -> None:
@@ -212,7 +208,7 @@ def _init_repo_with_origin_main(path: Path) -> str:
     return base_sha
 
 
-def test_pyright_files_skips_without_origin_main(checkout: Path) -> None:
+def test_pyright_files_rejects_unknown_scope(checkout: Path) -> None:
     result = subprocess.run(
         ["bash", str(PYRIGHT_FILES)],
         cwd=checkout,
@@ -221,8 +217,8 @@ def test_pyright_files_skips_without_origin_main(checkout: Path) -> None:
         check=False,
         timeout=10,
     )
-    assert result.returncode == 0
-    assert "PRE-PUSH SKIPPED [pyright]: origin/main is not resolvable locally" in result.stderr
+    assert result.returncode != 0
+    assert "requires local origin/main" in result.stderr
 
 
 def test_pyright_files_skips_when_no_python_files_changed(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@
 # dependencies -- can change the verdict of files that did not change, so an edit to any of
 # them lints the whole project, as does `--all-files`. A type-aware rule can also react to a
 # type that changed in ANOTHER file, which this per-file run does not see: the pre-push
-# `frontend-eslint-full` hook and CI's frontend job lint the whole project.
+# hook checks branch paths; CI's frontend job lints the whole project.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"

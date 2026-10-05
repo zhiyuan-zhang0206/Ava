@@ -1,5 +1,11 @@
 # Vitest at pre-push; defer automatic local test subsets
 
+> Superseded policy: local pre-push checks now use branch contribution paths;
+> full suites run only in CI. See [current hook behavior](../conventions/runbook.md#git-hooks-pre-commit--pre-push)
+> and [testing](../conventions/testing.md). The original decision and measurements
+> below remain historical evidence.
+
+
 ## Decision and rule
 
 On the post-#3282 base `8053a2f88`, move `frontend-vitest` to pre-push and
