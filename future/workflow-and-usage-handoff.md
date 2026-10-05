@@ -20,8 +20,7 @@ The observer script never kills peers.
 
 Workflow selection PR (merged during this work): https://github.com/zhiyuan-zhang0206/Ava/pull/4342
 
-Follow-up contribution: branch `codex/workflow-usage-reminders`; PR link will be
-recorded after creation.
+Follow-up PR: https://github.com/zhiyuan-zhang0206/Ava/pull/4349
 
 Development checkout: `.worktrees/workflow-selection`, branch
 `codex/workflow-usage-reminders`. The follow-up is submitted for review; no merge
@@ -64,7 +63,10 @@ lifecycle action is part of this contribution.
 
 Local validation after rebasing onto `95ca2cb6a`: 418 affected tests passed,
 including 18 focused usage tests and the real read-only CLI query and
-notification path. New observer code passes Pyright without errors. Tests
+notification path. New observer code passes Pyright without errors. Commit and pre-push checks
+passed, including frontend type checking and eslint. Full frontend Vitest was
+skipped because frontend changes only remove generated task-schema fields; API
+regressions and type checking verify their consumers. CI is tracked on the PR. Tests
 cover real SQL lineage selection, windows, lifetime folding, unpriced calls,
 notification-only thresholds, task contracts, claim/timeline links, LLM usage,
 and affected prompt routing. Generated OpenAPI, frontend types, and event
