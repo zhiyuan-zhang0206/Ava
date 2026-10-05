@@ -186,6 +186,61 @@ def test_annotations_are_not_read() -> None:
     assert _check("def f(value: zz_missing_type) -> zz_missing_return:\n    return value\n") is None
 
 
+@pytest.mark.parametrize(
+    "script",
+    [
+        "def identity[T](value):\n    return T\n",
+        "def wrap[**P](fn):\n    return P\n",
+        "def pack[*Ts](values):\n    return Ts\n",
+        "class Bag[T]:\n    item = T\n",
+        "class BagP[**P]:\n    item = P\n",
+        "class BagT[*Ts]:\n    item = Ts\n",
+        "type Bag[T] = list[T]\n",
+        "type BagP[**P] = list[P]\n",
+        "type BagTs[*Ts] = list[*Ts]\n",
+    ],
+    ids=[
+        "fn-typevar",
+        "fn-paramspec",
+        "fn-typevartuple",
+        "class-typevar",
+        "class-paramspec",
+        "class-typevartuple",
+        "alias-typevar",
+        "alias-paramspec",
+        "alias-typevartuple",
+    ],
+)
+def test_pep695_type_parameters_are_bindings(script: str) -> None:
+    """A type parameter is a name the script binds (2026-10-05 review); reading it is not drift."""
+    assert _check(script) is None
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "def f[T: zz_missing_bound]():\n    return T\n",
+        "class C[T: zz_missing_bound]:\n    pass\n",
+        "type A[T: zz_missing_bound] = list[T]\n",
+    ],
+    ids=["fn", "class", "alias"],
+)
+def test_type_parameter_bounds_are_not_read(script: str) -> None:
+    """A bound is evaluated lazily like an annotation, never at fire time."""
+    assert _check(script) is None
+
+
+def test_a_missing_name_next_to_a_bound_type_param_is_still_red() -> None:
+    red = _check("def identity[T](value: T) -> T:\n    return zz_missing_value\n")
+    assert red is not None and red.startswith("undefined-name:")
+    assert "L2 zz_missing_value" in red
+
+
+def test_a_missing_name_in_a_type_alias_value_is_still_red() -> None:
+    red = _check("type Bag[T] = list[zz_missing_alias]\n")
+    assert red is not None and red.startswith("undefined-name:") and "L1 zz_missing_alias" in red
+
+
 def test_a_conditional_import_binding_is_green() -> None:
     assert (
         _check(
