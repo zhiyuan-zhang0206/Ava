@@ -8,7 +8,7 @@ import os
 import stat
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -499,3 +499,22 @@ def test_a_socket_path_that_cannot_fit_fails_before_launch(
 
     with pytest.raises(owner.CodingSessionSocketError, match="bytes; unix sockets"):
         owner.codex_app_server_socket(_key(tmp_path), _SOCKET_GENERATION)
+
+
+@pytest.mark.parametrize("status", ["inactive", "invalid"])
+def test_observation_outcomes_cannot_be_written(tmp_path: Path, status: str) -> None:
+    from dataclasses import replace
+
+    key = _key(tmp_path)
+    launched = _launch(key, agent_id=7)
+    projected = replace(launched, status=record_codec.CodingSessionStatus(status))
+    with pytest.raises(ValueError, match="only lifecycle states"):
+        record_codec.write_unlocked(projected)
+    assert (
+        owner.read(key, _generation(launched)).status is record_codec.CodingSessionStatus.LAUNCHING
+    )
+
+
+def test_owner_snapshot_rejects_unknown_status(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        record_codec.CodingSessionOwner(key=_key(tmp_path), status=cast(Any, "unexpected"))

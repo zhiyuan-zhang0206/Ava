@@ -15,6 +15,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Never, cast
 
@@ -22,7 +23,26 @@ from base.host.atomic_io import fsync_parent, write_text_atomic
 
 SCHEMA_VERSION = 1
 _TOOL_RE = re.compile(r"[a-z][a-z0-9-]*")
-PersistedStatus = Literal["launching", "active", "terminal"]
+
+
+class CodingSessionStatus(StrEnum):
+    """Lifecycle states and read-only observation outcomes of an owner record."""
+
+    LAUNCHING = "launching"
+    ACTIVE = "active"
+    TERMINAL = "terminal"
+    INACTIVE = "inactive"
+    INVALID = "invalid"
+
+
+PersistedStatus = Literal[
+    CodingSessionStatus.LAUNCHING, CodingSessionStatus.ACTIVE, CodingSessionStatus.TERMINAL
+]
+PERSISTED_STATUSES = (
+    CodingSessionStatus.LAUNCHING,
+    CodingSessionStatus.ACTIVE,
+    CodingSessionStatus.TERMINAL,
+)
 
 
 class InvalidCodingSessionOwnerError(RuntimeError):
@@ -43,7 +63,7 @@ class CodingSessionOwner:
     """One immutable snapshot of a canonical owner generation."""
 
     key: CodingSessionKey
-    status: Literal["inactive", "launching", "active", "terminal", "invalid"]
+    status: CodingSessionStatus
     generation: str | None = None
     owner_agent_id: int | None = None
     display_label: str | None = None
@@ -60,6 +80,10 @@ class CodingSessionOwner:
     terminalized_at: dt.datetime | None = None
     terminal_reason: str | None = None
     error: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize valid string construction to the same enum used by journal reads."""
+        object.__setattr__(self, "status", CodingSessionStatus(self.status))
 
 
 def _invalid(message: str) -> Never:
@@ -238,13 +262,13 @@ def _parse_session_identity(
     if name_raw is not None and not isinstance(name_raw, str):
         _invalid("session_name must be a string or null")
     name = name_raw
-    if status == "active" and (session_id is None or not name):
+    if status == CodingSessionStatus.ACTIVE and (session_id is None or not name):
         _invalid("active owner must carry a session id and full name")
     if (session_id is None) != (name is None):
         _invalid("session id and full name must be published together")
     if session_id is not None and name != full_session_name(owner_agent_id, session_id, suffix):
         _invalid("session_name does not match its owner, id, and generation")
-    if status == "launching" and session_id is not None:
+    if status == CodingSessionStatus.LAUNCHING and session_id is not None:
         _invalid("launching owner cannot publish a session handle")
     return session_id, name
 
@@ -267,7 +291,7 @@ def _parse_supervisor_identity(
         _invalid("supervisor session id and full name must be published together")
     if not supervised and session_id is not None:
         _invalid("a file-less takeover generation never carries a supervisor handle")
-    if status == "active" and supervised and session_id is None:
+    if status == CodingSessionStatus.ACTIVE and supervised and session_id is None:
         _invalid("active owner must carry its supervisor handle")
     if session_id is not None and name != full_session_name(
         owner_agent_id,
@@ -286,9 +310,11 @@ def _parse_terminal_metadata(
     if reason_raw is not None and not isinstance(reason_raw, str):
         _invalid("terminal_reason must be a string or null")
     terminalized_at = _optional_timestamp(raw.get("terminalized_at"), "terminalized_at")
-    if status == "terminal" and (not reason_raw or terminalized_at is None):
+    if status == CodingSessionStatus.TERMINAL and (not reason_raw or terminalized_at is None):
         _invalid("terminal owner must carry its reason and terminalized time")
-    if status != "terminal" and (reason_raw is not None or terminalized_at is not None):
+    if status != CodingSessionStatus.TERMINAL and (
+        reason_raw is not None or terminalized_at is not None
+    ):
         _invalid("only a terminal owner may carry terminal metadata")
     return terminalized_at, reason_raw
 
@@ -303,9 +329,12 @@ def _parse(key: CodingSessionKey, value: object) -> CodingSessionOwner:
         _invalid("record key does not match its canonical path")
     if raw.get("tool") != key.tool:
         _invalid("record tool does not match its canonical path")
-    status = raw.get("status")
-    if status not in ("launching", "active", "terminal"):
-        _invalid(f"unknown status {status!r}")
+    raw_status = raw.get("status")
+    if not isinstance(raw_status, str):
+        _invalid(f"unknown status {raw_status!r}")
+    status = CodingSessionStatus(raw_status)
+    if status not in PERSISTED_STATUSES:
+        _invalid(f"unknown persisted status {status!r}")
     persisted_status = status
     generation, owner_agent_id, label, suffix = _parse_generation_identity(key, raw)
     raw_state_dir = Path(_required_str(raw, "state_dir"))
@@ -349,13 +378,17 @@ def _read_path(key: CodingSessionKey, path: Path, generation: str | None) -> Cod
     try:
         owner = _parse(key, json.loads(path.read_text(encoding="utf-8")))
     except FileNotFoundError:
-        return CodingSessionOwner(key=key, status="inactive", generation=generation)
+        return CodingSessionOwner(
+            key=key, status=CodingSessionStatus.INACTIVE, generation=generation
+        )
     except (OSError, TypeError, ValueError) as exc:
-        return CodingSessionOwner(key=key, status="invalid", generation=generation, error=str(exc))
+        return CodingSessionOwner(
+            key=key, status=CodingSessionStatus.INVALID, generation=generation, error=str(exc)
+        )
     if generation is not None and owner.generation != generation:
         return CodingSessionOwner(
             key=key,
-            status="invalid",
+            status=CodingSessionStatus.INVALID,
             generation=generation,
             error="record generation does not match its file name",
         )
@@ -408,6 +441,8 @@ def _fsync_parent(path: Path) -> None:
 
 
 def write_unlocked(owner: CodingSessionOwner) -> None:
+    if owner.status not in PERSISTED_STATUSES:
+        raise ValueError("only lifecycle states may be persisted")
     if owner.generation is None:
         raise ValueError("an owner record is written under its generation")
     path = state_path(owner.key, owner.generation)

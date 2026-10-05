@@ -37,6 +37,7 @@ import pytest
 
 from base.paths import workspace_dir
 from base.sessions.coding_session_owner import CodingSessionKey, CodingSessionOwner
+from base.sessions.coding_session_owner_record import CodingSessionStatus
 
 _REPO = Path(__file__).parents[2]
 _DYNAMIC_WORKFLOW_SCRIPTS = (
@@ -325,7 +326,7 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
     owner = CodingSessionOwner(
         key=key,
         generation="generation",
-        status="active",
+        status=CodingSessionStatus.ACTIVE,
         created_at=dt.datetime.fromtimestamp(work.stat().st_mtime - 1, dt.UTC),
         expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
     )

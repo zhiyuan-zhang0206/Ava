@@ -18,6 +18,7 @@ from base.deploy.maintenance import pause_owner
 from base.deploy.release import editable_install
 from base.host import atomic_io
 from base.sessions import coding_session_owner_record
+from base.sessions.coding_session_owner_record import CodingSessionStatus
 from base.sessions.pty import allocation_freeze
 from cli.commands.observability import grafana_render, observatory_urls, otel_collector
 
@@ -34,7 +35,9 @@ def _marker_write(case: str, path: Path) -> None:
         key = coding_session_owner_record.CodingSessionKey("cluster", "workspace", "codex")
         coding_session_owner_record.write_unlocked(
             coding_session_owner_record.CodingSessionOwner(
-                key=key, status="inactive", generation="11111111-2222-4333-8444-555555555555"
+                key=key,
+                status=CodingSessionStatus.LAUNCHING,
+                generation="11111111-2222-4333-8444-555555555555",
             )
         )
     elif case == "pause":
