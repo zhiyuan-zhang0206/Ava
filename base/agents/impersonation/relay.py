@@ -18,7 +18,7 @@ from base.agents.impersonation._store import (
     require_relay_active_locked,
     token_hash,
 )
-from base.agents.impersonation.status import ImpersonationStatus
+from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.agents.messages.caller_identity import caller_payload
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -310,4 +310,4 @@ def abort_lease(
             ended = cur.fetchone()
             assert ended is not None  # noqa: S101 — locked overhead row exists
     wake_agent(db, bus, lease["agent_id"], roster_changed=True)
-    return public(ended)
+    return public(parse_lease(ended))

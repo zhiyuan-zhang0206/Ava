@@ -59,8 +59,9 @@ def lock_lease(conn: psycopg.Connection, lease_id: str) -> LeaseRecord:
 
 
 def public(lease: Mapping[str, Any]) -> dict[str, Any]:
+    status = ImpersonationStatus(lease["status"])
     return {
-        key: str(value) if isinstance(value, UUID) else value
+        key: status if key == "status" else str(value) if isinstance(value, UUID) else value
         for key, value in lease.items()
         if key not in ("token_hash", "relay_token_hash")
     }

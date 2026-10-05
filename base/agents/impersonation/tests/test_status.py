@@ -44,3 +44,63 @@ def test_open_projection_rejects_closed_statuses() -> None:
         else:
             with pytest.raises(ValueError):
                 adapter.validate_python(status.value)
+
+
+@pytest.mark.parametrize("row", [{}, {"status": "unexpected"}, {"status": None}])
+@pytest.mark.parametrize("reader", ["public", "public_session", "resolve", "list_sessions"])
+def test_public_readers_reject_invalid_raw_status(
+    row: dict[str, Any], reader: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from typing import cast
+
+    from base.agents.impersonation import history, sessions
+    from base.db import Database
+
+    def execute(*_args: object) -> None:
+        pass
+
+    # Supply every projection field so an unrelated missing key cannot fake a rejection.
+    fields = (
+        "name",
+        "executor_name",
+        "process_metadata",
+        "created_at",
+        "activated_at",
+        "ended_at",
+        "expires_at",
+        "ttl_seconds",
+        "ack_window_seconds",
+        "max_delivery_attempts",
+        "reason",
+        "summary",
+        "handoff_path",
+        "handoff_applied_at",
+        "rejection_reason",
+        "relay_provider",
+        "relay_heartbeat_at",
+        "relay_last_failure_at",
+        "events_completed_at",
+    )
+    raw: dict[str, Any] = dict.fromkeys(fields)
+    raw.update(agent_id=7, session_id=1, machine="local", automatic=False)
+    raw.update(row)
+    monkeypatch.setattr(history, "machine_name", lambda: "local")
+    cursor = SimpleNamespace(execute=execute, fetchone=lambda: raw, fetchall=lambda: [raw])
+
+    def context_cursor(**_kwargs: object) -> nullcontext[SimpleNamespace]:
+        return nullcontext(cursor)
+
+    connection = SimpleNamespace(cursor=context_cursor)
+    db = cast(Database, SimpleNamespace(connect=lambda: nullcontext(connection)))
+    expected = KeyError if "status" not in row else ValueError
+    with pytest.raises(expected):
+        if reader == "public":
+            public(raw)
+        elif reader == "public_session":
+            history.public_session(raw)
+        elif reader == "resolve":
+            history.resolve(db, 7, 1)
+        else:
+            sessions.list_sessions(db, 7)

@@ -19,6 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
+from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -73,6 +74,7 @@ def metadata(lease: Mapping[str, Any]) -> ImpersonationMetadata:
 
 def public_session(lease: Mapping[str, Any]) -> dict[str, Any]:
     """Expose the numeric handle without legacy UUIDs or credentials."""
+    status = ImpersonationStatus(lease["status"])
     fields = (
         "agent_id",
         "session_id",
@@ -98,7 +100,11 @@ def public_session(lease: Mapping[str, Any]) -> dict[str, Any]:
         "events_completed_at",
     )
     result = {key: lease[key] for key in fields} | {"id": lease["session_id"]}
-    if lease["automatic"] and result["status"] in ("requested", "accepted"):
+    result["status"] = status
+    if lease["automatic"] and status in (
+        ImpersonationStatus.REQUESTED,
+        ImpersonationStatus.ACCEPTED,
+    ):
         result["status"] = "preparing"
     return result
 
@@ -114,6 +120,7 @@ def resolve(db: Database, agent_id: int, session_id: int) -> dict[str, Any]:
         lease = cur.fetchone()
     if lease is None:
         raise ValueError(f"Agent {agent_id} has no impersonation session {session_id}")
+    parse_lease(lease)
     if lease["machine"] != machine_name():
         raise ValueError("Impersonation operations must run on the agent's machine")
     return lease

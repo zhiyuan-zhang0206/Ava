@@ -13,6 +13,7 @@ from base.agents.impersonation._store import (
     lock_lease,
     require_relay_active_locked,
 )
+from base.agents.impersonation.status import ImpersonationStatus
 from base.db import Database, publish_inbound_wake
 from base.events.live.announce import (
     publish_agent_updated_sync,
@@ -37,7 +38,7 @@ def reserve_delivery(
         authenticate_relay(lease, relay_token)
         was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
-        if lease["status"] != "active":
+        if lease["status"] != ImpersonationStatus.ACTIVE:
             rows = []
         else:
             require_relay_active_locked(conn, lease, relay_token)
@@ -57,7 +58,7 @@ def reserve_delivery(
                     lease["ack_window_seconds"],
                 ),
             ).fetchall()
-    if was_open and lease["status"] == "expired":
+    if was_open and lease["status"] == ImpersonationStatus.EXPIRED:
         publish_inbound_wake(db, bus, lease["agent_id"], "impersonation-expired")
         publish_impersonation_changed_sync(bus, lease["agent_id"])
         publish_agent_updated_sync(bus, lease["agent_id"])
