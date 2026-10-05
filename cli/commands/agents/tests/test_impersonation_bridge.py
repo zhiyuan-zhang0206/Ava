@@ -465,7 +465,7 @@ def test_expired_lease_notifies_host_without_subscribing_or_extending() -> None:
     emitted: list[str] = []
     run(inbox, listener, emitted.append)
     assert len(emitted) == 1
-    assert "control expired" in emitted[0]
+    assert "ended: expired" in emitted[0]
     assert not listener.opened
 
 
@@ -480,7 +480,7 @@ def test_active_expiry_notifies_loss_of_control() -> None:
     run(inbox, Listener(inbox, waited=waited), emitted.append)
     assert len(emitted) == 2
     assert emitted[0] == inbox.start_message
-    assert "control expired" in emitted[1]
+    assert "ended: expired" in emitted[1]
 
 
 @pytest.mark.parametrize("outcome", ["released", "rejected", "expired"])
@@ -498,7 +498,7 @@ def test_waiting_controller_is_told_terminal_outcome(outcome: relay.LeaseStatus)
     else:
         assert len(emitted) == 2
         assert emitted[0] == inbox.start_message
-        assert f"control {outcome}" in emitted[1]
+        assert f"ended: {outcome}" in emitted[1]
 
 
 def test_wait_never_extends_beyond_lease_lifetime() -> None:
@@ -587,7 +587,7 @@ def test_claude_envelope_truncates_long_content_but_keeps_the_ack_line() -> None
 def test_codex_requires_a_control_endpoint_without_queueing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands.agents import codex_app_server
+    from base.agents.impersonation import host_transport as codex_app_server
 
     monkeypatch.setattr(codex_app_server, "default_control_endpoint", lambda: None)
     with pytest.raises(RuntimeError, match=r"Steer.*--codex-remote"):
@@ -617,7 +617,7 @@ def test_codex_refusal_never_falls_back_to_pending(
 def test_codex_emitter_delivers_literal_input_to_the_owning_server(
     monkeypatch: pytest.MonkeyPatch, explicit: bool
 ) -> None:
-    from cli.commands.agents import codex_app_server
+    from base.agents.impersonation import host_transport as codex_app_server
 
     attempts: list[tuple[str, str, str]] = []
     endpoint = "unix:///tmp/ava-codex.sock"

@@ -20,10 +20,14 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+import psycopg
 import pytest
 from websockets.sync.server import Server, ServerConnection, unix_serve
 
-from cli.commands.agents import codex_app_server
+from base.agents.impersonation import host_transport as codex_app_server
+from base.agents.impersonation.terminal_notices import deliver_pending_notice
+from base.cluster.machine import machine_name
+from base.db import Database, create_agent
 
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 
@@ -256,3 +260,41 @@ def test_live_submit_treats_a_bare_unix_endpoint_as_the_default_socket(
     finally:
         server.stop()
     assert reason is None
+
+
+def test_ended_lease_reaches_actual_codex_host_without_a_relay(
+    short_socket: Path,
+    database: Database,
+    db_conn: psycopg.Connection,
+) -> None:
+    from uuid import uuid4
+
+    aid, lease_id = create_agent(db_conn), uuid4()
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'terminated',%s)",
+        (aid, machine_name()),
+    )
+    db_conn.execute(
+        "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote) "
+        "VALUES(%s,%s,'external_agent:test',%s,'active',300,clock_timestamp()+interval '5 minutes','codex',%s,%s)",
+        (lease_id, aid, machine_name(), str(THREAD_ID), _endpoint(short_socket)),
+    )
+    db_conn.execute(
+        "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp(),rejection_reason='confirmed executor death' WHERE id=%s",
+        (lease_id,),
+    )
+    db_conn.commit()
+    server = FakeAppServer()
+    server.start(short_socket)
+    try:
+        assert deliver_pending_notice(database, machine_name())
+    finally:
+        server.stop()
+    payload = server.received[-1]["params"]
+    assert payload["threadId"] == str(THREAD_ID)
+    assert str(lease_id) in payload["input"][0]["text"]
+    assert "confirmed executor death" in payload["input"][0]["text"]
+    assert db_conn.execute(
+        "SELECT terminal_notice_accepted_at IS NOT NULL FROM agent_impersonations WHERE id=%s",
+        (lease_id,),
+    ).fetchone() == (True,)

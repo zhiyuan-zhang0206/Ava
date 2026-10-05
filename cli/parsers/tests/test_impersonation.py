@@ -61,7 +61,7 @@ def test_request_uses_external_identity_without_delivering_a_credential(
         }
 
     monkeypatch.setattr(
-        "cli.commands.agents.codex_app_server.default_control_endpoint",
+        "base.agents.impersonation.host_transport.default_control_endpoint",
         lambda: "unix:///tmp/codex.sock",
     )
     monkeypatch.setattr(sessions, "request", request)
@@ -106,7 +106,7 @@ def test_request_without_steer_endpoint_does_not_acquire_a_lease(
 ) -> None:
     from unittest.mock import Mock
 
-    from cli.commands.agents import codex_app_server
+    from base.agents.impersonation import host_transport as codex_app_server
 
     request = Mock(return_value={})
     monkeypatch.setattr(sessions, "request", request)

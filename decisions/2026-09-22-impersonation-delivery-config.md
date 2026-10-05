@@ -14,3 +14,5 @@ The SQL counter no longer caps every lease at two. Serialized reservations
 enforce the saved limit. Downgrade refuses open leases with a policy the old
 code cannot honor, or any recorded count above two that the old constraint
 cannot represent; it never truncates durable history to make rollback pass.
+
+Update: [Authority and delivery separation](../docs/history/2026-10-05/impersonation-authority-and-delivery.md) supersedes exhaustion-as-expiry; durable per-message reservation and receipt semantics remain.
