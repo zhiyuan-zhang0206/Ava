@@ -565,15 +565,11 @@ def test_instruction_script_prints_only_after_successful_detach(
         raise RuntimeError("lease expired before detach")
 
     monkeypatch.setattr(instruction_reader.external, "attach", attach)
-    monkeypatch.setattr(
-        instruction_reader.snapshots,
-        "load_snapshot",
-        lambda _agent_id: (
-            SimpleNamespace(messages=[SystemMessage(content="Native rules")]),
-            None,
-            None,
-        ),
-    )
+
+    def snapshot(_agent_id: int) -> tuple[SimpleNamespace, None, None]:
+        return SimpleNamespace(messages=[SystemMessage(content="Native rules")]), None, None
+
+    monkeypatch.setattr(instruction_reader.snapshots, "load_snapshot", snapshot)
     monkeypatch.setattr(sys, "argv", ["read_instructions.py", "0", "--agent", "405"])
     with pytest.raises(RuntimeError, match="lease expired"):
         instruction_reader.main()

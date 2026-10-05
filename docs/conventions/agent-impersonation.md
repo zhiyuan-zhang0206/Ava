@@ -104,8 +104,8 @@ User-visible replies never go through the attachment — send them with the CLI 
 
 Direct Python is the normal SDK path; `ava impersonate exec` is an optional
 wrapper. Use the cluster checkout's `.venv/bin/python` inside the controller's
-own process tree, preserving its `AVA_HOME`. No long-lived interpreter is needed.
-Before work, run the impersonator skill's bundled `scripts/read_instructions.py`
+own process tree, preserving its `AVA_HOME`. No long-lived interpreter is needed. Before work, run the impersonator skill's
+bundled `scripts/read_instructions.py`
 with the session id and `--agent`. Read its output in full: the system prompt and
 configured preloaded skill notes saved in the current native context window,
 not a newly rendered prompt. Restore relevant memory, tasks and workspace
