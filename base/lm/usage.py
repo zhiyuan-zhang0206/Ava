@@ -26,7 +26,6 @@ def log_usage_from_message(
     latency_ms: float | None = None,
     decode_ms: float | None = None,
     priced_at: datetime | None = None,
-    task_id: int | None = None,
     usage_kind: str = "agent",
     source: str | None = None,
     for_agent_id: int | None = None,
@@ -63,7 +62,6 @@ def log_usage_from_message(
         latency_ms=latency_ms,
         decode_ms=decode_ms,
         priced_at=priced_at,
-        task_id=task_id,
         usage_kind=usage_kind,
         source=source,
         for_agent_id=for_agent_id,
@@ -112,7 +110,6 @@ def _log_usage(
     usage_kind: str,
     decode_ms: float | None = None,
     priced_at: datetime | None = None,
-    task_id: int | None = None,
     source: str | None = None,
     for_agent_id: int | None = None,
     cache_mechanism: str | None = None,
@@ -173,7 +170,6 @@ def _log_usage(
         latency_ms=latency_ms,
         decode_ms=decode_ms,
         usage_kind=usage_kind,
-        **({"task_id": task_id} if task_id is not None else {}),
         **({"source": source, "transport_source": "system"} if source is not None else {}),
         **(
             {"cache_mechanism": cache_mechanism, "cache_scope": cache_scope}

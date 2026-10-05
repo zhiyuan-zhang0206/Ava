@@ -284,9 +284,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=TaskEscalation,
         site="task_maintenance/daemon.py:_run_escalate",
     ),
-    "task_usage_record_failed": telemetry_event(
-        "task_usage_record_failed", "task usage recording failed", tier="anomaly"
-    ),
     # labeler / trace housekeeping
     "label_generated": telemetry_event("label_generated", "label auto-generated", tier="noise"),
     "label_generate_failed": telemetry_event(

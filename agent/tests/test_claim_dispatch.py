@@ -145,7 +145,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     cmd = await claim_node(
-        AgentState(active_task_id=99),
+        AgentState(),
         _make_runtime(ops_pool=aops_pool),
         _config(
             tid,
@@ -163,7 +163,6 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     assert msgs[0].content.startswith("[")  # pyright: ignore[reportUnknownMemberType]
     assert "hello" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     assert cmd.update["halted"] is False  # type: ignore[index]
-    assert cmd.update["active_task_id"] is None  # type: ignore[index]
 
 
 async def test_claim_chat_expands_slash_command(

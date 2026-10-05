@@ -116,7 +116,6 @@ When done:
 Do not message anyone — writing the file IS the handoff, and ending
 yourself IS the completion.
 """,
-    label="flight-search-worker",
 )
 # ... same shape for hotels.json and activities.json
 worker_ids = {"flights": flight_id}

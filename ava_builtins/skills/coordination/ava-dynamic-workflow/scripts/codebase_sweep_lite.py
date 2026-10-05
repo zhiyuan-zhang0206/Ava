@@ -36,11 +36,8 @@ def hf(wave: int, role: str) -> Path:
     return HD / f"w{wave}_{role}.json"
 
 
-def spawn(prompt: str, label: str = "") -> int:
-    # `label` is added by the ava_fleet `agents.spawn` wrap
-    # (ava_builtins/plugins/ava_fleet/plugin.py); the core signature does not
-    # carry it.
-    return ava.agents.spawn(prompt=prompt, label=label)  # pyright: ignore[reportCallIssue]
+def spawn(prompt: str) -> int:
+    return ava.agents.spawn(prompt=prompt)
 
 
 def read_state() -> dict:
@@ -128,7 +125,6 @@ Return JSON written to {hf(1, role)}:
 }}
 After writing, message no one — the file IS the handoff.
 """,
-            label=role,
         )
         log(f"  [{role}] spawned #{wid} — {desc}")
 
@@ -193,7 +189,6 @@ Return JSON written to {hf(2, role)}:
 }}
 After writing, message no one — the file IS the handoff.
 """,
-                label=role,
             )
             log(f"  [{role}] spawned #{wid} — {len(subset)} findings")
 
@@ -228,7 +223,6 @@ Generate a Markdown report:
 Write to {hf(3, "draft")}, wrapped in JSON: {{"report":"markdown..."}}
 After writing, message no one — the file IS the handoff.
 """,
-        label="report-writer",
     )
     log(f"  [report-writer] spawned #{wid}")
 
@@ -278,7 +272,6 @@ Return JSON written to {hf(4, role)}:
 {{"role":"{role}","critiques":[{{"target":"...","issue":"...","suggestion":"..."}}]}}
 After writing, message no one — the file IS the handoff.
 """,
-            label=role,
         )
         log(f"  [{role}] spawned #{wid}")
 
@@ -313,7 +306,6 @@ ava.ui.serve(page_dir, name="codebase-sweep-lite", title="Codebase Sweep Report"
 
 After completion, message no one.
 """,
-        label="publisher",
     )
     log(f"  [publisher] spawned #{wid}")
 

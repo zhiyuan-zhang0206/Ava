@@ -68,7 +68,7 @@ and results you can verify. Keep simple local steps with the current agent; weig
 supervision and integration cost against the benefit of another worker. Choose
 tools by demonstrated capability for the task, not fixed file-count thresholds.
 For Ava's external-worker launch, supervision, resume, or takeover mechanics,
-load `ava.skills.ava_guide.external_agents`.
+load the external-agents guide in Ava Guide.
 
 ## Capability Matching
 
@@ -92,8 +92,8 @@ A routine task needs no capability report or mandatory `Not used` entry.
 
 Use a sentence or a few working notes for ordinary tasks. Persist the objective,
 acceptance evidence, boundaries, next action, and necessary coordination state
-when work spans turns or needs recovery. Reuse the existing task and agent state
-owners; do not create a parallel workflow registry for this choice.
+when work spans turns or needs recovery. Use durable working notes or existing work records; no collaboration plugin,
+task registry, label convention, or specific SDK is required.
 
 Calibration, alignment, planning, and evaluation can stand alone, interleave,
 and feed back into one another. Execute settled slices while investigating
@@ -107,7 +107,10 @@ Skipping Define Goal still requires a recognizable outcome and completion
 condition when pursuing a sustained goal. Skipping Align cannot settle an open
 permission question. Evaluation depth is selectable, but completion claims need
 supporting evidence. Budget and authority boundaries apply to every combination;
-this skill does not enforce a hard spending ceiling.
+this skill does not enforce a hard spending ceiling. When a usage reminder
+arrives, reassess the remaining work and budget: preserve results, prepare a
+handoff, narrow the next step, or ask for a changed budget as appropriate. A
+reminder does not automatically terminate peers or discard in-flight work.
 
 All collaborators are persistent peer agents. Worker, supervisor, reviewer, and
 orchestrator are roles assigned through context and configuration, not separate

@@ -983,8 +983,9 @@ CREATE TABLE agent_tasks (
     last_reminded_at   TIMESTAMPTZ,            -- last time the daemon reminded the owner
     reminder_count      INTEGER NOT NULL DEFAULT 0,  -- reminders sent for the current overdue window
     escalated_at        TIMESTAMPTZ,  -- delegator escalation marker: set by the daemon with the delivered digest; cleared with the counters by any update (the user leg marks itself via its notice)
-    token_budget        BIGINT CHECK (token_budget IS NULL OR token_budget > 0),  -- optional ceiling for explicitly task-tagged LLM tokens
-    usd_budget          DOUBLE PRECISION CHECK (usd_budget IS NULL OR (usd_budget > 0 AND usd_budget < 'Infinity'::double precision)),  -- optional finite USD ceiling for explicitly task-tagged LLM cost
+    -- Retired task-cost columns: inactive; retained for expand-contract upgrades.
+    token_budget        BIGINT CHECK (token_budget IS NULL OR token_budget > 0),
+    usd_budget          DOUBLE PRECISION CHECK (usd_budget IS NULL OR (usd_budget > 0 AND usd_budget < 'Infinity'::double precision)),
     token_used          BIGINT NOT NULL DEFAULT 0 CHECK (token_used >= 0),
     usd_used            DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (usd_used >= 0 AND usd_used < 'Infinity'::double precision),
     token_budget_notified_at TIMESTAMPTZ,  -- first token-ceiling breach notification

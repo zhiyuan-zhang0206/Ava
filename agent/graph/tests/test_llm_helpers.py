@@ -18,8 +18,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator
-from datetime import datetime
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -48,22 +46,6 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 def ledger() -> LlmLedger:
     """A fresh ledger per test: the node's error counts and silent-idle budget start empty."""
     return LlmLedger()
-
-
-def _fixed_task_usage_tally(
-    _msg: AIMessage,
-    model: str,
-    *,
-    latency_ms: float | None = None,
-    decode_ms: float | None = None,
-    priced_at: datetime | None = None,
-    task_id: int | None = None,
-    cache_mechanism: str | None = None,
-    cache_scope: str | None = None,
-) -> tuple[int, float]:
-    """Stable usage tally for task-metering wiring tests."""
-    del model, latency_ms, decode_ms, priced_at, task_id, cache_mechanism, cache_scope
-    return 15, 0.25
 
 
 # ───────────── _capture_ava_overview ─────────────
@@ -1066,81 +1048,3 @@ async def test_llm_usage_event_carries_latency_ms(loguru_records, ledger: LlmLed
     lat = usage[0]["extra"]["latency_ms"]
     assert lat is not None and lat > 0, f"latency_ms should be a positive ms float, got {lat!r}"
     assert usage[0]["extra"]["model"] == "deepseek-flash"
-
-
-async def test_completed_task_turn_records_usage(
-    monkeypatch: pytest.MonkeyPatch, ledger: LlmLedger
-) -> None:
-    """A task-tagged completed turn forwards its measured usage to that task only."""
-    import agent.graph.llm.node as llm_module
-    from ava_builtins.plugins.ava_fleet import task_registry
-
-    recorded: list[tuple[int, int, float]] = []
-
-    async def _one_chunk() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="hi",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
-        )
-
-    def record(task_id: int, *, token_count: int, cost_usd: float) -> None:
-        recorded.append((task_id, token_count, cost_usd))
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _one_chunk()
-    monkeypatch.setattr(llm_module, "log_llm_usage", _fixed_task_usage_tally)
-    monkeypatch.setattr(task_registry, "record_task_usage", record)
-
-    result = await llm_node(
-        AgentState(messages=[HumanMessage(content="hi")], halted=False, active_task_id=42),
-        _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
-        _CONFIG,
-        ledger=ledger,
-    )
-
-    assert result.goto == "after_exec"
-    assert recorded == [(42, 15, 0.25)]
-
-
-async def test_task_usage_failure_does_not_break_completed_turn(
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
-    ledger: LlmLedger,
-) -> None:
-    """A metering-store outage cannot turn one completed LLM call into a retry."""
-    import agent.graph.llm.node as llm_module
-    from ava_builtins.plugins.ava_fleet import task_registry
-
-    async def _one_chunk() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="hi",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
-        )
-
-    def unavailable(_task_id: int, *, token_count: int, cost_usd: float) -> None:
-        del token_count, cost_usd
-        raise OSError("task database unavailable")
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _one_chunk()
-    monkeypatch.setattr(llm_module, "log_llm_usage", _fixed_task_usage_tally)
-    monkeypatch.setattr(task_registry, "record_task_usage", unavailable)
-
-    result = await llm_node(
-        AgentState(messages=[HumanMessage(content="hi")], halted=False, active_task_id=42),
-        _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
-        _CONFIG,
-        ledger=ledger,
-    )
-
-    assert result.goto == "after_exec"
-    assert fake_llm.astream.call_count == 1
-    assert any(
-        record["extra"].get("label") == "task-usage"
-        and record["extra"].get("body")
-        == "failed to record usage for task 42: OSError('task database unavailable')"
-        and record["extra"].get("event") == "task_usage_record_failed"
-        for record in loguru_records
-    )
