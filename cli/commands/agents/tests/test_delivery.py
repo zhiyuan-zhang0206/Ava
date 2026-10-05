@@ -62,6 +62,9 @@ def active(
         database, event_bus, lease["id"], agent_id, owner, "Process and ACK the test message"
     )
     leases.activate(database, event_bus, lease["id"], owner)
+    lease = leases.relay_get(database, event_bus, lease["id"], lease["relay_token"]) | {
+        "relay_token": lease["relay_token"]
+    }
     message_id = insert_inbound_message(
         db_conn,
         agent_id,
@@ -111,7 +114,18 @@ def assert_expiry_note_explains_pending_messages(
     assert "did not ACK" in note[0] and "Unacknowledged messages remain pending" in note[0]
 
 
-def test_two_attempts_each_get_a_full_window_then_native_observes_expiry(
+def _assert_exhaustion_preserved(
+    ended: dict[str, Any], lease: dict[str, Any], mid: int, db_conn: psycopg.Connection
+) -> None:
+    assert ended["status"] == "active"
+    assert f"message {mid} exhausted" in ended["relay_degraded_reason"]
+    assert ended["reason"] == "Test ACK exhaustion"
+    assert reserve(lease, mid) == set()
+    assert_message_pending(db_conn, mid)
+    assert ended["expires_at"] == lease["expires_at"]
+
+
+def test_two_attempts_keep_lease_active_and_late_receipt_possible(
     db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
     lease, owner, mid = active
@@ -134,12 +148,11 @@ def test_two_attempts_each_get_a_full_window_then_native_observes_expiry(
     # The native reconciler also enforces the budget without a live relay.
     ended = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert ended is not None
-    assert ended["status"] == "expired"
-    assert f"did not ACK message {mid} after 2 delivery attempts" in ended["rejection_reason"]
-    assert ended["reason"] == "Test ACK exhaustion"
-    assert reserve(lease, mid) == set()
-    assert_message_pending(db_conn, mid)
-    assert_expiry_note_explains_pending_messages(db_conn, ended["summary_inbound_id"])
+    _assert_exhaustion_preserved(ended, lease, mid, db_conn)
+    leases.ack(database, event_bus, lease["id"], attested_caller(lease), [mid])
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (mid,)
+    ).fetchone() == ("done",)
 
 
 def test_delivery_reservation_that_expires_lease_refreshes_roster(
@@ -200,7 +213,7 @@ def test_rotating_relay_does_not_reset_budget(
     assert rows[0]["delivery_due"] is False
     elapse(db_conn, lease)
     assert reserve(lease, mid) == set()
-    assert leases.relay_get(database, event_bus, lease["id"], "replacement")["status"] == "expired"
+    assert leases.relay_get(database, event_bus, lease["id"], "replacement")["status"] == "active"
 
 
 def test_concurrent_relays_only_reserve_once(
@@ -239,7 +252,7 @@ def test_release_wins_timeout_race_without_being_overwritten(
     )
 
 
-def test_exhausted_message_outside_page_still_ends_lease(
+def test_exhausted_message_outside_page_remains_visible_without_ending_lease(
     db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
     lease, _, first = active
@@ -264,8 +277,8 @@ def test_exhausted_message_outside_page_still_ends_lease(
     leases.ack(database, event_bus, lease["id"], attested_caller(lease), [first])
     elapse(db_conn, lease)
     ended = leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])
-    assert ended["status"] == "expired"
-    assert f"message {other}" in ended["rejection_reason"]
+    assert ended["status"] == "active"
+    assert f"message {other}" in ended["relay_degraded_reason"]
 
 
 class ClockListener:
@@ -296,9 +309,22 @@ class ClockListener:
     async def wait_one(self, timeout: float) -> None:
         lease, window = self._lease, self._lease["ack_window_seconds"]
         self.waits += 1
-        assert (
-            self.waits <= lease["max_delivery_attempts"]
-        )  # ignore-config regressions fail, not hang
+        if self.waits > lease["max_delivery_attempts"]:
+            assert self.waits == lease["max_delivery_attempts"] + 1
+            assert (
+                leases.relay_get(
+                    self._database, self._event_bus, lease["id"], lease["relay_token"]
+                )["status"]
+                == "active"
+            )
+            leases.release(
+                self._database,
+                self._event_bus,
+                lease["id"],
+                attested_caller(lease),
+                "Explicit test end after delivery exhaustion",
+            )
+            return
         elapse(self._db_conn, lease, window - 1)
         inbox = leases.relay_inbox(self._database, lease["id"], lease["relay_token"])
         assert not inbox[0]["delivery_due"]
@@ -323,8 +349,7 @@ def assert_pushes_follow_snapshotted_budget(
         assert ("final delivery" in push) == (count == attempts)
     assert f"Each message has {attempts} delivery attempts" in pushes[0]
     assert f"with {window}s to ACK each" in pushes[0]
-    assert "Ava control expired" in pushes[-1]
-    assert "did not ACK" in pushes[-1]
+    assert all("Ava control expired" not in push for push in pushes)
 
 
 @pytest.mark.parametrize("active", [(180, 2), (7, 1), (60, 3)], indirect=True)
@@ -401,5 +426,5 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
         debounce=0,
     )
     assert_pushes_follow_snapshotted_budget(pushes, mid, window, attempts)
-    assert listener.closed and listener.waits == attempts
+    assert listener.closed and listener.waits == attempts + 1
     assert_message_pending(db_conn, mid)

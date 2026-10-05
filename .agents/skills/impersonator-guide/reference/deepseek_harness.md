@@ -36,8 +36,8 @@ terminal or a detached helper is refused.
 ## Traps
 
 - **The relay job is load-bearing.** It shows up in `job_list`; never
-  `job_kill` it. Killing it stops the heartbeat, and the Ava side ends the
-  takeover (`aborted: the bound relay stopped heartbeating`).
+  `job_kill` it. Killing it visibly degrades delivery; the existing lease
+  remains bounded by its original TTL and confirmed executor liveness.
 - **Keep credentials out of the conversation.** dsh uploads session logs with
   its model requests by default. The request keeps the relay credential in the
   stub for this reason — never print the stub or paste a credential into a

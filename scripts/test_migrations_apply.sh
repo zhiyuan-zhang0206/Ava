@@ -226,6 +226,22 @@ BEGIN
 END $$;
 UPDATE agent_impersonations SET status = 'released' WHERE agent_id = 991005;
 DO $$
+DECLARE snapshot JSONB; pending TIMESTAMPTZ;
+BEGIN
+    SELECT terminal_notice_snapshot,terminal_notice_pending_at INTO snapshot,pending
+    FROM agent_impersonations WHERE agent_id=991005;
+    IF snapshot IS NULL OR pending IS NULL
+       OR snapshot->>'lease_id'<>'00000000-0000-0000-0000-000000000005' THEN
+        RAISE EXCEPTION 'Terminal notice first-transition snapshot did not fire';
+    END IF;
+    UPDATE agent_impersonations SET status=status WHERE agent_id=991005;
+    IF NOT EXISTS (SELECT 1 FROM agent_impersonations WHERE agent_id=991005
+        AND terminal_notice_snapshot=snapshot AND terminal_notice_pending_at=pending) THEN
+        RAISE EXCEPTION 'Repeated terminal write reset notice state';
+    END IF;
+END $$;
+
+DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM agents_meta WHERE id = 991005

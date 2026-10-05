@@ -82,9 +82,10 @@ The codex relay needs no manual start: the accepting runtime spawns it at
 activation from the recorded spec, handing the scoped relay credential over a
 private stdin pipe (`--token-stdin` — the credential never appears in argv,
 environment variables or files). If it cannot start, the acceptance rolls back.
-When its heartbeat goes stale the takeover stops instead of respawning the
-relay — see *Process death → auto-stop* — with one narrow restart-shaped
-exception. The manual form below remains for diagnostics:
+A stale heartbeat degrades delivery while executor authority remains bounded
+by its original TTL. A birth-confirmed Codex relay is replaced under the same
+lease; see *Executor authority and relay recovery*. The manual form below
+remains for diagnostics:
 
 ```sh
 /path/to/checkout/.venv/bin/ava impersonate relay 42 \
@@ -153,7 +154,8 @@ process it runs are killed**, and the session receives one
 `[Monitor expired ... Re-arm it if you still need the watch.]` notice. Re-arm as
 soon as that notice arrives: the fresh arm starts a relay that resumes delivery
 using each message's existing attempt count and ACK deadline. A missed re-arm
-stops the heartbeat and the lease stops (Process death → auto-stop). The legacy
+leaves delivery visibly degraded; the lease keeps its original TTL. Claude
+Monitor requires the controller to re-arm it. The legacy
 `persistent` field is ignored; an arm without `timeout_ms` runs under the
 5-minute default. Verified on Claude Code 2.1.275 (task #4037). Normal Bash
 permissions apply. Monitor is unavailable
@@ -202,7 +204,8 @@ background job owned by that session (visible to `job_list`, stopped by
 plugin steers each into the session — an idle session starts a turn, a busy one
 takes it at its next step, the Steer semantics of the codex relay. There is
 nothing for the executor to arm; a missing heartbeat rejects the takeover like
-any controller-session relay, and a stale one stops it without re-provisioning.
+any controller-session relay at admission. Once active, a stale relay degrades
+delivery without re-provisioning; executor authority keeps its original TTL.
 
 The executor's commands run from dsh's shell tool, a direct child of the `node`
 process, so the attestation anchor is always in reach. Under dsh's default
@@ -213,29 +216,24 @@ permission preset. A self-takeover launched by `spawn_dsh.py` runs with
 prompts in its PTY. dsh resolves its own model credential (environment,
 `$DSH_HOME/.credentials.yaml`, the working directory's `.env`, `$DSH_HOME/.env`).
 
-## Process death → auto-stop
+## Executor authority and relay recovery
 
-A takeover stops when either of its two core components dies; a dead component
-is never silently respawned (task #3998, user ruling 2026-09-18). The accepting
-runtime re-checks both on the held-controls pass, which the dispatcher's
+Confirmed executor death ends authority; relay failure only degrades delivery.
+The accepting runtime re-checks both on the held-controls pass, which the dispatcher's
 database-backed pending scan triggers for held rows every ~30 seconds — the
 check is pull-based and never depends on wake delivery. Worst-case detection is
 the stale window plus one scan interval (≈75 s).
 
-- **Executor death.** Every pass classifies the session's recorded controller
-  anchors (pid + stable start time) against the live process table. All of them
-  dead or reused (the pid now belongs to a different process) stops the lease.
-  A single unreadable pass (AccessDenied / unknown) waits for a second
-  consecutive pass; a session that recorded no anchors (legacy rows) is
-  skipped, never read as "all dead".
-- **Relay death.** A relay heartbeat older than 45 seconds stops the lease. The
-  one narrow exception: a codex relay minted by an *earlier* incarnation (the
-  durable mint mark — time + generation + owner — lives on the lease row),
-  whose last beat predates this process's start, and only inside the
-  fresh-start window (`AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`, default
-  120 s, 0 disables). That restart-shaped loss alone is re-provisioned and
-  respawned; a claude or dsh relay is never re-provisioned from the native side —
-  its stale heartbeat always stops the lease.
+- **Executor authority.** Confirmed death/reuse of every recorded provider
+  anchor ends the lease. Unknown or absent evidence is visible degradation,
+  never confirmed death; authority ends at its original TTL if no decision arrives.
+- **Relay transport.** A stale Codex relay is retired by its recorded process
+  birth before a locked generation CAS mints a replacement. Its private token
+  pipe stays closed until the new child's birth is persisted. No TTL renewal or
+  new takeover occurs. A legacy generation-zero relay without a recorded birth
+  cannot safely be adopted or retired after host restart: recovery is withheld
+  with explicit degradation until an operator ends that old lease. Controller-
+  session providers lack independent respawn support and remain visibly degraded.
 - **What stopping does.** The lease goes terminal (`expired`) with the cause
   recorded as `aborted: <detail>` in `rejection_reason` (the request's own
   `reason` is preserved), pending renewal reminders are dismissed, a relay
@@ -258,8 +256,8 @@ the stale window plus one scan interval (≈75 s).
   on the lease; edits apply to new leases, while existing leases and relay
   restarts keep their saved policy. Pre-migration leases keep their 300-second
   window. Each envelope states the window and per-message attempt number.
-  Missing the final ACK window ends the takeover as `expired` with
-  an explicit missing-ACK cause and unacknowledged input goes to native handoff.
+  Missing the final ACK window pauses that message's automatic delivery.
+  Its durable body remains inbox-readable and ACK-able while the lease is active.
   Reads and native reconciliation check this across the whole lease, regardless
   of inbox pagination or new arrivals, on the existing 30-second catchup cycle.
   Due retries take priority over fresh rows. Rows already pending at activation push immediately
@@ -292,11 +290,17 @@ the stale window plus one scan interval (≈75 s).
   handoff. Envelope ids remain the idempotency key: a host that already received
   a batch simply re-ACKs it. The configured budget is per message, with no
   exactly-once claim across transport or process crashes.
-- The relay heartbeats the lease row every 10 seconds; a heartbeat older than
-  45 seconds counts as stale and stops the lease (see *Process death →
-  auto-stop*), so messages never sit silently behind a dead relay. The one
-  exception is a restart-shaped codex loss inside the fresh-start window,
-  which is re-provisioned; a claude or dsh relay is never re-provisioned.
+- The relay heartbeats every 10 seconds; a beat stale past 45 seconds triggers
+  transport recovery, not identity expiry. Same-lease recovery preserves attempt
+  budgets and reservations, and cannot overlap an unconfirmed old sender.
+- The machine host's existing scan delivers newly ended leases' notices using
+  immutable recorded Codex endpoint/thread snapshots, including after native
+  restoration, replacement takeover or agent termination. Each RPC is bounded;
+  transient failures retry with backoff capped at fifteen minutes. Acceptance is
+  host acceptance, not executor receipt; ambiguous timeout can duplicate a notice.
+  Unsupported destinations retain explicit failure and are never called delivered.
+  Notices name the old lease and never cancel a replacement. Native handoff does
+  not depend on notice delivery; pre-migration ended leases are not backfilled.
 - Renewal reminders: five minutes before a lease expires, the gateway inserts
   a durable inbox row of `kind="reminder"` (one per expiry deadline; the payload carries
   the session linkage) that the relay pushes like any message. Release or expiry
@@ -319,3 +323,7 @@ Steer input reaches the active turn at its next processing opportunity; it
 does not promise to interrupt an in-flight tool. Transport success also
 does not prove that the model processed the message. Keep processing ACKs in
 Ava, and make actions safe to retry when their completion is ambiguous.
+
+The retired `AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS` setting is ignored
+by existing environment and saved-overlay readers; new configuration writes
+reject it. Removing an old host setting is a separate operator action.

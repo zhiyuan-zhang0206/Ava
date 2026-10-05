@@ -9,6 +9,7 @@ from typing import LiteralString, cast
 
 import psycopg
 import pytest
+from psycopg import sql
 
 from base.cluster.authority import ensure_groups
 from tests.path_scoped.db_authority_tests import AuthorityCluster
@@ -68,3 +69,38 @@ def test_refresh_revokes_the_runner_agents_update_an_earlier_release_granted(
         assert conn.execute(
             "SELECT impersonation_index FROM agents WHERE id = %s", (after,)
         ).fetchone() == (1,)
+
+
+def test_runner_transport_maintenance_grants_do_not_allow_destination_mutation(
+    authority_postgres: AuthorityCluster,
+) -> None:
+    cluster = authority_postgres
+    with cluster.admin() as conn:
+        row = conn.execute(
+            "INSERT INTO agents(label) VALUES('transport grants') RETURNING id"
+        ).fetchone()
+        assert row is not None
+        conn.execute(
+            "INSERT INTO agents_meta(id,spawner,status) VALUES(%s,'user','idling')", (row[0],)
+        )
+        assert _open_lease(conn, row[0]) == (0,)
+        ensure_groups(conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups)
+    with cluster.connect_class("runner", autocommit=True) as conn:
+        conn.execute(
+            "UPDATE agent_impersonations SET relay_generation=1,relay_identity='{}',"
+            "relay_degraded_reason='unknown',terminal_notice_attempts=1 WHERE agent_id=%s",
+            (row[0],),
+        )
+        for column in (
+            "terminal_notice_snapshot",
+            "terminal_notice_pending_at",
+            "relay_thread_id",
+            "machine",
+        ):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(
+                    sql.SQL(
+                        "UPDATE agent_impersonations SET {column}=NULL WHERE agent_id=%s"
+                    ).format(column=sql.Identifier(column)),
+                    (row[0],),
+                )

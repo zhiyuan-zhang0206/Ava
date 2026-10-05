@@ -39,8 +39,8 @@ request:
   your end message: what you did, what you verified, what remains open and
   where to resume from. Release resumes the Ava agent: one system note wakes it
   with your summary, and it continues from there. The Ava side also stops a
-  lease by itself when a core component dies — your executor process, or the
-  relay delivering your messages; the end note names the cause. A stopped lease
+  lease when your executor is confirmed dead or its original TTL expires. Relay
+  failure degrades delivery; the lease-scoped end note names the cause. A stopped lease
   is over: do not keep acting, and do not request a new takeover — a fresh one
   is arranged by the Ava side.
 - Everything between those two points happens under the lease. Nothing outside
@@ -96,7 +96,7 @@ ava impersonate status <session_id> --agent <agent_id>
 The response shows the lease status and its expiry. Statuses you will see:
 `preparing` (not yet active), `active` (you may act), and terminal
 `released`, `expired`, `rejected` (`expired` also covers a takeover the Ava
-side stopped because a core component died — the session record names the
+side stopped after confirmed executor death — the session record names the
 cause).
 
 ## Messages: receive, acknowledge, process
@@ -130,8 +130,8 @@ Rules that keep delivery honest:
   finishing work goes through say and the release summary, never an ACK. A batch
   not acknowledged within its ACK window is retried up to the lease's configured
   total attempt limit (default: 2 attempts, each with 180 seconds to ACK);
-  missing the final window ends impersonation and returns unacknowledged input to
-  the native agent. The per-message budget is fixed at request time and survives
+  missing the final window pauses automatic delivery of that message; read and
+  ACK it through the inbox. The budget is fixed at request time and survives
   relay restarts; the ids make re-ACKing a batch you already received harmless.
   A message you cannot act on is still acknowledged on receipt — say what you
   could not do in your release summary.
@@ -215,7 +215,7 @@ Hard rules:
   reminder, no background renewal process. If no reminder has arrived, you do
   not renew — the Ava side times reminders to the actual lease.
 - If the lease ends while you work — TTL expiry, or the Ava side stopping a
-  takeover whose core component died — stop immediately: further CLI and SDK
+  takeover after confirmed executor death — stop immediately: further CLI and SDK
   calls fail validation. Control returns to the Ava agent with your
   unacknowledged messages and staged state preserved. Do not keep acting
   under the identity, and do not request a new lease on your own — a fresh

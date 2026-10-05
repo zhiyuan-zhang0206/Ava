@@ -1,4 +1,4 @@
-"""A replacement host adopts a held agent without a model and re-provisions the restart-lost relay."""
+"""A replacement host keeps legacy unknown relay custody parked without a model."""
 
 from typing import Any
 from unittest.mock import MagicMock, Mock
@@ -16,6 +16,22 @@ from base.cluster.machine import machine_name
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from tests.impersonation_support import attested_caller, recorded_tree
+
+
+def _assert_accepting_binding(
+    db_conn: psycopg.Connection[Any], agent_id: int, lease_id: str
+) -> None:
+    runtime = db_conn.execute(
+        "SELECT runtime_generation, runtime_owner FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone()
+    db_conn.commit()
+    accepted = db_conn.execute(
+        "SELECT accepted_generation, accepted_owner FROM agent_impersonations WHERE id=%s",
+        (lease_id,),
+    ).fetchone()
+    db_conn.commit()
+    assert accepted == runtime
 
 
 @pytest.mark.parametrize("control", ["restart", "terminate", "cancel"])
@@ -59,8 +75,6 @@ async def test_replacement_host_adopts_held_agent_without_model(
     monkeypatch.setattr(
         "base.agents.impersonation.provider_anchor_states", Mock(return_value=["alive"])
     )
-    # A window no process age can exceed: the fresh-start carve-out is open.
-    monkeypatch.setattr("base.config.settings.agent.impersonation_reprovision_window_seconds", 1e9)
     graph = MagicMock()
     host = AgentHost(
         pool=aops_pool,
@@ -90,22 +104,16 @@ async def test_replacement_host_adopts_held_agent_without_model(
     # The open lease keeps the row in the periodic pull scan: held supervision
     # must never rely on a wake being delivered (task #3998).
     assert agent_id in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}
-    # The replacement incarnation inherited the accepting binding (task #2635)
-    # — without it the held-controls supervision could not re-provision, and
-    # the spawn above would not have happened (task #2634's path, now task
-    # #3998's fresh-start re-provision).
-    runtime = db_conn.execute(
-        "SELECT runtime_generation, runtime_owner FROM agents_meta WHERE id=%s",
-        (agent_id,),
-    ).fetchone()
-    db_conn.commit()
-    accepted = db_conn.execute(
-        "SELECT accepted_generation, accepted_owner FROM agent_impersonations WHERE id=%s",
-        (lease["id"],),
-    ).fetchone()
-    db_conn.commit()
-    assert accepted == runtime
-    spawn.assert_called()
+    # The replacement incarnation inherits the accepting binding; unknown
+    # generation-zero custody still withholds transport recovery.
+    _assert_accepting_binding(db_conn, agent_id, lease["id"])
+    spawn.assert_not_called()  # Legacy generation-zero custody is deliberately unknown.
+    assert (
+        leases.get(database, event_bus, lease["id"], attested_caller(lease))[
+            "relay_degraded_reason"
+        ]
+        == "previous relay retirement unknown; replacement withheld"
+    )
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
         (agent_id, control),

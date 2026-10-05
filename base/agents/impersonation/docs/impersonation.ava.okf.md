@@ -33,9 +33,9 @@ native return, renewal, and operator closure.
 
 ## Relay binding
 
-`base/agents/impersonation/relay.py` owns relay credential provisioning and
-re-provisioning, relay reads, heartbeats, failure stamps, and aborting a lease
-when a component dies. The package door exposes this surface to callers through
+`base/agents/impersonation/relay.py` owns fenced relay credential provisioning,
+child birth receipts, relay reads, heartbeats, failure stamps, and executor-death aborts
+only when the executor is confirmed dead. The package door exposes this surface to callers through
 `base.agents.impersonation`. Providers: `codex` relays are spawned by the
 accepting runtime into the owning app server; `claude` and `dsh` relays run
 inside the controller session (`SESSION_RELAY_PROVIDERS`), so the request mints
@@ -51,8 +51,8 @@ Later config edits apply to new leases. Migration preserves the 300-second
 window of existing leases. Attempt count, policy and database reservation time
 survive restart and relay credential rotation. The relay
 credential can reserve delivery but cannot ACK, renew, or arbitrarily release.
-Lease reads and native reconciliation expire an exhausted takeover with the
-missing-ACK cause through the existing handoff. Expiry checks all pending rows,
+Lease reads and native reconciliation record exhausted delivery without ending
+authority. The body remains readable and ACK-able. Checks cover all pending rows,
 not just the relay page. New arrivals and unrelated ACKs do not reset a budget.
 A submission failure spends its reserved attempt and retains the pending body.
 
@@ -127,3 +127,12 @@ keep a default because one value is the only reading:
 See [[ava/external/docs/external.ava.okf.md]],
 [external agent procedure](../../../../conventions/agent-impersonation.md), and
 [host relay setup](../../../../conventions/agent-impersonation-hosts.md).
+
+Relay generation claims serialize under the native owner and lease locks.
+The private credential pipe opens only after the new child birth is persisted;
+confirmed retirement precedes rotation, including previously reserved senders.
+Already in-flight host RPCs may complete later: no distributed exactly-once
+claim is made. `relay_degraded_reason` and `relay_degraded_at` describe the last
+observed failure, not an assertion that the channel is currently unhealthy.
+`terminal_notices.py` owns independently retried ended-lease injection, while
+`host_transport.py` owns actual Codex acceptance and CLI compatibility imports.

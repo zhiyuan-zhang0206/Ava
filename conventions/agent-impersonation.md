@@ -151,8 +151,8 @@ ava impersonate renew 0 --agent 405 --ttl 1800
 
 Inbox reads do not ACK. Each lease snapshots the configured ACK window and
 maximum total delivery attempts (defaults: 180 seconds, 2 attempts including
-the first). Missing a final ACK window ends the takeover and preserves pending
-input for native handoff. See [delivery configuration](agent-impersonation-hosts.md#delivery-and-recovery).
+the first). Missing a final ACK window pauses automatic delivery of that message;
+the lease remains active and inbox reads and late ACK remain available. See [delivery configuration](agent-impersonation-hosts.md#delivery-and-recovery).
 An ACK records delivery receipt — never completion — and never affects history
 retention. `cancel` asks the external controller
 to stop; acknowledge it on receipt, then stop. `reminder` indicates an approaching TTL deadline:

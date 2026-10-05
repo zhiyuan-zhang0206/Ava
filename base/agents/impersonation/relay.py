@@ -89,17 +89,18 @@ def relay_heartbeat(db: Database, lease_id: str, relay_token: str) -> None:
 
 
 def provision_relay(
-    db: Database, lease_id: str, incarnation: RuntimeIncarnation, relay_token: str
-) -> dict[str, Any]:
-    """Mint or re-mint the scoped relay credential on the lease row.
+    db: Database,
+    lease_id: str,
+    incarnation: RuntimeIncarnation,
+    relay_token: str,
+    *,
+    expected_generation: int = 0,
+) -> dict[str, Any] | None:
+    """Claim one transport generation after the caller confirmed the old relay retired.
 
-    Called by the accepting native runtime at activation (codex) and again when
-    a restart lost the in-memory handle inside its fresh-start window (task
-    #3998). Re-provisioning revokes any earlier relay credential, so a
-    slow-dying duplicate relay loses authority and exits. The durable mint mark
-    (timestamp + minting incarnation, task #3998) is written in the same
-    transaction; the supervisor reads it after a restart to tell an earlier
-    incarnation's mint from "never minted".
+    The locked compare-and-swap prevents two supervisor passes from minting
+    different credentials for the same observation. A loser performs no writes.
+    A new child reads its credential only after its birth identity is persisted.
     """
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
@@ -114,13 +115,58 @@ def provision_relay(
             incarnation.owner,
         ):
             raise ImpersonationError("Relay provisioning belongs to the accepting incarnation")
+        if lease["relay_generation"] != expected_generation:
+            return None
+        fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
+        if fresh != (True,):
+            return None
         conn.execute(
-            "UPDATE agent_impersonations SET relay_token_hash=%s,"
+            "UPDATE agent_impersonations SET relay_token_hash=%s,relay_generation=relay_generation+1,"
+            "relay_identity=NULL,relay_heartbeat_at=NULL,"
             "relay_minted_at=clock_timestamp(),relay_minted_generation=%s,"
             "relay_minted_owner=%s WHERE id=%s",
             (token_hash(relay_token), incarnation.generation, incarnation.owner, lease_id),
         )
         return public(lock_lease(conn, lease_id))
+
+
+def record_relay_identity(
+    db: Database,
+    lease_id: str,
+    incarnation: RuntimeIncarnation,
+    relay_token: str,
+    identity: dict[str, Any],
+) -> None:
+    """Persist a blocked child's birth before allowing it to read the relay credential."""
+    with db.write_transaction() as conn:
+        require_native(conn, incarnation)
+        lease = lock_lease(conn, lease_id)
+        authenticate_relay(lease, relay_token)
+        if lease["agent_id"] != incarnation.agent_id or lease["status"] not in (
+            "accepted",
+            "active",
+        ):
+            raise ImpersonationError("Child registration requires the native-held open lease")
+        conn.execute(
+            "UPDATE agent_impersonations SET relay_identity=%s WHERE id=%s",
+            (Jsonb(identity), lease_id),
+        )
+
+
+def record_degradation(
+    db: Database, lease_id: str, incarnation: RuntimeIncarnation, reason: str
+) -> None:
+    """Record the last observed degradation and its time, not a current health verdict."""
+    with db.write_transaction() as conn:
+        require_native(conn, incarnation)
+        lease = lock_lease(conn, lease_id)
+        if lease["agent_id"] != incarnation.agent_id or lease["status"] not in OPEN:
+            return
+        conn.execute(
+            "UPDATE agent_impersonations SET relay_degraded_reason=%s,"
+            "relay_degraded_at=clock_timestamp() WHERE id=%s",
+            (reason, lease_id),
+        )
 
 
 def fail_acceptance(
@@ -206,10 +252,10 @@ def aborted_detail(reason: object) -> str | None:
 def abort_lease(
     db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, detail: str
 ) -> dict[str, Any] | None:
-    """Stop a takeover whose core component died (task #3998), like a TTL expiry.
+    """Stop a takeover after confirmed executor death, like a TTL expiry.
 
-    ``detail`` is the plain death phrase ("the executor process is gone" / "the
-    bound relay stopped heartbeating"). The lease goes terminal ("expired")
+    ``detail`` is the confirmed executor death phrase ("the executor process
+    is gone"). The lease goes terminal ("expired")
     with ``rejection_reason`` recorded as ``aborted: <detail>`` — the request's
     own ``reason`` (its stated purpose) is preserved, and the resume chain
     reads the prefixed marker back via ``aborted_detail``. Like expiry, a

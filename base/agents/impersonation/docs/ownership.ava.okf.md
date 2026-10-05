@@ -26,14 +26,13 @@ note followed by a completed-termination note, including when native execution
 is drained. Both precede the next resurrection marker; the graph's acceptance
 acknowledgement describes the earlier intent separately. Termination dismisses
 renewal reminders and records `terminated: agent was terminated` on the session.
-An authenticated bound relay reads that terminal metadata and sends an
-interruption notice through its existing host transport before exiting, including
-if termination won before its first heartbeat. No ordinary inbox read, delivery
-reservation, ACK or renewal is allowed after termination. Executor delivery is
-best-effort: a missing relay or failed transport never blocks revocation or
-resurrects the owner. A relay process emits once and exits; a separately restarted
-relay can repeat the same session-scoped notice. Repeated status writes add no
-native notices once the session is closed. Restart preserves the lease.
+The machine host's existing scan independently sends a lease-scoped notice to
+its immutable recorded Codex endpoint/thread, even when the relay is dead or a
+new lease has replaced it. No inbox authority is reopened. Native restoration
+never waits for notice delivery. Host acceptance is persisted; ambiguous timeout
+retries may duplicate a notice. Unsupported providers remain explicitly marked,
+never described as delivered. Only first open-to-terminal transitions mark a
+notice; existing ended history is not backfilled. Restart preserves the lease.
 The native pair carries `impersonation_termination_notice: true`; the watchdog
 preserves these notes through long terminated periods for later resurrection.
 

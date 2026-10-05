@@ -381,20 +381,22 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
         if lease["status"] == "active"
         else None
     )
-    if fresh == (True,) and overdue is None:
+    if fresh == (True,):
+        if overdue is not None:
+            reason = f"message {overdue[0]} exhausted its delivery budget; receipt remains possible"
+            conn.execute(
+                "UPDATE agent_impersonations SET relay_degraded_reason=%s,"
+                "relay_degraded_at=clock_timestamp() WHERE id=%s AND relay_degraded_reason IS DISTINCT FROM %s",
+                (reason, lease["id"], reason),
+            )
+            lease["relay_degraded_reason"] = reason
         return lease
     from base.agents.impersonation.event_log import is_log_native
     from base.agents.impersonation_manifest import close_event_admission
 
     if is_log_native(lease):
         close_event_admission(conn, str(lease["id"]))
-    detail = (
-        f"the executor did not ACK message {overdue[0]} after "
-        f"{lease['max_delivery_attempts']} delivery attempts "
-        f"({lease['ack_window_seconds']}s per ACK window)"
-        if overdue is not None
-        else None
-    )
+    detail = None
     inbound_id = None
     if lease["status"] == "active" and not lease["automatic"]:
         inbound_id = insert_handoff(

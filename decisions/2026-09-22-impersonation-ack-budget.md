@@ -21,3 +21,5 @@ live lease has reserved attempts, preventing a rollback/re-upgrade budget reset.
 
 Update: [Configurable delivery policy](2026-09-22-impersonation-delivery-config.md) supersedes
 the fixed five-minute default for new requests; durable reservation semantics remain.
+
+Update: [Authority and delivery separation](../docs/history/2026-10-05/impersonation-authority-and-delivery.md) supersedes exhaustion-as-expiry; durable per-message reservation and receipt semantics remain.

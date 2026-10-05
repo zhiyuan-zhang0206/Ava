@@ -25,6 +25,9 @@ def grant_event_log_runner_access(conn: psycopg.Connection, runner_role: str) ->
             "accepted_generation,accepted_owner,consent_version,activated_at,ended_at,"
             "plugin_delta,delta_version,applied_version,relay_token_hash,relay_heartbeat_at,"
             "relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,"
+            "relay_generation,relay_identity,relay_degraded_reason,relay_degraded_at,"
+            "terminal_notice_accepted_at,terminal_notice_attempt_id,terminal_notice_attempt_at,"
+            "terminal_notice_attempts,terminal_notice_error,terminal_notice_unsupported_at,"
             "handoff_document,handoff_path,handoff_applied_at,"
             "next_entry,event_delivery_pending_reason,start_message) ON agent_impersonations TO {}"
         ).format(role)

@@ -60,6 +60,7 @@ from pydantic import BaseModel
 
 from agent.ownership.hosted import settle_stale_running_rows
 from base import paths
+from base.agents.impersonation.terminal_notices import run_notice_delivery
 from base.agents.incarnation.exec_request_evidence import disposition_hint
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.agents.observation.db_wait import DatabaseWaits
@@ -523,6 +524,9 @@ async def run() -> None:
         # group exits, every loop joined, before the runtime drains turns.
         try:
             async with asyncio.TaskGroup() as background:
+                background.create_task(
+                    run_notice_delivery(db, local_machine), name="impersonation_terminal_notices"
+                )
                 for name, loop in _background_loops().items():
                     background.create_task(loop, name=name)
                 await InboundWakeDispatcher(
