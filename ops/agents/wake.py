@@ -1,7 +1,7 @@
 """Resume a terminated agent by preserving its identity and enqueuing a wake."""
 
 from datetime import datetime
-from typing import Literal, LiteralString
+from typing import LiteralString
 
 import psycopg
 from psycopg import sql
@@ -21,6 +21,7 @@ from base.agents.incarnation.lifecycle_acceptance import (
     UNOWNED_TERMINATION_ID,
     UNOWNED_TERMINATION_RECORDED,
 )
+from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.cluster.machine import machine_name
 from base.config import field_alias, get_field, settings
 from base.db import Database, fetch_one, publish_inbound_wake
@@ -62,7 +63,7 @@ def _transition_terminated_to_unclaimed_idling(
     *,
     unowned_termination: int | None,
     trigger_inbound_id: int | None,
-    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
+    trigger_inbound_kind: WakeTriggerKind | None,
 ) -> datetime:
     """Run the one final resurrection CAS with a fully static SQL shape.
 
@@ -190,7 +191,7 @@ def _prepare_resurrect_attempt(
     resurrected_by: str,
     prompt: str | None,
     trigger_inbound_id: int | None,
-    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
+    trigger_inbound_kind: WakeTriggerKind | None,
     billing_recovery: bool = False,
 ) -> telemetry.Event:
     """Commit resurrection and its optional prompt before waking the host.
@@ -333,7 +334,7 @@ def resurrect_agent(
     resurrected_by: str,
     prompt: str | None = None,
     trigger_inbound_id: int | None = None,
-    trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
+    trigger_inbound_kind: WakeTriggerKind | None = None,
     billing_recovery: bool = False,
 ) -> int:
     """Resume a terminated hosted incarnation and enqueue lifecycle plus optional chat.
@@ -357,6 +358,8 @@ def resurrect_agent(
     """
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
+    if trigger_inbound_kind is not None:
+        trigger_inbound_kind = validate_wake_trigger_kind(trigger_inbound_kind)
     prepared_event = _prepare_resurrect_attempt(
         db,
         bus,

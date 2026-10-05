@@ -16,6 +16,7 @@ a dev cluster's `&<prefix>:*` redis ACL grant.
 """
 
 from enum import StrEnum
+from typing import Literal, get_args
 
 
 class InterruptReason(StrEnum):
@@ -47,3 +48,16 @@ class InboundKind(StrEnum):
     FORK = "fork"
     HEARTBEAT = "heartbeat"
     REMINDER = "reminder"
+
+
+# Only these pending-work kinds can trigger automatic resurrection.
+WakeTriggerKind = Literal[InboundKind.CHAT, InboundKind.COMPACT_REQUEST, InboundKind.SYSTEM_NOTE]
+
+
+def validate_wake_trigger_kind(value: str) -> WakeTriggerKind:
+    """Parse a wake trigger without admitting unrelated inbound control kinds."""
+    kind = InboundKind(value)
+    for allowed in get_args(WakeTriggerKind):
+        if kind is allowed:
+            return allowed
+    raise ValueError(f"inbound kind cannot trigger resurrection: {value!r}")

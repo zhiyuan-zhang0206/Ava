@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from base.agents import TerminateResult
 from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 from ops.rpc_schemas.content import UserContent
 
@@ -117,6 +118,6 @@ class TerminateAgentResponse(BaseModel):
         (version skew): nothing was killed.
     """
 
-    status: Literal["enqueued", "already_terminated"]
+    status: TerminateResult
     open_tasks: OpenTasksHint | None = None
     shell_sessions: ShellSessionsKill | None = None

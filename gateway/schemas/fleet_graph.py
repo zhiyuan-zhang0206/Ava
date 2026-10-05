@@ -5,14 +5,13 @@ unchanged, so the OpenAPI codegen is byte-identical to the wire before.
 """
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
 )
 
-from base.agents import AgentStatus
+from base.agents import AgentStatus, LivenessState
 
 
 class FleetGraphNode(BaseModel):
@@ -23,7 +22,7 @@ class FleetGraphNode(BaseModel):
     agent_id: int
     label: str | None
     status: AgentStatus
-    liveness_state: Literal["online", "offline", "unknown"]
+    liveness_state: LivenessState
     spawner: str
     machine: str | None
     # Recent-work score over the selected window: in_total * 0.1 + out_total * 1.0

@@ -23,6 +23,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.agents import TerminateResult
 from base.daemon.tests.fakes import pin_endpoints
 from base.db import Database
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
@@ -338,7 +339,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(monkeypatch: pytest.MonkeyP
         captured["body"] = body
         captured["trigger_inbound_id"] = trigger_inbound_id
         captured["trigger_inbound_kind"] = trigger_inbound_kind
-        return TerminateAgentResponse(status="enqueued")
+        return TerminateAgentResponse(status=TerminateResult.ENQUEUED)
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(

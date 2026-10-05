@@ -3607,11 +3607,7 @@ export interface components {
             machine: string;
             /** Supports Vision */
             supports_vision: boolean;
-            /**
-             * Liveness State
-             * @enum {string}
-             */
-            liveness_state: "online" | "offline" | "unknown";
+            liveness_state: components["schemas"]["LivenessState"];
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation: components["schemas"]["AgentObservation"];
             /** Awaiting Response Count */
@@ -3724,11 +3720,7 @@ export interface components {
             machine: string;
             /** Status */
             status: string;
-            /**
-             * Liveness State
-             * @enum {string}
-             */
-            liveness_state: "online" | "offline" | "unknown";
+            liveness_state: components["schemas"]["LivenessState"];
             /** Last Probe At */
             last_probe_at?: string | null;
             observation?: components["schemas"]["AgentObservation"] | null;
@@ -4010,11 +4002,7 @@ export interface components {
             machine: string;
             /** Supports Vision */
             supports_vision: boolean;
-            /**
-             * Liveness State
-             * @enum {string}
-             */
-            liveness_state: "online" | "offline" | "unknown";
+            liveness_state: components["schemas"]["LivenessState"];
             /** Last Probe At */
             last_probe_at: string | null;
             availability?: components["schemas"]["AgentAvailability"] | null;
@@ -5097,11 +5085,7 @@ export interface components {
             /** Label */
             label: string | null;
             status: components["schemas"]["AgentStatus"];
-            /**
-             * Liveness State
-             * @enum {string}
-             */
-            liveness_state: "online" | "offline" | "unknown";
+            liveness_state: components["schemas"]["LivenessState"];
             /** Spawner */
             spawner: string;
             /** Machine */
@@ -5531,6 +5515,12 @@ export interface components {
             /** Text */
             text: string | null;
         };
+        /**
+         * LivenessState
+         * @description Observed reachability, separate from agent lifecycle intent.
+         * @enum {string}
+         */
+        LivenessState: "online" | "offline" | "unknown";
         /**
          * LlmBucket
          * @description One bucket's LLM call profile. Latency percentiles are over rows that
@@ -6752,11 +6742,7 @@ export interface components {
          *         resurrect.
          */
         RestartAgentResponse: {
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "enqueued" | "already_terminated";
+            status: components["schemas"]["RestartResult"];
         };
         /**
          * RestartBucket
@@ -6781,6 +6767,11 @@ export interface components {
             agents: components["schemas"]["AgentRestartRow"][];
             totals: components["schemas"]["RestartTotals"];
         };
+        /**
+         * RestartResult
+         * @enum {string}
+         */
+        RestartResult: "enqueued" | "already_terminated";
         /** RestartTotals */
         RestartTotals: {
             /** Agent Restarts */
@@ -6845,12 +6836,13 @@ export interface components {
          *         not apply.
          */
         ResurrectAgentResponse: {
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "spawned" | "already_alive";
+            status: components["schemas"]["ResurrectResult"];
         };
+        /**
+         * ResurrectResult
+         * @enum {string}
+         */
+        ResurrectResult: "spawned" | "already_alive";
         /**
          * RunTimelineBoundaries
          * @description Turn rows that anchor the initialized-context-to-compact session.
@@ -7973,14 +7965,15 @@ export interface components {
          *         (version skew): nothing was killed.
          */
         TerminateAgentResponse: {
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "enqueued" | "already_terminated";
+            status: components["schemas"]["TerminateResult"];
             open_tasks?: components["schemas"]["OpenTasksHint"] | null;
             shell_sessions?: components["schemas"]["ShellSessionsKill"] | null;
         };
+        /**
+         * TerminateResult
+         * @enum {string}
+         */
+        TerminateResult: "enqueued" | "already_terminated";
         /**
          * TextContentBlock
          * @description Text part of a multimodal chat message (OpenAI content-block shape).
