@@ -60,3 +60,10 @@ The ops server and the **delivery-outbox redelivery loop** (`services/agent_runn
 ## Notes
 - Unlike Gateway's `/api/*` endpoints — agent-ops is the inbound ops port on the agent-runner side.
 - Binding and auth are consistent per host, no single-vs-multi-host branching; LAN reachable but without secret it won't work.
+
+### Deferred delivery journal state
+
+`base/agents/messages/delivery_outbox.py:DeliveryOutboxState` owns the durable
+`pending` / `abandoned` disposition. Reads restore enum members; writes retain
+plain JSON strings. A corrupt or unknown state remains unreadable and retained
+for inspection without preventing healthy entries from being flushed.
