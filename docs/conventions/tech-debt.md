@@ -118,3 +118,16 @@ errors and exclusions; absence of printed hits is not proof of correctness.
 The report opens no PR, records no findings, and duplicates no silent-exception
 or conflict-marker gate. It is not a contribution prerequisite. The schedule
 is an existing runtime option; this guide does not enable or run it.
+
+Each section reports `findings`, `empty`, `error` or `skipped`, preserving raw
+stdout/stderr evidence. Findings are not command failures. Any tool or report
+parse error marks the overall scan incomplete and returns nonzero, which the
+schedule records as a failed scan; missing frontend dependencies are an explicit
+optional skip. The scanner remains an optional discovery aid, not a lint gate.
+
+Exit-code interpretation follows the tools: ripgrep 1 means no matches and
+greater values are errors; [npm outdated's implementation](https://github.com/npm/cli/blob/latest/lib/commands/outdated.js)
+returns 1 for outdated dependencies, verified against its JSON report;
+[Vulture's documented codes](https://github.com/jendrikseipp/vulture#exit-codes)
+use 3 for findings and 1/2 for input/argument errors. Invalid JSON or an error
+envelope is never reported as an empty dependency scan.

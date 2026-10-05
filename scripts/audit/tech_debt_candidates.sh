@@ -21,21 +21,93 @@ echo "repo: $REPO"
 echo "HEAD: $(git rev-parse --short HEAD)"
 echo ""
 
+# Tool errors make the report incomplete; findings are successful observations.
+SCAN_ERRORS=0
+SCAN_TMP=$(mktemp -d)
+trap 'rm -rf "$SCAN_TMP"' EXIT
+
+report_scan() {
+    local mode="$1" code=0 outcome
+    shift
+    "$@" >"$SCAN_TMP/stdout" 2>"$SCAN_TMP/stderr" || code=$?
+    cat "$SCAN_TMP/stdout"
+    cat "$SCAN_TMP/stderr"
+    case "$mode:$code" in
+        rg:0|vulture:3) outcome=findings ;;
+        rg:1|vulture:0) outcome=empty ;;
+        text:0)
+            if [[ ! -s "$SCAN_TMP/stdout" ]] || [[ $(cat "$SCAN_TMP/stdout") == "(none found)" ]]; then
+                outcome=empty
+            else
+                outcome=findings
+            fi ;;
+        uv:0|npm:0|npm:1|cochange:0)
+            outcome=$(.venv/bin/python - "$mode" "$SCAN_TMP/stdout" <<'JSON'
+import json
+import sys
+from pathlib import Path
+
+mode, source = sys.argv[1:]
+try:
+    value = json.loads(Path(source).read_text())
+    if mode == "uv":
+        if not isinstance(value, list) or any(
+            not isinstance(row, dict) or not all(isinstance(row.get(key), str)
+            for key in ("name", "version", "latest_version")) for row in value
+        ):
+            raise ValueError("expected an outdated-package list")
+        findings = bool(value)
+    elif mode == "npm":
+        if not isinstance(value, dict) or "error" in value:
+            raise ValueError("expected an outdated-package object, not an error")
+        for rows in value.values():
+            for row in rows if isinstance(rows, list) else [rows]:
+                if not isinstance(row, dict) or not all(
+                    isinstance(row.get(key), str) for key in ("wanted", "latest")
+                ):
+                    raise ValueError("invalid outdated-package record")
+        findings = bool(value)
+    else:
+        if not isinstance(value, dict) or not isinstance(value["strong_pairs"], list):
+            raise ValueError("expected locality report with strong_pairs")
+        count = value["fix_wide_count"]
+        if type(count) is not int or count < 0:
+            raise ValueError("invalid locality fix_wide_count")
+        findings = bool(count or value["strong_pairs"])
+    print("findings" if findings else "empty")
+except (ValueError, KeyError, TypeError, OSError) as exc:
+    print(f"report parse error: {exc}", file=sys.stderr)
+    sys.exit(1)
+JSON
+            ) || outcome=error
+            if [[ "$mode" == npm && "$code:$outcome" != "0:empty" && "$code:$outcome" != "1:findings" ]]; then
+                echo "npm exit code and report disagree: $code / $outcome"
+                outcome=error
+            fi ;;
+        *) outcome=error ;;
+    esac
+    echo "[result: $outcome; exit: $code]"
+    if [[ "$outcome" == error ]]; then SCAN_ERRORS=$((SCAN_ERRORS + 1)); fi
+}
+
+npm_report() { (cd ui/web && npm outdated --json); }
+
 SCAN_DIRS="ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ base/"
 
 # ------------------------------------------------------------------
 # Class 1: outdated deps
 # ------------------------------------------------------------------
 echo "--- [1/6] deps: uv pip list --outdated ---"
-uv pip list --outdated 2>&1 || echo "(uv pip list failed)"
+report_scan uv uv pip list --outdated --format json
 echo ""
 
 if [ -d ui/web/node_modules ]; then
     echo "--- [1/6] deps: npm outdated (frontend) ---"
-    (cd ui/web && npm outdated --json 2>&1) || echo "(npm outdated failed)"
+    report_scan npm npm_report
     echo ""
 else
     echo "--- [1/6] deps: npm outdated SKIPPED (no node_modules) ---"
+    echo "[result: skipped; reason: no node_modules]"
     echo ""
 fi
 
@@ -43,36 +115,36 @@ fi
 # Class 3: fail-fast anti-patterns
 # ------------------------------------------------------------------
 echo "--- [2/6] fail-fast: .get(k) or {} ---"
-rg -n '\.get\([^)]*\)\s+or\s+\{' $SCAN_DIRS 2>&1 || echo "(none found)"
+report_scan rg rg -n '\.get\([^)]*\)\s+or\s+\{' $SCAN_DIRS
 echo ""
 
 echo "--- [2/6] fail-fast: case _: defaults ---"
-rg -n 'case\s+_\s*:' $SCAN_DIRS 2>&1 || echo "(none found)"
+report_scan rg rg -n 'case\s+_\s*:' $SCAN_DIRS
 echo ""
 
 echo "--- [2/6] fail-fast: rare / shouldn't happen / almost never comments ---"
-rg -n -i "(rare|shouldn't happen|almost never)" $SCAN_DIRS 2>&1 || echo "(none found)"
+report_scan rg rg -n -i "(rare|shouldn't happen|almost never)" $SCAN_DIRS
 echo ""
 
 # ------------------------------------------------------------------
 # Class 4: inline markers (TODO/FIXME/XXX/HACK)
 # ------------------------------------------------------------------
 echo "--- [3/6] inline-marker: TODO|FIXME|XXX|HACK ---"
-rg -n 'TODO|FIXME|XXX|HACK' $SCAN_DIRS 2>&1 || echo "(none found)"
+report_scan rg rg -n 'TODO|FIXME|XXX|HACK' $SCAN_DIRS
 echo ""
 
 # ------------------------------------------------------------------
 # Class 5: dead code (vulture)
 # ------------------------------------------------------------------
 echo "--- [4/6] dead-code: vulture ---"
-uvx vulture $SCAN_DIRS --min-confidence 80 2>&1 || echo "(vulture failed or not installed)"
+report_scan vulture uvx vulture $SCAN_DIRS --min-confidence 80
 echo ""
 
 # ------------------------------------------------------------------
 # Class 8: docstring-budget (detection half — judgement happens in the sweep)
 # ------------------------------------------------------------------
 echo "--- [5/6] docstring-budget: Raises sections + soft-zone lengths ---"
-.venv/bin/python - <<'PY' 2>&1 || echo "(docstring-budget scan failed)"
+report_scan text .venv/bin/python - <<'PY'
 import ast
 from pathlib import Path
 from scripts.lint.agent_docstrings import (
@@ -131,7 +203,11 @@ echo ""
 # judgment (docs/conventions/tech-debt.md).
 # ------------------------------------------------------------------
 echo "--- [6/6] locality: cochange.py (spread + co-change index) ---"
-.venv/bin/python scripts/structure/cochange.py 2>&1 || echo "(cochange scan failed)"
+report_scan cochange .venv/bin/python scripts/structure/cochange.py --json
 echo ""
 
+if [[ "$SCAN_ERRORS" -gt 0 ]]; then
+    echo "=== Scan incomplete: $SCAN_ERRORS section error(s) $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+    exit 1
+fi
 echo "=== Scan complete $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
