@@ -155,9 +155,9 @@ Capabilities rather than standing as its own section.
   publishing. Combines the irreversible-action and external-send-privacy gaps.
 - **Core align-before-action** — `agent/graph/prompt/system_prompt.py:_align_before_action_section`,
   on by default via `settings.prompt_align_before_action_enabled` (env
-  `AVA_SYSTEM_PROMPT_ALIGN`): before large / ambiguous / hard-to-redo work, and right
-  after exploring or planning, confirm scope + approach with the user instead of
-  running on assumptions; let the user pin or defer the working rhythm. A
+  `AVA_SYSTEM_PROMPT_ALIGN`): resolve unsettled material outcome, cost, autonomy,
+  and authority choices; recommend concrete trade-offs and respect existing
+  consent rather than reapprove settled work after exploration or planning. A
   general-agent behavior, distinct from action-caution (which gates individual
   irreversible ops, not the direction of substantial work).
 - **`ava_code` plugin sections** — both in `ava_builtins/plugins/ava_code/plugin.py`:
@@ -310,7 +310,7 @@ Dimensions the upstream prompts cover that Ava's is silent on, classified.
 | Editing discipline (minimal focused diffs, comment-only-when-why, don't revert working-tree changes) | — | ❌ dropped — the model already self-applies these, and Ava rarely edits a human-authored working tree; not worth prompt weight |
 | Faithful outcome reporting (say so if tests failed / a step was skipped) | Ava core | ✅ `_outcome_reporting_section` |
 | Caution before irreversible / outward-facing actions; external-send = publishing | Ava core | ✅ `_action_caution_section` (the two combined) |
-| Align before committing to a direction (confirm scope/approach before large work; user pins or defers the rhythm) | Ava core | ✅ `_align_before_action_section` |
+| Resolve material direction and authority choices; respect settled instructions and user working preferences | Ava core | ✅ `_align_before_action_section` |
 | Malicious-code refusal / security gating | Ava core | ⬜ open — Ava is the user's private agent, not a public product; a refusal stance could get in the way. Deferred pending a threat-model call |
 
 ### Deliberately stripped / covered elsewhere (not real gaps)

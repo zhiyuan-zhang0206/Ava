@@ -35,9 +35,9 @@ The system prompt carried in every LLM call, built **once per context window** �
 - `_output_conciseness_section` — Output conciseness
 - `_outcome_reporting_section` — Honest reporting
 - `_action_caution_section` — Confirm before irreversible actions
-- `_align_before_action_section` — Align on big-picture direction
+- `_align_before_action_section` — Resolve material outcome, cost, autonomy, and authority choices; respect existing consent rather than reapprove settled work after planning
 - `_cross_machine_delegation_section` — One sentence (user-finalized wording, verbatim): when work spans machines, let an agent on the target machine do it rather than reaching across. Toggle `AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION` (default on); semantic steer only — no API detail, so it cannot go stale.
-- `_delegation_check_section` — The 30-second check before taking on work; the prompt's only mandatory-flagged process. The skill-index step (match the task against `# Capabilities`, load the covering skill) sits here rather than in the index itself, because an agent that never reads the index cannot know it is rebuilding one of its own skills. It is dropped and the remaining steps renumbered when this agent renders no Capabilities section at all (`capability_index_is_empty`). The other four steps are the delegation half
+- `_delegation_check_section` — Consult the capability index and load `ava-workflow` when available for non-trivial or consequential work. Select methods and peer collaboration by need, without forcing interviews, plans, supervision, or delegation. The index step is omitted and steps renumbered when the index is empty.
 - `_file_driven_work_section` — File-driven workflow
 - `_long_running_operation_section` — Lifecycle and cost principles without fleet; the long-running-agent skill supplies procedures.
 - `_temporal_awareness_section` — Time awareness, including the `ai-capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments

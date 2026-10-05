@@ -11,10 +11,10 @@ Input: an alignment document (or a clear user requirement). Output: an executabl
 
 **Plan is not the default step after Align.** A clear goal with acceptance criteria is enough to start executing directly; an explicit planning pass on top of it is overhead when the path is straightforward.
 
-Plan earns its place in exactly two situations:
+Plan is useful in these situations; scale its depth to the coordination needed:
 
 1. **The task is very large and the flow is long** — many steps spanning sessions or days, where a roadmap is needed to keep the work from drifting.
-2. **Parallel execution is needed** — you must agree on the target, decompose into independent subtasks, and split them across agents. The plan is the **contract that makes concurrency safe**: each worker gets a well-defined slice with clear acceptance criteria, so parallel work joins without collision.
+2. **Parallel execution is needed** — you must agree on the target, decompose into independent subtasks, and split them across agents. Each peer needs a well-defined slice, dependencies, and acceptance criteria. A few independent tasks can use short briefs; repeated stages or large fan-outs can use an executable [dynamic workflow](../../../coordination/ava-dynamic-workflow/SKILL.md) instead of a separate plan document.
 
 Everything in this skill (decompose, estimate, mark dependencies, set checkpoints, surface risks) lives inside those two situations. When in doubt, **start executing; plan when execution actually demands it.**
 
@@ -24,7 +24,7 @@ Everything in this skill (decompose, estimate, mark dependencies, set checkpoint
 2. **Every step has clear output and acceptance criteria.** "Change the code" is not a step — "Modify module X so interface Y returns format Z, verified by unit tests" is a step.
 3. **Mark dependencies and parallelizability.** Which steps can run in parallel? Which must be serial? For parallel work this is the whole point of the plan.
 4. **Surface uncertainty.** Explicitly mark what you don't know — "needs investigation to determine approach" is itself a step.
-5. **Keep capability matching structural.** Every plan has a Capabilities section and every task node has `Skills / MCP`; brief plans use shorter entries or `None` rather than a reduced shape.
+5. **Match capabilities to the work.** Follow [Capability Matching](../SKILL.md#capability-matching); name useful skills and tools in substantial plans. Short briefs need only the capabilities their peers require.
 
 ## Process
 
@@ -68,13 +68,13 @@ Set checkpoints at key milestones — stop at these points to verify the directi
 
 ## Capabilities
 - Use: [skill or MCP] — [one-line reason]
-- Not used: [skill or MCP] — [one-line reason]
-Capabilities the Align phase marked *deliberately not used* carry over to this section's `Not used:` line unless execution proves otherwise.
+- Alternative: [only a rejected capability whose trade-off matters]
+Carry forward material capability decisions from existing context; an Align phase is optional.
 
 ## Task Breakdown
 
 Each task node names the skills and MCP tools it depends on in the `Skills / MCP` field.
-The `Skills / MCP` field is required even in a short plan; use `None` when a task needs no named capability.
+Use the table for a substantial plan; a short brief or orchestration script can express the same dependencies without this template.
 
 | # | Task | Skills / MCP | Output | Estimate | Depends On | Risk | Priority | Parallelizable |
 |---|------|--------------|--------|----------|------------|------|----------|----------------|
@@ -100,12 +100,15 @@ The `Skills / MCP` field is required even in a short plan; use `None` when a tas
 
 ### 6. Align and confirm
 
-Send the plan to the user for confirmation. Highlight:
+Present the plan when it helps the user steer. Ask only about material choices
+not settled by existing instructions; do not request approval merely because a
+plan was written. Highlight relevant open choices:
 - Key decision points ("I chose approach A over B because…")
 - Uncertainties ("Step 3 needs investigation to determine the approach")
 - Time estimates ("Estimated total: X hours / days")
 
-Once confirmed, enter the Work & Evaluate phase.
+Proceed with authorized work and the chosen verification strategy; wait only
+for decisions that dependent work actually needs.
 
 ## The Evaluation Connection
 

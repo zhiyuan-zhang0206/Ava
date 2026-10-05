@@ -223,7 +223,7 @@ def test_delegation_check_makes_consulting_the_index_mandatory(
     assert "steps 2-3 named no better agent" in text
 
 
-def test_delegation_check_skill_step_carries_the_one_percent_rule(
+def test_delegation_check_routes_nontrivial_work_without_forcing_methods(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.agent, "prompt_delegation_check_enabled", True)
@@ -231,8 +231,14 @@ def test_delegation_check_skill_step_carries_the_one_percent_rule(
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
 
     text = _delegation_check_section(AgentSlices.resolve())
-    assert "1% chance" in text
-    assert '"this is simple enough"' in text
+    assert "load ava-workflow when available" in text
+    assert "non-trivial, ambiguous, consequential, sustained, or parallel" in text
+    assert "does not mandate an interview" in text
+    assert "goal supervision, a plan document, or delegation" in text
+    assert "1% chance" not in text
+    assert "Keep it yourself only" not in text
+    assert "parallelizable work does not require delegation" in text
+    assert "orchestration script" in text
     assert "Does a skill already cover this?" in text
     assert "ava.help(ava.skills.<name>)" in text
 

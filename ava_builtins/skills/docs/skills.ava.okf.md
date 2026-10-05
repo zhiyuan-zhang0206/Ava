@@ -50,7 +50,7 @@ Breaking large tasks into multi-agent / long tasks and driving them.
 
 | Skill | Purpose | Detail |
 |------|------|------|
-| ava-workflow | Three actors (agents / human / real world), three phases (Calibrate / Align / Plan) with Evaluation threaded through all of them | [[ava_builtins/skills/practice/ava-workflow/docs/ava-workflow.ava.okf.md]] |
+| ava-workflow | Select working strategy, optional goal definition and supervision, peer or script orchestration, and verification | [[ava_builtins/skills/practice/ava-workflow/docs/ava-workflow.ava.okf.md]] |
 | ava-dynamic-workflow | Orchestrate parallel workers: explore→fork→join→reduce | [[ava_builtins/skills/coordination/ava-dynamic-workflow/docs/ava-dynamic-workflow.ava.okf.md]] |
 | ava-goal | Supervise another agent to achieve a goal (watcher wakes up on target idle to judge) | [[ava_builtins/skills/coordination/ava-goal/docs/ava-goal.ava.okf.md]] |
 | ava-use-other-agents | Drive Claude Code / OpenAI Codex CLI for long tasks; hand the agent's identity to Codex, Claude Code or DeepSeek Harness | [[ava_builtins/skills/coordination/ava-use-other-agents/docs/ava-use-other-agents.ava.okf.md]] |
