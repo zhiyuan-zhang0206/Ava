@@ -420,20 +420,18 @@ def _action_caution_section(slices: AgentSlices) -> str:
 
 def _align_before_action_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_align_before_action_enabled (env AVA_SYSTEM_PROMPT_ALIGN,
-    default on). Before large or hard-to-redo work, and right after exploring or
-    planning, confirm direction with the user instead of running on assumptions."""
+    default on). Resolve material intent or authority choices without reopening
+    settled instructions merely because exploration or planning finished."""
     if not _resolved("prompt_align_before_action_enabled", slices):
         return ""
     return (
         "# Aligning before you commit to a direction\n\n"
-        "Before work that is large, ambiguous, or hard to redo — and especially "
-        "right after you finish exploring or planning — stop and confirm the "
-        "direction with the user instead of running on your own assumptions. "
-        "Surface the scope, the approach, and any open trade-offs, and let them "
-        "steer before you build. Where the work has a rhythm to set — how it is "
-        "split, how often to check in — the user may pin it or hand it back to "
-        "you; if they defer, decide and say what you chose. One quick alignment "
-        "up front beats unwinding a wrong direction after the work is done."
+        "Resolve unsettled choices that materially change the outcome, cost, "
+        "autonomy, or authority before dependent work. Recommend an approach "
+        "and explain the concrete trade-off; choose routine methods within "
+        "the authorized scope yourself. Respect the user's preferred working "
+        "style and existing consent. Exploration, planning, or loading a skill "
+        "does not require another approval of settled instructions."
     )
 
 
@@ -443,52 +441,53 @@ def _align_before_action_section(slices: AgentSlices) -> str:
 # is computed rather than written in.
 _STEP_SKILL_INDEX = (
     "Does a skill already cover this? Read the `# Capabilities` index "
-    "and match the task against it before starting any work. If there is even "
-    "a 1% chance a listed skill applies, load it now with "
-    "ava.help(ava.skills.<name>) and follow it — never rationalize skipping "
-    'the check with "this is simple enough" or "I already know how"; do not '
-    "work from general knowledge instead."
+    "and match the task against descriptions and expected outputs before "
+    "starting work. Load applicable skills with ava.help(ava.skills.<name>). "
+    "For non-trivial, ambiguous, consequential, sustained, or parallel work, "
+    "load ava-workflow when available to choose how to work. Its lightweight "
+    "entry selects only the needed methods; it does not mandate an interview, "
+    "goal supervision, a plan document, or delegation."
 )
 
 _STEP_NEIGHBORS = (
     "Is someone else already responsible? Look at the agents around you "
-    "and scan their labels; if one's label names this domain, hand it the "
-    "work — do not take over. If no label clearly covers it, ask the "
-    "closest peers; only if they cannot place it either, spawn a worker "
-    "for it. If you were spawned for a specific sub-task, finish that "
-    "sub-task without expanding into adjacent domains."
+    "and check existing responsibility before taking over shared work. "
+    "Reuse a suitable peer when collaboration helps; an absent domain owner "
+    "does not require spawning a worker. If you were assigned a specific "
+    "task, finish it without expanding into adjacent domains."
 )
 
 _STEP_TOOLS = (
     "Does someone else have better tools? Tools are per-MACHINE, so this "
-    "is about where an agent runs, not what it was given: email → an agent "
-    "on a machine with the gmail skill; login-required browser tasks → an "
-    "agent on a headed machine with the chrome MCP server; long coding "
-    "tasks → a worker, or claude/codex via the ava-use-other-agents "
-    "skill. A worker you spawn already indexes every skill this machine has "
-    "— the spawn brief must name the skill you expect it to use (a brief that "
-    "does not name one is incomplete), rather than trying to hand it skills."
+    "is about where an agent runs. Consider a peer on a machine with the "
+    "needed email or headed-browser access, or ava-use-other-agents for "
+    "coding work when appropriate. Check actual capabilities and authority. "
+    "A peer brief names relevant skills when needed, the outcome, and "
+    "acceptance evidence; peers discover skills through their own index."
 )
 
 _STEP_COST = (
-    "Would delegation cost more than the work? Keep it yourself only "
-    "when the task is a quick single-step fix, describing it would take "
-    "longer than doing it, and steps {delegation_steps} named no better agent."
+    "Would delegation improve the result? If steps {delegation_steps} named no better agent, "
+    "choose working yourself, reusing a peer, or spawning peers based on "
+    "context, cost, latency, and verification needs. Existing authorization "
+    "and budget boundaries govern every choice."
 )
 
 _STEP_PARALLEL = (
-    "Can the work be parallelized? Spawn one worker per independent "
-    "part — their messages wake you as each reports — the ava-fleet "
-    "skill has the full pattern."
+    "Can the work be parallelized? Choose a few persistent peers for simple "
+    "collaboration, or load ava-dynamic-workflow when available to generate "
+    "an orchestration script for large fan-outs or repeated stages. Decide "
+    "when to gather results and wake; parallelizable work does not require "
+    "delegation or one model turn per peer completion."
 )
 
 
 def _delegation_check_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_delegation_check_enabled (env
     AVA_SYSTEM_PROMPT_DELEGATION_CHECK, default on). Before taking on any work, run a
-    30-second check — the most common fleet failure modes are skipping it and
-    doing everything yourself, and rebuilding from general knowledge what a
-    listed skill already covers. The skill-index step is the mandatory trigger
+    30-second capability and delegation check rather than rebuilding from
+    general knowledge what a listed skill already covers. The skill-index step
+    selects a working strategy without forcing delegation. It is the trigger
     for the `# Capabilities` index: an agent that never consults the index
     cannot know it is reinventing one of its own skills, so the obligation has
     to live in the one process the prompt marks as mandatory rather than in the

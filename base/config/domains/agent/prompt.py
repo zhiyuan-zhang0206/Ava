@@ -360,9 +360,9 @@ class AgentPromptSettings(EnvSettings):
         default=None,
         alias="AVA_SYSTEM_PROMPT_ALIGN",
         description=(
-            "Inject an 'Aligning before you commit to a direction' section: before "
-            "large/ambiguous/hard-to-redo work, confirm scope + approach with the "
-            "user instead of running on assumptions. Unset resolves the per-model "
+            "Inject an 'Aligning before you commit to a direction' section: resolve "
+            "material outcome, cost, autonomy, and authority choices while respecting "
+            "existing consent. Unset resolves the per-model "
             "default (shared floor: on)."
         ),
         json_schema_extra={
@@ -379,8 +379,9 @@ class AgentPromptSettings(EnvSettings):
         description=(
             "Inject a 'Before you act \u2014 check' section: does a skill already "
             "cover this, is someone else already responsible, do they have better "
-            "tools, would delegation cost more than the work, can it be "
-            "parallelized? The skill-index step is dropped when this agent renders "
+            "tools, would delegation improve the result, which collaboration method "
+            "fits? Route non-trivial work through ava-workflow when available. "
+            "The skill-index step is dropped when this agent renders "
             "no Capabilities section. Unset resolves the per-model default (shared "
             "floor: on)."
         ),

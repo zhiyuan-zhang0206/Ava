@@ -23,6 +23,15 @@ failure routed back to the phase that owns it.
               └── each failure routes back to the phase that owns it, then resumes
 ```
 
+## Choose Verification Independently
+
+Choose verification depth through [Workflow](../SKILL.md), whether or not Align,
+Define Goal, Plan, or goal supervision ran. Take acceptance criteria from the
+user's requirement, the existing task, or working notes. Use direct observations
+and deterministic checks where possible; choose independent or adversarial peer
+review when consequences or uncertainty justify it. A reviewer is a normal
+persistent peer with suitable context and access, not a special agent type.
+
 ## The Network, Not the Final Step
 
 The three phases aren't a staircase you climb once and leave behind. During
@@ -66,7 +75,7 @@ the right tools.
 #### 3. Self-evaluate
 After completion, ask yourself:
 - Does the output meet the acceptance criteria (from Plan's step, or from
-  Align's success criteria when there's no plan)?
+  the agreed requirement or task when there's no plan)?
 - Any edge cases missed?
 - Is the quality at the expected level?
 
@@ -155,14 +164,14 @@ project's contributor guidance; maintainers decide merge procedure.
 
 The loop terminates when ALL of the following are met:
 1. All steps in the plan are complete (or, without a plan, all slices of the goal are done)
-2. All success criteria are satisfied (check against alignment document item by item)
+2. All success criteria are satisfied (check against the agreed acceptance criteria item by item)
 3. Relevant verification supports the result, and remaining limitations are stated
 
 ## Delivery
 
 When the task is complete:
 1. Collect all outputs (file paths, PR links, etc.)
-2. Verify completion against the alignment document item by item
+2. Verify completion against the agreed acceptance criteria item by item
 3. Write a brief summary including key decisions and known limitations
 4. Notify relevant parties (user / peer agents)
 

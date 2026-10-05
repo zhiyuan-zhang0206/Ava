@@ -16,6 +16,7 @@ import pytest
 
 from agent.graph.prompt.system_prompt import (
     _INVEST_IN_THE_FUTURE_SECTION,
+    _align_before_action_section,
     _communication_style_section,
     _invest_in_the_future_section,
     build_system_prompt,
@@ -23,6 +24,19 @@ from agent.graph.prompt.system_prompt import (
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
+
+
+def test_alignment_preserves_authorized_work_and_optional_methods(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_align_before_action_enabled", True)
+
+    rendered = _align_before_action_section(AgentSlices.resolve())
+
+    assert "outcome, cost, autonomy, or authority" in rendered
+    assert "choose routine methods within the authorized scope yourself" in rendered
+    assert "does not require another approval of settled instructions" in rendered
+    assert "stop and confirm" not in rendered
 
 
 @pytest.mark.parametrize(

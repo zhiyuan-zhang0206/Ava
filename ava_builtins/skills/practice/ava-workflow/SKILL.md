@@ -1,97 +1,104 @@
 ---
 name: ava-workflow
-description: "Coordinates agents, the human, and reality through calibration, alignment, planning, and continuous evaluation. Use for any non-trivial task, even when the user does not explicitly ask for a workflow. Entry is lightweight: a one-question align or a five-line plan counts."
+description: "Chooses and adjusts how to work: direct execution, calibration, alignment, goal definition, sustained supervision, peer collaboration, script orchestration, and evaluation. Use automatically for non-trivial, ambiguous, consequential, sustained, or parallel tasks; choose only the capabilities the task needs."
 ---
 
-# Ava Workflow — Three Actors, Three Phases, One Evaluation Thread
+# Ava Workflow — Choose How to Work
 
-Work happens between **three actors** — the agents (us), the human (intent and values), and the real world (facts). Three phases keep the actors in sync, and **Evaluation threads through all of them** rather than standing at the end as a fourth step.
+Workflow is the lightweight entry point for choosing a working strategy. The
+human supplies intent and preferences; agents discover facts in the world and
+choose how to pursue and verify the result. Loading this skill does not require
+an interview, a plan document, goal supervision, or delegation. Direct execution
+with a suitable check is a valid workflow.
 
-```
-            ┌─────────────┐
-            │  real world │  ← facts live here
-            └──────┬──────┘
-                   │  Calibrate: do our models of reality match?
-        ┌──────────┴──────────┐
-        │      agents         │
-        └──────────┬──────────┘
-                   │  Align: what do we actually want to do?
-        ┌──────────┴──────────┐
-        │       human         │
-        └─────────────────────┘
-                   │  Plan: turn the aligned intent into an executable spec
-                   ▼
-            work + evaluation
-```
+## Choose a Working Strategy
 
-## The Three Actors and Three Phases
+First assess ambiguity, scale, consequences, duration, and independent work.
+These are separate dimensions: a small consequential action can need alignment,
+while a large repetitive migration can need script orchestration without an
+interview. Respect the user's explicit choices and existing authorization.
 
-| Phase | Syncs | Core Question | When Needed |
-|-------|-------|---------------|-------------|
-| **Calibrate** (optional) | agents & human ↔ reality | "Does our mental model match the real world?" | Someone's model of the subject is off |
-| **Align** | agents ↔ human | "What are we actually trying to do? What does success look like?" | Goal / constraints are fuzzy; include [Capability Matching](#capability-matching) |
-| **Plan** | intent → executable spec | "How do we split this into tasks agents can execute?" | Task is very large, or needs parallel execution; carry [Capability Matching](#capability-matching) into task nodes |
-| **Evaluation** (threads through all) | every phase's quality | "What counts as good? How is reality doing? When and how do we check?" | Always — the question just lives inside each phase |
+| Dimension | Available choices | Selection question |
+|---|---|---|
+| Understanding | Existing context, targeted reconnaissance, Calibrate | Which factual uncertainty changes the work? |
+| Intent | Direct execution, brief clarification, deeper Align | Which unresolved choice changes the outcome or authority? |
+| Goal definition | Use the stated outcome, sharpen it briefly, Define Goal | Is completion clear and verifiable? |
+| Continuation | Finish this turn, sustained goal supervision, event-driven waiting | What should start the next useful action, and what should stop it? |
+| Collaboration | Work alone, reuse or spawn a few peers, Dynamic Workflow | Does delegation or a reusable script improve this task? |
+| Evaluation | Direct observation, deterministic checks, independent peer review, adversarial review | What evidence is sufficient for these consequences? |
 
-### Evaluation is a thread, not a phase
+Choose each dimension independently. Goal definition does not enable goal mode;
+goal mode does not require an Align session or a dynamic workflow. A dynamic
+workflow is executable orchestration code, not merely several delegated tasks.
+Load the relevant detailed guide only when that capability is needed.
 
-Evaluation is **not the final step** — it is deeply woven into the three phases, and each phase answers a different piece of it:
+Examples:
+- A clear bug fix: execute directly and reproduce the failing-then-passing case.
+- A clear outcome needing repeated work: use it as the goal and ask a normal peer
+  to pursue it under sustained supervision, without a Define Goal interview.
+- A large batch with known checks: run a dynamic workflow without goal mode.
+- A vague consequential request: Align, then choose the relevant domain skills.
+- An already settled change: skip Align and strengthen independent evaluation.
 
-- **"What counts as good?" → Align.** The success criteria you pin down in alignment *are* the evaluation standard.
-- **"How is reality doing?" → Calibrate.** Calibrating is evaluating your model of the world against the world.
-- **"When and how do we evaluate?" → Plan.** Checkpoints, acceptance criteria per step, and verification gates are the evaluation schedule.
+## Recommend Before Asking
 
-The Work & Evaluate skill is this thread made explicit during execution — but it answers to all three phases, not just "after the plan." See [Work & Evaluate](work-eval/SKILL.md).
+Choose routine methods within the authorized scope. Tell the user the strategy
+briefly when it helps them steer; do not ask them to understand or select between
+internal names such as goal mode, Define Goal, or Dynamic Workflow. Ask only when
+an unsettled choice materially changes outcome, cost, speed, verification,
+autonomy, or authority. Give a recommendation and explain the concrete trade-off.
+For example: "I recommend parallel investigation followed by independent checks;
+this is faster but costs more than a sequential pass."
 
-## When to Use
-
-- **Full workflow**: open-ended, multi-step task → Calibrate (if needed) → Align → Plan (only if the task is very large or needs parallelism — see below) → Work & Eval
-- **Calibrate only**: the user wants to understand part of a codebase, system, workflow, or domain — no action intent. (See the `calibrate` sub-skill.)
-- **Align only**: the request is vague; you need to clarify before deciding how to proceed
-- **Plan only**: requirements are already aligned, and the task is large enough (or parallel enough) to need decomposition into an executable spec
-- **Work & Eval only**: you already have a clear goal and acceptance criteria and need step-by-step execution with continuous self-verification
+Users may explicitly choose any method, or delegate the choice. Existing consent
+remains valid; loading a skill or producing a plan does not create another
+approval gate. A chosen method never grants additional spending or permissions.
 
 ## Capability Matching
 
-Every Align and Plan output includes a short capability list: name the relevant skills and MCP tools the task will use and the candidates deliberately not used, with a one-line reason for each.
-Include at least one `Use:` and one `Not used:` line; when every relevant capability is used, write `Not used: None — all relevant capabilities are required.`
+1. Identify the current gap: domain knowledge, execution access, verification,
+   coordination, or recovery. Start from the task, not a skill's name.
+2. Scan skill descriptions and available tools; read candidates whose trigger
+   and expected output cover that gap. Check current repository and environment
+   facts before assuming a capability is usable.
+3. Distinguish reference material from an executable procedure. Reading a
+   migration skill does not authorize a migration. Check tools, environment,
+   permissions, and cost prerequisites before using a procedure.
+4. Select the smallest adequate combination. Reuse existing peers when suitable;
+   spawn peers or write orchestration code when that improves the result.
+5. Revisit selection when evidence reveals a new gap or invalidates a premise.
 
-```text
-- Use: `align` skill — resolve the open product decisions.
-- Use: `chrome` MCP — drive the logged-in browser for a login-required page.
-- Not used: browser automation — repository evidence is sufficient.
-```
+For substantial Align or Plan outputs, name selected skills and tools with a
+short reason. Mention a rejected alternative only when its trade-off matters.
+A routine task needs no capability report or mandatory `Not used` entry.
 
-Keep it to one line per capability. No ceremony: this is a selection heuristic, not a report.
+## Keep the Strategy Proportional and Adjustable
 
-## Plan's Scope Is Narrower Than You Think
+Use a sentence or a few working notes for ordinary tasks. Persist the objective,
+acceptance evidence, boundaries, next action, and necessary coordination state
+when work spans turns or needs recovery. Reuse the existing task and agent state
+owners; do not create a parallel workflow registry for this choice.
 
-**After Align, most work goes straight to execution — no Plan phase.** A clear goal with acceptance criteria is enough to start; running an explicit planning pass on top of alignment is overhead when the path is straightforward.
+Calibration, alignment, planning, and evaluation can stand alone, interleave,
+and feed back into one another. Execute settled slices while investigating
+others when safe; delegation is optional. Reassess the remaining work at useful
+checkpoints. Changes within the agreed scope need no ceremonial reapproval;
+changes to outcome, authority, or authorized spending need the relevant decision.
 
-Plan earns its place in exactly two situations:
+## Optional Methods, Explicit Commitments
 
-1. **The task is very large and the flow is long.** Many steps, spanning sessions or days; you need a roadmap so the work doesn't drift or get lost.
-2. **Parallel execution is needed.** You must agree on the target, decompose into independent subtasks, and split them across agents — the plan is the contract that makes concurrency safe.
+Skipping Define Goal still requires a recognizable outcome and completion
+condition when pursuing a sustained goal. Skipping Align cannot settle an open
+permission question. Evaluation depth is selectable, but completion claims need
+supporting evidence. Budget and authority boundaries apply to every combination;
+this skill does not enforce a hard spending ceiling.
 
-Everything the Plan phase used to do (decompose, estimate, mark dependencies, set checkpoints, surface risks) still lives in those two situations — it just doesn't run on every task. When in doubt, **start executing; plan when execution actually demands it.**
-
-## The Calibration Decision (recommend, don't assume)
-
-Calibrate exists because a plan is only as good as the model it is built on. Whether to run it is a **judgment call the agent makes and recommends** — not a checkbox the user ticks:
-
-- **Run it** when the user's statements about the subject are vague, hedged, or contradicted by what you find; when they ask "how does X work" as part of a larger task; or when they are new to the system/domain.
-- **Skip it** when the user names specific files, configs, or behaviors correctly, corrects *your* statements about the subject, or says they know it and your quick check finds nothing off.
-- **Not sure? Ask.** One sentence — "are you familiar with this area?" — costs nothing and beats a wasted loop either way.
-- **Calibrate per-slice, not per-task.** The user may know A well and be fuzzy on B; only run the loop where the model is uncalibrated, and skip the rest.
-
-## The Phases Are a Network, Not a Pipeline
-
-The phases express *logical* dependencies — understanding precedes goal-setting, goals precede decomposition — but they **overlap, interleave, and feed back into each other**. Treat them as a mesh, not a line:
-
-- **Skip any phase** whose input is already solid (Calibrate when the user knows the subject; Align when the goal is crisp; Plan when the task is small or serial).
-- **Interleave freely.** The Align interview may reveal that the user's model of some slice is wrong — switch back to Calibrate for that slice, then resume Align. Calibration may surface a fact that reshapes the goal — revisit Align. A slice of the plan that is fully settled can be executed (Work & Eval) while the rest is still being calibrated or aligned.
-- **Execution feeds back.** Mid-execution, new facts can invalidate a plan premise (back to Calibrate), reveal the goal itself was off (back to Align), or demand re-splitting the remaining work (back to Plan). Work & Evaluate is where the thread reconnects to all three phases — see its skill.
-- **Spawn the moment a slice is locked.** The moment any slice is calibrated *and* confirmed by the user, hand it to a sub-agent (`ava.agents.spawn`) and keep working on the remaining slices yourself — do not block the session waiting for it. Join via watcher/checkpoint per the `ava-dynamic-workflow` skill (explore → fork → join → reduce). Never spawn a slice whose premises are still being calibrated or aligned.
+All collaborators are persistent peer agents. Worker, supervisor, reviewer, and
+orchestrator are roles assigned through context and configuration, not separate
+agent types. Choose fresh context or a fork and appropriate access for the role;
+peer identity does not require identical permissions or copied assumptions.
+Agent persistence does not automatically make an orchestration script resumable:
+record progress and account for interrupted watchers and external effects.
 
 ## Core Principles
 
@@ -158,7 +165,9 @@ Before asking the user anything, look for the answer in the environment — code
 
 ### 2. Plan when execution demands it (Plan)
 
-Don't start coding without a roadmap **when the task is large or parallel**. Spend time understanding the problem domain, decomposing tasks, identifying dependencies, and estimating risks. The plan doesn't need to be perfect, but it needs to exist — and it needs to exist *because the task needs it*, not because it's the default next step after Align.
+Record a roadmap when dependencies, duration, or coordination make it useful.
+A few independent peer briefs or a dynamic workflow script can express the plan;
+parallel work alone does not require a separate document or confirmation phase.
 
 ### 3. Check the work (Work & Eval)
 
@@ -172,28 +181,13 @@ The [engineering review](../ava-serious-engineering/practices/review/SKILL.md)
 guide offers failure-path questions when useful. Project contributors follow the
 project's contributing guidance; maintainers choose its merge process.
 
-## Chaining Phases
-
-When all phases are used together:
-
-1. **Calibrate** produces a calibration record (if the subject was unfamiliar) → grounds everything downstream
-2. **Align** produces an alignment document → send to user for confirmation
-3. **Plan** (only when the task is large or parallel) reads the alignment document → produces an execution plan → send to user for confirmation
-4. **Work & Eval** reads the execution plan (or, for smaller tasks, the alignment document directly) → executes step by step → evaluates against the success criteria from Align → delivers when done
-
-Each confirmation point is a **checkpoint** for material choices still open,
-not a demand to reapprove settled instructions. The user can correct course at
-any checkpoint, avoiding the cost of drifting too far before discovery.
-
-## Relationship to Goal Mode
-
-Work & Evaluate checks results during execution. Goal mode adds sustained
-supervision when the task needs it. Independent review is another optional way
-to examine assumptions and failure paths; choose these tools to fit the task.
-
 ## Detailed Guides
 
-- [Calibrate Phase](calibrate/SKILL.md) — the exploration + calibration loop that syncs agents' and the human's models with reality
-- [Align Phase](align/SKILL.md) — how to question, when to stop, output format, and how its success criteria anchor evaluation
-- [Plan Phase](plan/SKILL.md) — when to plan at all, how to decompose for concurrency, output format
-- [Work & Evaluate Phase](work-eval/SKILL.md) — the evaluation thread made explicit: self-challenge execution loop that reconnects to Calibrate / Align / Plan
+- [Calibrate](calibrate/SKILL.md) — investigate and correct factual understanding.
+- [Align](align/SKILL.md) — resolve material intent, priority, and authority choices.
+- [Define Goal](define-goal/SKILL.md) — sharpen an unclear outcome and its evidence.
+- [Plan](plan/SKILL.md) — record dependencies and checkpoints when useful.
+- [Work & Evaluate](work-eval/SKILL.md) — execute and verify against the chosen criteria.
+- [Goal supervision](../../coordination/ava-goal/SKILL.md) — sustain a peer's work toward a terminal outcome.
+- [Dynamic Workflow](../../coordination/ava-dynamic-workflow/SKILL.md) — generate a Python script to coordinate peers and aggregate results.
+- [Watcher](../../coordination/ava-watcher/SKILL.md) — wait for an event or time without repeated model turns.
