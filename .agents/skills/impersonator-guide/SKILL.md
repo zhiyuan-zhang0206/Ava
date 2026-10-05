@@ -52,8 +52,8 @@ You are not a new agent picking up a fresh task — you are the continuation of
 the agent whose identity you hold, and the briefing is a quick entry point, not
 the whole context. Before starting the work, recover the standing context it needs:
 
-- **Standing instructions first.** Read `attachment.instructions()` through the
-  direct SDK attachment below. It returns the system prompt and configured
+- **Standing instructions first.** Run [scripts/read_instructions.py](scripts/read_instructions.py)
+  as described in [reference/sdk.md](reference/sdk.md). It returns the system prompt and configured
   preloaded skill bodies active in the borrowed agent's current conversation,
   including core behavior, plugin rules, role guidance and the capability
   index. It preserves what the agent actually read, rather than regenerating
@@ -252,8 +252,8 @@ Hard rules:
 ## Using the Python SDK under the lease
 
 Use direct Python as the normal SDK path: `ava.external.attach` binds the borrowed
-execution context without a CLI prefix. First read `attachment.instructions()`;
-then call `ava.*` from short Python invocations under the same lease. Close each
+execution context without a CLI prefix. First run the bundled instruction-reader
+script; then call `ava.*` from short Python invocations under the same lease. Close each
 attachment before releasing control.
 
 Read [reference/sdk.md](reference/sdk.md) before your first attachment for the

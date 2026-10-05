@@ -14,29 +14,16 @@ lease to a Python process. The external model keeps its own tools; SDK calls exe
 in that external process. The attachment is a context manager with explicit `flush`
 and `close` methods, and never starts or renews a lease.
 
-`attachment.instructions()` validates the lease and returns the native
-checkpoint's leading system prompt plus notes tagged `preloaded_skills` (including
-fork-added skills), in their original order. It reads a copy captured before
-external journal replay, so staged messages cannot redefine inherited guidance.
-Missing prompts and non-text/empty instruction bodies fail explicitly. This is
-what the current context window actually carries, not a fresh render from changed
-configuration; task history, memory and other context notes are recovered separately.
-The external namespace stays outside `ava.__all_for_ava__`, so ordinary agents'
-default SDK overview and wildcard expansion do not advertise attachment controls.
+The attachment stays outside `ava.__all_for_ava__`, so ordinary agents' default
+SDK overview and wildcard expansion do not advertise its controls. Direct Python
+can open and close a short attachment for each SDK operation; CLI exec is an
+optional wrapper. Existing client handles are reused and the prior context is
+restored at detach; an attachment that creates its own clients closes them.
 
-Use the cluster checkout's Python directly inside the attested controller tree:
-
-```python
-import ava
-
-with ava.external.attach(0, agent_id=405) as attachment:
-    print(attachment.instructions())
-```
-
-Each invocation may open and close its own attachment. The CLI exec command is
-an optional wrapper; SDK operations do not require a CLI prefix or a persistent
-interpreter. The borrowed context preserves existing client handles and restores
-the prior context at detach; an attachment that creates its own clients closes them.
+The impersonator skill owns its context-recovery procedure and bundled
+[read-instructions script](../../../.agents/skills/impersonator-guide/scripts/read_instructions.py).
+It uses the existing attachment and native snapshot reader; no instruction-export
+method is added to the SDK.
 
 Closing an attachment first flushes its plugin delta, then—only if the process
 emitted telemetry—synchronously drains the event pipeline and finalizes OTLP

@@ -17,13 +17,14 @@ Each invocation may attach, do its work and close; no persistent Python process
 is required. For example, read the standing instructions first:
 
 ```bash
-/path/to/cluster-checkout/.venv/bin/python - <<'PY'
-import ava
-
-with ava.external.attach(0, agent_id=405) as attachment:
-    print(attachment.instructions())
-PY
+/path/to/cluster-checkout/.venv/bin/python \
+  /path/to/impersonator-guide/scripts/read_instructions.py 0 --agent 405
 ```
+
+The script is beside this skill, in `../scripts/`. It uses the existing lease
+attachment to read the native system prompt and configured preloaded skill notes.
+Context selection belongs to this skill, not to the SDK. The script prints no
+memory index or task history; recover those selectively as the main guide directs.
 
 Replace the example path and ids with your cluster checkout and active lease.
 Read the returned text before acting. Subsequent Python operations use the same

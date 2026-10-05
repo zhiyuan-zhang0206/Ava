@@ -15,15 +15,12 @@ from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
 
-from langchain_core.messages import SystemMessage
-
 from ava import agent_identity
 from ava._settings import database
 from ava.sdk_surface import process_context
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 from base.cluster.machine import machine_name
 from base.config.agent_pins import resolve_agent_config_pins
 from base.log import logger
@@ -129,17 +126,6 @@ class Attachment:
             ava.ensure_plugins_loaded(surface=False)
             state, overlay, birth = load_snapshot(self.agent_id)
             self._state_cls = type(state)
-            # Capture native guidance before external journal replay. Staged
-            # controller messages must not redefine the owner's instructions.
-            self._instruction_messages = tuple(
-                message.model_copy(deep=True)
-                for index, message in enumerate(state.messages)
-                if index == 0
-                or (
-                    read_ava_kwargs(message).get("ava_msg_type") == AvaMsgType.SYSTEM_NOTE
-                    and read_ava_kwargs(message).get("ava_note_tag") == NoteTag.PRELOADED_SKILLS
-                )
-            )
             self.config = (
                 resolve_agent_config_pins(overlay, birth),
                 PluginConfigView(resolve_agent_plugin_pins(overlay)),
@@ -196,25 +182,6 @@ class Attachment:
                 "another attachment changed plugin state; attach again before acting"
             )
         return self.agent_id
-
-    def instructions(self) -> str:
-        """Read the borrowed agent's system prompt and configured preloaded skills.
-
-        Returns the guidance active in its current conversation, unchanged by
-        later configuration edits or your own staged messages. Task history and
-        memory are recovered separately. Raises when no saved system prompt is
-        available; never substitutes a generic agent's instructions.
-        """
-        self._validate()
-        messages = self._instruction_messages
-        if not messages or not isinstance(messages[0], SystemMessage):
-            raise RuntimeError("borrowed agent has no saved system prompt")
-        parts: list[str] = []
-        for message in messages:
-            if not isinstance(message.content, str) or not message.content.strip():
-                raise ValueError("borrowed agent instructions must contain nonempty text")
-            parts.append(message.content)
-        return "\n\n".join(parts)
 
     def flush(self) -> None:
         """Durably stage this attachment's new plugin delta; never renew the lease."""
