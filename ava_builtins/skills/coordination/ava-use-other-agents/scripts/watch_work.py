@@ -279,9 +279,9 @@ class _Watch:
         path = self.path
         owner = coding_session_owner.read(key, expected_generation)
         if owner.generation != expected_generation or owner.status in (
-            "inactive",
-            "terminal",
-            "invalid",
+            CodingSessionStatus.INACTIVE,
+            CodingSessionStatus.TERMINAL,
+            CodingSessionStatus.INVALID,
         ):
             return True
         status_is_current = bool(
