@@ -17,7 +17,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from base.deploy.maintenance import pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import CERTIFIED_PHASES, MaintenanceHold, MaintenancePhase
 
 _authorized_start: ContextVar[tuple[str, datetime] | None] = ContextVar(
     "maintenance_start", default=None
@@ -56,14 +56,18 @@ def business_paused() -> bool:
         return False
     if current.maintenance is None:
         return True
-    return current.maintenance.phase in {"stopping", "stopped", "starting", "ready"}
+    return current.maintenance.phase in {
+        MaintenancePhase.STOPPING,
+        MaintenancePhase.STOPPED,
+        MaintenancePhase.STARTING,
+        MaintenancePhase.READY,
+    }
 
 
 # The stop window's phases: the drain has landed, or the unit is mid-stop /
 # mid-start. `preparing`/`draining` stay live — an already-admitted turn may
 # still be counted down and must finish; `ready` is included so a resume's
 # last moments cannot race a background loop with the hold about to release.
-_QUIESCED_PHASES = frozenset({"drained", "stopping", "stopped", "starting", "ready"})
 
 
 def quiesced() -> bool:
@@ -84,7 +88,7 @@ def quiesced() -> bool:
         return True
     if current is None or current.maintenance is None:
         return False
-    return current.maintenance.phase in _QUIESCED_PHASES
+    return current.maintenance.phase in CERTIFIED_PHASES
 
 
 # The stop leg of the maintenance window: drainage is complete and the unit has
@@ -94,7 +98,9 @@ def quiesced() -> bool:
 # start leg on a booting host must drain its pending workset — recovery may
 # not wait for the hold to release, because pub/sub has no replay (task
 # #3227).
-_STOP_LEG_PHASES = frozenset({"drained", "stopping", "stopped"})
+_STOP_LEG_PHASES = frozenset(
+    {MaintenancePhase.DRAINED, MaintenancePhase.STOPPING, MaintenancePhase.STOPPED}
+)
 
 
 def in_stop_leg() -> bool:
@@ -152,7 +158,11 @@ def pending_command(agent_id: int) -> int | None:
     if current is None or current.maintenance is None:
         return None
     hold = current.maintenance
-    if hold.phase != "draining" or agent_id in hold.drained or agent_id in hold.failures:
+    if (
+        hold.phase != MaintenancePhase.DRAINING
+        or agent_id in hold.drained
+        or agent_id in hold.failures
+    ):
         return None
     return hold.commands.get(agent_id) or None
 
@@ -255,20 +265,24 @@ def clear_failures() -> dict[int, str]:
     return cleared
 
 
-def set_phase(holder: str, acquired_at: datetime, phase: str) -> pause_owner.PauseOwnerSnapshot:
+def set_phase(
+    holder: str, acquired_at: datetime, phase: MaintenancePhase
+) -> pause_owner.PauseOwnerSnapshot:
     current = require_operation(holder, acquired_at)
     assert current.maintenance is not None  # noqa: S101
     hold = current.maintenance
     allowed = {
-        "draining": "drained",
-        "drained": "stopping",
-        "stopping": "stopped",
-        "stopped": "starting",
-        "starting": "ready",
+        MaintenancePhase.DRAINING: MaintenancePhase.DRAINED,
+        MaintenancePhase.DRAINED: MaintenancePhase.STOPPING,
+        MaintenancePhase.STOPPING: MaintenancePhase.STOPPED,
+        MaintenancePhase.STOPPED: MaintenancePhase.STARTING,
+        MaintenancePhase.STARTING: MaintenancePhase.READY,
     }
     if phase != allowed.get(hold.phase):
         raise RuntimeError(f"invalid maintenance transition: {hold.phase} -> {phase}")
-    if phase == "drained" and (hold.failures or set(hold.drained) != set(hold.commands)):
+    if phase == MaintenancePhase.DRAINED and (
+        hold.failures or set(hold.drained) != set(hold.commands)
+    ):
         raise RuntimeError("resume cohort has not fully drained")
     updated = MaintenanceHold.decode({**hold.encode(), "phase": phase})
     return pause_owner.change_maintenance(holder, acquired_at, hold, updated)

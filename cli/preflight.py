@@ -9,6 +9,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.deploy.maintenance.state import MaintenancePhase
+
 
 def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
     """Refuse every command from a checkout that is not the home's own.
@@ -45,6 +47,6 @@ def unit_already_stopped() -> bool:
     return (
         current.status == "paused"
         and current.maintenance is not None
-        and current.maintenance.phase == "stopped"
+        and current.maintenance.phase == MaintenancePhase.STOPPED
         and not current.maintenance.failures
     )

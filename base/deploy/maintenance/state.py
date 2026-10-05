@@ -1,20 +1,38 @@
 """Typed payload carried by the existing local deploy-pause owner journal."""
 
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from enum import StrEnum
+from typing import cast
 
-MaintenancePhase = Literal[
-    "preparing", "draining", "drained", "stopping", "stopped", "starting", "ready"
-]
-_PHASES = ("preparing", "draining", "drained", "stopping", "stopped", "starting", "ready")
+
+class MaintenancePhase(StrEnum):
+    """The closed lifecycle vocabulary persisted in the local hold journal."""
+
+    PREPARING = "preparing"
+    DRAINING = "draining"
+    DRAINED = "drained"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    STARTING = "starting"
+    READY = "ready"
+
+
 # From `drained` on the drain is certified: that transition required every
 # member drained with no failure (base.deploy.maintenance.admission.set_phase).
-_CERTIFIED_PHASES = frozenset({"drained", "stopping", "stopped", "starting", "ready"})
+CERTIFIED_PHASES = frozenset(
+    {
+        MaintenancePhase.DRAINED,
+        MaintenancePhase.STOPPING,
+        MaintenancePhase.STOPPED,
+        MaintenancePhase.STARTING,
+        MaintenancePhase.READY,
+    }
+)
 
 
 @dataclass(frozen=True)
 class MaintenanceHold:
-    phase: MaintenancePhase = "preparing"
+    phase: MaintenancePhase = MaintenancePhase.PREPARING
     # The restart command remains in Postgres across the data-plane move.
     # A zero value means preparation has not yet durably enqueued it.
     commands: dict[int, int] = field(default_factory=dict[int, int])
@@ -37,7 +55,7 @@ class MaintenanceHold:
         hold never drains; no receipt of it gates the hold. Before the capture
         (phase `preparing`, empty cohort) nothing is proven.
         """
-        captured = self.phase != "preparing" or bool(self.commands or self.parked)
+        captured = self.phase != MaintenancePhase.PREPARING or bool(self.commands or self.parked)
         return captured and agent_id not in self.commands and agent_id not in self.parked
 
     def settled_after_drain(self, agent_id: int) -> bool:
@@ -48,13 +66,13 @@ class MaintenanceHold:
         pending), so no receipt of it gates the hold. Until `drained` their
         failures still record.
         """
-        return self.phase in _CERTIFIED_PHASES and (
+        return self.phase in CERTIFIED_PHASES and (
             agent_id in self.drained or agent_id in self.parked
         )
 
     def encode(self) -> dict[str, object]:
         return {
-            "phase": self.phase,
+            "phase": self.phase.value,
             "commands": {str(agent): command for agent, command in self.commands.items()},
             "drained": list(self.drained),
             "failures": {str(agent): reason for agent, reason in self.failures.items()},
@@ -68,8 +86,16 @@ class MaintenanceHold:
             raise TypeError("maintenance must be an object")
         raw = cast(dict[str, object], value)
         phase, commands, drained = raw["phase"], raw["commands"], raw["drained"]
-        if phase not in _PHASES or not isinstance(commands, dict) or not isinstance(drained, list):
-            raise ValueError("invalid maintenance phase or resume cohort")
+        if (
+            not isinstance(phase, str)
+            or not isinstance(commands, dict)
+            or not isinstance(drained, list)
+        ):
+            raise ValueError("invalid maintenance phase or resume cohort")  # noqa: TRY004
+        try:
+            parsed_phase = MaintenancePhase(phase)
+        except ValueError as exc:
+            raise ValueError("invalid maintenance phase") from exc
         parsed = _commands(cast(dict[object, object], commands))
         receipts = cast(list[object], drained)
         if any(type(agent) is not int or agent not in parsed for agent in receipts):
@@ -80,7 +106,7 @@ class MaintenanceHold:
         undelivered = _receipts(raw.get("undelivered", {}), "undelivered receipts")
         parked_ids = _parked_ids(raw["parked"], parsed)
         return cls(
-            phase,
+            parsed_phase,
             parsed,
             tuple(cast(list[int], receipts)),
             failed,

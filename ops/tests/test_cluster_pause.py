@@ -17,6 +17,7 @@ import pytest
 from base.cluster.machine import machine_name
 from base.db import Database, create_agent, insert_inbound_message
 from base.deploy.maintenance import admission, pause_owner
+from base.deploy.maintenance.state import MaintenancePhase
 from base.deploy.state.host_deploy_state import HostDeployState
 from base.events.live.bus import EventBus
 from ops import agent_pause, cluster_pause
@@ -108,7 +109,7 @@ def test_pause_holds_admission_without_closing_dependencies(
     agent_pause.pause_agents(database, event_bus)
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
-    assert current.maintenance.phase == "drained"
+    assert current.maintenance.phase == MaintenancePhase.DRAINED
     assert posture == [], "in-flight SDK requests still need the gateway"
     assert local_runtime.has_answer and local_runtime.killed == []
 
@@ -208,7 +209,7 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
 
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
-    assert current.maintenance.phase == "draining"
+    assert current.maintenance.phase == MaintenancePhase.DRAINING
     assert current.maintenance.drained == ()
     command = current.maintenance.commands[agent]
     # Issue #2159: the timeout names per-agent delivery state, row fences and
@@ -257,7 +258,9 @@ def test_stall_report_names_the_predecessor_owner_fence(
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     monkeypatch.setattr(agent_pause, "host_identity", lambda: HostIdentity(successor, frozenset()))
 
-    report = _stall_report(database, MaintenanceHold("draining", {agent: command}), [agent])
+    report = _stall_report(
+        database, MaintenanceHold(MaintenancePhase.DRAINING, {agent: command}), [agent]
+    )
 
     assert f"owner={predecessor}" in report
     assert f"not the live boot {successor}" in report
@@ -282,7 +285,9 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
 
     when = datetime(2026, 9, 10, tzinfo=UTC)
     pause_owner.begin_maintenance("wsl:pid1", when)
-    pause_owner.change_maintenance("wsl:pid1", when, MaintenanceHold(), MaintenanceHold("stopping"))
+    pause_owner.change_maintenance(
+        "wsl:pid1", when, MaintenanceHold(), MaintenanceHold(MaintenancePhase.STOPPING)
+    )
     monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: False)
 
     with pytest.raises(RuntimeError) as raised:

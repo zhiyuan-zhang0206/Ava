@@ -14,6 +14,7 @@ from typing import cast
 import base.deploy.state.host_deploy_state
 from base.db import Database
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
+from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 
 _log = logging.getLogger(__name__)
@@ -82,7 +83,13 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
 
     if (
         current.maintenance is not None
-        and current.maintenance.phase in ("stopping", "stopped", "starting", "ready")
+        and current.maintenance.phase
+        in (
+            MaintenancePhase.STOPPING,
+            MaintenancePhase.STOPPED,
+            MaintenancePhase.STARTING,
+            MaintenancePhase.READY,
+        )
         and not start_serving.is_serving()
     ):
         return "services have stopped; ava start must pass readiness before resume"
