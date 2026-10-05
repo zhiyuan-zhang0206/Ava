@@ -16,13 +16,13 @@ from cli.commands.extensions._external_skill_fs import (
     _validate_manifest_subset,
     _verify_cleanup_file,
 )
-from cli.commands.extensions._external_skill_ledger import _write_ledger
-
-_SKILL_NAME = "operating-ava-cluster"
+from cli.commands.extensions._external_skill_ledger import _SKILL_NAME, _write_ledger
 
 
-def _transaction_path(skills_root: Path, kind: str, generation_id: str) -> Path:
-    return skills_root / f".{_SKILL_NAME}.ava-{kind}-{generation_id}"
+def _transaction_path(
+    skills_root: Path, kind: str, generation_id: str, *, skill_name: str = _SKILL_NAME
+) -> Path:
+    return skills_root / f".{skill_name}.ava-{kind}-{generation_id}"
 
 
 def _prepared_path(ledger_path: Path, generation_id: str) -> Path:
@@ -64,10 +64,17 @@ def _queue_garbage(
         ledger["garbage"].append(record)
 
 
-def _source_path(ledger_path: Path, skills_root: Path, kind: str, generation_id: str) -> Path:
+def _source_path(
+    ledger_path: Path,
+    skills_root: Path,
+    kind: str,
+    generation_id: str,
+    *,
+    skill_name: str = _SKILL_NAME,
+) -> Path:
     if kind == "prepared":
         return _prepared_path(ledger_path, generation_id)
-    return _transaction_path(skills_root, kind, generation_id)
+    return _transaction_path(skills_root, kind, generation_id, skill_name=skill_name)
 
 
 def _verify_cleanup_candidate(path: Path, manifest: list[dict[str, Any]]) -> None:
@@ -232,9 +239,13 @@ def _cleanup_garbage_item(
     skills_root: Path,
     item: dict[str, Any],
     rename: Callable[[Path, Path], None],
+    *,
+    skill_name: str = _SKILL_NAME,
 ) -> bool:
     generation_id = item["path_generation_id"]
-    source = _source_path(ledger_path, skills_root, item["kind"], generation_id)
+    source = _source_path(
+        ledger_path, skills_root, item["kind"], generation_id, skill_name=skill_name
+    )
     quarantine = _quarantine_path(ledger_path, item["kind"], generation_id)
     if item["location"] == "source" and _claim_from_source(
         ledger_path, ledger, item, source, quarantine, rename
@@ -256,11 +267,15 @@ def _cleanup_garbage_impl(
     skills_root: Path,
     label: str,
     rename: Callable[[Path, Path], None],
+    *,
+    skill_name: str = _SKILL_NAME,
 ) -> None:
     for item in list(ledger["garbage"]):
         try:
             if (
-                _cleanup_garbage_item(ledger_path, ledger, skills_root, item, rename)
+                _cleanup_garbage_item(
+                    ledger_path, ledger, skills_root, item, rename, skill_name=skill_name
+                )
                 and item in ledger["garbage"]
             ):
                 ledger["garbage"].remove(item)

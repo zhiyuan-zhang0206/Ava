@@ -1,7 +1,7 @@
 """Publish Ava's operator skill into already-present external agent homes.
 
 The external homes remain user-owned.  Ava's authority is bound by a private
-ledger under ``AVA_HOME`` and every mutation is serialized and limited to one
+ledger under ``AVA_HOME`` and every mutation is serialized and limited to each
 named skill target (plus transaction siblings bearing an Ava generation ID).
 """
 
@@ -38,6 +38,7 @@ from cli.commands.extensions._external_skill_fs import (
 )
 from cli.commands.extensions._external_skill_ledger import (
     _FORMAT,
+    _SKILL_NAME,
     _load_ledger,
     _ownership_marker,
     _parse_record,
@@ -45,7 +46,7 @@ from cli.commands.extensions._external_skill_ledger import (
     _write_ledger,
 )
 
-_SKILL_NAME = "operating-ava-cluster"
+_SKILL_NAMES = (_SKILL_NAME, "deploy-ava-cluster")
 _MARKER_NAME = ".ava-managed.json"
 _CLIENTS = (("Codex", ".codex", "codex"), ("Claude Code", ".claude", "claude"))
 
@@ -54,12 +55,15 @@ def _prepared_stage_path(ledger_path: Path, generation_id: str) -> Path:
     return ledger_path.parent / f".{ledger_path.stem}-stage-{generation_id}"
 
 
-def _verify_marker(root: Path, installation_id: str, generation_id: str) -> None:
+def _verify_marker(
+    root: Path, installation_id: str, generation_id: str, *, skill_name: str = _SKILL_NAME
+) -> None:
     if not stat.S_ISDIR(_lstat(root).st_mode):
         raise _ClientConflictError("Ava-managed target is not a regular directory")
     record = _parse_record(root / _MARKER_NAME)
     if (
         record is None
+        or record.get("skill") != skill_name
         or record.get("installation_id") != installation_id
         or record.get("generation_id") != generation_id
     ):
@@ -86,9 +90,16 @@ def _warn(label: str, reason: str) -> None:
 
 
 def _cleanup_garbage(
-    ledger_path: Path, ledger: dict[str, Any], skills_root: Path, label: str
+    ledger_path: Path,
+    ledger: dict[str, Any],
+    skills_root: Path,
+    label: str,
+    *,
+    skill_name: str = _SKILL_NAME,
 ) -> None:
-    _cleanup_garbage_impl(ledger_path, ledger, skills_root, label, _rename_no_replace)
+    _cleanup_garbage_impl(
+        ledger_path, ledger, skills_root, label, _rename_no_replace, skill_name=skill_name
+    )
 
 
 def _stage_copy(
@@ -98,9 +109,13 @@ def _stage_copy(
     ledger_path: Path,
     ledger: dict[str, Any],
     source_digest: str,
+    *,
+    skill_name: str = _SKILL_NAME,
 ) -> Path:
     generation_id = uuid.uuid4().hex
-    marker = _ownership_marker(ledger["installation_id"], generation_id, source_digest)
+    marker = _ownership_marker(
+        ledger["installation_id"], generation_id, source_digest, skill_name=skill_name
+    )
     expected_manifest = _stage_manifest(source_manifest, marker)
     transaction = {
         "claim_state": "idle",
@@ -120,7 +135,7 @@ def _stage_copy(
         raise _SourceIntegrityError("operator skill source copy did not verify")
     transaction["stage_state"] = "publishing"
     _write_ledger(ledger_path, ledger)
-    stage = _transaction_path(skills_root, "stage", generation_id)
+    stage = _transaction_path(skills_root, "stage", generation_id, skill_name=skill_name)
     _rename_no_replace(prepared, stage)
     transaction["stage_state"] = "published"
     _write_ledger(ledger_path, ledger)
@@ -131,13 +146,15 @@ def _abandon_transaction(
     ledger_path: Path,
     ledger: dict[str, Any],
     skills_root: Path,
+    *,
+    skill_name: str = _SKILL_NAME,
 ) -> bool:
     """Move every remaining residue pointer to durable cleanup state."""
     transaction = cast(dict[str, Any] | None, ledger["transaction"])
     if transaction is None:
         return True
     generation_id = transaction["generation_id"]
-    stage = _transaction_path(skills_root, "stage", generation_id)
+    stage = _transaction_path(skills_root, "stage", generation_id, skill_name=skill_name)
     prepared = _prepared_stage_path(ledger_path, generation_id)
     if transaction["claim_state"] != "idle":
         return False
@@ -178,7 +195,9 @@ def _restore_claimed_previous(
     if not _exists(previous):
         if not _exists(target):
             raise _ClientConflictError("claimed target and prior copy are both missing")
-        _verify_marker(target, ledger["installation_id"], old["generation_id"])
+        _verify_marker(
+            target, ledger["installation_id"], old["generation_id"], skill_name=target.name
+        )
         _require_digest(target, old["digest"], "restored managed target was modified")
     else:
         _rename_no_replace(previous, target)
@@ -191,12 +210,14 @@ def _reconcile_stage_publication(
     ledger: dict[str, Any],
     skills_root: Path,
     transaction: dict[str, Any],
+    *,
+    skill_name: str = _SKILL_NAME,
 ) -> None:
     if transaction["stage_state"] != "publishing":
         return
     generation_id = transaction["generation_id"]
     prepared = _prepared_stage_path(ledger_path, generation_id)
-    stage = _transaction_path(skills_root, "stage", generation_id)
+    stage = _transaction_path(skills_root, "stage", generation_id, skill_name=skill_name)
     prepared_exists = _exists(prepared)
     stage_exists = _exists(stage)
     if prepared_exists and stage_exists:
@@ -206,7 +227,7 @@ def _reconcile_stage_publication(
             raise _ClientConflictError("prepared Ava stage was modified")
         _rename_no_replace(prepared, stage)
     elif stage_exists:
-        _verify_marker(stage, ledger["installation_id"], generation_id)
+        _verify_marker(stage, ledger["installation_id"], generation_id, skill_name=skill_name)
         if _tree_manifest(stage) != transaction["expected_manifest"]:
             raise _ClientConflictError("published Ava stage was modified")
     else:
@@ -232,11 +253,15 @@ def _reconcile_target_claim(
     if previous_exists and target_exists:
         raise _ClientConflictError("target claim outcome is ambiguous")
     if previous_exists:
-        _verify_marker(previous, ledger["installation_id"], old["generation_id"])
+        _verify_marker(
+            previous, ledger["installation_id"], old["generation_id"], skill_name=target.name
+        )
         _require_digest(previous, old["digest"], "claimed managed target was modified")
         transaction["claim_state"] = "claimed"
     elif target_exists:
-        _verify_marker(target, ledger["installation_id"], old["generation_id"])
+        _verify_marker(
+            target, ledger["installation_id"], old["generation_id"], skill_name=target.name
+        )
         _require_digest(target, old["digest"], "managed target changed during claim")
         transaction["claim_state"] = "idle"
     else:
@@ -276,11 +301,11 @@ def _activate(
 ) -> str:
     transaction = cast(dict[str, Any], ledger["transaction"])
     generation_id = transaction["generation_id"]
-    stage = _transaction_path(skills_root, "stage", generation_id)
-    previous = _transaction_path(skills_root, "previous", generation_id)
+    stage = _transaction_path(skills_root, "stage", generation_id, skill_name=target.name)
+    previous = _transaction_path(skills_root, "previous", generation_id, skill_name=target.name)
     if transaction["stage_state"] != "published" or not _exists(stage):
         raise _ClientConflictError("incomplete Ava transaction was preserved")
-    _verify_marker(stage, ledger["installation_id"], generation_id)
+    _verify_marker(stage, ledger["installation_id"], generation_id, skill_name=target.name)
     if _tree_manifest(stage) != transaction["expected_manifest"]:
         raise _ClientConflictError("staged Ava transaction was modified")
     old = ledger["installed"]
@@ -296,7 +321,9 @@ def _activate(
             _rename_no_replace(target, previous)
             transaction["claim_state"] = "claimed"
             _write_ledger(ledger_path, ledger)
-            _verify_marker(previous, ledger["installation_id"], old["generation_id"])
+            _verify_marker(
+                previous, ledger["installation_id"], old["generation_id"], skill_name=target.name
+            )
             _require_digest(
                 previous, old["digest"], "managed target changed before it could be claimed"
             )
@@ -310,7 +337,7 @@ def _activate(
     except OSError:
         _restore_claimed_previous(ledger_path, ledger, transaction, previous, target)
         raise
-    _verify_marker(target, ledger["installation_id"], generation_id)
+    _verify_marker(target, ledger["installation_id"], generation_id, skill_name=target.name)
     if _tree_digest(target) != transaction["expected_digest"]:
         raise _ClientConflictError("activated Ava target failed verification")
     _commit_activation(ledger_path, ledger, transaction, previous)
@@ -326,11 +353,19 @@ def _recover(
     transaction = ledger["transaction"]
     if transaction is None:
         return None
-    stage = _transaction_path(skills_root, "stage", transaction["generation_id"])
-    previous = _transaction_path(skills_root, "previous", transaction["generation_id"])
-    _reconcile_stage_publication(ledger_path, ledger, skills_root, transaction)
+    stage = _transaction_path(
+        skills_root, "stage", transaction["generation_id"], skill_name=target.name
+    )
+    previous = _transaction_path(
+        skills_root, "previous", transaction["generation_id"], skill_name=target.name
+    )
+    _reconcile_stage_publication(
+        ledger_path, ledger, skills_root, transaction, skill_name=target.name
+    )
     if transaction["stage_state"] == "published" and _exists(target) and not _exists(stage):
-        _verify_marker(target, ledger["installation_id"], transaction["generation_id"])
+        _verify_marker(
+            target, ledger["installation_id"], transaction["generation_id"], skill_name=target.name
+        )
         _require_digest(
             target, transaction["expected_digest"], "activated transaction was modified"
         )
@@ -344,7 +379,7 @@ def _recover(
         _restore_claimed_previous(ledger_path, ledger, transaction, previous, target)
     if transaction["stage_state"] == "published" and _exists(stage):
         return _activate(ledger_path, ledger, skills_root, target)
-    if _abandon_transaction(ledger_path, ledger, skills_root):
+    if _abandon_transaction(ledger_path, ledger, skills_root, skill_name=target.name):
         return None
     raise _ClientConflictError("incomplete Ava transaction still owns a claimed target")
 
@@ -417,7 +452,9 @@ def _managed_target_current(ledger: dict[str, Any], target: Path, source_digest:
         return False
     if not _exists(target):
         raise _ClientConflictError("managed target is missing")
-    _verify_marker(target, ledger["installation_id"], installed["generation_id"])
+    _verify_marker(
+        target, ledger["installation_id"], installed["generation_id"], skill_name=target.name
+    )
     if _tree_digest(target) != installed["digest"]:
         raise _ClientConflictError("user-modified managed target was preserved")
     return installed["source_digest"] == source_digest
@@ -431,37 +468,47 @@ def _converge_locked(
     client_key: str,
     label: str,
     ledger_path: Path,
+    *,
+    skill_name: str = _SKILL_NAME,
 ) -> None:
     skills_root = _skills_root_of(client_home)
-    target = skills_root / _SKILL_NAME
+    target = skills_root / skill_name
     ledger = _ledger_for(ledger_path, client_key, target)
-    _cleanup_garbage(ledger_path, ledger, skills_root, label)
+    _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
     recovered = _recover(ledger_path, ledger, skills_root, target)
     if recovered is not None:
-        print(f"  · {label} external operator skill {recovered}: skills/{_SKILL_NAME}")
-        _cleanup_garbage(ledger_path, ledger, skills_root, label)
+        print(f"  · {label} external operator skill {recovered}: skills/{skill_name}")
+        _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
         return
-    _cleanup_garbage(ledger_path, ledger, skills_root, label)
+    _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
     if _managed_target_current(ledger, target, source_digest):
         return
     try:
-        _stage_copy(snapshot, source_manifest, skills_root, ledger_path, ledger, source_digest)
+        _stage_copy(
+            snapshot,
+            source_manifest,
+            skills_root,
+            ledger_path,
+            ledger,
+            source_digest,
+            skill_name=skill_name,
+        )
     except (OSError, _SourceIntegrityError):
-        if _abandon_transaction(ledger_path, ledger, skills_root):
-            _cleanup_garbage(ledger_path, ledger, skills_root, label)
+        if _abandon_transaction(ledger_path, ledger, skills_root, skill_name=skill_name):
+            _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
         raise
     try:
         action = _activate(ledger_path, ledger, skills_root, target)
     except (OSError, _ClientConflictError):
-        if _abandon_transaction(ledger_path, ledger, skills_root):
-            _cleanup_garbage(ledger_path, ledger, skills_root, label)
+        if _abandon_transaction(ledger_path, ledger, skills_root, skill_name=skill_name):
+            _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
         raise
-    print(f"  · {label} external operator skill {action}: skills/{_SKILL_NAME}")
-    _cleanup_garbage(ledger_path, ledger, skills_root, label)
+    print(f"  · {label} external operator skill {action}: skills/{skill_name}")
+    _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
 
 
 def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = None) -> None:
-    """Copy one operator skill into present Codex and Claude Code homes."""
+    """Copy deployment and operations skills into present Codex and Claude Code homes."""
     home = Path.home() if host_home is None else host_home
     try:
         _validate_directory(home, "host home is not a regular directory")
@@ -472,33 +519,36 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
     present = [client for client in _CLIENTS if _exists(home / client[1])]
     if not present:
         return
-    source = ctx.repo / ".agents" / "skills" / _SKILL_NAME
-    _validate_source_path(ctx.repo, source)
-    snapshot = _source_snapshot(source)
-    source_manifest = snapshot.manifest()
-    source_digest = _manifest_digest(source_manifest)
     try:
         ledger_root = _ensure_ledger_root(ctx)
     except (OSError, RuntimeError) as exc:
         for label, _, _ in present:
             _warn(label, f"private ownership ledger unavailable ({type(exc).__name__})")
         return
-    for label, home_name, client_key in present:
-        ledger_path = ledger_root / f"{client_key}.json"
-        lock_path = ledger_root / f"{client_key}.lock"
-        try:
-            _validate_lock(lock_path)
-            with file_lock(lock_path, timeout_s=2):
-                _converge_locked(
-                    snapshot,
-                    source_manifest,
-                    source_digest,
-                    home / home_name,
-                    client_key,
-                    label,
-                    ledger_path,
-                )
-        except _ClientConflictError as exc:
-            _warn(label, str(exc))
-        except (LockTimeoutError, OSError) as exc:
-            _warn(label, f"conflict ({type(exc).__name__})")
+    for skill_name in _SKILL_NAMES:
+        source = ctx.repo / "ava_builtins" / "skills" / "platform" / skill_name
+        _validate_source_path(ctx.repo, source)
+        snapshot = _source_snapshot(source)
+        source_manifest = snapshot.manifest()
+        source_digest = _manifest_digest(source_manifest)
+        for label, home_name, client_key in present:
+            ledger_name = client_key if skill_name == _SKILL_NAME else f"{client_key}-{skill_name}"
+            ledger_path = ledger_root / f"{ledger_name}.json"
+            lock_path = ledger_root / f"{ledger_name}.lock"
+            try:
+                _validate_lock(lock_path)
+                with file_lock(lock_path, timeout_s=2):
+                    _converge_locked(
+                        snapshot,
+                        source_manifest,
+                        source_digest,
+                        home / home_name,
+                        client_key,
+                        label,
+                        ledger_path,
+                        skill_name=skill_name,
+                    )
+            except _ClientConflictError as exc:
+                _warn(label, str(exc))
+            except (LockTimeoutError, OSError) as exc:
+                _warn(label, f"conflict ({type(exc).__name__})")

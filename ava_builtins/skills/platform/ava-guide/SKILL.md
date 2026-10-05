@@ -52,6 +52,8 @@ a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self
 
 | If you need to… | Read |
 |---|---|
+| Install Ava, initialize a home, or join a runner | [deploy-ava-cluster](../deploy-ava-cluster/SKILL.md) |
+| Diagnose cluster failures, check health, or recover infrastructure | [operating-ava-cluster](../operating-ava-cluster/SKILL.md) |
 | Start/stop/update the cluster, understand cluster/unit/machine model, prepare and cut releases | [ops](ops/SKILL.md) |
 | Dispose of dead agents' workspaces — cold-data disposal, tombstone, ledger | [workspace-cleanup](workspace-cleanup/SKILL.md) |
 | Add, list, remove, enable/disable MCP servers | [mcp](mcp/SKILL.md) |

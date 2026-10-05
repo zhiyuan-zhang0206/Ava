@@ -464,9 +464,10 @@ production home).
 The converge phase (`cli/commands/converge/host.py:converge_host`) is idempotent — run
 by every source `cmd_start`. Run it standalone with `ava converge`. It covers the
 prod `ava` link, `~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
-external agents: when `~/.codex` and/or `~/.claude` already exists, it copies only
-`.agents/skills/operating-ava-cluster` into that client's global `skills/` root. Missing
-client homes are not created. A private per-client ledger under `$AVA_HOME/configs/`
+external agents: when `~/.codex` and/or `~/.claude` already exists, it copies
+`deploy-ava-cluster` and `operating-ava-cluster` from the canonical
+`ava_builtins/skills/platform/` sources into that client's global `skills/` root. Missing
+client homes are not created. A private per-client, per-skill ledger under `$AVA_HOME/configs/`
 binds the installed generation to its in-target marker and a digest of names, kinds,
 bytes, and modes. The ledger also records each generation's expected path manifest,
 so interrupted staging and partially completed cleanup remain named and safely

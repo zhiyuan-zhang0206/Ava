@@ -23,7 +23,13 @@ _HEX = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[0-9a-f]{32}$")
 
 
-def _ownership_marker(installation_id: str, generation_id: str, source_digest: str) -> bytes:
+def _ownership_marker(
+    installation_id: str,
+    generation_id: str,
+    source_digest: str,
+    *,
+    skill_name: str = _SKILL_NAME,
+) -> bytes:
     return (
         json.dumps(
             {
@@ -31,7 +37,7 @@ def _ownership_marker(installation_id: str, generation_id: str, source_digest: s
                 "generation_id": generation_id,
                 "installation_id": installation_id,
                 "owner": "ava",
-                "skill": _SKILL_NAME,
+                "skill": skill_name,
                 "source_digest": source_digest,
             },
             indent=2,

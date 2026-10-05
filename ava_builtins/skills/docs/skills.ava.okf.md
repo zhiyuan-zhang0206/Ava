@@ -38,6 +38,8 @@ behavioral discipline for long-running/ultra-speed agents.
 | Skill | Purpose | Detail |
 |------|------|------|
 | ava-guide | Operate / extend yourself via the `ava` CLI; root SKILL.md is an index, seven bare-name sub-skills bear the load (`ops`, `mcp`, `packages`, `agents`, `presets`, `models`, `onboarding`) | [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md]] |
+| deploy-ava-cluster | Install Ava, initialize a home and join runner units | [[okf/skills/external-agent-operator-bridge.ava.okf.md]] |
+| operating-ava-cluster | Diagnose and recover deployment infrastructure | [[okf/skills/external-agent-operator-bridge.ava.okf.md]] |
 | ava-schedule-writer | Natural language → gateway managed scheduled task (resumable script + `/api/schedules`) | [[ava_builtins/skills/coordination/ava-schedule-writer/docs/ava-schedule-writer.ava.okf.md]] |
 | ava-watcher | Start a background watcher that wakes you on event/time triggers (stop in-turn polling) | [[ava_builtins/skills/coordination/ava-watcher/docs/ava-watcher.ava.okf.md]] |
 | ava-being-a-long-running-agent | Operating as a long-running process: manage lifecycle, wait for external events, persist before compaction | [[ava_builtins/skills/coordination/ava-being-a-long-running-agent/docs/ava-being-a-long-running-agent.ava.okf.md]] |

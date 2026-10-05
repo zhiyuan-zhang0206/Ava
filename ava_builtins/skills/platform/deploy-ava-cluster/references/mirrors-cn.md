@@ -25,7 +25,7 @@ validates it, exports exact requirements and hashes offline, and obtains those
 same artifacts through the configured single index. It does not re-resolve or
 rewrite the lock. Existing machine uv/pip single-index settings are recognized;
 explicit environment settings win. See
-[Machine Python indexes](../../../../docs/conventions/dev-setup.md#machine-python-indexes).
+[Machine Python indexes](../../../../../docs/conventions/dev-setup.md#machine-python-indexes).
 
 npm follows the same split: `npm ci` downloads each tarball through the
 configured registry, while the committed `ui/web/package-lock.json` keeps
