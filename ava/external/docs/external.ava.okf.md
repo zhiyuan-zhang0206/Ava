@@ -14,6 +14,17 @@ lease to a Python process. The external model keeps its own tools; SDK calls exe
 in that external process. The attachment is a context manager with explicit `flush`
 and `close` methods, and never starts or renews a lease.
 
+The attachment stays outside `ava.__all_for_ava__`, so ordinary agents' default
+SDK overview and wildcard expansion do not advertise its controls. Direct Python
+can open and close a short attachment for each SDK operation; CLI exec is an
+optional wrapper. Existing client handles are reused and the prior context is
+restored at detach; an attachment that creates its own clients closes them.
+
+The impersonator skill owns its context-recovery procedure and bundled
+[read-instructions script](../../../.agents/skills/impersonator-guide/scripts/read_instructions.py).
+It uses the existing attachment and native snapshot reader; no instruction-export
+method is added to the SDK.
+
 Closing an attachment first flushes its plugin delta, then—only if the process
 emitted telemetry—synchronously drains the event pipeline and finalizes OTLP
 while the interpreter is still live. This gives a short `ava impersonate exec`

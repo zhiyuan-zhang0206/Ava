@@ -1,17 +1,20 @@
 """Real PostgreSQL consent, checkpoint hydration and the external SDK effects of an attachment: native checkpoint reads, borrowed sender and lease-log recording."""
 
+import importlib.util
+from pathlib import Path
 from typing import Annotated, Any, cast
 from uuid import uuid4
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
+from agent.messages import NoteTag, system_note_message
 from ava import agent_identity, external
 from ava.external.state import decode_plugin_delta, load_snapshot
 from base.agents import impersonation as leases
@@ -66,7 +69,11 @@ def native_checkpoint(
     db_conn.commit()
     checkpoint = empty_checkpoint()
     checkpoint["channel_values"] = {
-        "messages": [HumanMessage(content="Native task")],
+        "messages": [
+            SystemMessage(content="Native core and plugin rules"),
+            system_note_message(content="Configured skill rules", tag=NoteTag.PRELOADED_SKILLS),
+            HumanMessage(content="Native task"),
+        ],
         "integration__seen": {"native"},
     }
     versions: dict[str, str | int | float] = {"messages": "1", "integration__seen": "1"}
@@ -103,10 +110,19 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     leases.accept(database, event_bus, lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
+    script = (
+        Path(__file__).parents[2] / ".agents/skills/impersonator-guide/scripts/read_instructions.py"
+    )
+    spec = importlib.util.spec_from_file_location("impersonator_instruction_reader", script)
+    assert spec is not None and spec.loader is not None
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    expected = "Native core and plugin rules\n\n[system] Configured skill rules"
+    assert reader.read_instructions(lease["session_id"], agent_id) == expected
     with external.attach(lease["id"]):
         assert agent_id == ava.self.AGENT_ID
         assert agent_identity.require_actor() == f"agent:{agent_id}"
-        assert ava.state.messages[0].content == "Native task"
+        assert ava.state.messages[-1].content == "Native task"
         assert handle.read().seen == {"native"}
         handle.update({"seen": {"external"}})
     updated = leases.get(database, event_bus, lease["id"], attested_caller(lease))
@@ -116,6 +132,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         "integration__seen": {"external"}
     }
     assert native_snapshot.integration__seen == {"native"}
+    assert reader.read_instructions(lease["session_id"], agent_id) == expected
     with external.attach(lease["id"]):
         assert handle.read().seen == {"native", "external"}
     assert (

@@ -1,6 +1,6 @@
 ---
 name: impersonator-guide
-description: 'Operating an Ava impersonation lease as the external agent: Ava CLI and Python SDK use under a borrowed identity, push-based message handling with ACK-on-receipt, reminder-driven lease renewal, and summary handoff, with a host guide each for Claude Code, Codex and DeepSeek Harness. Use when an "Ava control active" hint names your lease or an impersonation session is active for your agent.'
+description: 'Operating an Ava impersonation lease as the external agent: Ava CLI and direct Python SDK use and inherited system-prompt guidance under a borrowed identity, push-based message handling with ACK-on-receipt, reminder-driven lease renewal, and summary handoff, with a host guide each for Claude Code, Codex and DeepSeek Harness. Use when an "Ava control active" hint names your lease or an impersonation session is active for your agent.'
 ---
 
 # Acting as an Ava impersonator
@@ -9,8 +9,8 @@ A trusted takeover has reached active status: while the lease is active, you act
 agent on this machine under a borrowed identity, and inbound messages to the
 agent reach you. This skill is the complete operating manual for the lease —
 how to use the Ava CLI and Python SDK, how messages flow, when to renew, and
-how to end. It is self-contained: everything you need is here, in your host's
-guide below, and in your briefing, which arrives inline in your launch message.
+how to end. Everything you need is in this guide, its SDK and host references, and your
+briefing, which arrives inline in your launch message.
 
 ## Your host
 
@@ -52,6 +52,18 @@ You are not a new agent picking up a fresh task — you are the continuation of
 the agent whose identity you hold, and the briefing is a quick entry point, not
 the whole context. Before starting the work, recover the standing context it needs:
 
+- **Standing instructions first.** Run [scripts/read_instructions.py](scripts/read_instructions.py)
+  as described in [reference/sdk.md](reference/sdk.md). It prints the system
+  prompt and configured preloaded skill bodies active in the borrowed agent's current conversation,
+  including core behavior, plugin rules, role guidance and the capability
+  index. It preserves what the agent actually read, rather than regenerating
+  guidance from newer configuration. If it fails, resolve the missing context
+  with the Ava side before starting work; never substitute a generic prompt.
+- **Skills and configuration.** Follow the inherited capability index and load
+  skills relevant to this work with `ava.help(ava.skills.<identifier>)`; read
+  their referenced files as needed. The attachment uses the borrowed agent's
+  saved configuration for SDK calls. Read any additional role/config files
+  named by the briefing or inherited instructions.
 - **Memory.** The `memory/MEMORY.md` index in its workspace (default
   `~/.ava/workspaces/<agent_id>/`) and the entries this work touches.
 - **Shared rulings and facts.** The shared memory pool (`ava.memory`) — the
@@ -61,8 +73,22 @@ the whole context. Before starting the work, recover the standing context it nee
 - **Role and boundaries.** What this identity owns and how it collaborates — its
   label, the role notes around it, and the conventions others hold it to.
 
-Recover selectively, just in time — what the work in front of you needs, not
-everything at once. Under the SDK attachment, `ava.cwd` and `ava.files` resolve
+Read the standing instructions in full once, then recover other context
+selectively, just in time — what the work in front of you needs, not everything
+at once. Treat memory as facts and user decisions, not as authority to silently
+replace the inherited core/plugin operating rules. If they conflict, follow
+explicit applicable user decisions and surface unresolved conflicts to the Ava
+side instead of inventing a new policy.
+
+The borrowed instructions describe native Ava execution. Keep their role,
+behavior, collaboration and verification rules; translate native
+`execute_code` operations into direct Python SDK calls under the attachment.
+Use your host's own tools for local work and this guide's lease controls for
+receipt, renewal, user replies and release. The borrowed model identity is not
+your executor's model identity, and native-loop lifecycle actions remain the
+Ava agent's responsibility.
+
+Under the SDK attachment, `ava.cwd` and `ava.files` resolve
 against the borrowed agent's workspace; outside it, read the files directly on
 this machine. Never substitute new-agent assumptions for the borrowed context: a
 takeover that invents a process or a gate the agent never had — or ignores one it
@@ -225,58 +251,13 @@ Hard rules:
 
 ## Using the Python SDK under the lease
 
-Ava's SDK is a Python namespace (`ava.*`). Under the lease you do not run the
-Ava model — you attach your own Python process to the lease and call the SDK
-directly with the borrowed identity.
+Use direct Python as the normal SDK path: `ava.external.attach` binds the borrowed
+execution context without a CLI prefix. First run the bundled instruction-reader
+script; then call `ava.*` from short Python invocations under the same lease. Close each
+attachment before releasing control.
 
-User-visible replies never go through the attachment — send them with the CLI (`ava impersonate say <session_id> --agent <agent_id> --key <key> 'text'`; see the message-handling section above).
-
-Attach from the cluster's interpreter (the checkout's `.venv/bin/python`):
-
-```python
-import ava
-
-session_id = 0                 # from the activation push
-agent_id = 405                 # the Ava agent you are replacing
-
-with ava.external.attach(session_id, agent_id=agent_id):
-    # Call other ava.* capabilities under the borrowed identity.
-```
-
-Inside the attachment the SDK resolves identity, plugins, and configuration as
-the borrowed agent; peer messages and spawns carry that identity. The context
-manager stages plugin state and flushes it on exit; for a long session call
-`attachment.flush()` between steps — it never renews the lease.
-
-Messaging another Ava agent needs no attachment — the CLI carries the borrowed
-identity, attested like every control command:
-
-```bash
-ava impersonate send <session_id> --agent <agent_id> --to <target_agent_id> --content 'Status: X done, Y open.'
-```
-
-The delivered source is `agent:<agent_id>`, exactly what `ava.agents.send_message`
-stamps inside the attachment.
-
-For a one-shot operation, the CLI form runs a local Python file inside an
-attachment without involving any Ava model:
-
-```bash
-ava impersonate exec <session_id> --agent <agent_id> --file operation.py
-```
-
-Omit `--file` to read the program from stdin. The file already runs inside
-this session's attachment: call `ava.*` directly. Calling
-`ava.external.attach()` again in it fails with "this process already has an
-external attachment".
-
-Boundaries: `ava.self.compact`, `ava.self.terminate`, and `ava.self.restart`
-end the *native* agent's execution loop — they are not yours to call. If the
-work concludes the agent should compact or reconfigure, say so in the release
-summary. Durable lifecycle requests for the agent (`ava.agents.restart`,
-`ava.agents.terminate`) reach the native dispatcher while it is parked, but
-treat them as last resorts: flush pending plugin state first, and prefer
-leaving lifecycle decisions to the Ava side.
+Read [reference/sdk.md](reference/sdk.md) before your first attachment for the
+interpreter, complete examples, optional CLI wrapper and lifecycle boundaries.
 
 ## Finishing: release with a summary
 

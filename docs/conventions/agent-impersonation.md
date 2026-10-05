@@ -102,6 +102,16 @@ with ava.external.attach(0, agent_id=405):
 
 User-visible replies never go through the attachment — send them with the CLI (`ava impersonate say`, see *Talk to the human*; peer messages have their own CLI form, see *Message another agent as the borrowed identity*).
 
+Direct Python is the normal SDK path; `ava impersonate exec` is an optional
+wrapper. Use the cluster checkout's `.venv/bin/python` inside the controller's
+own process tree, preserving its `AVA_HOME`. No long-lived interpreter is needed. Before work, run the impersonator skill's
+bundled `scripts/read_instructions.py`
+with the session id and `--agent`. Read its output in full: the system prompt and
+configured preloaded skill notes saved in the current native context window,
+not a newly rendered prompt. Restore relevant memory, tasks and workspace
+context separately; follow the [impersonator guide](../../.agents/skills/impersonator-guide/SKILL.md)
+for translating native execution instructions to your host.
+
 An attachment binds the borrowed identity and saved configuration. SDK calls,
 plugin state accesses and flush validate the active lease. Plugin changes are
 journaled; the native graph applies them before resuming. Direct Python object

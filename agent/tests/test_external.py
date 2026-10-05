@@ -699,3 +699,31 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
     assert not staged
     assert _borrowed_agent_id() is None
     assert snapshot.messages == [HumanMessage(content="Native history", id="native")]
+
+
+def test_attachment_reuses_clients_and_restores_original_context(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    original = process_context.peek()
+    assert original is not None
+    with external.attach("lease"):
+        assert ava.context.clients is original.clients
+        assert ava.context.identity is not None
+        assert ava.context.identity.lease is not None
+        assert ava.context.identity.lease.agent_id == 405
+        assert ava.context.sql is ava.DB
+        assert ava.context.redis is ava.REDIS
+    assert process_context.peek() is original
+
+
+def test_external_controls_stay_out_of_native_prompt(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    from agent.graph.prompt.system_prompt import build_system_prompt
+    from base.host.env.agent_slices import AgentSlices
+    from base.packages.plugins.extensions import ExtensionRegistry
+
+    prompt = build_system_prompt(ExtensionRegistry(()), AgentSlices.resolve())
+    assert "external" not in ava.__all_for_ava__
+    assert "ava.external.attach" not in prompt
+    assert "## ava.external" not in prompt
