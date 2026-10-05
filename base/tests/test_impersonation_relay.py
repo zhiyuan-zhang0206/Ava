@@ -146,6 +146,7 @@ def test_provision_relay_only_for_the_accepting_incarnation(
     with pytest.raises(leases.ImpersonationError):
         leases.provision_relay(database, lease["id"], foreign, "relay-credential")
     provisioned = leases.provision_relay(database, lease["id"], owner, "relay-credential")
+    assert provisioned is not None
     assert "relay_token_hash" not in provisioned
     assert (
         leases.relay_get(database, event_bus, lease["id"], "relay-credential")["status"]
@@ -160,8 +161,12 @@ def test_provision_relay_revokes_the_previous_credential(
     lease = _request(owner)
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
-    leases.provision_relay(database, lease["id"], owner, "first")
-    leases.provision_relay(database, lease["id"], owner, "second")
+    first = leases.provision_relay(database, lease["id"], owner, "first")
+    assert first is not None
+    second = leases.provision_relay(
+        database, lease["id"], owner, "second", expected_generation=first["relay_generation"]
+    )
+    assert second is not None
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
         leases.relay_get(database, event_bus, lease["id"], "first")
     assert leases.relay_get(database, event_bus, lease["id"], "second")["status"] == "active"
@@ -188,7 +193,14 @@ def test_active_lease_binding_inherits_the_replacement_incarnation(
         str(replacement.generation),
         str(replacement.owner),
     )
-    provisioned = leases.provision_relay(database, lease["id"], replacement, "relay-credential")
+    provisioned = leases.provision_relay(
+        database,
+        lease["id"],
+        replacement,
+        "relay-credential",
+        expected_generation=state["relay_generation"],
+    )
+    assert provisioned is not None
     assert "relay_token_hash" not in provisioned
     assert (
         leases.relay_get(database, event_bus, lease["id"], "relay-credential")["status"] == "active"
