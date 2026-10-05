@@ -29,6 +29,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.messages.envelope import wrap_inbound
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
 from base.db import Database
@@ -80,7 +81,7 @@ async def claim_gate(
     await supervise_relay(db, bus, session, agent_id, ctx.relays)
     if session is None:
         return None
-    if session["status"] == "requested" and session["automatic"]:
+    if session["status"] == ImpersonationStatus.REQUESTED and session["automatic"]:
         from agent.impersonation_handoff import start_marker
         from base.agents.impersonation import accept
 
@@ -96,7 +97,7 @@ async def claim_gate(
             },
             goto=END,
         )
-    if session["status"] == "requested":
+    if session["status"] == ImpersonationStatus.REQUESTED:
         request_receipt = f"{session['id']}:{session['consent_version']}"
         if state.impersonation_request_id == request_receipt:
             return None
@@ -146,7 +147,7 @@ def protect_native_hooks(
                 runtime.context.require_bus(),
                 agent_id_from_config(config),
             )
-            if session is not None and session["status"] != "requested":
+            if session is not None and session["status"] != ImpersonationStatus.REQUESTED:
                 return Command(update={"turn_idle": True}, goto=END)
         return await runner(state, runtime, config)
 
@@ -233,18 +234,18 @@ async def settle_checkpoint(
 ) -> bool:
     """After invocation+flush, activate; apply terminal deltas exactly once."""
     session = await native_status(db, bus, agent_id)
-    if session is None or session["status"] == "requested":
+    if session is None or session["status"] == ImpersonationStatus.REQUESTED:
         return False
     incarnation = current_incarnation(agent_id)
     assert incarnation is not None  # noqa: S101 — native_status requires it
-    if session["status"] == "accepted":
+    if session["status"] == ImpersonationStatus.ACCEPTED:
         if not activate_accepted:
             return False
         activated = await _activate_accepted(graph, db, bus, session, incarnation, relays)
         if activated is None:
             return False
         session = activated
-    if session["status"] == "active":
+    if session["status"] == ImpersonationStatus.ACTIVE:
         return True
     await _apply_plugin_deltas(graph, db, session, agent_id, incarnation)
     if session["automatic"] and session["handoff_applied_at"] is None:
@@ -408,7 +409,11 @@ def _await_session_relay(
         while not _heartbeat_fresh(session["relay_heartbeat_at"]) and time.monotonic() < deadline:
             time.sleep(_RELAY_READY_POLL_S)
             latest = read_status(db, bus, incarnation.agent_id, incarnation)
-            if latest is None or latest["id"] != session["id"] or latest["status"] != "accepted":
+            if (
+                latest is None
+                or latest["id"] != session["id"]
+                or latest["status"] != ImpersonationStatus.ACCEPTED
+            ):
                 return False
             session = latest
     if _heartbeat_fresh(session["relay_heartbeat_at"]):
@@ -485,7 +490,7 @@ def _establish_codex_relay(
                 fail_acceptance,
                 "relay credential was re-provisioned",
             )
-        if latest["status"] != "accepted":
+        if latest["status"] != ImpersonationStatus.ACCEPTED:
             return False  # released/expired/rejected while starting; no relay needed
         if _heartbeat_fresh(latest["relay_heartbeat_at"]):
             return True
@@ -573,18 +578,18 @@ async def supervise_relay(
         and (child.lease_id != session["id"] or child.generation != session["relay_generation"])
     ):
         return  # A delayed predecessor snapshot cannot retire a replacement's sender.
-    if session is None or session["status"] not in ("requested", "accepted", "active"):
+    if session is None or session["status"] not in OPEN:
         if child is not None:
             with db.connect() as conn:
                 terminal = conn.execute(
                     "SELECT status FROM agent_impersonations WHERE id=%s", (child.lease_id,)
                 ).fetchone()
-            if terminal is not None and terminal[0] not in ("requested", "accepted", "active"):
+            if terminal is not None and ImpersonationStatus(terminal[0]) not in OPEN:
                 if relays.children.get(agent_id) is child:
                     relays.children.pop(agent_id, None)
                 await asyncio.to_thread(_terminate_relay, child)
         return
-    if session["status"] != "active":
+    if session["status"] != ImpersonationStatus.ACTIVE:
         return
     if await _executor_verdict_stops(db, bus, session, agent_id, relays):
         return

@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 
+from base.agents.impersonation.status import ImpersonationStatus
 from base.events.live import redis_listener
 from cli.commands.agents import impersonation_relay as relay
 
@@ -37,7 +38,7 @@ class Inbox:
         self.routine: set[int] = set(pending)
         self.batch_window = 0.0
         self.page_size = page_size
-        self.status: relay.LeaseStatus = "active"
+        self.status: ImpersonationStatus = ImpersonationStatus.ACTIVE
         self.expires_at = datetime.now(UTC) + timedelta(minutes=5)
         self.start_message = "Start here: resume the implementation from the failing test."
         self.reads = 0
@@ -77,7 +78,7 @@ class Inbox:
             and relay._loop_time() - at >= self.ack_window_seconds
             for i, (count, at) in self.attempts.items()
         ):
-            self.status = "expired"
+            self.status = ImpersonationStatus.EXPIRED
         page = frozenset(sorted(self.messages)[: self.page_size])
         return relay.InboxSnapshot(
             page,
@@ -101,11 +102,11 @@ class Inbox:
 
     @property
     def active(self) -> bool:
-        return self.status == "active"
+        return self.status == ImpersonationStatus.ACTIVE
 
     @active.setter
     def active(self, value: bool) -> None:
-        self.status = "active" if value else "released"
+        self.status = ImpersonationStatus.ACTIVE if value else ImpersonationStatus.RELEASED
 
 
 class Listener:
