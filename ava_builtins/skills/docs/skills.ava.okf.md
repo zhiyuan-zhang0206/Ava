@@ -78,7 +78,7 @@ adapters, transcription.
 ## Not indexed here
 The rest of `ava_builtins/skills/` (e.g. `ai-capability-timescale`,
 `ava-corp`, `ava-deep-research`, `ava-modification-layers`,
-`ava-package-installer`, `ava-qa-inspection`, `ava-serious-engineering`,
+`ava-package-installer`, `ava-serious-engineering`,
 `ava-serious-research`, `develop-a-plugin`, `telegram-send-file`) carries no
 OKF node — `SKILL.md` in each is the reference.
 

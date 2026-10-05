@@ -182,7 +182,7 @@ prod runtime and dev workspace are split at the filesystem level:
 | Path | Role | Notes |
 |---|---|---|
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode); `ava.self.update()` was removed 2026-08) |
-| `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (made by `scripts/setup-worktree.sh <task>`) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool; complete it with `scripts/setup-worktree.sh` inside it) | freely checkout any branch, decoupled from prod |
+| `<development-checkout>/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (made by `scripts/setup-worktree.sh <task>`) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool; complete it with `scripts/setup-worktree.sh` inside it) | freely checkout any branch, decoupled from prod |
 
 ### Worktree uv iron rule (Tasks #1572, #5638)
 
@@ -213,11 +213,11 @@ before its dependency synchronization.
 Before deleting a worktree, inspect every long-lived Ava virtualenv on the host:
 
 ```bash
-find "$HOME/Ava/.venv" "$HOME/.ava/source/.venv" \
+find "<development-checkout>/.venv" "${AVA_HOME:-$HOME/.ava}/source/.venv" \
   -name _editable_impl_ava.pth -print -exec sed -n '1p' {} \;
 ```
 
-Each printed target must be its stable checkout root (`~/Ava` for the dev clone,
+Each printed target must be its stable checkout root (the development clone,
 the installed prod source for prod), never the worktree being removed. The same
 check applies to the editable URL uv records beside the pointer — in each venv,
 `cat` the `ava-*.dist-info/direct_url.json` and confirm `url` is the stable
@@ -567,7 +567,7 @@ Ordinary maintenance holds retain their separate operator procedures in
 [graceful maintenance](graceful-maintenance.md). Generic recovery is not a way
 to forge process closure; do not resurrect a removed updater or bootstrap entry.
 
-Commands in the "long-running processes" / "E2E tests" sections below default to cwd = `$AVA_HOME/source/` (prod context). Dev work goes through `~/Ava/.worktrees/<task>/`.
+Commands in the "long-running processes" / "E2E tests" sections below default to cwd = `$AVA_HOME/source/` (prod context). Dev work goes through the prepared checkout's `.worktrees/<task>/`.
 
 ## $AVA_HOME, installed packages, and node capabilities
 
@@ -1071,38 +1071,25 @@ The next walls once memory is handled: the heartbeat's
 wake-rate ceiling (~1.67/s, ≈750 agents on today's numbers) and LLM turn cost,
 which is linear in fleet size regardless of any of the above.
 
-### Post-deploy visual gate
+### Optional rendered-page inspection
 
-On the macmini runtime host, export `AVA_VISUAL_GATE_COOKIE_FILE` as a 0600
-Playwright storage-state JSON, Netscape cookie jar, or single `name=value` file,
-then run `scripts/post_deploy_visual/check.py --check --base-url <production-gate>
---health-url <gateway-origin>` (the gate serves the SPA wall for
-unauthenticated /api, so the health probe must target the gateway origin
-explicitly; the script appends `/api/health`).
-The wrapper calls the public gateway health API to compare process `started_at`,
-runs the browser pass with the repo-pinned Playwright Chromium headless on the
-host (no Docker), and writes `probes.json`, `meta.json`, and capture artifacts
-beneath
-`~/post-deploy-visual/<wave-sha>/`. It never routes notifications: the invoking
-agent sends a P0 result to #3242 and #405 with `send_message`, or queues P2 with
-`notify`. It runs after rollout and cannot block deployment. Exit 20 is P0,
-exit 10 is P2, and exit 0 is green or expected drift.
-The daily 07:30 invocation and a same-process-start run are sentinels and do not
-advance the two-deployment-wave escalation counter. A concrete first-wave
-invocation: `scripts/post_deploy_visual/check.py --check --base-url
-<gate-entry-url> --health-url <gateway-origin-url>` — the base URL is the
-gate (frontend entry), never the gateway API origin, and the script refuses a
-base URL that answers the gateway health JSON up front.
+`scripts/post_deploy_visual/check.py` is an optional inspection tool. It grants
+no production access and is not a release gate. Choose an authorized target;
+the deployment owner supplies any authentication and notification policy.
 
-No command updates a golden implicitly. After a reviewer or #405 confirms a report,
-roll it forward with `scripts/post_deploy_visual/check.py --accept-wave <sha>
---accepted-by <reviewer>`; this appends the reviewer, UTC timestamp, SHA, and
-capture list to the 0600 `acceptance-audit.jsonl`. If the exported cookie leaks,
-revoke it immediately with `curl --fail-with-body -X POST --cookie
-"$AVA_VISUAL_GATE_COOKIE_FILE" "$AVA_VISUAL_GATE_URL/api/auth/logout"`, delete
-the leaked file, export a fresh session cookie, and restore mode 0600 before the
-next run. The curl revocation consumes Netscape and `name=value` cookie files;
-a Playwright storage-state JSON export must be revoked from the logged-in UI.
+Run `--check --base-url <frontend-entry-url> --health-url <gateway-origin-url>`.
+The frontend URL must serve the UI, while the health URL names the gateway:
+the script appends `/api/health` and rejects a frontend URL serving gateway
+health JSON. It uses repo-pinned Playwright Chromium and writes browser probes,
+metadata and capture artifacts. Use `--output-root <artifact-directory>` for
+the target; choose the monitoring schedule as part of the deployment policy.
+
+If authentication is needed, `AVA_VISUAL_GATE_COOKIE_FILE` accepts a mode-0600
+Playwright storage-state JSON, Netscape cookie jar or `name=value` file. Protect
+that file as a credential and revoke a leaked session through the target's
+supported logout flow. No command implicitly accepts a new visual baseline;
+`--accept-wave <sha> --accepted-by <reviewer>` records an explicit acceptance.
+The output's escalation policy is diagnostic; an operator decides its use.
 
 ### Start / check / restart
 

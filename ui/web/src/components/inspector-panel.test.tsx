@@ -861,12 +861,12 @@ describe("InspectorPanel", () => {
 
   it("renders skill-list config keys in canonical dash spelling (display_name)", async () => {
     // The runtime stores skill lists in the underscore Python projection
-    // (ava_qa_inspection); the overlay must present the canonical dash form
-    // (ava-qa-inspection) while non-skill values stay untouched.
+    // (example_skill); the overlay must present the canonical dash form
+    // (example-skill) while non-skill values stay untouched.
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         config_overlay: {
-          skills_to_inject_into_system_prompt: ["ava_qa_inspection", "*"],
+          skills_to_inject_into_system_prompt: ["example_skill", "*"],
           llm_model: "claude-opus-4-8",
         },
       }),
@@ -875,8 +875,8 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
     // The dd renders the JSON-serialized array; the underscore projection must
     // be gone and the canonical dash spelling present.
-    expect(screen.getByText('["ava-qa-inspection","*"]')).toBeTruthy();
-    expect(screen.queryByText(/ava_qa_inspection/)).toBeNull();
+    expect(screen.getByText('["example-skill","*"]')).toBeTruthy();
+    expect(screen.queryByText(/example_skill/)).toBeNull();
     expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
   });
 

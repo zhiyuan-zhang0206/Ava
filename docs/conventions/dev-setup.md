@@ -80,7 +80,7 @@ inside the worktree. A worktree made by another tool (Claude Code's
 
 ```bash
 bash scripts/setup-worktree.sh <task>   # last line: worktree ready: <path> (branch <branch>)
-cd ~/Ava/.worktrees/<task>              # a script cannot change your directory
+cd <printed-worktree-path>             # a script cannot change your directory
 .venv/bin/pytest <selected test files>
 ```
 
