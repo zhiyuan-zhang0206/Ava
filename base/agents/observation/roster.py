@@ -14,7 +14,7 @@ import psycopg
 from psycopg import sql
 from pydantic import BaseModel
 
-from base.agents import AgentStatus
+from base.agents import AgentStatus, LivenessState
 from base.agents.observation.evidence import (
     AgentAvailability,
     AgentObservation,
@@ -49,7 +49,7 @@ class AgentCard(AgentLineage):
     label: str | None
     machine: str
     supports_vision: bool
-    liveness_state: Literal["online", "offline", "unknown"]
+    liveness_state: LivenessState
     availability: AgentAvailability | None = None
     observation: AgentObservation
     awaiting_response_count: int

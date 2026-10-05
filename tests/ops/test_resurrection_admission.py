@@ -20,6 +20,7 @@ from base.agents.incarnation.resources import (
     ResourceBirth,
     decode_resources,
 )
+from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database, insert_inbound_message
@@ -100,7 +101,7 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
         aid,
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
-        trigger_inbound_kind="chat" if guarded else None,
+        trigger_inbound_kind=InboundKind.CHAT if guarded else None,
     )
 
     assert _status(db_conn, aid) == ("idling", None)
@@ -152,7 +153,7 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
             None,
             unowned_termination=named,
             trigger_inbound_id=chat,
-            trigger_inbound_kind="chat" if trigger else None,
+            trigger_inbound_kind=InboundKind.CHAT if trigger else None,
         )
     db_conn.rollback()
     assert _status(db_conn, aid) == ("terminated", None)
@@ -271,7 +272,7 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
         event_bus,
         aid,
         trigger_inbound_id=trigger,
-        trigger_inbound_kind="chat",
+        trigger_inbound_kind=InboundKind.CHAT,
     )
     assert status is AgentStatus.TERMINATED
     refused = [r for r in loguru_records if r["extra"].get("event") == "auto_resurrect_refused"]
@@ -307,7 +308,7 @@ async def test_other_auto_resurrect_failures_stay_informational(
         event_bus,
         aid,
         trigger_inbound_id=trigger,
-        trigger_inbound_kind="chat",
+        trigger_inbound_kind=InboundKind.CHAT,
     )
     events = [r["extra"].get("event") for r in loguru_records if r["level"].name == "WARNING"]
     assert "auto_resurrect_refused" not in events
@@ -441,7 +442,7 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
         aid,
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
-        trigger_inbound_kind="chat" if guarded else None,
+        trigger_inbound_kind=InboundKind.CHAT if guarded else None,
     )
 
     assert _unowned_idle(db_conn, aid)

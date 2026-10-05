@@ -27,6 +27,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentStatus
+from base.agents.messages.inbound import InboundKind
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
@@ -121,7 +122,7 @@ async def resurrect_one(
                     bus,
                     agent_id,
                     trigger_inbound_id=trigger_inbound_id,
-                    trigger_inbound_kind="chat",
+                    trigger_inbound_kind=InboundKind.CHAT,
                 )
         except Exception:
             _log.warning(

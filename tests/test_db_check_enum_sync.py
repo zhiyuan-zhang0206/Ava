@@ -27,7 +27,7 @@ from typing import get_args
 
 import pytest
 
-from base.agents import AgentStatus, TerminationSource
+from base.agents import AgentStatus, LivenessState, TerminationSource
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.status import TaskStatus
 from base.cluster.machine import MachineRole
@@ -46,6 +46,7 @@ _SCHEMA = re.sub(
 # (table, column) -> the Python value-set that is the source of truth for it.
 _CASES: dict[tuple[str, str], set[str]] = {
     ("agents_meta", "status"): {s.value for s in AgentStatus},
+    ("agents_meta", "liveness_state"): {s.value for s in LivenessState},
     # The stamped-by-every-terminated-write source. A value in the enum but not the
     # CHECK is a CheckViolation at the write site; a value in the CHECK but not the
     # enum is one scripts/lint/termination_source.py would reject as unknown.
