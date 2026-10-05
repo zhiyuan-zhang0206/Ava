@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from cli import main as cli_main
 
 
@@ -58,10 +58,14 @@ def test_force_stop_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None
 @pytest.mark.parametrize(
     ("state", "hold", "expected"),
     [
-        ("paused", MaintenanceHold("stopped"), "skip"),
-        ("paused", MaintenanceHold("drained"), None),
-        ("paused", MaintenanceHold("stopped", failures={1: "checkpoint_flush"}), None),
-        ("resumed", MaintenanceHold("stopped"), None),
+        ("paused", MaintenanceHold(MaintenancePhase.STOPPED), "skip"),
+        ("paused", MaintenanceHold(MaintenancePhase.DRAINED), None),
+        (
+            "paused",
+            MaintenanceHold(MaintenancePhase.STOPPED, failures={1: "checkpoint_flush"}),
+            None,
+        ),
+        ("resumed", MaintenanceHold(MaintenancePhase.STOPPED), None),
         ("paused", None, None),
     ],
 )

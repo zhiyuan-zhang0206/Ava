@@ -18,6 +18,7 @@ from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import begin, finish, phase, status_path
 from base.deploy.maintenance import admission
+from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.native_process.ownership import retain_processes
 from base.sessions.pty.paths import SERVICE_UNIT
@@ -226,8 +227,8 @@ def _report_incomplete(
 def _mark_stopped(holder: str, acquired_at: datetime) -> None:
     """Move the held maintenance generation to stopped (re-validating it)."""
     current = admission.require_operation(holder, acquired_at)
-    if current.maintenance is not None and current.maintenance.phase == "stopping":
-        admission.set_phase(holder, acquired_at, "stopped")
+    if current.maintenance is not None and current.maintenance.phase == MaintenancePhase.STOPPING:
+        admission.set_phase(holder, acquired_at, MaintenancePhase.STOPPED)
 
 
 def _timed_phase(phases: list[tuple[str, float]], label: str, step: Callable[[], object]) -> None:
@@ -391,13 +392,13 @@ def _drain_and_stop(
     assert current is not None and current.maintenance is not None  # noqa: S101
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     holder, acquired_at = current.holder, current.acquired_at
-    if current.maintenance.phase == "drained":
+    if current.maintenance.phase == MaintenancePhase.DRAINED:
         from base.deploy.state.host_deploy_state import set_posture
 
         # A failed posture write leaves the drained phase retryable. The
         # stopped phase never dials a data plane that is already offline.
         set_posture(Database.from_settings(), "paused")
-        admission.set_phase(current.holder, current.acquired_at, "stopping")
+        admission.set_phase(current.holder, current.acquired_at, MaintenancePhase.STOPPING)
     _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
     # The pty-sessions service outlives the services phase: it closes the terminals
     # below. Keeping it (`--keep-service pty-sessions`) keeps the terminals it holds.

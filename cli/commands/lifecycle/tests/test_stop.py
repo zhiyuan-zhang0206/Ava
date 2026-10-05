@@ -18,7 +18,7 @@ from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from base.sessions.pty import client
 from base.sessions.pty.paths import SERVICE_UNIT
@@ -90,7 +90,7 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
     assert [call["preserve"] for call in root_stops] == [{"browser", SERVICE_UNIT}]
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
-    assert current.maintenance.phase == "stopped"
+    assert current.maintenance.phase == MaintenancePhase.STOPPED
 
 
 def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane(
@@ -173,7 +173,9 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     assert unowned.poll() is None
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
-    assert current.maintenance.phase == "stopped"  # the start leg, not the stop, releases the hold
+    assert (
+        current.maintenance.phase == MaintenancePhase.STOPPED
+    )  # the start leg, not the stop, releases the hold
 
 
 def test_root_stop_refusal_keeps_hold_without_force(
@@ -292,8 +294,8 @@ def test_repeated_stop_needs_no_live_database_or_host(
 ) -> None:
     dependencies(monkeypatch)
     drained()
-    admission.set_phase("local", WHEN, "stopping")
-    admission.set_phase("local", WHEN, "stopped")
+    admission.set_phase("local", WHEN, MaintenancePhase.STOPPING)
+    admission.set_phase("local", WHEN, MaintenancePhase.STOPPED)
     monkeypatch.setattr(command, "pause_agents", agent_pause.pause_agents)
     monkeypatch.setattr(
         agent_pause, "host_identity", MagicMock(side_effect=AssertionError("host is down"))
@@ -314,7 +316,9 @@ def test_failed_flush_cannot_be_released_by_a_bare_resume(
     drained()
     current = admission.require_operation("local", WHEN)
     assert current.maintenance is not None
-    failed = MaintenanceHold("draining", commands={42: 7}, failures={42: "final flush failed"})
+    failed = MaintenanceHold(
+        MaintenancePhase.DRAINING, commands={42: 7}, failures={42: "final flush failed"}
+    )
     pause_owner.change_maintenance("local", WHEN, current.maintenance, failed)
     from ops.cluster_pause import unpause_local_cluster
 

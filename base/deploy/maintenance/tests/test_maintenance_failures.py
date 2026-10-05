@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from services.agent_runner.agent_host.tests.test_agent_host import _Build, _Row
 from services.agent_runner.agent_host.tests.test_agent_host import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.test_agent_host import wired as wired
@@ -47,7 +47,10 @@ async def test_failure_is_latched_before_any_journal_io(
         before = pause_owner.begin_maintenance("failed", WHEN).snapshot
         assert before.maintenance is not None
         pause_owner.change_maintenance(
-            "failed", WHEN, before.maintenance, MaintenanceHold("draining", {11: 100})
+            "failed",
+            WHEN,
+            before.maintenance,
+            MaintenanceHold(MaintenancePhase.DRAINING, {11: 100}),
         )
         fail_next_read = broken_io == "read"
         raise RuntimeError("isolated final flush failure")

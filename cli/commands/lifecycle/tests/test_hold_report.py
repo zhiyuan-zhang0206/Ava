@@ -5,7 +5,7 @@ import json
 import pytest
 
 from base.deploy.maintenance import hold_driver, pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from cli.commands.lifecycle import hold_report
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
@@ -33,7 +33,7 @@ def test_status_json_carries_the_generation_phase_and_failures(
 ) -> None:
     before = pause_owner.begin_maintenance("local", WHEN).snapshot
     assert before.maintenance is not None
-    held = MaintenanceHold("draining", {1: 11}, failures={1: "RuntimeError"})
+    held = MaintenanceHold(MaintenancePhase.DRAINING, {1: 11}, failures={1: "RuntimeError"})
     pause_owner.change_maintenance("local", WHEN, before.maintenance, held)
 
     hold = _json_hold(capsys)
@@ -83,7 +83,7 @@ def test_human_section_names_the_phase_and_the_exit(
 
     before = pause_owner.begin_maintenance("local", WHEN).snapshot
     assert before.maintenance is not None
-    held = MaintenanceHold("draining", {7: 70}, failures={7: "RuntimeError"})
+    held = MaintenanceHold(MaintenancePhase.DRAINING, {7: 70}, failures={7: "RuntimeError"})
     pause_owner.change_maintenance("local", WHEN, before.maintenance, held)
 
     hold_report.print_hold_section()

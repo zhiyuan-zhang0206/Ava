@@ -26,7 +26,7 @@ import pytest
 
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 from base.deploy.maintenance import pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
@@ -101,7 +101,9 @@ def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
 
 def drained() -> None:
     pause_owner.begin_maintenance("local", WHEN)
-    pause_owner.change_maintenance("local", WHEN, MaintenanceHold(), MaintenanceHold("drained"))
+    pause_owner.change_maintenance(
+        "local", WHEN, MaintenanceHold(), MaintenanceHold(MaintenancePhase.DRAINED)
+    )
 
 
 def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
