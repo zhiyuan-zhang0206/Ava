@@ -260,8 +260,9 @@ watch Loki panel latency and shrink the window again if it degrades).
 
 ## Syncing to the live Grafana
 
-There is no sync: native Grafana (host port 3003) reads the rendered
-directory through the absolute `GRAFANA_PROVISIONING_PATH` set in
+There is no sync: native Grafana (host port 3003 by default, 53003 on the
+station via `AVA_LGTM_GRAFANA_PORT`) reads the rendered directory through
+the absolute `GRAFANA_PROVISIONING_PATH` set in
 `runtime.env`, and its file provider reloads a changed file within ~30s.
 Editing a file here and checking out on the LGTM host is the deployment —
 except `ava-ops-main.json`, which converge generates from the metric
