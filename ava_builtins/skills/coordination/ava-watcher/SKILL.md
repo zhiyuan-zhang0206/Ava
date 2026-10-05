@@ -28,6 +28,18 @@ waiting so you don't burn turns polling.
   (`ava.shell.sessions.kill`) if you don't want both running. A longer
   schedule must pass an explicit `end_time`.
 
+## Usage budget reminders
+
+For agent tokens or recorded API costs, read [usage reports](references/usage.md)
+and use `scripts/agent_usage.py`. Select explicit IDs, a time window or lifetime,
+and spawn/fork birth lineage; task records are not a spending ledger. Optional
+polling sends a one-shot reminder to named peers and exits, without termination.
+
+A reminder is a decision point like a compaction warning. Preserve useful work
+and recovery notes, converge, hand off, or seek a revised budget according to
+the remaining work and authority. Bound the watcher lifetime and retain its
+session identity if it needs cancellation or recovery.
+
 ## Custom watcher
 
 Write a program that sends you a message when your condition is met,

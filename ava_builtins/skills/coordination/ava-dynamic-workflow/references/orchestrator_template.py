@@ -62,7 +62,6 @@ for task in SUB_TASKS:
 
     wid = ava.agents.spawn(
         prompt=task["prompt"].format(handoff_file=task["handoff_path"]),
-        label=task["label"],
     )
     worker_ids[task["id"]] = wid
     print(f"  spawned {task['label']}: #{wid}")

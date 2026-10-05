@@ -64,8 +64,6 @@ class _BatchState:
     restart_preserves_idle: bool = False
     restart_requested: bool = False
     update_initiated: bool = False
-    active_task_id: int | None = None
-    task_ids: set[int] = field(default_factory=set)
     committed_chat_ids: list[int] = field(default_factory=list)
 
     def append_scanned(self, message: BaseMessage, finding: SecurityFindingEntry | None) -> None:
@@ -166,7 +164,6 @@ async def _handle_chat(
 ) -> None:
     """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
     st.append_scanned(*build_chat_inbound(item))
-    st.active_task_id = None
     st.committed_chat_ids.append(item.id)
 
 
@@ -189,7 +186,7 @@ def _system_note_tag(payload: dict[str, object] | None) -> NoteTag:
 
 
 def _task_id_from_system_note(payload: dict[str, object] | None, tag: NoteTag) -> int | None:
-    """Return the explicit task attribution from a task note, if present."""
+    """Return the timeline task link from a task note, if present."""
     if tag is not NoteTag.TASK or not payload or "task_id" not in payload:
         return None
     task_id = payload["task_id"]
@@ -212,9 +209,6 @@ async def _handle_system_note(
     """
     finding = scan_inbound_content(item.content, source=f"inbound.system_note:{item.source}")
     task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
-    st.active_task_id = task_id
-    if task_id is not None:
-        st.task_ids.add(task_id)
     st.append_scanned(
         system_note_message(
             content=f"{_ts_prefix()}{item.content}",
@@ -652,12 +646,4 @@ async def dispatch_batch(
         kind = item.kind
         if kind in _ROUTING_KINDS and not routing.is_winner(item):
             continue
-        # A fresh non-task inbound starts unassociated work. A task system
-        # note below is the only writer that can establish attribution again.
-        if kind != InboundKind.SYSTEM_NOTE:
-            st.active_task_id = None
         await _dispatch_item(ctx, state, agent_id, item, st, latest_resurrect_id)
-    if len(st.task_ids) > 1:
-        # Claim consumes the whole batch into one LLM turn. More than one task
-        # note therefore has no faithful task-level attribution.
-        st.active_task_id = None

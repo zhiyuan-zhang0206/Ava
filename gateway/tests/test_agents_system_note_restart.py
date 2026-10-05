@@ -104,7 +104,7 @@ class TestSystemNote:
     def test_system_note_task_id_must_name_an_existing_task(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """A nonexistent task must not create an LLM usage event with no total."""
+        """A task note must link to an existing task."""
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             resp = client.post(

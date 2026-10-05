@@ -1,0 +1,2 @@
+# Standalone usage CLI owns its configured database connection.
+db = ["agent_usage.py"]

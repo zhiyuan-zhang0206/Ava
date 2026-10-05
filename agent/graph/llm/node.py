@@ -115,7 +115,6 @@ def _finalize_turn_observability(
     agent_id: int,
     final_msg: AIMessage,
     handler: RedisStreamHandler,
-    task_id: int | None,
     model: str,
 ) -> None:
     """Post-stream metadata finalization for one completed AIMessage turn.
@@ -151,30 +150,17 @@ def _finalize_turn_observability(
         kw["ava_code_ms_by_block"] = {
             str(block_idx): ms for block_idx, ms in code_ms_by_block.items()
         }
-    usage_tally = log_llm_usage(
+    log_llm_usage(
         final_msg,
         model=model,
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
-        task_id=task_id,
         # Gemini + explicit cachedContent reports only the explicit block in
         # cache_read (implicit tail hits are billed but not reported), so the
         # event carries the honest provenance instead of a bare number.
         cache_mechanism=(CACHE_MECHANISM_MIXED if handler.used_explicit_cache else None),
         cache_scope=(CACHE_SCOPE_EXPLICIT_BLOCK if handler.used_explicit_cache else None),
     )
-    if task_id is not None and usage_tally is not None:
-        try:
-            from ava_builtins.plugins.ava_fleet.task_registry import record_task_usage
-
-            record_task_usage(task_id, token_count=usage_tally[0], cost_usd=usage_tally[1])
-        except Exception as exc:
-            logger.warning(
-                "[{label}] {body}",
-                label="task-usage",
-                event="task_usage_record_failed",
-                body=f"failed to record usage for task {task_id}: {exc!r}",
-            )
     usage = final_msg.usage_metadata or {}
     from base.lm.reasoning import extract_reasoning_tokens
 
@@ -583,7 +569,6 @@ async def _llm_node_impl(
         agent_id,
         final_msg,
         handler,
-        state.active_task_id,
         ctx.require_agent().brain.llm_model,
     )
 

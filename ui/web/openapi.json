@@ -15459,38 +15459,6 @@
             "title": "Reminder Count",
             "default": 0
           },
-          "token_budget": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Token Budget"
-          },
-          "usd_budget": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usd Budget"
-          },
-          "token_used": {
-            "type": "integer",
-            "title": "Token Used",
-            "default": 0
-          },
-          "usd_used": {
-            "type": "number",
-            "title": "Usd Used",
-            "default": 0.0
-          },
           "ghost": {
             "type": "boolean",
             "title": "Ghost",
@@ -15611,38 +15579,6 @@
           },
           "priority": {
             "$ref": "#/components/schemas/Priority"
-          },
-          "token_budget": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Token Budget"
-          },
-          "usd_budget": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usd Budget"
-          },
-          "token_used": {
-            "type": "integer",
-            "title": "Token Used",
-            "default": 0
-          },
-          "usd_used": {
-            "type": "number",
-            "title": "Usd Used",
-            "default": 0.0
           },
           "ghost": {
             "type": "boolean",
