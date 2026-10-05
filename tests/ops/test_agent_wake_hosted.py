@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -131,7 +132,7 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
             aid,
             resurrected_by="system",
             trigger_inbound_id=999999,
-            trigger_inbound_kind="chat",
+            trigger_inbound_kind=InboundKind.CHAT,
         )
     assert _row(db_conn, aid)[0] == "terminated"
     assert wakes == []
@@ -186,7 +187,7 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
         aid,
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger if guarded else None,
-        trigger_inbound_kind="chat" if guarded else None,
+        trigger_inbound_kind=InboundKind.CHAT if guarded else None,
     )
     successor = await admit_hosted_runtime(
         aops_pool, aid, machine_name(), owner, expected_from="idling", db=database
@@ -247,7 +248,7 @@ def _guarded_resurrect(aid: int, trigger: int) -> None:
         aid,
         resurrected_by="system",
         trigger_inbound_id=trigger,
-        trigger_inbound_kind="chat",
+        trigger_inbound_kind=InboundKind.CHAT,
     )
 
 
@@ -268,7 +269,7 @@ def test_reaped_crash_row_resumes_leftover_work(
             aid,
             resurrected_by="system",
             trigger_inbound_id=trigger,
-            trigger_inbound_kind="chat",
+            trigger_inbound_kind=InboundKind.CHAT,
         )
         == aid
     )
@@ -446,7 +447,7 @@ def test_historical_runtime_cannot_be_resurrected(
             aid,
             resurrected_by="system" if guarded else "user",
             trigger_inbound_id=trigger if guarded else None,
-            trigger_inbound_kind="chat" if guarded else None,
+            trigger_inbound_kind=InboundKind.CHAT if guarded else None,
         )
 
     assert db_conn.execute(query, (aid,)).fetchone() == before

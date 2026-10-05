@@ -6684,13 +6684,7 @@
             "title": "Supports Vision"
           },
           "liveness_state": {
-            "type": "string",
-            "enum": [
-              "online",
-              "offline",
-              "unknown"
-            ],
-            "title": "Liveness State"
+            "$ref": "#/components/schemas/LivenessState"
           },
           "availability": {
             "anyOf": [
@@ -6961,13 +6955,7 @@
             "title": "Status"
           },
           "liveness_state": {
-            "type": "string",
-            "enum": [
-              "online",
-              "offline",
-              "unknown"
-            ],
-            "title": "Liveness State"
+            "$ref": "#/components/schemas/LivenessState"
           },
           "last_probe_at": {
             "anyOf": [
@@ -7646,13 +7634,7 @@
             "title": "Supports Vision"
           },
           "liveness_state": {
-            "type": "string",
-            "enum": [
-              "online",
-              "offline",
-              "unknown"
-            ],
-            "title": "Liveness State"
+            "$ref": "#/components/schemas/LivenessState"
           },
           "last_probe_at": {
             "anyOf": [
@@ -9781,13 +9763,7 @@
             "$ref": "#/components/schemas/AgentStatus"
           },
           "liveness_state": {
-            "type": "string",
-            "enum": [
-              "online",
-              "offline",
-              "unknown"
-            ],
-            "title": "Liveness State"
+            "$ref": "#/components/schemas/LivenessState"
           },
           "spawner": {
             "type": "string",
@@ -10587,6 +10563,16 @@
         ],
         "title": "LastMessageResponse",
         "description": "GET /api/agents/{id}/last-message response — the text of the last\nAI message, or None when no AI message with text content exists yet."
+      },
+      "LivenessState": {
+        "type": "string",
+        "enum": [
+          "online",
+          "offline",
+          "unknown"
+        ],
+        "title": "LivenessState",
+        "description": "Observed reachability, separate from agent lifecycle intent."
       },
       "LlmBucket": {
         "properties": {
@@ -13205,12 +13191,7 @@
       "RestartAgentResponse": {
         "properties": {
           "status": {
-            "type": "string",
-            "enum": [
-              "enqueued",
-              "already_terminated"
-            ],
-            "title": "Status"
+            "$ref": "#/components/schemas/RestartResult"
           }
         },
         "type": "object",
@@ -13282,6 +13263,14 @@
         ],
         "title": "RestartReport"
       },
+      "RestartResult": {
+        "type": "string",
+        "enum": [
+          "enqueued",
+          "already_terminated"
+        ],
+        "title": "RestartResult"
+      },
       "RestartTotals": {
         "properties": {
           "agent_restarts": {
@@ -13332,12 +13321,7 @@
       "ResurrectAgentResponse": {
         "properties": {
           "status": {
-            "type": "string",
-            "enum": [
-              "spawned",
-              "already_alive"
-            ],
-            "title": "Status"
+            "$ref": "#/components/schemas/ResurrectResult"
           }
         },
         "type": "object",
@@ -13346,6 +13330,14 @@
         ],
         "title": "ResurrectAgentResponse",
         "description": "Resurrect agent response — returned by `POST /api/agents/{id}/resurrect`\n(the frontend resurrect button) and the internal auto-resurrect op.\n\n`spawned`: agent was dead; UPDATEd 'terminated' -> 'idling' +\n    started a fresh process attached to the same agent_id\n    (LangGraph state preserved; agent wakes up from where it left\n    off).\n`already_alive`: agent is still alive\n    (running/idling); resurrect does\n    not apply."
+      },
+      "ResurrectResult": {
+        "type": "string",
+        "enum": [
+          "spawned",
+          "already_alive"
+        ],
+        "title": "ResurrectResult"
       },
       "RunTimelineBoundaries": {
         "properties": {
@@ -15802,12 +15794,7 @@
       "TerminateAgentResponse": {
         "properties": {
           "status": {
-            "type": "string",
-            "enum": [
-              "enqueued",
-              "already_terminated"
-            ],
-            "title": "Status"
+            "$ref": "#/components/schemas/TerminateResult"
           },
           "open_tasks": {
             "anyOf": [
@@ -15836,6 +15823,14 @@
         ],
         "title": "TerminateAgentResponse",
         "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op beyond a requested shell-session kill. Hosted force instead\n    returns enqueued until its exact original host can prove quiescence;\n    metadata status alone is not exit evidence.\n\n`open_tasks`: the still-open tasks the agent owned as it went down — an\n    advisory hint, null when it owned none or the hint read failed.\n\n`shell_sessions`: what the shell-session kill did — set when\n    `kill_all_shell_sessions` was requested, None otherwise. A requested\n    kill answered with None means the home runner predates the option\n    (version skew): nothing was killed."
+      },
+      "TerminateResult": {
+        "type": "string",
+        "enum": [
+          "enqueued",
+          "already_terminated"
+        ],
+        "title": "TerminateResult"
       },
       "TextContentBlock": {
         "properties": {

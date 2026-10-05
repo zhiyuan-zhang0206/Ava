@@ -10,6 +10,7 @@ from pydantic import (
     NonNegativeInt,
 )
 
+from base.agents import LivenessState
 from base.agents.observation.evidence import AgentObservation
 from base.agents.observation.snapshot import OpenNotice
 from base.agents.tasks.priority import Priority
@@ -180,7 +181,7 @@ class AgentInspectLive(BaseModel):
     agent_id: int
     machine: str
     status: str
-    liveness_state: Literal["online", "offline", "unknown"]
+    liveness_state: LivenessState
     last_probe_at: datetime | None = None
     observation: AgentObservation | None = None
     shells_available: bool | None = None

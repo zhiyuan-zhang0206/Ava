@@ -445,32 +445,47 @@ class TestResurrect:
 
 class TestLifecycleResultEnums:
     """TerminateResult/RestartResult must stay in lockstep with the gateway's
-    wire Literal unions — a new wire status added on one side only would make
+    shared enum ownership and schema values — divergent wire values would make
     the SDK ValueError on a successful response."""
 
-    def test_terminate_result_matches_gateway_literal(self) -> None:
-        from typing import get_args, get_type_hints
+    def test_terminate_result_matches_gateway_schema(self) -> None:
+        from typing import get_type_hints
 
         from base.agents import TerminateResult
         from ops.rpc_schemas import TerminateAgentResponse
 
-        literal = get_type_hints(TerminateAgentResponse)["status"]
-        assert {m.value for m in TerminateResult} == set(get_args(literal))
+        assert get_type_hints(TerminateAgentResponse)["status"] is TerminateResult
+        schema = TerminateAgentResponse.model_json_schema()
+        reference = schema["properties"]["status"]["$ref"]
+        assert reference.startswith("#/$defs/")
+        values = schema["$defs"][reference.removeprefix("#/$defs/")]["enum"]
+        assert values
+        assert {m.value for m in TerminateResult} == set(values)
 
-    def test_resurrect_result_matches_gateway_literal(self) -> None:
-        from typing import get_args, get_type_hints
+    def test_resurrect_result_matches_gateway_schema(self) -> None:
+        from typing import get_type_hints
 
         from base.agents import ResurrectResult
         from ops.rpc_schemas import ResurrectAgentResponse
 
-        literal = get_type_hints(ResurrectAgentResponse)["status"]
-        assert {m.value for m in ResurrectResult} == set(get_args(literal))
+        assert get_type_hints(ResurrectAgentResponse)["status"] is ResurrectResult
+        schema = ResurrectAgentResponse.model_json_schema()
+        reference = schema["properties"]["status"]["$ref"]
+        assert reference.startswith("#/$defs/")
+        values = schema["$defs"][reference.removeprefix("#/$defs/")]["enum"]
+        assert values
+        assert {m.value for m in ResurrectResult} == set(values)
 
-    def test_restart_result_matches_gateway_literal(self) -> None:
-        from typing import get_args, get_type_hints
+    def test_restart_result_matches_gateway_schema(self) -> None:
+        from typing import get_type_hints
 
         from base.agents import RestartResult
         from ops.rpc_schemas import RestartAgentResponse
 
-        literal = get_type_hints(RestartAgentResponse)["status"]
-        assert {m.value for m in RestartResult} == set(get_args(literal))
+        assert get_type_hints(RestartAgentResponse)["status"] is RestartResult
+        schema = RestartAgentResponse.model_json_schema()
+        reference = schema["properties"]["status"]["$ref"]
+        assert reference.startswith("#/$defs/")
+        values = schema["$defs"][reference.removeprefix("#/$defs/")]["enum"]
+        assert values
+        assert {m.value for m in RestartResult} == set(values)

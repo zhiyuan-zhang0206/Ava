@@ -341,7 +341,7 @@ async def post_agent_system_note(
         request_inbound_provenance(request),
     )
     # Announce for the live UI (frontend badge / turn active), like chat.
-    note_kind = InboundKind.SYSTEM_NOTE.value
+    note_kind = InboundKind.SYSTEM_NOTE
     await _ops.publish_inbound_arrived(
         request.app.state.bus, agent_id, inbound_id, note_kind, body.source, body.content
     )
