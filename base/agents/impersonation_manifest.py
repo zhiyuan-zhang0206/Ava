@@ -8,7 +8,7 @@ completeness predicate live in the database (`event_log`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar  # noqa: TID251 -- SDK async finally needs task-local admission
 from dataclasses import dataclass, field, replace
@@ -107,7 +107,7 @@ def session_tag(agent_id: int, session_id: int) -> str:
     return f"{agent_id}:{session_id}"
 
 
-def pending_reason(lease: dict[str, Any]) -> str | None:
+def pending_reason(lease: Mapping[str, Any]) -> str | None:
     """Classify a handoff's current delivery uncertainty without inventing state."""
     if lease["events_completed_at"] is not None:
         return None
@@ -430,7 +430,7 @@ class EventSourceNotSealedError(RuntimeError):
     """A participant is open or failed, so the lease cannot be released."""
 
 
-def require_participants_sealed(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
+def require_participants_sealed(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
     """Refuse while any controller receipt is open or failed (release precondition)."""
     if not is_log_native(lease):
         return

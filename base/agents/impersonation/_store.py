@@ -6,6 +6,7 @@ import math
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from typing import Any, cast
 from uuid import UUID
 
@@ -14,13 +15,13 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from base.agents import AgentStatus
+from base.agents.impersonation.status import OPEN, ImpersonationStatus, LeaseRecord, parse_lease
 from base.agents.messages.caller_identity import caller_payload
 from base.cluster.machine import machine_name
 from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-
-OPEN = ("requested", "accepted", "active")
 
 
 class ImpersonationError(RuntimeError):
@@ -40,7 +41,7 @@ def lock_agent(conn: psycopg.Connection, agent_id: int) -> dict[str, Any]:
     return row
 
 
-def lock_lease(conn: psycopg.Connection, lease_id: str) -> dict[str, Any]:
+def lock_lease(conn: psycopg.Connection, lease_id: str) -> LeaseRecord:
     # Read only the immutable foreign key first; all mutations acquire the agent
     # lock before the lease or inbox, matching native ownership and claim order.
     row = conn.execute(
@@ -54,18 +55,19 @@ def lock_lease(conn: psycopg.Connection, lease_id: str) -> dict[str, Any]:
         lease = cur.fetchone()
     if lease is None:
         raise ImpersonationError("Impersonation disappeared")
-    return lease
+    return parse_lease(lease)
 
 
-def public(lease: dict[str, Any]) -> dict[str, Any]:
+def public(lease: Mapping[str, Any]) -> dict[str, Any]:
+    status = ImpersonationStatus(lease["status"])
     return {
-        key: str(value) if isinstance(value, UUID) else value
+        key: status if key == "status" else str(value) if isinstance(value, UUID) else value
         for key, value in lease.items()
         if key not in ("token_hash", "relay_token_hash")
     }
 
 
-def local(lease: dict[str, Any]) -> None:
+def local(lease: Mapping[str, Any]) -> None:
     if lease["machine"] != machine_name():
         raise ImpersonationError("Impersonation is limited to the agent's own machine")
 
@@ -254,7 +256,7 @@ def provider_anchor_states(process_metadata: object) -> list[str]:
     ]
 
 
-def verify_caller(lease: dict[str, Any], caller: object) -> None:
+def verify_caller(lease: Mapping[str, Any], caller: object) -> None:
     """Require the caller to descend from the lease's recorded controller process.
 
     The session id is the only control credential (user ruling 2026-09-16);
@@ -304,7 +306,7 @@ def verify_caller(lease: dict[str, Any], caller: object) -> None:
     )
 
 
-def authenticate(lease: dict[str, Any], caller: object) -> None:
+def authenticate(lease: Mapping[str, Any], caller: object) -> None:
     """Attested controller authority: caller presence plus same-machine placement."""
     verify_caller(lease, caller)
     local(lease)
@@ -319,7 +321,7 @@ def require_native(conn: psycopg.Connection, incarnation: RuntimeIncarnation) ->
     if (
         (meta["runtime_generation"], meta["runtime_owner"])
         != (incarnation.generation, incarnation.owner)
-        or meta["status"] not in ("running", "idling")
+        or AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING)
         or fresh != (True,)
     ):
         raise ImpersonationError("Native runtime no longer owns this agent")
@@ -327,7 +329,7 @@ def require_native(conn: psycopg.Connection, incarnation: RuntimeIncarnation) ->
 
 
 def insert_handoff(
-    conn: psycopg.Connection, lease: dict[str, Any], content: str, *, expired: bool = False
+    conn: psycopg.Connection, lease: Mapping[str, Any], content: str, *, expired: bool = False
 ) -> int:
     """Write only the negotiated workflow's handoff, in the lease transaction.
 
@@ -347,7 +349,7 @@ def insert_handoff(
     return row[0]
 
 
-def dismiss_reminders(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
+def dismiss_reminders(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
     """Retire this lease's pending renewal reminders, in the lease transaction.
 
     Reminders are written for the external controller only; once the lease
@@ -362,7 +364,7 @@ def dismiss_reminders(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
     )
 
 
-def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
+def expire(conn: psycopg.Connection, lease: LeaseRecord) -> LeaseRecord:
     if lease["status"] not in OPEN:
         return lease
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
@@ -378,7 +380,7 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
             "ORDER BY m.inbound_id LIMIT 1",
             (lease["id"], lease["max_delivery_attempts"], lease["ack_window_seconds"]),
         ).fetchone()
-        if lease["status"] == "active"
+        if lease["status"] == ImpersonationStatus.ACTIVE
         else None
     )
     if fresh == (True,):
@@ -398,7 +400,7 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
         close_event_admission(conn, str(lease["id"]))
     detail = None
     inbound_id = None
-    if lease["status"] == "active" and not lease["automatic"]:
+    if lease["status"] == ImpersonationStatus.ACTIVE and not lease["automatic"]:
         inbound_id = insert_handoff(
             conn,
             lease,
@@ -420,33 +422,37 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
         cur.execute("SELECT * FROM agent_impersonations WHERE id=%s", (lease["id"],))
         refreshed = cur.fetchone()
         assert refreshed is not None  # noqa: S101 - locked session exists
-        lease = refreshed
-    lease["status"] = "expired"
+        lease = parse_lease(refreshed)
+    lease["status"] = ImpersonationStatus.EXPIRED
     lease["summary_inbound_id"] = inbound_id
     return lease
 
 
 def validate_active(
-    lease: dict[str, Any], caller: object, *, fresh: bool, machine: str, status: str
+    lease: LeaseRecord, caller: object, *, fresh: bool, machine: str, status: AgentStatus
 ) -> None:
     """Validate either a joined read snapshot or rows already locked for mutation."""
-    if lease["status"] != "active" or not fresh:
+    if lease["status"] != ImpersonationStatus.ACTIVE or not fresh:
         raise ImpersonationError(
             "Impersonation session is not active (stale-session): it ended or its "
             "TTL expired; the native agent continues."
         )
-    if machine != lease["machine"] or status not in ("running", "idling"):
+    if machine != lease["machine"] or status not in (AgentStatus.RUNNING, AgentStatus.IDLING):
         raise ImpersonationError("Agent placement or lifecycle changed")
     authenticate(lease, caller)
 
 
-def require_active_locked(conn: psycopg.Connection, lease: dict[str, Any], caller: object) -> None:
+def require_active_locked(conn: psycopg.Connection, lease: LeaseRecord, caller: object) -> None:
     # Do not persist expiration here and then raise (which would roll it back).
     # The native boundary/get reconciler persists it independently.
     meta = lock_agent(conn, lease["agent_id"])
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
     validate_active(
-        lease, caller, fresh=fresh == (True,), machine=meta["machine"], status=meta["status"]
+        lease,
+        caller,
+        fresh=fresh == (True,),
+        machine=meta["machine"],
+        status=AgentStatus(meta["status"]),
     )
 
 
@@ -478,7 +484,7 @@ def validate_relay_spec(
         )
 
 
-def authenticate_relay(lease: dict[str, Any], relay_token: str) -> None:
+def authenticate_relay(lease: Mapping[str, Any], relay_token: str) -> None:
     """The relay's scoped credential: inbox/delivery/beat, never controller authority."""
     if lease["relay_token_hash"] is None or not hmac.compare_digest(
         lease["relay_token_hash"], token_hash(relay_token)
@@ -488,12 +494,15 @@ def authenticate_relay(lease: dict[str, Any], relay_token: str) -> None:
 
 
 def require_relay_active_locked(
-    conn: psycopg.Connection, lease: dict[str, Any], relay_token: str
+    conn: psycopg.Connection, lease: LeaseRecord, relay_token: str
 ) -> None:
     meta = lock_agent(conn, lease["agent_id"])
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
     authenticate_relay(lease, relay_token)
-    if lease["status"] != "active" or fresh != (True,):
+    if lease["status"] != ImpersonationStatus.ACTIVE or fresh != (True,):
         raise ImpersonationError("Impersonation is not active or its TTL has expired")
-    if meta["machine"] != lease["machine"] or meta["status"] not in ("running", "idling"):
+    if meta["machine"] != lease["machine"] or AgentStatus(meta["status"]) not in (
+        AgentStatus.RUNNING,
+        AgentStatus.IDLING,
+    ):
         raise ImpersonationError("Agent placement or lifecycle changed")

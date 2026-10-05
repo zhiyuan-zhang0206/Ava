@@ -15,6 +15,7 @@ from uuid import UUID
 
 import pytest
 
+from base.agents.impersonation.status import ImpersonationStatus
 from cli.commands.agents import impersonation_relay as relay
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
@@ -39,7 +40,7 @@ class Inbox:
         self.routine: set[int] = set(pending)
         self.batch_window = 0.0
         self.page_size = page_size
-        self.status: relay.LeaseStatus = "active"
+        self.status = ImpersonationStatus.ACTIVE
         self.expires_at = datetime.now(UTC) + timedelta(minutes=5)
         self.start_message = "Start here: resume the implementation from the failing test."
         self.reads = 0
@@ -96,11 +97,11 @@ class Inbox:
 
     @property
     def active(self) -> bool:
-        return self.status == "active"
+        return self.status == ImpersonationStatus.ACTIVE
 
     @active.setter
     def active(self, value: bool) -> None:
-        self.status = "active" if value else "released"
+        self.status = ImpersonationStatus.ACTIVE if value else ImpersonationStatus.RELEASED
 
 
 class Listener:
@@ -226,8 +227,8 @@ def test_two_missed_ack_windows_pause_message_until_explicit_end(clock: FakeCloc
     run(inbox, listener, emitted.append)
 
     assert sum("[id=11]" in text for text in emitted) == 2
-    assert observed == ["active"]
-    assert inbox.status == "released"
+    assert observed == [ImpersonationStatus.ACTIVE]
+    assert inbox.status == ImpersonationStatus.RELEASED
     assert inbox.pending == {11}
     assert len(emitted) == 3  # One start message and exactly two receipt envelopes.
     assert listener.closed
@@ -244,7 +245,11 @@ def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
         "ended_at": ended_at,
     }
     snapshot = relay.InboxSnapshot(
-        frozenset(), {}, datetime.now(UTC), "expired", terminal_notice_snapshot=terminal
+        frozenset(),
+        {},
+        datetime.now(UTC),
+        ImpersonationStatus.EXPIRED,
+        terminal_notice_snapshot=terminal,
     )
     emitted: list[str] = []
     # A delayed old snapshot must not borrow the caller's replacement lease scope.
@@ -254,19 +259,21 @@ def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
     assert f"Notice ID: impersonation-ended:{LEASE_ID}" in emitted[0]
     assert "does not end or cancel any newer" in emitted[0]
     assert "no active native runtime is implied" in emitted[0]
-    assert relay._ended(replace(snapshot, status="released"), 42, 0, emitted.append)
+    assert relay._ended(
+        replace(snapshot, status=ImpersonationStatus.RELEASED), 42, 0, emitted.append
+    )
     assert len(emitted) == 1  # Release injection remains solely host-owned.
 
 
 async def test_codex_relay_never_duplicates_host_owned_terminal_notice() -> None:
-    snapshot = relay.InboxSnapshot(frozenset(), {}, datetime.now(UTC), "expired")
+    snapshot = relay.InboxSnapshot(frozenset(), {}, datetime.now(UTC), ImpersonationStatus.EXPIRED)
     emitted: list[str] = []
 
     async def read() -> relay.InboxSnapshot:
         return snapshot
 
     inbox = Inbox()
-    inbox.status = "expired"
+    inbox.status = ImpersonationStatus.EXPIRED
     listener = Listener(inbox)
     await relay.relay_inbox(
         42,

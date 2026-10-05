@@ -7,6 +7,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents.impersonation._store import expire, lock_lease
+from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.announce import (
@@ -39,7 +40,7 @@ def reap_impersonations(
         expired_agents: list[int] = []
         for (lease_id,) in candidates:
             lease = lock_lease(conn, str(lease_id))
-            if expire(conn, lease)["status"] == "expired":
+            if expire(conn, lease)["status"] == ImpersonationStatus.EXPIRED:
                 expired_agents.append(lease["agent_id"])
     for agent_id in expired_agents:
         publish_inbound_wake(db, bus, agent_id, "impersonation-expired")
@@ -97,13 +98,16 @@ def force_expire_impersonation(
                 (agent_id,),
             )
             lease = cur.fetchone()
-        if lease is None or lease["session_id"] != session_id:
+        if lease is None:
+            return "not_open"
+        lease = parse_lease(lease)
+        if lease["session_id"] != session_id:
             return "not_open"
         set_actor(conn, actor)
         if is_log_native(lease):
             close_event_admission(conn, str(lease["id"]))
         inbound_id = None
-        if lease["status"] == "active" and not lease["automatic"]:
+        if lease["status"] == ImpersonationStatus.ACTIVE and not lease["automatic"]:
             inbound_id = insert_handoff(
                 conn,
                 lease,
@@ -175,7 +179,7 @@ def remind_expiring_impersonations(
         ).fetchall()
         for lease_id, agent_id, expires_at, session_id in candidates:
             lease = lock_lease(conn, str(lease_id))
-            if lease["status"] != "active" or lease["expires_at"] != expires_at:
+            if lease["status"] != ImpersonationStatus.ACTIVE or lease["expires_at"] != expires_at:
                 continue
             if (
                 conn.execute(

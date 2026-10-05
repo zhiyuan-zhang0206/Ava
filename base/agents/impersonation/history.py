@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
+from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -60,7 +62,7 @@ class ImpersonationMetadata(BaseModel):
     seq: int | None = None
 
 
-def metadata(lease: dict[str, Any]) -> ImpersonationMetadata:
+def metadata(lease: Mapping[str, Any]) -> ImpersonationMetadata:
     return ImpersonationMetadata(
         agent_id=lease["agent_id"],
         session_id=lease["session_id"],
@@ -70,8 +72,9 @@ def metadata(lease: dict[str, Any]) -> ImpersonationMetadata:
     )
 
 
-def public_session(lease: dict[str, Any]) -> dict[str, Any]:
+def public_session(lease: Mapping[str, Any]) -> dict[str, Any]:
     """Expose the numeric handle without legacy UUIDs or credentials."""
+    status = ImpersonationStatus(lease["status"])
     fields = (
         "agent_id",
         "session_id",
@@ -97,7 +100,11 @@ def public_session(lease: dict[str, Any]) -> dict[str, Any]:
         "events_completed_at",
     )
     result = {key: lease[key] for key in fields} | {"id": lease["session_id"]}
-    if lease["automatic"] and result["status"] in ("requested", "accepted"):
+    result["status"] = status
+    if lease["automatic"] and status in (
+        ImpersonationStatus.REQUESTED,
+        ImpersonationStatus.ACCEPTED,
+    ):
         result["status"] = "preparing"
     return result
 
@@ -113,6 +120,7 @@ def resolve(db: Database, agent_id: int, session_id: int) -> dict[str, Any]:
         lease = cur.fetchone()
     if lease is None:
         raise ValueError(f"Agent {agent_id} has no impersonation session {session_id}")
+    parse_lease(lease)
     if lease["machine"] != machine_name():
         raise ValueError("Impersonation operations must run on the agent's machine")
     return lease
@@ -168,7 +176,7 @@ def append(
     return seq
 
 
-def capture_pending(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
+def capture_pending(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
     """Include the backlog handed to this session, even if it predates activation."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
@@ -377,7 +385,7 @@ def _sdk_statistics(sdk: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _event_delivery_statistics(
-    lease: dict[str, Any], sdk: list[dict[str, Any]], api: list[dict[str, Any]]
+    lease: Mapping[str, Any], sdk: list[dict[str, Any]], api: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """Describe whether the handoff's event log is complete for the emitted events.
 
@@ -400,7 +408,7 @@ def _event_delivery_statistics(
     }
 
 
-def _pending_delivery_reason(lease: dict[str, Any]) -> str:
+def _pending_delivery_reason(lease: Mapping[str, Any]) -> str:
     from base.agents.impersonation_manifest import pending_reason
 
     result = pending_reason(lease)
@@ -415,7 +423,7 @@ def _by_occurrence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: (row["created_at"], row["seq"]))
 
 
-def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+def build_document(lease: Mapping[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Derive counts only from recorded facts; preserve the original events too."""
     sdk = _by_occurrence([row for row in rows if row["kind"] == "sdk_call"])
     api = _by_occurrence([row for row in rows if row["kind"] == "api_event"])
@@ -440,7 +448,9 @@ def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[st
     }
 
 
-def export_handoff(lease: dict[str, Any], conn: psycopg.Connection) -> tuple[dict[str, Any], str]:
+def export_handoff(
+    lease: Mapping[str, Any], conn: psycopg.Connection
+) -> tuple[dict[str, Any], str]:
     """Write one JSON file atomically in the agent workspace, before native resumption."""
     document = lease["handoff_document"]
     if document is None or document["version"] != 2:
