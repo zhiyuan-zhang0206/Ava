@@ -112,17 +112,21 @@ template into a running cluster without a restart of the manager, run
 - **Verify in-store scripts when repo code moves.** `ava schedules verify`
   checks every schedule's DB-embedded script — stopped rows included, built-in
   and agent-created alike — against the checkout it runs from: `py_compile`, a
-  top-level-imports-only execution in the checkout's runner venv, and an
+  top-level-imports-only execution in the checkout's runner venv, a name-read
+  check (every name the script reads, any scope, must be one it binds — the
+  rename leftover the imports alone cannot see; conservative: any binding
+  counts, annotations are not read, `from x import *` disables it), and an
   `inspect.signature().bind` of every call the script makes into repo code
   (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`;
   the argument shape only, so a call it cannot bind statically — `*args`, an
   instance method, a rebound name, the plugin-wrapped `ava.*` SDK — is skipped,
   never guessed). Nothing is started, stopped, or written. The drift classes that
   bit (a module move — e.g. the watcher module's move to `base.daemon.schedules.watcher`
-  — leaving stale in-store imports, task #4800; a changed signature —
-  `catch_up()` gaining a required `db`, 2026-10-03 — leaving calls that raise
-  `TypeError` on the first fire) are caught by its
-  `RED id=<id> name=<name> missing=<module|compile-error:<l>:<m>|call-signature:<l> <call>(): <why>|...>`
+  — leaving stale in-store imports, task #4800; a `shared` -> `base` rename leaving a
+  top-level statement reading a name nothing imports — 2026-10-01 audit, three of 16
+  copies; a changed signature — `catch_up()` gaining a required `db`, 2026-10-03 —
+  leaving calls that raise `TypeError` on the first fire) are caught by its
+  `RED id=<id> name=<name> missing=<module|compile-error:<l>:<m>|undefined-name:<l> <name>|call-signature:<l> <call>(): <why>|...>`
   lines before they can fire. `python -m cli.fleet_update down` runs it with the NEW
   checkout's code before stopping anything, and `up` runs it again on the gateway. Exit codes: 0 clean / 1 red / 2 tool error. Run it on the
   host that runs the schedules, or from a dev worktree to check the same table
