@@ -14,6 +14,7 @@ import ava
 from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.log import logger
 from base.sessions import coding_session_owner
+from base.sessions.coding_session_owner_record import CodingSessionStatus
 
 
 def resolve_dir(dir_path: str) -> Path:
@@ -176,4 +177,4 @@ def status(key: coding_session_owner.CodingSessionKey, print_owner: OwnerPrinter
         print_owner(owner)
         if owner.error:
             print(f"error={owner.error}", file=sys.stderr)
-    return 1 if any(owner.status == "invalid" for owner in owners) else 0
+    return 1 if any(owner.status == CodingSessionStatus.INVALID for owner in owners) else 0
