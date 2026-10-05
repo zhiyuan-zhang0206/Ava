@@ -10,8 +10,8 @@ hook whose inputs the branch added or changed, and a whole-repository hook (`pas
 false`) judges the deletion along with it. This covers the rest: a whole-repository hook whose
 `files:` pattern matches a deleted path and no added or changed one, and a per-file hook (which
 sees only the files it is handed) whose pattern matches any deleted path, runs with `--all-files`.
-When the range cannot be known (no origin/main) every hook runs, because not knowing is not a
-reason to skip. CI re-checks every hook on the pushed and merged tree either way.
+An unknown branch range is an explicit error: fetch origin/main before pushing.
+CI re-checks every hook on the pushed and merged tree either way.
 """
 
 from __future__ import annotations
@@ -44,17 +44,20 @@ def _git(*args: str) -> str:
     ).stdout
 
 
-def branch_paths() -> tuple[set[str], set[str]] | None:
-    """(deleted, added-or-changed) paths of merge-base(origin/main, HEAD)..HEAD; None when unknown.
+def branch_paths() -> tuple[set[str], set[str]]:
+    """(deleted, added-or-changed) paths of merge-base(origin/main, HEAD)..HEAD; raises when unknown.
 
     Renames are split into a deletion and an addition, so moving an input out of a hook's
     pattern counts as deleting it.
     """
-    try:
-        base = _git("merge-base", "origin/main", "HEAD").strip()
-        listing = _git("diff", "--name-status", "--no-renames", "-z", base, "HEAD").split("\0")
-    except subprocess.CalledProcessError:
-        return None
+    base = subprocess.run(  # noqa: S603 — fixed repo-local range owner
+        ["bash", str(_ROOT / "scripts/prepush-base.sh")],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    listing = _git("diff", "--name-status", "--no-renames", "-z", base, "HEAD").split("\0")
     deleted: set[str] = set()
     other: set[str] = set()
     for status, path in zip(listing[0::2], listing[1::2], strict=False):
@@ -63,16 +66,13 @@ def branch_paths() -> tuple[set[str], set[str]] | None:
 
 
 def hooks_to_run(
-    patterns: dict[str, tuple[re.Pattern[str], bool]], paths: tuple[set[str], set[str]] | None
+    patterns: dict[str, tuple[re.Pattern[str], bool]], paths: tuple[set[str], set[str]]
 ) -> list[str]:
     """The hooks the nested run cannot cover (`patterns`: hook -> (files pattern, whole-repo)).
 
-    Every hook when the range is unknown. Otherwise those whose pattern matches a deleted path
-    and, for a whole-repository hook, no added or changed one (the nested run executes that hook
+    Those whose pattern matches a deleted path and, for a whole-repository hook, no added or changed one (the nested run executes that hook
     over the whole repository anyway); a per-file hook never judges the deletion itself.
     """
-    if paths is None:
-        return list(patterns)
     deleted, other = paths
     return [
         hook
@@ -90,8 +90,6 @@ def main() -> int:
         for hook in HOOKS
     }
     paths = branch_paths()
-    if paths is None:
-        print("pre-push: branch range unknown (no origin/main); running every artifact hook")
     due = hooks_to_run(patterns, paths)
     if not due:
         print(
@@ -119,4 +117,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError as error:
+        print(error.stderr or str(error), file=sys.stderr)
+        raise SystemExit(error.returncode) from None

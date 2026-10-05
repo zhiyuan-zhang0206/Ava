@@ -84,10 +84,11 @@ a deliberately inverted assertion alone does not demonstrate that property.
 
 Commit hooks check changed files; pre-push hooks also check the branch diff,
 imports, types and generated-artifact freshness. CI independently runs the
-corresponding checks, including migration smoke and full test coverage. For
-scoped local frontend verification, the full-suite `frontend-vitest` pre-push hook
-can be skipped by name; record the selected tests instead. Fix genuine hook
-failures and report any checks that could not run. Do not use `--no-verify` to
+corresponding checks, including migration smoke and full test coverage. The
+frontend pre-push selector checks the branch contribution, using changed
+tests, related source paths and known filesystem consumers. It reports global
+and deletion closure as CI-only; a passing subset does not certify omitted
+consumers. Full suites remain CI-only. Fix genuine hook failures and report any checks that could not run. Do not use `--no-verify` to
 bypass unrelated checks.
 
 Record the tested revision and relevant commands/results. A missing workflow,

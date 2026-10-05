@@ -602,22 +602,22 @@ repos:
       # project to catch type drift / missed union updates / cross-file type
       # mismatches (the root cause of plain-text silent fallback in things
       # like SystemMarker: TS doesn't report, but runtime gets a bare string).
-      # Triggers on any frontend ts/tsx change; runs the whole project because
+      # Branch-owned frontend changes trigger it; runs the whole project because
       # tsc doesn't support incremental single-file checks.
       - id: frontend-tsc
         name: frontend tsc --noEmit
-        entry: bash scripts/prepush-guard.sh tsc -- bash -c 'cd ui/web && npx --no-install next typegen && npx --no-install tsc --noEmit'
+        entry: .venv/bin/python scripts/provision/prepush_frontend.py tsc
         stages: [pre-push]
         verbose: true
         language: system
-        files: ^ui/web/.*\.(ts|tsx)$
+        always_run: true
         pass_filenames: false
 
       # ESLint over the files this commit changed, through the same warning gate as CI (errors
       # and unbaselined warnings fail). An edit to the lint setup (config, local rules, warning
       # baseline, tsconfig, dependencies) lints the whole project instead. The commit stage cannot
-      # see a type-aware rule react to a type that changed in another file; the whole-project
-      # run below does, at push. The id stays `frontend-eslint`: CI's SKIP lists name it, and
+      # see a type-aware rule react to a type that changed in another file; CI checks those
+      # whole-project effects. The id stays `frontend-eslint`: CI's SKIP lists name it, and
       # CI's frontend job lints the whole project.
       - id: frontend-eslint
         name: frontend eslint (changed files)
@@ -625,26 +625,26 @@ repos:
         language: system
         files: ^ui/web/(.*\.(ts|tsx|js|mjs)|package(-lock)?\.json|tsconfig\.json|scripts/eslint-warning-baseline\.json)$
 
-      # The whole-project ESLint run, aligned with frontend CI.
+      # Push selection ignores old remote tips and lints own surviving paths.
+      # Keep this ID for existing CI SKIP-list compatibility.
       - id: frontend-eslint-full
-        name: frontend eslint (whole project)
-        entry: bash scripts/prepush-guard.sh eslint -- bash -c 'cd ui/web && npm run lint'
+        name: frontend eslint (branch files)
+        entry: .venv/bin/python scripts/provision/prepush_frontend.py eslint
         stages: [pre-push]
         verbose: true
         language: system
-        files: ^ui/web/.*\.(ts|tsx|js|mjs)$
+        always_run: true
         pass_filenames: false
 
-      # Full frontend unit suite belongs at push: measured ~23s locally.
-      # CI independently runs vitest with coverage; keep the full local suite.
-      # Decision: docs/decisions/2026-09-24-vitest-prepush-selection.md.
+      # Branch-owned frontend tests only. Full-suite coverage belongs to CI.
+      # The selector includes existing disk consumers outside the import graph.
       - id: frontend-vitest
         name: frontend vitest run
-        entry: bash scripts/prepush-guard.sh vitest -- bash -c 'cd ui/web && npx --no-install vitest run'
+        entry: .venv/bin/python scripts/provision/prepush_frontend.py vitest
         stages: [pre-push]
         verbose: true
         language: system
-        files: ^ui/web/.*\.(ts|tsx)$
+        always_run: true
         pass_filenames: false
 
       # types-generated.ts + openapi.json must stay in sync with the Pydantic

@@ -44,4 +44,5 @@ Host side, stdlib only: `boundary.py` (what both recipes share: the start profil
 
 ## Notes
 
+- `prepush-base.sh` owns the contribution range for branch lint, pyright, input gating, artifact freshness and `provision/prepush_frontend.py`; missing base fails. Frontend selection includes known filesystem consumers and reports global/deletion closure as CI-only.
 - pre-commit runs lints / codegen; pre-push runs pyright / tsc / eslint / vitest. Full pytest / migration smoke stay in CI; local tests are targeted.

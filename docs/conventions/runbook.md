@@ -996,15 +996,31 @@ frontend files (`scripts/precommit-eslint.sh`) and the whole project when the
 lint setup itself changed. A hook that scans the whole repository on every
 commit regardless of the diff is a design error, not a price of the check; CI's
 `pre-commit run --all-files` is the full scan of every hook and the merge gate.
-Frontend typecheck (including Next.js route typegen), the whole-project ESLint
-run (`frontend-eslint-full`: a type-aware rule can react to a type that changed
-in another file, which the per-file run cannot see) and the full Vitest suite run
-at **pre-push**, scoped by their own `files:` filter to frontend changes. Strict
-pyright also runs at pre-push, but scoped to the branch's own changed `.py`
-files (`scripts/prepush-pyright-files.sh`, `merge-base(origin/main,
-HEAD)..HEAD`, ACMR + still on disk) — never the whole repository locally
-(user ruling 2026-09-22: local runs check only the files touched; a
-full-repo strict pyright stays CI-only, `backend-static`'s `uv run pyright`).
+Pre-push selectors share `scripts/prepush-base.sh`: the contribution is
+`merge-base(origin/main, HEAD)..HEAD`, independent of a force-push's old remote
+tip. Missing `origin/main` or a missing merge-base fails explicitly; fetch the
+base before pushing. Frontend hooks always enter the selector, so deletions and
+renames cannot disappear behind pre-commit's file filter. Upstream-only UI
+changes inherited by rebase invoke no frontend tool.
+
+`frontend-tsc` retains project typecheck and route generation for owned frontend
+changes. `frontend-eslint-full` keeps its ID for CI compatibility but now checks
+only surviving branch code paths through the existing warning gate. CI checks
+whole-project lint effects. `frontend-vitest` runs changed tests and dependency-
+related source paths, plus known filesystem consumers (source-policy scan,
+CSS/layout, messages, package binding, backend login HTML, event fixtures, plugin
+vocabularies and app-UI locales). This is useful affected verification, not a
+claim that an import graph proves dynamic or filesystem closure. Deleted inputs
+and global configuration report the remaining CI-only verification explicitly;
+no full-suite fallback runs locally. Empty related collection fails, including
+Vitest's otherwise passing default for `related`. Diagnose a missing consumer
+and run explicit affected tests; do not turn on `passWithNoTests` to certify
+an empty collection.
+
+Pyright checks the branch's surviving changed `.py` paths only
+(`scripts/prepush-pyright-files.sh`); full-repository pyright and test suites
+remain CI-only. Tool availability/load/lock skips still report missing evidence
+through the existing guard; they are not proof that a check ran.
 Other local hooks default to pre-commit; upstream hooks may also declare
 pre-push hygiene checks. Run either stage explicitly with the worktree's own
 environment:
@@ -1014,11 +1030,10 @@ environment:
 .venv/bin/pre-commit run --all-files --hook-stage pre-push
 ```
 
-For targeted local verification, skip `frontend-vitest` by name at pre-push
-and run only the relevant vitest files, as described in the
-[testing guide](testing.md).
-The [Vitest placement decision](../decisions/2026-09-24-vitest-prepush-selection.md)
-records the measurements, push-cost projection and affected-test-selection limits.
+The [testing guide](testing.md) describes explicit local test paths. The
+[historical Vitest placement decision](../decisions/2026-09-24-vitest-prepush-selection.md)
+retains its measurements and selection limitations; its full-local-suite policy
+is superseded by the current scoped-local rule.
 
 Three more pre-push-only hooks close gaps: two that `git rebase` / `cherry-pick` /
 `merge` leave open (they never invoke the pre-commit hook for the commits they
@@ -1031,9 +1046,8 @@ create), and one that a per-file verdict cannot see:
   reach `git push` unchecked. The commit-stage hooks judge only the files they
   are handed, so this costs about what one commit over the same files costs;
   that is why it takes no load threshold and no lock (a load-dependent skip
-  would leave rebased commits unchecked at random). It skips loudly only when
-  it cannot know the range (`origin/main` is not locally resolvable — fetch
-  first) or has no `.venv/bin/pre-commit`.
+  would leave rebased commits unchecked at random). Missing scope is an error;
+  missing `.venv/bin/pre-commit` still reports unverified local execution.
 - `lint-prepush-artifact-freshness` (`scripts/provision/prepush_freshness.py`)
   re-checks, over the whole repository, the generated-artifact hooks (types and
   constants codegen, the events registry, the config-lite table, the Pyright
@@ -1046,8 +1060,8 @@ create), and one that a per-file verdict cannot see:
   inputs the branch also added or changed already ran in the branch-diff run,
   which judges the deletion with it, so it is not repeated; a per-file hook
   (`lint-ava-okf`) sees only the files it is handed and is re-checked whenever
-  a deleted path matches. A rename counts as deleting the old path; with no
-  known range every hook runs. `types-codegen-fresh` alone skips when
+  a deleted path matches. A rename counts as deleting the old path; an unknown
+  range fails explicitly. `types-codegen-fresh` alone skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
 - `lint-patch-targets-full` runs the patch-target lint over every test file
   when the branch touches any `.py` path, deleted ones included
