@@ -58,12 +58,15 @@ mismatches = [
     for _, line in stream["values"]
     if stream["stream"].get("event_name") != json.loads(line).get("event_name")
 ]
+observed_rows = sum(len(stream["values"]) for stream in result)
+assert observed_rows >= 1, "No event rows observed; an empty sample cannot certify indexed labels"
 assert not mismatches, mismatches[:20]
-print(f"checked {sum(len(stream['values']) for stream in result)} event rows")
+print(f"checked {observed_rows} event rows; no label mismatches")
 PY
 ```
 
-An absent `event_name` label or any mismatch fails the canary; run it only over
+An empty sample cannot certify labels and fails the canary. An absent
+`event_name` label or any mismatch also fails; run it only over
 newly emitted rows, since indexed-era data from before the rollout is immutable.
 
 ## Replay a trace mirror
