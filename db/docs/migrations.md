@@ -17,6 +17,19 @@ the gateway's cold `ava start` in the `up` half applies the pending migrations.
 For a manual catch-up, run `ava start` directly, which applies pending
 migrations on the way up.
 
+## Checkpoint dependency upgrades
+
+Fresh install alone invokes `PostgresSaver.setup()`; later starts only read and
+verify the complete checkpoint migration set after applying Ava migrations.
+`base/cluster/provision.py` freezes the adopted upstream baseline at version 9.
+An upstream dependency that adds version N must carry that DDL in an Ava
+timestamp migration and declare it in `CHECKPOINT_SCHEMA_AVA_MIGRATIONS`.
+Do not advance the frozen baseline instead. The migration must remain idempotent
+when fresh install already created both the effects and the upstream migration
+row, while recording its Ava migration name. Real-Postgres verification covers
+existing N-1 upgrade and fresh N birth followed by first-start registration;
+the drift gate refuses unmirrored dependency changes before DB mutation.
+
 ## Adding a new migration
 
 1. Write `migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` — the prefix is a

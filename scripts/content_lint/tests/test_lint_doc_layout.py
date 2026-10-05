@@ -20,7 +20,7 @@ def test_procedural_scan_roots_follow_relocated_conventions() -> None:
     expected = _REPO / "docs" / "conventions"
     assert expected == lint_doc_anchors._DOCS_CONVENTIONS
     assert expected == lint_doc_symbols._DOCS_CONVENTIONS
-    assert expected / "runbook.md" == lint_doc_roster._RUNBOOK
+    assert _REPO / "ops" / "docs" / "service-roster.md" == lint_doc_roster._SERVICE_ROSTER
 
 
 @pytest.mark.parametrize("axis", ["decisions", "postmortems"])
@@ -48,5 +48,7 @@ def test_relocated_conventions_trigger_procedural_hooks() -> None:
 
     config = yaml.safe_load((_REPO / ".pre-commit-config.yaml").read_text())
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
-    for hook_id in ("lint-doc-roster", "lint-doc-symbols", "lint-doc-anchors"):
+    assert re.search(hooks["lint-doc-roster"]["files"], "ops/docs/service-roster.md")
+    assert re.search(hooks["lint-doc-roster"]["files"], "ops/roster/__init__.py")
+    for hook_id in ("lint-doc-symbols", "lint-doc-anchors"):
         assert re.search(hooks[hook_id]["files"], "docs/conventions/runbook.md")

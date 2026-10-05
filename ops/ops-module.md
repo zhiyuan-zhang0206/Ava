@@ -6,7 +6,7 @@ coordination. Its design rationale is recorded in
 
 | Responsibility | Current implementation |
 |---|---|
-| Service specification | `ops/spec.py` (capability selection and gates); `ops/roster/` (canonical roster, its `service_spec` contract; `healthz.py` builds the entry of a standard `/healthz` daemon from its session, module, capabilities and `requires_db`) |
+| Service specification | `ops/roster/` (capability selection and gates, canonical roster and its `service_spec` contract; `healthz.py` builds the entry of a standard `/healthz` daemon from its session, module, capabilities and `requires_db`) |
 | Observation and status | `ops/roster/observe.py`; `ops/cluster_status/` (host snapshot, `schema_mismatch` diagnosis) |
 | Native agent drain | `ops/agent_pause/` (drain, `probe` of the running host) |
 | Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |
@@ -23,6 +23,8 @@ op clusters read `ops.lifecycle`, `ops.cluster`, `ops.host_config`,
 it is an operator entry point beside its `private-files/` manifest.
 
 `build_services()` supplies the application root manifest and local status roster.
+The [checked service inventory](docs/service-roster.md) belongs beside this owner;
+its sentinel table is validated against that registration in both directions.
 Agent-runner units execute agents inside one agent host. There is no per-agent
 process launcher or restarter service. Native service sessions and the
 `pty-sessions` service's persistent shells remain separate execution resources.

@@ -32,6 +32,18 @@ A missing or terminated row is not scheduled as normal work. A fresh foreign
 runtime owner refuses admission. Maintenance holds also refuse ordinary work;
 only the accepted control path can complete its own drain.
 
+## Checkpoint interval
+
+`AVA_CHECKPOINT_INTERVAL` defaults to four; the agent's `checkpoint_interval`
+configuration can override it. The effective interval travels with the turn's
+invoke configuration, so a shared host saver does not impose one agent's
+interval on another. Ordinary threads can replay up to N-1 skipped super-steps
+after a crash, including model costs and tool effects; terminal flush persists
+the remaining tail. Delta-bearing threads retire throttling and retain every
+super-step. Interval one restores every-step persistence. The operator
+[canary protocol](../../../docs/conventions/checkpoint-interval-canary.md)
+owns verification and rollback.
+
 ## Related contracts
 
 - [[admission.ava.okf.md]] — runtime ownership and admission

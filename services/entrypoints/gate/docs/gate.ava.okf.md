@@ -37,3 +37,5 @@ The loopback product tests exercise auth, the unavailable projection, proxy
 behavior, and health independently of dependencies. The native child test exercises real
 Gate startup, root IPC ownership, restart, stop, and rejection of a foreign
 listener. It does not prove macOS helper ancestry or a complete cluster rollout.
+
+Optional private HTTPS/HTTP2 entry and browser acceptance are in [Gate entry operations](operations.md).
