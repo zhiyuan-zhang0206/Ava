@@ -13,6 +13,7 @@ from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
+from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
@@ -269,7 +270,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     original = pause_owner.change_maintenance
 
     def fail_final(*args: Any, **kwargs: Any) -> pause_owner.PauseOwnerSnapshot:
-        if args[3].phase == "draining":
+        if args[3].phase == MaintenancePhase.DRAINING:
             raise OSError("final journal unavailable")
         return original(*args, **kwargs)
 

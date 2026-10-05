@@ -142,14 +142,13 @@ def test_journal_written_with_the_retired_repair_record_still_decodes() -> None:
 )
 def test_maintenance_journal_restores_owned_phase_vocabulary(phase: str) -> None:
     import json
-    from enum import StrEnum
 
     from base.deploy.maintenance.state import MaintenanceHold
 
     wire = MaintenanceHold(commands={7: 100}, drained=(7,), parked=(8,)).encode()
     wire["phase"] = phase
     restored = MaintenanceHold.decode(json.loads(json.dumps(wire)))
-    assert isinstance(restored.phase, StrEnum)
+    assert restored.phase is MaintenancePhase(phase)
     assert restored.encode() == wire
     assert restored.settled_after_drain(7) == (
         phase in {"drained", "stopping", "stopped", "starting", "ready"}
