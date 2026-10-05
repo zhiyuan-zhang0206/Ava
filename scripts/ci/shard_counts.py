@@ -2,7 +2,7 @@
 """Make the number of tests CI actually ran visible: per shard, per directory, and in total.
 
 The backend shards run `pytest -q`: the log is dots without test ids, and the JUnit report
-goes to Trunk only. So "a moved test did not fall out of CI" could only be proved by counting
+records the native test result. So "a moved test did not fall out of CI" could only be proved by counting
 around the move (the total changes by exactly the parametrized ids added), once per batch.
 This script reads what pytest already wrote, the shard's JUnit report, so nothing is
 collected a second time:
@@ -11,8 +11,7 @@ collected a second time:
                           --summary "$GITHUB_STEP_SUMMARY" [--min-tests 1]
         counts the tests one shard executed, by directory, into its log and the GitHub job
         summary, and writes them as JSON (the workflow uploads it as an artifact). It fails
-        when the shard left no JUnit report or executed fewer than `--min-tests` tests: the
-        Trunk uploader lets both pass, and this is the check that does not;
+        when the shard left no JUnit report or executed fewer than `--min-tests` tests;
 
     shard_counts.py total --dir counts/ --expected "1 2 ... 16 serial" [--baseline b.json] \\
                           --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY" \\
