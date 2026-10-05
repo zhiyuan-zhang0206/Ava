@@ -22,8 +22,9 @@ service ([[services/supervision/ava_root/docs/ava_root.ava.okf.md]] is the serve
   reply must name the kernel-reported Unix-socket peer; `root_process` and
   `owned_process` read captured
   native births and never adopt a current PID occupant. A missing or unknown
-  unit state rejects the reply; only an absent unit or a validated stopped
-  state can establish that no generation is running.
+  unit state rejects the reply. An absent unit, a validated stopped state, or
+  a positively dead/reused native birth establishes that the recorded
+  generation is not running.
 
 Consumers below the service: the start-serving gate (`base/deploy/lifecycle/start_serving.py`)
 authenticates the live root generation through `RootClient.status()`.
