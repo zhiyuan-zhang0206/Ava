@@ -4,9 +4,30 @@ request/response and its per-agent `resurrect-billing-v1` home action (task #391
 The `ops.rpc_schemas` door re-exports these names.
 """
 
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel
+
+
+class BillingRecoveryHomeResult(StrEnum):
+    """One home runner's adjudication, before batch-summary translation."""
+
+    SPAWNED = "spawned"
+    ALREADY_ALIVE = "already_alive"
+    REFUSED = "refused"
+    DEFERRED = "deferred"
+
+
+class BillingRecoveryOutcome(StrEnum):
+    """One agent's outcome in the operator's billing recovery batch."""
+
+    CANDIDATE = "candidate"
+    RESURRECTED = "resurrected"
+    ALREADY_ALIVE = "already_alive"
+    REFUSED = "refused"
+    DEFERRED = "deferred"
+    FAILED = "failed"
 
 
 class BillingResurrectRequest(BaseModel):
@@ -47,7 +68,7 @@ class BillingResurrectAgentOutcome(BaseModel):
 
     agent_id: int
     machine: str
-    status: Literal["candidate", "resurrected", "already_alive", "refused", "deferred", "failed"]
+    status: BillingRecoveryOutcome
     reason: str | None = None
 
 
@@ -64,7 +85,7 @@ class BillingResurrectAgentResponse(BaseModel):
         (`ResurrectSettlementDeferredError`); retry once it settles.
     """
 
-    status: Literal["spawned", "already_alive", "refused", "deferred"]
+    status: BillingRecoveryHomeResult
     reason: str | None = None
 
 

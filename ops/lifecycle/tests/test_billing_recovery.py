@@ -553,3 +553,60 @@ def test_balance_probe_fails_closed_when_neither_settings_nor_env_file_has_the_k
     report = billing_recovery.fetch_provider_balance()
 
     assert report.ok is False and "not configured" in report.detail
+
+
+@pytest.mark.parametrize(
+    ("model_name", "owner_name", "values"),
+    [
+        (
+            "BillingResurrectAgentResponse",
+            "BillingRecoveryHomeResult",
+            {"spawned", "already_alive", "refused", "deferred"},
+        ),
+        (
+            "BillingResurrectAgentOutcome",
+            "BillingRecoveryOutcome",
+            {"candidate", "resurrected", "already_alive", "refused", "deferred", "failed"},
+        ),
+    ],
+)
+def test_billing_result_owner_and_wire_contract(
+    model_name: str, owner_name: str, values: set[str]
+) -> None:
+    from pydantic import ValidationError
+
+    from ops.rpc_schemas import billing_recovery as schemas
+
+    model = getattr(schemas, model_name)
+    owner = getattr(schemas, owner_name)
+    assert model.model_fields["status"].annotation is owner
+    schema = model.model_json_schema()
+    ref = schema["properties"]["status"]["$ref"]
+    assert ref.startswith("#/$defs/")
+    assert set(schema["$defs"][ref.removeprefix("#/$defs/")]["enum"]) == values
+    extra = {"agent_id": 1, "machine": "home"} if model_name.endswith("Outcome") else {}
+    for value in values:
+        response = model.model_validate({**extra, "status": value})
+        assert response.status is owner(value)
+        assert response.model_dump(mode="json")["status"] == value
+    for invalid in (
+        None,
+        "unknown",
+        "resurrected" if model_name.endswith("Response") else "spawned",
+    ):
+        with pytest.raises(ValidationError):
+            model.model_validate({**extra, "status": invalid})
+
+
+def test_billing_dispatch_translation_covers_home_verdicts() -> None:
+    from ops.rpc_schemas.billing_recovery import BillingRecoveryHomeResult, BillingRecoveryOutcome
+
+    assert set(billing_recovery._DISPATCH_STATUS_MAP) == set(BillingRecoveryHomeResult)
+    assert (
+        billing_recovery._DISPATCH_STATUS_MAP[BillingRecoveryHomeResult.SPAWNED]
+        is BillingRecoveryOutcome.RESURRECTED
+    )
+    assert all(
+        isinstance(result, BillingRecoveryOutcome)
+        for result in billing_recovery._DISPATCH_STATUS_MAP.values()
+    )

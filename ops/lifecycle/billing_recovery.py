@@ -36,7 +36,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Literal
 
 import httpx
 from psycopg import Connection
@@ -53,6 +52,7 @@ from ops.rpc_schemas import (
     BillingResurrectAgentResponse,
     BillingResurrectResponse,
 )
+from ops.rpc_schemas.billing_recovery import BillingRecoveryHomeResult, BillingRecoveryOutcome
 
 _log = logging.getLogger(__name__)
 
@@ -61,18 +61,12 @@ _log = logging.getLogger(__name__)
 # the migration lock's "AVMI" (base/deploy/schema/migrations.py).
 _RUN_LOCK_KEY = 0x41564252
 
-# The per-agent summary status; the whitelist listing also rides it ('candidate').
-_OutcomeStatus = Literal[
-    "candidate", "resurrected", "already_alive", "refused", "deferred", "failed"
-]
-
-# Home-runner adjudication -> run-summary status. Typed so pyright checks the
-# literal-to-literal mapping instead of laundering it through `str`.
-_DISPATCH_STATUS_MAP: dict[str, _OutcomeStatus] = {
-    "spawned": "resurrected",
-    "already_alive": "already_alive",
-    "refused": "refused",
-    "deferred": "deferred",
+# Home-runner adjudication and batch summary are distinct contracts.
+_DISPATCH_STATUS_MAP: dict[BillingRecoveryHomeResult, BillingRecoveryOutcome] = {
+    BillingRecoveryHomeResult.SPAWNED: BillingRecoveryOutcome.RESURRECTED,
+    BillingRecoveryHomeResult.ALREADY_ALIVE: BillingRecoveryOutcome.ALREADY_ALIVE,
+    BillingRecoveryHomeResult.REFUSED: BillingRecoveryOutcome.REFUSED,
+    BillingRecoveryHomeResult.DEFERRED: BillingRecoveryOutcome.DEFERRED,
 }
 
 
@@ -311,14 +305,20 @@ async def resurrect_billing_agent_op(
             resurrect_agent, db, bus, agent_id, resurrected_by="user", billing_recovery=True
         )
     except ResurrectAlreadyAlive:
-        return BillingResurrectAgentResponse(status="already_alive")
+        return BillingResurrectAgentResponse(status=BillingRecoveryHomeResult.ALREADY_ALIVE)
     except ResurrectRefused as exc:
-        return BillingResurrectAgentResponse(status="refused", reason=exc.reason)
+        return BillingResurrectAgentResponse(
+            status=BillingRecoveryHomeResult.REFUSED, reason=exc.reason
+        )
     except MachinePaused as exc:
-        return BillingResurrectAgentResponse(status="refused", reason=f"machine_paused: {exc}")
+        return BillingResurrectAgentResponse(
+            status=BillingRecoveryHomeResult.REFUSED, reason=f"machine_paused: {exc}"
+        )
     except ResurrectSettlementDeferredError as exc:
-        return BillingResurrectAgentResponse(status="deferred", reason=str(exc))
-    return BillingResurrectAgentResponse(status="spawned")
+        return BillingResurrectAgentResponse(
+            status=BillingRecoveryHomeResult.DEFERRED, reason=str(exc)
+        )
+    return BillingResurrectAgentResponse(status=BillingRecoveryHomeResult.SPAWNED)
 
 
 async def _dispatch_all(
@@ -349,15 +349,17 @@ async def _dispatch_one(
         response = BillingResurrectAgentResponse.model_validate(forwarded)
     except _cluster_rpc.ClusterOpUnreachable:
         if candidate.machine != machine_name():
-            return _outcome(candidate, "failed", "home machine unreachable")
+            return _outcome(candidate, BillingRecoveryOutcome.FAILED, "home machine unreachable")
         # Local ops server unreachable (test / single-process): mirror
         # `resurrect_if_terminated` and fall back to the in-process op.
         try:
             response = await resurrect_billing_agent_op(db, bus, candidate.agent_id)
         except Exception as exc:
-            return _outcome(candidate, "failed", f"{type(exc).__name__}: {exc}")
+            return _outcome(
+                candidate, BillingRecoveryOutcome.FAILED, f"{type(exc).__name__}: {exc}"
+            )
     except Exception as exc:
-        return _outcome(candidate, "failed", f"{type(exc).__name__}: {exc}")
+        return _outcome(candidate, BillingRecoveryOutcome.FAILED, f"{type(exc).__name__}: {exc}")
     return _outcome(candidate, _DISPATCH_STATUS_MAP[response.status], response.reason)
 
 
@@ -395,7 +397,9 @@ def _release_run_lock(pool: ConnectionPool, conn: Connection) -> None:
 
 def _candidate_outcome(candidate: BillingCandidate) -> BillingResurrectAgentOutcome:
     return BillingResurrectAgentOutcome(
-        agent_id=candidate.agent_id, machine=candidate.machine, status="candidate"
+        agent_id=candidate.agent_id,
+        machine=candidate.machine,
+        status=BillingRecoveryOutcome.CANDIDATE,
     )
 
 
@@ -404,7 +408,7 @@ def _halted_alive_row(row: BillingHaltedAlive) -> BillingHaltedAliveRow:
 
 
 def _outcome(
-    candidate: BillingCandidate, status: _OutcomeStatus, reason: str | None = None
+    candidate: BillingCandidate, status: BillingRecoveryOutcome, reason: str | None = None
 ) -> BillingResurrectAgentOutcome:
     return BillingResurrectAgentOutcome(
         agent_id=candidate.agent_id, machine=candidate.machine, status=status, reason=reason
@@ -417,10 +421,10 @@ def _record_run_event(
     from base import telemetry
     from base.telemetry.audit_events import prepare_event_log, record_audit_standalone
 
-    resurrected = [o.agent_id for o in outcomes if o.status == "resurrected"]
-    refused = [o.agent_id for o in outcomes if o.status == "refused"]
-    deferred = [o.agent_id for o in outcomes if o.status == "deferred"]
-    failed = [o.agent_id for o in outcomes if o.status == "failed"]
+    resurrected = [o.agent_id for o in outcomes if o.status is BillingRecoveryOutcome.RESURRECTED]
+    refused = [o.agent_id for o in outcomes if o.status is BillingRecoveryOutcome.REFUSED]
+    deferred = [o.agent_id for o in outcomes if o.status is BillingRecoveryOutcome.DEFERRED]
+    failed = [o.agent_id for o in outcomes if o.status is BillingRecoveryOutcome.FAILED]
     run_event = prepare_event_log(
         event_type="billing_resurrect",
         agent_id=None,
