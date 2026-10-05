@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from base.db import Database
+from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.sessions.pty.paths import SERVICE_UNIT
 from cli.commands._repo import _repo_root, session_name
@@ -317,7 +318,13 @@ def _release_self_heal_pause() -> None:
     if (
         held is not None
         and held.maintenance is not None
-        and held.maintenance.phase in ("stopping", "stopped", "starting", "ready")
+        and held.maintenance.phase
+        in (
+            MaintenancePhase.STOPPING,
+            MaintenancePhase.STOPPED,
+            MaintenancePhase.STARTING,
+            MaintenancePhase.READY,
+        )
     ):
         print("  · services partially stopped; holding agents until ava start passes readiness")
         return

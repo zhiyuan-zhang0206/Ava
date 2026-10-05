@@ -21,7 +21,7 @@ from base.cluster.machine import machine_name, machine_role
 from base.db import Database, publish_inbound_wake
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.hold_driver import HoldDriver
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from ops.agent_pause.probe import HostIdentity, host_identity, host_running
 
@@ -102,9 +102,13 @@ def prepare(
         if row is not None:
             raise RuntimeError("unit has native agents but no running hosted owner")
         current = _hold(holder, at)
-        if current.phase == "preparing":
+        if current.phase == MaintenancePhase.PREPARING:
             pause_owner.change_maintenance(
-                holder, at, current, MaintenanceHold("draining"), refresh_driver=driver is not None
+                holder,
+                at,
+                current,
+                MaintenanceHold(MaintenancePhase.DRAINING),
+                refresh_driver=driver is not None,
             )
         return
     hold = _prepare_cohort(db, holder, at, identity, driver=driver)
@@ -178,7 +182,7 @@ def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
     # quiesce-exempt: the stop command's own bounded drain wait; it ends the moment the drain lands
     while True:
         hold = _hold(holder, at)
-        if hold.phase == "preparing":
+        if hold.phase == MaintenancePhase.PREPARING:
             raise RuntimeError(
                 "preparation is incomplete; re-run `ava stop`, or abandon it with `ava start`"
             )
@@ -197,8 +201,8 @@ def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
                     raise TimeoutError("agent-host continuations did not finish before deadline")
                 time.sleep(min(0.05, budget))
                 continue
-            if hold.phase == "draining":
-                admission.set_phase(holder, at, "drained")
+            if hold.phase == MaintenancePhase.DRAINING:
+                admission.set_phase(holder, at, MaintenancePhase.DRAINED)
             if time.monotonic() > deadline:
                 raise TimeoutError("drain verification exceeded its deadline; hold retained")
             return
@@ -330,11 +334,15 @@ def pause_agents(
     if (
         current.status != "paused"
         or current.maintenance is None
-        or current.maintenance.phase == "preparing"
+        or current.maintenance.phase == MaintenancePhase.PREPARING
     ):
         prepare(db, bus, holder, at, driver=driver)
     hold = _hold(holder, at)
-    if hold.phase in ("preparing", "draining", "drained"):
+    if hold.phase in (
+        MaintenancePhase.PREPARING,
+        MaintenancePhase.DRAINING,
+        MaintenancePhase.DRAINED,
+    ):
         drain(db, holder, at, timeout)
 
 

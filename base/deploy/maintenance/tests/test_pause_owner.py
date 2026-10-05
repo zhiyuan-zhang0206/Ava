@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.deploy.maintenance import pause_owner
+from base.deploy.maintenance.state import MaintenancePhase
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +42,9 @@ def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:
     stamp = HoldDriver()
     assert pause_owner.refresh_driver("op1", _when(1), driver=stamp) is False  # wrong generation
     assert pause_owner.refresh_driver("op1", _when(), driver=stamp) is True
-    after = pause_owner.change_maintenance("op1", _when(), hold, replace(hold, phase="draining"))
+    after = pause_owner.change_maintenance(
+        "op1", _when(), hold, replace(hold, phase=MaintenancePhase.DRAINING)
+    )
     assert after.driver == stamp
 
 
@@ -89,7 +92,7 @@ def test_a_journal_written_with_the_retired_reaped_map_still_reads() -> None:
 
     from base.deploy.maintenance.state import MaintenanceHold
 
-    hold = MaintenanceHold("stopped", {7: 100}, drained=(7,))
+    hold = MaintenanceHold(MaintenancePhase.STOPPED, {7: 100}, drained=(7,))
     pause_owner.state_path().write_text(
         json.dumps(
             {
@@ -113,7 +116,7 @@ def test_journal_written_with_the_retired_repair_record_still_decodes() -> None:
 
     from base.deploy.maintenance.state import MaintenanceHold
 
-    hold = MaintenanceHold("stopped", {7: 100}, drained=(7,))
+    hold = MaintenanceHold(MaintenancePhase.STOPPED, {7: 100}, drained=(7,))
     pause_owner.state_path().write_text(
         json.dumps(
             {
@@ -132,3 +135,29 @@ def test_journal_written_with_the_retired_repair_record_still_decodes() -> None:
     assert snapshot.maintenance == hold
     assert "repaired" not in hold.encode()
     assert "repair_record" not in hold.encode()
+
+
+@pytest.mark.parametrize(
+    "phase", ["preparing", "draining", "drained", "stopping", "stopped", "starting", "ready"]
+)
+def test_maintenance_journal_restores_owned_phase_vocabulary(phase: str) -> None:
+    import json
+
+    from base.deploy.maintenance.state import MaintenanceHold
+
+    wire = MaintenanceHold(commands={7: 100}, drained=(7,), parked=(8,)).encode()
+    wire["phase"] = phase
+    restored = MaintenanceHold.decode(json.loads(json.dumps(wire)))
+    assert restored.phase is MaintenancePhase(phase)
+    assert restored.encode() == wire
+    assert restored.settled_after_drain(7) == (
+        phase in {"drained", "stopping", "stopped", "starting", "ready"}
+    )
+
+
+@pytest.mark.parametrize("phase", ["future", None, 7, [], {}])
+def test_maintenance_journal_rejects_unknown_phase(phase: object) -> None:
+    from base.deploy.maintenance.state import MaintenanceHold
+
+    with pytest.raises(ValueError, match="maintenance phase"):
+        MaintenanceHold.decode({**MaintenanceHold().encode(), "phase": phase})
