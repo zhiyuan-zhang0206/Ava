@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -88,6 +91,45 @@ def _make_idle(
     return aid
 
 
+def _lease(
+    db: psycopg.Connection,
+    agent_id: int,
+    *,
+    status: str = "active",
+    delta_version: int = 0,
+    applied_version: int = 0,
+    automatic: bool = False,
+    handoff_applied: bool = False,
+) -> None:
+    """Insert one impersonation lease row for the agent (task #4872).
+
+    Only the columns the heartbeat predicate reads are varied; everything else
+    keeps its schema default (the BEFORE-INSERT trigger allocates `session_id`
+    and the AFTER-INSERT trigger records a lifecycle entry — the same bare
+    insert shape the other lease tests use)."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,"
+            "ttl_seconds,expires_at,session_id,plugin_delta,delta_version,"
+            "applied_version,automatic,handoff_applied_at) "
+            "VALUES(%s,%s,'external_agent:codex:test',%s,%s,300,"
+            "clock_timestamp()+interval '5 minutes',0,%s,%s,%s,%s,"
+            "CASE WHEN %s THEN clock_timestamp() ELSE NULL END)",
+            (
+                uuid4(),
+                agent_id,
+                machine_name(),
+                status,
+                Jsonb([{} for _ in range(delta_version)]),
+                delta_version,
+                applied_version,
+                automatic,
+                handoff_applied,
+            ),
+        )
+    db.commit()
+
+
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
     return dict(_select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S))
@@ -143,6 +185,52 @@ class TestSelectIdleAgents:
             )
         db_conn.commit()
         assert aid not in _selected(pool)
+
+    @pytest.mark.parametrize("status", ["requested", "accepted", "active"])
+    def test_agent_under_open_impersonation_lease_excluded(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, status: str
+    ) -> None:
+        """Task #4872: while a lease is open, control is with the impersonation
+        plane — the native loop is not the consumer, so a check-in could not
+        produce a turn and must not be queued (it would only age into a false
+        delivery poison)."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        _lease(db_conn, aid, status=status)
+        assert aid not in _selected(pool)
+
+    def test_terminal_impersonation_lease_does_not_block_checkin(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """A lease with nothing left to apply is history: the native loop is
+        the consumer again and the check-in cadence resumes."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        _lease(db_conn, aid, status="expired")
+        assert aid in _selected(pool)
+
+    def test_unapplied_impersonation_delta_excludes_agent(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """Unapplied delta state counts as in-flight (the impersonation
+        subsystem's own predicate): stay silent until the native catches up."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        _lease(db_conn, aid, status="expired", delta_version=3, applied_version=2)
+        assert aid not in _selected(pool)
+
+    def test_unapplied_automatic_handoff_excludes_agent(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """An automatic lease whose handoff was never applied still counts as
+        in-flight; a check-in waits for the application."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        _lease(db_conn, aid, status="expired", automatic=True)
+        assert aid not in _selected(pool)
+
+    def test_applied_automatic_handoff_does_not_block_checkin(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        _lease(db_conn, aid, status="expired", automatic=True, handoff_applied=True)
+        assert aid in _selected(pool)
 
     def test_active_pause_suppresses_even_when_idle_past_threshold(
         self, pool: ConnectionPool, db_conn: psycopg.Connection

@@ -1,8 +1,9 @@
 """Heartbeat daemon — gateway-owned idle-agent check-in dispatcher.
 
 It selects idle agents that have been parked past `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`
-(default 5 min) and have not paused their heartbeat, and INSERTs a `heartbeat`
-check-in inbound to each. The inbound-insert trigger wakes the agent (on any
+(default 5 min), have not paused their heartbeat, and are not under an in-flight
+impersonation lease (see `_select_idle_agents_needing_heartbeat`), then INSERTs
+a `heartbeat` check-in inbound to each. The inbound-insert trigger wakes the agent (on any
 machine — this is cluster-wide, not machine-scoped: unlike the agent host it never
 touches local sessions). Runs on the gateway, one per cluster.
 
@@ -162,7 +163,8 @@ def _select_idle_agents_needing_heartbeat(
 
     An agent is due when it is `idling`, has no pending inbound already queued
     to wake it (one about to wake on a real message does not also need a
-    check-in), and `now()` has reached its next check-in time. Its next
+    check-in), no impersonation lease is in flight for it, and `now()` has
+    reached its next check-in time. Its next
     check-in is the later of the pause window, idle clock, and durable reminder
     clock: `GREATEST(heartbeat_paused_until, last_active_at +
     idle_threshold_s + jitter, last_heartbeat_at + heartbeat_interval_s)`. The
@@ -172,6 +174,15 @@ def _select_idle_agents_needing_heartbeat(
     check-in can arrive before its end. PostgreSQL `GREATEST` ignores a NULL
     pause or reminder timestamp, preserving the existing behavior for agents
     never reminded and pre-migration rows.
+
+    An in-flight impersonation lease — open (`requested`/`accepted`/`active`), or
+    carrying unapplied delta/handoff state (deliberately the same predicate the
+    impersonation subsystem itself gates on) — also excludes the agent: control
+    is with the impersonation plane then, and its relay consumes only chat /
+    system-note / cancel / reminder kinds, so a check-in could not produce a
+    turn — it would only sit pending and age into a false `delivery_poisoned`
+    (task #4872; first seen live during the 2026-10-05 impersonation windows).
+    The normal cadence resumes once the lease state clears.
 
     `jitter_span_s` de-phases the idle-clock term by a deterministic per-agent
     offset `id mod jitter_span_s` seconds, spreading a fleet that went idle
@@ -214,6 +225,17 @@ def _select_idle_agents_needing_heartbeat(
         "  SELECT 1 FROM inbound_messages im "
         "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
         "    AND im.created_at >= now() - make_interval(secs => %s) "
+        ") "
+        # An in-flight impersonation lease (open, or with unapplied delta/handoff
+        # state — the impersonation subsystem's own predicate): control is with
+        # the impersonation plane, so a check-in here cannot produce a native
+        # turn and would only age into a false `delivery_poisoned` (task #4872).
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM agent_impersonations lease "
+        "  WHERE lease.agent_id = agents_meta.id "
+        "    AND (lease.status IN ('requested','accepted','active') "
+        "         OR lease.delta_version > lease.applied_version "
+        "         OR (lease.automatic AND lease.handoff_applied_at IS NULL)) "
         ") "
         "ORDER BY last_active_at ASC"
     )
