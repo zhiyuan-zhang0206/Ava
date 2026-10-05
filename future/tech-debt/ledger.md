@@ -1,7 +1,7 @@
 # Tech-debt ledger
 
-> Living tech-debt ledger, maintained by the sweeper engine (`ava_builtins/skills/practice/sweeper/`)
-> driven by this repo's debt classes (`.agents/skills/ava-sweeper/`).
+> Living tech-debt ledger. Current inspection rules and automated owners live in
+> [technical-debt guidance](../../docs/conventions/tech-debt.md).
 > The single "what debt is open now" view. Forward-looking (what we intend to
 > fix) → lives in `future/`. Entries are agent + human maintained: humans
 > set `wontfix`, and the sweeper must never re-add a `wontfix` item. Resolved
@@ -10,8 +10,8 @@
 This is the single register for debt from every mechanism; do not create a
 parallel ledger. A new mechanism, including a cap-domain "exit" registration,
 records an ordinary fingerprinted entry here with its own class. PRs that
-knowingly introduce debt register it here through the PR template, and the
-daily debt-clearing pass reconciles this ledger.
+knowingly introduce debt register it here through the PR template, and a
+requested reconciliation checks this ledger.
 
 <!-- watermark: last-swept-sha=a2495ca1f last-swept-date=2026-09-23 -->
 

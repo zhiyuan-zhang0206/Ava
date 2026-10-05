@@ -4,8 +4,8 @@ co-change pairs over a rolling window of first-parent history.
 Run: `.venv/bin/python scripts/structure/cochange.py [--days N | --commits N]
 [--repo PATH] [--min-support N] [--min-confidence F] [--json]`.
 
-This is a sweeper tool (`.agents/skills/ava-sweeper/SKILL.md`, debt class
-"locality (whole-repo)"), not a pre-commit gate: it reports on debt that
+This is an optional inspection tool (`docs/conventions/tech-debt.md`, locality
+class), not a pre-commit gate: it reports on debt that
 accumulates across many commits with no single owner or door, which
 `docs/conventions/lint-vs-sweeper.md`'s graduation test puts on the sweeper side —
 detection needs a rolling window of history and the fix needs judgement, so

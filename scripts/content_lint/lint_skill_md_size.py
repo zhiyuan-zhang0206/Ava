@@ -35,7 +35,7 @@ _TRANSITIONAL_FLOOR = 250
 _HARD_CEILING = 300
 
 # Skill SKILL.md locations: repo-shipped + plugins + the repo's own git-tracked
-# `.agents/skills/` (project-local skills, e.g. `.agents/skills/ava-sweeper/`;
+# `.agents/skills/` (project-local skills, e.g. `.agents/skills/review-contribution/`;
 # `.ava/skills` and `.claude/skills` link back to it). Every
 # family is globbed at both the root and the sub-skill level — a sub-skill is
 # where depth accumulates, so it is exactly where the ceiling has to reach.
