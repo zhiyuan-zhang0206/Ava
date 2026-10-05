@@ -42,6 +42,7 @@ from pathlib import Path
 import ava
 from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.sessions import coding_session_owner
+from base.sessions.coding_session_owner_record import CodingSessionStatus
 
 _HERE = Path(__file__).resolve().parent
 _PLUGIN = _HERE / "ava-relay-dsh" / "ava-relay.mjs"
@@ -166,7 +167,7 @@ def _status(key: coding_session_owner.CodingSessionKey) -> int:
         _print_owner(owner)
         if owner.error:
             print(f"error={owner.error}", file=sys.stderr)
-    return 1 if any(owner.status == "invalid" for owner in owners) else 0
+    return 1 if any(owner.status == CodingSessionStatus.INVALID for owner in owners) else 0
 
 
 def _cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:

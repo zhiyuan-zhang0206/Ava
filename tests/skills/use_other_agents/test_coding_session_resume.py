@@ -19,6 +19,7 @@ import pytest
 
 from ava.shell.coding_tools import _claude_checks, _common, claude, codex
 from base.sessions import coding_session_owner
+from base.sessions.coding_session_owner_record import CodingSessionStatus
 
 _SKILL_DIR = (
     Path(__file__).parents[3] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
@@ -125,7 +126,7 @@ def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
     workspace = tmp_path / "ws"
     workspace.mkdir()
     key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=tmp_path / "c")
-    return coding_session_owner.CodingSessionOwner(key=key, status="launching")
+    return coding_session_owner.CodingSessionOwner(key=key, status=CodingSessionStatus.LAUNCHING)
 
 
 @pytest.mark.parametrize("opened", [_SESSION, _OTHER])
