@@ -3,10 +3,13 @@
 The platform default is `/dev/shm` on Linux — RAM-sized — while a full-restore
 drill needs disk-sized room: on 2026-09-14 the throwaway postmaster died
 mid-restore when the cluster outgrew WSL's 7.8 GiB /dev/shm (dmesg signal 6; the
-drill surfaced only `PQputCopyData: server closed the connection`). These tests
-exercise selection through its seams — the `AVA_PG_THROWAWAY_BASE` settings field,
-the per-test-pinned `default_base`, and a scripted `free_bytes` — so they never
-depend on a real tmpfs's size or a host's real configured base.
+drill surfaced only `PQputCopyData: server closed the connection`), and on
+2026-10-05 a 15.4 GiB estimate cleared /dev/shm's 16 GiB while the actual restore
+did not. A caller that declares its footprint therefore takes the durable disk
+fallback outright; these tests exercise selection through its seams — the
+`AVA_PG_THROWAWAY_BASE` settings field, the per-test-pinned `default_base`, and a
+scripted `free_bytes` — so they never depend on a real tmpfs's size or a host's
+real configured base.
 """
 
 from __future__ import annotations
@@ -60,21 +63,31 @@ def test_no_requirement_keeps_the_platform_default_without_measuring(
     assert base.select_throwaway_base(None) == default
 
 
-def test_capacity_that_fits_keeps_the_platform_default(
+def test_declared_capacity_takes_the_durable_fallback(
     scratch_bases: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A caller that declares its footprint (the restore drills) gets the disk
+    fallback even when the platform default clears the estimate — the estimate is
+    a floor, not a guarantee (2026-10-05: a 15.4 GiB estimate cleared /dev/shm's
+    16 GiB; the actual restore did not, and the postmaster died mid-restore)."""
     default, fallback = scratch_bases
     _script_free(monkeypatch, {default: 1000, fallback: 1000})
-    assert base.select_throwaway_base(999) == default
-    assert base.select_throwaway_base(1000) == default  # >= is enough
+    assert base.select_throwaway_base(500) == fallback
+    assert base.select_throwaway_base(1000) == fallback  # >= is enough
+    _script_free(monkeypatch, {default: 10**9, fallback: 10**9})
+    assert base.select_throwaway_base(1) == fallback
 
 
-def test_capacity_shortage_demotes_to_the_disk_fallback(
+def test_a_default_that_clears_the_estimate_is_not_a_drill_base(
     scratch_bases: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """No gamble: when the durable base cannot hold the declared footprint, the
+    selection refuses — it never falls back to the RAM-sized default that merely
+    clears the same estimate."""
     default, fallback = scratch_bases
-    _script_free(monkeypatch, {default: 100, fallback: 1000})
-    assert base.select_throwaway_base(500) == fallback
+    _script_free(monkeypatch, {default: 10**9, fallback: 100})
+    with pytest.raises(base.InsufficientThrowawaySpaceError):
+        base.select_throwaway_base(500)
 
 
 def test_shortage_everywhere_fails_loudly_naming_each_base(
@@ -89,14 +102,16 @@ def test_shortage_everywhere_fails_loudly_naming_each_base(
     assert "AVA_PG_THROWAWAY_BASE" in message  # the escape hatch is named
 
 
-def test_equal_fallback_does_not_fake_a_demotion(
+def test_a_single_base_serves_or_the_selection_refuses(
     scratch_bases: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Hosts where the disk fallback resolves to the platform default (no /var/tmp,
-    the Windows temp dir): a shortage must refuse, not return the base that cannot
-    hold the data."""
+    the Windows temp dir): one candidate — it serves a declared capacity when it
+    can hold it, and a shortage refuses instead of returning a base that cannot."""
     default, _fallback = scratch_bases
     monkeypatch.setattr(base, "disk_fallback_base", lambda: default)
+    _script_free(monkeypatch, {default: 1000})
+    assert base.select_throwaway_base(500) == default
     _script_free(monkeypatch, {default: 100})
     with pytest.raises(base.InsufficientThrowawaySpaceError):
         base.select_throwaway_base(500)
