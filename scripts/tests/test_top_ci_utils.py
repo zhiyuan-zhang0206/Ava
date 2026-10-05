@@ -1429,30 +1429,15 @@ def test_diagnose_clock_lattice_gateway_case(diag_gh, monkeypatch, capsys) -> No
     assert "clock-lattice lint" in capsys.readouterr().out
 
 
-def test_diagnose_known_flake_matches_quarantined(diag_gh, monkeypatch, capsys) -> None:
-    """The #1871 consumer_guard case: failing test is in Trunk's flaky DB."""
+def test_diagnose_test_failure_uses_native_evidence(diag_gh, monkeypatch, capsys) -> None:
+    """Native failures are diagnosed without consulting a quarantine list."""
     check = "backend shard (4/16)"
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    calls: list[urllib.request.Request] = []
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence(
-            [
-                _TrunkResponse(
-                    {
-                        "quarantined_tests": [
-                            {
-                                "name": "test_consumer_guard_queue_backpressure",
-                                "file": "tests/agent/test_consumer_guard.py",
-                                "status": "FLAKY",
-                            }
-                        ]
-                    }
-                ),
-                _TrunkResponse({"state": "testing"}),
-            ],
-            [],
-        ),
+        _urlopen_sequence([_TrunkResponse({"state": "testing"})], calls),
     )
     diag_gh(
         [
@@ -1471,8 +1456,12 @@ def test_diagnose_known_flake_matches_quarantined(diag_gh, monkeypatch, capsys) 
     )
     assert ci_utils.main(["1871", "--diagnose"]) == 0
     out = capsys.readouterr().out
-    assert "known flake" in out
+    assert "unclassified CI failure" in out
+    assert "known flake" not in out
+    assert "Flaky DB" not in out
     assert "state=testing" in out
+    assert len(calls) == 1
+    assert "getSubmittedPullRequest" in calls[0].full_url
 
 
 def test_diagnose_runner_network_flake(diag_gh, monkeypatch, capsys) -> None:
