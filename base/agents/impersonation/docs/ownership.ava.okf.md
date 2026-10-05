@@ -20,6 +20,11 @@ reconciles preparation; active control survives native restarts. Administrative
 restart/terminate still reach the native dispatcher; termination revokes control.
 Legacy live requests retain their original consent flow during an upgrade.
 
+Lease status is owned by `base/agents/impersonation/status.py` (`ImpersonationStatus`):
+requested, accepted, active, released, rejected, expired. Raw lifecycle query rows
+validate their status before dispatch; other row fields keep their existing database
+contracts. The open roster projection admits only requested, accepted and active.
+
 Every status transition to `terminated` atomically expires open sessions and
 closes event admission. The trigger queues a native impersonation interruption
 note followed by a completed-termination note, including when native execution
