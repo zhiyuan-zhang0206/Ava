@@ -53,8 +53,8 @@ the agent whose identity you hold, and the briefing is a quick entry point, not
 the whole context. Before starting the work, recover the standing context it needs:
 
 - **Standing instructions first.** Run [scripts/read_instructions.py](scripts/read_instructions.py)
-  as described in [reference/sdk.md](reference/sdk.md). It returns the system prompt and configured
-  preloaded skill bodies active in the borrowed agent's current conversation,
+  as described in [reference/sdk.md](reference/sdk.md). It prints the system
+  prompt and configured preloaded skill bodies active in the borrowed agent's current conversation,
   including core behavior, plugin rules, role guidance and the capability
   index. It preserves what the agent actually read, rather than regenerating
   guidance from newer configuration. If it fails, resolve the missing context
