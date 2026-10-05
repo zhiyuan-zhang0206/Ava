@@ -1,12 +1,11 @@
 # Ava ops alert rules — Grafana Alerting, provisioned as code.
 #
-# Source of truth: this file. Native Grafana (port 3003, launchd label
-# `com.ava.grafana.<home-slug>` rendered by converge; 3002 is retired) reads
-# it directly from this checkout's provisioning directory — no copy step.
-# Alert-rule provisioning does NOT hot-reload file changes (verified
-# 2026-08-04): restart with `launchctl kickstart -k
-# gui/$(id -u)/com.ava.grafana.<home-slug>` (first `launchctl bootstrap
-# gui/$(id -u) <plist>` when the job is not loaded).
+# Source of truth: this file. Converge renders the provisioning tree into the
+# home (`$AVA_HOME/lgtm/native/config/provisioning/`, copied verbatim by
+# `cli/commands/observability/lgtm_native.py`); native Grafana (port 3003 by
+# default, 53003 on the station via `AVA_LGTM_GRAFANA_PORT`) reads that
+# rendered copy. Alert-rule file changes do NOT hot-reload: they apply on the
+# next alerting reload or restart (see the README, "Retired rules").
 #
 # Evaluation engine: Grafana Unified Alerting over the LGTM read side
 # (Task #1224): rules R1-R3, R5-R7 and R13 query Loki (the events stream — every
