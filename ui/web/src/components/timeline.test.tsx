@@ -848,6 +848,48 @@ describe("ItemView: inbound_chat source-driven color", () => {
   });
 });
 
+describe("ItemView: Markdown-authored inbound bodies", () => {
+  // ChatMarkdown is mocked here (renders data-testid="chat-markdown"), so the
+  // assertion is which bodies are routed through it, with the header split off.
+  it("compact summary body goes through ChatMarkdown", () => {
+    render(
+      <TimelineView
+        items={[makeItem({ kind: "inbound_compact_summary", payload: "Compact summary [ts]:\n\n## Goal" })]}
+      />,
+    );
+    revealCollapsedCards();
+    expect(screen.getByTestId("chat-markdown").textContent).toBe("## Goal");
+  });
+
+  it("inter-agent message body goes through ChatMarkdown; the human message stays plain", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "agent:7", payload: "Agent 7:\n\nsee **this**" }),
+          makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "User:\n\nkeep **raw**" }),
+        ]}
+      />,
+    );
+    revealCollapsedCards();
+    expect(screen.getAllByTestId("chat-markdown").map((n) => n.textContent)).toEqual(["see **this**"]);
+    expect(screen.getByText("keep **raw**")).toBeTruthy();
+  });
+
+  it("memory marker body goes through ChatMarkdown; a guidance note stays raw", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "system_marker", source: "memory", payload: "- [Title](a.md)" }),
+          makeItem({ item_id: "2.0", kind: "system_marker", source: "sdk_hint", payload: "use **raw** text" }),
+        ]}
+      />,
+    );
+    revealCollapsedCards();
+    expect(screen.getAllByTestId("chat-markdown").map((n) => n.textContent)).toEqual(["- [Title](a.md)"]);
+    expect(screen.getByText("use **raw** text")).toBeTruthy();
+  });
+});
+
 describe("ItemView: inbound_chat envelope split", () => {
   it("payload contains '<header>\\n\\n<body>' → header and body render separately", () => {
     render(
