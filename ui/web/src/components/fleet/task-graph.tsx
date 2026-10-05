@@ -23,8 +23,9 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 
+import { ChatMarkdown } from "@/components/markdown";
 import { WindowSelect, type WindowOption } from "@/components/window-select";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { PRIORITY_BG } from "@/lib/notices";
 import { formatRelative, formatUptime } from "@/lib/time";
 import type { TaskRow, TaskStatus } from "@/lib/types";
@@ -185,9 +186,9 @@ function TaskHoverCard({
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             {t("meta.description")}
           </p>
-          <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
-            {task.description}
-          </p>
+          <div className={cn("mt-0.5 max-h-24 break-words text-[11px] leading-snug text-popover-foreground/90", OVERFLOW_HIDDEN)}>
+            <ChatMarkdown content={task.description} />
+          </div>
         </div>
       ) : null}
       {task.results ? (
@@ -195,9 +196,9 @@ function TaskHoverCard({
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             {t("meta.result")}
           </p>
-          <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
-            {task.results}
-          </p>
+          <div className={cn("mt-0.5 max-h-24 break-words text-[11px] leading-snug text-popover-foreground/90", OVERFLOW_HIDDEN)}>
+            <ChatMarkdown content={task.results} />
+          </div>
         </div>
       ) : null}
 
