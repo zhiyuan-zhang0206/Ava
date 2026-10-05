@@ -8,6 +8,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from base.agents import AgentStatus
 from base.agents.impersonation._store import (
     OPEN as OPEN,
 )
@@ -39,6 +40,7 @@ from base.agents.impersonation._store import (
 )
 from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
 from base.agents.impersonation.history import append, capture_pending, set_actor
+from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config.service_read import current_field_values
@@ -114,7 +116,7 @@ def _reject_open_previous(conn: Connection[Any], agent_id: int) -> None:
         previous = cur.fetchone()
     if previous is None:
         return
-    previous = expire(conn, previous)
+    previous = expire(conn, parse_lease(previous))
     if (
         previous["status"] in OPEN
         or previous["delta_version"] > previous["applied_version"]
@@ -161,7 +163,7 @@ def request(
         meta = lock_agent(conn, agent_id)
         if meta["machine"] != machine_name():
             raise ImpersonationError("Impersonation is limited to the agent's own machine")
-        if meta["status"] not in ("running", "idling"):
+        if AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
             raise ImpersonationError("Agent must be running or idling to receive a request")
         _reject_open_previous(conn, agent_id)
         set_actor(conn, caller.source())
@@ -212,7 +214,7 @@ def get(db: Database, bus: EventBus, lease_id: str, caller: object) -> dict[str,
         authenticate(lease, caller)
         was_open = lease["status"] in OPEN
         result = public(expire(conn, lease))
-    if was_open and result["status"] == "expired":
+    if was_open and result["status"] == ImpersonationStatus.EXPIRED:
         wake_agent(db, bus, lease["agent_id"], roster_changed=True)
     return result
 
@@ -229,12 +231,13 @@ def require_active(db: Database, lease_id: str, caller: object) -> dict[str, Any
         lease = cur.fetchone()
     if lease is None:
         raise ImpersonationError("Impersonation does not exist")
+    parsed_lease = parse_lease(lease)
     validate_active(
-        lease,
+        parsed_lease,
         caller,
         fresh=lease.pop("fresh"),
         machine=lease.pop("current_machine"),
-        status=lease.pop("current_status"),
+        status=AgentStatus(lease.pop("current_status")),
     )
     return public(lease)
 
@@ -262,7 +265,7 @@ def accept(
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         local(lease)
-        if lease["agent_id"] != agent_id or lease["status"] != "requested":
+        if lease["agent_id"] != agent_id or lease["status"] != ImpersonationStatus.REQUESTED:
             raise ImpersonationError("Only the requested agent can accept a pending request")
         if lease["relay_provider"] is None:
             raise ImpersonationError(
@@ -297,7 +300,7 @@ def reject(
         if (
             incarnation.agent_id != agent_id
             or lease["agent_id"] != agent_id
-            or lease["status"] != "requested"
+            or lease["status"] != ImpersonationStatus.REQUESTED
         ):
             raise ImpersonationError("Only the requested agent can reject a pending request")
         conn.execute(
@@ -321,12 +324,18 @@ def activate(
         lease = lock_lease(conn, lease_id)
         was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
-        if lease["agent_id"] == incarnation.agent_id and lease["status"] == "expired":
+        if (
+            lease["agent_id"] == incarnation.agent_id
+            and lease["status"] == ImpersonationStatus.EXPIRED
+        ):
             # Expiry between the driver's status read and this locked boundary
             # returns control; it is not a fatal native runtime failure.
             result = public(lease)
         else:
-            if lease["agent_id"] != incarnation.agent_id or lease["status"] != "accepted":
+            if (
+                lease["agent_id"] != incarnation.agent_id
+                or lease["status"] != ImpersonationStatus.ACCEPTED
+            ):
                 raise ImpersonationError("Activation requires accepted native consent")
             if (lease["accepted_generation"], lease["accepted_owner"]) != (
                 incarnation.generation,
@@ -345,7 +354,10 @@ def activate(
             result = public(lock_lease(conn, lease_id))
             capture_pending(conn, result)
     wake_agent(
-        db, bus, incarnation.agent_id, roster_changed=was_open and result["status"] == "expired"
+        db,
+        bus,
+        incarnation.agent_id,
+        roster_changed=was_open and result["status"] == ImpersonationStatus.EXPIRED,
     )
     return result
 
@@ -383,9 +395,10 @@ def native_status(
             lease = cur.fetchone()
         if lease is None:
             return None
+        lease = parse_lease(lease)
         was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
-        if lease["status"] == "accepted" and (
+        if lease["status"] == ImpersonationStatus.ACCEPTED and (
             lease["accepted_generation"],
             lease["accepted_owner"],
         ) != (incarnation.generation, incarnation.owner):
@@ -396,11 +409,11 @@ def native_status(
                 "accepted_owner=NULL,consent_version=consent_version+1 WHERE id=%s",
                 (lease["id"],),
             )
-            lease["status"] = "requested"
+            lease["status"] = ImpersonationStatus.REQUESTED
             lease["accepted_generation"] = None
             lease["accepted_owner"] = None
             lease["consent_version"] += 1
-        if lease["status"] == "active" and (
+        if lease["status"] == ImpersonationStatus.ACTIVE and (
             lease["accepted_generation"],
             lease["accepted_owner"],
         ) != (incarnation.generation, incarnation.owner):
@@ -434,7 +447,7 @@ def native_status(
                 generation=str(incarnation.generation),
             )
         result = public(lease)
-    if was_open and result["status"] == "expired":
+    if was_open and result["status"] == ImpersonationStatus.EXPIRED:
         wake_agent(db, bus, agent_id, roster_changed=True)
     return result
 
@@ -469,7 +482,7 @@ def release(
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(lease, caller)
-        if lease["status"] == "released":
+        if lease["status"] == ImpersonationStatus.RELEASED:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
@@ -479,7 +492,7 @@ def release(
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(lease, caller)
-        if lease["status"] == "released":
+        if lease["status"] == ImpersonationStatus.RELEASED:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])

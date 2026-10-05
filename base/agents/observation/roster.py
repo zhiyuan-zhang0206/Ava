@@ -15,6 +15,7 @@ from psycopg import sql
 from pydantic import BaseModel
 
 from base.agents import AgentStatus, LivenessState
+from base.agents.impersonation.status import OpenImpersonationStatus
 from base.agents.observation.evidence import (
     AgentAvailability,
     AgentObservation,
@@ -61,8 +62,8 @@ class AgentCard(AgentLineage):
     # "active"), or None with no open lease. Only "active" means the agent is
     # actually taken over — a requested/accepted lease still runs the native
     # agent until activation at its next safe boundary (see
-    # base/agents/impersonation/_store.py's OPEN tuple).
-    open_impersonation_status: Literal["requested", "accepted", "active"] | None
+    # base/agents/impersonation/status.py's OPEN tuple).
+    open_impersonation_status: OpenImpersonationStatus | None
 
 
 class AgentDirectoryPage(BaseModel):

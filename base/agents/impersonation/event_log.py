@@ -13,6 +13,7 @@ audit event, still holds the body itself.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, cast
 
@@ -33,7 +34,7 @@ MAX_LOG_ENTRIES = 100_000
 CENTRAL_SOURCE = "central"
 
 
-def is_log_native(lease: dict[str, Any]) -> bool:
+def is_log_native(lease: Mapping[str, Any]) -> bool:
     """Whether this lease records its events in its own entries (protocol v2)."""
     return (
         lease["automatic"] is True
@@ -61,7 +62,7 @@ def locked_receipt_state(conn: psycopg.Connection, lease_id: str, source_key: st
 
 
 def append_source_event(
-    conn: psycopg.Connection, lease: dict[str, Any], event: Event, *, source_key: str
+    conn: psycopg.Connection, lease: Mapping[str, Any], event: Event, *, source_key: str
 ) -> None:
     """Record one event in the lease's own log, in the caller's transaction.
 
