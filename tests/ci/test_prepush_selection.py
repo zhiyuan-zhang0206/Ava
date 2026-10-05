@@ -8,7 +8,6 @@ throwaway repository; `test_prepush_hooks.py` holds the guard, install and stage
 
 # ruff: noqa: S603 — subprocess commands use only test-owned paths and fixture literals.
 
-import importlib
 import json
 import os
 import re
@@ -26,6 +25,7 @@ BRANCH_LINT = ROOT / "scripts/prepush-branch-lint.sh"
 FRESHNESS = ROOT / "scripts/provision/prepush_freshness.py"
 IF_CHANGED = ROOT / "scripts/prepush-if-changed.sh"
 PRECOMMIT_ESLINT = ROOT / "scripts/precommit-eslint.sh"
+SELECTOR = ROOT / "scripts/provision/prepush_frontend.py"
 
 
 def _init_probe_repo(path: Path) -> None:
@@ -106,10 +106,8 @@ def test_branch_lint_runs_whatever_the_load_and_without_a_lock(tmp_path: Path) -
     ]  # fmt: skip
 
 
-def test_eslint_runs_over_changed_files_at_commit_and_over_the_project_at_push() -> None:
-    """Twice by design: a hook is light only if its cost follows the change (commit), and a
-    type-aware rule can react to a type that changed in another file, which a per-file run cannot
-    see (push). The commit hook keeps the id CI's SKIP lists name."""
+def test_eslint_keeps_commit_hook_and_scopes_push_contribution() -> None:
+    """Keep the existing commit check and CI-compatible push hook ID."""
     hooks = _hooks()
     changed, whole = hooks["frontend-eslint"], hooks["frontend-eslint-full"]
     assert "stages" not in changed, "the changed-files run belongs to the commit stage"
@@ -117,7 +115,7 @@ def test_eslint_runs_over_changed_files_at_commit_and_over_the_project_at_push()
     assert "pass_filenames" not in changed, "it must be handed the changed files"
     assert whole["stages"] == ["pre-push"]
     assert whole["pass_filenames"] is False
-    assert "bash scripts/prepush-guard.sh eslint -- " in whole["entry"]
+    assert whole["entry"] == ".venv/bin/python scripts/provision/prepush_frontend.py eslint"
 
 
 # ── the commit-stage ESLint run over changed files ──────────────────────────────
@@ -234,6 +232,7 @@ def freshness_repo(tmp_path: Path) -> tuple[Path, Path]:
     repo = tmp_path / "repo"
     (repo / "scripts/provision").mkdir(parents=True)
     (repo / "scripts/provision/prepush_freshness.py").write_text(FRESHNESS.read_text())
+    (repo / "scripts/prepush-base.sh").write_text((ROOT / "scripts/prepush-base.sh").read_text())
     (repo / ".pre-commit-config.yaml").write_text((ROOT / ".pre-commit-config.yaml").read_text())
     calls = tmp_path / "calls.log"
     fake = repo / ".venv/bin/pre-commit"
@@ -352,16 +351,14 @@ def test_a_branch_touching_no_artifact_input_runs_nothing(
     assert "nothing to add" in result.stdout
 
 
-def test_an_unknown_range_runs_every_artifact_hook(freshness_repo: tuple[Path, Path]) -> None:
-    """No origin/main: not knowing what the branch changed is not a reason to skip."""
+def test_an_unknown_range_rejects_artifact_selection(freshness_repo: tuple[Path, Path]) -> None:
     repo, calls = freshness_repo
     _init_probe_repo(repo)
     _commit_all(repo, "base")
     result = _run_freshness(repo)
-    assert result.returncode == 0, result.stderr
-    assert sorted(_hooks_run(calls)) == sorted(
-        importlib.import_module("scripts.provision.prepush_freshness").HOOKS
-    )
+    assert result.returncode != 0
+    assert _hooks_run(calls) == []
+    assert "requires local origin/main" in result.stderr
 
 
 def test_types_codegen_is_skipped_loudly_without_node_modules(
@@ -370,7 +367,9 @@ def test_types_codegen_is_skipped_loudly_without_node_modules(
     repo, calls = freshness_repo
     subprocess.run(["rm", "-rf", str(repo / "ui/web/node_modules")], check=True)
     _init_probe_repo(repo)
-    _commit_all(repo, "base")  # no origin/main: every hook is due
+    _branch_from(repo, {"gateway/removed.py": "x = 1\n"})
+    subprocess.run(["git", "-C", str(repo), "rm", "-q", "gateway/removed.py"], check=True)
+    _commit_all(repo, "delete codegen input")
     result = _run_freshness(repo)
     assert "PRE-PUSH SKIPPED [types-codegen-fresh]: missing ui/web/node_modules" in result.stderr
     assert "types-codegen-fresh" not in _hooks_run(calls)
@@ -379,8 +378,9 @@ def test_types_codegen_is_skipped_loudly_without_node_modules(
 def test_a_failing_artifact_hook_fails_the_push(freshness_repo: tuple[Path, Path]) -> None:
     repo, calls = freshness_repo
     (repo / ".venv/bin/pre-commit").write_text(f'#!/bin/sh\necho "$@" >> {calls}\nexit 1\n')
-    _init_probe_repo(repo)
-    _commit_all(repo, "base")
+    _branch_from(repo, {"gateway/removed.py": "x = 1\n"})
+    subprocess.run(["git", "-C", str(repo), "rm", "-q", "gateway/removed.py"], check=True)
+    _commit_all(repo, "delete codegen input")
     assert _run_freshness(repo).returncode == 1
 
 
@@ -430,13 +430,26 @@ def test_if_changed_runs_for_an_added_changed_or_deleted_match(tmp_path: Path) -
     assert marker.read_text() == "RAN\n"
 
 
-def test_if_changed_runs_when_the_range_is_unknown(tmp_path: Path) -> None:
+def test_if_changed_rejects_unknown_scope(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_probe_repo(repo)  # no commit, no origin/main
     marker = tmp_path / "ran"
-    assert _run_if_changed(repo, r"\.py$", marker).returncode == 0
-    assert marker.read_text() == "RAN\n"
+    result = _run_if_changed(repo, r"\.py$", marker)
+    assert result.returncode != 0
+    assert "requires local origin/main" in result.stderr
+    assert not marker.exists()
+
+
+def test_if_changed_rejects_invalid_pattern(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo_with_origin_main(repo)
+    marker = tmp_path / "ran"
+    result = _run_if_changed(repo, "[", marker)
+    assert result.returncode != 0
+    assert not marker.exists()
+    assert "skipping" not in result.stdout
 
 
 def test_patch_targets_full_scan_is_gated_on_python_changes() -> None:
@@ -449,3 +462,260 @@ def test_patch_targets_full_scan_is_gated_on_python_changes() -> None:
         "bash", "scripts/prepush-if-changed.sh", r"\.py$", "--",
         ".venv/bin/python", "scripts/lint/patch_targets.py",
     ]  # fmt: skip
+
+
+# Frontend contribution scope across real rebase and pre-commit push ranges.
+
+
+def git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def commit(repo: Path, path: str, content: str) -> None:
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "fixture change")
+
+
+@pytest.fixture
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
+        monkeypatch.delenv(key, raising=False)
+    result = tmp_path / "repo"
+    result.mkdir()
+    git(result, "init", "-q", "-b", "main")
+    git(result, "config", "user.email", "test@example.com")
+    git(result, "config", "user.name", "Test")
+    commit(result, ".gitignore", "node_modules/\n")
+    git(result, "update-ref", "refs/remotes/origin/main", "HEAD")
+    bins = result / "ui/web/node_modules/.bin"
+    bins.mkdir(parents=True)
+    for name in ("vitest", "eslint", "next", "tsc"):
+        (bins / name).symlink_to(sys.executable)
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    for name in ("node", "npm", "npx"):
+        (probe / name).write_text(
+            f"#!{sys.executable}\nimport os,json,sys\n"
+            "if os.path.basename(sys.argv[0]) in {'npx', 'npm'}:\n"
+            " with open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n"
+            " raise SystemExit(int(os.environ.get('TOOL_STATUS', '0')))\n"
+            "sys.stdin.read()\n"
+        )
+        (probe / name).chmod(0o755)
+    monkeypatch.setenv("PATH", str(probe) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("CALLS", str(result / "calls.jsonl"))
+    monkeypatch.setenv("AVA_PREPUSH_MAX_LOAD_PER_CORE", "1000000")
+    monkeypatch.setenv("AVA_PREPUSH_LOCK_DIR", str(tmp_path / "locks"))
+    return result
+
+
+def select(repo: Path, tool: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SELECTOR), tool],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+
+
+def calls(repo: Path) -> list[list[str]]:
+    log = repo / "calls.jsonl"
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+@pytest.mark.parametrize("tool", ["tsc", "eslint", "vitest"])
+def test_rebased_upstream_ui_does_not_invoke_tool(repo: Path, tool: str) -> None:
+    git(repo, "checkout", "-qb", "contribution")
+    commit(repo, "notes.md", "own docs")
+    old = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "main")
+    commit(repo, "ui/web/src/upstream.ts", "export const x = 1")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "contribution")
+    git(repo, "rebase", "origin/main")
+    assert "ui/web/src/upstream.ts" in git(repo, "diff", "--name-only", old, "HEAD")
+    # Exercise actual pre-commit old-tip selection, not just the selector function.
+    config = repo / ".pre-commit-config.yaml"
+    legacy_command = {
+        "tsc": "npx --no-install next typegen && npx --no-install tsc --noEmit",
+        "eslint": "npm run lint",
+        "vitest": "npx --no-install vitest run",
+    }[tool]
+    config.write_text(
+        "repos:\n- repo: local\n  hooks:\n  - id: frontend\n    name: frontend\n"
+        f"    entry: bash {ROOT / 'scripts/prepush-guard.sh'} {tool} -- bash -c 'cd ui/web && {legacy_command}'\n"
+        "    language: system\n    stages: [pre-push]\n    files: ^ui/web/.*\\.(ts|tsx)$\n    pass_filenames: false\n"
+    )
+    legacy = subprocess.run(
+        [
+            str(ROOT / ".venv/bin/pre-commit"),
+            "run",
+            "--hook-stage",
+            "pre-push",
+            "--from-ref",
+            old,
+            "--to-ref",
+            "HEAD",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert legacy.returncode == 0, legacy.stdout + legacy.stderr
+    assert calls(repo), "the old push-tip trigger must reproduce the upstream-only tool invocation"
+    (repo / "calls.jsonl").unlink()
+    config.write_text(
+        "repos:\n- repo: local\n  hooks:\n  - id: frontend\n    name: frontend\n"
+        f"    entry: {sys.executable} {SELECTOR} {tool}\n"
+        "    language: system\n    stages: [pre-push]\n    always_run: true\n    pass_filenames: false\n"
+    )
+    result = subprocess.run(
+        [
+            str(ROOT / ".venv/bin/pre-commit"),
+            "run",
+            "--hook-stage",
+            "pre-push",
+            "--from-ref",
+            old,
+            "--to-ref",
+            "HEAD",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert calls(repo) == []
+
+
+def test_new_branch_runs_own_source_and_disk_consumer(repo: Path) -> None:
+    git(repo, "checkout", "-qb", "new-contribution")  # no remote branch exists
+    commit(repo, "ui/web/src/widget.tsx", "export const x = 1")
+    result = select(repo, "vitest")
+    assert result.returncode == 0, result.stderr
+    assert calls(repo) == [
+        [
+            "--no-install",
+            "vitest",
+            "run",
+            "--passWithNoTests=false",
+            "src/lib/localstorage-policy.test.ts",
+        ],
+        ["--no-install", "vitest", "related", "--run", "--passWithNoTests=false", "src/widget.tsx"],
+    ]
+
+
+def test_deleted_and_renamed_inputs_remain_visible(repo: Path) -> None:
+    commit(repo, "ui/web/src/old name.ts", "export const x = 1")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "mv", "ui/web/src/old name.ts", "ui/web/src/new name.ts")
+    git(repo, "commit", "-qm", "rename")
+    result = select(repo, "vitest")
+    assert result.returncode == 0, result.stderr
+    assert "deleted-input closure requires CI" in result.stderr
+    assert calls(repo)[-1][-1] == "src/new name.ts"
+    (repo / "calls.jsonl").unlink()
+    result = select(repo, "eslint")
+    assert result.returncode == 0, result.stderr
+    assert calls(repo)[0][-1] == "src/new name.ts"
+    assert "src/old name.ts" not in calls(repo)[0]
+
+
+def test_global_inputs_report_ci_gap_and_keep_known_disk_test(repo: Path) -> None:
+    commit(repo, "ui/web/package.json", "{}")
+    result = select(repo, "vitest")
+    assert result.returncode == 0
+    assert "UNVERIFIED" in result.stderr
+    assert calls(repo) == [
+        [
+            "--no-install",
+            "vitest",
+            "run",
+            "--passWithNoTests=false",
+            "src/lib/frontend-bind.test.ts",
+        ]
+    ]
+
+
+@pytest.mark.parametrize("tool", ["tsc", "eslint", "vitest"])
+def test_missing_base_is_not_no_changes(repo: Path, tool: str) -> None:
+    git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    result = select(repo, tool)
+    assert result.returncode != 0
+    assert "requires local origin/main" in result.stderr
+    assert "no tool invoked" not in result.stdout
+    assert calls(repo) == []
+
+
+def test_empty_or_failed_related_run_stays_failed(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commit(repo, "ui/web/scripts/changed.mjs", "export const x = 1")
+    monkeypatch.setenv("TOOL_STATUS", "1")
+    result = select(repo, "vitest")
+    assert result.returncode == 1
+    assert calls(repo)[0][2:5] == ["related", "--run", "--passWithNoTests=false"]
+
+
+@pytest.mark.parametrize(
+    ("path", "consumer"),
+    [
+        ("services/entrypoints/gate/static/login.html", "src/lib/gate-login.test.ts"),
+        ("tests/fixtures/events/chat_delta.json", "src/lib/event-fixtures.test.ts"),
+        ("base/packages/plugins/ui_contributions.py", "src/components/plugin-nav-icon.test.ts"),
+        ("ui/app/app-ui/locales/en.js", "src/app/app-ui-locale.test.ts"),
+        ("ui/web/messages/en/core.json", "src/i18n/messages-layout.test.ts"),
+        ("ui/web/src/app/globals.css", "src/app/globals-font-stack.test.ts"),
+    ],
+)
+def test_known_filesystem_consumers_run_without_import_edge(
+    repo: Path, path: str, consumer: str
+) -> None:
+    commit(repo, path, "fixture")
+    result = select(repo, "vitest")
+    assert result.returncode == 0, result.stderr
+    assert consumer in calls(repo)[0]
+    assert calls(repo)[0][2] == "run"
+
+
+def test_delete_only_input_checks_type_project_and_reports_test_closure(repo: Path) -> None:
+    commit(repo, "ui/web/src/removed.ts", "export const x = 1")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "rm", "ui/web/src/removed.ts")
+    git(repo, "commit", "-qm", "delete")
+    result = select(repo, "tsc")
+    assert result.returncode == 0, result.stderr
+    assert calls(repo) == [["--no-install", "next", "typegen"], ["--no-install", "tsc", "--noEmit"]]
+    (repo / "calls.jsonl").unlink()
+    result = select(repo, "vitest")
+    assert "deleted-input closure requires CI" in result.stderr
+    assert calls(repo) == [
+        [
+            "--no-install",
+            "vitest",
+            "run",
+            "--passWithNoTests=false",
+            "src/lib/localstorage-policy.test.ts",
+        ]
+    ]
+
+
+def test_eslint_pipeline_preserves_native_failure(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commit(repo, "ui/web/src/changed.ts", "export const x = 1")
+    monkeypatch.setenv("TOOL_STATUS", "7")
+    result = select(repo, "eslint")
+    assert result.returncode == 7
+    assert calls(repo)[0][-1] == "src/changed.ts"

@@ -17,8 +17,8 @@
 # lock (unlike the heavy tools behind scripts/prepush-guard.sh): it is light enough to run
 # every time, and a load-dependent skip would leave rebased commits unchecked at random.
 #
-# It still skips loudly when it cannot know the range (no origin/main) or has no
-# pre-commit to run. A local skip is never evidence the check ran; CI
+# Missing range fails explicitly; a missing pre-commit executable still reports
+# an unverified local run. A local skip is never evidence the check ran; CI
 # (backend-structure / merged-tree-structure) independently re-verifies the pushed and
 # merged tree.
 set -euo pipefail
@@ -28,13 +28,8 @@ skip() {
     exit 0
 }
 
-command -v git >/dev/null || skip "git is not installed"
-git rev-parse --verify -q origin/main >/dev/null 2>&1 \
-    || skip "origin/main is not resolvable locally; fetch first for full local coverage (CI still checks the pushed tree)"
+base_sha="$(bash "$(dirname "$0")/prepush-base.sh")"
 
-base_sha="$(git merge-base origin/main HEAD 2>/dev/null)" \
-    || skip "could not compute 'git merge-base origin/main HEAD'"
-[[ -n "$base_sha" ]] || skip "empty merge-base with origin/main"
 [[ -x .venv/bin/pre-commit ]] || skip "missing .venv/bin/pre-commit; run env -u VIRTUAL_ENV uv sync"
 
 exec .venv/bin/pre-commit run --hook-stage pre-commit --from-ref "$base_sha" --to-ref HEAD

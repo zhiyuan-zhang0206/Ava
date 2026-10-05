@@ -6,18 +6,7 @@
 # range: merge-base(origin/main, HEAD)..HEAD.
 set -euo pipefail
 
-skip() {
-    echo "WARNING: PRE-PUSH SKIPPED [pyright]: $*. CI must pass before merge." >&2
-    exit 0
-}
-
-command -v git >/dev/null || skip "git is not installed"
-git rev-parse --verify -q origin/main >/dev/null 2>&1 \
-    || skip "origin/main is not resolvable locally; fetch first for full local coverage (CI still checks the pushed tree)"
-
-base_sha="$(git merge-base origin/main HEAD 2>/dev/null)" \
-    || skip "could not compute 'git merge-base origin/main HEAD'"
-[[ -n "$base_sha" ]] || skip "empty merge-base with origin/main"
+base_sha="$(bash "$(dirname "$0")/prepush-base.sh")"
 
 # --diff-filter=ACMR (Added/Copied/Modified/Renamed) matches pre-commit's own
 # selection; a deleted .py file cannot be handed to pyright, and a renamed
