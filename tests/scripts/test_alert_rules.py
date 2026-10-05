@@ -1132,3 +1132,17 @@ def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> 
     assert "ava_event_log_drop_last_dropped_at_ratio" in query["model"]["expr"]
     threshold = next(q for q in rule["data"] if q["refId"] == "D")
     assert threshold["model"]["conditions"][0]["evaluator"] == {"type": "lt", "params": [300]}
+
+
+def test_delete_rules_tombstones_never_name_live_rules() -> None:
+    """The R23 tombstone must stay listed (orgId 1) and never name a live rule;
+    a dropped entry silently re-orphans the retire (README "Retired rules")."""
+    doc = yaml.safe_load((_RULES.parent / "delete-rules.yml").read_text(encoding="utf-8"))
+    assert doc["apiVersion"] == 1
+    entries = doc["deleteRules"]
+    assert entries, "an empty deleteRules re-orphans every retired rule"
+    live = {r["uid"] for r in _load_rules()}
+    for entry in entries:
+        assert set(entry) == {"orgId", "uid"} and entry["orgId"] == 1
+        assert entry["uid"] and len(entry["uid"]) <= 40 and entry["uid"] not in live
+    assert {"orgId": 1, "uid": "ava-ops-pitr-storage-growth"} in entries

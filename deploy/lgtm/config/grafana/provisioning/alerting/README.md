@@ -33,10 +33,21 @@ dashboards).
   which are substring searches), so multi-alternative `event_name=~"a|b"`
   matches exact event names.
 
+### Retired rules (tombstones)
+
+Grafana does not delete a file-provisioned rule that disappears from
+`rules.yml`; the rule survives as an orphan and keeps evaluating. A rule
+removed here must also be listed in `delete-rules.yml` (a `deleteRules:`
+tombstone): file provisioning deletes the UID on the next alerting reload or
+restart, and entries are idempotent, so tombstones stay after the rule is
+gone. First use: R23 (`ava-ops-pitr-storage-growth`, retired 2026-10-02,
+removed from the station 2026-10-05).
+
 ## Where these run (LGTM stack)
 
-Native Grafana on the LGTM host (port 3003) evaluates these rules from the
-converge-rendered provisioning tree (`$AVA_HOME/lgtm/native/config/
+Native Grafana on the LGTM host (port 3003 by default, 53003 on the station via
+`AVA_LGTM_GRAFANA_PORT`) evaluates these rules from the converge-rendered
+provisioning tree (`$AVA_HOME/lgtm/native/config/
 provisioning/`, copied verbatim by `cli/commands/observability/lgtm_native.py` from the
 source checkout's `deploy/lgtm/config/grafana/provisioning` — rendered files
 carry content-hash user-edit protection; the webhook URL is a Grafana-native
