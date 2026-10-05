@@ -114,6 +114,8 @@ retransmission timeout.
   running the baseline plus all post-baseline migrations, must converge to the
   same schema.
 
+Contributor steps and validation commands: [database migration guide](../../../../db/docs/migrations.md).
+
 ## Key Dependencies
 
 - [[base/docs/base.ava.okf.md]] — the base-layer overview

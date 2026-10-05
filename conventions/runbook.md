@@ -2338,7 +2338,7 @@ environment:
 
 For targeted local verification, skip `frontend-vitest` by name at pre-push
 and run only the relevant vitest files, as described in the
-[local-test skill](../.agents/skills/run-local-tests/SKILL.md).
+[testing guide](testing.md).
 The [Vitest placement decision](../decisions/2026-09-24-vitest-prepush-selection.md)
 records the measurements, push-cost projection and affected-test-selection limits.
 

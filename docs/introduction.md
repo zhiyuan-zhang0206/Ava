@@ -341,7 +341,7 @@ node for the full design.
 | Install / deploy | [`.agents/skills/deploy-ava-cluster/SKILL.md`](../.agents/skills/deploy-ava-cluster/SKILL.md) |
 | Set up dev environment | [`conventions/dev-setup.md`](../conventions/dev-setup.md) |
 | Run ops / troubleshoot | [`conventions/runbook.md`](../conventions/runbook.md) |
-| Write a PR | **[`.agents/skills/write-a-pr-description/SKILL.md`](../.agents/skills/write-a-pr-description/SKILL.md)** |
+| Write a PR | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Follow coding conventions | [`conventions/python-conventions.md`](../conventions/python-conventions.md) |
 | Know what NOT to do | [`conventions/non-goals.md`](../conventions/non-goals.md) |
 | See glossary | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) (OKF terminology sections) |

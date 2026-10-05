@@ -166,7 +166,7 @@ dev-host inventory + secret paths: [`conventions/dev-setup.md`](conventions/dev-
 tracked as an applied SET keyed by name; `db/schema.sql` is the squashed baseline.
 There are no down migrations: a mistake is fixed forward, lossy operations go
 **expand-contract**, and a migration already on main is never edited, deleted or renamed
-(`scripts/content_lint/lint_migrations.py` enforces it). **Adding a migration:** `.agents/skills/add-a-migration/SKILL.md`.
+(`scripts/content_lint/lint_migrations.py` enforces it). **Adding a migration:** [database migration guide](db/docs/migrations.md).
 
 ## Agent instruction files
 
@@ -185,7 +185,7 @@ Five axes, one fact per place: `*.ava.okf.md` in each package's `docs/` = what t
 | Understand architecture | [`okf/index.ava.okf.md`](okf/index.ava.okf.md) (domain overviews + the node graph) |
 | Set up dev environment | [`conventions/dev-setup.md`](conventions/dev-setup.md) |
 | Run ops / deploy | [`conventions/runbook.md`](conventions/runbook.md) |
-| Write a PR | **[`.agents/skills/write-a-pr-description/SKILL.md`](.agents/skills/write-a-pr-description/SKILL.md)** |
+| Write a PR | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Understand part of the codebase interactively | [`ava_builtins/skills/practice/ava-workflow/calibrate/SKILL.md`](ava_builtins/skills/practice/ava-workflow/calibrate/SKILL.md) |
 | Find every reference before changing or moving something | `.venv/bin/python scripts/audit/where_used.py TARGET` (`pkg.mod:name`, `pkg.mod` or a path): importers, tests, patch targets, docs, baselines in one call; after a move, `scripts/audit/module_moves.py OLD=NEW` |
 | Follow coding conventions | [`conventions/python-conventions.md`](conventions/python-conventions.md) |
@@ -219,11 +219,11 @@ rule 4's ask-first loop is [workflow align](ava_builtins/skills/practice/ava-wor
 ## Workflow (mandatory)
 
 - **Worktree + PR** — every change in a worktree made by `bash scripts/setup-worktree.sh <task>` (run from the main clone or any worktree: branch `ava-<task>` off fresh `origin/main`, its own real `.venv`, locked install, `npm ci` for `ui/web`, hook / editable-venv checks), then `cd` to the path on its last line `worktree ready: <path> (branch <branch>)`. Never `git worktree add` by hand or symlink a `.venv`; a worktree from Claude Code's own tool gets the same script with no argument, run inside it. Merged via PR through the Trunk merge queue; direct push forbidden. Merge is not deployment; runtime rollout requires separate operator authorization and verification. [Workflow →](.agents/skills/ship-a-change/SKILL.md)
-- **PR description** — must have file-tree diff with ★ critical paths + prose data flow. [Spec →](.agents/skills/write-a-pr-description/SKILL.md)
+- **PR description** — must have file-tree diff with ★ critical paths + prose data flow. [Contribution guide →](CONTRIBUTING.md)
 - **Tech-debt sweeps** — follow `.agents/skills/ava-sweeper/` (debt classes + tracker; boundary vs. lint in [`conventions/lint-vs-sweeper.md`](conventions/lint-vs-sweeper.md)).
 - **Complexity analysis** — McCabe cyclomatic complexity + maintainability index via radon, ranked for refactoring. [Skill →](.agents/skills/measure-complexity/SKILL.md)
 - **Local tests before push** — local checks cover **only what you changed**: `.venv/bin/pytest -n 2 <files>` on the test files you changed plus those that execute your changed code; pyright on your changed files only (`git diff --name-only --diff-filter=ACMR -z origin/main...HEAD -- '*.py' | xargs -0 -r .venv/bin/pyright`); UI eslint and vitest on the changed paths, `tsc --noEmit` once after the last UI edit.
-  **Never** run `pyright` or `pytest` without file arguments, on a whole directory, or as any full suite locally — including for `base/` changes; full suites run in CI only (user ruling 2026-09-22; pyright included 2026-10-01). Do not re-run a check when no code changed since its last run. [How to →](.agents/skills/run-local-tests/SKILL.md)
+  **Never** run `pyright` or `pytest` without file arguments, on a whole directory, or as any full suite locally — including for `base/` changes; full suites run in CI only (user ruling 2026-09-22; pyright included 2026-10-01). Do not re-run a check when no code changed since its last run. [How to →](conventions/testing.md)
 - **Git hooks** — install both stages from the main clone's stable `.venv`; commit hooks judge only the change, heavy static checks run at pre-push. [Install and guardrails →](conventions/runbook.md#git-hooks-pre-commit--pre-push)
 - **CI to green, then enqueue, then clean up** — poll `.venv/bin/python scripts/ci_utils.py <PR#>` until all-green (fix red immediately; `NO_WORKFLOW_RUNS` = the suite never ran = not green), then submit with `--wait --merge` (submits to the Trunk merge queue; the queue verifies the combined tree that actually lands — a PR with conflicts still needs a manual `git rebase origin/main` first; PRs awaiting user review are never enqueued). After merge: remove the local worktree and delete the remote branch. [Detail →](.agents/skills/ship-a-change/SKILL.md)
 - **Commit = code + docs stable** — docs go in same PR. Structure changes reconcile the package's `docs/` OKF nodes; scan `conventions/` + `future/` for stale refs.

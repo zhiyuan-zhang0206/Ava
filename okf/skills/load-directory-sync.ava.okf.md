@@ -47,9 +47,9 @@ channels]]):
   `engines.ava` / `requires_commit` excludes the running host is dropped from
   the catalog/index, with the reason visible in `ava packages status`.
 
-**Not converged — the 12 real `.agents/skills/` project skills.** The
+**Not converged — the real `.agents/skills/` project skills.** The
 repo-development workflow and Ava-cluster-operations family (ship-a-change,
-write-a-pr-description, ava-self-development, …) stopped being
+ava-self-development, …) stopped being
 fleet-distributed (issue #146;
 `decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`,
 resolving the open point in

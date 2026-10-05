@@ -1,14 +1,9 @@
----
-name: add-a-migration
-description: Adds and changes Ava database migrations safely. Use when the task mentions migrations, schema changes, expand-contract, or `db/schema.sql`, even if it sounds like a small SQL edit.
----
-
-# Add a migration
+# Database migrations
 
 The model itself — baseline vs post-baseline deltas, the applied **set** keyed by
 migration name, the immutability of merged migrations, expand-contract for lossy
 operations, and the bidirectional `assert_schema_current` check — is in
-`base/deploy/schema/docs/migrations.ava.okf.md`. What follows is how you operate it.
+[migration model](../../base/deploy/schema/docs/migrations.ava.okf.md). What follows is how you operate it.
 
 ## Applying migrations
 

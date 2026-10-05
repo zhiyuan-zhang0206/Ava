@@ -62,7 +62,6 @@ tech debt.
 | ava-self-evolution | Weekly collect real runs into trace dataset, mine skill/plugin regressions and produce fix reports | [[ava_builtins/skills/platform/ava-self-evolution/docs/ava-self-evolution.ava.okf.md]] |
 | skill-creator | Create / improve / review skill | [[ava_builtins/skills/platform/skill-creator/docs/skill-creator.ava.okf.md]] |
 | sweeper | Tech debt sweep engine (reconcile repo debt tracker, land PR) | [[ava_builtins/skills/practice/sweeper/docs/sweeper.ava.okf.md]] |
-| auto-review | Automatic PR semantic review (AGENTS.md compliance, doc sync, security, test judgment) | [[ava_builtins/skills/practice/auto-review/docs/auto-review.ava.okf.md]] |
 
 ## Web & media
 Fetching content from the web and media — driving AI web apps, per-source
