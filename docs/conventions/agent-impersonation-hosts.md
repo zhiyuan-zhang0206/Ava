@@ -50,7 +50,7 @@ value, or supervisor-held credential to manage. The old
 `shell_snapshot` settings and presence check) is obsolete: a stale or unrelated
 process gets a classified refusal (no-anchor / anchor-dead / chain-mismatch)
 instead of a credential error. A control-orphaned lease stays parked until the
-native side ends it (restart/stop) or its TTL expires. The attestation anchor set is the supported controller ends — currently `codex`, `claude` and `dsh` (`base/agents/impersonation/_impersonation_store.verify_caller`); claude's native install layout (`<install>/claude/versions/<version>`, whose process name is the version) is recognized as its controller, and dsh — a Node program — is recognized as a `node` process whose script (recorded by `base/native_process/ownership.process_metadata` for Node processes) is the `dsh` launcher or `@deepseek-ai/dsh/lib/bin.js`. Extending support to a new controller CLI means extending that set and this list together.
+native side ends it (restart/stop) or its TTL expires. The attestation anchor set is the supported controller ends — currently `codex`, `claude` and `dsh` (`base/agents/impersonation/_store.verify_caller`); claude's native install layout (`<install>/claude/versions/<version>`, whose process name is the version) is recognized as its controller, and dsh — a Node program — is recognized as a `node` process whose script (recorded by `base/native_process/ownership.process_metadata` for Node processes) is the `dsh` launcher or `@deepseek-ai/dsh/lib/bin.js`. Extending support to a new controller CLI means extending that set and this list together.
 
 ### One app server for TUI and relay
 
