@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
@@ -31,7 +31,7 @@ def test_normal_start_cannot_release_maintenance() -> None:
 def test_receipts_cannot_substitute_for_a_different_restart_or_generation() -> None:
     first = pause_owner.begin_maintenance("migration", WHEN).snapshot
     assert first.maintenance is not None
-    hold = MaintenanceHold("draining", {42: 100, 43: 101})
+    hold = MaintenanceHold(MaintenancePhase.DRAINING, {42: 100, 43: 101})
     pause_owner.change_maintenance("migration", WHEN, first.maintenance, hold)
     admission.record_drained(42, 100)
     assert admission.pending_command(42) is None
@@ -39,12 +39,12 @@ def test_receipts_cannot_substitute_for_a_different_restart_or_generation() -> N
     with pytest.raises(RuntimeError, match="cohort"):
         admission.record_drained(43, 102)
     with pytest.raises(RuntimeError, match="fully drained"):
-        admission.set_phase("migration", WHEN, "drained")
+        admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
     with pytest.raises(RuntimeError, match="generation"):
         admission.require_operation("migration", WHEN + timedelta(seconds=1))
     admission.record_drained(43, 101)
-    done = admission.set_phase("migration", WHEN, "drained")
-    assert done.maintenance == replace(hold, phase="drained", drained=(42, 43))
+    done = admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
+    assert done.maintenance == replace(hold, phase=MaintenancePhase.DRAINED, drained=(42, 43))
     assert admission.held()
 
 
@@ -61,11 +61,13 @@ def test_malformed_maintenance_never_becomes_an_inactive_deploy_pause() -> None:
 def test_replayed_cohort_write_cannot_drop_a_drain_receipt() -> None:
     original = pause_owner.begin_maintenance("migration", WHEN).snapshot
     assert original.maintenance is not None
-    hold = MaintenanceHold("draining", {42: 100})
+    hold = MaintenanceHold(MaintenancePhase.DRAINING, {42: 100})
     pause_owner.change_maintenance("migration", WHEN, original.maintenance, hold)
     admission.record_drained(42, 100)
     with pytest.raises(RuntimeError, match="progress changed"):
-        pause_owner.change_maintenance("migration", WHEN, hold, replace(hold, phase="drained"))
+        pause_owner.change_maintenance(
+            "migration", WHEN, hold, replace(hold, phase=MaintenancePhase.DRAINED)
+        )
 
 
 def test_quiesced_covers_only_the_stop_window() -> None:
@@ -73,15 +75,21 @@ def test_quiesced_covers_only_the_stop_window() -> None:
 
     first = pause_owner.begin_maintenance("migration", WHEN).snapshot
     assert first.maintenance is not None
-    assert first.maintenance.phase == "preparing"
+    assert first.maintenance.phase == MaintenancePhase.PREPARING
     assert not admission.quiesced()
 
     pause_owner.change_maintenance(
-        "migration", WHEN, first.maintenance, MaintenanceHold("draining")
+        "migration", WHEN, first.maintenance, MaintenanceHold(MaintenancePhase.DRAINING)
     )
     assert not admission.quiesced()
 
-    for phase in ("drained", "stopping", "stopped", "starting", "ready"):
+    for phase in (
+        MaintenancePhase.DRAINED,
+        MaintenancePhase.STOPPING,
+        MaintenancePhase.STOPPED,
+        MaintenancePhase.STARTING,
+        MaintenancePhase.READY,
+    ):
         current = admission.set_phase("migration", WHEN, phase)
         assert current.maintenance is not None
         assert admission.quiesced(), phase
@@ -102,16 +110,16 @@ def test_in_stop_leg_covers_only_the_drained_to_stopped_slice() -> None:
     assert not admission.in_stop_leg()
 
     pause_owner.change_maintenance(
-        "migration", WHEN, first.maintenance, MaintenanceHold("draining")
+        "migration", WHEN, first.maintenance, MaintenanceHold(MaintenancePhase.DRAINING)
     )
     assert not admission.in_stop_leg()
 
-    for phase in ("drained", "stopping", "stopped"):
+    for phase in (MaintenancePhase.DRAINED, MaintenancePhase.STOPPING, MaintenancePhase.STOPPED):
         current = admission.set_phase("migration", WHEN, phase)
         assert current.maintenance is not None
         assert admission.in_stop_leg(), phase
 
-    for phase in ("starting", "ready"):
+    for phase in (MaintenancePhase.STARTING, MaintenancePhase.READY):
         current = admission.set_phase("migration", WHEN, phase)
         assert current.maintenance is not None
         assert not admission.in_stop_leg(), phase
@@ -124,12 +132,17 @@ def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
     assert first.maintenance is not None
     assert not admission.business_paused()
     pause_owner.change_maintenance(
-        "migration", WHEN, first.maintenance, MaintenanceHold("draining")
+        "migration", WHEN, first.maintenance, MaintenanceHold(MaintenancePhase.DRAINING)
     )
     assert not admission.business_paused()
-    admission.set_phase("migration", WHEN, "drained")
+    admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
     assert not admission.business_paused()  # Other hosts may still need this gateway's SDK.
-    for phase in ("stopping", "stopped", "starting", "ready"):
+    for phase in (
+        MaintenancePhase.STOPPING,
+        MaintenancePhase.STOPPED,
+        MaintenancePhase.STARTING,
+        MaintenancePhase.READY,
+    ):
         admission.set_phase("migration", WHEN, phase)
         assert admission.business_paused(), phase
     final = admission.snapshot()
@@ -185,7 +198,7 @@ def test_clear_failures_drops_blocking_receipts_and_keeps_the_rest() -> None:
     first = pause_owner.begin_maintenance("migration", WHEN).snapshot
     assert first.maintenance is not None
     hold = MaintenanceHold(
-        "draining",
+        MaintenancePhase.DRAINING,
         {1: 11, 2: 22},
         drained=(2,),
         failures={1: "RuntimeError"},

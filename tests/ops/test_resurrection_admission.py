@@ -25,6 +25,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
+from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -637,6 +638,6 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
         acquired_at=when,
     )
 
-    assert hold.phase == "draining"
+    assert hold.phase == MaintenancePhase.DRAINING
     assert hold.parked == (resurrected,)
     assert hold.commands == {}

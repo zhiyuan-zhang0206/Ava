@@ -19,7 +19,7 @@ from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.config import settings
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.hold_driver import HoldDriver
-from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 
 
 class LifecycleCollisionError(RuntimeError):
@@ -70,7 +70,7 @@ def prepare(
     assert hold is not None  # noqa: S101
     if hold.failures:
         raise RuntimeError(f"maintenance has failed continuations: {sorted(hold.failures)}")
-    if hold.phase != "preparing":
+    if hold.phase != MaintenancePhase.PREPARING:
         return hold
     if conn.info.transaction_status != TransactionStatus.IDLE:
         raise RuntimeError("maintenance preparation requires an idle connection it can commit")
@@ -109,7 +109,7 @@ def prepare(
         for agent_id in sorted(hold.commands):
             commands[agent_id] = _restart(conn, agent_id, holder, acquired_at)
     _emit_orphan_settlements(settled)
-    draining = MaintenanceHold("draining", commands, parked=hold.parked)
+    draining = MaintenanceHold(MaintenancePhase.DRAINING, commands, parked=hold.parked)
     pause_owner.change_maintenance(
         holder, acquired_at, hold, draining, refresh_driver=driver is not None
     )

@@ -19,6 +19,7 @@ from base.db import Database
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
+from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
@@ -254,7 +255,7 @@ class TestPauseAgents:
 
         current = admission.snapshot()
         assert current is not None and current.maintenance is not None
-        assert current.maintenance.phase == "drained"
+        assert current.maintenance.phase == MaintenancePhase.DRAINED
         with TestClient(app) as client:
             assert client.get("/api/agents").status_code == 200
         assert not cluster_pause.is_paused(database)
@@ -269,7 +270,7 @@ class TestPauseAgents:
         first = pause_owner.read()
         agent_pause.pause_agents(database, event_bus)
         assert pause_owner.read() == first
-        assert first.maintenance is not None and first.maintenance.phase == "drained"
+        assert first.maintenance is not None and first.maintenance.phase == MaintenancePhase.DRAINED
         assert pause_backend.killed == pause_backend.spawned == []
 
 
