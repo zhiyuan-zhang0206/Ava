@@ -133,11 +133,14 @@ def test_a_passing_run_copies_the_evidence_out_and_deletes_only_its_vm(
     assert deleted[1] == result["vm"] and deleted[1].startswith(tart_vm.VM_PREFIX)
     assert [step["name"] for step in result["steps"]] == [
         "export", "clone", "boot", "keychain", "prepare-source", "toolchain", "python",
-        "profile-upload", "observer-upload", "init", "start", "observe", "snapshot",
+        "profile-upload", "observer-upload", "init", "retire-golden-helper", "start", "observe", "snapshot",
     ]  # fmt: skip
 
+    retirement = next(call for call in fake.commands("exec") if "ava stop" in call[-2])
+    assert retirement[1] == result["vm"]
 
-@pytest.mark.parametrize("failing", ["ava start", "uv sync", "git fetch", "ava init"])
+
+@pytest.mark.parametrize("failing", ["ava stop", "ava start", "uv sync", "git fetch", "ava init"])
 def test_a_failed_step_still_collects_and_deletes_the_vm(
     failing: str, fake: Fake, repo: Path, tmp_path: Path
 ) -> None:
@@ -368,6 +371,6 @@ def test_the_guest_logs_are_unpacked_only_as_plain_files_under_the_evidence_dire
 
 def test_every_step_the_run_records_has_a_bound() -> None:
     steps = {"clone", "keychain", "prepare-source", "toolchain", "python", "profile-upload",
-             "observer-upload", "init", "start", "observe", "snapshot"}  # fmt: skip
+             "observer-upload", "init", "retire-golden-helper", "start", "observe", "snapshot"}  # fmt: skip
     assert steps == set(tart_run.TIMEOUTS)
     assert all(seconds > 0 for seconds in tart_run.TIMEOUTS.values())
