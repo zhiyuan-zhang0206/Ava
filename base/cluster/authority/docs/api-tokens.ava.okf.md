@@ -24,8 +24,10 @@ while a daemon runs. Delivery mirrors the login: the root launcher gives each se
 `cli/commands/_data_plane.api_delivery`) only while the API is authenticated
 (a set human secret on the gateway, an API-bearing capability on a remote
 unit), so a delivered token always means "present a bearer"; the boot pass
-gives an admitted operator process the same token; exec children and watchers
-inherit it. Clients present `AVA_API_TOKEN` first (`base.cluster.machine.gateway_bearer`);
+gives an admitted operator process the same token. A pure runner's settings-lite
+CLI reads only the API token from its installed capability when the process has
+none and no launcher profile; exec children and watchers inherit delivered tokens. Clients present
+`AVA_API_TOKEN` first (`base.cluster.machine.gateway_bearer`);
 only an operator or gateway-profile process without one presents the human secret,
 while a process launched with the agent or runner profile and lacking one raises
 `GatewayApiTokenMissing` (a remote-managed plane delivers no token, so its gateway

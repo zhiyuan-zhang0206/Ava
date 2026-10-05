@@ -101,8 +101,8 @@ def test_impersonator_guide_carries_receipt_semantics_and_the_borrowed_context()
     assert "ava.tasks" in text
     assert "substitute new-agent assumptions" in text
     assert "A truncated push is not received yet" in text
+    assert "ava agents timeline <agent_id>" in text
     assert "ava.context.gateway.get" in text
-    assert "ava agents timeline" not in text
     assert "receipt, not completion" in text
     assert "process what arrives, then acknowledge it" not in text
     assert "Acknowledge only what you actually handled" not in text
