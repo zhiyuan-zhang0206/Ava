@@ -35,6 +35,14 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 
 ## Open
 
+### boundary:supervisor-intent-fixture-stop-window
+- **class**: boundary
+- **status**: open
+- **evidence**: `services/supervision/ava_root/tests/test_ava_root_intent.py:_supervisor` sets a 0.2s real-process stop budget for intent tests. In `test_restart_up_half_failure_retry_replaces_and_clears`, attempt 1 of [PR #4321, run 37318714866, shard 10](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/37318714866/job/111792197420) exhausted that window in `services/supervision/ava_root/stopping.py:_stop_posix_generation`, retaining live PID 10633 rather than falsely certifying closure. The next configured attempt passed this test; it failed a separate single-box port fixture instead. The fixture ties an intent-state assertion to a short native-process deadline. Root cause of the delayed exit remains unknown: the trace does not establish CPU load, signal-delivery failure or a production ownership-guard defect. Diagnose before changing the timeout or runtime behavior.
+- **first-seen**: 2026-10-05 (PR #4321)
+- **last-verified**: 2026-10-05
+
+
 ### locality:cli/commands/agents/control.py:cli/parsers/agents.py
 - **class**: locality
 - **status**: open
