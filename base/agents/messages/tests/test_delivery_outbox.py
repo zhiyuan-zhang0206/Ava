@@ -720,7 +720,7 @@ def test_journal_state_restores_enum_and_plain_wire_string(journal: Path, state:
     assert json.loads(path.read_text())["state"] == state
 
 
-@pytest.mark.parametrize("invalid", ["unknown", None, 1, ["pending"]])
+@pytest.mark.parametrize("invalid", ["missing", "unknown", None, 1, ["pending"]])
 def test_invalid_journal_state_is_isolated_from_healthy_delivery(
     journal: Path,
     pool: ConnectionPool,
@@ -733,7 +733,10 @@ def test_invalid_journal_state_is_isolated_from_healthy_delivery(
     corrupt = _record(agent_id=agent_id, content="corrupt state", key="corrupt", now=_NOW)
     assert good is not None and corrupt is not None
     raw = json.loads(corrupt.read_text())
-    raw["state"] = invalid
+    if invalid == "missing":
+        del raw["state"]
+    else:
+        raw["state"] = invalid
     corrupt.write_text(json.dumps(raw))
     assert outbox._read(corrupt) is None
     report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
