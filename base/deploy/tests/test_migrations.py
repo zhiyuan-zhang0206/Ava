@@ -239,3 +239,69 @@ def test_schema_mutation_lock_released_on_exception(db_conn: psycopg.Connection)
         raise RuntimeError("boom")
     assert _try_lock_from_other_conn() is True
     db_conn.rollback()
+
+
+def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices() -> None:
+    """The forward delta handles an old active lease without inventing PID custody."""
+    from typing import LiteralString, cast
+
+    from psycopg import sql
+
+    from base.deploy.tests.migration_support import _SCHEMA_SQL, _throwaway_database
+
+    root = Path(__file__).resolve().parents[3]
+    delta = root / "migrations/20261005T095252_separate-impersonation-transport-lifecycle.sql"
+    with (
+        _throwaway_database("impersonation_transport") as url,
+        psycopg.connect(url, autocommit=True) as conn,
+    ):
+        conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+        conn.execute("DROP TRIGGER agent_impersonations_terminal_notice ON agent_impersonations")
+        conn.execute("DROP FUNCTION mark_impersonation_terminal_notice()")
+        columns = (
+            "relay_generation",
+            "relay_identity",
+            "relay_degraded_reason",
+            "relay_degraded_at",
+            "terminal_notice_snapshot",
+            "terminal_notice_pending_at",
+            "terminal_notice_accepted_at",
+            "terminal_notice_attempt_id",
+            "terminal_notice_attempt_at",
+            "terminal_notice_attempts",
+            "terminal_notice_error",
+            "terminal_notice_unsupported_at",
+        )
+        for column in columns:
+            conn.execute(
+                sql.SQL("ALTER TABLE agent_impersonations DROP COLUMN {}").format(
+                    sql.Identifier(column)
+                )
+            )
+        conn.execute("DELETE FROM schema_migrations WHERE name=%s", (delta.stem,))
+        assert conn.execute(
+            "SELECT count(*) FROM information_schema.columns WHERE table_name='agent_impersonations' AND column_name=ANY(%s)",
+            (list(columns),),
+        ).fetchone() == (0,)
+        row = conn.execute(
+            "INSERT INTO agents(label) VALUES('transport fixture') RETURNING id"
+        ).fetchone()
+        assert row is not None
+        aid = row[0]
+        conn.execute(
+            "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at) "
+            "VALUES(gen_random_uuid(),%s,'codex','fixture','released',3600,now()+interval '1 hour'),"
+            "(gen_random_uuid(),%s,'codex','fixture','active',3600,now()+interval '1 hour')",
+            (aid, aid),
+        )
+        conn.execute(cast(LiteralString, delta.read_text()))
+        assert conn.execute(
+            "SELECT relay_generation,relay_identity,terminal_notice_pending_at FROM agent_impersonations ORDER BY session_id"
+        ).fetchall() == [(0, None, None), (0, None, None)]
+        conn.execute(
+            "UPDATE agent_impersonations SET status='expired',ended_at=now() WHERE status='active'"
+        )
+        assert conn.execute(
+            "SELECT terminal_notice_pending_at IS NOT NULL,terminal_notice_snapshot->>'status' "
+            "FROM agent_impersonations WHERE status='expired'"
+        ).fetchone() == (True, "expired")

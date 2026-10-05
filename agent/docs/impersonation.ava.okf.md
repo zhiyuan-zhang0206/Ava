@@ -24,18 +24,17 @@ claim gate (native loop paused or resuming) and the held-controls pass
 (services/agent_runner/agent_host/host.py `_apply_held_controls`) while an active lease
 parks the agent outside the graph — the dispatcher's pending scan wakes rows
 with an open lease periodically, pull-based from the database, so supervision
-does not depend on wake delivery. It stops the takeover when a core component
-died (task #3998): all recorded controller anchors dead/reused (a single
-unreadable pass waits for a second consecutive pass; no anchors is skipped),
-or a relay heartbeat stale past 45 seconds. The one exception is a codex relay
-minted by an earlier incarnation whose last beat predates this process start,
-inside the fresh-start window (`AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`,
-0 disables) — re-provisioned and respawned instead of stopped; a claude relay
-is never re-provisioned. Stopping is the abort path: terminal `expired` with
-`aborted: <detail>` in rejection_reason, a held relay process terminated,
-reminders dismissed, and the resume chain's end note names the cause. The hot
-path is one native-status read, the anchor classification and a heartbeat
-comparison.
+does not depend on wake delivery. Executor authority is separate from relay
+transport: only confirmed provider-anchor death, explicit end or original TTL
+ends the lease. Unknown liveness remains visible until the original deadline.
+Codex delivery recovery retires the old recorded process birth, then claims one
+transport generation under the lease lock. The new child receives its private
+credential only after its birth is persisted. Message attempts and ACK remain
+durable across replacement; exhaustion pauses a message, never identity.
+Legacy generation-zero relays missing birth evidence remain visibly degraded
+rather than guessed or adopted. Independent ended-lease notices use the existing
+host scan and shared `base.agents.impersonation.host_transport` owner; native
+handoff does not wait for host submission or its retry receipts.
 
 The claim gate leaves chat, heartbeat and compaction input pending while held.
 Node guards suppress initialization hooks, automatic compaction, and execution
@@ -53,8 +52,8 @@ Termination also queues ordered native system notes: impersonation interrupted,
 then completed termination. Ordinary claim renders these before the resurrection
 marker. Resurrection and its prompt use the database clock after locking the
 agent; claim orders by creation time and id, including equal-time notes.
-The closing lease reason drives the bound relay's best-effort executor notice
-without reopening its expired inbox authority.
+The closing lease reason drives the independent host scan's durable notice
+without reopening expired inbox authority or delaying native handoff.
 
 Cancel requests remain pending in the external inbox while held. The controller
 acknowledges the request on receipt, then stops its current work; the cancel
@@ -69,7 +68,7 @@ so a crash between checkpoint and acknowledgement cannot apply an additive
 reducer twice. Core lifecycle fields cannot be changed by plugin deltas.
 
 Tests: `agent/tests/test_impersonation.py` covers gates, receipt recovery, the
-component-death judgments and the fresh-start window;
+executor-death judgments and fenced delivery recovery;
 `agent/tests/test_impersonation_integration.py` exercises PostgreSQL, buffered
 checkpoints, the compiled graph, a real exec child, peer inbox acknowledgement,
 release summary, native resumption with plugin state, and the abort→resume

@@ -36,8 +36,8 @@ activation gate waits for its heartbeat:
 
 A watch is capped at 30 minutes. At the deadline Claude Code kills it together
 with the relay and posts one `Monitor expired … Re-arm it` notice: re-arm at
-once with the same command. A missed re-arm stops the heartbeat, and the Ava
-side ends the takeover (`aborted: the bound relay stopped heartbeating`).
+once with the same command. A missed re-arm visibly degrades delivery; it
+does not end executor authority before the original TTL or confirmed death.
 
 ## How messages arrive
 

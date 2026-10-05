@@ -391,8 +391,12 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     result = await asyncio.to_thread(relay.cmd_relay, args)
     assert result == (1 if transport_dead else 0)
     assert len(emitted) == 1
-    assert "Ava impersonation interrupted" in emitted[0]
+    assert f"Ava impersonation lease {session['session_id']}" in emitted[0]
+    assert session["id"] in emitted[0]
+    assert "Ended at:" in emitted[0]
+    assert "does not end or cancel any newer" in emitted[0]
     assert "The agent was terminated" in emitted[0]
+    assert "no active native runtime is implied" in emitted[0]
     assert "ACK" not in emitted[0]
     assert len(_native_notices(db_conn, owner.agent_id)) == 2
     assert db_conn.execute(
@@ -451,8 +455,12 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
     )
     assert len(emitted) == 2
     assert emitted[0].startswith("Handoff brief\n\nAva control active:")
-    assert "Ava impersonation interrupted" in emitted[1]
+    assert f"Ava impersonation lease {session['session_id']}" in emitted[1]
+    assert session["id"] in emitted[1]
+    assert "Ended at:" in emitted[1]
+    assert "does not end or cancel any newer" in emitted[1]
     assert "The agent was terminated" in emitted[1]
+    assert "no active native runtime is implied" in emitted[1]
     assert listener.closed
 
 

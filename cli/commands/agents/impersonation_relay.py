@@ -1,8 +1,9 @@
 """Push a durable inbox through the bound relay, without ACK or lease renewal.
 
 Each message uses the delivery budget and ACK window snapshotted on its lease.
-Reservations survive relay restarts. Exhaustion expires the takeover
-through normal native handoff, preserving all unacknowledged content.
+Reservations survive relay restarts. Exhaustion pauses that message's automatic
+push; its durable body remains readable and late receipt ACKs remain valid.
+Executor authority keeps its original TTL.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from pydantic import BaseModel
 import base.events.live.redis_listener
 from base.agents.impersonation import RELAY_HEARTBEAT_SECONDS
 from base.agents.impersonation.delivery import reserve_delivery
+from base.agents.impersonation.terminal_notices import notice_text
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -50,6 +52,7 @@ class _Lease(BaseModel):
     relay_batch_window_seconds: int = 0
     start_message: str = ""
     rejection_reason: str | None = None
+    terminal_notice_snapshot: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,7 @@ class InboxSnapshot:
     end_reason: str | None = None
     ack_window_seconds: int = 180
     max_delivery_attempts: int = 2
+    terminal_notice_snapshot: dict[str, Any] | None = None
 
     @property
     def active(self) -> bool:
@@ -157,10 +161,10 @@ def message_push(
     blocks.append(
         f"ACK within {ack_window_seconds}s. "
         + (
-            "This batch includes a final delivery; a missed ACK window ends impersonation."
+            "This batch includes a final delivery; a missed ACK window pauses automatic delivery of those messages."
             if any(m.delivery_attempts + 1 >= max_delivery_attempts for m in messages)
             else f"At most {max_delivery_attempts} total attempts per message; "
-            "a missed final ACK window ends impersonation."
+            "a missed final ACK window pauses automatic delivery; inbox reads and ACK remain valid."
         )
     )
     return "\n".join(blocks)
@@ -186,7 +190,7 @@ def activation_hint(
         f"arrives: {ack} ID... Use {inbox} to read missed messages or a truncated "
         "message's full body — read it before acknowledging. "
         f"Each message has {max_delivery_attempts} delivery attempts, "
-        f"with {ack_window_seconds}s to ACK each; exhaustion ends impersonation."
+        f"with {ack_window_seconds}s to ACK each; exhaustion pauses message delivery, not the lease."
     )
 
 
@@ -195,20 +199,21 @@ def _ended(
 ) -> bool:
     if snapshot.status not in _TERMINAL:
         return False
-    if snapshot.status == "expired" and snapshot.end_reason == "terminated: agent was terminated":
-        emit(
-            f"Ava impersonation interrupted: agent={agent_id} lease={lease_id}. "
-            "The agent was terminated. Do not use this identity. "
-            "Unacknowledged messages remain pending."
-        )
-        return True
-    if snapshot.status != "released":
-        emit(
-            f"Ava control {snapshot.status}: agent={agent_id} lease={lease_id}. "
-            "Do not use this identity. The native agent can continue its workflow. "
-            "The relay did not ACK messages or renew the lease."
-            + (f" Reason: {snapshot.end_reason}" if snapshot.end_reason else "")
-        )
+    if snapshot.status == "released":
+        return True  # The host-side durable notice owns release notification.
+    terminal = snapshot.terminal_notice_snapshot
+    if terminal is None:
+        # Pre-migration/synthetic snapshots have no immutable terminal record.
+        # Keep the supplied lease scope and disclose unavailable historical time.
+        terminal = {
+            "session_id": lease_id,
+            "lease_id": lease_id,
+            "agent_id": agent_id,
+            "status": snapshot.status,
+            "reason": snapshot.end_reason,
+            "ended_at": "unknown (legacy record)",
+        }
+    emit(notice_text(terminal))
     return True
 
 
@@ -264,7 +269,12 @@ def _read_inbox(
         raise ValueError("The impersonation lease does not belong to the requested agent")
     if lease.status != "active":
         return InboxSnapshot(
-            frozenset(), {}, lease.expires_at, lease.status, end_reason=lease.rejection_reason
+            frozenset(),
+            {},
+            lease.expires_at,
+            lease.status,
+            end_reason=lease.rejection_reason,
+            terminal_notice_snapshot=lease.terminal_notice_snapshot,
         )
     try:
         # relay_inbox validates same-machine active authority in its own transaction.
@@ -278,6 +288,7 @@ def _read_inbox(
                 latest.expires_at,
                 latest.status,
                 end_reason=latest.rejection_reason,
+                terminal_notice_snapshot=latest.terminal_notice_snapshot,
             )
         raise
     messages = {
@@ -379,6 +390,7 @@ class _InboxRelay:
         debounce: float,
         catchup_seconds: float,
         max_chars: int | None,
+        notify_terminal: bool,
     ) -> None:
         self.agent_id = agent_id
         self.lease_id = lease_id
@@ -389,6 +401,7 @@ class _InboxRelay:
         self.debounce = debounce
         self.catchup_seconds = catchup_seconds
         self.max_chars = max_chars
+        self.notify_terminal = notify_terminal
         self.start_sent = False
         self.last_emit = float("-inf")
         self.routine_deadline: float | None = None
@@ -397,6 +410,8 @@ class _InboxRelay:
     async def _read(self) -> InboxSnapshot | None:
         """The current snapshot, or None once the lease ended (the end was emitted)."""
         snapshot = await self.read_inbox()
+        if snapshot.status in _TERMINAL and not self.notify_terminal:
+            return None  # The independent host scan owns Codex terminal injection.
         if _ended(snapshot, self.agent_id, self.lease_id, self.emit):
             return None
         return snapshot
@@ -487,7 +502,7 @@ class _InboxRelay:
                         return
                     continue
                 # The database owns expiry; periodic catchup also repairs missed
-                # Redis wakes and observes the final ACK window's expiration.
+                # Redis wakes; final-window exhaustion pauses this message's delivery.
                 await self._wait(snapshot)
         finally:
             await self.listener.close()
@@ -504,12 +519,13 @@ async def relay_inbox(
     debounce: float = 0.5,
     catchup_seconds: float = _CATCHUP_SECONDS,
     max_chars: int | None = None,
+    notify_terminal: bool = True,
 ) -> None:
     """Deliver consent/start first, then respect the lease budget per pending row.
 
     Database time and durable reservations own the ACK windows and budget;
     local monotonic time only controls batching/rate limits. Every read
-    reconciles exhaustion across the whole lease, even outside this inbox
+    records exhaustion across the whole lease, even outside this inbox
     page. Due retries precede fresh rows so arrivals cannot starve them.
     Reserve immediately before the host call, rechecking ACK/release races.
     A failed or ambiguous host submission spends an attempt, never an ACK.
@@ -528,6 +544,7 @@ async def relay_inbox(
         debounce=debounce,
         catchup_seconds=catchup_seconds,
         max_chars=max_chars,
+        notify_terminal=notify_terminal,
     ).run()
 
 
@@ -589,7 +606,8 @@ def cmd_relay(args: argparse.Namespace) -> int:
             if not await asyncio.to_thread(_write_heartbeat, db, lease_id, token):
                 # Termination can win between startup's lease read and beat.
                 # Terminal metadata is readable; ordinary inbox authority stays closed.
-                _ended(await read_inbox(), args.agent_id, session_id, emit)
+                if args.provider != "codex":
+                    _ended(await read_inbox(), args.agent_id, session_id, emit)
                 return
             heartbeat = asyncio.create_task(_heartbeat_loop(db, lease_id, token))
             try:
@@ -605,6 +623,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
                     emit=emit,
                     debounce=args.debounce,
                     max_chars=max_chars,
+                    notify_terminal=args.provider != "codex",
                 )
             finally:
                 heartbeat.cancel()
