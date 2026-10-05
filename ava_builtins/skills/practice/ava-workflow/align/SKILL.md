@@ -5,9 +5,9 @@ description: "Aligns agents and humans on the real goal, constraints, priorities
 
 # Align — Sync Intent Between Agents and Human
 
-Don't start building on vague requirements. Invest a few turns asking questions to surface implicit assumptions, constraints, and success criteria. The sole output of this phase is **a clear alignment document** — not code, not a solution design.
+Don't start building on vague requirements. Invest a few turns asking questions to surface implicit assumptions, constraints, and success criteria. Resolve the material uncertainty with a short clarification for routine work or an alignment document when the decisions need a durable record. Choose depth through [Workflow](../SKILL.md); do not force an interview when intent is already clear.
 
-The goal is to resolve every branch of the **decision tree** — surface each open fork, make an explicit choice, and close it — until no ambiguous branch remains.
+The goal is to resolve every branch of the **decision tree** — surface each open fork, make an explicit choice, and close it — until no material ambiguity remains. Routine method choices within the authorized scope belong to the agent.
 
 ## What Align syncs
 
@@ -74,7 +74,9 @@ The **frontier** is every decision whose prerequisites are already settled — t
 2. A question whose answer depends on another question still open *this* round belongs to a *later* round — hold it back.
 3. Wait for the user's answers. Each answer settles a decision and pushes the frontier outward, unblocking the questions that depended on it. Recompute the frontier and ask the next round.
 
-Keep each round compact (aim for ≤5-8 questions), but the *session* runs until the frontier is empty — every branch visited, nothing silently assumed. **Order rounds by dependency**: a decision's prerequisites are answered before the decision itself is asked. Importance only orders questions *within* a round, never across them.
+Keep each round compact. Ask only the frontier questions whose answers materially
+change the outcome, trade-off, or authority; routine method choices can be made
+within the agreed scope. Stop when those material branches are settled. **Order rounds by dependency**: a decision's prerequisites are answered before the decision itself is asked. Importance only orders questions *within* a round, never across them.
 
 A useful checklist for what the frontier's earliest rounds should surface:
 
@@ -95,9 +97,15 @@ A useful checklist for what the frontier's earliest rounds should surface:
 - **Challenge assumptions.** "You mentioned React — is that because the team knows it, or is there a hard technical requirement? What if we used something lighter?"
 - **Surface risks.** "Given this timeline, if we discover mid-way that the data format is incompatible, rolling back would be expensive — should we do a quick spike first?"
 
-### 4. Produce an alignment document
+### 4. Check the outcome and record the decisions
 
-After questioning, output a concise alignment document:
+Check that the outcome, acceptance evidence, boundaries, and stopping conditions
+are clear. Use [Define Goal](../define-goal/SKILL.md) only when these need refinement;
+choose skills through [Capability Matching](../SKILL.md#capability-matching).
+Goal supervision and dynamic orchestration remain independent choices.
+
+A short clarification can finish in the conversation. When a durable alignment
+record is useful, use this template and omit sections that add no information:
 
 ```
 # Alignment Document: [Task Name]
@@ -121,7 +129,7 @@ the task has no meaningful reusable investment.]
 
 ## Capabilities
 - Use: [skill or MCP] — [one-line reason]
-- Not used: [skill or MCP] — [one-line reason]
+- Alternative: [only a rejected capability whose trade-off matters]
 
 ## Priorities
 1. [Highest priority]
@@ -174,5 +182,5 @@ Align can be used independently — any time you feel the task isn't clear enoug
 - Don't ask a question without your recommended answer attached — if you can't recommend one, you haven't explored enough to be asking it yet
 - Don't reopen settled choices; clarify the worst acceptable outcome when that unresolved trade-off would change the work
 - Don't ask the user for facts you can look up — explore the environment first, and spin up a sub-agent for facts that surface mid-grilling
-- Don't skip branches in the decision tree — each unresolved branch is a future rework waiting to happen
+- Don't leave material branches unresolved; make routine method choices within the agreed scope
 - Don't align on top of an uncalibrated model — if the user's picture of the subject is wrong, calibrate that slice first
