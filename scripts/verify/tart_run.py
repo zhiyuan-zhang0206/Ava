@@ -71,6 +71,9 @@ WORK = "$HOME/verify"
 KEYCHAIN_GUARD = guest_script(
     'security show-keychain-info "$HOME/Library/Keychains/login.keychain-db"'
 )
+# The golden image boots its installed helper through launchd. Retire that job
+# through the supported lifecycle before start may replace a stale helper.
+STOP = guest_script(f'cd "{GUEST_SOURCE}" && .venv/bin/ava stop --yes')
 INIT = guest_script(f'cd "{GUEST_SOURCE}" && {" ".join(init_argv(f"{WORK}/profile.env"))}')
 START = guest_script(f'cd "{GUEST_SOURCE}" && {" ".join(START_ARGV)}')
 OBSERVE = guest_script(
@@ -102,6 +105,7 @@ TIMEOUTS = {
     "profile-upload": 60,
     "observer-upload": 60,
     "init": 120,
+    "retire-golden-helper": 120,
     "start": 2400,
     "observe": 600,
     "snapshot": 60,
@@ -151,6 +155,7 @@ def run_steps(evidence: Evidence, tart: Tart, vm: str, commit: str) -> None:
         stdin=(RECIPE / "observe.py").read_text(),
     )
     guest("init", INIT)
+    guest("retire-golden-helper", STOP)
     guest("start", START)
     guest("observe", OBSERVE)
     guest("snapshot", SNAPSHOT)
