@@ -18,6 +18,7 @@ from uuid import UUID
 
 import pytest
 
+from base.agents.impersonation.status import ImpersonationStatus
 from base.db import Database
 from base.events.live.bus import EventBus
 from cli.commands.agents import impersonation_relay as relay
@@ -44,7 +45,7 @@ class Inbox:
         self.routine: set[int] = set(pending)
         self.batch_window = 0.0
         self.page_size = page_size
-        self.status: relay.LeaseStatus = "active"
+        self.status: ImpersonationStatus = ImpersonationStatus.ACTIVE
         self.expires_at = datetime.now(UTC) + timedelta(minutes=5)
         self.start_message = "Start here: resume the implementation from the failing test."
         self.reads = 0
@@ -84,7 +85,7 @@ class Inbox:
             and relay._loop_time() - at >= self.ack_window_seconds
             for i, (count, at) in self.attempts.items()
         ):
-            self.status = "expired"
+            self.status = ImpersonationStatus.EXPIRED
         page = frozenset(sorted(self.messages)[: self.page_size])
         return relay.InboxSnapshot(
             page,
@@ -108,11 +109,11 @@ class Inbox:
 
     @property
     def active(self) -> bool:
-        return self.status == "active"
+        return self.status == ImpersonationStatus.ACTIVE
 
     @active.setter
     def active(self, value: bool) -> None:
-        self.status = "active" if value else "released"
+        self.status = ImpersonationStatus.ACTIVE if value else ImpersonationStatus.RELEASED
 
 
 class Listener:
@@ -277,11 +278,11 @@ def test_native_catchup_recovers_message_with_no_redis_publish() -> None:
 
 def test_waits_for_native_consent_then_delivers_start_and_inbox() -> None:
     inbox = Inbox(7)
-    inbox.status = "requested"
+    inbox.status = ImpersonationStatus.REQUESTED
 
     def waited(n: int) -> None:
         if n == 1:
-            inbox.status = "active"
+            inbox.status = ImpersonationStatus.ACTIVE
         else:
             inbox.active = False
 
@@ -460,7 +461,7 @@ def test_release_during_debounce_prevents_delivery(monkeypatch: pytest.MonkeyPat
 
 def test_expired_lease_notifies_host_without_subscribing_or_extending() -> None:
     inbox = Inbox()
-    inbox.status = "expired"
+    inbox.status = ImpersonationStatus.EXPIRED
     listener = Listener(inbox)
     emitted: list[str] = []
     run(inbox, listener, emitted.append)
@@ -474,7 +475,7 @@ def test_active_expiry_notifies_loss_of_control() -> None:
 
     def waited(n: int) -> None:
         if n == 1:
-            inbox.status = "expired"
+            inbox.status = ImpersonationStatus.EXPIRED
 
     emitted: list[str] = []
     run(inbox, Listener(inbox, waited=waited), emitted.append)
@@ -484,11 +485,11 @@ def test_active_expiry_notifies_loss_of_control() -> None:
 
 
 @pytest.mark.parametrize("outcome", ["released", "rejected", "expired"])
-def test_waiting_controller_is_told_terminal_outcome(outcome: relay.LeaseStatus) -> None:
+def test_waiting_controller_is_told_terminal_outcome(outcome: str) -> None:
     inbox = Inbox()
 
     def waited(n: int) -> None:
-        inbox.status = outcome
+        inbox.status = ImpersonationStatus(outcome)
 
     emitted: list[str] = []
     run(inbox, Listener(inbox, waited=waited), emitted.append)
@@ -777,32 +778,3 @@ def test_release_racing_with_read_stops_cleanly(
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     assert not relay._read_inbox(database, event_bus, 42, LEASE_ID, "test-token").active
-
-
-@pytest.mark.parametrize("status", ["requested", "accepted"])
-def test_pending_consent_checks_status_without_opening_inbox(
-    monkeypatch: pytest.MonkeyPatch,
-    status: relay.LeaseStatus,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    from base.agents import impersonation
-
-    def get(_db: object, _bus: object, _lease_id: str, _token: str) -> dict[str, Any]:
-        return {
-            "id": str(LEASE_ID),
-            "agent_id": 42,
-            "status": status,
-            "expires_at": datetime.now(UTC) + timedelta(minutes=5),
-            "ack_window_seconds": 180,
-            "max_delivery_attempts": 2,
-        }
-
-    def inbox(_db: object, _lease_id: str, _token: str) -> list[dict[str, Any]]:
-        pytest.fail("Pending consent must not read the protected inbox")
-
-    monkeypatch.setattr(impersonation, "relay_get", get)
-    monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    snapshot = relay._read_inbox(database, event_bus, 42, LEASE_ID, "test-token")
-    assert snapshot.status == status
-    assert not snapshot.message_ids

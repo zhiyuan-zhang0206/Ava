@@ -19,7 +19,7 @@ import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -27,6 +27,7 @@ from pydantic import BaseModel
 import base.events.live.redis_listener
 from base.agents.impersonation import RELAY_HEARTBEAT_SECONDS
 from base.agents.impersonation.delivery import reserve_delivery
+from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
 from base.config import settings
 from base.db import Database
@@ -38,14 +39,13 @@ _MIN_EMIT_INTERVAL_SECONDS = 2.0
 # Bound each message in the host context; full bodies remain in the durable
 # inbox. The same cap also respects Claude Monitor's per-line budget.
 _PUSH_MAX_CHARS = 2000
-_TERMINAL = frozenset({"released", "rejected", "expired"})
-type LeaseStatus = Literal["requested", "accepted", "active", "released", "rejected", "expired"]
+_TERMINAL = frozenset(ImpersonationStatus) - frozenset(OPEN)
 
 
 class _Lease(BaseModel):
     id: UUID
     agent_id: int
-    status: LeaseStatus
+    status: ImpersonationStatus
     expires_at: datetime
     ack_window_seconds: int
     max_delivery_attempts: int
@@ -84,7 +84,7 @@ class InboxSnapshot:
     message_ids: frozenset[int]
     messages: dict[int, InboxMessage]
     expires_at: datetime
-    status: LeaseStatus = "active"
+    status: ImpersonationStatus = ImpersonationStatus.ACTIVE
     routine_ids: frozenset[int] = frozenset()
     batch_window: float = 0.0
     start_message: str = ""
@@ -95,7 +95,7 @@ class InboxSnapshot:
 
     @property
     def active(self) -> bool:
-        return self.status == "active"
+        return self.status == ImpersonationStatus.ACTIVE
 
 
 class WakeListener(Protocol):
@@ -199,7 +199,7 @@ def _ended(
 ) -> bool:
     if snapshot.status not in _TERMINAL:
         return False
-    if snapshot.status == "released":
+    if snapshot.status == ImpersonationStatus.RELEASED:
         return True  # The host-side durable notice owns release notification.
     terminal = snapshot.terminal_notice_snapshot
     if terminal is None:
@@ -267,7 +267,7 @@ def _read_inbox(
     lease = _Lease.model_validate(impersonation.relay_get(db, bus, str(lease_id), token))
     if lease.agent_id != agent_id or lease.id != lease_id:
         raise ValueError("The impersonation lease does not belong to the requested agent")
-    if lease.status != "active":
+    if lease.status != ImpersonationStatus.ACTIVE:
         return InboxSnapshot(
             frozenset(),
             {},
@@ -306,7 +306,7 @@ def _read_inbox(
         frozenset(messages),
         messages,
         lease.expires_at,
-        "active",
+        ImpersonationStatus.ACTIVE,
         routine_ids=_routine_ids(rows),
         batch_window=float(lease.relay_batch_window_seconds),
         start_message=lease.start_message,

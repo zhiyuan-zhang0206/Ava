@@ -1,7 +1,7 @@
 """Impersonation lease status vocabulary and status-only row validation."""
 
 from enum import StrEnum
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast, get_args
 
 
 class ImpersonationStatus(StrEnum):
@@ -18,7 +18,7 @@ class ImpersonationStatus(StrEnum):
 OpenImpersonationStatus = Literal[
     ImpersonationStatus.REQUESTED, ImpersonationStatus.ACCEPTED, ImpersonationStatus.ACTIVE
 ]
-OPEN = (ImpersonationStatus.REQUESTED, ImpersonationStatus.ACCEPTED, ImpersonationStatus.ACTIVE)
+OPEN = cast(tuple[OpenImpersonationStatus, ...], tuple(get_args(OpenImpersonationStatus)))
 
 
 class LeaseRecord(TypedDict):
