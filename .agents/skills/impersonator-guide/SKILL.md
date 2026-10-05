@@ -140,7 +140,8 @@ Rules that keep delivery honest:
   payload; the pushes are the delivery. A truncated push is not received yet: fetch the
   full body with the inbox command first (the fetch is part of receiving), then
   ACK — once acknowledged, the inbox no longer returns the row; acknowledged
-  before reading? The body is not lost: read it inside the lease attachment —
+  before reading? The body is not lost: on an admitted runner or gateway read it
+  with `ava agents timeline <agent_id>`; otherwise read it inside the lease attachment —
   `ava impersonate exec`, then `ava.context.gateway.get("/api/agents/<agent_id>/timeline")`.
 - **Confirm the start message.** Activation, relay liveness, and transport
   acceptance are not host receipt: confirm the start message actually arrived
