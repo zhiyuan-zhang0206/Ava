@@ -1,7 +1,7 @@
 """fleet graph.
 
-Split out of the former monolithic ops/schemas.py; FastAPI registers these
-unchanged, so the OpenAPI codegen is byte-identical to the wire before.
+FastAPI exports these projections with shared enum schema references.
+The generated frontend contract preserves their JSON wire values.
 """
 
 from datetime import datetime
