@@ -71,8 +71,8 @@ included: its prompt writes no `PROMPTING` line, so verify it by screenshot
 ## Tiers (design v1)
 
 The machine-facing contract: a target tier names the authorization set a host
-should hold. User decisions 2026-09-17: the full tier includes Full Disk
-Access, and macmini's target is L2.
+should hold. The full tier includes Full Disk Access; the deployment owner
+chooses the target tier for each authorized host.
 
 | Tier | Contents |
 |---|---|
@@ -184,12 +184,10 @@ from the preflight re-read, not from the child's own output.
 
 ### fda -- `kTCCServiceSystemPolicyAllFiles`
 
-- Never triggered by this tool, by decision: macmini's target tier is L2 (no
-  Full Disk Access), and an experimental prompt would leave a denied row on a
-  machine that does not need the grant. The 2026-09-12 audit found no
-  evidence the grant is needed; the user placed it in the full tier
-  (2026-09-17), and the method is archived for a future L3 machine's first
-  grant instead.
+- Full Disk Access belongs to L3. Do not trigger its experimental prompt on
+  an authorized host whose chosen target is L2: it would add a denied row
+  without a required capability. Use the archived method only when the
+  deployment owner explicitly authorizes L3 onboarding for that target.
 
 ### devtools -- `kTCCServiceDeveloperTool`
 
@@ -223,7 +221,7 @@ Per-machine rebuild/reinstall flow gains one step, inserted before the flip:
    requests attributed to the helper; the per-service preflight results it
    prints are informational).
 
-A fresh machine (no helper assets, e.g. company-air) starts one step earlier:
+A fresh authorized host with no helper assets starts one step earlier:
 build + sign + launchd registration, then the same 2-4 with the user present
 for the first grants.
 
