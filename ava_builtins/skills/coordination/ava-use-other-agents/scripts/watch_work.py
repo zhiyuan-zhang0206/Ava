@@ -22,6 +22,7 @@ from pathlib import Path
 import ava
 from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.sessions import coding_session_owner
+from base.sessions.coding_session_owner_record import CodingSessionStatus
 
 WORK_FILE = "/path/to/work.md"
 POLL_SECONDS = 60
@@ -107,9 +108,9 @@ def _owner_terminated(agent_id: int) -> bool:
 
 
 def _session_crashed(owner: coding_session_owner.CodingSessionOwner) -> bool:
-    if owner.status == "launching":
+    if owner.status == CodingSessionStatus.LAUNCHING:
         return coding_session_owner.launch_is_stale(owner)
-    if owner.status != "active" or owner.session_name is None:
+    if owner.status != CodingSessionStatus.ACTIVE or owner.session_name is None:
         return False
     from base.sessions.backend import get_shell_backend
 
@@ -278,9 +279,9 @@ class _Watch:
         path = self.path
         owner = coding_session_owner.read(key, expected_generation)
         if owner.generation != expected_generation or owner.status in (
-            "inactive",
-            "terminal",
-            "invalid",
+            CodingSessionStatus.INACTIVE,
+            CodingSessionStatus.TERMINAL,
+            CodingSessionStatus.INVALID,
         ):
             return True
         status_is_current = bool(

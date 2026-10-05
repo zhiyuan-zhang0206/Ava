@@ -16,6 +16,7 @@ import pytest
 
 from ava.shell.coding_tools import _claude_checks, _common, claude
 from base.sessions import coding_session_owner
+from base.sessions.coding_session_owner_record import CodingSessionStatus
 
 _SKILL_DIR = (
     Path(__file__).parents[4] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
@@ -60,7 +61,7 @@ def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
     now = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)
     return coding_session_owner.CodingSessionOwner(
         key=key,
-        status="active",
+        status=CodingSessionStatus.ACTIVE,
         generation=generation,
         owner_agent_id=41,
         display_label="workspace",
@@ -131,7 +132,9 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     active = _owner(tmp_path)
-    launching = replace(active, status="launching", session_id=None, session_name=None)
+    launching = replace(
+        active, status=CodingSessionStatus.LAUNCHING, session_id=None, session_name=None
+    )
     sent: list[str] = []
     killed: list[int] = []
     terminated: list[str] = []
@@ -227,7 +230,7 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     active = _owner(tmp_path)
     launching = replace(
         active,
-        status="launching",
+        status=CodingSessionStatus.LAUNCHING,
         session_id=None,
         session_name=None,
         tasks_file=None,
@@ -285,7 +288,9 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         assert session_id == 7
         assert session_name.endswith("-claude-workspace-11111111")
         events.append("publish")
-        return replace(launching, status="active", session_id=7, session_name=session_name)
+        return replace(
+            launching, status=CodingSessionStatus.ACTIVE, session_id=7, session_name=session_name
+        )
 
     monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "init_file", _unexpected)
@@ -319,7 +324,9 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
     """An earlier session's wrapper, orphaned in the same workspace, polls its own
     generation's dir; the new stub lives only in the new generation's private dir."""
     active = _owner(tmp_path)
-    launching = replace(active, status="launching", session_id=None, session_name=None)
+    launching = replace(
+        active, status=CodingSessionStatus.LAUNCHING, session_id=None, session_name=None
+    )
     sent: list[str] = []
 
     def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
@@ -348,7 +355,12 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
         session_id: int,
         session_name: str,
     ) -> coding_session_owner.CodingSessionOwner:
-        return replace(launching, status="active", session_id=session_id, session_name=session_name)
+        return replace(
+            launching,
+            status=CodingSessionStatus.ACTIVE,
+            session_id=session_id,
+            session_name=session_name,
+        )
 
     monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
@@ -631,7 +643,7 @@ def test_failed_early_publish_kills_claude_session_before_startup(
     active = _owner(tmp_path)
     launching = replace(
         active,
-        status="launching",
+        status=CodingSessionStatus.LAUNCHING,
         session_id=None,
         session_name=None,
         tasks_file=None,

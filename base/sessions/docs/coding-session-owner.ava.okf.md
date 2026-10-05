@@ -82,3 +82,8 @@ anything is launched.
   termination used by exact generation cleanup
 - [[ava_builtins/skills/coordination/ava-use-other-agents/docs/ava-use-other-agents.ava.okf.md]]
   — Codex launcher and supervisor that consume this owner contract
+
+`CodingSessionStatus` in `base/sessions/coding_session_owner_record.py` owns both
+lifecycle states and observation outcomes. Only launching, active and terminal
+are persisted; inactive and invalid are read outcomes. Journal reads parse status
+and journal writes reject observation outcomes. JSON spellings remain unchanged.
