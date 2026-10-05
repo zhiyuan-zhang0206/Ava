@@ -153,7 +153,8 @@ _ALLOWED_FILES = frozenset(
         "scripts/ci/migration_smoke.py",  # builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Ava runtime config
         "scripts/lint/code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.
         "scripts/ci/coverage_gates.py",  # BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser
-        "scripts/ci_utils.py",  # CI_QUEUE and TRUNK_API_TOKEN are per-invocation CI-orchestration inputs; Settings models deployment config, and its singleton cannot preserve the required live environment read for this standalone merge watcher
+        "scripts/ci/owner_operations.py",  # TRUNK_API_TOKEN and CI_QUEUE are explicit owner-operation inputs, separate from deployment Settings
+        "scripts/ci/commands.py",  # TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration
         "base/native_process/os_platform.py",  # launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity
         "base/host/system/probes.py",  # display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not ava runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators
         "ava/watcher.py",  # _spawn() bootstrap code uses os.environ.get in a string literal for the child process bootstrap
