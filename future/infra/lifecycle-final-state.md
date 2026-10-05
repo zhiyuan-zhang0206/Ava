@@ -9,7 +9,7 @@
 > surface is closed, and the implementation phase has started (task #3195, slices P1–P7).
 > Migration is a one-shot cutover; the window is booked with the user directly, and the
 > user watches the cutover live. Decision record:
-> [`decisions/2026-09-12-process-lifecycle-final-state.md`](../../decisions/2026-09-12-process-lifecycle-final-state.md).
+> [`docs/decisions/2026-09-12-process-lifecycle-final-state.md`](../../docs/decisions/2026-09-12-process-lifecycle-final-state.md).
 
 | | |
 |---|---|
@@ -323,7 +323,7 @@ Full enumeration across 16 scenarios x 3 requests: parent exit / launchd adoptio
 
 ## Appendix · Workflow and next steps
 - Material chain: CTO as the writer; #6124's code-level A/C inventory (read-only, repo@91c6b4735); #1818's ops facts.
-- Next steps (the implementation phase): the key F measurements first (F1 multi-level attribution); the PR sequence P1–P7 (synced with #405); the final draft lands in the repo as usual (`future/` + `decisions/`).
+- Next steps (the implementation phase): the key F measurements first (F1 multi-level attribution); the PR sequence P1–P7 (synced with #405); the final draft lands in the repo as usual (`future/` + `docs/decisions/`).
 - Discipline: the design surface is closed (17:41); the migration/cutover moment is watched by the user in person, and its window is booked separately.
 
 <!-- Translation notes (draft-2 to English, task #3201), for review:

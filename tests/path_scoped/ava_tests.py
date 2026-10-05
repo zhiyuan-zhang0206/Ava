@@ -34,7 +34,7 @@ from tests.path_scoped.pty_service import pty_service as pty_service
 # a reserved high-range fake agent-id (900000+) for its OWN identity in pty
 # session tests that create no DB agent;
 # the band sits far above the monotonic spawn sequence (see the id contract in
-# decisions/2026-06-30-monotonic-test-ids.md), so it never collides with a real spawn or a
+# docs/decisions/2026-06-30-monotonic-test-ids.md), so it never collides with a real spawn or a
 # captured self id. Spaced by 10 to leave room for the "other agent" in filter tests.
 _WORKER_NUM = int(re.sub(r"\D", "", os.environ.get("PYTEST_XDIST_WORKER", "")) or "0")
 _TEST_AGENT_BASE = 900_000 + _WORKER_NUM * 10

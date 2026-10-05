@@ -84,7 +84,7 @@ case "$OS" in
   windows)
     # A native Windows unit carries agent-runner only and owns no data plane; a
     # gateway on Windows hardware runs inside WSL2, where the linux branch
-    # applies (conventions/windows-setup.md).
+    # applies (docs/conventions/windows-setup.md).
     prov_log "Windows: no local data plane; run a gateway inside WSL2 through the Linux path"
     exit 0
     ;;

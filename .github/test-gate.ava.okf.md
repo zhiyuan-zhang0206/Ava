@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "CI test gate and executed-test counts"
-description: "How the backend jobs' Trunk quarantine gate fails closed (empty secret, missing or empty JUnit report), the per-shard and total executed-test counts CI prints, and where the root leak guard's findings are read."
+description: "Native test verdicts and supplier-independent JUnit validation, the per-shard and total executed-test counts CI prints, and where the root leak guard's findings are read."
 tags:
   - ci
   - testing
@@ -11,32 +11,25 @@ tags:
 
 ## The gate
 
-`backend-shard`, `backend-selected` and `backend-serial` run pytest with
-`continue-on-error`, so the Trunk quarantine gate (`trunk-io/analytics-uploader`)
-is what turns a pytest failure red: quarantined flaky failures pass, real ones
-block. That gate used to fail open twice. It was skipped when
-`TRUNK_ORG_URL_SLUG` was empty, so nothing judged pytest at all; and the
-uploader's `allow-missing-junit-files` defaults to true, so a pytest that died
-before writing a JUnit report (a `pytest_plugins` module that fails to import
-ends the run in the configuration phase) uploaded nothing and passed with not
-one test run. A pytest that ran zero tests (a broken `testpaths`) leaves an
-empty report and passed the same way.
+Backend shards, enforced selected subsets, the serial timing-sensitive bucket,
+frontend Vitest and every e2e family propagate their native test command's final
+exit status. No external quarantine service or repository secrets change that
+verdict. The existing selector shadow job remains informational while the full
+backend fan-out gates integration.
 
-It now fails closed:
+The `require-test-gate` composite action also validates each required JUnit
+report, including after a native failure: missing or malformed reports, a wrong
+root, no executed tests, or recorded failures/errors cannot read green. It prints
+the failing test identities. Backend retries validate the final attempt; earlier
+reports and the attempt-1 failure log remain available as evidence. Only the
+explicitly optional backend/frontend serial buckets permit empty reports. A
+backend serial pytest exit 5 is admitted only for that empty bucket; valid,
+failure-free JUnit evidence is still required.
 
-- The uploader runs with `allow-missing-junit-files: false`.
-- When the secret is empty, the `require-test-gate` composite action runs
-  instead: on this repository's own runs it errors (`TRUNK_ORG_URL_SLUG is
-  empty, the test gate cannot run`); on a run that never gets secrets — a
-  fork's pull request, or any Dependabot-triggered run (even on this
-  repository's own branches) — pytest's own outcome decides.
-- Each backend shard's `Report executed test counts` step is a gate: no JUnit
-  report, or no executed test, reds the shard (`--min-tests 1`). The flaky
-  bucket may be empty, so it only needs a report (`--min-tests 0`).
-
-`tests/ci/test_backend_test_gate.py` pins the wiring and reproduces both
-failures with a real pytest. The `e2e` and `frontend` jobs have their own
-uploader steps, which this change does not touch.
+`tests/ci/test_backend_test_gate.py` exercises native failures, false-success
+reports, missing or malformed evidence, optional empty buckets and retry reports,
+and reproduces a crashed pytest and a zero-execution pytest. Forks, Dependabot
+and canonical runs use the same test verdict.
 
 ## Executed-test counts
 

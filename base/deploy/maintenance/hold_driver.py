@@ -70,7 +70,7 @@ class ProcessRef:
         death.
         """
         # Function-local so each call reads the owner modules' current bindings
-        # (conventions/python-conventions.md, "Reach a stubbable name through its
+        # (docs/conventions/python-conventions.md, "Reach a stubbable name through its
         # owning module"); the probe tests stub `pid_starttime_ticks` there.
         from base.native_process import pid_starttime_ticks
         from base.native_process.ownership import create_time_matches, stable_create_time

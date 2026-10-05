@@ -22,7 +22,7 @@ Design-wise, the gateway (spawn / send_message) is centralized under
 `/api/agents/*` — SDK (`ava.agents.*`) / frontend / bootstrap script
 all share the same endpoint set. Auto-resurrect is handled internally
 by `deliver_chat_inbound`. See
-decisions/2026-05-09-stateless-gateway.md.
+docs/decisions/2026-05-09-stateless-gateway.md.
 
 Architectural rule: this module does **not** build the turn-loop prompts
 (spawn/draft endpoints like schedules/guide/packages DO inline a fixed

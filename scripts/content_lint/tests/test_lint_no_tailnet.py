@@ -4,7 +4,7 @@ Rules (2026-08-03/04 Gateway-URL ruling + 2026-08-20 public-repo contribution
 ruling): the repo must not carry a deployment's private overlay addresses as
 literals; the cluster's user-visible URL derives from AVA_GATEWAY_URL /
 reachable_host(). The CIDR range notation (100.64.0.0/10) is the neutral way
-to NAME the range and stays allowed; decisions/ is frozen historical
+to NAME the range and stays allowed; docs/decisions/ is frozen historical
 narrative; a line that genuinely exercises the range boundary opts out with an
 inline `# tailnet-ip-ok:` marker. These tests pin the detection, the range
 boundaries, and the exemption paths. In-range fixtures are built at runtime
@@ -146,8 +146,8 @@ def test_other_lines_with_marker_not_exempted(repo: Path) -> None:
 
 def test_decisions_is_frozen_exemption(repo: Path) -> None:
     literal = _cgnat_ip(103, "96.72")
-    _write(repo, "decisions/2026-06-11-multihost-deployment.md", f"our gateway {literal}\n")
-    assert gate._scan_file("decisions/2026-06-11-multihost-deployment.md") == []
+    _write(repo, "docs/decisions/2026-06-11-multihost-deployment.md", f"our gateway {literal}\n")
+    assert gate._scan_file("docs/decisions/2026-06-11-multihost-deployment.md") == []
 
 
 def test_binary_file_skipped(repo: Path) -> None:

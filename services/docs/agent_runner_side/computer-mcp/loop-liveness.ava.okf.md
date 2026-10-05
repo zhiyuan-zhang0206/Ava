@@ -16,7 +16,7 @@ through the loop. 2026-10-04: a wedged loop left the unit unstoppable through
 five failed root stop windows into the restart breaker — ~15 minutes of
 machine-wide computer-use downtime until a manual kill, with no stack and no
 shutdown line left behind
-([`postmortems/0011`](../../../../postmortems/0011-a-process-that-cannot-be-stopped-cannot-be-restarted.md)).
+([`docs/postmortems/0011`](../../../../docs/postmortems/0011-a-process-that-cannot-be-stopped-cannot-be-restarted.md)).
 
 The loop-liveness watchdog bounds the blocked-loop half. The loop re-beats the
 watchdog each tick and a background thread that sees no beat for

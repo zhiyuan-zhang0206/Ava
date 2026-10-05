@@ -395,7 +395,7 @@ def _register_macos(interval_s: int) -> int:
     # Ownership is two-pronged: the inherited `XPC_SERVICE_NAME` is a cheap
     # fast path that only the job's direct child matches, while descendants —
     # where converges actually run — read "0", so the live process tree check
-    # is the proof (postmortems/0008).
+    # is the proof (docs/postmortems/0008).
     own_job = _own_probe_job_of({label})
     if own_job is not None:
         logger.info("Health probe '{}' is registering itself — deferring reload", own_job)

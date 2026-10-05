@@ -564,7 +564,7 @@ settings.general.machine_serve_gateway = None
 # never collide either.
 
 
-def _distinct_free_ports(count: int) -> list[int]:
+def distinct_free_ports(count: int) -> list[int]:
     """`count` different free localhost ports: every socket stays bound until all
     are chosen, so the kernel cannot hand the same number out twice. The small race
     before a server binds one is the same that tests/_containers.py accepts for
@@ -595,7 +595,7 @@ def _pin_setting(field: str, value: object) -> None:
 # session's table slots) can be the same number: separate `bind(0)` calls release
 # each port at once and the kernel may return it again.
 _HEALTH_PORT_FIELDS = tuple(_HEALTH_PORT_OVERRIDES.values())
-_ports = iter(_distinct_free_ports(len(_HEALTH_PORT_FIELDS) + 7 + len(FIXED_PORTS)))
+_ports = iter(distinct_free_ports(len(_HEALTH_PORT_FIELDS) + 7 + len(FIXED_PORTS)))
 for _health_port_field in _HEALTH_PORT_FIELDS:
     _pin_setting(_health_port_field, next(_ports))
 

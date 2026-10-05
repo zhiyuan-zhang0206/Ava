@@ -45,7 +45,7 @@ depth or automatically defer necessary infrastructure as "not this task."
 Before firing any question at the user, ask yourself: **can I answer this by looking?**
 
 - Is the answer in the codebase? (Read files, search for related code, check git history)
-- Is it in the project docs? (AGENTS.md, CONTEXT.md, conventions/, memory pool)
+- Is it in the project docs? (AGENTS.md, CONTEXT.md, docs/conventions/, memory pool)
 - Is it an observable fact? (Check running processes, config files, deployed state)
 
 **Facts come from the environment. Material goals and trade-offs come from the user.** Don't ask "what database do we use?" when you can inspect the configuration. Make routine implementation choices within the agreed scope; ask when a choice changes user-visible guarantees, scope or authority.
@@ -139,7 +139,7 @@ the task has no meaningful reusable investment.]
 [Background, previous attempts, relevant links]
 ```
 
-For a heavyweight alignment that settles a **load-bearing design decision** (chose X over Y, and the reasoning), also record it per repo discipline in `decisions/YYYY-MM-DD-<topic>.md` — one curated entry per decision. The alignment document is the working artifact; `decisions/` is the durable record of *why*. Follow the repo's doc-maintenance discipline; don't reach for heavier domain-modeling machinery.
+For a heavyweight alignment that settles a **load-bearing design decision** (chose X over Y, and the reasoning), also record it per repo discipline in `docs/decisions/YYYY-MM-DD-<topic>.md` — one curated entry per decision. The alignment document is the working artifact; `docs/decisions/` is the durable record of *why*. Follow the repo's doc-maintenance discipline; don't reach for heavier domain-modeling machinery.
 
 ### 5. Confirm, then proceed
 

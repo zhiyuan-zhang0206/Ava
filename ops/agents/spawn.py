@@ -228,7 +228,7 @@ def create_agent_row(
         fork_checkpoint: exact checkpoint id of the source agent. LangGraph
             (see below).
         preset_name: the spawn-time preset reference, stored for display next
-            to the RESOLVED config_overlay (decisions/2026-09-10-preset-in-
+            to the RESOLVED config_overlay (docs/decisions/2026-09-10-preset-in-
             config-overlay-fork-cache.md); None = no preset.
         fork_tail_skills: skill names a fork's config added to
             skills_to_inject_into_system_prompt (minus its expand list); carried

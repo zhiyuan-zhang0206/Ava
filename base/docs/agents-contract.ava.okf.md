@@ -18,7 +18,7 @@ tags:
 
 ### Status and result enums
 - `AgentStatus` (StrEnum) lifecycle states: `RUNNING` (claimed process, including boot) → `IDLING` (waiting for wakeup between turns or unclaimed before boot) → `TERMINATED`.
-- `TerminationSource` (StrEnum) — who wrote `status='terminated'`: `USER`/`EXIT`/`REAPER`/`LAUNCH_CONFIRM`/`INTEGRITY`, stamped by EVERY terminated-write in the same statement (NULL is permanently unresurrectable — `scripts/lint/termination_source.py` enforces it). Historical termination-source values remain readable after retiring per-agent process supervision. There is no closed state: a terminated agent may be resurrected by any new message ([decision](../../decisions/2026-09-27-terminate-has-no-closed-state.md)).
+- `TerminationSource` (StrEnum) — who wrote `status='terminated'`: `USER`/`EXIT`/`REAPER`/`LAUNCH_CONFIRM`/`INTEGRITY`, stamped by EVERY terminated-write in the same statement (NULL is permanently unresurrectable — `scripts/lint/termination_source.py` enforces it). Historical termination-source values remain readable after retiring per-agent process supervision. There is no closed state: a terminated agent may be resurrected by any new message ([decision](../../docs/decisions/2026-09-27-terminate-has-no-closed-state.md)).
 - Operation result enums: `TerminateResult` / `RestartResult` / `ResurrectResult` — encode idempotent operation outcomes (enqueued / already_terminated / already_alive …) as wire strings.
 
 ### Wire error protocol

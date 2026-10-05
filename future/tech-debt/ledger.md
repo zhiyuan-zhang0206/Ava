@@ -1,7 +1,7 @@
 # Tech-debt ledger
 
-> Living tech-debt ledger, maintained by the sweeper engine (`ava_builtins/skills/practice/sweeper/`)
-> driven by this repo's debt classes (`.agents/skills/ava-sweeper/`).
+> Living tech-debt ledger. Current inspection rules and automated owners live in
+> [technical-debt guidance](../../docs/conventions/tech-debt.md).
 > The single "what debt is open now" view. Forward-looking (what we intend to
 > fix) → lives in `future/`. Entries are agent + human maintained: humans
 > set `wontfix`, and the sweeper must never re-add a `wontfix` item. Resolved
@@ -10,8 +10,8 @@
 This is the single register for debt from every mechanism; do not create a
 parallel ledger. A new mechanism, including a cap-domain "exit" registration,
 records an ordinary fingerprinted entry here with its own class. PRs that
-knowingly introduce debt register it here through the PR template, and the
-daily debt-clearing pass reconciles this ledger.
+knowingly introduce debt register it here through the PR template, and a
+requested reconciliation checks this ledger.
 
 <!-- watermark: last-swept-sha=a2495ca1f last-swept-date=2026-09-23 -->
 
@@ -34,6 +34,14 @@ Mechanisms may add structured bullet fields beyond this base set (for example,
 cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unknown fields.
 
 ## Open
+
+### boundary:supervisor-intent-fixture-stop-window
+- **class**: boundary
+- **status**: open
+- **evidence**: `services/supervision/ava_root/tests/test_ava_root_intent.py:_supervisor` sets a 0.2s real-process stop budget for intent tests. In `test_restart_up_half_failure_retry_replaces_and_clears`, attempt 1 of [PR #4321, run 37318714866, shard 10](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/37318714866/job/111792197420) exhausted that window in `services/supervision/ava_root/stopping.py:_stop_posix_generation`, retaining live PID 10633 rather than falsely certifying closure. The next configured attempt passed this test; it failed a separate single-box port fixture instead. The fixture ties an intent-state assertion to a short native-process deadline. Root cause of the delayed exit remains unknown: the trace does not establish CPU load, signal-delivery failure or a production ownership-guard defect. Diagnose before changing the timeout or runtime behavior.
+- **first-seen**: 2026-10-05 (PR #4321)
+- **last-verified**: 2026-10-05
+
 
 ### locality:cli/commands/agents/control.py:cli/parsers/agents.py
 - **class**: locality
@@ -75,6 +83,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 ### docstring-budget:ava/watcher.py:cron
 - **class**: docstring-budget
 - **status**: wontfix
-- **evidence**: ~18 lines (soft cap 12) after the 2026-09-27 watcher-registry removal (decisions/2026-09-27-watchers-are-never-restarted.md) dropped the old supersede/replace/reuse residue entirely. Residue now: five Args (cron format, timezone, end_time types, name, notify) + the one-line warning that re-registering the same schedule does NOT dedupe any more — it starts a second, independent session, whose loss would silently reintroduce the double-firing confusion the old dedupe used to prevent. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.
+- **evidence**: ~18 lines (soft cap 12) after the 2026-09-27 watcher-registry removal (docs/decisions/2026-09-27-watchers-are-never-restarted.md) dropped the old supersede/replace/reuse residue entirely. Residue now: five Args (cron format, timezone, end_time types, name, notify) + the one-line warning that re-registering the same schedule does NOT dedupe any more — it starts a second, independent session, whose loss would silently reintroduce the double-firing confusion the old dedupe used to prevent. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.
 - **first-seen**: 2026-09-23
 - **last-verified**: 2026-09-27

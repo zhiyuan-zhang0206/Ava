@@ -28,7 +28,7 @@ swallowed and never perturb hook or wrap semantics.
 Two consumers read the stream. In the aggregate fetch path (`base/telemetry/metrics/aggregate.py` + `base/telemetry/metrics/aggregate_sql.py`), the
 `plugin_activation` section counts activations by contribution and by
 plugin × model — a contribution that registers but never fires is the removal
-evidence [`philosophy.md` §6](../../conventions/philosophy.md) asks for. The
+evidence [`philosophy.md` §6](../../docs/conventions/philosophy.md) asks for. The
 weekly self-evolution collector puts the same counts on each run record as
 `plugins_activated`, so `mine.py` can cluster bad runs by the contribution that
 acted in them. A row missing part of the `(plugin, surface, identifier)` key

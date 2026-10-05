@@ -10,7 +10,7 @@ best practice (OpenAI / Anthropic Agent Skills, AGENTS.md v1.1 proposal) converg
 on a root AGENTS.md of <= 100 lines — light enough to stay in context permanently.
 
 Ava's AGENTS.md was reduced from 385 to 81 lines (2026-07-14) by extracting
-specialized rules into conventions/ following progressive disclosure. This lint
+specialized rules into docs/conventions/ following progressive disclosure. This lint
 prevents it from creeping back up.
 
 ## Thresholds
@@ -56,7 +56,7 @@ def main(_argv: list[str] | None = None) -> int:
         print(
             f"AGENTS.md:{n_lines}: error: {n_lines} lines exceeds the "
             f"{_HARD_CEILING}-line hard ceiling — trim or move content to "
-            f"conventions/. If the ceiling genuinely needs to move, bump "
+            f"docs/conventions/. If the ceiling genuinely needs to move, bump "
             f"_HARD_CEILING in scripts/lint/agents_md_size.py in the same PR "
             f"and justify it in the commit message.",
         )

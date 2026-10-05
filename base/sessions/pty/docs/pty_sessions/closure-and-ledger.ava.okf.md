@@ -50,8 +50,8 @@ it on the same idempotency keys. A database that cannot be reached is still
 never a failed or delayed start. A stop that finds no service closes from the
 ledger and writes the same notices itself. Delivery is idempotent on machine,
 agent, session and shell birth, and a terminated owner is dropped.
-Decisions: `decisions/2026-10-04-pty-crash-notices.md`,
-`decisions/2026-10-04-pty-crash-notices-staged-retry.md`.
+Decisions: `docs/decisions/2026-10-04-pty-crash-notices.md`,
+`docs/decisions/2026-10-04-pty-crash-notices-staged-retry.md`.
 
 ## Dependencies
 

@@ -61,7 +61,7 @@ one code path with two callers.
 - `cli/commands/data_plane/walg.py` — `cmd_walg_restore()`, `cmd_walg_drill()`
 
 ## Notes
-- Operator procedure and the drill's failure texts: `conventions/runbook.md` ("WAL-G archiving"),
+- Operator procedure and the drill's failure texts: `docs/conventions/runbook.md` ("WAL-G archiving"),
   `.agents/skills/operating-ava-cluster/references/walg-restore.md`.
 - Scope: the database under the same home identity. Rebuilding a lost host's identity state is not covered.
 - The directory a restore leaves is a promoted database on a new timeline; before it backs a new

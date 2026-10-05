@@ -26,8 +26,9 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
    (FULL / SKIP / SELECTED), and stays non-gating: a selector or setup failure
    leaves the routing outputs empty, which degrades to the full fan-out.
 2. `backend-selected` runs only a SELECTED list and is informational in shadow.
-   In enforce it is the gate, and its JUnit feeds the same Trunk quarantine
-   gate as the shards (quarantined flaky failures pass, real failures block).
+   In enforce it is the gate: the native pytest result and shared JUnit
+   validator reject failed, missing, malformed or unexecuted reports, just
+   like the shards. No external quarantine service determines the verdict.
    `backend-shard` is skipped exactly when enforce + SELECTED; it runs the
    full suite in every other combination, including every Trunk merge-tree
    branch.
@@ -41,6 +42,6 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 
 ## Related policy
 
-[conventions/test-selection.md](../conventions/test-selection.md) owns the
+[docs/conventions/test-selection.md](../docs/conventions/test-selection.md) owns the
 selection rules, blind-file limits, duration guard, artifacts, maintenance, and
 the mode switch.

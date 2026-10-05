@@ -38,7 +38,7 @@ def lint(monkeypatch, tmp_path):
     here depend on whatever `base/` happens to define today.
     """
     mod = importlib.import_module("scripts.content_lint.lint_doc_anchors")
-    docs = tmp_path / "conventions"
+    docs = tmp_path / "docs" / "conventions"
     docs.mkdir(parents=True)
     skills = tmp_path / ".agents" / "skills"
     skills.mkdir(parents=True)
@@ -185,7 +185,7 @@ def test_dev_skill_doc_is_in_scope(lint):
 
 
 def test_non_markdown_file_in_scope_is_scanned(lint):
-    # `.agents/skills/ship-a-change/reference/ci_watcher.py` cites
+    # `scripts/ci/watch_pr.py` cites
     # `scripts/ci_utils.py:check_ci` in its docstring — an `.md`-only scan would
     # walk straight past it, which is how the `#65` rename lost `db/schema.sql`.
     mod, _, skills, _ = lint

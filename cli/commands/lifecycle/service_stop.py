@@ -8,7 +8,7 @@ Persistent terminals have one closure (`base.sessions.pty.closure`), run by the
 pty-sessions service that holds every shell: HUP the shells and TERM the rest of
 each captured POSIX session, wait a bounded grace, SIGKILL what is left, each
 session whole. `close_terminals` asks the service for it at `ava stop`
-(decisions/2026-09-28-stop-escalates-to-sigkill.md) and gives every busy session
+(docs/decisions/2026-09-28-stop-escalates-to-sigkill.md) and gives every busy session
 whose shell it verified gone its owner's notice, naming what of it outlived the
 SIGKILL. A service that is not running is closed from its ledger instead
 (`services.agent_runner.pty_sessions.ledger.sweep`), and its owners are told it crashed, not
@@ -43,7 +43,7 @@ from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
 
 # How long a normal stop's terminal closure waits between its HUP/TERM and the
-# SIGKILL of whatever is left (decisions/2026-09-28-stop-escalates-to-sigkill.md):
+# SIGKILL of whatever is left (docs/decisions/2026-09-28-stop-escalates-to-sigkill.md):
 # a job that handles TERM gets this long to clean up. The stop's own deadline
 # caps it as well.
 _TERMINAL_STOP_GRACE_S = 10.0
@@ -243,7 +243,7 @@ def close_terminals(
     the SIGKILL leg is bounded by `_TERMINAL_KILL_WAIT_S` and runs even when
     the grace spent the rest of the deadline — a stop that reached its
     terminal phase closes its terminals
-    (decisions/2026-09-28-stop-escalates-to-sigkill.md). A process that
+    (docs/decisions/2026-09-28-stop-escalates-to-sigkill.md). A process that
     outlives its SIGKILL fails the stop, which keeps its maintenance hold. A
     terminal still tearing down after that gets the rest of the deadline, and
     at least `_TERMINAL_KILL_WAIT_S`, to leave the service's table.
@@ -291,7 +291,7 @@ def report_postgres_stop_escalation(
     caller owns a stop journal, collects the line for it
     (`_temporary_stop._finish_stop`); a leg that owns no journal passes
     nothing and still gets stderr and the event
-    (decisions/2026-10-02-pg-stop-escalates-to-immediate.md).
+    (docs/decisions/2026-10-02-pg-stop-escalates-to-immediate.md).
     """
     killed = ", ".join(str(pid) for pid in escalation.killed) or "none"
     note = (

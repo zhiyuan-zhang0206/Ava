@@ -2,10 +2,10 @@
 
 **Status: slices 1 to 5 are done; slice 6 is partly done.** The ruling and its
 reasons are in
-[one cluster per host](../../decisions/2026-09-30-one-cluster-per-host.md). This
+[one cluster per host](../../docs/decisions/2026-09-30-one-cluster-per-host.md). This
 doc is the order of work: six slices, each its own PR with its docs and tests.
 The shipped model is described in [`AGENTS.md`](../../AGENTS.md) and
-[`runbook.md`](../../conventions/runbook.md); this doc stays as the record of the
+[`runbook.md`](../../docs/conventions/runbook.md); this doc stays as the record of the
 order and of what each slice deleted.
 
 Slice 6 has its Linux container recipe and its Tart recipe (`scripts/verify/`: the
@@ -20,7 +20,7 @@ container, a VM or a Tart macOS VM, where it is that boundary's one cluster.
 In scope: the mechanisms that keep several clusters apart on one host, and the
 way a process learns its home. Out of scope: the release path and PITR shell
 (removed by the updater work,
-[decision](../../decisions/2026-09-30-remove-release-image-path.md)), the docs
+[decision](../../docs/decisions/2026-09-30-remove-release-image-path.md)), the docs
 and tests relocation (the locality work), and the data plane itself.
 
 ## What must survive every slice
@@ -35,9 +35,9 @@ and tests relocation (the locality work), and the data plane itself.
    application code set a scratch `AVA_HOME`; the `~/.ava` cluster is started and
    stopped only from `~/.ava/source`. Those three rules have a test that fails if
    one is broken. Every other development tool that imports application code
-   follows the convention in `conventions/dev-setup.md` (a temporary `AVA_HOME`, or
+   follows the convention in `docs/conventions/dev-setup.md` (a temporary `AVA_HOME`, or
    a Docker or Tart boundary); see
-   [guard only irreversible mistakes](../../decisions/2026-10-01-guard-only-irreversible-mistakes.md).
+   [guard only irreversible mistakes](../../docs/decisions/2026-10-01-guard-only-irreversible-mistakes.md).
 3. **`AVA_HOME` is the one override of the home.** Unset means `~/.ava`. It is
    read when needed, never captured at import, and there is no second channel.
 4. **A test home never uses the production ports.** Tests on a machine that also
@@ -65,7 +65,7 @@ is independent of them.
 
 Nothing is held back for other work. The release path the updater work was
 deleting is gone
-([decision](../../decisions/2026-09-30-remove-release-image-path.md)), and slice 4
+([decision](../../docs/decisions/2026-09-30-remove-release-image-path.md)), and slice 4
 was the last to touch `base/cluster` and `base/host/env`, so the tests that
 exercise these mechanisms, the pinned `tests/base` files included, can move into
 their packages' own `tests/` directories under the locality work.
@@ -80,7 +80,7 @@ their packages' own `tests/` directories under the locality work.
   same fix as slice 2's for the home, applied to configuration, and is its own
   work.
 - **The older identity channels are retired** (done; see
-  [a home's identity lives in its `.env`](../../decisions/2026-10-01-retire-machine-identity-files.md)).
+  [a home's identity lives in its `.env`](../../docs/decisions/2026-10-01-retire-machine-identity-files.md)).
   The `$AVA_HOME/machine_*`, `gateway_url` and `memory_remote` files are no longer
   read, and `ava start` admits a home only through its intent. A home that still has the
   files gets their values into its `.env` by a hand step before the first start of the

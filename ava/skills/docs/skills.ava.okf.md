@@ -48,7 +48,7 @@ anywhere else, and one published elsewhere drops in unmodified.
 
 **Underscore is the Python projection and nothing else.** `-` is not an
 identifier character, so the CodeAct namespace reaches
-`write-a-pr-description/` as `ava.skills.write_a_pr_description`. `target()`
+`inspect-a-trace/` as `ava.skills.inspect_a_trace`. `target()`
 renders that projection; `.` separates namespace segments there, while the
 display `identifier()` joins the same segments with `:`
 (`ava.skills.web-ai:deep-research`).

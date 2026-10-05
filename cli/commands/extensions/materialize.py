@@ -3,7 +3,7 @@
 A sibling of `skills_sync.py` (repo/plugin skills from the checkout) and
 `_plugin_scaffold.py`, for the content the CLUSTER owns: whatever arrived by
 `ava skill install` on any machine (`future/infra/extension-ownership.md` S2,
-model in `decisions/2026-08-21-extension-ownership-three-tiers.md`).
+model in `docs/decisions/2026-08-21-extension-ownership-three-tiers.md`).
 
 Its own module rather than another function in `converge/host.py` because it is
 not a converge STEP — see the docstring below — and because `converge/host.py`

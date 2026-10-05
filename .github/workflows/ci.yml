@@ -80,7 +80,7 @@ env:
   # no PR gates on the subset — the full fan-out gates and the subset plus its
   # comparison report run informational beside it. Set back to "shadow" to
   # restore that behavior; all routing below derives from this one value.
-  # See conventions/test-selection.md.
+  # See docs/conventions/test-selection.md.
   TEST_SELECTION_MODE: "enforce"
   # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
   UV_FROZEN: "1"
@@ -753,7 +753,6 @@ jobs:
       matrix:
         group: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     env:
-      TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
       # One data file per shard so the aggregator can `coverage combine` them.
@@ -779,10 +778,8 @@ jobs:
       - name: Run pytest shard
         id: pytest-shard
         shell: bash
-        # Flaky-Tests gate flip (task #2414): test failures no longer red this
-        # step — Trunk's quarantine-aware evaluation of the uploaded JUnit is
-        # the gate now (quarantined failures pass, real failures still block).
-        continue-on-error: true
+        # Native pytest failure makes this job red; JUnit validation also
+        # catches missing evidence and a success exit with recorded failures.
         # Hang forensics (task #3328): the canary shard has stalled silently
         # ~17 min at ~96% until the 20-min cap killed it (e.g. run 34779755502
         # — dead output, workers idle). -o faulthandler_timeout=300 uses the
@@ -832,22 +829,12 @@ jobs:
           fi
           exit "$status"
 
-      - name: Require the test gate
-        # Fail-closed: the Trunk gate below is the only thing that turns the pytest
-        # step's failures red (it is continue-on-error), so an empty secret must not
-        # skip it silently.
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' }}
-        uses: ./.github/actions/require-test-gate
-        with:
-          pytest-outcome: ${{ steps.pytest-shard.outcome }}
-
       - name: Report executed test counts
         # What this shard actually ran, from the JUnit report pytest already wrote
         # (the -q log has no test ids): the total and the count per tests/ directory,
         # in this log and the job summary. The last attempt's report wins. It is also a
         # gate: no JUnit report (pytest died before writing one, e.g. a plugin failed
-        # to import) or no executed test at all reds the shard, which the Trunk
-        # uploader alone would let pass.
+        # to import) or no executed test at all reds the shard.
         if: ${{ !cancelled() }}
         run: >
           python3 scripts/ci/shard_counts.py shard --group ${{ matrix.group }}
@@ -865,24 +852,23 @@ jobs:
           path: tmp/shard-counts-${{ matrix.group }}.json
           if-no-files-found: ignore
 
-      - name: Trunk quarantine gate (upload test results)
-        id: trunk-gate
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
-        uses: trunk-io/analytics-uploader@14c0f18990953eecd01c9c5afe3cc63a73b6c371 # v2.1.5
+      - name: Validate native test results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
         with:
-          cli-version: 0.15.4
-          junit-paths: tmp/junit-backend-shard-${{ matrix.group }}-*.xml
-          # The action's default is true: a missing report would upload nothing and pass.
-          allow-missing-junit-files: false
-          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-          token: ${{ secrets.TRUNK_API_TOKEN }}
-      - name: Show unquarantined failure summary
-        # failure() prevents GitHub Actions from adding implicit success(),
-        # which would skip the summary when the gate fails.
-        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        uses: ./.github/actions/junit-failure-summary
+          test-outcome: ${{ steps.pytest-shard.outcome }}
+          junit-patterns: '["tmp/junit-backend-shard-${{ matrix.group }}-a*.xml"]'
+          latest-report: 'true'
+
+      - name: Upload native test reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          junit-patterns: '["tmp/junit-backend-shard-*.xml"]'
+          name: test-results-backend-shard-${{ matrix.group }}
+          path: |
+            tmp/junit-backend-shard-${{ matrix.group }}-a*.xml
+          if-no-files-found: warn
 
       - name: Upload flake telemetry (attempt-1 failure)
         if: ${{ always() && (steps.pytest-shard.outputs.retried == 'true' || matrix.group == 8) }}
@@ -958,7 +944,6 @@ jobs:
       subset_status: ${{ steps.run-subset.outputs.subset_status }}
       subset_duration_secs: ${{ steps.run-subset.outputs.subset_duration_secs }}
     env:
-      TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
       TESTS: ${{ needs.test-select.outputs.tests }}
@@ -982,11 +967,8 @@ jobs:
 
       - name: Run selected pytest subset
         id: run-subset
-        # Same split as a shard: pytest's exit code alone is not the gate —
-        # the Trunk quarantine gate below decides what is a real failure
-        # (quarantined flaky failures pass, real failures still block). The
-        # exit status is recorded either way for the shadow report.
-        continue-on-error: true
+        # Record the native exit for the selector report and propagate it.
+        # Only the existing shadow job remains informational; enforce is strict.
         shell: bash
         run: |
           mkdir -p tmp
@@ -1007,49 +989,24 @@ jobs:
           finished=$(date +%s)
           echo "subset_status=$status" >> "$GITHUB_OUTPUT"
           echo "subset_duration_secs=$((finished - started))" >> "$GITHUB_OUTPUT"
-          # Shadow failures belong in the report, never in this check result;
-          # the step-level continue-on-error carries that either way.
+          exit "$status"
 
-      - name: Require a subset JUnit report
-        # Fail-closed guard (QA review 2026-09-11): the selector's no-tests
-        # rule returns FULL for an empty candidate, so a SELECTED decision
-        # should always have tests — but if that ever breaks, the run step
-        # records status 5 with no JUnit, and the Trunk uploader tolerates a
-        # missing file. Zero executed tests must never read green.
-        if: ${{ !cancelled() && needs.test-select.outputs.mode == 'enforce' }}
-        shell: bash
-        run: |
-          if [ ! -s tmp/junit-backend-selected.xml ]; then
-            echo "::error::the enforced subset produced no JUnit report (TESTS='$TESTS') — refusing green without executing tests"
-            exit 1
-          fi
-
-      - name: Require the test gate
-        # Fail-closed, enforce mode only (see backend-shard): an empty secret must
-        # not skip the Trunk gate silently.
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' && needs.test-select.outputs.mode == 'enforce' }}
+      - name: Validate native test results
+        if: ${{ !cancelled() }}
         uses: ./.github/actions/require-test-gate
         with:
-          pytest-outcome: ${{ steps.run-subset.outcome }}
-
-      - name: Trunk quarantine gate (upload test results)
-        id: trunk-gate
-        # Enforce mode only: in shadow the subset never gates, so it uploads
-        # nothing and a subset failure cannot red anything.
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' && needs.test-select.outputs.mode == 'enforce' }}
-        uses: trunk-io/analytics-uploader@14c0f18990953eecd01c9c5afe3cc63a73b6c371 # v2.1.5
-        with:
-          cli-version: 0.15.4
-          junit-paths: tmp/junit-backend-selected.xml
-          # The action's default is true: a missing report would upload nothing and pass.
-          allow-missing-junit-files: false
-          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-          token: ${{ secrets.TRUNK_API_TOKEN }}
-      - name: Show unquarantined failure summary
-        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        uses: ./.github/actions/junit-failure-summary
-        with:
+          test-outcome: ${{ steps.run-subset.outcome }}
           junit-patterns: '["tmp/junit-backend-selected.xml"]'
+
+      - name: Upload native test reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-backend-selected
+          path: |
+            tmp/junit-backend-selected.xml
+          if-no-files-found: warn
 
       - name: Upload selected-subset log
         if: ${{ always() }}
@@ -1067,7 +1024,6 @@ jobs:
     needs: [classify]
     if: ${{ needs.classify.outputs.backend == 'true' }}
     env:
-      TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
       COVERAGE_FILE: coverage-data-serial
@@ -1091,20 +1047,21 @@ jobs:
 
       - name: Run flaky pytest bucket serially
         id: pytest-serial
-        continue-on-error: true
-        run: >
-          mkdir -p tmp &&
-          uv run pytest -m flaky --ignore=tests/e2e -q
-          --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui
-          --cov=ops --cov=services --cov=ava_builtins
-          --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
-
-      - name: Require the test gate
-        # Fail-closed (see backend-shard): an empty secret must not skip the Trunk gate.
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' }}
-        uses: ./.github/actions/require-test-gate
-        with:
-          pytest-outcome: ${{ steps.pytest-serial.outcome }}
+        shell: bash
+        run: |
+          mkdir -p tmp
+          set +e
+          uv run pytest -m flaky --ignore=tests/e2e -q \
+            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
+            --cov=ops --cov=services --cov=ava_builtins \
+            --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
+          status=$?
+          # This explicitly optional bucket may contain no tests (pytest exit 5).
+          # The report guard still requires valid, failure-free JUnit evidence.
+          if [ "$status" = 5 ]; then
+            exit 0
+          fi
+          exit "$status"
 
       - name: Report executed test counts
         # The flaky bucket's tests count with the shards' (see backend-shard). The bucket
@@ -1125,22 +1082,23 @@ jobs:
           path: tmp/shard-counts-serial.json
           if-no-files-found: ignore
 
-      - name: Trunk quarantine gate (upload test results)
-        id: trunk-gate
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
-        uses: trunk-io/analytics-uploader@14c0f18990953eecd01c9c5afe3cc63a73b6c371 # v2.1.5
+      - name: Validate native test results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
         with:
-          cli-version: 0.15.4
-          junit-paths: tmp/junit-backend-serial.xml
-          # The action's default is true: a missing report would upload nothing and pass.
-          allow-missing-junit-files: false
-          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-          token: ${{ secrets.TRUNK_API_TOKEN }}
-      - name: Show unquarantined failure summary
-        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        uses: ./.github/actions/junit-failure-summary
-        with:
+          test-outcome: ${{ steps.pytest-serial.outcome }}
           junit-patterns: '["tmp/junit-backend-serial.xml"]'
+          min-tests: '0'
+
+      - name: Upload native test reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-backend-serial
+          path: |
+            tmp/junit-backend-serial.xml
+          if-no-files-found: warn
 
       - name: Upload coverage data
         id: coverage-upload
@@ -1708,8 +1666,6 @@ jobs:
     timeout-minutes: 20
     needs: [classify]
     if: ${{ needs.classify.outputs.frontend == 'true' }}
-    env:
-      TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1749,10 +1705,10 @@ jobs:
         working-directory: ui/web
         run: npm run lint
       - name: Unit tests (vitest run)
+        id: vitest
         working-directory: ui/web
-        continue-on-error: true
         run: npx vitest run --coverage
-      # vitest.config.mts already emits json-summary for this gate. Quarantined
+      # vitest.config.mts already emits json-summary for this gate. Timing-sensitive
       # src/**/flaky/** tests run serially below with coverage disabled, so this
       # checks the stable parallel denominator. Raise toward the measured value
       # over time (tests/README.md), never toward 100: line coverage is not quality.
@@ -1775,27 +1731,39 @@ jobs:
                   f"Frontend coverage {coverage}% is below threshold {threshold}%"
               )
           EOF
-      # Quarantined timing-sensitive tests (src/**/flaky/**) run serially in
+      # Timing-sensitive tests (src/**/flaky/**) run serially in
       # their own vitest process — see ui/web/vitest.flaky.config.mts.
       - name: Flaky unit tests (vitest run, serial)
+        id: vitest-flaky
+        if: ${{ !cancelled() }}
         working-directory: ui/web
-        continue-on-error: true
         run: npx vitest run --config vitest.flaky.config.mts
 
-      - name: Trunk quarantine gate (upload test results)
-        id: trunk-gate
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
-        uses: trunk-io/analytics-uploader@14c0f18990953eecd01c9c5afe3cc63a73b6c371 # v2.1.5
+      - name: Validate native test results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
         with:
-          cli-version: 0.15.4
-          junit-paths: ui/web/junit.xml,ui/web/junit-flaky.xml
-          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-          token: ${{ secrets.TRUNK_API_TOKEN }}
-      - name: Show unquarantined failure summary
-        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        uses: ./.github/actions/junit-failure-summary
+          test-outcome: ${{ steps.vitest.outcome }}
+          junit-patterns: '["ui/web/junit.xml"]'
+
+      - name: Validate flaky frontend results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
         with:
-          junit-patterns: '["ui/web/junit.xml", "ui/web/junit-flaky.xml"]'
+          test-outcome: ${{ steps.vitest-flaky.outcome }}
+          junit-patterns: '["ui/web/junit-flaky.xml"]'
+          min-tests: '0'
+
+      - name: Upload native test reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-frontend
+          path: |
+            ui/web/junit.xml
+            ui/web/junit-flaky.xml
+          if-no-files-found: warn
 
   e2e-shard:
     name: e2e shard (${{ matrix.group }}/4)
@@ -1809,7 +1777,6 @@ jobs:
       matrix:
         group: [1, 2, 3, 4]
     env:
-      TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
@@ -1872,7 +1839,7 @@ jobs:
         timeout-minutes: 15
 
       - name: Run e2e tests
-        continue-on-error: true
+        id: pytest-e2e
         # tests/e2e shares .test_durations with the backend suite (pytest-split
         # filters the file to this run's node ids; the nightly refresh measures
         # both suites), so the split is duration-balanced once e2e entries land.
@@ -1887,20 +1854,22 @@ jobs:
           --splitting-algorithm least_duration
           --junit-xml=tmp/junit-e2e-shard-${{ matrix.group }}.xml -o junit_family=xunit1
 
-      - name: Trunk quarantine gate (upload test results)
-        id: trunk-gate
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
-        uses: trunk-io/analytics-uploader@14c0f18990953eecd01c9c5afe3cc63a73b6c371 # v2.1.5
+      - name: Validate native test results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
         with:
-          cli-version: 0.15.4
-          junit-paths: tmp/junit-e2e-shard-${{ matrix.group }}.xml
-          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-          token: ${{ secrets.TRUNK_API_TOKEN }}
-      - name: Show unquarantined failure summary
-        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        uses: ./.github/actions/junit-failure-summary
-        with:
+          test-outcome: ${{ steps.pytest-e2e.outcome }}
           junit-patterns: '["tmp/junit-e2e-shard-*.xml"]'
+
+      - name: Upload native test reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-e2e-shard-${{ matrix.group }}
+          path: |
+            tmp/junit-e2e-shard-*.xml
+          if-no-files-found: warn
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -1919,7 +1888,6 @@ jobs:
     # message flow, self-restart and self-terminate through the real daemon.
     if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
     env:
-      TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
@@ -1972,7 +1940,7 @@ jobs:
         timeout-minutes: 15
 
       - name: Run hosted e2e tests
-        continue-on-error: true
+        id: pytest-hosted
         # Five tests, one worker: each test starts its own function-scoped
         # gateway + ops + agent-host, so serial keeps the run simple and the
         # logs unambiguous. message_flow / self_restart / self_terminate are
@@ -1989,20 +1957,22 @@ jobs:
           -v -n 1
           --junit-xml=tmp/junit-e2e-hosted.xml -o junit_family=xunit1
 
-      - name: Trunk quarantine gate (upload test results)
-        id: trunk-gate
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
-        uses: trunk-io/analytics-uploader@14c0f18990953eecd01c9c5afe3cc63a73b6c371 # v2.1.5
+      - name: Validate native test results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
         with:
-          cli-version: 0.15.4
-          junit-paths: tmp/junit-e2e-hosted.xml
-          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-          token: ${{ secrets.TRUNK_API_TOKEN }}
-      - name: Show unquarantined failure summary
-        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        uses: ./.github/actions/junit-failure-summary
-        with:
+          test-outcome: ${{ steps.pytest-hosted.outcome }}
           junit-patterns: '["tmp/junit-e2e-hosted.xml"]'
+
+      - name: Upload native test reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-e2e-hosted
+          path: |
+            tmp/junit-e2e-hosted.xml
+          if-no-files-found: warn
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -2030,7 +2000,6 @@ jobs:
     needs: [classify]
     if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
     env:
-      TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
@@ -2083,7 +2052,7 @@ jobs:
         timeout-minutes: 15
 
       - name: Run env-guard warmup + home-isolation in one serial process
-        continue-on-error: true
+        id: pytest-env-guard
         # The whole point is ONE process: the package-scoped _e2e_process_env
         # fixture must fire and its teardown must land BEFORE the isolation
         # detectors read the environment. One scenario-marked test covers the
@@ -2098,20 +2067,22 @@ jobs:
           tests/test_home_isolation.py -v -n 1
           --junit-xml=tmp/junit-e2e-env-guard.xml -o junit_family=xunit1
 
-      - name: Trunk quarantine gate (upload test results)
-        id: trunk-gate
-        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
-        uses: trunk-io/analytics-uploader@14c0f18990953eecd01c9c5afe3cc63a73b6c371 # v2.1.5
+      - name: Validate native test results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
         with:
-          cli-version: 0.15.4
-          junit-paths: tmp/junit-e2e-env-guard.xml
-          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-          token: ${{ secrets.TRUNK_API_TOKEN }}
-      - name: Show unquarantined failure summary
-        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        uses: ./.github/actions/junit-failure-summary
-        with:
+          test-outcome: ${{ steps.pytest-env-guard.outcome }}
           junit-patterns: '["tmp/junit-e2e-env-guard.xml"]'
+
+      - name: Upload native test reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-e2e-env-guard
+          path: |
+            tmp/junit-e2e-env-guard.xml
+          if-no-files-found: warn
 
       - name: Upload e2e logs on failure
         if: failure()

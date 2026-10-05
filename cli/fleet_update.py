@@ -6,7 +6,7 @@ checkout to NEW. `up`: start the gateway, then each runner (macOS as a one-time
 GUI-session LaunchAgent: helper signing needs the login keychain); check holds
 and the listed machines' roster rows; smoke-test each listed agent-runner; refresh skills; then check
 for drift (the gateway's in-store schedule scripts, every host's plugins), which fails `up` last.
-After a failure, fix the cause and rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
+After a failure, fix the cause and rerun the whole half. See docs/conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
 
 The window is quiet because `down` opens one Grafana silence over every alert rule before the first
 stop (`--silence-hours`, default 4) and `up` expires it once it completes (cli/fleet_alert_silence.py).

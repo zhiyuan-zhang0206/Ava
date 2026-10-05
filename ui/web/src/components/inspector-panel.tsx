@@ -614,8 +614,8 @@ function ShellRow({
 }
 
 // Config keys whose values are skill-name lists. The agent runtime stores
-// these in the underscore Python projection (ava_qa_inspection); the UI
-// renders the canonical dash spelling (ava-qa-inspection) — the same rule the
+// these in the underscore Python projection (example_skill); the UI
+// renders the canonical dash spelling (example-skill) — the same rule the
 // `# Capabilities` index and the skills panel follow
 // (base.packages.skills.names.display_name).
 const SKILL_LIST_KEYS = new Set([

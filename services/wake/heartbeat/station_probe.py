@@ -7,7 +7,7 @@ profile (test_gateway_consumer_guard). The watchdog resolves it by dotted string
 runner closure never contains it.
 
 The GATEWAY's probe of a REMOTE observatory station (WP4, task #1946;
-conventions/reachability-and-credentials.md). When `AVA_OBSERVABILITY_URL`
+docs/conventions/reachability-and-credentials.md). When `AVA_OBSERVABILITY_URL`
 is empty the check is a no-op: the observatory is local and the `lgtm`
 healthcheck keeps the native stack alive. When it is set, the gateway dials
 the station through the reachability contract — the address the station
@@ -87,7 +87,7 @@ def resolve_target() -> _StationTarget | None:
         "unit_dial_url; a hybrid gateway+station unit advertises its gateway URL "
         "and is not a probe target) — probing the configured base until the "
         "station registers (reachability contract, "
-        "conventions/reachability-and-credentials.md)"
+        "docs/conventions/reachability-and-credentials.md)"
     )
     return target
 

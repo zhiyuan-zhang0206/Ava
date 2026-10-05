@@ -2,7 +2,7 @@
 
 The ops layer owns desired service state, lifecycle operations and deployment
 coordination. Its design rationale is recorded in
-[the ops decision](../decisions/2026-07-19-ops-k8s-semantics-without-k8s.md).
+[the ops decision](../docs/decisions/2026-07-19-ops-k8s-semantics-without-k8s.md).
 
 | Responsibility | Current implementation |
 |---|---|
@@ -36,7 +36,7 @@ flush, actual continuation completion and resource settlement. Ordinary stop
 shares that drain and then closes the selected local services, PTYs and data
 plane; restart keeps the data plane and browser.
 Timeout fails without implicit force. The complete operator contract is in
-[graceful maintenance](../conventions/graceful-maintenance.md).
+[graceful maintenance](../docs/conventions/graceful-maintenance.md).
 
 A fleet update is `python -m cli.fleet_update`. What the update path still lacks
 is recorded in the

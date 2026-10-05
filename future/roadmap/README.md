@@ -9,7 +9,7 @@ encodes *why it is or isn't being worked on now*, which is the thing that drifts
 if it lives only in someone's head.
 
 This folder is the **strategic capability/product roadmap**, distinct from the
-engineering backlogs in [`../infra/`](../infra/) and the module-co-located plans
+engineering backlogs in [`../infra/`](../infra) and the module-co-located plans
 (`agent/`, `ops/`, `base/lm/`, `ava_builtins/`) —
 those track build-level work item by item; this tracks what Ava is *for* and what
 it builds next at the capability level, and links down into those streams where a

@@ -80,57 +80,8 @@ def _job_log_tail(job_id: int, repo: str) -> str:
     return result.stdout[-_DIAGNOSE_LOG_TAIL:]
 
 
-def _failed_test_names(log: str) -> list[str]:
-    """Test ids from pytest's `FAILED <file>::<test>` summary lines."""
-    return re.findall(r"^FAILED\s+(\S+)", log, re.MULTILINE)
-
-
-def _quarantined_tests(repo: str, *, token: str | None) -> list[dict[str, object]]:
-    """Trunk's quarantined (flaky/broken) tests; empty when unavailable.
-    The lookup needs TRUNK_API_TOKEN and the Flaky Tests upload wiring (PR #1626); without either,
-    the diagnosis cannot vouch for flakiness and says so instead of guessing.
-    """
-    if not token:
-        return []
-    owner, name = repo.split("/", maxsplit=1)
-    payload: dict[str, object] = {
-        "repo": {"host": "github.com", "owner": owner, "name": name},
-        "org_url_slug": trunk_api.ORG_SLUG,
-        # Trunk's page ceiling: 100 per page; one page is the whole lookup
-        # (task #3696 exception inventory).
-        "page_query": {"page_size": 100},
-    }
-    data, error = trunk_api.post("flaky-tests/list-quarantined-tests", payload, token)
-    if error is not None or data is None:
-        return []
-    raw = data.get("quarantined_tests", [])
-    tests = raw if isinstance(raw, list) else []
-    return [t for t in tests if isinstance(t, dict)]
-
-
-def _match_quarantined(
-    failed: list[str], quarantined: list[dict[str, object]]
-) -> list[dict[str, object]]:
-    """Quarantined entries whose test name appears among the failed tests."""
-    hits: list[dict[str, object]] = []
-    for entry in quarantined:
-        entry_name = str(entry.get("name") or "")
-        if not entry_name:
-            continue
-        if any(test_id.endswith("::" + entry_name) for test_id in failed):
-            hits.append(entry)
-    return hits
-
-
-def _classify_check(name: str, log: str, quarantined: list[dict[str, object]]) -> tuple[str, str]:
-    """(classification, suggested action) for one failing check."""
-    hits = _match_quarantined(_failed_test_names(log), quarantined)
-    if hits:
-        statuses = sorted({str(h.get("status")) for h in hits})
-        return (
-            f"known flake ({', '.join(statuses)} in Trunk flaky DB)",
-            "rerun the failed job — no code change; resubmit if the queue failed",
-        )
+def _classify_check(name: str, log: str) -> tuple[str, str]:
+    """(classification, suggested action) from a failing check's native log."""
     for pattern, label, action in _FAILURE_SIGNATURES:
         if re.search(pattern, log, re.IGNORECASE):
             return label, action
@@ -218,11 +169,8 @@ def _pr_level_issues(view: dict[str, object], pr: str, repo: str) -> list[dict[s
     return issues
 
 
-def _failing_check_entries(
-    view: dict[str, object], pr: str, repo: str, *, token: str | None
-) -> list[dict[str, object]]:
+def _failing_check_entries(view: dict[str, object], pr: str, repo: str) -> list[dict[str, object]]:
     """Classified entries (with job log tails) for the PR's failing checks."""
-    quarantined = _quarantined_tests(repo, token=token)
     try:
         failed_jobs = list_failed_jobs(pr, repo)
     except CiJobRerunError:
@@ -238,7 +186,7 @@ def _failing_check_entries(
         check_name = str(check.get("name") or "unnamed check")
         job = next((j for j in failed_jobs if j.get("name") == check_name), None)
         log = _job_log_tail(int(job["job_id"]), repo) if job else ""
-        classification, action = _classify_check(check_name, log, quarantined)
+        classification, action = _classify_check(check_name, log)
         entry: dict[str, object] = {
             "check": check_name,
             "conclusion": check.get("conclusion"),
@@ -267,7 +215,7 @@ def _trunk_diagnosis(pr: str, repo: str, token: str) -> dict[str, object]:
 def diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
     """Collect the PR's failure evidence and classify it (task #2572).
     Diagnosis only — no repair action is taken here; the operator executes the suggested action.
-    Evidence sources: the PR's check rollup + job log tails, Trunk's queue state + flaky DB, and
+    Evidence sources: the PR's check rollup + job log tails, Trunk's queue state, and
     the synthetic trunk-merge test PRs.
     """
     diag: dict[str, Any] = {
@@ -277,7 +225,6 @@ def diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
         "checks": [],
         "trunk": None,
         "synthetic_test_prs": [],
-        "flaky_db_available": token is not None,
     }
     view = _pr_view(pr, repo, "mergeable,headRefOid,state,statusCheckRollup")
     if view is None:
@@ -286,7 +233,7 @@ def diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
     diag["state"] = view.get("state")
     diag["mergeable"] = view.get("mergeable")
     diag["issues"] = _pr_level_issues(view, pr, repo)
-    diag["checks"] = _failing_check_entries(view, pr, repo, token=token)
+    diag["checks"] = _failing_check_entries(view, pr, repo)
     if token:
         diag["trunk"] = _trunk_diagnosis(pr, repo, token)
     diag["synthetic_test_prs"] = [
@@ -324,8 +271,6 @@ def print_diagnosis(diag: dict[str, Any]) -> None:
             print(f"Trunk queue: not queryable ({trunk['error']})")
         else:
             print(f"Trunk queue: state={trunk.get('state')} reason={trunk.get('reason')}")
-    if not diag.get("flaky_db_available"):
-        print("Flaky DB: not checked (TRUNK_API_TOKEN missing) — flake calls stay unverified")
     synthetic = diag.get("synthetic_test_prs", [])
     for pull in synthetic:
         print(

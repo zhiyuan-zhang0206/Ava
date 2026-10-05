@@ -214,7 +214,7 @@ def _register_in_cluster(
     """Write every package to the cluster extension registry, or raise.
 
     Deliberately NOT best-effort. The cluster row is the authority the whole
-    ownership model rests on (`decisions/2026-08-21-extension-ownership-three-tiers.md`),
+    ownership model rests on (`docs/decisions/2026-08-21-extension-ownership-three-tiers.md`),
     so an install that cannot reach the cluster must not quietly become a
     machine-local one — that is the drift, not a degraded mode of avoiding it.
     The operator's fix is to bring the cluster up and re-run, and the error says

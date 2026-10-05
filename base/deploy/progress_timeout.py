@@ -70,7 +70,7 @@ LEGACY_HOST_ADOPTION_SILENCE_S = 60.0
 #
 # It is NOT sized to outlast a gateway that really died: that needs the
 # watchdog's 60 s round plus a respawn
-# (`decisions/2026-07-30-accept-readiness-gate-residual-race.md` priced waiting
+# (`docs/decisions/2026-07-30-accept-readiness-gate-residual-race.md` priced waiting
 # for it here and refused it).
 GATEWAY_PREFLIGHT_BUDGET_S = 30.0
 

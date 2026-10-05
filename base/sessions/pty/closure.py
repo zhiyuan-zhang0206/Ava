@@ -10,7 +10,7 @@ its descendants and every process of its POSIX session, each pinned by birth)
 before the first signal. Shells get SIGHUP first, so a restart loop cannot keep
 producing jobs; every other member gets SIGTERM; whatever is still alive when
 the grace ends is SIGKILLed with its session whole
-(decisions/2026-09-28-stop-escalates-to-sigkill.md). A session with anything
+(docs/decisions/2026-09-28-stop-escalates-to-sigkill.md). A session with anything
 beyond its shell at capture is busy; a busy session whose shell the closure
 verified gone is `ClosedSession` (with the processes of it that outlived the
 SIGKILL), and every process that outlived the SIGKILL is a `Survivor`.

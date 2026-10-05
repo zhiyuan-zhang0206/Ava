@@ -74,7 +74,7 @@ registers the unit) and is allowed.
 Checkout enumeration is Git-bound. Integer-keyed migration history is unsupported and fails before mutation.
 
 Rationale and the rejected alternatives:
-[2026-07-31-migrations-are-gateway-only](../../../../decisions/2026-07-31-migrations-are-gateway-only.md).
+[2026-07-31-migrations-are-gateway-only](../../../../docs/decisions/2026-07-31-migrations-are-gateway-only.md).
 
 ## Reset generations
 
@@ -113,6 +113,8 @@ retransmission timeout.
 - Review test for a new migration: running `db/schema.sql` on a fresh DB, and
   running the baseline plus all post-baseline migrations, must converge to the
   same schema.
+
+Contributor steps and validation commands: [database migration guide](../../../../db/docs/migrations.md).
 
 ## Key Dependencies
 

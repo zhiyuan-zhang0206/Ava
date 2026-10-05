@@ -116,7 +116,7 @@ def test_service_without_identity_probe_cannot_claim_readiness(
 def test_register_gateway_advertises_without_gateway_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """gateway registration no longer requires AVA_GATEWAY_URL.
 
-    WP4 (conventions/reachability-and-credentials.md): the advertised URL is
+    WP4 (docs/conventions/reachability-and-credentials.md): the advertised URL is
     built on `reachable_host()` — the machine's private-network address — not
     on the bare gateway URL, so a gateway unit with a reachable identity
     registers a dialable address even before `AVA_GATEWAY_URL` is configured

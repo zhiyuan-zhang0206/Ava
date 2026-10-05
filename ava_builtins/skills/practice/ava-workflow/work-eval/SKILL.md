@@ -1,6 +1,6 @@
 ---
 name: work-eval
-description: Executes multi-step work with adversarial self-review and verification woven through every step; large tasks end with an independent adversarial review by a fresh agent. Use when implementation, research, or operations require continuous evaluation rather than a single final check.
+description: Executes multi-step work with adversarial self-review and verification woven through every step. Use when implementation, research, or operations require continuous evaluation rather than a single final check.
 ---
 
 # Work & Evaluate — The Evaluation Thread, Made Explicit
@@ -73,9 +73,9 @@ After completion, ask yourself:
 #### 4. Self-challenge (a weak signal)
 
 Switch to an adversarial perspective and challenge your own work. This local,
-cheap check catches step-level slips and is enough to gate a small task, but it
-is structurally biased by the author's context and assumptions. It must never
-be the final gate for a large task; use the independent review below.
+cheap check catches step-level slips, but the author's context and assumptions
+can bias it. Pair it with concrete tests or observations; consider another
+perspective when the task would benefit from one.
 
 - **"Is this really moving toward the final goal?"**
   - Does this step's output genuinely advance the goal? Or does it just "look busy"?
@@ -137,89 +137,26 @@ with later review and lets the user understand your decision path:
 **Plan change**: [If any]
 ```
 
-## Independent Adversarial Review
+## Optional additional review
 
-### When it is mandatory
+Choose another perspective when it helps answer an unresolved correctness,
+security or design question, or when the user requests review. A larger task,
+parallel execution or an absent user does not by itself require a reviewer agent.
+Review should examine artifacts and acceptance criteria, with concrete locations,
+evidence and suggested fixes for findings.
 
-Any one of these conditions makes the review mandatory:
-
-1. **Long flow** — the task spans multiple sessions or days.
-2. **Parallel work** — multiple agents or spawned workers produce results that join.
-3. **High stakes** — the work is irreversible or outward-facing; involves real money; affects production, data, or security; or touches a system whose failure is expensive.
-4. **The user cannot review in real time** — an autonomous batch needs the review agent as the user's stand-in.
-5. **The Plan phase produced a plan** — Plan is reserved for large or parallel work, so its plan includes this review step.
-
-For a large task, skipping independent review is not an option.
-Self-challenge does not satisfy this gate. When in doubt, review: the pass costs
-far less than a wrong delivery.
-
-### Spawn a fresh reviewer
-
-Use `ava.agents.spawn` to create a reviewer with no shared context and a
-self-contained brief whose only job is to hunt for faults. Never use
-`fork_from` the executor, because shared context carries the author's
-assumptions into the review. Never use the author or any agent that worked on
-the task. Give the reviewer the alignment document, plan, and artifact or diff
-locations — not the author's justifications. The report must come from the
-artifacts.
-
-### Review target and report
-
-Review:
-
-- the delivered work against every success criterion from Align;
-- every plan step against its acceptance criteria;
-- failure paths, not just the happy path, plus edge cases; and
-- the routing history: were findings sent back to the phase that owned them,
-  or papered over during execution?
-
-Use this output shape:
-
-```markdown
-Verdict: APPROVE | REQUEST CHANGES
-
-P0/P1/P2: [finding]
-Location: [file:line]
-Evidence: [what proves the defect]
-Suggested fix: [specific correction]
-```
-
-Use the [`adversarial-review`](../../../../../.agents/skills/adversarial-review/) skill for the
-hunting stance: assume the work is defective, prefer the failure path, and
-apply severity discipline. A finding without a location and evidence is not a
-finding.
-
-### Interact until clean
-
-One round is:
-
-1. The reviewer works independently and posts the report through
-   `ava.agents.send_message`, or writes it to a file named in the brief.
-2. Fix every P0/P1 or rebut it with evidence.
-3. The same reviewer re-checks only the changed hunks and rebutted findings.
-4. Repeat until the verdict is clean.
-
-The author cannot waive P0/P1; only the user can. Escalate any P0 that survives
-rebuttal to the user.
-
-### Close out
-
-Record the verdict in a task-log line or PR comment so the trail proves the
-gate passed. Deliver or merge only after a clean verdict, then terminate the
-review agent as a one-shot worker. If the review routes a finding back to
-Calibrate, Align, or Plan, run that loop and re-review before delivery.
-
-When the user is unavailable during an autonomous batch, the reviewer is the
-user's stand-in — mandatory, not optional. The batch's single authorization
-covers execution; this review checks that the result matches what the user
-authorized.
+The [engineering review](../../ava-serious-engineering/practices/review/SKILL.md)
+guide has useful failure-path questions. Return findings in the requested channel
+and address material defects. There is no required persona, verdict-comment format
+or independent-review delivery gate. Respect the task's authorization and the
+project's contributor guidance; maintainers decide merge procedure.
 
 ## Loop Termination Conditions
 
 The loop terminates when ALL of the following are met:
 1. All steps in the plan are complete (or, without a plan, all slices of the goal are done)
 2. All success criteria are satisfied (check against alignment document item by item)
-3. The appropriate final gate passes: a small task's self-challenge finds no substantive flaw; a large task has a clean independent-review verdict
+3. Relevant verification supports the result, and remaining limitations are stated
 
 ## Delivery
 

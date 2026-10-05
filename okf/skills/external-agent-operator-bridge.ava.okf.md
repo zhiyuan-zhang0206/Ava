@@ -1,7 +1,7 @@
 ---
 type: doc
 title: External-agent operator skill bridge
-description: Prod host convergence copies only operating-ava-cluster into already-present Codex and Claude Code global skill roots, with externally bound ownership and serialized recovery that preserve conflicts.
+description: Prod host convergence copies deployment and operations skills into already-present Codex and Claude Code global skill roots, with externally bound ownership and serialized recovery that preserve conflicts.
 tags:
 - extensions
 - agent-instruction
@@ -12,21 +12,21 @@ tags:
 
 `cli/commands/extensions/external_skills.py` is a dedicated host-global
 converge step. It reads
-`<repo>/.agents/skills/operating-ava-cluster` and considers exactly two client
+`<repo>/ava_builtins/skills/platform/{deploy-ava-cluster,operating-ava-cluster}` and considers exactly two client
 homes: `~/.codex` and `~/.claude`. A missing client home is a no-op; the step
 does not create either top-level directory. Because the step has
 `host_global=True`, `converge_host` runs it only from the default-home prod
 checkout and skips both `.worktrees/` and `.claude/worktrees/` checkouts.
 
 For each present client, the target is
-`<client-home>/skills/operating-ava-cluster`. Ava creates a complete staged copy
+`<client-home>/skills/<skill-name>`. Ava creates a complete staged copy
 beside that target. One validated in-memory source snapshot supplies the
 manifest, digest, and staged bytes for every present client, so publication
 never re-reads a moving Git checkout or mixes source generations. Pathname and
 opened-handle metadata are compared by stable file identity across those API
 families, while full before/after signatures remain local to each family; this
 avoids Windows metadata-representation mismatches without weakening mutation
-detection. A private per-client ledger under
+detection. A private per-client, per-skill ledger under
 `$AVA_HOME/configs/external-agent-skills/` records an installation identity,
 installed generation and digest, active transaction, exact cleanup records,
 and terminal private-retention records;
@@ -39,6 +39,11 @@ durable pointer. Write-ahead stage-publication and target-claim phases precede
 their no-replace renames. Recovery reconciles source and destination presence
 against the transaction marker, digest, and manifest; a merely colliding or
 otherwise ambiguous generation-shaped path never becomes Ava-owned.
+
+The existing operator keeps its `<client>.json` ledger and `<client>.lock`;
+deployment uses `<client>-deploy-ava-cluster.json` and its own lock. Markers and
+transaction paths identify their skill, so updates and recovery cannot cross
+targets. A conflict for one skill does not block the other.
 
 A per-target cross-process lock serializes convergence. A source change stages
 a complete no-follow copy, atomically claims the current target, and verifies
@@ -67,9 +72,11 @@ ownership contract does not require symlink support on Windows. Per-client
 path, lock, and rename failures are labelled warnings and do not abort core
 converge; source-integrity failures remain fatal.
 
-This projection is not an Ava skill source: it writes no install-registry row,
-does not enter `~/.ava/skills/`, and does not make `.agents/skills/` a
-fleet-wide runtime source again.
+The external projection writes no Ava install-registry row. The canonical
+built-in sources separately enter Ava's load directory through normal skill
+convergence and the core update channel (`ava packages refresh`); `.agents/skills/` compatibility
+links point to the same owners. Ava Guide links both specialized skills.
+Only the existing Codex and Claude Code home integrations are supported.
 
 ## Key dependencies
 

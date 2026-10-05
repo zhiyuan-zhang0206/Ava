@@ -320,9 +320,9 @@ def test_every_test_running_job_reports_and_uploads_its_counts(job: str, group: 
     assert "scripts/ci/shard_counts.py shard" in report["run"]
     assert f"--group {group}" in report["run"]
     assert upload["with"]["name"] == f"shard-counts-{group}"
-    # Right after the test step, ahead of the Trunk gate, whatever the tests' outcome.
+    # After the test step, ahead of the native JUnit validator, for every outcome.
     run_step = next(i for i, step in enumerate(steps) if "pytest" in str(step.get("run", "")))
-    gate = _index(steps, "Trunk quarantine gate (upload test results)")
+    gate = _index(steps, "Validate native test results")
     assert run_step < _index(steps, "Report executed test counts") < gate
     assert report["if"] == upload["if"] == "${{ !cancelled() }}"
 

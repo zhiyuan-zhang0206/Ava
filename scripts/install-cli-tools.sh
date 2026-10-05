@@ -15,7 +15,7 @@
 # WSL without sudo: a host that already carries every tool skips apt entirely
 # (the gh keyring + apt-sources writes below need root), and an apt failure
 # degrades to a warning instead of a hard stop — the missing tools can be
-# installed later via `sudo apt-get install ...`. See conventions/windows-setup.md.
+# installed later via `sudo apt-get install ...`. See docs/conventions/windows-setup.md.
 
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/provision/_lib.sh"
@@ -37,7 +37,7 @@ fi
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "install-cli-tools.sh: requires apt-get (Debian/Ubuntu/WSL)." >&2
     echo "  macOS: brew install git ripgrep jq fd bat tree fzf htop gh" >&2
-    echo "  Windows: install these via winget or use WSL2 (see conventions/windows-setup.md)" >&2
+    echo "  Windows: install these via winget or use WSL2 (see docs/conventions/windows-setup.md)" >&2
     exit 2
 fi
 

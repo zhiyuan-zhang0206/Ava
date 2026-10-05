@@ -1,6 +1,6 @@
 ---
 name: ava-workflow
-description: "Coordinates agents, the human, and reality through calibration, alignment, planning, and continuous evaluation. Use for any non-trivial task, even when the user does not explicitly ask for a workflow; large tasks need a fresh agent's adversarial review. Entry is lightweight: a one-question align or a five-line plan counts."
+description: "Coordinates agents, the human, and reality through calibration, alignment, planning, and continuous evaluation. Use for any non-trivial task, even when the user does not explicitly ask for a workflow. Entry is lightweight: a one-question align or a five-line plan counts."
 ---
 
 # Ava Workflow — Three Actors, Three Phases, One Evaluation Thread
@@ -160,38 +160,17 @@ Before asking the user anything, look for the answer in the environment — code
 
 Don't start coding without a roadmap **when the task is large or parallel**. Spend time understanding the problem domain, decomposing tasks, identifying dependencies, and estimating risks. The plan doesn't need to be perfect, but it needs to exist — and it needs to exist *because the task needs it*, not because it's the default next step after Align.
 
-### 3. Self-challenge — a weak signal (Work & Eval)
+### 3. Check the work (Work & Eval)
 
-At every point — including during Calibrate and Align — challenge your own work. "Is this really moving toward the goal? Is there a simpler way? Am I solving the wrong problem?" Self-challenge is cheap and catches local slips, so keep it as the step-level loop and use it as the gate for small tasks. But it is only a weak signal: the author's own context and assumptions structurally bias their judgment. Self-review is never a substitute for independent review and cannot gate anything large or irreversible. Escalate those tasks to the independent reviewer below.
+Challenge the assumptions and exercise the relevant behavior as you work. Use
+concrete acceptance criteria and record verification limits. Independent review
+can help with unfamiliar or consequential changes; choose it when the user
+requests it or the task benefits from another perspective. It is optional,
+and parallel work or writing a plan does not require a reviewer agent.
 
-## Independent Adversarial Review
-
-Every large task includes at least one independent adversarial review. Spawn a
-fresh agent with no shared context whose only job is to hunt for faults. Never
-use self-review or an agent that worked on the task, and never use `fork_from`
-the executor: forking copies the context and assumptions that bias the author's
-judgment.
-
-Any one of these conditions makes a task large for this gate:
-
-1. **Long flow** — it spans multiple sessions or days.
-2. **Parallel work** — multiple agents or spawned workers produce results that join.
-3. **High stakes** — the decision is irreversible or outward-facing; involves real money; affects production, data, or security; or touches a system whose failure is expensive.
-4. **The user cannot review in real time** — an autonomous batch needs the review agent as a non-negotiable substitute for the user's judgment.
-5. **The Plan phase produced a plan** — Plan is reserved for large or parallel work, so the independent review step belongs in that plan.
-
-When in doubt, spawn the reviewer — a review pass costs far less than a wrong
-delivery. Brief it with the alignment document, plan, and artifact locations,
-not the author's narrative. The reviewer reports a verdict plus
-severity-ranked P0/P1/P2 findings with evidence. Fix every P0/P1 or rebut it
-with evidence, then have the same reviewer re-check only the changed parts and
-rebutted findings. Repeat until the verdict is clean, and record that verdict
-on the task or PR. Escalate any P0 that survives rebuttal to the user.
-
-See [Work & Evaluate](work-eval/SKILL.md) for the full protocol. Use the
-[`adversarial-review`](../../../../.agents/skills/adversarial-review/) skill for
-the hunting stance: assume the work is defective, prefer the failure path, and
-apply severity discipline.
+The [engineering review](../ava-serious-engineering/practices/review/SKILL.md)
+guide offers failure-path questions when useful. Project contributors follow the
+project's contributing guidance; maintainers choose its merge process.
 
 ## Chaining Phases
 
@@ -208,9 +187,9 @@ any checkpoint, avoiding the cost of drifting too far before discovery.
 
 ## Relationship to Goal Mode
 
-Work & Evaluate uses self-challenge as its cheap inner loop. Goal mode is a sustained supervision relationship between two agents; independent adversarial review is a fresh agent's focused fault-hunting gate.
-
-For large tasks, keep Work & Eval inside execution and add the independent review gate above. Add goal mode too when the work needs ongoing external supervision rather than a one-shot verdict.
+Work & Evaluate checks results during execution. Goal mode adds sustained
+supervision when the task needs it. Independent review is another optional way
+to examine assumptions and failure paths; choose these tools to fit the task.
 
 ## Detailed Guides
 

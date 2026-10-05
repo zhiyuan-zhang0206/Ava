@@ -11,7 +11,7 @@ to get from "agent 3048 behaved badly around 14:00" to that stretch of the
 conversation, its events, its span tree, and a link the user can open.
 
 Nothing trace-shaped is committed to the repo — there is no `traces/` doc axis
-(retired 2026-08-19, [why](../../../decisions/2026-08-19-retire-the-traces-doc-axis.md)).
+(retired 2026-08-19, [why](../../../docs/decisions/2026-08-19-retire-the-traces-doc-axis.md)).
 The evidence is queried live, against the version that is actually running.
 
 ## The four surfaces

@@ -1,6 +1,6 @@
 """Tests for scripts/ci/no_silent_resurrection.py — the 30-day resurrection check.
 
-The behavior this file locks in (decision 2026-10-04, conventions/
+The behavior this file locks in (decision 2026-10-04, docs/conventions/
 no-silent-resurrection.md): the lines a PR adds are compared with the lines
 main deleted in the last N days; a run of at least two dead strong lines (or
 one dead distinctive line) fails unless a commit in the PR carries a
@@ -465,7 +465,7 @@ def test_line_classification(text: str, expected: tuple[bool, bool]) -> None:
         ("restore 6ecfe14c3 deliberately", ["6ecfe14c3"], []),
         ("restore R6ECfe14c3", [], []),  # a path-less token that is not all hex
         ("restore pkg/a.py", [], ["pkg/a.py"]),
-        ("restore decisions/", [], ["decisions/"]),
+        ("restore docs/decisions/", [], ["docs/decisions/"]),
         ("restore README.md", [], ["README.md"]),
         ("restore version v1.24.5", [], []),  # a version is not a file path
     ],

@@ -1,21 +1,8 @@
-"""The backend jobs' test gate is fail-closed: a run that ran no tests, or has no gate, is red.
-
-Each backend pytest step is `continue-on-error`, so a pytest failure is red only when the
-Trunk quarantine gate (`trunk-io/analytics-uploader`) says so. That gate used to fail open
-twice:
-
-1. it is skipped when `TRUNK_ORG_URL_SLUG` is empty, and then nothing judged pytest's failures;
-2. `allow-missing-junit-files` defaults to true, so a pytest that died before writing its JUnit
-   report (a `pytest_plugins` entry that fails to import ends the run in the configuration
-   phase) uploaded nothing and passed, with not one test run. So did a pytest that ran zero
-   tests (a broken `testpaths`), whose report is present and empty.
-
-These tests pin the wiring in ci.yml, run the composite action's script, and reproduce both
-failures with a real pytest.
-"""
+"""Native CI test failures and invalid or missing execution evidence are always red."""
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -29,122 +16,155 @@ from scripts.ci import shard_counts
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _JOBS = cast(
-    "dict[str, Any]",
-    yaml.safe_load((_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"],
+    "dict[str, Any]", yaml.safe_load((_REPO_ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
 )
-_ACTION = yaml.safe_load(
-    (_REPO_ROOT / ".github/actions/require-test-gate/action.yml").read_text(encoding="utf-8")
-)
-_GATE = "Trunk quarantine gate (upload test results)"
-_REQUIRE = "Require the test gate"
-
-# job -> (id of its pytest step, does the job gate only in enforce mode)
-_JOB_SHAPES = {
-    "backend-shard": ("pytest-shard", False),
-    "backend-selected": ("run-subset", True),
-    "backend-serial": ("pytest-serial", False),
+_ACTION = yaml.safe_load((_REPO_ROOT / ".github/actions/require-test-gate/action.yml").read_text())
+_SHAPES = {
+    "backend-shard": [("Run pytest shard", "pytest-shard")],
+    "backend-selected": [("Run selected pytest subset", "run-subset")],
+    "backend-serial": [("Run flaky pytest bucket serially", "pytest-serial")],
+    "frontend": [
+        ("Unit tests (vitest run)", "vitest"),
+        ("Flaky unit tests (vitest run, serial)", "vitest-flaky"),
+    ],
+    "e2e-shard": [("Run e2e tests", "pytest-e2e")],
+    "e2e-hosted": [("Run hosted e2e tests", "pytest-hosted")],
+    "e2e-env-guard": [
+        ("Run env-guard warmup + home-isolation in one serial process", "pytest-env-guard")
+    ],
 }
 
 
-def _steps(job: str) -> list[dict[str, Any]]:
-    return cast("list[dict[str, Any]]", _JOBS[job]["steps"])
+@pytest.mark.parametrize("job", _SHAPES)
+def test_native_tests_and_evidence_have_no_secret_or_quarantine_bypass(job: str) -> None:
+    steps = _JOBS[job]["steps"]
+    for name, identity in _SHAPES[job]:
+        native = next(step for step in steps if step.get("name") == name)
+        assert native.get("continue-on-error") is not True
+        guards = [
+            step
+            for step in steps
+            if step.get("uses") == "./.github/actions/require-test-gate"
+            and step["with"]["test-outcome"] == f"${{{{ steps.{identity}.outcome }}}}"
+        ]
+        assert len(guards) == 1
+        guard = guards[0]
+        assert guard["if"] == "${{ !cancelled() }}"
+        assert "continue-on-error" not in guard
+        assert steps.index(native) < steps.index(guard)
+    assert "TRUNK" not in json.dumps(_JOBS[job])
+    assert not any("trunk-io/analytics-uploader" in step.get("uses", "") for step in steps)
 
 
-def _step(job: str, name: str) -> dict[str, Any]:
-    matches = [step for step in _steps(job) if step.get("name") == name]
-    assert len(matches) == 1, f"{job}: expected exactly one step named {name!r}"
-    return matches[0]
+def test_optional_empty_buckets_and_final_attempt_are_explicit() -> None:
+    for job, identity in [("backend-serial", "pytest-serial"), ("frontend", "vitest-flaky")]:
+        guards = [
+            step
+            for step in _JOBS[job]["steps"]
+            if step.get("uses") == "./.github/actions/require-test-gate"
+        ]
+        guard = next(step for step in guards if identity in step["with"]["test-outcome"])
+        assert guard["with"]["min-tests"] == "0"
+    guard = next(
+        step
+        for step in _JOBS["backend-shard"]["steps"]
+        if step.get("uses") == "./.github/actions/require-test-gate"
+    )
+    assert guard["with"]["latest-report"] == "true"
+    assert "-a*.xml" in guard["with"]["junit-patterns"]
 
 
-def _position(job: str, name: str) -> int:
-    return _steps(job).index(_step(job, name))
-
-
-# ── the wiring ──────────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("job", _JOB_SHAPES)
-def test_the_trunk_gate_no_longer_lets_a_missing_report_pass(job: str) -> None:
-    gate = _step(job, _GATE)
-    assert gate["uses"].startswith("trunk-io/analytics-uploader@")
-    assert gate["with"]["allow-missing-junit-files"] is False
-
-
-@pytest.mark.parametrize("job", _JOB_SHAPES)
-def test_an_empty_secret_stops_the_job_instead_of_skipping_the_gate(job: str) -> None:
-    pytest_id, enforce_only = _JOB_SHAPES[job]
-    require = _step(job, _REQUIRE)
-    assert require["uses"] == "./.github/actions/require-test-gate"
-    assert require["with"]["pytest-outcome"] == f"${{{{ steps.{pytest_id}.outcome }}}}"
-    pytest_step = next(step for step in _steps(job) if step.get("id") == pytest_id)
-    assert pytest_step["continue-on-error"] is True  # what makes the gate the only judge
-    # It takes over exactly when the gate is skipped, and no other time.
-    gate_if = _step(job, _GATE)["if"]
-    assert "env.TRUNK_ORG_URL_SLUG != ''" in gate_if
-    mode = " && needs.test-select.outputs.mode == 'enforce'" if enforce_only else ""
-    assert require["if"] == f"${{{{ !cancelled() && env.TRUNK_ORG_URL_SLUG == ''{mode} }}}}"
-    assert gate_if == f"${{{{ !cancelled() && env.TRUNK_ORG_URL_SLUG != ''{mode} }}}}"
-    assert _position(job, _REQUIRE) < _position(job, _GATE)
-
-
-def test_a_backend_shard_that_ran_no_test_is_red() -> None:
-    report = _step("backend-shard", "Report executed test counts")
-    assert "continue-on-error" not in report
-    assert report["if"] == "${{ !cancelled() }}"
-    assert "--min-tests 1" in report["run"]
-    assert "-a*.xml" in report["run"]  # the last attempt's report, whichever attempt that is
-
-
-def test_the_flaky_bucket_may_be_empty_but_must_leave_a_report() -> None:
-    report = _step("backend-serial", "Report executed test counts")
-    assert "continue-on-error" not in report
-    assert "--min-tests 0" in report["run"]
-
-
-def test_the_composite_expects_secrets_only_from_this_repositorys_own_runs() -> None:
-    env = _ACTION["runs"]["steps"][0]["env"]["CAN_HAVE_SECRETS"]
-    assert "github.repository == 'zhiyuan-zhang0206/Ava'" in env
-    assert "github.event.pull_request.head.repo.full_name == github.repository" in env
-    assert _ACTION["runs"]["steps"][0]["env"]["PYTEST_OUTCOME"] == "${{ inputs.pytest-outcome }}"
-
-
-def test_a_dependabot_run_never_counts_as_able_to_have_secrets() -> None:
-    # A Dependabot-triggered run is same-repo yet gets no secrets (GitHub withholds
-    # them from dependabot[bot]); it must take the no-secrets path and judge pytest.
-    env = _ACTION["runs"]["steps"][0]["env"]["CAN_HAVE_SECRETS"]
-    assert "&& github.actor != 'dependabot[bot]'" in env
-
-
-# ── the composite action's script ───────────────────────────────────────────
-
-
-def _run_gate(can_have_secrets: str, outcome: str) -> subprocess.CompletedProcess[str]:
+def _run_gate(
+    tmp_path: Path,
+    *,
+    outcome: str = "success",
+    minimum: int = 1,
+    patterns: list[str] | None = None,
+    latest: bool = False,
+) -> subprocess.CompletedProcess[str]:
     script = _ACTION["runs"]["steps"][0]["run"]
-    env = {**os.environ, "CAN_HAVE_SECRETS": can_have_secrets, "PYTEST_OUTCOME": outcome}
-    return subprocess.run(  # noqa: S603 - the workflow's own script, fixed inputs
+    env = {
+        **os.environ,
+        "TEST_OUTCOME": outcome,
+        "JUNIT_PATTERNS": json.dumps(patterns or [str(tmp_path / "report.xml")]),
+        "MIN_TESTS": str(minimum),
+        "LATEST_REPORT": str(latest).lower(),
+    }
+    return subprocess.run(  # noqa: S603 - execute the repository action with synthetic reports
         ["bash", "-e", "-c", script], env=env, capture_output=True, text=True, check=False
     )
 
 
-@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled", "skipped"])
-def test_a_run_that_should_have_the_secret_fails_when_it_is_empty(outcome: str) -> None:
-    result = _run_gate("true", outcome)
-    assert result.returncode == 1
-    assert "::error::TRUNK_ORG_URL_SLUG is empty, the test gate cannot run" in result.stdout
+def _report(tmp_path: Path, cases: str, *, attributes: str = "") -> None:
+    (tmp_path / "report.xml").write_text(
+        f"<testsuites><testsuite {attributes}>{cases}</testsuite></testsuites>"
+    )
 
 
 @pytest.mark.parametrize("outcome", ["failure", "cancelled", "skipped"])
-def test_a_run_without_secrets_fails_on_pytests_own_outcome(outcome: str) -> None:
-    result = _run_gate("false", outcome)
+def test_native_failure_cannot_be_overruled_by_a_passing_report(
+    tmp_path: Path, outcome: str
+) -> None:
+    _report(tmp_path, '<testcase name="passes"/>')
+    result = _run_gate(tmp_path, outcome=outcome)
     assert result.returncode == 1
-    assert f"pytest ended '{outcome}'" in result.stdout
+    assert "native test step ended " + outcome in result.stdout
 
 
-def test_a_run_without_secrets_passes_when_pytest_passed() -> None:
-    assert _run_gate("false", "success").returncode == 0
+@pytest.mark.parametrize("kind", ["failure", "error"])
+def test_recorded_failure_cannot_be_overruled_by_a_success_exit(tmp_path: Path, kind: str) -> None:
+    _report(tmp_path, f'<testcase classname="Example" name="broken"><{kind}/></testcase>')
+    result = _run_gate(tmp_path)
+    assert result.returncode == 1
+    assert "FAILED Example::broken" in result.stdout
 
 
-# ── the two fail-open cases, with a real pytest ─────────────────────────────
+@pytest.mark.parametrize(
+    "contents",
+    [
+        None,
+        "<broken",
+        "<unrelated/>",
+        "<testsuites/>",
+        '<testsuite><testcase name="skip"><skipped/></testcase></testsuite>',
+    ],
+)
+def test_missing_malformed_or_unexecuted_report_is_red(
+    tmp_path: Path, contents: str | None
+) -> None:
+    if contents is not None:
+        (tmp_path / "report.xml").write_text(contents)
+    assert _run_gate(tmp_path).returncode == 1
+
+
+def test_every_required_report_must_exist(tmp_path: Path) -> None:
+    _report(tmp_path, '<testcase name="passes"/>')
+    assert (
+        _run_gate(
+            tmp_path, patterns=[str(tmp_path / "report.xml"), str(tmp_path / "absent.xml")]
+        ).returncode
+        == 1
+    )
+
+
+def test_explicitly_empty_bucket_requires_a_valid_successful_report(tmp_path: Path) -> None:
+    assert _run_gate(tmp_path, minimum=0).returncode == 1
+    _report(tmp_path, "")
+    assert _run_gate(tmp_path, minimum=0).returncode == 0
+    assert _run_gate(tmp_path, minimum=0, outcome="failure").returncode == 1
+    _report(tmp_path, "", attributes='errors="1"')
+    assert _run_gate(tmp_path, minimum=0).returncode == 1
+
+
+def test_final_attempt_is_validated_without_erasing_first_failure(tmp_path: Path) -> None:
+    first = tmp_path / "report-a1.xml"
+    final = tmp_path / "report-a2.xml"
+    first.write_text('<testsuite><testcase name="broken"><failure/></testcase></testsuite>')
+    final.write_text('<testsuite><testcase name="passes"/></testsuite>')
+    pattern = [str(tmp_path / "report-a*.xml")]
+    assert _run_gate(tmp_path, patterns=pattern, latest=True).returncode == 0
+    assert _run_gate(tmp_path, patterns=pattern).returncode == 1
+    assert "broken" in first.read_text()
 
 
 def _pytest(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -190,7 +210,7 @@ def test_a_pytest_that_dies_before_writing_its_report_is_red(tmp_path: Path) -> 
     report = tmp_path / "tmp" / "junit-backend-shard-1-a1.xml"
     result = _pytest(tmp_path, f"--junit-xml={report}", "-o", "junit_family=xunit1")
     assert result.returncode != 0
-    assert not report.exists()  # nothing for the uploader to see: it passed this run
+    assert not report.exists()  # the native process failed before producing evidence
     counted = _count(tmp_path / "tmp" / "junit-backend-shard-1-a*.xml", tmp_path / "c.json", 1)
     assert counted.returncode != 0
     assert "no JUnit report matches" in counted.stderr

@@ -32,7 +32,7 @@ Status of the gaps left by the swap:
   lints and conditional explicit codegen checks, `doc-lints` covers docs-only
   PRs, and the backend/frontend jobs own the heavy checks directly. Only the
   warn-only hook-installation check is local-only; see the
-  [CI runbook](../conventions/runbook.md#ci-continuous-integration).
+  [CI runbook](../docs/conventions/runbook.md#ci-continuous-integration).
 - **No `check_cross_branch_migrations`.** `scripts/content_lint/check_cross_branch_migrations.py`
   exists and nothing calls it, so migration-set drift between concurrently open
   branches is unchecked.

@@ -121,7 +121,7 @@ PROVIDER = ProviderContribution(
             effort_levels=_GPT_EFFORT,
             tuning=ModelTuning(
                 # Pinned 2026-08-01 (task #568): OpenAI documents `medium` as the
-                # default reasoning effort (decisions/2026-07-25-per-model-
+                # default reasoning effort (docs/decisions/2026-07-25-per-model-
                 # tuning-values.md Decision 4).
                 reasoning_effort="medium",
             ),

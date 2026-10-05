@@ -330,7 +330,7 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A watcher (`ava.watcher.at/cron/launch`) is just an `agent_shell_ttls`
-    row with no registry of its own (decisions/2026-09-27-watchers-are-never-
+    row with no registry of its own (docs/decisions/2026-09-27-watchers-are-never-
     restarted.md): there is no special case left in this pass, so a reclaimed
     watcher-shaped session — one that was actually running a script, exactly
     like a real watcher always is at its TTL deadline — gets the SAME

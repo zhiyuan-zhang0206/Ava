@@ -14,7 +14,7 @@ Beyond the `~/.ava/skills/` load dir, **project-local skills** mount at scan tim
 
 The standard directory is the open surface: a repo keeps its skills under `.agents/skills/` and links `.ava/skills` / `.claude/skills` back to it, so Ava, Claude Code and any Agent-Skills-standard client load the same set. The same content reached through several paths is deduped by content hash (`ava/skills/__init__.py:_scan_tree`).
 
-For Ava's own repo, this mount is the **only** distribution path for the 12
+For Ava's own repo, this mount is the **only** distribution path for the
 real repo-development workflow and Ava-cluster-operations skills since
 2026-08-21 (issue #146): converge stopped syncing `.agents/skills/`
 fleet-wide, so those skills load exactly when the agent works inside the
@@ -28,6 +28,10 @@ The five general skills mirrored alongside them — `ava-serious-engineering`,
 `telegram-send-file` — are instead built-ins converged into `~/.ava/skills/`;
 the mirror preserves the open-standard path while content-hash dedup keeps the
 same skill from loading twice in a checkout.
+
+Contributor entry: [docs/contributing.md](../../docs/contributing.md).
+The repo-specific `review-contribution` skill routes a contributor self-check to
+current convention and component owners; it does not require a reviewer agent.
 
 ## Key Dependencies
 - [[okf/skills/skills.ava.okf.md|Skill System]] — the mount/scan machinery this node extends

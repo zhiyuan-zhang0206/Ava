@@ -305,7 +305,7 @@ def validate_spec(
     # per-model value it cannot show one ("" means "provider's own
     # default", which is not a displayable rung), and the UI would regress
     # to a synthetic "Effort: default" option. Pin a real default (the
-    # vendor's documented one; see decisions/2026-07-25-per-model-
+    # vendor's documented one; see docs/decisions/2026-07-25-per-model-
     # tuning-values.md Decision 4).
     if not spec.tuning.reasoning_effort:
         raise RuntimeError(

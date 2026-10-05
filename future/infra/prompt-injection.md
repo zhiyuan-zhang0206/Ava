@@ -46,7 +46,7 @@
 ## Why this is categorically different from the auth question
 
 The gateway-auth threat is **bounded** (no actor exists outside the single-user
-trust boundary — see [`non-goals.md`](../../conventions/non-goals.md) "Auth / multi-user"). Prompt
+trust boundary — see [`non-goals.md`](../../docs/conventions/non-goals.md) "Auth / multi-user"). Prompt
 injection is **unbounded**: untrusted content flows straight into the most
 powerful actor in the system. The agent holds `execute_code` (raw Python = bash +
 the full SDK); the moment attacker-controlled text enters its context and hijacks
@@ -188,7 +188,7 @@ actually carry untrusted content in real use, how often, and into which agents
 (do the privileged orchestrators ever ingest raw untrusted content directly, or
 is it already mostly funnelled through fetch/feed paths that could be isolated
 cheaply?). The answer decides whether #1–#4 above are even needed, and in what
-order. This ties into the [sandbox non-goal](../../conventions/non-goals.md) whose
+order. This ties into the [sandbox non-goal](../../docs/conventions/non-goals.md) whose
 trigger ("agent runs untrusted third-party input") is arguably already met by
 `web.fetch` / feeds / chrome — the gap to size is "met in principle" vs "met at a
 volume/exposure that warrants the build."

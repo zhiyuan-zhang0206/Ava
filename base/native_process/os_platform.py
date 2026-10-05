@@ -74,7 +74,7 @@ def descends_from_launchd_job(label: str) -> bool:
     whole process tree, so a converge running beneath the job it is about to
     replace would kill its own recovery. The inherited ``XPC_SERVICE_NAME``
     cannot prove ownership — only the job's direct child reads the label
-    while descendants read ``"0"`` (postmortems/0008) — so ask the scheduler
+    while descendants read ``"0"`` (docs/postmortems/0008) — so ask the scheduler
     for the job's current pid and walk this process's ancestry instead.
 
     False off macOS, when the job is not loaded/not running (it owns no live

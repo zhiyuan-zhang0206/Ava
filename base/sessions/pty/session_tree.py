@@ -79,7 +79,7 @@ _POLL_S = 0.01
 # it: the original session could only have been replaced by a new one under the
 # same id if it ended and the kernel handed the pid out again inside this
 # window. Pid reuse does not land inside a couple of seconds; this is half that
-# (decisions/2026-09-28-session-id-proven-by-a-live-member.md).
+# (docs/decisions/2026-09-28-session-id-proven-by-a-live-member.md).
 _PROOF_FRESH_S = 1.0
 
 # A member in one of these states cannot fork any more.

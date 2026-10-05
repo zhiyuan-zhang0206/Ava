@@ -1470,7 +1470,7 @@ def main(argv: list[str] | None = None) -> int:
         "--diagnose",
         action="store_true",
         help="diagnose why the PR's CI / queue attempt failed: reads the check "
-        "rollup + job log tails, Trunk queue state + flaky DB, and the synthetic "
+        "rollup + job log tails, Trunk queue state, and the synthetic "
         "trunk-merge test PRs, then prints classifications with suggested actions "
         "(--json for the machine-readable report). Diagnosis only — no repair "
         "action is executed.",

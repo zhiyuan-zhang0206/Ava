@@ -31,7 +31,7 @@ form is the CIDR range notation, not a host address.
 
 ## Exemptions
 
-- `decisions/` — frozen historical narrative (2026-08-20 ruling: never
+- `docs/decisions/` — frozen historical narrative (2026-08-20 ruling: never
   rewritten, never extended).
 - An inline `# tailnet-ip-ok: <reason>` marker on the same line as the
   literal, for tests that genuinely exercise the 100.64.0.0/10 range
@@ -62,7 +62,7 @@ _TAILNET_IP_RE = re.compile(
 
 # Repo-relative path prefixes that are frozen historical narrative and never
 # scanned (user ruling 2026-08-20).
-_FROZEN_PATH_PREFIXES = ("decisions/",)
+_FROZEN_PATH_PREFIXES = ("docs/decisions/",)
 
 # Inline opt-out marker "<name>-ok:", same convention as the other repo lints.
 _OPT_OUT_MARKER = "tailnet-ip-ok:"

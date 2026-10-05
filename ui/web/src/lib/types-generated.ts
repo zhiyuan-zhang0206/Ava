@@ -392,7 +392,7 @@ export interface paths {
          *     UI.
          *
          *     The new design uniformly uses backend LLM summary generation (see
-         *     decisions/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
+         *     docs/decisions/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
          *     parameter old frontends sent is ignored (still accepted — extra query
          *     parameters never fail the call). Agent-initiated compact still goes through
          *     ava.self.compact() -> kind='compact_summary'; this is a separate signal
@@ -7925,7 +7925,7 @@ export interface components {
          *     host observes the agent's work ended. Without it, sessions are left alone.
          *     A terminated agent is otherwise an ordinary terminated agent — any new
          *     message may resurrect it
-         *     (decisions/2026-09-27-terminate-has-no-closed-state.md).
+         *     (docs/decisions/2026-09-27-terminate-has-no-closed-state.md).
          *
          *     `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
          *     includes this source in the lifecycle marker shown to the agent.

@@ -15,6 +15,12 @@ The agent runs inside a process, but its surrounding deployment (DB, gateway, pe
 ## Seven Sub-skills (Bare Names Carry Weight)
 The root is an index; the real content lives in seven sub-skills: `ops` (start/stop/update clusters, cluster/unit/machine model, channels, release cut, sessions), `mcp` (install/manage MCP servers + wrapper pattern), `packages` (install/upgrade/remove skills & plugins + skill-vs-plugin distinction), `agents` (agent/command/preset/schedule concepts), **`presets`** (create/modify/manage agent config presets — turn a user's request for "a new agent type" into a preset; added in d31660c8), `models` (which LLM a spawned agent runs on — flash-only model policy), `onboarding` (first use of a cluster with a new user — preference interview, intent discovery, memory write-up, first task; the one user-facing sub-skill).
 
+The root also links the standalone `deploy-ava-cluster` and
+`operating-ava-cluster` skills for installation, joining units, diagnosis and
+recovery. Their canonical platform sources supply Ava's load directory and
+the managed Codex/Claude Code copies; the guide does not duplicate their
+instructions.
+
 ## Design Intent (Operate Along the Grain)
 - **One tool = one namespace**: the agent has only one action, `execute_code`; each capability is a Python name under `ava.*`. The CLI is the **operator's** surface to the same system.
 - **Core is destined to shrink**: as models get stronger, remove scaffolding — log reading, plugin-config merge, Telegram push are *skill/CLI*, not persistent SDK functions; a capability has to be used frequently enough to deserve a short SDK name.

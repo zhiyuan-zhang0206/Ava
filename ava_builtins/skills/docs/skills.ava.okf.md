@@ -38,6 +38,8 @@ behavioral discipline for long-running/ultra-speed agents.
 | Skill | Purpose | Detail |
 |------|------|------|
 | ava-guide | Operate / extend yourself via the `ava` CLI; root SKILL.md is an index, seven bare-name sub-skills bear the load (`ops`, `mcp`, `packages`, `agents`, `presets`, `models`, `onboarding`) | [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md]] |
+| deploy-ava-cluster | Install Ava, initialize a home and join runner units | [[okf/skills/external-agent-operator-bridge.ava.okf.md]] |
+| operating-ava-cluster | Diagnose and recover deployment infrastructure | [[okf/skills/external-agent-operator-bridge.ava.okf.md]] |
 | ava-schedule-writer | Natural language → gateway managed scheduled task (resumable script + `/api/schedules`) | [[ava_builtins/skills/coordination/ava-schedule-writer/docs/ava-schedule-writer.ava.okf.md]] |
 | ava-watcher | Start a background watcher that wakes you on event/time triggers (stop in-turn polling) | [[ava_builtins/skills/coordination/ava-watcher/docs/ava-watcher.ava.okf.md]] |
 | ava-being-a-long-running-agent | Operating as a long-running process: manage lifecycle, wait for external events, persist before compaction | [[ava_builtins/skills/coordination/ava-being-a-long-running-agent/docs/ava-being-a-long-running-agent.ava.okf.md]] |
@@ -62,7 +64,6 @@ tech debt.
 | ava-self-evolution | Weekly collect real runs into trace dataset, mine skill/plugin regressions and produce fix reports | [[ava_builtins/skills/platform/ava-self-evolution/docs/ava-self-evolution.ava.okf.md]] |
 | skill-creator | Create / improve / review skill | [[ava_builtins/skills/platform/skill-creator/docs/skill-creator.ava.okf.md]] |
 | sweeper | Tech debt sweep engine (reconcile repo debt tracker, land PR) | [[ava_builtins/skills/practice/sweeper/docs/sweeper.ava.okf.md]] |
-| auto-review | Automatic PR semantic review (AGENTS.md compliance, doc sync, security, test judgment) | [[ava_builtins/skills/practice/auto-review/docs/auto-review.ava.okf.md]] |
 
 ## Web & media
 Fetching content from the web and media — driving AI web apps, per-source
@@ -77,7 +78,7 @@ adapters, transcription.
 ## Not indexed here
 The rest of `ava_builtins/skills/` (e.g. `ai-capability-timescale`,
 `ava-corp`, `ava-deep-research`, `ava-modification-layers`,
-`ava-package-installer`, `ava-qa-inspection`, `ava-serious-engineering`,
+`ava-package-installer`, `ava-serious-engineering`,
 `ava-serious-research`, `develop-a-plugin`, `telegram-send-file`) carries no
 OKF node — `SKILL.md` in each is the reference.
 

@@ -11,7 +11,7 @@ path). Setting it false is a kill-switch: nothing here runs, converge rewrites
 AVA_DB_URL to the direct Postgres port, and every consumer talks to Postgres
 directly through the one URL.
 
-Auth — always authenticated, whatever the cluster secret (decisions/
+Auth — always authenticated, whatever the cluster secret (docs/decisions/
 2026-09-26-internal-data-plane-always-authenticated.md):
 
 - **client → pgbouncer**: `auth_type = scram-sha-256` against a `userlist.txt`

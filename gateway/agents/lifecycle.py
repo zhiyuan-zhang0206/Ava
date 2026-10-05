@@ -100,7 +100,7 @@ async def post_compact(
     UI.
 
     The new design uniformly uses backend LLM summary generation (see
-    decisions/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
+    docs/decisions/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
     parameter old frontends sent is ignored (still accepted — extra query
     parameters never fail the call). Agent-initiated compact still goes through
     ava.self.compact() -> kind='compact_summary'; this is a separate signal

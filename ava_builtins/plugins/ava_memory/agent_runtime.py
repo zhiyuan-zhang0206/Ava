@@ -141,7 +141,7 @@ be checked:
 
 - self-verifying: running code, ava cluster status, the database, the
   filesystem. Read it and you know the current answer.
-- asserted: AGENTS.md, conventions/, decisions/, okf/*.ava.okf.md.
+- asserted: AGENTS.md, docs/conventions/, docs/decisions/, okf/*.ava.okf.md.
   Maintained and reviewed, but they can lag the code.
 - remembered: the shared pool and your own memory. A snapshot, carrying an
   author and a timestamp.

@@ -27,7 +27,7 @@ class TerminateAgentRequest(BaseModel):
     host observes the agent's work ended. Without it, sessions are left alone.
     A terminated agent is otherwise an ordinary terminated agent — any new
     message may resurrect it
-    (decisions/2026-09-27-terminate-has-no-closed-state.md).
+    (docs/decisions/2026-09-27-terminate-has-no-closed-state.md).
 
     `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
     includes this source in the lifecycle marker shown to the agent.

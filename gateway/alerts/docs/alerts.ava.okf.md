@@ -17,7 +17,7 @@ standard webhook payload to the gateway; this router is the other half of
 the loop. This router is the only way alerts enter the store: no other process writes
 `alerts` or pushes an alert to IM (`tests/scripts/test_alert_single_path.py`);
 every other condition is an event plus a Grafana rule
-([decision](../../../decisions/2026-10-04-alerting-on-grafana-alerting.md)).
+([decision](../../../docs/decisions/2026-10-04-alerting-on-grafana-alerting.md)).
 One row per episode, with another IM when severity increases. The store/IM core
 lives in `base/telemetry/alerts.py`. Three HTTP surfaces plus one background
 reconciler:

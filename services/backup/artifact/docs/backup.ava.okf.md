@@ -37,7 +37,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `services/backup/artifact/intermediates.py` — `sweep_closed_partials()`, the closed-intermediate sweep every backup run applies to the backup directory
 - `services/backup/artifact/names.py` — the managed-dump name grammar and the off-site namespace root (`ava-logical`)
 - `services/backup/artifact/offsite.py` — `publish()`: the best-effort OSS publish of one finished artifact (multipart, per-part `Content-MD5`, ETag-chain verification, forbid-overwrite on completion only, adopt-after-crash)
-- The daily dump is this package's recovery point; point-in-time recovery exists only while the optional WAL-G path ([[walg.ava.okf.md|WAL-G]]) is on — it ships WAL and takes daily base backups, and `ava backup walg restore` restores one into a directory you name, proved weekly by its recovery drill (see `conventions/disaster-recovery.md`). Nothing here deletes a remote object.
+- The daily dump is this package's recovery point; point-in-time recovery exists only while the optional WAL-G path ([[walg.ava.okf.md|WAL-G]]) is on — it ships WAL and takes daily base backups, and `ava backup walg restore` restores one into a directory you name, proved weekly by its recovery drill (see `docs/conventions/disaster-recovery.md`). Nothing here deletes a remote object.
 
 ## Notes
 - Gateway capability only; `ava start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.

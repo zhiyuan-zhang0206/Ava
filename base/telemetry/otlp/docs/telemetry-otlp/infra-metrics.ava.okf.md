@@ -125,6 +125,6 @@ gateway collector writes to loopback Prometheus.
   OTLP names: `system_cpu_utilization_ratio`,
   `system_filesystem_utilization_ratio`, `postgresql_backends`,
   `postgresql_connection_max`, `redis_memory_used_bytes`, …
-- The operator's reading loop is `conventions/runbook.md` ("The operator's SRE
+- The operator's reading loop is `docs/conventions/runbook.md` ("The operator's SRE
   loop"); the thresholds are deployment config, never framework constants.
 - Parent node: [[telemetry-otlp.ava.okf.md|OTLP export backend]].

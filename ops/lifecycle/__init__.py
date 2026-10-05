@@ -165,7 +165,7 @@ async def terminate_agent_op(
     """Local-target graceful or force terminate. Caller handles cross-machine.
 
     `body.kill_all_shell_sessions` also kills the agent's shell sessions on
-    this, its home machine (decisions/2026-09-27-terminate-has-no-closed-state.md).
+    this, its home machine (docs/decisions/2026-09-27-terminate-has-no-closed-state.md).
     A force terminate kills them right after its fence commits, and so does a
     terminate that finds the agent already terminated. A graceful terminate of
     a live agent only records the request on its terminate command: the home

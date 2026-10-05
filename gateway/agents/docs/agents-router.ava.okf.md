@@ -37,7 +37,7 @@ cache-valid: only ADDITIONS to `skills_to_inject_into_system_prompt` /
 `fork_config_change_not_allowed`); the added skills ride the fork inbound
 payload and load at the context tail. A fork without config inherits the
 source's overlay + preset verbatim. See
-[decision](../../../decisions/2026-09-10-preset-in-config-overlay-fork-cache.md).
+[decision](../../../docs/decisions/2026-09-10-preset-in-config-overlay-fork-cache.md).
 
 The POST receipt adds `accepted=true`, `execution_observed=false`, an observed
 availability reason, and `observed_at` while retaining `id` for older clients.

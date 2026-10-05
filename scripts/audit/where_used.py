@@ -16,7 +16,7 @@ reference to the old path may remain); this one is the question BEFORE.
   the top level of that module; the name is checked, so a typo fails fast);
 - a module or package: `pkg.mod`, `pkg/mod.py` or `pkg` (a package covers every
   module below it);
-- any other tracked path: a file (`conventions/runbook.md`) or a directory.
+- any other tracked path: a file (`docs/conventions/runbook.md`) or a directory.
 
 Several targets may be given; the repository is read once.
 
@@ -44,7 +44,7 @@ always carries the full count):
   it. A file whose name is unique in the repository matches by that bare name.
 - `STRUCTURE`: the structure baseline shards, `pyproject.toml`, hooks, workflows and
   the lint registries under `scripts/{structure,lint,content_lint}`.
-- `FROZEN HISTORY`: `decisions/`, `postmortems/` and `CHANGELOG.md`.
+- `FROZEN HISTORY`: `docs/decisions/`, `docs/postmortems/` and `CHANGELOG.md`.
   Historical references, never rewritten.
 
 References from inside the target (its own file, or a package's own modules) are

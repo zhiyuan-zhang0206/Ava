@@ -168,7 +168,7 @@ Push/PR → CI
 
 Pre-commit runs lint and codegen checks; pre-push runs pyright and frontend
 tsc, eslint and the full Vitest suite. Local development tests are targeted;
-see the [hook runbook](../conventions/runbook.md#git-hooks-pre-commit--pre-push).
+see the [hook runbook](../docs/conventions/runbook.md#git-hooks-pre-commit--pre-push).
 
 ## `.test_durations` — pytest-split duration data
 

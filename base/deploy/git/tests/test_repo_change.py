@@ -6,10 +6,11 @@ from base.deploy.git.repo_change import classify_change, is_doc_path
 @pytest.mark.parametrize(
     "path",
     [
-        "decisions/foo.md",
-        "postmortems/x.md",
+        "docs/contributing.md",
+        "docs/decisions/foo.md",
+        "docs/postmortems/x.md",
         "future/y.md",
-        "conventions/z.md",
+        "docs/conventions/z.md",
         "okf/index.ava.okf.md",
         "assets/img.png",
         "schedules/x.json",
@@ -33,10 +34,10 @@ def test_is_doc_path_leaves_nested_code_docs_to_their_directory(path: str) -> No
         (["agent/graph/exec/node.py"], (False, True)),
         (
             [
-                "decisions/foo.md",
-                "postmortems/x.md",
+                "docs/decisions/foo.md",
+                "docs/postmortems/x.md",
                 "future/y.md",
-                "conventions/z.md",
+                "docs/conventions/z.md",
                 "okf/index.ava.okf.md",
                 "assets/img.png",
                 "schedules/x.json",

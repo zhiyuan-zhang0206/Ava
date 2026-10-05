@@ -46,10 +46,10 @@ backticked, so the miss is latent rather than live.
 
 ## Scope: the procedural axis, the built-in skills, and the OKF axis
 
-`conventions/`, the repo's own dev skills under `.agents/skills/`, and the
+`docs/conventions/`, the repo's own dev skills under `.agents/skills/`, and the
 built-in skills under `ava_builtins/skills/` — all three tell an agent what to
 do *right now*, so a stale anchor there is a live instruction to open something
-that no longer exists. `decisions/` is a never-rewritten archive and `future/`
+that no longer exists. `docs/decisions/` is a never-rewritten archive and `future/`
 is design space that may name not-yet-built symbols; both stay out, exactly as
 they are for `lint_doc_symbols.py` and `check_doc_references.py`.
 
@@ -66,10 +66,9 @@ shape, one meaning, and the resolver stays the trivial single-root lookup that
 the procedural axis already had.
 
 Every **file** under the procedural roots is scanned, not just `*.md`. A
-maintained non-Markdown file carries live anchors too — `.agents/skills/ship-a-
-change/reference/ci_watcher.py` cites `scripts/ci_utils.py:check_ci` in its
-module docstring, and the `#65` rename hunt lost a reference in `db/schema.sql`
-to exactly this `.md`-only assumption.
+maintained non-Markdown file carries live anchors too. Skill helper docstrings
+are live instructions, and the `#65` rename hunt lost a reference in
+`db/schema.sql` to exactly this `.md`-only assumption.
 
 Symlinked directories ARE descended: 21 of the 38 entries under `.agents/skills/`
 are symlinks to the built-in skills, so a `Path.rglob` walk (which does not follow
@@ -85,7 +84,7 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_DOCS_CONVENTIONS = _REPO_ROOT / "conventions"
+_DOCS_CONVENTIONS = _REPO_ROOT / "docs" / "conventions"
 _DEV_SKILLS = _REPO_ROOT / ".agents" / "skills"
 _BUILTIN_SKILLS = _REPO_ROOT / "ava_builtins" / "skills"
 

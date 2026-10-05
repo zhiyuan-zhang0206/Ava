@@ -19,7 +19,7 @@ Ava does not sandbox model-authored code. `execute_code` runs the agent's
 generated Python in the agent process, on the host, with the permissions of
 whichever user started it — the same trust model as a human running that
 code themselves. The `before_exec` hook (see
-[`demos/permission-hooks/`](demos/permission-hooks/)) can intercept and warn on
+[`demos/permission-hooks/`](demos/permission-hooks)) can intercept and warn on
 dangerous patterns before they run, but it is a **mitigation layer, not a
 security boundary**: it lowers the rate of a bad command executing, it does
 not close off the possibility (see the module docstring in `ava/security.py`).
@@ -77,7 +77,7 @@ fully containerized cluster is on the roadmap
 as the substrate for eval and self-code-evolution workloads specifically — it
 is not a general-purpose per-agent sandbox, and the absence of one is a
 tracked, deliberate non-goal
-([`conventions/non-goals.md`](conventions/non-goals.md)).
+([`docs/conventions/non-goals.md`](docs/conventions/non-goals.md)).
 
 ## Supported versions
 

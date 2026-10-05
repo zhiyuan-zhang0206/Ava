@@ -15,24 +15,24 @@ reinstall packages, or reload modules in a running production tree.
 Run any script, test or subagent that imports application code with a temporary
 `AVA_HOME` (`export AVA_HOME="$(mktemp -d)" AVA_CONFIG_FETCH=skip`), or inside the
 Docker/Tart verification boundary. Unset, the home is `~/.ava`, which on a host
-that also runs production is production (`conventions/dev-setup.md`).
+that also runs production is production (`docs/conventions/dev-setup.md`).
 
 The running interpreter keeps imported modules. A merged commit, an on-disk
 SHA, or a successful CLI exit does not prove running services adopted it.
-Read `conventions/defensive-patterns.md`: a rollout cannot deliver its own
+Read `docs/conventions/defensive-patterns.md`: a rollout cannot deliver its own
 protection; the old orchestrator controls the first rollout of a new safeguard.
 
 ## Change workflow
 
 1. Use a separate development clone and isolated worktree. Preserve existing
-   uncommitted changes. Follow `ship-a-change` for PR and merge-queue mechanics.
+   uncommitted changes. Follow [the contribution guide](../../../docs/contributing.md) for repository work.
 2. Implement code, documentation and behavior tests together. Follow explicit
    user test-location constraints. When local tests or cluster boot are
    forbidden, use selected tests and required integration gates in CI.
-3. Obtain review against the exact PR head SHA. Prior-head approval
-   does not approve later changes. Record real CI runs and negative controls;
-   skipped checks or no workflow runs do not prove behavior.
-4. Enqueue only after required review, CI and user/coordinator clearance.
+3. Review the contribution against current project and domain rules, and record
+   validation for the source revision that ran. Skipped checks or missing
+   workflow runs do not prove behavior.
+4. Submit the PR and address feedback; maintainers handle merging.
    Merge proves repository integration, not production health.
 5. Only the designated operator performs the separately authorized rollout.
    Contributors must not launch competing deployments, bulk lifecycle
@@ -49,7 +49,7 @@ drain timeouts or assume old code understands a new flag. Record before rollout:
 - Fixed target SHA; current installed/running versions; gateway, runner,
   schema and plugin compatibility.
 - No conflicting rollout, live lease or unauthorized lifecycle actor.
-- CI and exact-head review evidence.
+- Validation evidence for the target revision and its compatibility boundaries.
 - Verified recovery point and supported rollback or fix-forward plan.
 - Safe bootstrapping under the old imported orchestrator.
 
@@ -74,7 +74,7 @@ Do not declare success from a filtered roster, pointer, CLI exit, or stale
 health response. An offline host is an explicit incomplete result.
 
 If rollout fails, preserve evidence and read `ava status` and
-`conventions/graceful-maintenance.md`. Confirm the hold's owner is not live and
+`docs/conventions/graceful-maintenance.md`. Confirm the hold's owner is not live and
 schema compatibility before acting. Do not blindly retry
 updates or reset production source. If no supported safe path exists, report
 the precise blocker and request a scoped recovery decision.

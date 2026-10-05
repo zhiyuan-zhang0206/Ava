@@ -52,7 +52,7 @@ finer boundary is not needed for these use cases and is not in scope.
 
 ## Reconcile the charter note
 
-[`non-goals.md`](../../conventions/non-goals.md) lists sandbox as a V1 non-goal ("runs bare on the
+[`non-goals.md`](../../docs/conventions/non-goals.md) lists sandbox as a V1 non-goal ("runs bare on the
 host") while the small-core charter lists sandbox as explicitly **not**
 removable ("safety is never free"). This item resolves that: the boundary is
 the disposable containerized cluster, and it is close, not far — most of it

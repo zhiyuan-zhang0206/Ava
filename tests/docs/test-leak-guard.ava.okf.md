@@ -59,7 +59,7 @@ The identity a test acts as is bound bare by hundreds of tests (`pin_agent(...)`
 
 ## Fixing a finding
 
-Recipes per kind are in the fail-mode message and in [flaky-tests §9](../../conventions/flaky-tests.md): `setenv(name, "")` before `delenv`; `monkeypatch.setitem(vars(module), name, value)` or `mock.patch.object`; `monkeypatch.chdir`; restore the handler in a `finally`; nothing for the agent identity: `identity_restore` puts it back (below).
+Recipes per kind are in the fail-mode message and in [flaky-tests §9](../../docs/conventions/flaky-tests.md): `setenv(name, "")` before `delenv`; `monkeypatch.setitem(vars(module), name, value)` or `mock.patch.object`; `monkeypatch.chdir`; restore the handler in a `finally`; nothing for the agent identity: `identity_restore` puts it back (below).
 
 ## Cost threshold
 

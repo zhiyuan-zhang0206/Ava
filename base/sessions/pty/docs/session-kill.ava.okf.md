@@ -121,8 +121,8 @@ counts only once a second, immediate poll is quiet too, since a member can fork
 while the first scan runs. A capture nothing can prove any more is still scanned
 and its session's processes logged. What is left after the grace dies by
 `kill_session_tree(also=<capture>, proven_at=<its proof>)`
-(decisions/2026-09-28-stop-escalates-to-sigkill.md,
-decisions/2026-09-28-session-id-proven-by-a-live-member.md). A shell already
+(docs/decisions/2026-09-28-stop-escalates-to-sigkill.md,
+docs/decisions/2026-09-28-session-id-proven-by-a-live-member.md). A shell already
 gone is still closed through the members the service recorded earlier: a live
 recorded member proves the session id.
 
