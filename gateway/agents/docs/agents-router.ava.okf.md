@@ -18,7 +18,10 @@ and state reads live in `state.py`; `forward.py` provides the cross-machine
 forwarding helpers. The billing batch-recovery entry is `POST /api/agents/resurrect-billing`
 (a read-only preview unless the body sets `execute`; orchestration in
 `ops/lifecycle/billing_recovery.py`, per-agent dispatch via the versioned
-`resurrect-billing-v1` home action).
+`resurrect-billing-v1` home action). `ops/rpc_schemas/billing_recovery.py` owns
+the distinct `BillingRecoveryHomeResult` and `BillingRecoveryOutcome` enums;
+lifecycle dispatch translates home verdicts into batch outcomes. Raw RPC values
+are validated by the response models, and JSON wire strings stay unchanged.
 
 `/api/cancel` cancels a running turn. `/api/models` exposes available models,
 and `/api/agents/{id}/exited` finalizes an agent exit.

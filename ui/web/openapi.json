@@ -8403,6 +8403,19 @@
         "title": "BillingHaltedAliveRow",
         "description": "One billing-halted agent that is still alive — reported, never actioned.\n\nThe entry only resurrects terminated victims. A halted agent that is still\nalive parks heartbeats and clears its own halt on the next successful turn,\nso the batch lists these rows for operator visibility and deliberately\ntakes no action on them; releasing their hold is a follow-up candidate,\nnot part of this entry."
       },
+      "BillingRecoveryOutcome": {
+        "type": "string",
+        "enum": [
+          "candidate",
+          "resurrected",
+          "already_alive",
+          "refused",
+          "deferred",
+          "failed"
+        ],
+        "title": "BillingRecoveryOutcome",
+        "description": "One agent's outcome in the operator's billing recovery batch."
+      },
       "BillingResurrectAgentOutcome": {
         "properties": {
           "agent_id": {
@@ -8414,16 +8427,7 @@
             "title": "Machine"
           },
           "status": {
-            "type": "string",
-            "enum": [
-              "candidate",
-              "resurrected",
-              "already_alive",
-              "refused",
-              "deferred",
-              "failed"
-            ],
-            "title": "Status"
+            "$ref": "#/components/schemas/BillingRecoveryOutcome"
           },
           "reason": {
             "anyOf": [
