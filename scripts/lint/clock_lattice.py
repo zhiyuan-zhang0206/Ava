@@ -190,7 +190,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "
     "no lattice neighbour and no ordering safety depends on this value",
     (
-        "ava_builtins/skills/coordination/ava-use-other-agents/scripts/watch_work.py",
+        "ava_builtins/skills/platform/ava-guide/external-agents/scripts/watch_work.py",
         "STALL_SECONDS",
     ): "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour",
     (

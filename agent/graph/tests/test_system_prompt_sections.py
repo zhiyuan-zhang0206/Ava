@@ -264,7 +264,7 @@ def test_temporal_awareness_invokes_ai_capability_timescale(
 
     rendered = _temporal_awareness_section(AgentSlices.resolve())
 
-    assert "ai-capability-timescale" in rendered
+    assert "ava.skills.ava_workflow.capability_timescale" in rendered
     assert "scheduling, estimating, or judging the feasibility" in rendered
 
 

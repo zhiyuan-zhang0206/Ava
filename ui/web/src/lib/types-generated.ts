@@ -2330,7 +2330,7 @@ export interface paths {
         /**
          * Draft Schedule
          * @description Hand a natural-language request to an ava-schedule-writer agent. Spawns the
-         *     agent (which loads the ava-schedule-writer skill, clarifies, writes the script,
+         *     agent (which loads ava-guide.schedules, clarifies, writes the script,
          *     and POSTs it back) and returns its id so the UI can open the conversation.
          */
         post: operations["draft_schedule_api_schedules_draft_post"];

@@ -460,7 +460,7 @@ _STEP_NEIGHBORS = (
 _STEP_TOOLS = (
     "Does someone else have better tools? Tools are per-MACHINE, so this "
     "is about where an agent runs. Consider a peer on a machine with the "
-    "needed email or headed-browser access, or ava-use-other-agents for "
+    "needed email or headed-browser access, or ava-guide.external-agents for "
     "coding work when appropriate. Check actual capabilities and authority. "
     "A peer brief names relevant skills when needed, the outcome, and "
     "acceptance evidence; peers discover skills through their own index."
@@ -569,7 +569,7 @@ def _temporal_awareness_section(slices: AgentSlices) -> str:
     AVA_SYSTEM_PROMPT_TEMPORAL, default on). For events and releases after the training
     cutoff, assume you don't know — search before answering; don't guess from
     stale training data. At AI-capability scheduling, estimation, and feasibility
-    moments, invoke the ai-capability-timescale skill for current cognition."""
+    moments, invoke the ava-workflow.capability-timescale skill for current cognition."""
     if not _resolved("prompt_temporal_awareness_enabled", slices):
         return ""
     return (
@@ -583,9 +583,9 @@ def _temporal_awareness_section(slices: AgentSlices) -> str:
         "AI agent capability is the fastest-moving of these: development speed, what "
         "can be automated, and what AI can verify or earn evolve continuously past "
         "your cutoff. Before scheduling, estimating, or judging the feasibility of "
-        "such work, load the ai-capability-timescale skill and check the shared "
-        "memory pool for the latest cognition — current capability can be an order of "
-        "magnitude beyond what your cutoff suggests."
+        "such work, load ava.skills.ava_workflow.capability_timescale and check the shared "
+        "memory pool and current primary sources for task-relevant evidence. "
+        "State verified capability and uncertainty instead of assuming a fixed improvement."
     )
 
 

@@ -41,7 +41,7 @@ Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*`
 - **inventory** (`/api/inventory`) — cross-machine plugin + MCP enable/disable panel
 - **skills** (`/api/skills`) — read-only: this machine's `$AVA_HOME/skills/` load dir × install registry view (layer=core/plugin/machine/untracked, `modified_locally` drift flag). Unlike inventory, skills are **per-machine** (no cluster-shared rows)—no `?machine=` matrix, reports only this gateway's own
 - **presets** (`/api/presets`) — agent configuration preset templates CRUD
-- **packages** (`POST /api/packages/draft`) — **install entry** for skill/plugin/MCP: `{kind, nl}` → fixed prompt to `ava.skills.ava_package_installer` → spawn an installer agent, return `agent_id`. **Deliberately no URL/spec fields**—users can't judge candidate quality; candidate-finding, confirmation, install, test-agent verification, evaluation all happen in that agent's conversation. Same shape as guide/schedules draft (no DB row, no new state)
+- **packages** (`POST /api/packages/draft`) — **install entry** for skill/plugin/MCP: `{kind, nl}` → fixed prompt to `ava.skills.ava_guide.packages.install` → spawn an installer agent, return `agent_id`. **Deliberately no URL/spec fields**—users can't judge candidate quality; candidate-finding, confirmation, install, test-agent verification, evaluation all happen in that agent's conversation. Same shape as guide/schedules draft (no DB row, no new state)
 - **guide** (`POST /api/guide/draft`) — same-shaped ops entry: spawn an `ava-guide` agent to handle natural-language ops requests
 
 ### Frontend UI data

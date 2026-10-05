@@ -76,4 +76,4 @@ only itself.
   Operator starts rewrite it, while internal restarts and the watchdog read it.
 - Daemon pidfiles live only under `$AVA_HOME/run/`.
 - Operational procedures that act on these paths (backup/restore, log reading,
-  recovery) are in `.agents/skills/operating-ava-cluster/`.
+  recovery) are in `.agents/skills/ava-guide/operations/`.

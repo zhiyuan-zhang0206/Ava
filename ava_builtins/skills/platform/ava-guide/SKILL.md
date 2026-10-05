@@ -1,104 +1,78 @@
 ---
 name: ava-guide
-description: Explains Ava's CLI, runtime, packages, MCP servers, presets, schedules, and agent concepts. Use whenever the task mentions operating Ava itself or any `ava` command, even if the requested action sounds routine.
+description: Guides humans, external agents, and Ava agents in understanding, deploying, operating, and extending Ava. Use for Ava CLI or SDK operations, cluster health, packages, plugins, schedules, agent configuration, or external-agent delegation and takeover.
 ---
 
-# Operating Ava (the `ava` CLI)
+# Ava Guide
 
-You run as an agent process, but the deployment around you — the database, the
-gateway, your peers, the machines they run on, the skills and MCP servers you
-can reach — is operated through one command-line tool: **`ava`**. This skill is
-the map of that tool: what the command families are, the mental model behind
-them, and which sub-skill to open for a given job.
+This is the shared guide to using Ava: understand the system, deploy a cluster,
+operate it, add capabilities, schedule work, and work with agents. It serves
+humans, external agents such as Codex or Claude Code, and agents inside Ava.
+The root is a map; load the relevant sub-skill for the task.
 
-You do not need this for the work the user asks you to do day to day. Reach for
-it when the task is about **yourself**: adding a capability, upgrading, checking
-the fleet, understanding why something is split across machines. The one
-user-facing exception is [onboarding](onboarding/SKILL.md) — the first-use
-conversation with a new user.
+## Choose your execution surface
 
-## Running the CLI
+- **Humans and external agents:** use the `ava` CLI from a shell. On a
+  production host, `ava` points to the production checkout. In a development
+  checkout, use its own `.venv/bin/ava` and an isolated development home.
+- **Ava agents:** use the `ava.*` SDK for capabilities available to your agent;
+  use `ava.shell.run(...)` for CLI operations. Load a sub-skill with
+  `ava.help(ava.skills.ava_guide.<subskill>)`.
+- **Scripts and schedules:** use the documented CLI/API or SDK surfaces that
+  support their execution identity. A schedule is not an agent; agent-only
+  capabilities require handing the work to an agent.
 
-Run `ava` through your shell (`ava.shell.run(...)`).
+`ava --help` and `ava <command> --help` own CLI argument syntax. This guide owns
+concepts, task routing, operational judgment, and verification. Repository
+references such as `docs/conventions/runbook.md` are relative to the Ava source
+checkout, not the installed skill copy. For a deployment, that source is
+`$AVA_HOME/source`; an external reader uses the checkout they are operating.
 
-- On a production host the command is `ava ...` — a symlink on `PATH` that
-  always points at the production checkout.
-- In a dev checkout you prefix it: `.venv/bin/ava ...`.
+## Find the task
 
-`ava --help` lists every command; `ava <cmd> --help` drills into one. The help
-text is the authoritative argument reference — this skill does **not** restate
-flags. It carries the things help cannot: the mental model, when to use what,
-and the design intent.
-
-## External takeovers (impersonation)
-
-An external tool (Codex, Claude Code) can take over an Ava agent's identity for a
-session. The executor talks to the human through the CLI only:
-`ava impersonate say <session_id> --agent <id> --key <key> 'text'` (`--phase final`
-for the closing message), watches the lease with `ava impersonate status` / `list`,
-consumes and ACKs inbound messages with `ava impersonate inbox` / `ack`, renews with
-`ava impersonate renew`, messages other agents under the borrowed identity with
-`ava impersonate send <session_id> --agent <id> --to <target> --content 'text'`,
-and ends with `ava impersonate release --summary`. The
-Python attachment (`ava.external.attach`) remains for the executor's other `ava.*`
-capabilities.
-
-The executor's field manual is `.agents/skills/impersonator-guide/SKILL.md` (one host guide per
-coding tool under its `reference/`); launching
-a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self`
-(see the `ava-use-other-agents` skill).
-
-## Sub-skills
-
-| If you need to… | Read |
+| Task | Read |
 |---|---|
-| Install Ava, initialize a home, or join a runner | [deploy-ava-cluster](../deploy-ava-cluster/SKILL.md) |
-| Diagnose cluster failures, check health, or recover infrastructure | [operating-ava-cluster](../operating-ava-cluster/SKILL.md) |
-| Start/stop/update the cluster, understand cluster/unit/machine model, prepare and cut releases | [ops](ops/SKILL.md) |
-| Dispose of dead agents' workspaces — cold-data disposal, tombstone, ledger | [workspace-cleanup](workspace-cleanup/SKILL.md) |
-| Add, list, remove, enable/disable MCP servers | [mcp](mcp/SKILL.md) |
-| Install, upgrade, remove skills & plugins; understand the difference | [packages](packages/SKILL.md) |
-| Understand agents, commands, presets, schedules — the agent-level concepts | [agents](agents/SKILL.md) |
-| Create, update, or manage agent config presets — turn user needs into a preset | [presets](presets/SKILL.md) |
-| Pick the model a spawned agent runs on — flash-only model policy, `config_overlay` | [models](models/SKILL.md) |
-| Onboard a new user — interview preferences, discover intent, record memory, start the first task; migrate a user from Claude Code / Codex / OpenClaw / Hermes | [onboarding](onboarding/SKILL.md) |
+| Install Ava, initialize a home, or join a runner | [deploy](deploy/SKILL.md) |
+| Start, stop, update, or configure the cluster; manage releases | [ops](ops/SKILL.md) |
+| Check health, triage alerts, diagnose failures, or recover infrastructure | [operations](operations/SKILL.md) |
+| Decide where a change belongs and how it takes effect (L1–L4) | [modification-layers](modification-layers/SKILL.md) |
+| Understand skills/plugins or manage installed packages | [packages](packages/SKILL.md) |
+| Find a capability, compare candidates, install, and verify it | [packages.install](packages/install/SKILL.md) |
+| Add, inspect, or remove MCP servers | [mcp](mcp/SKILL.md) |
+| Understand Ava plugins or develop a native plugin | [plugins](plugins/SKILL.md), then [plugins.develop](plugins/develop/SKILL.md) |
+| Create or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
+| Create and manage reusable agent configurations | [presets](presets/SKILL.md) |
+| Choose a model for an agent | [models](models/SKILL.md) |
+| Write, create, inspect, or change persistent scheduled work | [schedules](schedules/SKILL.md) |
+| Launch and supervise an external coding agent, or arrange a takeover | [external-agents](external-agents/SKILL.md) |
+| Dispose of dead agents' workspaces | [workspace-cleanup](workspace-cleanup/SKILL.md) |
+| Begin using Ava or migrate from another tool | [onboarding](onboarding/SKILL.md) |
 
-Cluster + host config cuts across all of these: `ava config get/set/unset`
-reads and writes the cluster's `.env` — the single source of truth for settings
-like the memory pool's tracked branch (`AVA_TRACK_BRANCH`). See [ops](ops/SKILL.md) for the
-config-driven surfaces (fleet update, release cut).
+## Shared boundaries
 
-## Division of Operations and Development
+The guide explains **how to use Ava's capabilities**. `ava-workflow` owns how
+to clarify goals, calibrate assumptions, plan, delegate, and evaluate work.
+`skill-creator` owns reusable skill-writing methodology; use
+[modification-layers](modification-layers/SKILL.md) to decide where a skill edit
+belongs. Kernel contributors follow `AGENTS.md`, `docs/contributing.md`, and
+the project-local `ava-self-development` skill.
 
-When you face a task related to Ava itself, first determine which category it falls into:
+A built-in skill or plugin edit is a kernel contribution (L4), even when its
+content resembles a local extension (L2/L3). Develop in an isolated checkout;
+the production source is the tree from which the live cluster boots. Kernel
+integration and operator rollout are separate actions. Guide membership does
+not grant operator authority: use the authorization and verification rules
+for the action you are taking.
 
-| If you want to… | Read this skill |
-|---|---|
-| Run the cluster, update code, switch tracks, manage MCP servers, install skills/plugins | **ava-guide** (this skill) |
-| Change the deployment itself — edit a skill, develop a plugin, or modify kernel source | **ava-modification-layers** (pick the layer L1–L4; L3 continues into **develop-a-plugin**, L4 into **ava-self-development**) |
+External agents may operate Ava through the CLI without borrowing an agent
+identity. A takeover is a separate mode: its launcher follows
+[external-agents](external-agents/SKILL.md), and its executor follows the
+project-local `impersonator-guide` under `.agents/skills/impersonator-guide/`.
 
-Simply put: **Ava Guide = operating system**, **the modification layers = development system**.
+## Design intent
 
-Things not handled by this skill:
-- Modifying a line of SDK code and then making the cluster take effect → this is the full process of ava-self-development (PR → CI → merge → the operator's `python -m cli.fleet_update`)
-- Directly modifying files in the production checkout and then reloading → **never do this** (there is no "in-process shortcut")
-- Manually using `git checkout` to switch branches in the production checkout → will break the startup of all new agents
-
-## Design intent (so you operate with the grain, not against it)
-
-- **One tool, exposed as a namespace.** You have exactly one action —
-  `execute_code` — and every capability is a Python name under `ava.*`. The CLI
-  is the *operator's* surface for the same system; reach for it when a job is
-  about the deployment, not about composing capabilities in code.
-- **The core is meant to shrink.** Scaffolding around the model is removed as
-  the model gets stronger. That is why log reading, plugin-config merge, and
-  Telegram push are *skills / CLI*, not permanent SDK functions: a capability
-  earns a short SDK name only by being used often enough to pay for itself.
-- **Changing your own code is not a CLI op.** You never edit the running source
-  and reload it. Code changes go through PR -> CI -> merge -> the operator's `python -m cli.fleet_update`.
-  That whole flow is its own skill: **ava-self-development**. This guide stops
-  at *operating* the deployment; self-modification lives there.
-- **Use the existing primitive.** When you want a deployment to do something,
-  there is almost always a command or an SDK call for it already. Prefer it over
-  a clever shortcut (a hand-rolled SQL write, a bespoke transient channel) — the
-  shortcut is the thing that breaks on the next upgrade.
+- Ava keeps one agent tool, `execute_code`, with capabilities under `ava.*`.
+- Prefer existing CLI, API, and SDK primitives over parallel implementations.
+- Keep shared facts with their owners. Use CLI help for flags, repository
+  conventions for runtime contracts, and sub-skills for operational procedures.
+- Load only the detail needed for the task; keep this root a compact map.

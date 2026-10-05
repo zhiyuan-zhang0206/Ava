@@ -1,7 +1,7 @@
 ---
 type: doc
 title: External-agent operator skill bridge
-description: Prod host convergence copies deployment and operations skills into already-present Codex and Claude Code global skill roots, with externally bound ownership and serialized recovery that preserve conflicts.
+description: Prod host convergence copies the complete Ava Guide package into already-present Codex and Claude Code global skill roots, with externally bound ownership and serialized recovery that preserve conflicts.
 tags:
 - extensions
 - agent-instruction
@@ -12,7 +12,7 @@ tags:
 
 `cli/commands/extensions/external_skills.py` is a dedicated host-global
 converge step. It reads
-`<repo>/ava_builtins/skills/platform/{deploy-ava-cluster,operating-ava-cluster}` and considers exactly two client
+`<repo>/ava_builtins/skills/platform/ava-guide/` and considers exactly two client
 homes: `~/.codex` and `~/.claude`. A missing client home is a no-op; the step
 does not create either top-level directory. Because the step has
 `host_global=True`, `converge_host` runs it only from the default-home prod
@@ -40,10 +40,11 @@ their no-replace renames. Recovery reconciles source and destination presence
 against the transaction marker, digest, and manifest; a merely colliding or
 otherwise ambiguous generation-shaped path never becomes Ava-owned.
 
-The existing operator keeps its `<client>.json` ledger and `<client>.lock`;
-deployment uses `<client>-deploy-ava-cluster.json` and its own lock. Markers and
-transaction paths identify their skill, so updates and recovery cannot cross
-targets. A conflict for one skill does not block the other.
+The guide uses `<client>-ava-guide.json` and `<client>-ava-guide.lock`. Legacy
+operator (`<client>.json`) and deployment (`<client>-deploy-ava-cluster.json`)
+ledgers and their targets are preserved and no longer refreshed. The bridge
+never adopts them as the guide or removes their user content. A conflict at the
+new guide target remains a preserved conflict under the existing ownership rules.
 
 A per-target cross-process lock serializes convergence. A source change stages
 a complete no-follow copy, atomically claims the current target, and verifies
@@ -73,9 +74,10 @@ path, lock, and rename failures are labelled warnings and do not abort core
 converge; source-integrity failures remain fatal.
 
 The external projection writes no Ava install-registry row. The canonical
-built-in sources separately enter Ava's load directory through normal skill
-convergence and the core update channel (`ava packages refresh`); `.agents/skills/` compatibility
-links point to the same owners. Ava Guide links both specialized skills.
+Ava Guide package separately enters Ava's load directory through normal skill
+convergence and the core update channel (`ava packages refresh`); the
+`.agents/skills/ava-guide` compatibility link points to the same owner. The
+external copy includes its nested skills, scripts, and references.
 Only the existing Codex and Claude Code home integrations are supported.
 
 ## Key dependencies

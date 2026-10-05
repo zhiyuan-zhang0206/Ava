@@ -7,7 +7,7 @@ import pytest
 
 from cli.commands.converge import host as converge_host
 
-SKILL_NAME = "operating-ava-cluster"
+SKILL_NAME = "ava-guide"
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def _bridge_module():
 
 
 def _write_source(repo: Path) -> None:
-    for name in (SKILL_NAME, "deploy-ava-cluster"):
+    for name in (SKILL_NAME,):
         source = repo / "ava_builtins" / "skills" / "platform" / name
         source.mkdir(parents=True)
         (source / "SKILL.md").write_text("operator guidance\n")

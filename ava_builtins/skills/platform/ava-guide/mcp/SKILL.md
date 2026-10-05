@@ -15,7 +15,7 @@ view of the machine config + any plugin-bundled `.mcp.json`).
 
 This skill is the CLI reference. To go from "I want to reach tool X" to a
 server that is installed and proven to work, read
-`ava.help(ava.skills.ava_package_installer)` — it covers finding candidates in
+`ava.help(ava.skills.ava_guide.packages.install)` — it covers finding candidates in
 the official MCP registry, the confirm gate before running a third party's
 process here, and verifying with a test agent.
 

@@ -60,7 +60,7 @@ agents only through the project-local mount — see
 [[okf/skills/project-local.ava.okf.md]].
 
 The external-agent operator bridge is outside this load-directory contract. A
-prod host-global converge step projects exactly `operating-ava-cluster` into an
+prod host-global converge step projects the complete `ava-guide` package into an
 already-present Codex or Claude Code home; it neither registers that copy in
 Ava's install registry nor restores `.agents/skills/` as an Ava runtime source.
 See [[okf/skills/external-agent-operator-bridge.ava.okf.md]].

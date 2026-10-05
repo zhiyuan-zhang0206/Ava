@@ -13,7 +13,12 @@ import pytest
 from ava.shell.coding_tools import _claude_checks, _first_run, claude
 
 _SKILL_DIR = (
-    Path(__file__).parents[4] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
+    Path(__file__).parents[4]
+    / "ava_builtins"
+    / "skills"
+    / "platform"
+    / "ava-guide"
+    / "external-agents"
 )
 
 

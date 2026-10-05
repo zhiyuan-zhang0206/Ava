@@ -15,7 +15,7 @@ from ava.shell.coding_tools import codex
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 
-_SKILL_DIR = Path(__file__).parents[2] / "ava_builtins/skills/coordination/ava-use-other-agents"
+_SKILL_DIR = Path(__file__).parents[2] / "ava_builtins/skills/platform/ava-guide/external-agents"
 _ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
 
 
@@ -70,7 +70,7 @@ def _assert_provider_specific_relay_instructions(message: str, provider: str) ->
 def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     provider: str, tmp_path: Path
 ) -> None:
-    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     assert guide.is_file()
     brief = "Goal: fix the login flow.\nDecision: keep the session table as-is."
     message = bootstrap_message(42, "Fix login", provider, brief, guide)
@@ -85,7 +85,7 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
 )
 def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide: str) -> None:
     """The general guide covers every host; relay startup and traps are per host."""
-    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     path = guide.parent / "reference" / host_guide
     assert path.is_file()
     message = bootstrap_message(42, "Fix login", provider, "brief", guide)
@@ -97,7 +97,7 @@ def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide:
 def test_impersonator_guide_carries_receipt_semantics_and_the_borrowed_context() -> None:
     """Task #5010: an ACK is receipt and the takeover inherits the borrowed identity's
     standing context — both must be present in the guide the bootstrap points at."""
-    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     text = guide.read_text(encoding="utf-8")
     assert "## Before acting: inherit the borrowed context" in text
     assert "memory/MEMORY.md" in text
@@ -113,11 +113,28 @@ def test_impersonator_guide_carries_receipt_semantics_and_the_borrowed_context()
 
 
 def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
-    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, codex_remote=_ENDPOINT)
     assert f"--codex-remote {_ENDPOINT}" in message
     assert "delivers into that same server" in message
     assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
+
+
+def test_installed_dsh_launcher_uses_the_runtime_executor_guide(tmp_path: Path) -> None:
+    """Moving or copying the launcher must not derive a repo from its directory depth."""
+    installed = tmp_path / "installed" / "ava-guide" / "external-agents" / "scripts"
+    installed.mkdir(parents=True)
+    source = _SKILL_DIR / "scripts" / "spawn_dsh.py"
+    script = installed / source.name
+    shutil.copyfile(source, script)
+    spec = importlib.util.spec_from_file_location("installed_dsh_guide_test", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    message = module._takeover_bootstrap_message(42, "Fix login", "brief")
+    guide = Path(__file__).resolve().parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
+    assert guide.is_file()
+    assert str(guide) in message
 
 
 def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) -> None:
@@ -334,7 +351,7 @@ def test_launch_requires_native_identity_before_creating_workspace(
 
 
 def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
-    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "claude", "brief", guide, relay_resident=True)
     assert "Ava relay plugin" in message
     assert "do not arm a Monitor watch" in message
@@ -343,14 +360,14 @@ def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
 
 
 def test_codex_bootstrap_ignores_the_resident_flag() -> None:
-    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, relay_resident=True)
     assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
     assert "Ava relay plugin" not in message
 
 
 def test_dsh_bootstrap_names_the_session_plugin_relay() -> None:
-    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "dsh", "brief", guide)
     assert "--provider dsh" in message and "--as 'DeepSeek Harness: Fix login'" in message
     assert "Ava relay plugin loaded into this DeepSeek Harness session" in message
@@ -499,7 +516,7 @@ def test_dsh_plugin_takeover_runner_submits_and_consumes_the_launch_message(
 
 
 def test_impersonator_sdk_reference_covers_instruction_read_and_direct_python() -> None:
-    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     text = guide.read_text(encoding="utf-8")
     assert "scripts/read_instructions.py" in text
     assert "reference/sdk.md" in text
@@ -511,7 +528,7 @@ def test_impersonator_sdk_reference_covers_instruction_read_and_direct_python() 
 @pytest.fixture
 def instruction_reader() -> Any:
     script = (
-        _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/scripts/read_instructions.py"
+        Path(__file__).parents[2] / ".agents/skills/impersonator-guide/scripts/read_instructions.py"
     )
     spec = importlib.util.spec_from_file_location("impersonator_instruction_reader", script)
     assert spec is not None and spec.loader is not None

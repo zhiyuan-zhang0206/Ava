@@ -370,21 +370,21 @@ def test_deployment_publication_crash_recovers_without_changing_operator(
     ).read_text() == "deployment v1\n"
 
 
-def test_product_operator_skills_have_one_builtin_source_and_guide_entry() -> None:
+def test_product_guide_has_one_builtin_source_and_nested_operator_entries() -> None:
     from cli.commands.extensions.skills_sync import iter_sources
 
     repo = Path(__file__).resolve().parents[4]
     sources, _ = iter_sources(repo)
-    for name in _DISTRIBUTED_SKILLS:
-        canonical = repo / "ava_builtins" / "skills" / "platform" / name
-        assert (repo / ".agents" / "skills" / name).resolve() == canonical
-        assert any(source.name == name and source.src == canonical for source in sources)
-    guide = (repo / "ava_builtins" / "skills" / "platform" / "ava-guide" / "SKILL.md").read_text()
-    assert "../deploy-ava-cluster/SKILL.md" in guide
-    assert "../operating-ava-cluster/SKILL.md" in guide
+    canonical = repo / "ava_builtins" / "skills" / "platform" / "ava-guide"
+    assert (repo / ".agents" / "skills" / "ava-guide").resolve() == canonical
+    assert any(source.name == "ava-guide" and source.src == canonical for source in sources)
+    assert not any(source.name in _DISTRIBUTED_SKILLS for source in sources)
+    guide = (canonical / "SKILL.md").read_text()
+    assert "deploy/SKILL.md" in guide
+    assert "operations/SKILL.md" in guide
 
 
-def test_builtin_deploy_and_operations_install_with_the_core_update_channel(
+def test_builtin_guide_installs_with_the_core_update_channel(
     tmp_path: Path, unit_home: Path
 ) -> None:
     import shutil
@@ -396,13 +396,13 @@ def test_builtin_deploy_and_operations_install_with_the_core_update_channel(
     product_repo = Path(__file__).resolve().parents[4]
     repo = tmp_path / "repo"
     sources = repo / "ava_builtins" / "skills" / "platform"
-    for name in _DISTRIBUTED_SKILLS:
+    for name in ("ava-guide",):
         shutil.copytree(
             product_repo / "ava_builtins" / "skills" / "platform" / name, sources / name
         )
     converge_skills(repo, unit_home)
-    assert {skill["name"] for skill in ava.skills.names()} == set(_DISTRIBUTED_SKILLS)
-    for name in _DISTRIBUTED_SKILLS:
+    assert any(skill["name"] == "ava-guide" for skill in ava.skills.names())
+    for name in ("ava-guide",):
         entry = install_registry.get(name)
         assert entry is not None and entry.enabled and entry.origin == "repo"
         installed = unit_home / "skills" / name / "SKILL.md"

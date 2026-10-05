@@ -25,7 +25,12 @@ from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 
 _SKILL_DIR = (
-    Path(__file__).parents[4] / "ava_builtins" / "skills" / "coordination" / "ava-use-other-agents"
+    Path(__file__).parents[4]
+    / "ava_builtins"
+    / "skills"
+    / "platform"
+    / "ava-guide"
+    / "external-agents"
 )
 
 

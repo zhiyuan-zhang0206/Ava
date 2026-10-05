@@ -32,7 +32,7 @@ Only files matching `services.backup.artifact.names` are managed (counted
 for due-ness, pruned); a hand-made dump parked in the same directory is never
 touched.
 
-Restore procedure: `.agents/skills/operating-ava-cluster/references/db-restore.md`.
+Restore procedure: `.agents/skills/ava-guide/operations/references/db-restore.md`.
 """
 
 from __future__ import annotations

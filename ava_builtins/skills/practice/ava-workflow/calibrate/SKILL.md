@@ -12,6 +12,10 @@ findings, the human confirms or corrects, the agent follows the drift — until
 everyone's mental model matches reality. Inspired by Matt Pocock's "grill me"
 pattern.
 
+For AI-dependent feasibility, scheduling, or pace assumptions, use
+[capability-timescale](../capability-timescale/SKILL.md) and carry verified
+evidence and uncertainty into this phase's output.
+
 ## Why this loop exists
 
 People who say "I want to understand X" usually do not have a crisp question —

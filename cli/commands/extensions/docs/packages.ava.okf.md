@@ -18,7 +18,7 @@ agent there (`ava.agents.spawn(machine=...)`).
 
 There is deliberately **no install form in the UI**. The Skills / Plugins / MCP
 sections of `/control` take a natural-language request; `POST
-/api/packages/draft` spawns an `ava-package-installer` agent that owns the whole
+/api/packages/draft` spawns an `ava-guide.packages.install` agent that owns the whole
 lifecycle — find candidates, confirm before installing anything that runs code,
 install, verify with a test agent, judge, report. No install-by-URL field
 exists, because a user generally cannot tell a good package from a bad one,

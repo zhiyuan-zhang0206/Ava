@@ -184,7 +184,7 @@ def test_draft_launches_a_writer_with_the_request_in_model_input(spawned_agent: 
             message["text"] for message in model_inputs(writer_id)[0] if message["type"] == "human"
         )
         assert request_text in human
-        assert "ava.skills.ava_schedule_writer" in human
+        assert "ava.skills.ava_guide.schedules" in human
         with psycopg.connect(settings.data_plane.db_url) as conn:
             row = conn.execute("SELECT label FROM agents WHERE id = %s", (writer_id,)).fetchone()
         assert row == ("ava-schedule-writer",)

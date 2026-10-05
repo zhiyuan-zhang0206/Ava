@@ -7,6 +7,10 @@ description: "Turns aligned intent into an executable task graph with dependenci
 
 Input: an alignment document (or a clear user requirement). Output: an executable plan. The granularity is "one step can be completed by one agent in one continuous session." If you're working alone, the plan is your task list; if fleet collaboration is needed, the plan is the blueprint for spawn/fork.
 
+For AI-dependent feasibility, scheduling, or pace assumptions, use
+[capability-timescale](../capability-timescale/SKILL.md) and carry verified
+evidence and uncertainty into this phase's output.
+
 ## When Plan Is Needed (and when it isn't)
 
 **Plan is not the default step after Align.** A clear goal with acceptance criteria is enough to start executing directly; an explicit planning pass on top of it is overhead when the path is straightforward.

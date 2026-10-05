@@ -23,7 +23,7 @@ Three states, and the third is the one that matters:
   Not matching it means a local edit -> **refuse and say so**.
 
 Refusing is the conservative direction on purpose. An extension is content
-someone may have been iterating on in place (the design's L3 develop-a-plugin
+someone may have been iterating on in place (the design's L3 ava-guide.plugins.develop
 loop lives exactly here), and silently reverting an edit to match a cluster row
 destroys work with no trace. A loud skip leaves both copies intact and makes the
 operator choose.

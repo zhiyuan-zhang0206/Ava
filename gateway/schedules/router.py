@@ -400,10 +400,10 @@ async def get_schedule_runs(
 @router.post("/api/schedules/draft")
 async def draft_schedule(body: ScheduleDraftRequest, request: Request) -> ScheduleDraftResponse:
     """Hand a natural-language request to an ava-schedule-writer agent. Spawns the
-    agent (which loads the ava-schedule-writer skill, clarifies, writes the script,
+    agent (which loads ava-guide.schedules, clarifies, writes the script,
     and POSTs it back) and returns its id so the UI can open the conversation."""
     prompt = (
-        "You are a schedule writer. Read and follow ava.skills.ava_schedule_writer to turn this "
+        "You are a schedule writer. Read and follow ava.skills.ava_guide.schedules to turn this "
         "request into a gateway-hosted schedule: clarify the trigger / skip / error-handling, "
         "write the script, and create it via POST /api/schedules. Request:\n\n" + body.nl
     )

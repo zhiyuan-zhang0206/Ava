@@ -338,7 +338,7 @@ node for the full design.
 |---|---|
 | Get started | **[QUICKSTART.md](../QUICKSTART.md)** |
 | Understand architecture | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) |
-| Install / deploy | [`.agents/skills/deploy-ava-cluster/SKILL.md`](../.agents/skills/deploy-ava-cluster/SKILL.md) |
+| Install / deploy | [`.agents/skills/ava-guide/deploy/SKILL.md`](../ava_builtins/skills/platform/ava-guide/deploy/SKILL.md) |
 | Set up dev environment | [`docs/conventions/dev-setup.md`](conventions/dev-setup.md) |
 | Run ops / troubleshoot | [`docs/conventions/runbook.md`](conventions/runbook.md) |
 | Write a PR | [CONTRIBUTING.md](../CONTRIBUTING.md) |

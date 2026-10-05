@@ -13,7 +13,7 @@ it with ``--remote``, and the endpoint carried into the launch message so the
 request records it (``--codex-remote``) and the relay delivers into the same
 server.
 
-The ``ava-use-other-agents`` skill's ``spawn_codex.py`` is the command-line
+The ``ava-guide.external-agents`` skill's ``spawn_codex.py`` is the command-line
 entry; it passes its own skill directory, whose ``references/`` holds the
 collaboration contract (and locates the impersonator guide) and whose
 ``scripts/`` holds the supervisor script.
@@ -484,7 +484,7 @@ def _start_codex(
             request.takeover_name,
             request.takeover_brief,
             remote,
-            impersonator_guide(request.skill_dir),
+            impersonator_guide(),
         )
     else:
         assert request.tasks_file is not None and request.work_file is not None  # noqa: S101

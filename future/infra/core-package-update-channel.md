@@ -324,7 +324,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Registry schema v2: `UpdateState` / `ChannelState` fields, lazy migration (retired, batch b5 2026-09-20: a v1 file is refused), defaults resolution from settings (`base/config/domains/packages.py`: per-class default mode/interval, base tick, master switch).
 - `ava packages status` (read-only) + `--json` — including the host version and each package's declared range (§5.5).
 - Version plumbing: optional manifest support for skill packages; the core-content CI check (declared ranges must include the repo's current version); the derived host-version policy recorded in [`docs/conventions/host-versioning.md`](../../docs/conventions/host-versioning.md) (no bump discipline; `[project].version` remains only as the wheel-mode fallback).
-- Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/extensions/docs/packages.ava.okf.md`, and the `ava-modification-layers` / `develop-a-plugin` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
+- Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/extensions/docs/packages.ava.okf.md`, and the `ava-guide.modification-layers` / `ava-guide.plugins.develop` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
 - Acceptance at landing: v1 file loads, migrates on next write, defaults visible in status; no behavior change elsewhere (test lock: registry round-trip + migration) — the v1 leg later retired, batch b5 2026-09-20: v1 files are refused.
 
 ### P1 — skills fast lane (the POC; the deliverable the user can feel) — **landed: PR #2368**

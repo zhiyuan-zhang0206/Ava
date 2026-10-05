@@ -8,7 +8,7 @@ owner generation of its own keyed by ``(cluster, workspace, claude)``; its relay
 starts with the session via the skill's bundled ava-relay plugin (resident
 mode) unless the executor-armed Monitor flow is requested.
 
-The ``ava-use-other-agents`` skill's ``spawn_claude.py`` is the command-line
+The ``ava-guide.external-agents`` skill's ``spawn_claude.py`` is the command-line
 entry; it passes its own skill directory, whose ``references/`` holds the
 collaboration contract (and locates the impersonator guide) and whose
 ``scripts/`` holds the bundled relay plugin.
@@ -278,7 +278,7 @@ def _run_takeover_launch(
                 ),
             )
             _wait_for_ready(sid, failure_marker=marker, resumed=resume)
-        guide = impersonator_guide(skill_dir)
+        guide = impersonator_guide()
         message = _takeover_bootstrap_message(
             owner_agent_id,
             takeover_name,

@@ -1,32 +1,56 @@
 ---
 type: doc
-title: ava-guide skill — Operate the deployment via the ava CLI
-description: "A map skill for the agent to operate its own deployment — the root SKILL.md is an index, with weight carried by seven bare-name sub-skills: ops / mcp / packages / agents / presets / models / onboarding. Provides the mental model and design intent of the CLI (help already gives flags), never restates flags."
+title: Ava Guide — Understand, deploy, operate, and extend Ava
+description: Shared task guide for humans, external agents, and Ava agents; one root routes to deployment, operations, extensions, scheduling, and agent execution sub-skills.
 tags:
 - extensions
 - agent-instruction
 ---
 
-# ava-guide skill — Operate the deployment via the ava CLI
+# Ava Guide
 
-## What is it
-The agent runs inside a process, but its surrounding deployment (DB, gateway, peers, machine, reachable skills/MCP) is operated via a CLI tool, **`ava`**. This skill (`$AVA_HOME/skills/ava-guide/`) is a map of that tool: command families, the mental model behind them, and which sub-skill to open for which task. It **never restates flags** (`ava <cmd> --help` is the authoritative parameter reference); it only carries what help cannot: the mental model, when to use what, and design intent. You won't need it for everyday user tasks; reach for it when the task is about **yourself** (adding capabilities / upgrading / inspecting the fleet / understanding why something is cross-machine).
+`ava_builtins/skills/platform/ava-guide/` is the canonical guide package.
+Ava loads it at `$AVA_HOME/skills/ava-guide/`; the open-standard mirror is
+`.agents/skills/ava-guide`. Host-global convergence projects the complete
+package into already-present Codex and Claude Code skill homes.
 
-## Seven Sub-skills (Bare Names Carry Weight)
-The root is an index; the real content lives in seven sub-skills: `ops` (start/stop/update clusters, cluster/unit/machine model, channels, release cut, sessions), `mcp` (install/manage MCP servers + wrapper pattern), `packages` (install/upgrade/remove skills & plugins + skill-vs-plugin distinction), `agents` (agent/command/preset/schedule concepts), **`presets`** (create/modify/manage agent config presets — turn a user's request for "a new agent type" into a preset; added in d31660c8), `models` (which LLM a spawned agent runs on — flash-only model policy), `onboarding` (first use of a cluster with a new user — preference interview, intent discovery, memory write-up, first task; the one user-facing sub-skill).
+## Audience and execution surface
 
-The root also links the standalone `deploy-ava-cluster` and
-`operating-ava-cluster` skills for installation, joining units, diagnosis and
-recovery. Their canonical platform sources supply Ava's load directory and
-the managed Codex/Claude Code copies; the guide does not duplicate their
-instructions.
+Humans and external agents use the CLI; Ava agents use applicable `ava.*`
+capabilities and the CLI through their shell. Schedules use the documented
+surfaces available to their schedule identity. The root describes these entry
+points, source-checkout references, and authority boundaries. It remains a map;
+sub-skills carry executable procedures and their bundled resources.
 
-## Design Intent (Operate Along the Grain)
-- **One tool = one namespace**: the agent has only one action, `execute_code`; each capability is a Python name under `ava.*`. The CLI is the **operator's** surface to the same system.
-- **Core is destined to shrink**: as models get stronger, remove scaffolding — log reading, plugin-config merge, Telegram push are *skill/CLI*, not persistent SDK functions; a capability has to be used frequently enough to deserve a short SDK name.
-- **Modifying its own code is not a CLI op**: never edit the running source and reload; kernel-code changes go through the full L4 workflow of the `ava-self-development` skill (`.agents/skills/ava-self-development/`; layer routing = the `ava-modification-layers` skill). ava-guide = operations system, ava-self-development = development system.
+## Task hierarchy
 
-## Key Dependencies
-- [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[../../../../cli/docs/cli.ava.okf.md|Command Line]] — the `ava` CLI itself (cluster lifecycle implementation)
-- [[ava/docs/presets.ava.okf.md|ava.agents.presets]] — the preset model that the presets sub-skill operates
+- `deploy`: acquire dependencies, initialize, and join a runner.
+- `ops`: cluster lifecycle, settings, tracks, and releases.
+- `operations`: health, incident triage, diagnosis, and recovery.
+- `modification-layers`: route L1 installation, L2 skill edits, L3 native plugin
+  development, and L4 kernel contributions; built-in changes are L4.
+- `packages` / `packages.install`: installed-package mechanics and the full
+  discovery, approval, installation, verification, and judgment flow.
+- `mcp`, `plugins` / `plugins.develop`: MCP management and native plugin development.
+- `agents`, `presets`, `models`: agent concepts, configuration, and model choice.
+- `schedules`: persistent work; [[ava_builtins/skills/platform/ava-guide/schedules/docs/schedules.ava.okf.md]].
+- `external-agents`: delegated workers and identity takeover;
+  [[ava_builtins/skills/platform/ava-guide/external-agents/docs/external-agents.ava.okf.md]].
+- `workspace-cleanup`, `onboarding`: workspace disposal and first use/migration.
+
+`ava-workflow` owns work organization and evaluation. `skill-creator` remains
+an independent authoring method. `ava-self-development` and `impersonator-guide`
+remain project-local contributor/executor manuals. Guide membership changes
+neither kernel contribution requirements nor operator authorization.
+
+## Consumers and distribution
+
+Package and schedule draft endpoints load `ava.skills.ava_guide.packages.install`
+and `ava.skills.ava_guide.schedules`. External copies use independent
+`<client>-ava-guide` ledgers; legacy deployment/operator copies and their ledgers
+are preserved and are no longer refreshed by this bridge.
+
+- [[okf/skills/external-agent-operator-bridge.ava.okf.md]] — external publication and ownership
+- [[ava_builtins/skills/docs/skills.ava.okf.md]] — built-in catalog
+- [[cli/docs/cli.ava.okf.md]] — CLI owner
+- [[ava/docs/presets.ava.okf.md]] — agent preset model

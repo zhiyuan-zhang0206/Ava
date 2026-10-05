@@ -11,9 +11,8 @@ things every later turn depends on: **who the user is** (memory notes) and
 **what the user wants the cluster for** (the first piece of work). This
 sub-skill is that conversation, start to finish.
 
-Unlike the other ava-guide sub-skills, this one is not about the `ava` CLI —
-it is about the user. It lives here because a fresh cluster's first question
-is "now what?"
+This sub-skill helps the user begin using Ava: establish their preferences,
+connect their goals to capabilities, and start useful work.
 
 ## When this applies
 
@@ -188,7 +187,7 @@ they land somewhere.
 2. Agree each role's boundary before spawning: what it owns, what it may
    never touch.
 3. Record each role as `type/role` with its boundary.
-4. For time-triggered work, load `ava.skills.ava_schedule_writer` and
+4. For time-triggered work, load `ava.skills.ava_guide.schedules` and
    create the schedule; spawn the first role agent with a self-contained
    prompt naming the domain and the cadence.
 

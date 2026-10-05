@@ -4027,7 +4027,7 @@
     "/api/schedules/draft": {
       "post": {
         "summary": "Draft Schedule",
-        "description": "Hand a natural-language request to an ava-schedule-writer agent. Spawns the\nagent (which loads the ava-schedule-writer skill, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.",
+        "description": "Hand a natural-language request to an ava-schedule-writer agent. Spawns the\nagent (which loads ava-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.",
         "operationId": "draft_schedule_api_schedules_draft_post",
         "requestBody": {
           "content": {

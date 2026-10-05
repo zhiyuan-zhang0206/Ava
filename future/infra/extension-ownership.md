@@ -361,7 +361,7 @@ Adoption, not flag-day:
 - **Issue #41 (`ava plugins inspect`)**: the catalog's "what exists / what's
   enabled" half reads these cluster rows; its "what registered" half stays
   registration facts. The not-runnable row defined here is an inspect output.
-- **Issue #42 (four-layer model)**: L3 develop-a-plugin installs into this
+- **Issue #42 (four-layer model)**: L3 ava-guide.plugins.develop installs into this
   registry and canaries on the author agent via `extension_overlay`; the S2
   sync event is L2's broadcast carrier; self-evolution's change detection
   extends to registry version changes.
