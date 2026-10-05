@@ -26,7 +26,7 @@ from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import settings
 from base.native_process.ownership import OwnedProcess
-from cli.commands.data_plane import maintenance_stop
+from cli.commands.data_plane import _pooler_stop, maintenance_stop
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler, _native_birth
 
@@ -238,8 +238,28 @@ def test_explicit_force_can_finish_a_retained_drain(
         assert conn.execute("SELECT count(*) FROM pooler_stop_receipt").fetchone() == (0,)
 
 
+class _StopClock:
+    """Only the mocked pooler's wait consumes this test's virtual budget."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, delay: float) -> None:
+        self.now += delay
+
+
+@pytest.fixture
+def stop_clock(monkeypatch: pytest.MonkeyPatch) -> _StopClock:
+    clock = _StopClock()
+    monkeypatch.setattr(_pooler_stop, "time", clock)
+    return clock
+
+
 def test_durable_intent_prevents_resignal_before_listener_closes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop_clock: _StopClock
 ) -> None:
     identity = OwnedProcess.capture(psutil.Process(os.getpid()))
     custodian = OwnedPooler(identity, 16433, tmp_path / "pgbouncer.ini")
@@ -247,10 +267,41 @@ def test_durable_intent_prevents_resignal_before_listener_closes(
     monkeypatch.setattr(OwnedPooler, "_process", Mock(return_value=process))
     monkeypatch.setattr(ownership, "require_listener", Mock(return_value=frozenset({identity.pid})))
     for _attempt in range(2):
-        assert not custodian.stop(deadline=time.monotonic() + 0.02)
+        assert not custodian.stop(deadline=stop_clock.monotonic() + 0.02)
     process.send_signal.assert_called_once_with(signal.SIGINT)
     with pytest.raises(RuntimeError, match="already requested"):
         custodian.require_accepting()
+
+
+@pytest.mark.parametrize("after_intent_write", [False, True])
+def test_expired_stop_budget_never_admits_a_signal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stop_clock: _StopClock,
+    after_intent_write: bool,
+) -> None:
+    identity = OwnedProcess.capture(psutil.Process(os.getpid()))
+    custodian = OwnedPooler(identity, 16433, tmp_path / "pgbouncer.ini")
+    process = Mock()
+    monkeypatch.setattr(OwnedPooler, "_process", Mock(return_value=process))
+    monkeypatch.setattr(ownership, "require_listener", Mock(return_value=frozenset({identity.pid})))
+    deadline = stop_clock.monotonic()
+    if after_intent_write:
+        write = _pooler_stop.write_private_bytes
+
+        def expires_after_write(path: Path, data: bytes) -> None:
+            write(path, data)
+            stop_clock.sleep(0.02)
+
+        monkeypatch.setattr(_pooler_stop, "write_private_bytes", expires_after_write)
+        deadline += 0.02
+    with pytest.raises(TimeoutError, match="stop deadline expired; custody retained"):
+        custodian.stop(deadline=deadline)
+    process.send_signal.assert_not_called()
+    intent = tmp_path / "stop-intent.json"
+    assert intent.exists() is after_intent_write
+    if after_intent_write:
+        assert json.loads(intent.read_text()) == _native_birth(identity)
 
 
 def test_native_birth_change_refuses_signal(tmp_path: Path) -> None:
