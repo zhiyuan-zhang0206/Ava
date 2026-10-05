@@ -223,7 +223,9 @@ def test_the_rollout_step_makes_an_old_intent_readable_idempotently(
 
 def _runbook_port_slot_step() -> str:
     """The python snippet the runbook gives for dropping the retired port slots."""
-    runbook = (Path(__file__).resolve().parents[2] / "conventions" / "runbook.md").read_text()
+    runbook = (
+        Path(__file__).resolve().parents[2] / "docs" / "conventions" / "runbook.md"
+    ).read_text()
     blocks = re.findall(r"```bash\n(.*?)\n\s*```", runbook, flags=re.DOTALL)
     (step,) = [b for b in blocks if "start-intent.json" in b and "pitr_uploader" in b]
     return textwrap.dedent(step)
@@ -285,7 +287,9 @@ def test_the_runbook_step_drops_the_milvus_port_slot_idempotently(
     with pytest.raises(RuntimeError, match=r"unexpected \['milvus'\]"):
         identity.read_intent(inputs.home)
 
-    runbook = (Path(__file__).resolve().parents[2] / "conventions" / "runbook.md").read_text()
+    runbook = (
+        Path(__file__).resolve().parents[2] / "docs" / "conventions" / "runbook.md"
+    ).read_text()
     blocks = re.findall(r"```bash\n(.*?)\n\s*```", runbook, flags=re.DOTALL)
     (step,) = [b for b in blocks if "start-intent.json" in b and 'pop("milvus"' in b]
     for _ in range(2):  # the second run changes nothing

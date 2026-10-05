@@ -3,7 +3,7 @@
 > This directory holds unimplemented design drafts, improvement plans, and recon reports.
 > Completed items are deleted (OKF is the source of truth for current state).
 > A completed item that carried a load-bearing design decision moves to
-> [`decisions/`](../decisions/) instead of being deleted.
+> [`docs/decisions/`](../docs/decisions) instead of being deleted.
 
 Organized by **direction**:
 
@@ -64,7 +64,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 > `web-fetch-skill-routing`, `config-decomposition`, `plugin-extension-api`,
 > `dynamic-workflow`, `fleet-view-design`, `ava-code-memory` (the last one
 > *rejected* — memory belongs to the cluster's memory plugin, and repo facts belong
-> in that repo's `AGENTS.md`). Moved to [`decisions/`](../decisions/) because
+> in that repo's `AGENTS.md`). Moved to [`docs/decisions/`](../docs/decisions) because
 > the decision outlived the plan: `multihost-deployment` →
 > `2026-06-11-multihost-deployment`, `state-surface-canonicalization` →
 > `2026-05-22-state-surface-canonicalization`, `cron-to-scheduler-cutover` →

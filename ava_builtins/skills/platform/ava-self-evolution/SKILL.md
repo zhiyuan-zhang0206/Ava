@@ -73,7 +73,7 @@ Collecting is the point on its own — grow the dataset on every batch, even in 
 ### 2. Detect what changed
 
 Kernel-resident skills and plugins (L4 of the four-layer modification model —
-`decisions/2026-08-19-four-layer-modification-model.md`):
+`docs/decisions/2026-08-19-four-layer-modification-model.md`):
 
 ```
 git -C ~/.ava/source log --since='1 day ago' --name-only --pretty='%h %cI %s' -- ava_builtins/skills/ ava_builtins/plugins/ .agents/skills/

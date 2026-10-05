@@ -204,7 +204,7 @@ def test_renew_rejects_unknown_session() -> None:
 
 def test_renew_accepts_watcher_session(db_conn: psycopg.Connection, _agent_row: int) -> None:
     """A watcher's session renews exactly like any other session
-    (decisions/2026-09-27-watchers-are-never-restarted.md): a watcher is
+    (docs/decisions/2026-09-27-watchers-are-never-restarted.md): a watcher is
     nothing but a shell session, with no separate registry or deadline of
     its own to desync from — deadline = now + ttl, same as any other renew."""
     wid = ava.watcher.launch(

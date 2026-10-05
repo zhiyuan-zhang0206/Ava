@@ -583,7 +583,7 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
         # TRUNCATE without RESTART IDENTITY: ids grow monotonically from the
         # session-level `_apply_e2e_seq_offset` PID base and are never reused
         # across tests (the same no-reuse contract as the non-e2e suite — see
-        # decisions/2026-06-30-monotonic-test-ids.md). Leaving the sequence untouched also
+        # docs/decisions/2026-06-30-monotonic-test-ids.md). Leaving the sequence untouched also
         # preserves the per-worker PID offset without re-applying it, so
         # cross-worker session names stay disjoint.
         #

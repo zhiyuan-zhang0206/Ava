@@ -6,13 +6,13 @@ layout (each skill is a directory with its own `SKILL.md`).
 
 **Distribution: project-local only for the real project-skill directories.**
 They are NOT a `converge` source (issue #146 /
-`decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`).
+`docs/decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`).
 An Ava agent sees them only through the project-local mount —
 `ava_builtins/plugins/ava_code/_walk.py:project_skill_roots` resolves this
 directory from `ava.cwd` at scan time — so they load exactly when the agent is
 working inside this checkout, never on a machine that only runs Ava. This
 project-local family covers repo-development workflow, Ava-cluster-operations
-skills (`ship-a-change`, `ava-self-development`, …), and the
+skills (`review-contribution`, `ava-self-development`, …), and the
 platform's external-host guide (`impersonator-guide`, for agents acting under an
 impersonation lease).
 General methodology and user-service skills are built-ins instead, then appear
@@ -33,4 +33,4 @@ The directories that are **not** symlinks are real project skills authored
 here (one dir = one skill; edit them in place).
 
 Contributor testing and migration instructions are ordinary documentation:
-[testing](../../conventions/testing.md) and [migrations](../../db/docs/migrations.md).
+[testing](../../docs/conventions/testing.md) and [migrations](../../db/docs/migrations.md).

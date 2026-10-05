@@ -38,7 +38,7 @@ touches is no longer validated at import (the accepted semantic change of task
 configured runner still fetches bootstrap at the same point, and the
 equivalence windows plus first-error parity with the eager path are pinned by
 tests (`tests/base/test_config_lite_*.py`); the design record is
-[2026-09-16-config-boot-lite](../../decisions/2026-09-16-config-boot-lite.md).
+[2026-09-16-config-boot-lite](../../docs/decisions/2026-09-16-config-boot-lite.md).
 
 `base/host/env/config_registry.py` is the single projection of field aliases,
 annotations, editor types, choices, and `json_schema_extra` metadata. Both the
@@ -51,7 +51,7 @@ is no `ava_home` field), and a script a git hook launches that reaches applicati
 code calls `dotenv_boot.enter_scratch_home()` first (behind
 `if __name__ == "__main__":`, never at import; it refuses inside pytest), so its
 imports never read another unit's `.env` or present a gateway bearer. Other
-development tools set a temporary `AVA_HOME` by convention (`conventions/dev-setup.md`).
+development tools set a temporary `AVA_HOME` by convention (`docs/conventions/dev-setup.md`).
 
 Bootstrap serves `AVA_HOST_MAX_CONCURRENT_TURNS` verbatim, including zero for
 unlimited admission. Runner requests select only the credential role. Snapshot

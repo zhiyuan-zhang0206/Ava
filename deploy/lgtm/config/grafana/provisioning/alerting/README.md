@@ -266,7 +266,7 @@ There is no independent launchd or systemd Grafana restart path.
 Before 2026-10-04 several processes wrote their own alerts (a direct row plus a direct IM)
 and several gates throttled or graded them (consecutive rounds, grace windows, cooldown
 markers, the 180s/600s transition clock, deploy-window holds). All of that is gone
-([decision](../../../../../../decisions/2026-10-04-alerting-on-grafana-alerting.md)): the code
+([decision](../../../../../../docs/decisions/2026-10-04-alerting-on-grafana-alerting.md)): the code
 emits a declared event (`category=telemetry`) while a condition holds, and the rule's `for:`
 and trailing window carry the debounce. A condition that stops resolves itself when its events stop.
 

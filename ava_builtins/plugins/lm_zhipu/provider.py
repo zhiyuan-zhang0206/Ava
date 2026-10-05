@@ -102,7 +102,7 @@ PROVIDER = ProviderContribution(
             effort_levels=("low", "high", "max"),
             tuning=ModelTuning(
                 # Pinned 2026-08-01 (task #568): Z.ai documents GLM-5.2's default
-                # effort as `max` (decisions/2026-07-25-per-model-tuning-
+                # effort as `max` (docs/decisions/2026-07-25-per-model-tuning-
                 # values.md Decision 4).
                 reasoning_effort="max",
                 # The roster's best-documented overload history, from Z.ai's own

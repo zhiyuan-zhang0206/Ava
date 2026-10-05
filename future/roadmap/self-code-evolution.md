@@ -47,7 +47,7 @@ Two hard prerequisites, both already on the roadmap as their own items:
    that can rewrite its own framework while running unconfined on the host is the
    maximal blast radius. Self-code-evolution does not start until the exec
    boundary exists.
-2. **An eval harness** (SWE-bench / GAIA, per [`non-goals.md`](../../conventions/non-goals.md)). An
+2. **An eval harness** (SWE-bench / GAIA, per [`non-goals.md`](../../docs/conventions/non-goals.md)). An
    autonomous code-change loop with no objective scorecard optimizes for nothing
    measurable and can silently regress. The loop must be able to grade its own
    change before merging. No eval, no go.

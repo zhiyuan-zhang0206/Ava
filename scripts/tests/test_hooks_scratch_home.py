@@ -11,7 +11,7 @@ module that entered a scratch home while being imported would replace the whole 
 worker's `AVA_HOME` (`enter_scratch_home` refuses inside pytest for that reason).
 
 Every other script is run by a person or an agent, on purpose. For those the rule is the
-development convention (`conventions/dev-setup.md`), not code.
+development convention (`docs/conventions/dev-setup.md`), not code.
 
 The hook scripts are derived from `.pre-commit-config.yaml`, so a new hook is covered
 without anyone remembering this file. One canary run proves the mechanism end to end.

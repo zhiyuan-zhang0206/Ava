@@ -174,7 +174,7 @@ def _gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[s
         base_db_url=db,
         base_redis_url=redis,
         cluster_secret=secret,
-        # Redis always authenticates, whatever the bearer (decisions/
+        # Redis always authenticates, whatever the bearer (docs/decisions/
         # 2026-09-26-internal-data-plane-always-authenticated.md). Postgres
         # needs no minted password: its owner is NOLOGIN and the first start
         # mints write generation 0 into the home's database authority store.

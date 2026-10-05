@@ -122,7 +122,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
     package manager (pnpm) install ignores package-lock.json entirely, resolves
     ranges fresh, and leaves both the lockfile and the stamp untouched; that
     exact drift shipped a minifier-emptied dependency to prod while every
-    converge check passed (task #2654, postmortems/0007). So the stamp-matched
+    converge check passed (task #2654, docs/postmortems/0007). So the stamp-matched
     path additionally verifies node_modules against the lockfile and falls
     through to `npm ci` on drift.
     """

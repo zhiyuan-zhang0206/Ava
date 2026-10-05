@@ -2,7 +2,7 @@
 
 > **Status: the install-time gate and the trust tier are BUILT.** What shipped,
 > and why it is shaped this way, is
-> [`decisions/2026-07-29-skill-trust-tiers-and-install-scan.md`](../../decisions/2026-07-29-skill-trust-tiers-and-install-scan.md);
+> [`docs/decisions/2026-07-29-skill-trust-tiers-and-install-scan.md`](../../docs/decisions/2026-07-29-skill-trust-tiers-and-install-scan.md);
 > the current-state description lives in
 > [`base/packages/extensions/docs/install_registry.ava.okf.md`](../../base/packages/extensions/docs/install_registry.ava.okf.md)
 > and [`cli/commands/extensions/docs/packages.ava.okf.md`](../../cli/commands/extensions/docs/packages.ava.okf.md).

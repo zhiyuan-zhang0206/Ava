@@ -25,7 +25,7 @@ The compaction request is shaped to ride the backend's automatic prefix cache:
 it reuses the conversation exactly as the main llm node already sent it — same
 leading SystemMessage, same message objects, same single bound tool — and
 appends one instruction message. See:
-decisions/2026-04-18-in-place-compact.md.
+docs/decisions/2026-04-18-in-place-compact.md.
 
 The system-prompt snapshot invariant: messages[0] is built by
 build_system_prompt() exactly once, on the agent's first round, and never

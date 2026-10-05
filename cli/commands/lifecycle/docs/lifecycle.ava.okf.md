@@ -61,7 +61,7 @@ settles a hold's failed continuation receipts through `_failed_receipts`
 (re-delivering each one, reporting and notifying the owner for any it cannot)
 once the unit serves and before the hold releases. These reuse the
 [durable maintenance journal](../../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
-See [the coordinated operator procedure](../../../../conventions/graceful-maintenance.md).
+See [the coordinated operator procedure](../../../../docs/conventions/graceful-maintenance.md).
 
 ## Start
 

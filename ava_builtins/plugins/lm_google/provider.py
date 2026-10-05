@@ -188,7 +188,7 @@ PROVIDER = ProviderContribution(
             effort_levels=("low", "medium", "high"),
             tuning=ModelTuning(
                 # The model page says its default thinking_level is `medium`
-                # (decisions/2026-07-25-per-model-tuning-values.md).
+                # (docs/decisions/2026-07-25-per-model-tuning-values.md).
                 reasoning_effort="medium",
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
@@ -248,7 +248,7 @@ PROVIDER = ProviderContribution(
             tuning=ModelTuning(
                 # Pinned 2026-08-01 (task #568): this model defaults to
                 # thinking_level=high and cannot drop to minimal (Google docs;
-                # also recorded in decisions/2026-07-25-per-model-tuning-
+                # also recorded in docs/decisions/2026-07-25-per-model-tuning-
                 # values.md Decision 3).
                 reasoning_effort="high",
                 # The only asymmetry Google's own docs admit inside this family:

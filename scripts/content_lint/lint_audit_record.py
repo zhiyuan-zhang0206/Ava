@@ -6,7 +6,7 @@ hook form). Also a pre-commit hook.
 
 ## Why
 
-`audit_events` is the system of record for audit facts (decisions/
+`audit_events` is the system of record for audit facts (docs/decisions/
 2026-10-02-audit-events-in-postgres.md); Loki holds a projection that sheds,
 truncates and expires. A call site that builds an audit event without
 recording it through one of the `record_audit*` primitives
@@ -58,7 +58,7 @@ _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 
 # Sites whose audit record is deliberately not `audit_events`: key `path::function`, value the
 # reason. The `.env` write audit's record is the per-home JSONL because its writers run where
-# no database identity exists (decisions/2026-10-02-env-write-audit-stays-local.md).
+# no database identity exists (docs/decisions/2026-10-02-env-write-audit-stays-local.md).
 _LOCAL_RECORD_SITES: dict[str, str] = {
     "base/host/env/audit.py::_emit_audit_event": "the per-home .env audit JSONL is the record",
 }

@@ -2,7 +2,7 @@
 
 The graph runs on langgraph's default durability ("async" — the agent's
 `graph.ainvoke` never passes `durability="exit"`; per-node checkpointing is a
-deliberate design, see decisions/2026-05-02-self-cycling-langgraph.md), so
+deliberate design, see docs/decisions/2026-05-02-self-cycling-langgraph.md), so
 the PostgresSaver writes one checkpoint row per super-step (node boundary; a
 turn spans several). Over a long-running agent these accumulate without bound
 across `checkpoints` / `checkpoint_blobs` / `checkpoint_writes`. `trim_checkpoints`

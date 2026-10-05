@@ -8,10 +8,8 @@ PR test selector (`scripts/ci/test_selector.py`) both classify a diff through it
 from __future__ import annotations
 
 _DOC_ROOTS = (
-    "decisions/",  # the why axis — never-rewritten ADRs
-    "postmortems/",  # the why-it-escaped axis — frozen incident narratives
+    "docs/",  # project documentation, including contributor guidance and frozen history
     "future/",  # the plans axis
-    "conventions/",  # the how-to-work axis
     "okf/",  # the OKF index layer
     "assets/",  # README-embedded artifacts
     "schedules/",  # version-controlled schedule templates (provisioned, not imported)

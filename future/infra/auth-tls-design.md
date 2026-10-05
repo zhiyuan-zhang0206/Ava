@@ -10,7 +10,7 @@
 > the Next.js proxy this doc originally recommended (see "Decision" below).
 >
 > Current edge posture (bearer-gated when configured, loopback + `AVA_MACHINE_HOST`
-> binds, trusted CIDRs) is in `AGENTS.md` "Running" + [`runbook.md`](../../conventions/runbook.md).
+> binds, trusted CIDRs) is in `AGENTS.md` "Running" + [`runbook.md`](../../docs/conventions/runbook.md).
 > Everything below is kept for the *why* — chiefly why cookies beat a proxy and
 > beat bearer tokens in the browser.
 

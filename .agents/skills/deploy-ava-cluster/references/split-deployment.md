@@ -44,7 +44,7 @@ the credential for the caller's role.
 Postgres and PgBouncer expose the configured reachable address only with
 control-plane authentication enabled. Redis uses the platform's native network
 contract: macOS has its host relay, while Linux binds the authenticated native
-instance to the configured address. See the [runbook](../../../../conventions/runbook.md)
+instance to the configured address. See the [runbook](../../../../docs/conventions/runbook.md)
 for binding and firewall ownership. No-secret single-box storage remains local.
 
 ## Join each runner

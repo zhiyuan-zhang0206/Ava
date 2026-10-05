@@ -129,7 +129,7 @@ it on demand (exit 2 on criticals).
 A **mitigation layer, not a boundary**: known shapes of known attacks, in text
 it can read. A clean report means "no rule matched", never "safe". Rationale +
 rejected alternatives:
-[the decision record](../../../../decisions/2026-07-29-skill-trust-tiers-and-install-scan.md);
+[the decision record](../../../../docs/decisions/2026-07-29-skill-trust-tiers-and-install-scan.md);
 open gaps: [what's left](../../../../future/infra/skill-supply-chain-trust.md).
 
 Beyond the load dir, a plugin can contribute skill roots at scan time via

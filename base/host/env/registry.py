@@ -42,7 +42,7 @@ only at the delivery boundaries that consume them.
 
 Delivery is the backend env-dict handoff (`base.sessions.env_forwarding.forward_env_dict`).
 KEY=VALUE argv delivery stays forbidden (secrets never ride
-argv — decisions/2026-07-30-secrets-never-ride-argv.md).
+argv — docs/decisions/2026-07-30-secrets-never-ride-argv.md).
 """
 
 from __future__ import annotations

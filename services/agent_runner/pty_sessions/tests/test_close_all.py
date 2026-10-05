@@ -2,7 +2,7 @@
 
 Real shells, real signals. The shells get SIGHUP and every other member of their
 POSIX session SIGTERM; what is alive when the grace ends is SIGKILLed whole
-(decisions/2026-09-28-stop-escalates-to-sigkill.md). A busy session whose shell
+(docs/decisions/2026-09-28-stop-escalates-to-sigkill.md). A busy session whose shell
 the closure verified gone comes back in `Outcome.closed`, which is what a stop
 turns into owner notices.
 """

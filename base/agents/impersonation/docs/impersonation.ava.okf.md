@@ -125,8 +125,8 @@ keep a default because one value is the only reading:
   hints); not an operator parameter.
 
 See [[ava/external/docs/external.ava.okf.md]],
-[external agent procedure](../../../../conventions/agent-impersonation.md), and
-[host relay setup](../../../../conventions/agent-impersonation-hosts.md).
+[external agent procedure](../../../../docs/conventions/agent-impersonation.md), and
+[host relay setup](../../../../docs/conventions/agent-impersonation-hosts.md).
 
 Relay generation claims serialize under the native owner and lease locks.
 The private credential pipe opens only after the new child birth is persisted;

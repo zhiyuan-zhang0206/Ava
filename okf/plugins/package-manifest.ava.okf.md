@@ -14,9 +14,9 @@ Packages may ship an `ava-plugin.json` at their root declaring identity
 `pythonPackages` / `hostCapabilities`), contribution surfaces, and lifecycle
 shape. Install paths validate it via `base/packages/plugins/manifest.py` (host-axis
 checks: the derived host version must satisfy `engines.ava`, and the checkout
-must contain `requires_commit` — [host-versioning.md](../../conventions/host-versioning.md)); runtime
+must contain `requires_commit` — [host-versioning.md](../../docs/conventions/host-versioning.md)); runtime
 loading, lifecycle states, and context gates land post-open-source. Full
-contract: [conventions/plugin-spec-v2.md](../../conventions/plugin-spec-v2.md).
+contract: [docs/conventions/plugin-spec-v2.md](../../docs/conventions/plugin-spec-v2.md).
 
 ## Console Contributions (`contributions.ui`)
 `base/packages/plugins/ui_contributions.py` validates the web-console half: a plugin

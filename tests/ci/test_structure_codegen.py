@@ -477,7 +477,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
 
 
 def test_irrelevant_and_empty_diffs_skip_visibly() -> None:
-    for paths in ((), ("db/schema.sql", "conventions/runbook.md", "ui/web/src/app/page.tsx")):
+    for paths in ((), ("db/schema.sql", "docs/conventions/runbook.md", "ui/web/src/app/page.tsx")):
         output, log, _ = select("pull_request", paths)
         assert output == "run=false\n"
         assert log.splitlines() == [

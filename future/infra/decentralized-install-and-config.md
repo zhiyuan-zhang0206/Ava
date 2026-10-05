@@ -13,7 +13,7 @@
 > **per-machine-local** (`plugins_config_overrides` dropped). And the override layer
 > as a whole is **retired** — config is single-source in each unit's `.env`, so the
 > "runtime config stays cluster-backed in a DB row" position below is history; see
-> [`2026-07-19-config-ownership-decomposition.md`](../../decisions/2026-07-19-config-ownership-decomposition.md).
+> [`2026-07-19-config-ownership-decomposition.md`](../../docs/decisions/2026-07-19-config-ownership-decomposition.md).
 >
 > Original 2026-05-30 framing kept for rationale: it supersedes an earlier
 > "capability-gating central distribution" framing — the gating problem dissolves
@@ -63,7 +63,7 @@ server lives on GUI machines because you only **install** it there.
   *Superseded for skills (2026-07-14): `~/.ava/skills/` is now the single load dir;
   repo/plugin skills are converged into it (registry-tracked, hash-guarded) rather
   than loading from the repo. See
-  [`2026-07-14-skills-single-load-dir`](../../decisions/2026-07-14-skills-single-load-dir.md).*
+  [`2026-07-14-skills-single-load-dir`](../../docs/decisions/2026-07-14-skills-single-load-dir.md).*
 - The **installer is an Ava agent, not a declarative engine.** CC's
   `/plugin install` is a fixed pipeline that can't debug. Ava's strength is an
   agent with terminal + code that can clone, run setup, hit an error, read it,
@@ -75,7 +75,7 @@ server lives on GUI machines because you only **install** it there.
 ## Config & enablement = local
 
 > Reconciliation with the four-quadrant frame
-> ([`2026-05-22-state-surface-canonicalization.md`](../../decisions/2026-05-22-state-surface-canonicalization.md)):
+> ([`2026-05-22-state-surface-canonicalization.md`](../../docs/decisions/2026-05-22-state-surface-canonicalization.md)):
 > that draft put plugin config in Q4 (cluster-wide → DB); the move here reclassifies
 > it as **per-machine**, so it's local overlay config, not a DB row. The frame and its
 > "`~/.ava/` must be wipe-and-replay safe" rule still hold — the overlay just also

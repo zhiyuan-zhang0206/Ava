@@ -5,7 +5,7 @@ stop that must find the group empty. `gone()` counts a zombie as ended (the test
 reaper), but `group_empty` counts a zombie as a member by design (`base/native_process/
 group_closure.py`), so the stop refuses until the parent reaps. An orphan's parent is init, which
 reaps within milliseconds; root's stop window in those tests is 200 ms, so the outcome was a
-race: `conventions/flaky-tests.md` section 1, and CI's attempt 1 red / attempt 2 green.
+race: `docs/conventions/flaky-tests.md` section 1, and CI's attempt 1 red / attempt 2 green.
 
 Here the parent is a process this test controls, so the zombie lasts exactly as long as the test
 wants and the timing the race left to chance is fixed.

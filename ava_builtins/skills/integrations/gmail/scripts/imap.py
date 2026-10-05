@@ -116,7 +116,7 @@ def _app_password() -> str:
     # lock/prompt hangs stall headless pipelines), then falls back to the
     # `ava-gmail-imap` Keychain entry. File path is deliberately machine-level,
     # not cluster-scoped via resolve_ava_home(): the Keychain entry it mirrors
-    # is itself per-OS-user (conventions/dev-setup.md).
+    # is itself per-OS-user (docs/conventions/dev-setup.md).
     secrets_file = Path("~/.ava/secrets/gmail-app-password").expanduser()
     if secrets_file.exists():
         try:

@@ -18,7 +18,7 @@ Use the repository's pinned dev dependency, `radon==6.0.1`, after `uv sync`.
 Run `.venv/bin/radon` so reports use the same metric version as the structure
 budget gate. Complexity reports help rank refactoring work; the enforced
 CC/nesting thresholds and frozen-baseline protocol live in
-[`python-conventions.md`](../../../conventions/python-conventions.md#function-quality-budgets-complexity-and-nesting).
+[`python-conventions.md`](../../../docs/conventions/python-conventions.md#function-quality-budgets-complexity-and-nesting).
 
 ## Run it
 

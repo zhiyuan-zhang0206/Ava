@@ -307,7 +307,7 @@ def test_failed_cmd_closes_session_even_when_notice_fails(
     even when the completion notice cannot be delivered. A shell that outlives
     its command is a live session nobody intended to keep — for a watcher
     specifically, one that is never rebuilt regardless
-    (decisions/2026-09-27-watchers-are-never-restarted.md), so leaving it up
+    (docs/decisions/2026-09-27-watchers-are-never-restarted.md), so leaving it up
     would just be a leaked session.
 
     The CLI is faked with a script that exits 1: under the old `&& exit` the

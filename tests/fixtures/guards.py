@@ -149,7 +149,7 @@ def _stub_everywhere(
 
     **This is not the same job as reaching a name through its owning module**
     (`base.cluster.session_name(...)` — see the rule in
-    `conventions/python-conventions.md`). That convention stops a *new* frozen
+    `docs/conventions/python-conventions.md`). That convention stops a *new* frozen
     alias from being created, so the owner is the only surface and a reader can move
     modules without taking its patch out of reach. It can only apply to code this
     repo writes. This helper covers the aliases that already exist and cannot be

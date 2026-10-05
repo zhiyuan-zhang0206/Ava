@@ -3,7 +3,7 @@
 Goal: a function's dependencies are in its signature or its constructor, never
 reached through a module global. The direction, the rule that separates what is
 injected from what may stay global, and the alternatives rejected are in the
-[decision record](../../decisions/2026-10-02-dependency-injection-direction.md);
+[decision record](../../docs/decisions/2026-10-02-dependency-injection-direction.md);
 this page is the target form and what is left. Built so far: the ambient-state lint
 and the first configuration slices ([Config slices](#config-slices-first-batch-done));
 the rest is target form.
@@ -20,7 +20,7 @@ supplies the package doors and the shrink-only baseline practice the enforcement
   process constructs, and a boot-lite layer serves a small field subset until the
   first read outside it. `AVA_HOME` is read at each call by the path helpers.
 - **Per-agent config** resolves as `config_overlay > birth_config > cluster
-  default` ([per-agent config lifecycle](../../decisions/2026-07-31-per-agent-config-lifecycle.md)).
+  default` ([per-agent config lifecycle](../../docs/decisions/2026-07-31-per-agent-config-lifecycle.md)).
   The host turns the two stored maps into pins (`base/config/agent_pins.py`) and
   resolves them, with the plugin pins, into the agent's `AgentSlices` each turn; only
   the turn identity is still bound in a ContextVar.
@@ -53,7 +53,7 @@ slice names the fields under their flat names, so a root builds it by reading
 
 ### 2. Config types live in their package
 
-[The 2026-07-19 decision](../../decisions/2026-07-19-config-ownership-decomposition.md)
+[The 2026-07-19 decision](../../docs/decisions/2026-07-19-config-ownership-decomposition.md)
 kept every sub-model in the base layer because readers imported the aggregate
 from the lowest layer. Under injection a component imports only its own type, and
 the composition root, which sits above all packages, imports every type, so the
@@ -362,7 +362,7 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   rule fails `Clock.from_settings()` outside the roots named in `CLOCK_PACKAGES` (the schedules
   command and the cluster-status probe); libraries build their own clock at the call. The
   endpoint, bus and clock rules share one shape (`scripts/structure/ambient_state/rootrule.py`).
-- **Done, the cluster secret** (behavior change, `decisions/2026-10-03-cluster-secret-contraction.md`):
+- **Done, the cluster secret** (behavior change, `docs/decisions/2026-10-03-cluster-secret-contraction.md`):
   outside the gateway, the CLI and the root, no component holds the human secret. im_bridge
   presents its machine API token and accepts the write generation's tokens on `/send`
   (`base.cluster.machine.daemon_acceptance`, shared with the ops server); the callers of `/send`
@@ -421,6 +421,6 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   shim is carried: such plugins are updated when their runtime rolls out.
 - **Whether the boot-lite layer is still needed.** Boot-lite
   exists because constructing the whole `Settings` cost a measurable amount of
-  memory in every exec child ([why](../../decisions/2026-09-16-config-boot-lite.md));
+  memory in every exec child ([why](../../docs/decisions/2026-09-16-config-boot-lite.md));
   a process that builds only the types it uses may not need it. That is an
   inference that has not been tested.

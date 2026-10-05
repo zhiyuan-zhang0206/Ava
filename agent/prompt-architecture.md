@@ -313,7 +313,7 @@ Dimensions the upstream prompts cover that Ava's is silent on, classified.
   at runtime. Codex bakes an `AGENTS.md` *spec* (scope/precedence/nesting) into
   its prompt; Ava could add a one-liner about nesting precedence if it proves
   necessary, but the bulk stays in `AGENTS.md`.
-- Long-term memory **mechanics**, skill catalog — [`philosophy.md`](../conventions/philosophy.md)
+- Long-term memory **mechanics**, skill catalog — [`philosophy.md`](../docs/conventions/philosophy.md)
   lists memory as a removable layer; the mechanics stay in the `ava.memory` SDK
   docstrings, not the framework prompt. (The memory **behavior** layer — when /
   what to remember — did land in core as `memory_discipline_section`; see the

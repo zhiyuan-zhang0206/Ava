@@ -14,7 +14,7 @@ Rules (source of truth):
      subtree does not false-positive on cross-domain links. A `[[wikilink]]` is
      the node-graph edge syntax, so its universe is the .ava.okf.md files and
      nothing else — a target that names a real file on one of the other three
-     doc axes (decisions/, future/, conventions/) is reported
+     doc axes (docs/decisions/, future/, docs/conventions/) is reported
      with that as the reason, because the remedy is a normal markdown link
      rather than a new node. Inline code spans and fenced blocks are not links
      (the code-sample exemption from check_doc_references): a target quoted as
@@ -99,7 +99,7 @@ MAX_LINES = 200
 # distribution showed nodes stacked in the last few characters below it — the
 # fingerprint of trimming facts away to fit rather than of content that had
 # genuinely outgrown one topic. Rationale + the rejected alternatives:
-# decisions/2026-07-29-okf-node-ceiling.md.
+# docs/decisions/2026-07-29-okf-node-ceiling.md.
 MAX_CHARS = 8000
 # Remaining room below MAX_CHARS at which W010 starts reporting. Sized at a
 # couple of the corpus's larger paragraphs, so an author is told about the wall
@@ -112,7 +112,7 @@ WARN_MARGIN = 800
 _SPLIT_HINT = (
     "Split a section into its own node under '{stem}/' (the filesystem derives "
     "the parent edge; the docs/ layer stands for its package directory, so here "
-    "that is '{home}') — see conventions/doc-maintenance.md."
+    "that is '{home}') — see docs/conventions/doc-maintenance.md."
 )
 # The index layer and the CI overview keep their nodes outside a docs/ layer.
 _LAYER_EXEMPT = ("okf/", ".github/")
@@ -388,8 +388,8 @@ def _wikilink_error(
                 f"Wikilink target is not an OKF node: [[{target}]] is '{non_node}'. "
                 f"[[wikilinks]] are node-graph edges and the graph holds only "
                 f"*.ava.okf.md files; cite the why / plan / how axes "
-                f"(decisions/, future/, conventions/) with a normal "
-                f"markdown link instead — see conventions/doc-maintenance.md.",
+                f"(docs/decisions/, future/, docs/conventions/) with a normal "
+                f"markdown link instead — see docs/conventions/doc-maintenance.md.",
             )
         return LintError(path_str, 1, "W008", f"Wikilink target not found: [[{target}]]")
     if "/" in target and resolved not in _literal_denotations(rel_path, target):

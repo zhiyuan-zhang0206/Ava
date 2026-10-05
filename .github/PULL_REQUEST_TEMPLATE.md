@@ -1,43 +1,12 @@
-<!-- See CONTRIBUTING.md. A PR description is not a summary + a
-list of changed files — give the reviewer the intermediate state needed to catch
-design errors without reading the whole diff. Delete these comments as you fill
-each section. -->
+<!-- Follow docs/contributing.md. Keep detail proportional to the change;
+remove sections that do not help assess it. -->
 
-## Checklist
-<!-- Check the boxes that apply to this PR. -->
+## What and why
 
-- [ ] Documentation — updates subsystem passports or other docs
-- [ ] Breaking change — alters a public API or on-wire contract
-- [ ] New plugin / skill — adds or modifies a plugin or skill
-- [ ] Database migration — includes a migration under migrations/
-- [ ] Dependency change — adds, removes, or bumps a dependency
+<!-- Explain the concrete problem and resulting behavior. Add a file tree or
+control-flow explanation when it helps readers understand a larger change. -->
 
-## What & why
+## Validation
 
-## File-tree diff
-<!-- A tree following the repo structure; mark each entry (A/M/D/R) + a short
-note. Put a ★ on critical paths: new/removed entry points, cross-process /
-cross-network calls. -->
-
-```
-```
-
-## Runtime behavior changed
-<!-- The control flow / invariants a reader cannot infer from the tree. As needed. -->
-
-## NOT tested
-<!-- Explicit boundaries. "happy path works" is not "everything works". -->
-
-
-## Recurrence evidence
-<!-- Behavior-changing PRs only: one `closing-gate:` line — `guard=<path-or-gate-name>
-red-battery=<evidence>` or `repro=<command> red/green=<reference> why-not-guard=<one line>`;
-`doc_only=<reason>` for no-executable-behavior changes; `upline_hook=#<task>` for unshipped code.
-See conventions/incident-closeout.md. Delete this section when nothing applies (non-behavior
-surfaces). -->
-
-## Tech-debt registration
-<!-- A PR that knowingly introduces debt (a deliberate shortcut, deferred work/TODO, or
-suppression) must add or extend a fingerprinted entry in `future/tech-debt/ledger.md`.
-Write `none` when this PR introduces no such debt. Review enforces this starter
-obligation; there is no CI gate yet. -->
+<!-- Record relevant checks and material gaps. Distinguish successful execution
+from skipped, missing or incomplete verification. -->

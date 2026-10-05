@@ -5,7 +5,7 @@ description: Defines Ava-specific debt classes and tracker rules for the sweeper
 
 # Sweeper — Ava repo classes
 
-These classes are governed by `conventions/lint-vs-sweeper.md` (the lint vs
+These classes are governed by `docs/conventions/lint-vs-sweeper.md` (the lint vs
 sweeper boundary + the graduation test that decides which side a check lands on).
 
 The reconcile procedure (control flow, evidence bar, entry/fingerprint format,
@@ -134,7 +134,7 @@ AVA_SDK_EXPAND list inlines the high-frequency namespaces in full), so every
 sentence is a per-agent, per-turn token cost. The zero-false-positive core
 (CJK, impl keywords, module-doc child restating, SDK<->skill coupling) is the
 `lint-docstrings` pre-commit gate; this class covers the **judgement residue**
-of the zero-based budget (`conventions/sdk-docstring-discipline.md`):
+of the zero-based budget (`docs/conventions/sdk-docstring-discipline.md`):
 
 - **A `Raises:` section** — legitimate only when the function must teach an
   input format anyway (cron expressions, duration strings) and the error is
@@ -227,7 +227,7 @@ with `rg '^(<{7} |={7}$|>{7} )'` — the trailing space and the `$` are what
 separate a real marker from a decorative `=====` banner, of which this repo has
 several. The framework's `check-merge-conflict` hook runs at pre-commit;
 structural CI repeats it over all files, including after a rebase. The
-[pre-push stage](../../../conventions/runbook.md#git-hooks-pre-commit--pre-push)
+[pre-push stage](../../../docs/conventions/runbook.md#git-hooks-pre-commit--pre-push)
 carries the heavy static checks.
 
 ### 11. locality (whole-repo)
@@ -236,7 +236,7 @@ Debt no single commit creates: a fix that has to touch many packages at once,
 or two files in different packages that always change together — either one
 means a decision has no single owner or door. Detection needs a rolling
 window of history (not one commit) and the fix needs judgement (which side
-becomes the owner), so [lint-vs-sweeper](../../../conventions/lint-vs-sweeper.md)'s
+becomes the owner), so [lint-vs-sweeper](../../../docs/conventions/lint-vs-sweeper.md)'s
 graduation test puts this here, split from Rule 4 (package doors) the way
 `skill-desc` splits from its own lint: `scripts/structure/cochange.py`
 reuses Rule 4's own package resolution (`scripts.structure.locality._package_of`),

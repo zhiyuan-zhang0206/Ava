@@ -81,7 +81,7 @@ a new key needs a same-file removal of the SAME private name with equal or
 greater value (its owner module moved), and git -M renames carry keys. A file
 split, a move to another file, or a swap for a different private name cannot
 carry a frozen site — fix the site instead. Why locality:
-conventions/python-conventions.md.
+docs/conventions/python-conventions.md.
 
 ### Rule 6: no path imports under ava_builtins/ (package doors)
 

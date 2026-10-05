@@ -134,7 +134,7 @@ def _reject_loopback_dial_url(
     peer online under the wrong identity (the 2026-07-18 runner incident; the
     station variant is the same shape — the gateway would probe itself instead of
     the station). The location of the gateway is read from THIS unit's configured
-    gateway URL (see conventions/reachability-and-credentials.md, rule 2):
+    gateway URL (see docs/conventions/reachability-and-credentials.md, rule 2):
 
     - `url` None, or this unit also serves gateway → never a misconfig (skip).
     - this unit is agent-runner-only or observability-station-only, `url` loopback,
@@ -168,7 +168,7 @@ def _reject_loopback_dial_url(
 
 def unit_dial_url(roles: MachineRoles) -> str | None:
     """The inbound base URL a unit carrying `roles` advertises — the address the
-    rest of the cluster dials (conventions/reachability-and-credentials.md,
+    rest of the cluster dials (docs/conventions/reachability-and-credentials.md,
     endpoint advertisement).
 
     The single definition, shared by both callers of `register_self`: `ava start`
@@ -392,7 +392,7 @@ def _composed_gateway_url(live: list[tuple[Any, ...]]) -> str | None:
     """Dial URL: ops URL of the live agent-runner unit when present, else the gateway unit's URL,
     else the station unit's advertised OTLP ingress URL (WP4: a pure station advertises the
     address remote consumers dial — the bearer-authenticated OTLP ingress; see
-    conventions/reachability-and-credentials.md)."""
+    docs/conventions/reachability-and-credentials.md)."""
     runner_url = next((row[3] for row in live if row[1]), None)
     gateway_only_url = next((row[3] for row in live if row[0]), None)
     station_only_url = next((row[3] for row in live if row[2]), None)

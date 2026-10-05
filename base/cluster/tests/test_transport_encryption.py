@@ -43,7 +43,7 @@ def test_undeclared_transport_encryption_refuses_off_box_bind(
     message = str(exc.value)
     assert "AVA_TRANSPORT_ENCRYPTION" in message
     assert "tls, mtls, overlay" in message
-    assert "conventions/runbook.md" in message
+    assert "docs/conventions/runbook.md" in message
 
 
 @pytest.mark.parametrize("mode", ("tls", "mtls", "overlay"))

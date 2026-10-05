@@ -20,7 +20,7 @@ writing during a graceful shutdown. The gate trusts the process it stops to
 run this code: a process that predates the gate cannot be stopped by it (the
 first release carrying it cannot deliver its own protection), and a process
 holding one connection forever never re-reads the minimum. The trade-off is in
-`decisions/2026-09-30-client-side-code-version-gate.md`.
+`docs/decisions/2026-09-30-client-side-code-version-gate.md`.
 
 Direct connections (administrator, migration applier, `pg_dump`) and explicit
 targets (`connect_url`) are not gated. The `ava` CLI is exempt by declaration
@@ -73,7 +73,7 @@ _REFUSAL = (
     "cluster minimum {minimum} (deployment_state.min_code_version). This is stale "
     "code and must not write; exiting with code {code}. Update this host's checkout "
     "to the cluster's current commit. After an intentional rollback, lower "
-    "min_code_version by hand (conventions/runbook.md, Code version gate)."
+    "min_code_version by hand (docs/conventions/runbook.md, Code version gate)."
 )
 
 

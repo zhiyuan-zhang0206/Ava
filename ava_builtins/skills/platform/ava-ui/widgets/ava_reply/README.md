@@ -31,5 +31,5 @@ target agent, which wakes and reads it.
 This rides the unauthenticated, CORS-open `POST /api/agents/{id}/messages`
 endpoint. That is deliberate — the private network / single machine is the trust
 boundary, and a page can do nothing the agent itself couldn't (see the ui skill
-"Sending a decision back from the page" and `conventions/non-goals.md` "Auth /
+"Sending a decision back from the page" and `docs/conventions/non-goals.md` "Auth /
 multi-user"). Do not treat it as an authorization check.

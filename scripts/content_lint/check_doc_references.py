@@ -7,7 +7,7 @@ Run: `.venv/bin/python scripts/content_lint/check_doc_references.py` (exit 1 on 
 
 Two escapes, hours apart, from the same class:
 
-- `conventions/windows-setup.md` told readers to run
+- `docs/conventions/windows-setup.md` told readers to run
   `install.sh --skip-native-infra`. That flag has never existed.
 - `ava_builtins/skills/ava-self-development/SKILL.md` — a skill agents load and
   *execute* — told them `ava start --cluster preview`, eight days after
@@ -28,11 +28,11 @@ every job is free.
 
 Three doc trees get exemptions, not a blanket skip:
 
-- `decisions/` is skipped entirely (flags and links both). A decision
+- `docs/decisions/` is skipped entirely (flags and links both). A decision
   record legitimately names the flag it removed or the file it deleted (see
-  `decisions/2026-07-20-path-only-cluster-identity.md`) and history is
+  `docs/decisions/2026-07-20-path-only-cluster-identity.md`) and history is
   never rewritten to satisfy a linter.
-- `postmortems/` is skipped entirely, for the same reason: an incident
+- `docs/postmortems/` is skipped entirely, for the same reason: an incident
   narrative is frozen, and the code path, flag, or file it names is the one
   that existed when the failure escaped — often one that was deleted as part
   of the fix. Because nothing checks those links, the template requires
@@ -513,13 +513,13 @@ def main() -> int:
     problems: list[str] = []
     for doc in docs:
         rel = doc.relative_to(REPO)
-        # decisions/ and postmortems/ — point-in-time records and never
+        # docs/decisions/ and docs/postmortems/ — point-in-time records and never
         # rewritten, so citing the flag or file that existed THEN is the record
         # working as intended (2026-07-22-telegram-out-of-core.md names the files
         # it deleted; a postmortem names the code path as it stood during the
         # incident). Fully exempt: neither axis describes what IS true now, and a
         # CLI rename must not force history to be re-written to satisfy the linter.
-        if rel.parts[0] in ("decisions", "postmortems"):
+        if rel.parts[:2] in (("docs", "decisions"), ("docs", "postmortems")):
             continue
         # future/ — plans. A flag it proposes may not exist yet (skip_flags),
         # but a link it names must resolve UNLESS marked `(planned)`

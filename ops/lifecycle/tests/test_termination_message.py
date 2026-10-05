@@ -249,7 +249,7 @@ async def _until_blocked_or_done(task: asyncio.Task[object], holder_pid: int) ->
 
 class TestKillAllShellSessions:
     """`kill_all_shell_sessions` on terminate / kill
-    (decisions/2026-09-27-terminate-has-no-closed-state.md): a graceful
+    (docs/decisions/2026-09-27-terminate-has-no-closed-state.md): a graceful
     terminate of a live agent records the request on its terminate command and
     kills nothing yet; a force terminate, or an agent that is already
     terminated, has its sessions killed before the response, which reports

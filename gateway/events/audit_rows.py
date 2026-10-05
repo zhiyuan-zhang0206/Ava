@@ -1,6 +1,6 @@
 """Reads of the audit record — `audit_events` (Postgres) in the event stream's row shape.
 
-`category=audit` events are recorded in Postgres (decisions/2026-10-02-audit-events-in-postgres.md);
+`category=audit` events are recorded in Postgres (docs/decisions/2026-10-02-audit-events-in-postgres.md);
 Loki holds only a projection that expires. Every reader that needs audit history reads here:
 `/api/events`, the run timeline, the fleet graph and the neighbors walk. Rows come back in the
 same dict shape `gateway.events.telemetry_rows.query_events` returns, so one merge serves both.

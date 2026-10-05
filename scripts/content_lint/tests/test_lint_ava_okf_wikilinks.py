@@ -1,7 +1,7 @@
 """`scripts/content_lint/lint_ava_okf.py` — wikilink resolution diagnostics (rules 8 + 11).
 
 A `[[wikilink]]` is the node-graph edge syntax, so its universe is the
-`.ava.okf.md` files and nothing else: a link to a `decisions/` record can
+`.ava.okf.md` files and nothing else: a link to a `docs/decisions/` record can
 never resolve, no matter how plainly the file exists on disk. W008 has to say
 that, because "target not found" sends the reader looking for a missing file
 instead of at the axis mix-up.
@@ -74,13 +74,13 @@ def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
     "target",
     [
         "2026-07-29-some-decision.md",  # bare name, found by basename across the repo
-        "decisions/2026-07-29-some-decision.md",  # as written from the repo root
+        "docs/decisions/2026-07-29-some-decision.md",  # as written from the repo root
     ],
 )
 def test_non_node_target_names_the_file_and_the_remedy(tmp_path, monkeypatch, capsys, target):
     """A wikilink to a decision record: the diagnostic names the file it found, says
     it is not a node, and points at the markdown link that is the actual fix."""
-    decision = tmp_path / "decisions/2026-07-29-some-decision.md"
+    decision = tmp_path / "docs/decisions/2026-07-29-some-decision.md"
     decision.parent.mkdir(parents=True)
     decision.write_text("# Why\n", encoding="utf-8")
     _node(
@@ -92,7 +92,7 @@ def test_non_node_target_names_the_file_and_the_remedy(tmp_path, monkeypatch, ca
     assert code == 0, out  # W008 is a warning, not a block
     assert "W008" in out
     assert "not an OKF node" in out
-    assert "decisions/2026-07-29-some-decision.md" in out  # what it found
+    assert "docs/decisions/2026-07-29-some-decision.md" in out  # what it found
     assert "markdown link" in out  # what to do instead
     assert "1 warning(s)" in out
 
@@ -100,13 +100,13 @@ def test_non_node_target_names_the_file_and_the_remedy(tmp_path, monkeypatch, ca
 def test_markdown_link_to_a_decision_record_is_clean(tmp_path, monkeypatch, capsys):
     """The remedy the message names really is clean — the linter reads wikilinks
     only, so citing a non-node axis as a markdown link reports nothing."""
-    decision = tmp_path / "decisions/2026-07-29-some-decision.md"
+    decision = tmp_path / "docs/decisions/2026-07-29-some-decision.md"
     decision.parent.mkdir(parents=True)
     decision.write_text("# Why\n", encoding="utf-8")
     _node(
         tmp_path,
         "base/cluster/machine.ava.okf.md",
-        "Liveness is the live probe ([why](../decisions/2026-07-29-some-decision.md)).",
+        "Liveness is the live probe ([why](../docs/decisions/2026-07-29-some-decision.md)).",
     )
 
     code, out = _lint_tmp(tmp_path, monkeypatch, capsys)
@@ -142,7 +142,7 @@ def test_labelled_wikilink_to_a_missing_target_reports_the_target(tmp_path, monk
 def test_url_target_is_not_reported_as_a_doc(tmp_path, monkeypatch, capsys):
     """A URL is nothing on disk, so it gets the plain miss — never the axis message,
     which would send the reader hunting for a same-named file in an axis dir."""
-    doc = tmp_path / "conventions/runbook.md"
+    doc = tmp_path / "docs/conventions/runbook.md"
     doc.parent.mkdir(parents=True)
     doc.write_text("# Runbook\n", encoding="utf-8")
     _node(tmp_path, "base/cluster/machine.ava.okf.md", "See [[https://example.test/runbook.md]].")

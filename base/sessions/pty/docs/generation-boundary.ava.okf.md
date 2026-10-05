@@ -21,7 +21,7 @@ kill a PTY, but reconcilers apply the boundary on their next pass:
   current desired state and can later be rebuilt under the new generation.
 - A watcher (`ava.watcher.at/cron/launch`) is NOT one of these reconcilers any
   more — it has no desired-state record and nothing rebuilds one
-  (decisions/2026-09-27-watchers-are-never-restarted.md). A watcher session
+  (docs/decisions/2026-09-27-watchers-are-never-restarted.md). A watcher session
   from an earlier generation simply keeps running (or not) exactly as it
   would without the freeze, subject only to its own TTL deadline, an
   explicit kill, or `ava stop`.
