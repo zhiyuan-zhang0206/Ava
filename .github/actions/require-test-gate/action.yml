@@ -1,32 +1,77 @@
-name: Require the test gate
-description: >-
-  Fail-closed companion of the Trunk quarantine gate. A pytest step that runs with
-  continue-on-error never fails its job by itself; the Trunk gate is what turns its
-  failures red. Call this when TRUNK_ORG_URL_SLUG is empty, i.e. when that gate is
-  about to be skipped: a run that should have the secret errors out, and a run that
-  cannot have it (a fork's pull request, or any Dependabot-triggered run) fails on
-  pytest's own outcome.
+name: Validate native test results
+description: Require successful native test execution and complete, parseable JUnit evidence.
 inputs:
-  pytest-outcome:
-    description: steps.<id>.outcome of the pytest step whose failures the gate would judge.
+  test-outcome:
+    description: Native test step outcome; success is required regardless of repository or secrets.
     required: true
+  junit-patterns:
+    description: JSON list of required JUnit glob patterns.
+    required: true
+  min-tests:
+    description: Minimum executed test cases; zero is permitted only for an explicitly optional bucket.
+    default: '1'
+  latest-report:
+    description: Read only the final attempt matched by each pattern, retaining earlier reports as artifacts.
+    default: 'false'
 runs:
   using: composite
   steps:
     - shell: bash
       env:
-        # Secrets exist only on this repository's own runs; a fork's pull request
-        # gets none, and a Dependabot-triggered run never gets them either (even on
-        # this repository's own branches) — GitHub withholds them from dependabot[bot].
-        CAN_HAVE_SECRETS: ${{ github.repository == 'zhiyuan-zhang0206/Ava' && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-        PYTEST_OUTCOME: ${{ inputs.pytest-outcome }}
+        TEST_OUTCOME: ${{ inputs.test-outcome }}
+        JUNIT_PATTERNS: ${{ inputs.junit-patterns }}
+        MIN_TESTS: ${{ inputs.min-tests }}
+        LATEST_REPORT: ${{ inputs.latest-report }}
       run: |
-        if [ "$CAN_HAVE_SECRETS" = "true" ]; then
-          echo "::error::TRUNK_ORG_URL_SLUG is empty, the test gate cannot run"
-          exit 1
-        fi
-        if [ "$PYTEST_OUTCOME" != "success" ]; then
-          echo "::error::pytest ended '$PYTEST_OUTCOME' and this run has no Trunk gate (no secrets): failing on pytest's own outcome"
-          exit 1
-        fi
-        echo "no Trunk gate on this run (no secrets); pytest succeeded"
+        python3 - <<'EOF'
+        import glob
+        import json
+        import os
+        from xml.etree import ElementTree as ET
+
+        problems = []
+        if os.environ["TEST_OUTCOME"] != "success":
+            problems.append("native test step ended " + os.environ["TEST_OUTCOME"])
+        patterns = json.loads(os.environ["JUNIT_PATTERNS"])
+        if not isinstance(patterns, list) or not patterns or not all(isinstance(pattern, str) for pattern in patterns):
+            raise SystemExit("JUnit patterns must be a nonempty list of strings")
+        paths = set()
+        for pattern in patterns:
+            matches = sorted(glob.glob(pattern))
+            if not matches:
+                problems.append("missing JUnit report: " + pattern)
+            elif os.environ["LATEST_REPORT"] == "true":
+                paths.add(matches[-1])
+            else:
+                paths.update(matches)
+        executed = skipped = failed = 0
+        for path in sorted(paths):
+            try:
+                root = ET.parse(path).getroot()
+            except (ET.ParseError, OSError) as error:
+                problems.append("cannot read JUnit report " + path + ": " + str(error))
+                continue
+            if root.tag not in ("testsuites", "testsuite"):
+                problems.append("invalid JUnit root in " + path + ": " + root.tag)
+                continue
+            for suite in root.iter("testsuite"):
+                if int(suite.get("failures", "0")) or int(suite.get("errors", "0")):
+                    problems.append("JUnit suite records failures or errors: " + path)
+            for case in root.iter("testcase"):
+                if case.find("skipped") is not None:
+                    skipped += 1
+                else:
+                    executed += 1
+                if case.find("failure") is not None or case.find("error") is not None:
+                    failed += 1
+                    identity = "::".join(filter(None, (case.get("classname"), case.get("name"))))
+                    print("  FAILED " + identity)
+        if executed < int(os.environ["MIN_TESTS"]):
+            problems.append("too few executed tests: " + str(executed))
+        if failed:
+            problems.append(str(failed) + " failing test cases")
+        print(f"Native JUnit results: {executed} executed, {skipped} skipped, {failed} failed")
+        for problem in problems:
+            print("::error::" + problem)
+        raise SystemExit(1 if problems else 0)
+        EOF

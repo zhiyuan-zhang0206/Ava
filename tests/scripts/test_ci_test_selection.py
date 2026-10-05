@@ -76,35 +76,27 @@ def test_subset_job_gates_only_in_enforce() -> None:
     )
     assert subset["outputs"]["subset_status"] == "${{ steps.run-subset.outputs.subset_status }}"
     run_step = _step(subset, "Run selected pytest subset")
-    # The Trunk quarantine gate is the decider, exactly as in a shard.
-    assert run_step["continue-on-error"] is True
+    assert "continue-on-error" not in run_step
+    assert 'exit "$status"' in run_step["run"]
     assert '-m "not flaky" -n 4' in run_step["run"]
     assert "--junit-xml=tmp/junit-backend-selected.xml" in run_step["run"]
 
 
 def test_zero_execution_never_reads_green() -> None:
-    """Fail-closed guard: a SELECTED run with no JUnit (empty TESTS -> status
-    5, or a hard pytest crash) must red the enforce gate even though the Trunk
-    uploader tolerates missing files."""
-    guard = _step(_workflow_jobs()["backend-selected"], "Require a subset JUnit report")
-    assert guard["if"] == "${{ !cancelled() && needs.test-select.outputs.mode == 'enforce' }}"
-    assert "junit-backend-selected.xml" in guard["run"]
-    assert "exit 1" in guard["run"]
+    guard = _step(_workflow_jobs()["backend-selected"], "Validate native test results")
+    assert guard["if"] == "${{ !cancelled() }}"
+    assert guard["uses"] == "./.github/actions/require-test-gate"
+    assert guard["with"]["junit-patterns"] == '["tmp/junit-backend-selected.xml"]'
 
 
-def test_subset_and_shard_quarantine_gates_have_the_same_shape() -> None:
-    """The subset must not red on quarantined flaky failures any more than a
-    shard does — same uploader, same summary step; subset gate enforce-only."""
+def test_subset_and_shard_native_gates_have_the_same_shape() -> None:
     jobs = _workflow_jobs()
-    subset_gate = _step(jobs["backend-selected"], "Trunk quarantine gate (upload test results)")
-    shard_gate = _step(jobs["backend-shard"], "Trunk quarantine gate (upload test results)")
-    assert subset_gate["uses"] == shard_gate["uses"]
-    assert subset_gate["with"]["junit-paths"] == "tmp/junit-backend-selected.xml"
-    assert shard_gate["with"]["junit-paths"] == "tmp/junit-backend-shard-${{ matrix.group }}-*.xml"
-    assert "needs.test-select.outputs.mode == 'enforce'" in subset_gate["if"]
-    assert "TRUNK_ORG_URL_SLUG" in subset_gate["if"]
-    _step(jobs["backend-selected"], "Show unquarantined failure summary")
-    _step(jobs["backend-shard"], "Show unquarantined failure summary")
+    subset_gate = _step(jobs["backend-selected"], "Validate native test results")
+    shard_gate = _step(jobs["backend-shard"], "Validate native test results")
+    assert subset_gate["uses"] == shard_gate["uses"] == "./.github/actions/require-test-gate"
+    assert subset_gate["if"] == shard_gate["if"] == "${{ !cancelled() }}"
+    assert "TRUNK" not in str(subset_gate) + str(shard_gate)
+    assert shard_gate["with"]["latest-report"] == "true"
 
 
 def test_aggregator_requires_whichever_pytest_path_ran() -> None:
