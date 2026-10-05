@@ -47,6 +47,8 @@ class LeaseRecord(TypedDict):
     machine: Any
     max_delivery_attempts: Any
     relay_provider: Any
+    relay_generation: Any
+    relay_degraded_reason: Any
     relay_token_hash: Any
     process_metadata: Any
     source: Any
