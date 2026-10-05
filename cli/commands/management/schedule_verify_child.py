@@ -10,9 +10,12 @@ Three checks; nothing from the script's body runs:
    implicit module global (`__name__`, ...). This is the read the import check cannot see: after the
    `shared` -> `base` rename, `_ROOT = Path(base.__file__)` reads a `base` nothing imports — the
    import check stays green and the first real fire dies with `NameError` (2026-10-01 audit: three
-   of 16 copies). Conservative by construction: a name bound anywhere counts as bound, annotations
-   are never read (house style: `from __future__ import annotations`), and a `from x import *`
-   disables the check outright.
+   of 16 copies). Conservative by construction: a name bound anywhere counts as bound (a PEP 695
+   type parameter's own name included: `def f[T]`, `class C[T]`, `type A[T]`), annotation
+   expressions are never read (house style: `from __future__ import annotations`; type-parameter
+   bounds and defaults likewise), and a `from x import *` disables the check outright. Names only
+   a runtime would create (`exec`/`eval`, `globals()` writes) are not modeled: a read of one is
+   reported, never guessed around.
 3. **Call sites** — every call whose callee resolves through those imports to repo code
    (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`) must
    `inspect.signature(...).bind` the arguments the script passes. A signature that moved on
@@ -73,7 +76,15 @@ def _rebound_names(tree: ast.Module) -> set[str]:
             continue
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
             names.add(node.id)
-        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        elif isinstance(
+            node,
+            ast.FunctionDef
+            | ast.AsyncFunctionDef
+            | ast.ClassDef
+            | ast.TypeVar
+            | ast.ParamSpec
+            | ast.TypeVarTuple,
+        ):
             names.add(node.name)
         elif isinstance(node, ast.arg):
             names.add(node.arg)
@@ -215,6 +226,16 @@ class _NameReads(ast.NodeVisitor):
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._visit_function(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Decorators, bases, keywords and body read as usual; type-parameter bounds/defaults are
+        annotation-like and never read."""
+        for child in (*node.decorator_list, *node.bases, *node.keywords, *node.body):
+            self.visit(child)
+
+    def visit_TypeAlias(self, node: ast.TypeAlias) -> None:
+        """Only the value reads; the name binds and type-parameter bounds/defaults never read."""
+        self.visit(node.value)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         self._visit_defaults(node.args)
