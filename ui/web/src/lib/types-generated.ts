@@ -4361,6 +4361,12 @@ export interface components {
             streak: number;
         };
         /**
+         * BillingRecoveryOutcome
+         * @description One agent's outcome in the operator's billing recovery batch.
+         * @enum {string}
+         */
+        BillingRecoveryOutcome: "candidate" | "resurrected" | "already_alive" | "refused" | "deferred" | "failed";
+        /**
          * BillingResurrectAgentOutcome
          * @description One agent's line in the billing batch-recovery summary.
          *
@@ -4373,11 +4379,7 @@ export interface components {
             agent_id: number;
             /** Machine */
             machine: string;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "candidate" | "resurrected" | "already_alive" | "refused" | "deferred" | "failed";
+            status: components["schemas"]["BillingRecoveryOutcome"];
             /** Reason */
             reason?: string | null;
         };
