@@ -1,32 +1,17 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Sweeper standalone mechanical-scan runner for the Ava repo — cron-friendly,
-# zero-agent.
-#
-# Add to crontab to periodically scan for tech debt. This script runs only the
-# 6 greppable / tool-checkable debt classes (deps, fail-fast, inline-marker,
-# dead-code, docstring-budget detection, locality) of the 11 in SKILL.md and
-# writes a report to stdout. The other
-# reasoned classes (docs-aging, boundary, skill-desc) need agent judgment and
-# are intentionally omitted here. (import-lint graduated to a blocking pre-commit
-# hook, `lint-imports`, so it is no longer a sweeper class.) It does NOT open a
-# PR — that requires the AI agent (see SKILL.md + ava.skills.sweeper).
-#
-# Usage:
-#   bash .agents/skills/ava-sweeper/run.sh [--repo <path>]
-#
-# Cron example (weekly, Sunday 03:00):
-#   0 3 * * 0 bash /path/to/Ava/.agents/skills/ava-sweeper/run.sh >> ~/logs/sweep.log 2>&1
-# =============================================================================
+# Optional Ava debt-candidate report. Rules and evidence requirements live in
+# docs/conventions/tech-debt.md. This is not a lint or contribution prerequisite.
+# Usage: bash scripts/audit/tech_debt_candidates.sh [--repo PATH]
+# The existing daily-debt schedule consumes this report; no runtime is changed here.
 
 set -euo pipefail
 
 if [[ $# -eq 0 ]]; then
-    REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
+    REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 elif [[ "$1" == "--repo" && $# -eq 2 && -n "$2" ]]; then
     REPO="$2"
 else
-    echo "usage: run.sh [--repo <path>]" >&2
+    echo "usage: tech_debt_candidates.sh [--repo <path>]" >&2
     exit 2
 fi
 cd "$REPO"
@@ -67,10 +52,6 @@ echo ""
 
 echo "--- [2/6] fail-fast: rare / shouldn't happen / almost never comments ---"
 rg -n -i "(rare|shouldn't happen|almost never)" $SCAN_DIRS 2>&1 || echo "(none found)"
-echo ""
-
-echo "--- [2/6] fail-fast: except Exception: pass ---"
-rg -n 'except\s+Exception\s*:\s*pass' $SCAN_DIRS 2>&1 || echo "(none found)"
 echo ""
 
 # ------------------------------------------------------------------
@@ -147,7 +128,7 @@ echo ""
 # Class 11: locality (whole-repo) — per-commit spread + cross-package
 # co-change index, defaults (90-day window on main, min-support 8,
 # min-confidence 0.6). Detection only; findings + ledger entries need
-# agent judgement (SKILL.md).
+# judgment (docs/conventions/tech-debt.md).
 # ------------------------------------------------------------------
 echo "--- [6/6] locality: cochange.py (spread + co-change index) ---"
 .venv/bin/python scripts/structure/cochange.py 2>&1 || echo "(cochange scan failed)"

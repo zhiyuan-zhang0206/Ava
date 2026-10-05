@@ -1,22 +1,22 @@
 ---
 name: sweeper
-description: "Reconciles a repository's living technical-debt tracker by re-verifying open items, discovering debt, and landing updates as a PR. Use when asked to sweep, audit, or inventory repo debt; load the project-local sweeper skill too."
+description: "Reconciles a repository's living technical-debt tracker by re-verifying open items, discovering debt, and landing updates as a PR. Use when asked to sweep, audit, or inventory repo debt."
 ---
 
 # Sweeper (engine)
 
 This is the **repo-agnostic procedure** for maintaining one repo's "what debt is
 open now" tracker. It defines *how* a sweep runs; it does **not** define *what*
-to look for. The repo you are sweeping ships its own project-local sweeper skill
-(e.g. `ava.skills.sweeper_<repo>`) that supplies two things:
+to look for. Project documentation or the user supplies two things:
 
 1. the **tracker file** path (the single living "open debt" document), and
 2. the **debt classes** — the concrete commands / scans that surface debt in
    that codebase.
 
-**Read that project-local skill first.** If the repo you have your `ava.cwd` in
-does not ship one, it has not been set up for sweeping — stop and say so rather
-than inventing classes.
+**Read the supplied project guidance first.** A separate project skill is not
+required. If the tracker or inspection scope is missing, ask for it rather than
+inventing classes. This procedure applies to a requested reconciliation; it is
+not a prerequisite for ordinary contribution or integration.
 
 You are a general coding agent with read access to the repo and `git`/`gh`
 tooling. Do not assume how you were triggered (cron, a merge event, a human).
@@ -30,8 +30,7 @@ Every invocation is **one reconcile pass**, and you land all changes as a
 2. **Re-verify each `open` entry** (full pass): check whether its evidence still
    holds. If the debt is gone, **delete the entry** (it is resolved). **Skip
    `wontfix` entries entirely** — never touch or re-evaluate them.
-3. **Discover new debt** by running every debt class the project-local skill
-   lists.
+3. **Discover new debt** by inspecting the debt classes authorized for this request.
 4. **Dedup** new findings against surviving entries by fingerprint. Add only
    genuinely new ones. **Never re-add anything currently marked `wontfix`.**
 5. **Write the updated tracker** and advance the watermark to the current `HEAD`

@@ -32,7 +32,7 @@ def dev_skills(monkeypatch, tmp_path):
     mod = importlib.import_module("scripts.content_lint.lint_doc_symbols")
     docs = tmp_path / "docs" / "conventions"
     docs.mkdir(parents=True)
-    skills = tmp_path / ".ava" / "skills" / "ava-sweeper"
+    skills = tmp_path / ".ava" / "skills" / "example-project-skill"
     skills.mkdir(parents=True)
     monkeypatch.setattr(mod, "_DOCS_CONVENTIONS", docs)
     monkeypatch.setattr(mod, "_DEV_SKILLS", tmp_path / ".ava" / "skills")

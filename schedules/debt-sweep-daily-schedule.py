@@ -142,7 +142,7 @@ def _scan_summary(*, succeeded: bool, report: str) -> str:
 
 
 def _run_mechanical_scan(repo: Path, artifact_path: Path | None) -> ScanReport:
-    script = repo / ".agents" / "skills" / "ava-sweeper" / "run.sh"
+    script = repo / "scripts" / "audit" / "tech_debt_candidates.sh"
     try:
         completed = subprocess.run(
             ["bash", str(script), "--repo", str(repo)],
@@ -176,7 +176,7 @@ def worker_prompt(day: str, scan: ScanReport) -> str:
     return f"""You are today's debt-clearing pass for the Ava repository ({day}).
 
 Start a fresh worktree from origin/main and follow the normal PR workflow; never push main.
-Read and follow the `ava.skills.sweeper` engine and `.agents/skills/ava-sweeper/` project skill.
+Use the `ava.skills.sweeper` engine with `docs/conventions/tech-debt.md` as project input.
 Reconcile the single ledger at `{_LEDGER_PATH}`.
 
 The mechanical scan artifact is `{scan.artifact_path}`.

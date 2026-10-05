@@ -310,3 +310,27 @@ def test_failure_notification_propagates_when_p0_lead_is_unavailable(
 
     with pytest.raises(RuntimeError, match="P0 lead unavailable"):
         module._report_failure("worker dispatch failed")
+
+
+def test_scan_uses_public_candidate_tool_and_preserves_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    module = _load_schedule_module()
+    script = REPO_ROOT / "scripts" / "audit" / "tech_debt_candidates.sh"
+    artifact = tmp_path / "scan.txt"
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args == ["bash", str(script), "--repo", str(REPO_ROOT)]
+        assert script.is_file()
+        assert kwargs["timeout"] == module._SCAN_TIMEOUT_SECONDS
+        return subprocess.CompletedProcess(args, 0, "candidate evidence\n", "")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    scan = module._run_mechanical_scan(REPO_ROOT, artifact)
+    assert scan.succeeded
+    assert artifact.read_text() == "candidate evidence\n"
+    prompt = module.worker_prompt("2026-10-05", scan)
+    assert "docs/conventions/tech-debt.md" in prompt
+    assert "ava-sweeper" not in prompt

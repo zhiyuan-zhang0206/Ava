@@ -44,6 +44,6 @@ carried by codegen).
 Debt class, evidence bar, and the graduation path (a leaked decision with a
 confirmed single owner becomes a Rule 5 `DECISIONS` entry, guarded by the
 lint from then on) live in the sweeper's own repo skill:
-`.agents/skills/ava-sweeper/SKILL.md`, class "locality (whole-repo)".
+`docs/conventions/tech-debt.md`, locality inspection guidance.
 
 Parent: [[scripts/docs/scripts.ava.okf.md|scripts]].
