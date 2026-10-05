@@ -16,8 +16,8 @@ import logging
 from collections.abc import Callable, MutableMapping
 from pathlib import Path
 
+from base.native_process.root_control.ipc import UnitState
 from services.supervision.ava_root import custody
-from services.supervision.ava_root.manifest import UnitState
 from services.supervision.ava_root.unit_records import _UnitRuntime
 
 _log = logging.getLogger("services.supervision.ava_root.supervisor")

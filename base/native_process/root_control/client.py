@@ -23,8 +23,10 @@ from base.native_process.root_control.ipc import (
     MAX_MESSAGE_BYTES,
     ProtocolError,
     ResponsePayload,
+    UnitState,
     encode,
     parse_response,
+    parse_status_response,
 )
 
 _DEFAULT_TIMEOUT_S = 30.0
@@ -115,7 +117,7 @@ def owned_process(unit_id: str, *, timeout: float = 2.0) -> OwnedProcess | None:
         row = cast("dict[str, object]", item)
         if row.get("id") != unit_id:
             continue
-        if row.get("state") != "running":
+        if row["state"] == UnitState.STOPPED:
             return None
         owner, root = native_identity(row), native_identity(body.get("root"))
         if not owner.live() or not root.live():
@@ -140,7 +142,7 @@ class RootClient:
             request["name"] = name
         raw = self._roundtrip(encode(request), status=verb == "status")
         try:
-            return parse_response(raw)
+            return parse_status_response(raw) if verb == "status" else parse_response(raw)
         except ProtocolError as exc:
             raise RootClientError(f"malformed response from root supervisor: {exc}") from exc
 

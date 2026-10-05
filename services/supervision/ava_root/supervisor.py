@@ -24,6 +24,7 @@ from base.native_process.root_control.ipc import (
     ErrorCode,
     RequestPayload,
     ResponsePayload,
+    UnitState,
     Verb,
     error_response,
     ok_response,
@@ -43,7 +44,6 @@ from services.supervision.ava_root.intent_store import (
 from services.supervision.ava_root.manifest import (
     RestartPolicy,
     UnitRegistry,
-    UnitState,
     UnknownUnitError,
 )
 from services.supervision.ava_root.reconciling import ReconcilingMixin
