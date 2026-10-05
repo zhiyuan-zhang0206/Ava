@@ -13,7 +13,7 @@ from the path alone:
 | `*.ava.okf.md` (in the package's `docs/`) | what the system **is** — structure, responsibilities, terminology | now |
 | `docs/decisions/` | **why** it was chosen this way — rejected alternatives, trade-offs | past, never rewritten |
 | `future/` | what we **plan** to do | future |
-| `docs/conventions/` | **how** to work — rules, processes, operations | now |
+| `docs/conventions/` | **how** to work — shared rules, processes and coordination | now |
 | `docs/postmortems/` | **why a failure escaped** — what broke, why every safety net missed it, what guardrail now prevents the class | past, never rewritten |
 
 A fact carried on two axes will drift. When you find a duplicate, keep the copy
@@ -188,9 +188,10 @@ Process, rule, and observed-behaviour changes → the doc that owns them:
 
 | Change | Doc |
 |---|---|
-| Operational procedures | `.agents/skills/` (one skill per procedure) |
-| Backup schedule / retention / restore | `.agents/skills/operating-ava-cluster/references/db-restore.md` — the `pg-backup` service's own behaviour moved with the restore procedure rather than staying in the runtime model |
-| Runtime model (clusters, data plane, logging, CI) | `runbook.md` |
+| Shared operating principles and coordinated recovery order | `docs/conventions/`; keep component details at their owner |
+| Concrete component operations | The owning domain’s `docs/`; skills link that source when guiding the capability |
+| Backup schedule / retention / restore | `services/backup/` component docs; the operating skill links the coordinated procedure |
+| Runtime structure (clusters, data plane, logging, CI) | Component-local OKF nodes; `runbook.md` is an operator entry and coordination guide |
 | Dev environment setup | `dev-setup.md` |
 | Contributor process | `docs/contributing.md` |
 | Coding conventions | `python-conventions.md` |

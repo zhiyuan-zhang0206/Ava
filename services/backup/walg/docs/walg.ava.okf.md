@@ -87,3 +87,5 @@ proves it are [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]].
 ## Notes
 - Operator procedure (enable, disable, the daily tick, lifecycle rule, escrow): `docs/conventions/runbook.md`, "WAL-G archiving". Why WAL-G and why launch arguments: [decision](../../../../docs/decisions/2026-10-02-walg-physical-backup.md).
 - Gateway capability only; a remote-managed data plane is refused at converge.
+
+Operator setup, enable/disable and recovery steps are in [WAL-G operations](operations.md).

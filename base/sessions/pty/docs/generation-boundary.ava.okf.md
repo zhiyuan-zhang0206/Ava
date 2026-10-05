@@ -39,3 +39,5 @@ UUID from a known-live session (the service's `list` reports each session's
 generation), rebuild a valid marker with that exact UUID, and then permit
 reconciliation. If no session establishes the UUID, leave allocation
 fail-closed until an operator makes the boundary explicit.
+
+Operator commands and their coordinated cleanup entry are in [PTY allocation operations](operations.md).

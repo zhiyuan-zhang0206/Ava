@@ -1,5 +1,12 @@
 # Cluster consistency: commit-level pinning (vs schema-level)
 
+**Current ownership:** this superseded pin/automatic-rollback proposal is
+archived. Current checkout identity and update admission belong to
+[start identity](../../cli/docs/start_identity.ava.okf.md) and the
+[coordinated update procedure](../../docs/conventions/runbook.md#updating-a-networked-cluster-in-source-mode).
+No current writer or consumer implements this proposal's pin fields; the
+original increments and checklist below are preserved as evidence.
+
 > **Status: superseded. Both increments and the drift response were retired by
 > the unified cluster lifecycle rework
 > ([`../infra/unified-cluster-lifecycle.md`](unified-cluster-lifecycle.md));

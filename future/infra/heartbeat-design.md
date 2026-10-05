@@ -1,5 +1,11 @@
 # Ava Fleet Heartbeat — Design
 
+**Current ownership:** this original proposal is archived; its rejected
+backoff/escalation design is not pending work. Current behavior belongs to
+[heartbeat](../../services/docs/gateway_side/heartbeat.ava.okf.md), and the adopted
+choice is [opt-out over escalation](../../docs/decisions/2026-06-22-heartbeat-opt-out-over-escalation.md).
+The original research and partial-landing notes below are preserved as evidence.
+
 > Status: **Partially superseded** (2026-06-22). The self-check heartbeat (Tier 2)
 > is now **implemented with a deliberately simpler design** than this proposal:
 > a single gateway daemon (`services/wake/heartbeat/`) that nudges idle agents on a
