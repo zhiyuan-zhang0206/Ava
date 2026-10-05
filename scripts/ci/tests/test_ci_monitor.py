@@ -1,4 +1,4 @@
-"""Tests for scripts/ci_utils.py — the tool AGENTS.md gates merges on.
+"""Tests for the reusable CI verdicts and optional owner CLI operations.
 
 The verdict this file cares most about was wrong on 2026-07-28: when Actions cannot schedule (#885
 switched to hosted runners a private repo has no minutes for), every workflow check vanishes from
@@ -9,7 +9,6 @@ the rollup. The only check left is a GitHub App's; it passes, and `check_ci` rep
 from __future__ import annotations
 
 import email.message
-import importlib.util
 import json
 import subprocess
 import sys
@@ -21,21 +20,14 @@ from typing import Any, cast
 
 import pytest
 
+from scripts.ci import commands as ci_utils
+from scripts.ci import monitor, owner_operations, status
+
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
 # pyright: reportUnknownArgumentType = warning
 
-_MOD_PATH = Path(__file__).resolve().parents[2] / "scripts" / "ci_utils.py"
-_MOD_NAME = "ci_utils_under_test"
-_spec = importlib.util.spec_from_file_location(_MOD_NAME, _MOD_PATH)
-assert _spec and _spec.loader
-ci_utils = importlib.util.module_from_spec(_spec)
-# Register before exec: @dataclass resolves its own module out of sys.modules while the class body
-# is processed, and fails on a module that is not there yet.
-sys.modules[_MOD_NAME] = ci_utils
-_spec.loader.exec_module(ci_utils)
-
-CIStatus = ci_utils.CIStatus
+CIStatus = status.CIStatus
 
 
 def _check(
@@ -152,7 +144,7 @@ def gh(monkeypatch: pytest.MonkeyPatch):
 
             return _R()
 
-        monkeypatch.setattr(ci_utils.subprocess, "run", _run)
+        monkeypatch.setattr(status.subprocess, "run", _run)
 
     return _install
 
@@ -160,7 +152,7 @@ def gh(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def has_workflows(monkeypatch: pytest.MonkeyPatch):
     def _set(value: bool) -> None:
-        monkeypatch.setattr(ci_utils, "_repo_has_workflows", lambda: value)
+        monkeypatch.setattr(status, "_repo_has_workflows", lambda: value)
 
     return _set
 
@@ -172,7 +164,7 @@ def test_app_check_alone_is_not_green(gh: Any, has_workflows: Any) -> None:
     """The 2026-07-28 shape: Actions never ran, an app check passed."""
     gh([_APP_CHECK], scheduled=[])
     has_workflows(True)
-    r = ci_utils.check_ci("886")
+    r = status.check_ci("886")
     assert r.verdict is CIStatus.NO_WORKFLOW_RUNS
     assert r.workflow_checks == []
     assert "DID NOT RUN" in r.summary()
@@ -182,14 +174,14 @@ def test_app_check_alone_is_green_when_repo_has_no_workflows(gh: Any, has_workfl
     """A repo with no workflow files is legitimately green on app checks alone."""
     gh([_APP_CHECK])
     has_workflows(False)
-    assert ci_utils.check_ci("1").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("1").verdict is CIStatus.ALL_PASSED
 
 
 def test_one_workflow_check_is_enough_to_be_green(gh: Any, has_workflows: Any) -> None:
     """The guard asks whether the suite ran at all — not how many jobs it has."""
     gh([_APP_CHECK, _check("backend (pytest + pyright)", "SUCCESS")])
     has_workflows(True)
-    r = ci_utils.check_ci("1")
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.ALL_PASSED
     assert r.workflow_checks == ["backend (pytest + pyright)"]
 
@@ -207,7 +199,7 @@ def test_full_green_suite(gh: Any, has_workflows: Any) -> None:
         ]
     )
     has_workflows(True)
-    r = ci_utils.check_ci("1")
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.ALL_PASSED
     assert len(r.passed) == 4
 
@@ -216,7 +208,7 @@ def test_failure_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> No
     """A real failure must report FAILED, never the did-not-run verdict."""
     gh([_APP_CHECK, _check("backend (pytest + pyright)", "FAILURE")])
     has_workflows(True)
-    r = ci_utils.check_ci("1")
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.FAILED
     assert r.failed == [{"name": "backend (pytest + pyright)", "conclusion": "FAILURE"}]
 
@@ -225,14 +217,14 @@ def test_pending_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> No
     """Still-running checks mean wait, not did-not-run."""
     gh([_APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
     has_workflows(True)
-    assert ci_utils.check_ci("1").verdict is CIStatus.PENDING
+    assert status.check_ci("1").verdict is CIStatus.PENDING
 
 
 def test_unknown_conclusion_counts_as_pending(gh: Any, has_workflows: Any) -> None:
     """A COMPLETED check with an unrecognized conclusion must not read as green."""
     gh([_check("weird", "SOMETHING_NEW")])
     has_workflows(True)
-    r = ci_utils.check_ci("1")
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.PENDING
     assert r.pending == ["weird"]
 
@@ -240,7 +232,7 @@ def test_unknown_conclusion_counts_as_pending(gh: Any, has_workflows: Any) -> No
 def test_merge_conflict_short_circuits(gh: Any, has_workflows: Any) -> None:
     gh([_check("backend", "SUCCESS")], mergeable="CONFLICTING")
     has_workflows(True)
-    assert ci_utils.check_ci("1").verdict is CIStatus.MERGE_CONFLICT
+    assert status.check_ci("1").verdict is CIStatus.MERGE_CONFLICT
 
 
 @pytest.mark.parametrize(
@@ -270,7 +262,7 @@ def test_status_context_bucketing(
     }
     gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
     has_workflows(True)
-    result = ci_utils.check_ci("1")
+    result = status.check_ci("1")
     assert result.verdict is verdict
     assert "?" not in result.pending
     if bucket == "failed":
@@ -301,7 +293,7 @@ def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
     )
     gh([_check("backend (pytest + pyright)", "SUCCESS"), stale, fresh])
     has_workflows(True)
-    r = ci_utils.check_ci("1")
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.ALL_PASSED
     assert r.failed == []
     assert r.completed.count("backend serial (flaky)") == 1
@@ -312,7 +304,7 @@ def test_empty_rollup(gh: Any, has_workflows: Any) -> None:
     NO_CHECKS."""
     gh([])
     has_workflows(True)
-    assert ci_utils.check_ci("1").verdict is CIStatus.NO_CHECKS
+    assert status.check_ci("1").verdict is CIStatus.NO_CHECKS
 
 
 def test_empty_rollup_with_a_queued_run_is_pending_not_no_checks(gh: Any) -> None:
@@ -323,7 +315,7 @@ def test_empty_rollup_with_a_queued_run_is_pending_not_no_checks(gh: Any) -> Non
     NO_CHECKS here exits before the suite has begun."""
     gh([], scheduled=["CI"])
 
-    r = ci_utils.check_ci("2249")
+    r = status.check_ci("2249")
     assert r.verdict is CIStatus.PENDING
     assert r.pending == ["CI"]
 
@@ -334,9 +326,9 @@ def test_empty_rollup_with_an_unanswerable_probe_is_error(
     """The runs probe failing must not read as a settled NO_CHECKS — the exact
     verdict this probe exists to rule out when checks may still be attaching."""
     gh([])
-    monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "_runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    r = ci_utils.check_ci("2249")
+    r = status.check_ci("2249")
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -347,8 +339,8 @@ def test_gh_failure_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
         stdout = ""
         stderr = "gh: not authenticated"
 
-    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
-    r = ci_utils.check_ci("1")
+    monkeypatch.setattr(status.subprocess, "run", lambda *_a, **_k: _R())
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.ERROR
     assert "not authenticated" in r.error_detail
 
@@ -358,7 +350,7 @@ def test_gh_failure_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_this_repo_has_workflows() -> None:
     """The guard is only armed where workflows exist; here they do."""
-    assert ci_utils._repo_has_workflows() is True
+    assert status._repo_has_workflows() is True
 
 
 # --- the false negative: scheduled but not yet reporting ---
@@ -374,7 +366,7 @@ def test_queued_run_with_no_check_yet_is_pending_not_did_not_run(
     gh([_APP_CHECK], scheduled=["CI"])
     has_workflows(True)
 
-    r = ci_utils.check_ci("901")
+    r = status.check_ci("901")
     assert r.verdict == CIStatus.PENDING
     assert "CI" in r.pending
     assert "DID NOT RUN" not in r.summary()
@@ -398,7 +390,7 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
     )
     has_workflows(True)
 
-    r = ci_utils.check_ci("774")
+    r = status.check_ci("774")
     assert r.verdict is CIStatus.PENDING
     assert "CI" in r.pending
     assert "guardrails (impacted)" in r.passed
@@ -411,7 +403,7 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
         scheduled=[],
         main_completed=True,
     )
-    assert ci_utils.check_ci("775").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("775").verdict is CIStatus.ALL_PASSED
 
 
 def test_partial_suite_green_with_an_unanswerable_probe_is_error(
@@ -428,9 +420,9 @@ def test_partial_suite_green_with_an_unanswerable_probe_is_error(
         ]
     )
     has_workflows(True)
-    monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "_runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    r = ci_utils.check_ci("776")
+    r = status.check_ci("776")
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -446,13 +438,13 @@ def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workf
     has_workflows(True)
     gh(checks, scheduled=[], main_completed=False)
 
-    r = ci_utils.check_ci("3137")
+    r = status.check_ci("3137")
     assert r.verdict is CIStatus.PENDING
-    assert ci_utils.MAIN_CI_WORKFLOW_NAME in r.pending
+    assert status.MAIN_CI_WORKFLOW_NAME in r.pending
     assert "all green" not in r.summary()
     assert "pending" in r.summary().lower()
     gh(checks, scheduled=[], main_completed=True)
-    assert ci_utils.check_ci("3137").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("3137").verdict is CIStatus.ALL_PASSED
 
 
 def test_main_workflow_probe_failure_is_error(
@@ -461,9 +453,9 @@ def test_main_workflow_probe_failure_is_error(
     """An unanswerable main-workflow probe is unknown, never a green verdict."""
     gh([_check("backend", "SUCCESS")], scheduled=[], main_completed=True)
     has_workflows(True)
-    monkeypatch.setattr(ci_utils, "_main_workflow_run_completed", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "_main_workflow_run_completed", lambda *_a, **_k: None)
 
-    r = ci_utils.check_ci("3137")
+    r = status.check_ci("3137")
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -483,14 +475,14 @@ def test_main_workflow_probe_reads_completed_runs_of_the_main_workflow(
         seen["cmd"] = cmd
         return _R()
 
-    monkeypatch.setattr(ci_utils.subprocess, "run", _run)
-    assert ci_utils._main_workflow_run_completed("abc123", None) is True
+    monkeypatch.setattr(status.subprocess, "run", _run)
+    assert status._main_workflow_run_completed("abc123", None) is True
     joined = " ".join(seen["cmd"])
     assert "head_sha=abc123" in joined
     assert "status=completed" in joined
     assert 'select(.name == "CI" and .conclusion != "skipped")' in joined
     _R.stdout = "0"
-    assert ci_utils._main_workflow_run_completed("abc123", None) is False
+    assert status._main_workflow_run_completed("abc123", None) is False
 
 
 def _core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
@@ -507,7 +499,7 @@ def _core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
 def test_draft_pr_with_skipped_core_suite_is_not_ready(gh: Any, has_workflows: Any) -> None:
     gh(_core_rollup("SKIPPED"), is_draft=True, scheduled=[], main_completed=True)
     has_workflows(True)
-    result = ci_utils.check_ci("3313")
+    result = status.check_ci("3313")
     assert result.verdict is CIStatus.NOT_READY
     assert "NOT READY" in result.summary() and "draft" in result.summary()
     assert "all green" not in result.summary()
@@ -517,15 +509,15 @@ def test_draft_pr_with_skipped_core_suite_is_not_ready(gh: Any, has_workflows: A
 def test_draft_pr_whose_core_suite_ran_stays_green(gh: Any, has_workflows: Any) -> None:
     gh(_core_rollup("SUCCESS"), is_draft=True, main_completed=True)
     has_workflows(True)
-    assert ci_utils.check_ci("3313").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("3313").verdict is CIStatus.ALL_PASSED
 
 
 def test_ready_transition_with_draft_skipped_core_is_pending(gh: Any, has_workflows: Any) -> None:
     gh(_core_rollup("SKIPPED"), is_draft=False, scheduled=[], main_completed=False)
     has_workflows(True)
-    result = ci_utils.check_ci("3313")
+    result = status.check_ci("3313")
     assert result.verdict is CIStatus.PENDING
-    assert ci_utils.MAIN_CI_WORKFLOW_NAME in result.pending
+    assert status.MAIN_CI_WORKFLOW_NAME in result.pending
     assert "skipped by draft gating" in result.summary()
     assert result.core_skipped and "all green" not in result.summary()
 
@@ -539,19 +531,17 @@ def test_path_filtered_core_skip_with_a_ran_main_run_stays_green(
     ]
     gh(checks, is_draft=False, main_completed=True)
     has_workflows(True)
-    assert ci_utils.check_ci("2505").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("2505").verdict is CIStatus.ALL_PASSED
 
 
 def test_core_suite_skipped_reads_only_the_shard_families() -> None:
     skipped = _core_rollup("SKIPPED")
     names = [c["name"] for c in skipped[2:4]]
-    assert ci_utils._core_suite_skipped([]) is None
-    assert ci_utils._core_suite_skipped([_APP_CHECK]) is None
-    assert ci_utils._core_suite_skipped([_check("backend selected subset", "SKIPPED")]) is None
-    assert ci_utils._core_suite_skipped(skipped) == names
-    assert (
-        ci_utils._core_suite_skipped([*skipped, _check("backend shard (1/16)", "SUCCESS")]) is None
-    )
+    assert status._core_suite_skipped([]) is None
+    assert status._core_suite_skipped([_APP_CHECK]) is None
+    assert status._core_suite_skipped([_check("backend selected subset", "SKIPPED")]) is None
+    assert status._core_suite_skipped(skipped) == names
+    assert status._core_suite_skipped([*skipped, _check("backend shard (1/16)", "SUCCESS")]) is None
 
 
 def test_main_workflow_probe_returns_none_when_unanswerable(
@@ -564,11 +554,11 @@ def test_main_workflow_probe_returns_none_when_unanswerable(
         stdout = ""
         stderr = "boom"
 
-    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
-    assert ci_utils._main_workflow_run_completed("abc123", None) is None
+    monkeypatch.setattr(status.subprocess, "run", lambda *_a, **_k: _R())
+    assert status._main_workflow_run_completed("abc123", None) is None
     _R.returncode = 0
     _R.stdout = "not a number"
-    assert ci_utils._main_workflow_run_completed("abc123", None) is None
+    assert status._main_workflow_run_completed("abc123", None) is None
 
 
 def test_runs_api_failure_keeps_the_conservative_verdict(
@@ -581,9 +571,9 @@ def test_runs_api_failure_keeps_the_conservative_verdict(
     None from []."""
     gh([_APP_CHECK])
     has_workflows(True)
-    monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "_runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    assert ci_utils.check_ci("886").verdict == CIStatus.NO_WORKFLOW_RUNS
+    assert status.check_ci("886").verdict == CIStatus.NO_WORKFLOW_RUNS
 
 
 def test_runs_probe_reads_only_incomplete_runs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -600,8 +590,8 @@ def test_runs_probe_reads_only_incomplete_runs(monkeypatch: pytest.MonkeyPatch) 
         seen["cmd"] = cmd
         return _R()
 
-    monkeypatch.setattr(ci_utils.subprocess, "run", _run)
-    assert ci_utils._runs_not_yet_reporting("abc123", None) == ["CI"]
+    monkeypatch.setattr(status.subprocess, "run", _run)
+    assert status._runs_not_yet_reporting("abc123", None) == ["CI"]
     joined = " ".join(seen["cmd"])
     assert "head_sha=abc123" in joined
     assert 'select(.status != "completed")' in joined
@@ -614,12 +604,12 @@ def test_runs_probe_returns_none_on_bad_response(
     """A failed query is None (unanswerable), not [] (nothing scheduled) — the
     distinction is what keeps an unanswerable probe from reading as green."""
     response = subprocess.CompletedProcess([], returncode, stdout, "boom")
-    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: response)
-    assert ci_utils._runs_not_yet_reporting("abc123", None) is None
+    monkeypatch.setattr(status.subprocess, "run", lambda *_a, **_k: response)
+    assert status._runs_not_yet_reporting("abc123", None) is None
 
 
 def _completed(stdout: str = "", returncode: int = 0) -> Any:
-    return ci_utils.subprocess.CompletedProcess([], returncode, stdout, "boom")
+    return status.subprocess.CompletedProcess([], returncode, stdout, "boom")
 
 
 @pytest.mark.parametrize(
@@ -632,7 +622,7 @@ def _completed(stdout: str = "", returncode: int = 0) -> Any:
     ],
 )
 def test_parse_ts(value: str | None, expected: float | None) -> None:
-    assert ci_utils._parse_ts(value) == expected
+    assert status._parse_ts(value) == expected
 
 
 @pytest.mark.parametrize(
@@ -641,9 +631,9 @@ def test_parse_ts(value: str | None, expected: float | None) -> None:
 def test_queue_cooldown_seconds(
     monkeypatch: pytest.MonkeyPatch, last: float | None, now: float, expected: int
 ) -> None:
-    monkeypatch.setattr(ci_utils, "_last_head_update", lambda *_a: last)
-    monkeypatch.setattr(ci_utils.time, "time", lambda: now)
-    assert ci_utils._queue_cooldown_seconds("7", "o/r") == expected
+    monkeypatch.setattr(owner_operations, "_last_head_update", lambda *_a: last)
+    monkeypatch.setattr(status.time, "time", lambda: now)
+    assert owner_operations._queue_cooldown_seconds("7", "o/r") == expected
 
 
 @pytest.mark.parametrize(
@@ -664,16 +654,16 @@ def test_last_head_update(
     reply_iter = iter(replies)
     seen: list[list[str]] = []
     monkeypatch.setattr(
-        ci_utils.subprocess, "run", lambda cmd, **_k: seen.append(cmd) or next(reply_iter)
+        status.subprocess, "run", lambda cmd, **_k: seen.append(cmd) or next(reply_iter)
     )
-    assert ci_utils._last_head_update("7", "o/r") == expected
+    assert owner_operations._last_head_update("7", "o/r") == expected
     assert "/issues/7/timeline" in " ".join(seen[0])
     assert "/pulls/7/commits" in " ".join(seen[1])
 
 
 @pytest.fixture
 def no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ci_utils.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(status.time, "sleep", lambda _s: None)
 
 
 @pytest.fixture
@@ -689,18 +679,18 @@ def poll(monkeypatch: pytest.MonkeyPatch):
             calls["n"] += 1
             v = verdicts[i]
             if v is CIStatus.ALL_PASSED:
-                return ci_utils.CIResult(verdict=v, passed=["lint", "test"])
+                return status.CIResult(verdict=v, passed=["lint", "test"])
             if v is CIStatus.FAILED:
-                return ci_utils.CIResult(
+                return status.CIResult(
                     verdict=v, failed=[{"name": "lint", "conclusion": "FAILURE"}]
                 )
             if v is CIStatus.ERROR:
-                return ci_utils.CIResult(verdict=v, error_detail="gh CLI error: boom")
+                return status.CIResult(verdict=v, error_detail="gh CLI error: boom")
             if v is CIStatus.NOT_READY:
-                return ci_utils.CIResult(verdict=v, core_skipped=["backend shard (1/16)"])
-            return ci_utils.CIResult(verdict=v)
+                return status.CIResult(verdict=v, core_skipped=["backend shard (1/16)"])
+            return status.CIResult(verdict=v)
 
-        monkeypatch.setattr(ci_utils, "check_ci", fake_check)
+        monkeypatch.setattr(status, "check_ci", fake_check)
 
     return _install
 
@@ -760,7 +750,7 @@ def test_wait_timeout_while_pending_exits_one(monkeypatch, poll, capsys) -> None
     # --timeout bounds the wait for run_background use (no watchdog there);
     # a still-pending PR at the deadline is a failed watch, not a silent hang.
     poll(CIStatus.PENDING)
-    monkeypatch.setattr(ci_utils.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(status.time, "sleep", lambda _s: None)
     assert ci_utils.main(["1243", "--wait", "--timeout", "1"]) == 1
     assert "timed out" in capsys.readouterr().err
 
@@ -769,9 +759,9 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     poll(CIStatus.ALL_PASSED)
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
+    monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
@@ -810,9 +800,9 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
     failures 2026-09-06 left no trace). The full getSubmittedPullRequest
     payload must be printed on the terminal branch."""
     poll(CIStatus.ALL_PASSED)
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner([]))
+    monkeypatch.setattr(status.subprocess, "run", _gh_runner([]))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
@@ -834,9 +824,9 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
 
 def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch, capsys) -> None:
     poll(CIStatus.ALL_PASSED)
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner([]))
+    monkeypatch.setattr(status.subprocess, "run", _gh_runner([]))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
@@ -952,7 +942,7 @@ def test_json_probe_pending_is_not_terminal(gh: Any, has_workflows: Any, capsys)
 def test_rerun_failed_jobs_dry_run_lists_jobs(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """--dry-run lists the failed jobs and exits 0 without re-running anything."""
     monkeypatch.setattr(
-        ci_utils,
+        owner_operations,
         "list_failed_jobs",
         lambda _pr, _repo: [
             {
@@ -970,7 +960,7 @@ def test_rerun_failed_jobs_dry_run_lists_jobs(monkeypatch: pytest.MonkeyPatch, c
 
 
 def test_rerun_failed_jobs_nothing_to_do(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    monkeypatch.setattr(ci_utils, "list_failed_jobs", lambda _pr, _repo: [])
+    monkeypatch.setattr(owner_operations, "list_failed_jobs", lambda _pr, _repo: [])
     assert ci_utils.main(["42", "--rerun-failed-jobs", "--dry-run"]) == 0
     assert "No failed jobs" in capsys.readouterr().out
 
@@ -980,7 +970,7 @@ def test_rerun_failed_jobs_forwards_and_reports_errors(
 ) -> None:
     """A rejected rerun request is printed and flips the exit code to 3."""
     monkeypatch.setattr(
-        ci_utils,
+        owner_operations,
         "rerun_failed_jobs",
         lambda _pr, _repo: ([], [], ["lint: gh: rate limited"]),
     )
@@ -990,7 +980,7 @@ def test_rerun_failed_jobs_forwards_and_reports_errors(
 
 def test_rerun_failed_jobs_success_exits_zero(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.setattr(
-        ci_utils,
+        owner_operations,
         "rerun_failed_jobs",
         lambda _pr, _repo: (
             [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}],
@@ -1008,7 +998,7 @@ def test_rerun_failed_jobs_waits_for_still_running_run(
     """Failures waiting on a still-running run are reported with the recovery
     action and exit 5, never forwarded as a 403 (task #3764)."""
     monkeypatch.setattr(
-        ci_utils,
+        owner_operations,
         "rerun_failed_jobs",
         lambda _pr, _repo: (
             [],
@@ -1035,7 +1025,7 @@ def test_rerun_failed_jobs_reports_mixed_outcomes(monkeypatch: pytest.MonkeyPatc
     """A rerun that partly lands and partly waits prints both lines and exits
     5: the waiting remainder governs the exit (task #3764)."""
     monkeypatch.setattr(
-        ci_utils,
+        owner_operations,
         "rerun_failed_jobs",
         lambda _pr, _repo: (
             [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}],
@@ -1064,9 +1054,9 @@ def test_rerun_failed_jobs_query_failure_is_an_error(
     the error is reported on stderr and the exit code flips to 1."""
 
     def _boom(_pr: Any, _repo: Any) -> list[dict]:
-        raise ci_utils.CiJobRerunError("gh api runs failed: rate limited")
+        raise owner_operations.CiJobRerunError("gh api runs failed: rate limited")
 
-    monkeypatch.setattr(ci_utils, "list_failed_jobs", _boom)
+    monkeypatch.setattr(owner_operations, "list_failed_jobs", _boom)
     assert ci_utils.main(["42", "--rerun-failed-jobs", "--dry-run"]) == 1
     captured = capsys.readouterr()
     assert "Failed to list failed jobs" in captured.err
@@ -1079,9 +1069,9 @@ def test_rerun_failed_jobs_query_failure_non_dry_run_exits_one(
     """The non-dry-run path reports the same query failure instead of exiting 0."""
 
     def _boom(_pr: Any, _repo: Any) -> list[dict]:
-        raise ci_utils.CiJobRerunError("gh pr view failed: not found")
+        raise owner_operations.CiJobRerunError("gh pr view failed: not found")
 
-    monkeypatch.setattr(ci_utils, "rerun_failed_jobs", _boom)
+    monkeypatch.setattr(owner_operations, "rerun_failed_jobs", _boom)
     assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 1
     assert "Failed to list failed jobs" in capsys.readouterr().err
 
@@ -1264,7 +1254,7 @@ def diag_gh(monkeypatch):
                     return subprocess.CompletedProcess(cmd, 0, out, "")
             return subprocess.CompletedProcess(cmd, 1, "", "unmatched: " + joined)
 
-        monkeypatch.setattr(ci_utils.subprocess, "run", run)
+        monkeypatch.setattr(status.subprocess, "run", run)
 
     return _install
 
@@ -1667,7 +1657,7 @@ def _install_probe(
             return _ProbeResponse((jobs_rc or {}).get(run_id, 0), str(jobs[run_id]))
         return _ProbeResponse(runs_rc, runs if isinstance(runs, str) else json.dumps(runs))
 
-    monkeypatch.setattr(ci_utils.subprocess, "run", run)
+    monkeypatch.setattr(status.subprocess, "run", run)
 
 
 def test_limbo_runs_flags_aged_queued_zero_job_run(monkeypatch) -> None:
@@ -1678,7 +1668,7 @@ def test_limbo_runs_flags_aged_queued_zero_job_run(monkeypatch) -> None:
         {91: 0},
         calls=calls,
     )
-    got = ci_utils._limbo_runs("abc1234", "o/r")
+    got = status._limbo_runs("abc1234", "o/r")
     assert got is not None
     assert [r["id"] for r in got] == [91]
     assert got[0]["name"] == "Native root lifetime proof"
@@ -1698,16 +1688,18 @@ def test_limbo_runs_skips_fresh_and_progressing_runs(monkeypatch) -> None:
         ],
         {93: 3, 94: 0},
     )
-    assert [r["id"] for r in ci_utils._limbo_runs("abc1234", "o/r")] == [94]
+    result = status._limbo_runs("abc1234", "o/r")
+    assert result is not None
+    assert [r["id"] for r in result] == [94]
 
 
 def test_limbo_runs_probe_failures_never_read_as_limbo(monkeypatch) -> None:
     # An unanswerable runs probe is None (missing evidence), never [].
     _install_probe(monkeypatch, [], {}, runs_rc=1)
-    assert ci_utils._limbo_runs("abc1234", "o/r") is None
+    assert status._limbo_runs("abc1234", "o/r") is None
     # Unreadable output is the same: not evidence of limbo.
     _install_probe(monkeypatch, "not json", {}, runs_rc=0)
-    assert ci_utils._limbo_runs("abc1234", "o/r") is None
+    assert status._limbo_runs("abc1234", "o/r") is None
     # A candidate whose job count cannot be read is skipped, not assumed stuck.
     _install_probe(
         monkeypatch,
@@ -1715,7 +1707,7 @@ def test_limbo_runs_probe_failures_never_read_as_limbo(monkeypatch) -> None:
         {95: 0},
         jobs_rc={95: 1},
     )
-    assert ci_utils._limbo_runs("abc1234", "o/r") == []
+    assert status._limbo_runs("abc1234", "o/r") == []
 
 
 def test_limbo_runs_skips_unparseable_created_at_and_non_int_id(monkeypatch) -> None:
@@ -1730,7 +1722,7 @@ def test_limbo_runs_skips_unparseable_created_at_and_non_int_id(monkeypatch) -> 
         {},
         calls=calls,
     )
-    assert ci_utils._limbo_runs("abc1234", "o/r") == []
+    assert status._limbo_runs("abc1234", "o/r") == []
     assert len(calls) == 1  # no jobs probe ran for any candidate
 
 
@@ -1741,8 +1733,8 @@ def test_check_ci_attaches_limbo_to_pending(gh: Any, has_workflows: Any, monkeyp
     )
     has_workflows(True)
     stuck = [{"id": 91, "name": "Example proof A", "age_s": 1500}]
-    monkeypatch.setattr(ci_utils, "_limbo_runs", lambda *_a, **_k: stuck)
-    r = ci_utils.check_ci("1")
+    monkeypatch.setattr(status, "_limbo_runs", lambda *_a, **_k: stuck)
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.PENDING
     assert r.pending == ["Example proof A"]
     assert r.limbo == stuck
@@ -1755,9 +1747,9 @@ def test_check_ci_empty_rollup_with_scheduled_run_probes_limbo(
     gh([], scheduled=["CI"])
     has_workflows(True)
     monkeypatch.setattr(
-        ci_utils, "_limbo_runs", lambda *_a, **_k: [{"id": 92, "name": "CI", "age_s": 1200}]
+        status, "_limbo_runs", lambda *_a, **_k: [{"id": 92, "name": "CI", "age_s": 1200}]
     )
-    r = ci_utils.check_ci("1")
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.PENDING
     assert r.limbo == [{"id": 92, "name": "CI", "age_s": 1200}]
 
@@ -1767,8 +1759,8 @@ def test_check_ci_limbo_probe_none_stays_plain_pending(
 ) -> None:
     gh([_check("backend", "SUCCESS")], scheduled=["CI"])
     has_workflows(True)
-    monkeypatch.setattr(ci_utils, "_limbo_runs", lambda *_a, **_k: None)
-    r = ci_utils.check_ci("1")
+    monkeypatch.setattr(status, "_limbo_runs", lambda *_a, **_k: None)
+    r = status.check_ci("1")
     assert r.verdict is CIStatus.PENDING
     assert r.limbo == []
 
@@ -1776,10 +1768,10 @@ def test_check_ci_limbo_probe_none_stays_plain_pending(
 def _limbo_result(
     *,
     pending: list[str] | None = None,
-    limbo: list[dict[str, Any]] | None = None,
+    limbo: list[status.LimboRun] | None = None,
     failed: list[dict[str, str]] | None = None,
 ) -> Any:
-    return ci_utils.CIResult(
+    return status.CIResult(
         verdict=CIStatus.PENDING,
         pending=list(pending or []),
         limbo=list(limbo or []),
@@ -1789,7 +1781,7 @@ def _limbo_result(
 
 def test_query_once_json_includes_limbo(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
-        ci_utils,
+        status,
         "check_ci",
         lambda *_a, **_k: _limbo_result(
             pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 700}]
@@ -1800,43 +1792,15 @@ def test_query_once_json_includes_limbo(monkeypatch, capsys) -> None:
     assert payload["limbo"] == [{"id": 91, "name": "CI", "age_s": 700}]
 
 
-def test_only_limbo_blocks_requires_the_named_runs_to_be_the_only_obstacle() -> None:
-    stuck = {"id": 91, "name": "CI", "age_s": 700}
-    assert ci_utils._only_limbo_blocks(_limbo_result(pending=["CI"], limbo=[stuck])) is True
-    # A real pending check beside them: --force must not touch this.
-    assert (
-        ci_utils._only_limbo_blocks(_limbo_result(pending=["CI", "docs lint"], limbo=[stuck]))
-        is False
-    )
-    # Same names but no limbo evidence at all.
-    assert ci_utils._only_limbo_blocks(_limbo_result(pending=["CI"], limbo=[])) is False
-    # Two limbo runs of one name cannot cover a single pending entry (count lock).
-    assert (
-        ci_utils._only_limbo_blocks(
-            _limbo_result(pending=["CI"], limbo=[stuck, {**stuck, "id": 92}])
-        )
-        is False
-    )
-    # A failed check is never forgivable.
-    assert (
-        ci_utils._only_limbo_blocks(
-            _limbo_result(
-                pending=["CI"], limbo=[stuck], failed=[{"name": "lint", "conclusion": "FAILURE"}]
-            )
-        )
-        is False
-    )
-
-
 def test_report_limbo_names_once_per_key(capsys) -> None:
     result = _limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 660}])
-    key = ci_utils._report_limbo(result, None)
+    key = monitor._report_limbo(result, None)
     first = capsys.readouterr()
     assert key == (91,)
     assert "GitHub limbo" in first.err
     assert "(#91," in first.err
     # The same state does not re-print on every poll.
-    assert ci_utils._report_limbo(result, key) == key
+    assert monitor._report_limbo(result, key) == key
     assert capsys.readouterr().err == ""
 
 
@@ -1848,7 +1812,7 @@ def _install_results_poller(monkeypatch: pytest.MonkeyPatch, *results: Any) -> N
         calls["n"] += 1
         return results[i]
 
-    monkeypatch.setattr(ci_utils, "check_ci", fake_check)
+    monkeypatch.setattr(status, "check_ci", fake_check)
 
 
 def test_wait_names_limbo_runs_and_says_the_block(no_sleep, monkeypatch, capsys) -> None:
@@ -1863,37 +1827,103 @@ def test_wait_names_limbo_runs_and_says_the_block(no_sleep, monkeypatch, capsys)
     assert "91" in err
 
 
-def test_wait_force_concludes_green_only_over_limbo(no_sleep, monkeypatch, capsys) -> None:
-    _install_results_poller(
-        monkeypatch,
-        _limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
-    )
-    assert ci_utils.main(["1243", "--wait", "--force"]) == 0
-    captured = capsys.readouterr()
-    assert "--force: proceeding despite 1 GitHub-limbo run(s)" in captured.out
-    assert "forced past: CI (#91)" in captured.err
-
-
-def test_wait_force_is_refused_when_a_real_check_is_still_pending(
-    no_sleep, monkeypatch, capsys
+@pytest.mark.parametrize("mode", [[], ["--wait"], ["--merge"]])
+def test_removed_force_flag_is_rejected(
+    mode: list[str], capsys: pytest.CaptureFixture[str]
 ) -> None:
+    with pytest.raises(SystemExit) as error:
+        ci_utils.main(["42", *mode, "--force"])
+    assert error.value.code == 2
+    assert "unrecognized arguments: --force" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("pending", [["CI"], ["CI", "docs lint"]])
+def test_limbo_never_enqueues_or_claims_green(
+    no_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    pending: list[str],
+) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     _install_results_poller(
         monkeypatch,
-        _limbo_result(pending=["CI", "docs lint"], limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
+        _limbo_result(pending=pending, limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
     )
-    assert ci_utils.main(["1243", "--wait", "--timeout", "1", "--force"]) == 1
-    captured = capsys.readouterr()
-    assert "CI green" not in captured.out
-    assert "the block is" in captured.err
+    clock = iter([0.0, 0.0, 2.0])
+    monkeypatch.setattr(status.time, "monotonic", lambda: next(clock))
+    submissions: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        owner_operations, "_submit_trunk", lambda *a, **_k: submissions.append(a) or 0
+    )
+    assert ci_utils.main(["42", "--merge", "--timeout", "1"]) == 1
+    assert submissions == []
+    output = capsys.readouterr()
+    assert "CI green" not in output.out
+    assert "GitHub limbo" in output.err
+    assert "remain pending, never green" in output.err
 
 
-def test_wait_force_does_not_green_a_plain_pending(no_sleep, monkeypatch, capsys) -> None:
-    _install_results_poller(monkeypatch, _limbo_result(pending=["CI"]))
-    assert ci_utils.main(["1243", "--wait", "--timeout", "1", "--force"]) == 1
-    assert "CI green" not in capsys.readouterr().out
+@pytest.mark.parametrize("arguments", [["42"], ["42", "--wait"]])
+def test_read_only_cli_does_not_load_owner_operations(arguments: list[str]) -> None:
+    # A fresh interpreter proves the import boundary even when this test module
+    # has imported the owner tools for their separate contract tests.
+    code = "\n".join(
+        [
+            "import importlib.abc, json, os, sys",
+            f"sys.path.insert(0, {str(Path.cwd())!r})",
+            "class RejectOwnerImports(importlib.abc.MetaPathFinder):",
+            "    def find_spec(self, fullname, path, target=None):",
+            "        if fullname in ('scripts.ci.owner_operations', 'scripts.ci.trunk_api'):",
+            "            raise AssertionError('read-only CLI imported owner operations: ' + fullname)",
+            "sys.meta_path.insert(0, RejectOwnerImports())",
+            "os.environ.pop('TRUNK_API_TOKEN', None)",
+            "os.environ['CI_QUEUE'] = 'unrelated-owner-queue'",
+            "from scripts import ci_utils",
+            "from scripts.ci import status",
+            "status.check_ci = lambda *a, **k: status.CIResult(status.CIStatus.ALL_PASSED)",
+            f"raise SystemExit(ci_utils.main({arguments!r}))",
+        ]
+    )
+    result = subprocess.run(  # noqa: S603 - hermetic code built from fixed test inputs
+        [sys.executable, "-I", "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "green" in result.stdout
 
 
-def test_force_requires_wait_or_merge() -> None:
-    with pytest.raises(SystemExit) as e:
-        ci_utils.main(["42", "--force"])
-    assert e.value.code == 2
+@pytest.mark.parametrize(
+    "next_verdict", [CIStatus.PENDING, CIStatus.NO_WORKFLOW_RUNS, CIStatus.ERROR]
+)
+def test_owner_rechecks_genuine_green_before_submission(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], next_verdict: CIStatus
+) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    _install_results_poller(
+        monkeypatch, status.CIResult(CIStatus.ALL_PASSED), status.CIResult(next_verdict)
+    )
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", lambda *_a: 0)
+    submissions: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        owner_operations, "_submit_trunk", lambda *a, **_k: submissions.append(a) or 0
+    )
+    assert ci_utils.main(["42", "--merge"]) == (3 if next_verdict is CIStatus.ERROR else 1)
+    assert submissions == []
+    assert "submitted" not in capsys.readouterr().out
+
+
+def test_merge_and_rerun_conflict_is_rejected_before_polling(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+
+    def unexpected_poll(*_a: Any, **_k: Any) -> status.CIResult:
+        raise AssertionError("invalid owner command polled CI")
+
+    monkeypatch.setattr(status, "check_ci", unexpected_poll)
+    with pytest.raises(SystemExit) as error:
+        ci_utils.main(["42", "--merge", "--rerun-failed-jobs"])
+    assert error.value.code == 2
+    assert "exclusive" in capsys.readouterr().err

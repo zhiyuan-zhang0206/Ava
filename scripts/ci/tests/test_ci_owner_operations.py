@@ -1,30 +1,15 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
-import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci_utils.py"
-
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("ci_utils", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-ci_utils = _load_script()
+from scripts.ci import commands as ci_utils
+from scripts.ci import monitor, owner_operations, status
 
 
 def _no_cooldown(_: str, __: str) -> int:
@@ -32,12 +17,12 @@ def _no_cooldown(_: str, __: str) -> int:
 
 
 def _all_green(_: str | int, *, repo: str | None = None) -> Any:
-    return ci_utils.CIResult(verdict=ci_utils.CIStatus.ALL_PASSED)
+    return status.CIResult(verdict=status.CIStatus.ALL_PASSED)
 
 
 def _all_green_with_trunk_queue_check(_: str | int, *, repo: str | None = None) -> Any:
-    return ci_utils.CIResult(
-        verdict=ci_utils.CIStatus.ALL_PASSED,
+    return status.CIResult(
+        verdict=status.CIStatus.ALL_PASSED,
         trunk_checks=[{"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS"}],
     )
 
@@ -59,7 +44,7 @@ def _gh_runner(calls: list[list[str]]):
     [("urgent", 0), ("high", 10), ("medium", 100), ("low", 200)],
 )
 def test_trunk_priority_maps_cli_names_to_submit_values(priority: str, expected: int) -> None:
-    assert ci_utils._trunk_priority(priority) == expected
+    assert owner_operations._trunk_priority(priority) == expected
 
 
 def test_queue_resolution_prefers_flag_then_environment_then_trunk_default(
@@ -67,11 +52,11 @@ def test_queue_resolution_prefers_flag_then_environment_then_trunk_default(
 ) -> None:
     monkeypatch.setenv("CI_QUEUE", "trunk")
     with pytest.raises(ValueError, match="unknown CI queue"):
-        ci_utils._resolve_queue("retired")
-    assert ci_utils._resolve_queue(None) == "trunk"
+        owner_operations._resolve_queue("retired")
+    assert owner_operations._resolve_queue(None) == "trunk"
 
     monkeypatch.delenv("CI_QUEUE")
-    assert ci_utils._resolve_queue(None) == "trunk"
+    assert owner_operations._resolve_queue(None) == "trunk"
 
 
 class _TrunkResponse:
@@ -110,9 +95,9 @@ def test_trunk_queue_submits_and_reports_merged(
 ) -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
+    monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
@@ -125,9 +110,9 @@ def test_trunk_queue_submits_and_reports_merged(
             requests,
         ),
     )
-    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+    monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
-    rc = ci_utils._trunk_merge_flow(
+    rc = owner_operations._trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -167,7 +152,7 @@ def test_trunk_queue_reports_failed_state(
         _urlopen_sequence([_TrunkResponse({"state": "failed", "reason": "red CI"})], requests),
     )
 
-    rc = ci_utils._watch_trunk_enqueue(
+    rc = owner_operations._watch_trunk_enqueue(
         "42",
         "zhiyuan-zhang0206/Ava",
         every=1,
@@ -190,7 +175,7 @@ def test_trunk_queue_times_out_while_pending(
         _urlopen_sequence([_TrunkResponse({"state": "testing"})], requests),
     )
 
-    rc = ci_utils._watch_trunk_enqueue(
+    rc = owner_operations._watch_trunk_enqueue(
         "42",
         "zhiyuan-zhang0206/Ava",
         every=1,
@@ -210,13 +195,13 @@ def test_trunk_queue_stops_after_consecutive_status_errors(
         urllib.request,
         "urlopen",
         _urlopen_sequence(
-            [urllib.error.URLError("offline")] * ci_utils.MAX_CONSECUTIVE_ERRORS,
+            [urllib.error.URLError("offline")] * status.MAX_CONSECUTIVE_ERRORS,
             requests,
         ),
     )
-    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+    monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
-    rc = ci_utils._watch_trunk_enqueue(
+    rc = owner_operations._watch_trunk_enqueue(
         "42",
         "zhiyuan-zhang0206/Ava",
         every=1,
@@ -226,7 +211,7 @@ def test_trunk_queue_stops_after_consecutive_status_errors(
     )
 
     assert rc == 3
-    assert len(requests) == ci_utils.MAX_CONSECUTIVE_ERRORS
+    assert len(requests) == status.MAX_CONSECUTIVE_ERRORS
 
 
 def test_trunk_submit_retries_once_after_an_http_error(
@@ -240,10 +225,10 @@ def test_trunk_submit_retries_once_after_an_http_error(
             [_TrunkResponse({}, status=503), _TrunkResponse({"accepted": True})], requests
         ),
     )
-    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+    monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        ci_utils._submit_trunk(
+        owner_operations._submit_trunk(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -263,10 +248,10 @@ def test_trunk_submit_returns_enqueue_error_after_second_http_error(
         "urlopen",
         _urlopen_sequence([_TrunkResponse({}, status=500)] * 2, requests),
     )
-    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+    monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        ci_utils._submit_trunk(
+        owner_operations._submit_trunk(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -287,9 +272,9 @@ def test_trunk_merge_requires_token_before_waiting(
 
 
 def test_real_trunk_queue_checks_do_not_block_all_green_predicate() -> None:
-    result = ci_utils.CIResult(verdict=ci_utils.CIStatus.ALL_PASSED)
+    result = status.CIResult(verdict=status.CIStatus.ALL_PASSED)
 
-    ci_utils._partition_checks(
+    status._partition_checks(
         [
             {"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS", "conclusion": ""},
             {
@@ -317,24 +302,24 @@ def test_json_query_includes_trunk_checks(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     queue_check = {"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS"}
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green_with_trunk_queue_check)
+    monkeypatch.setattr(status, "check_ci", _all_green_with_trunk_queue_check)
 
-    assert ci_utils._query_once("42", "zhiyuan-zhang0206/Ava", as_json=True) == 0
+    assert monitor.query_once("42", "zhiyuan-zhang0206/Ava", as_json=True) == 0
     assert json.loads(capsys.readouterr().out)["trunk_checks"] == [queue_check]
 
 
 def test_query_once_not_ready_is_not_green(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    result = ci_utils.CIResult(
-        verdict=ci_utils.CIStatus.NOT_READY, core_skipped=["backend shard (1/16)"]
+    result = status.CIResult(
+        verdict=status.CIStatus.NOT_READY, core_skipped=["backend shard (1/16)"]
     )
 
     def _result(_: str | int, *, repo: str | None = None) -> Any:
         return result
 
-    monkeypatch.setattr(ci_utils, "check_ci", _result)
-    assert ci_utils._query_once("42", "owner/repo", as_json=False) == 1
+    monkeypatch.setattr(status, "check_ci", _result)
+    assert monitor.query_once("42", "owner/repo", as_json=False) == 1
     printed = capsys.readouterr().out
     assert "NOT READY" in printed and "draft gating" in printed
 
@@ -342,8 +327,8 @@ def test_query_once_not_ready_is_not_green(
 def test_json_query_includes_draft_fields(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    result = ci_utils.CIResult(
-        verdict=ci_utils.CIStatus.NOT_READY,
+    result = status.CIResult(
+        verdict=status.CIStatus.NOT_READY,
         is_draft=True,
         core_skipped=["backend shard (1/16)"],
     )
@@ -351,8 +336,8 @@ def test_json_query_includes_draft_fields(
     def _result(_: str | int, *, repo: str | None = None) -> Any:
         return result
 
-    monkeypatch.setattr(ci_utils, "check_ci", _result)
-    assert ci_utils._query_once("42", "owner/repo", as_json=True) == 1
+    monkeypatch.setattr(status, "check_ci", _result)
+    assert monitor.query_once("42", "owner/repo", as_json=True) == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["is_draft"] is True
     assert payload["core_skipped"] == ["backend shard (1/16)"]
@@ -363,9 +348,9 @@ def test_trunk_flow_submits_without_reading_pr_labels(
 ) -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
+    monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
@@ -375,7 +360,7 @@ def test_trunk_flow_submits_without_reading_pr_labels(
     )
 
     assert (
-        ci_utils._trunk_merge_flow(
+        owner_operations._trunk_merge_flow(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -414,9 +399,9 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
     submissions were retried twice and exited 4 instead of resuming watch)."""
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
+    monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     responses: list[_TrunkResponse | urllib.error.URLError] = [
         urllib.error.HTTPError(
             "https://api.trunk.io/v1/submitPullRequest",
@@ -432,10 +417,10 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
         "urlopen",
         _urlopen_sequence(responses, requests),
     )
-    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+    monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        ci_utils._trunk_merge_flow(
+        owner_operations._trunk_merge_flow(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -468,10 +453,10 @@ def test_trunk_watch_keeps_polling_through_testing_state(
             requests,
         ),
     )
-    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+    monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        ci_utils._watch_trunk_enqueue(
+        owner_operations._watch_trunk_enqueue(
             "42",
             "zhiyuan-zhang0206/Ava",
             every=1,
@@ -489,9 +474,9 @@ def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
 ) -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
+    monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
@@ -499,10 +484,10 @@ def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
             [_TrunkResponse({}, status=409), _TrunkResponse({"state": "merged"})], requests
         ),
     )
-    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+    monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        ci_utils._trunk_merge_flow(
+        owner_operations._trunk_merge_flow(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -531,9 +516,9 @@ def test_trunk_submit_accepts_plain_text_ok_body(
     successful submit would be misread as an error and retried into a 409."""
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
+    monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
@@ -545,9 +530,9 @@ def test_trunk_submit_accepts_plain_text_ok_body(
             requests,
         ),
     )
-    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+    monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
-    rc = ci_utils._trunk_merge_flow(
+    rc = owner_operations._trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -588,10 +573,10 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
-        ci_utils.subprocess,
+        status.subprocess,
         "run",
         _trunk_runner(base_sha="a" * 40, main_sha="b" * 40, calls=calls),
     )
@@ -603,7 +588,7 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
         ),
     )
 
-    rc = ci_utils._trunk_merge_flow(
+    rc = owner_operations._trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -623,10 +608,10 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
-        ci_utils.subprocess,
+        status.subprocess,
         "run",
         _trunk_runner(base_sha="a" * 40, main_sha="b" * 40, calls=calls),
     )
@@ -638,7 +623,7 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
         ),
     )
 
-    rc = ci_utils._trunk_merge_flow(
+    rc = owner_operations._trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -658,10 +643,10 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
-        ci_utils.subprocess,
+        status.subprocess,
         "run",
         _trunk_runner(base_sha="a" * 40, main_sha="a" * 40, calls=calls),
     )
@@ -673,7 +658,7 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
         ),
     )
 
-    rc = ci_utils._trunk_merge_flow(
+    rc = owner_operations._trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -692,10 +677,10 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
-        ci_utils.subprocess,
+        status.subprocess,
         "run",
         _trunk_runner(base_sha=None, main_sha=None, calls=calls),
     )
@@ -707,7 +692,7 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
         ),
     )
 
-    rc = ci_utils._trunk_merge_flow(
+    rc = owner_operations._trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -726,10 +711,10 @@ def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
-        ci_utils.subprocess,
+        status.subprocess,
         "run",
         _trunk_runner(base_sha=None, main_sha=None, calls=calls),
     )
@@ -741,7 +726,7 @@ def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
         ),
     )
 
-    rc = ci_utils._trunk_merge_flow(
+    rc = owner_operations._trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
