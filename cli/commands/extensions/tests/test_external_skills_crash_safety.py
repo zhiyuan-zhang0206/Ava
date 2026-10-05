@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import stat
 from pathlib import Path
@@ -15,9 +16,15 @@ from cli.commands.extensions import external_skills as bridge
 SKILL = "operating-ava-cluster"
 
 
+@pytest.fixture(autouse=True)
+def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = importlib.import_module("cli.commands.extensions.external_skills")
+    monkeypatch.setattr(module, "_SKILL_NAMES", ("operating-ava-cluster",))
+
+
 def _world(tmp_path: Path) -> tuple[Path, Path, ConvergeCtx]:
     repo = tmp_path / "repo"
-    source = repo / ".agents" / "skills" / SKILL
+    source = repo / "ava_builtins" / "skills" / "platform" / SKILL
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("operator v1\n")
     host_home = tmp_path / "host-home"

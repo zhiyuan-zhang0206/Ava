@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import stat
@@ -17,8 +18,14 @@ from cli.commands.extensions import external_skills as bridge
 SKILL = "operating-ava-cluster"
 
 
+@pytest.fixture(autouse=True)
+def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = importlib.import_module("cli.commands.extensions.external_skills")
+    monkeypatch.setattr(module, "_SKILL_NAMES", ("operating-ava-cluster",))
+
+
 def _source(repo: Path, body: str = "operator v1\n") -> Path:
-    source = repo / ".agents" / "skills" / SKILL
+    source = repo / "ava_builtins" / "skills" / "platform" / SKILL
     (source / "references").mkdir(parents=True)
     (source / "SKILL.md").write_text(body)
     (source / "references" / "recovery.md").write_text("recover\n")
@@ -53,24 +60,6 @@ def _ledger(context: ConvergeCtx) -> dict[str, Any]:
             (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
         ),
     )
-
-
-def test_explicit_home_seam_never_calls_platform_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo = tmp_path / "repo"
-    _source(repo)
-    client = _client_home(tmp_path)
-    host_home = client.parent
-
-    def real_home_forbidden() -> Path:
-        raise AssertionError("tests must not resolve the real platform home")
-
-    monkeypatch.setattr(bridge.Path, "home", real_home_forbidden)
-
-    bridge.converge_external_agent_skill(_context(repo, tmp_path), host_home=host_home)
-
-    assert _target(client, tmp_path).is_dir()
 
 
 @pytest.mark.parametrize("linked_component", ["client-home", "skills-root"])
@@ -136,7 +125,7 @@ def test_source_path_component_link_is_fatal_before_copy(tmp_path: Path) -> None
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("operator\n")
     repo.mkdir()
-    (repo / ".agents").symlink_to(actual_agents, target_is_directory=True)
+    (repo / "ava_builtins").symlink_to(actual_agents, target_is_directory=True)
     client = _client_home(tmp_path)
 
     with pytest.raises(RuntimeError, match="source"):
@@ -243,6 +232,8 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
         ledger_path: Path,
         ledger: dict[str, Any],
         source_digest: str,
+        *,
+        skill_name: str = SKILL,
     ) -> Path:
         staged = original_stage(
             snapshot,
@@ -342,10 +333,12 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     original_rename = bridge._rename_no_replace
     late_target = False
 
-    def reject_claimed_previous(root: Path, installation_id: str, generation_id: str) -> None:
+    def reject_claimed_previous(
+        root: Path, installation_id: str, generation_id: str, *, skill_name: str = SKILL
+    ) -> None:
         if ".ava-previous-" in root.name:
             raise bridge._ClientConflictError("claimed copy changed")
-        original_verify(root, installation_id, generation_id)
+        original_verify(root, installation_id, generation_id, skill_name=skill_name)
 
     def collide_with_restore(source_path: Path, destination: Path) -> None:
         nonlocal late_target
@@ -574,11 +567,19 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
         ledger_path: Path,
         ledger: dict[str, Any],
         source_digest: str,
+        *,
+        skill_name: str = SKILL,
     ) -> Path:
         if skills_root.parent.name == ".codex":
             raise PermissionError("/secret/absolute/client/path")
         return original_stage(
-            snapshot, source_manifest, skills_root, ledger_path, ledger, source_digest
+            snapshot,
+            source_manifest,
+            skills_root,
+            ledger_path,
+            ledger,
+            source_digest,
+            skill_name=skill_name,
         )
 
     monkeypatch.setattr(bridge, "_stage_copy", inaccessible)

@@ -9,7 +9,7 @@ description: Sets up dependencies and starts Ava on a fresh machine or joins a r
 every startup of an initialized home. Package acquisition is a separate operation.
 Use the same two entries for a single box, a gateway, and a runner joining a gateway.
 
-The [runbook](../../../docs/conventions/runbook.md) describes the runtime contract.
+The [runbook](../../../../docs/conventions/runbook.md) describes the runtime contract.
 Use [secrets](references/secrets.md) for credential handling and
 [split deployment](references/split-deployment.md) for private-network setup.
 
@@ -17,7 +17,7 @@ Use [secrets](references/secrets.md) for credential handling and
 
 Use macOS or Linux, including WSL2. Native Windows application startup is not
 supported by the root service owner; see
-[Windows setup](../../../docs/conventions/windows-setup.md).
+[Windows setup](../../../../docs/conventions/windows-setup.md).
 
 Acquire Git, uv, Python 3.12, and the host packages independently. A gateway with
 local storage requires Postgres 17 with pgvector, Redis 8.2, and PgBouncer
@@ -131,7 +131,7 @@ connection facts from the gateway at Settings construction. See
 ## Dev worktrees
 
 A worktree owns no cluster. Acquire dependencies into its own real `.venv` and
-verify with selected tests and CI ([development in a worktree](../../../docs/conventions/dev-setup.md#development-in-a-worktree)).
+verify with selected tests and CI ([development in a worktree](../../../../docs/conventions/dev-setup.md#development-in-a-worktree)).
 A home that carries its own `source` checkout (`~/.ava`) is operated only by that
 checkout's `ava`; any other checkout's `ava` refuses every command.
 
