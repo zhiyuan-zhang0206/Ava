@@ -15,11 +15,15 @@ control plane speak, so lower layers reach the root without importing the
 service ([[services/supervision/ava_root/docs/ava_root.ava.okf.md]] is the server).
 
 - `ipc.py` — one JSON object per line, capped at 64 KiB; requests and responses
-  are validated fail-fast, unknown verbs and error codes are rejected.
+  are validated fail-fast, unknown verbs and error codes are rejected. It owns
+  `UnitState` (`running` / `stopped`); successful status replies require a unit
+  roster with a valid id and known state on every row.
 - `client.py` — `RootClient`, one blocking connection per call. A `status`
   reply must name the kernel-reported Unix-socket peer; `root_process` and
   `owned_process` read captured
-  native births and never adopt a current PID occupant.
+  native births and never adopt a current PID occupant. A missing or unknown
+  unit state rejects the reply; only an absent unit or a validated stopped
+  state can establish that no generation is running.
 
 Consumers below the service: the start-serving gate (`base/deploy/lifecycle/start_serving.py`)
 authenticates the live root generation through `RootClient.status()`.

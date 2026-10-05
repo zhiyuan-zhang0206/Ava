@@ -41,6 +41,13 @@ class Verb(StrEnum):
     RESOURCE = "resource"
 
 
+class UnitState(StrEnum):
+    """What a unit's process is doing right now."""
+
+    RUNNING = "running"
+    STOPPED = "stopped"
+
+
 class ErrorCode(StrEnum):
     """Stable failure codes; clients branch on these, not on message text."""
 
@@ -137,6 +144,33 @@ def parse_response(raw: bytes) -> ResponsePayload:
         raise ProtocolError(f"failed response carries an unknown code {code_raw!r}") from exc
     rejected: ResponsePayload = {"ok": False, "error": error_raw, "code": code.value}
     return rejected
+
+
+def parse_status_response(raw: bytes) -> ResponsePayload:
+    """Validate every unit state before a successful status can be consumed."""
+    response = parse_response(raw)
+    if not response["ok"]:
+        return response
+    body = response.get("result")
+    if not isinstance(body, dict):
+        raise ProtocolError("root status omitted its unit roster")
+    rows = cast("dict[str, object]", body).get("units")
+    if not isinstance(rows, list):
+        raise ProtocolError("root status omitted its unit roster")
+    for item in cast("list[object]", rows):
+        if not isinstance(item, dict):
+            raise ProtocolError("root status contains an invalid unit")
+        row = cast("dict[str, object]", item)
+        if not isinstance(row.get("id"), str) or not row["id"]:
+            raise ProtocolError("root status contains an invalid unit id")
+        state = row.get("state")
+        if not isinstance(state, str):
+            raise ProtocolError("root status must carry a string unit state")
+        try:
+            UnitState(state)
+        except ValueError as exc:
+            raise ProtocolError(f"root status carries an unknown unit state {state!r}") from exc
+    return response
 
 
 def ok_response(result: object) -> ResponsePayload:

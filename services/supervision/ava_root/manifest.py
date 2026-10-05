@@ -55,13 +55,6 @@ class RestartPolicy(StrEnum):
     NEVER = "never"
 
 
-class UnitState(StrEnum):
-    """What a unit's process is doing right now."""
-
-    RUNNING = "running"
-    STOPPED = "stopped"
-
-
 @dataclass(frozen=True, slots=True)
 class UnitManifest:
     """One declared unit (K2): the minimal, closed field set."""

@@ -12,9 +12,10 @@ import asyncio
 from dataclasses import dataclass, field
 
 from base.native_process.ownership import OwnedProcess
+from base.native_process.root_control.ipc import UnitState
 from services.supervision.ava_root.custody import ServiceCustody
 from services.supervision.ava_root.intent_store import IntentSource, RestartFailure, UnitIntent
-from services.supervision.ava_root.manifest import UnitManifest, UnitState
+from services.supervision.ava_root.manifest import UnitManifest
 
 
 @dataclass(slots=True)
