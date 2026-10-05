@@ -517,7 +517,8 @@ never updates them (above), and a stale copy only surfaces at its next fire
 into an unrelated exit code — 2026-10-01: a moved `scripts/` target read as
 "new candidates"). Before trusting `schedules`,
 verify and redeploy: run `ava schedules verify` over every in-store copy
-(py_compile, top-level imports only, and a `signature.bind` of each call the script
+(py_compile, top-level imports only, a static read of every name the script uses against
+the names it binds, and a `signature.bind` of each call the script
 makes into repo code — never a real fire; it does not execute run-time paths, so after a
 file move check the copies' referenced paths directly) and redeploy drifted
 copies through `ava schedules update <name> --script-file <file>`
@@ -1253,7 +1254,7 @@ itself (its own public key in its own `authorized_keys`):
   throwaway worktree of NEW at `$HOME/.ava/pre-update-verify` on the host's current
   interpreter. The table is read by the home's own (OLD) source checkout — the only code
   the database authority admits — and handed to the worktree as a rows file
-  (`--rows-file`), so NEW checks it offline and never dials the database. A red row (a moved module, a call that no longer binds), or a check that
+  (`--rows-file`), so NEW checks it offline and never dials the database. A red row (a moved module, an undefined name, a call that no longer binds), or a check that
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
   scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
   crash-loop after `up` until fixed). A host that has not fetched NEW (a dry run does
