@@ -50,7 +50,7 @@ def _assert_takeover_protocol_uses_say_and_own_summary_release(message: str) -> 
     assert "transport acceptance is not host receipt" in message
     assert "as soon as you receive it" in message
     assert "never substitute new-agent assumptions" in message
-    assert "attachment.instructions() through ava.external.attach" in message
+    assert "scripts/read_instructions.py" in message
     assert "system prompt and configured preloaded skills" in message
     assert "process and ACK inbound messages" not in message
 
@@ -501,8 +501,80 @@ def test_dsh_plugin_takeover_runner_submits_and_consumes_the_launch_message(
 def test_impersonator_sdk_reference_covers_instruction_read_and_direct_python() -> None:
     guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     text = guide.read_text(encoding="utf-8")
-    assert "attachment.instructions()" in text
+    assert "scripts/read_instructions.py" in text
     assert "reference/sdk.md" in text
     sdk_text = (guide.parent / "reference/sdk.md").read_text(encoding="utf-8")
-    assert "print(attachment.instructions())" in sdk_text
+    assert "scripts/read_instructions.py 0 --agent 405" in sdk_text
     assert "Use direct Python as the normal SDK path" in sdk_text
+
+
+@pytest.fixture
+def instruction_reader() -> Any:
+    script = (
+        _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/scripts/read_instructions.py"
+    )
+    spec = importlib.util.spec_from_file_location("impersonator_instruction_reader", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_instruction_script_selects_native_prompt_and_preloaded_skills(
+    instruction_reader: Any,
+) -> None:
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from agent.messages import NoteTag, system_note_message
+
+    messages = [
+        SystemMessage(content="Native core and plugin rules\n"),
+        system_note_message(content="Memory index", tag=NoteTag.MEMORY),
+        system_note_message(content="Preloaded skill", tag=NoteTag.PRELOADED_SKILLS),
+        HumanMessage(content="Task history"),
+        system_note_message(content="Fork-added skill", tag=NoteTag.PRELOADED_SKILLS),
+    ]
+    assert instruction_reader.instruction_text(messages) == (
+        "Native core and plugin rules\n\n\n[system] Preloaded skill\n\n[system] Fork-added skill"
+    )
+
+
+@pytest.mark.parametrize("content", [None, "", [{"type": "text", "text": "rules"}]])
+def test_instruction_script_refuses_missing_or_nontext_prompt(
+    instruction_reader: Any, content: Any
+) -> None:
+    from langchain_core.messages import SystemMessage
+
+    messages = [] if content is None else [SystemMessage(content=content)]
+    with pytest.raises((RuntimeError, ValueError), match=r"system prompt|nonempty text"):
+        instruction_reader.instruction_text(messages)
+
+
+def test_instruction_script_prints_only_after_successful_detach(
+    instruction_reader: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from langchain_core.messages import SystemMessage
+
+    @contextmanager
+    def attach(session_id: int, *, agent_id: int) -> Any:
+        assert (session_id, agent_id) == (0, 405)
+        yield
+        raise RuntimeError("lease expired before detach")
+
+    monkeypatch.setattr(instruction_reader.external, "attach", attach)
+    monkeypatch.setattr(
+        instruction_reader.snapshots,
+        "load_snapshot",
+        lambda _agent_id: (
+            SimpleNamespace(messages=[SystemMessage(content="Native rules")]),
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setattr(sys, "argv", ["read_instructions.py", "0", "--agent", "405"])
+    with pytest.raises(RuntimeError, match="lease expired"):
+        instruction_reader.main()
+    assert capsys.readouterr().out == ""

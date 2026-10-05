@@ -1,5 +1,7 @@
 """Real PostgreSQL consent, checkpoint hydration and the external SDK effects of an attachment: native checkpoint reads, borrowed sender and lease-log recording."""
 
+import importlib.util
+from pathlib import Path
 from typing import Annotated, Any, cast
 from uuid import uuid4
 
@@ -108,11 +110,16 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     leases.accept(database, event_bus, lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
-    with external.attach(lease["id"]) as attachment:
-        assert (
-            attachment.instructions()
-            == "Native core and plugin rules\n\n[system] Configured skill rules"
-        )
+    script = (
+        Path(__file__).parents[2] / ".agents/skills/impersonator-guide/scripts/read_instructions.py"
+    )
+    spec = importlib.util.spec_from_file_location("impersonator_instruction_reader", script)
+    assert spec is not None and spec.loader is not None
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    expected = "Native core and plugin rules\n\n[system] Configured skill rules"
+    assert reader.read_instructions(lease["session_id"], agent_id) == expected
+    with external.attach(lease["id"]):
         assert agent_id == ava.self.AGENT_ID
         assert agent_identity.require_actor() == f"agent:{agent_id}"
         assert ava.state.messages[-1].content == "Native task"
@@ -125,6 +132,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         "integration__seen": {"external"}
     }
     assert native_snapshot.integration__seen == {"native"}
+    assert reader.read_instructions(lease["session_id"], agent_id) == expected
     with external.attach(lease["id"]):
         assert handle.read().seen == {"native", "external"}
     assert (
