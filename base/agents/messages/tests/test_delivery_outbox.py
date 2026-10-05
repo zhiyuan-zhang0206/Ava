@@ -150,7 +150,7 @@ def test_read_accepts_legacy_fingerprint_without_completion_metadata(journal: Pa
         origin_pid=None,
         flush_attempts=0,
         last_flush_at=None,
-        state="pending",
+        state=outbox.DeliveryOutboxState.PENDING,
         abandon_reason=None,
         abandon_detail=None,
         abandoned_at=None,
@@ -702,3 +702,43 @@ def test_read_defaults_absent_abandon_detail(journal: Path) -> None:
     path.write_text(json.dumps(raw))
     entry = outbox._read(path)
     assert entry is not None and entry.abandon_detail is None
+
+
+@pytest.mark.parametrize("state", ["pending", "abandoned"])
+def test_journal_state_restores_enum_and_plain_wire_string(journal: Path, state: str) -> None:
+    path = _record(agent_id=7, content="wire contract", key="state-wire", now=_NOW)
+    assert path is not None
+    raw = json.loads(path.read_text())
+    raw["state"] = state
+    path.write_text(json.dumps(raw))
+    entry = outbox._read(path)
+    assert entry is not None
+    assert entry.state is outbox.DeliveryOutboxState(state)
+    assert entry.as_dict()["state"] == state
+    assert type(entry.as_dict()["state"]) is str
+    outbox._write_atomic(path, entry)
+    assert json.loads(path.read_text())["state"] == state
+
+
+@pytest.mark.parametrize("invalid", ["missing", "unknown", None, 1, ["pending"]])
+def test_invalid_journal_state_is_isolated_from_healthy_delivery(
+    journal: Path,
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    publish_wake: Callable[[int, str], bool],
+    invalid: object,
+) -> None:
+    agent_id = _agent(db_conn)
+    good = _record(agent_id=agent_id, content="healthy", key="healthy", now=_NOW)
+    corrupt = _record(agent_id=agent_id, content="corrupt state", key="corrupt", now=_NOW)
+    assert good is not None and corrupt is not None
+    raw = json.loads(corrupt.read_text())
+    if invalid == "missing":
+        del raw["state"]
+    else:
+        raw["state"] = invalid
+    corrupt.write_text(json.dumps(raw))
+    assert outbox._read(corrupt) is None
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
+    assert report.delivered == 1 and report.unreadable == 1
+    assert not good.exists() and corrupt.exists()

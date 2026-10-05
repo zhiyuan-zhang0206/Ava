@@ -171,7 +171,7 @@ def test_journal_directory_sync_failure_raises_after_visible_commit(
         origin_pid=None,
         flush_attempts=0,
         last_flush_at=None,
-        state="pending",
+        state=delivery_outbox.DeliveryOutboxState.PENDING,
         abandon_reason=None,
         abandon_detail=None,
         abandoned_at=None,

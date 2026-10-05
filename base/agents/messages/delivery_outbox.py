@@ -64,8 +64,9 @@ from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 from base.agents.messages.delivery_outbox_types import FlushPool as FlushPool
 from base.agents.messages.delivery_outbox_types import FlushReport
@@ -230,6 +231,13 @@ def split_content(content: Content) -> tuple[str, dict[str, object] | None]:
     return "\n".join(texts) or "[image]", {"content_blocks": [dict(block) for block in content]}
 
 
+class DeliveryOutboxState(StrEnum):
+    """Durable delivery disposition, independently of flush-pass outcomes."""
+
+    PENDING = "pending"
+    ABANDONED = "abandoned"
+
+
 @dataclass(frozen=True)
 class OutboxEntry:
     """One durable deferred delivery, as stored on disk."""
@@ -246,7 +254,7 @@ class OutboxEntry:
     origin_pid: int | None
     flush_attempts: int
     last_flush_at: str | None
-    state: Literal["pending", "abandoned"]
+    state: DeliveryOutboxState
     abandon_reason: str | None
     abandon_detail: str | None
     abandoned_at: str | None
@@ -266,7 +274,7 @@ class OutboxEntry:
             "origin_pid": self.origin_pid,
             "flush_attempts": self.flush_attempts,
             "last_flush_at": self.last_flush_at,
-            "state": self.state,
+            "state": self.state.value,
             "abandon_reason": self.abandon_reason,
             "abandon_detail": self.abandon_detail,
             "abandoned_at": self.abandoned_at,
@@ -307,9 +315,7 @@ def _read(path: Path) -> OutboxEntry | None:
         raw = cast("dict[str, object]", raw)
         if raw.get("schema_version") != _ENTRY_SCHEMA:
             return None
-        state = raw.get("state")
-        if state not in ("pending", "abandoned"):
-            return None
+        state = DeliveryOutboxState(raw["state"])
         content = raw.get("content")
         if not isinstance(content, str) and not isinstance(content, list):
             return None
@@ -423,7 +429,11 @@ def note_send_succeeded(
             _registry.pop(message_fingerprint, None)
         for path in _matching_paths(agent_id, message_fingerprint):
             entry = _read(path)
-            if entry is not None and entry.state == "pending" and entry.client_message_id == key:
+            if (
+                entry is not None
+                and entry.state is DeliveryOutboxState.PENDING
+                and entry.client_message_id == key
+            ):
                 with suppress(OSError):
                     path.unlink()
                 return
@@ -458,7 +468,7 @@ def record_failed_send(
         message_fingerprint = fingerprint(agent_id, source, content, completion_notice)
         for path in _matching_paths(agent_id, message_fingerprint):
             entry = _read(path)
-            if entry is None or entry.state != "pending":
+            if entry is None or entry.state is not DeliveryOutboxState.PENDING:
                 continue
             age = (moment - _parse_iso(entry.last_attempt_at)).total_seconds()
             if age <= snapshot.dedup_window_seconds:
@@ -473,7 +483,7 @@ def record_failed_send(
         pending = sum(
             1
             for path in journal_dir().glob(f"*{_ENTRY_SUFFIX}")
-            if (entry := _read(path)) is not None and entry.state == "pending"
+            if (entry := _read(path)) is not None and entry.state is DeliveryOutboxState.PENDING
         )
         if pending >= snapshot.max_entries:
             logger.warning(
@@ -497,7 +507,7 @@ def record_failed_send(
             origin_pid=os.getpid(),
             flush_attempts=0,
             last_flush_at=None,
-            state="pending",
+            state=DeliveryOutboxState.PENDING,
             abandon_reason=None,
             abandon_detail=None,
             abandoned_at=None,
@@ -601,7 +611,7 @@ def _abandon(
 ) -> None:
     updated = replace(
         entry,
-        state="abandoned",
+        state=DeliveryOutboxState.ABANDONED,
         abandon_reason=reason,
         abandon_detail=detail,
         abandoned_at=_iso(moment),
@@ -680,7 +690,7 @@ def _flush_path(
     if entry is None:
         logger.warning("[delivery-outbox] unreadable record kept for inspection: {}", path)
         return "unreadable"
-    if entry.state != "pending":
+    if entry.state is not DeliveryOutboxState.PENDING:
         # Abandoned records keep their inspection window, then expire (inert while off).
         if snapshot.enabled and _abandoned_expired(
             entry, moment, snapshot.abandoned_retention_days
