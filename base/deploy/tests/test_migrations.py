@@ -243,25 +243,46 @@ def test_schema_mutation_lock_released_on_exception(db_conn: psycopg.Connection)
 
 def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices() -> None:
     """The forward delta handles an old active lease without inventing PID custody."""
-    import subprocess
     from typing import LiteralString, cast
 
-    from base.deploy.tests.migration_support import _throwaway_database
+    from psycopg import sql
+
+    from base.deploy.tests.migration_support import _SCHEMA_SQL, _throwaway_database
 
     root = Path(__file__).resolve().parents[3]
-    old_schema = subprocess.run(
-        ["git", "show", "6e217d92d8dab0d28b4491206b6a7f20c19cc3a5:db/schema.sql"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
     delta = root / "migrations/20261005T095252_separate-impersonation-transport-lifecycle.sql"
     with (
         _throwaway_database("impersonation_transport") as url,
         psycopg.connect(url, autocommit=True) as conn,
     ):
-        conn.execute(cast(LiteralString, old_schema))
+        conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+        conn.execute("DROP TRIGGER agent_impersonations_terminal_notice ON agent_impersonations")
+        conn.execute("DROP FUNCTION mark_impersonation_terminal_notice()")
+        columns = (
+            "relay_generation",
+            "relay_identity",
+            "relay_degraded_reason",
+            "relay_degraded_at",
+            "terminal_notice_snapshot",
+            "terminal_notice_pending_at",
+            "terminal_notice_accepted_at",
+            "terminal_notice_attempt_id",
+            "terminal_notice_attempt_at",
+            "terminal_notice_attempts",
+            "terminal_notice_error",
+            "terminal_notice_unsupported_at",
+        )
+        for column in columns:
+            conn.execute(
+                sql.SQL("ALTER TABLE agent_impersonations DROP COLUMN {}").format(
+                    sql.Identifier(column)
+                )
+            )
+        conn.execute("DELETE FROM schema_migrations WHERE name=%s", (delta.stem,))
+        assert conn.execute(
+            "SELECT count(*) FROM information_schema.columns WHERE table_name='agent_impersonations' AND column_name=ANY(%s)",
+            (list(columns),),
+        ).fetchone() == (0,)
         row = conn.execute(
             "INSERT INTO agents(label) VALUES('transport fixture') RETURNING id"
         ).fetchone()

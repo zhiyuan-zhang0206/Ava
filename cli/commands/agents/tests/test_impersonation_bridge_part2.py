@@ -1,5 +1,5 @@
 """Push delivery with an ACK window: the relay delivers full inbox content
-and retries an unacknowledged message once before ending the lease.
+and retries an unacknowledged message once before pausing its automatic push.
 
 The relay never ACKs work itself and never renews the lease; a failed or
 restarted relay cannot lose a pending message.
@@ -73,13 +73,6 @@ class Inbox:
 
     async def read(self) -> relay.InboxSnapshot:
         self.reads += 1
-        if any(
-            i in self.pending
-            and count >= self.max_delivery_attempts
-            and relay._loop_time() - at >= self.ack_window_seconds
-            for i, (count, at) in self.attempts.items()
-        ):
-            self.status = "expired"
         page = frozenset(sorted(self.messages)[: self.page_size])
         return relay.InboxSnapshot(
             page,
@@ -217,21 +210,71 @@ def run(
 # ── Command plumbing ───────────────────────────────────────────────────────────
 
 
-def test_two_missed_ack_windows_end_the_takeover_without_a_third_push(clock: FakeClock) -> None:
+def test_two_missed_ack_windows_pause_message_until_explicit_end(clock: FakeClock) -> None:
     inbox = Inbox(11)
     emitted: list[str] = []
+    observed: list[str] = []
 
     def waited(n: int) -> None:
         if n <= 2:
             clock.advance(inbox.ack_window_seconds + 1)
         else:
-            inbox.active = False  # bound the old infinite-retry implementation
+            observed.append(inbox.status)
+            inbox.active = False  # Explicit end bounds the paused relay loop.
 
     listener = Listener(inbox, waited=waited)
     run(inbox, listener, emitted.append)
 
     assert sum("[id=11]" in text for text in emitted) == 2
-    assert inbox.status == "expired"
+    assert observed == ["active"]
+    assert inbox.status == "released"
     assert inbox.pending == {11}
-    assert "Ava control expired" in emitted[-1]
+    assert len(emitted) == 3  # One start message and exactly two receipt envelopes.
     assert listener.closed
+
+
+def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
+    ended_at = "2026-10-05T10:00:00+00:00"
+    terminal = {
+        "lease_id": str(LEASE_ID),
+        "session_id": 0,
+        "agent_id": 42,
+        "status": "expired",
+        "reason": "terminated: agent was terminated",
+        "ended_at": ended_at,
+    }
+    snapshot = relay.InboxSnapshot(
+        frozenset(), {}, datetime.now(UTC), "expired", terminal_notice_snapshot=terminal
+    )
+    emitted: list[str] = []
+    # A delayed old snapshot must not borrow the caller's replacement lease scope.
+    assert relay._ended(snapshot, 999, 1, emitted.append)
+    assert f"lease 0 ({LEASE_ID}) for agent 42" in emitted[0]
+    assert ended_at in emitted[0]
+    assert f"Notice ID: impersonation-ended:{LEASE_ID}" in emitted[0]
+    assert "does not end or cancel any newer" in emitted[0]
+    assert "no active native runtime is implied" in emitted[0]
+    assert relay._ended(replace(snapshot, status="released"), 42, 0, emitted.append)
+    assert len(emitted) == 1  # Release injection remains solely host-owned.
+
+
+async def test_codex_relay_never_duplicates_host_owned_terminal_notice() -> None:
+    snapshot = relay.InboxSnapshot(frozenset(), {}, datetime.now(UTC), "expired")
+    emitted: list[str] = []
+
+    async def read() -> relay.InboxSnapshot:
+        return snapshot
+
+    inbox = Inbox()
+    inbox.status = "expired"
+    listener = Listener(inbox)
+    await relay.relay_inbox(
+        42,
+        0,
+        read_inbox=read,
+        reserve=inbox.reserve,
+        listener=listener,
+        emit=emitted.append,
+        notify_terminal=False,
+    )
+    assert emitted == []

@@ -27,6 +27,7 @@ from pydantic import BaseModel
 import base.events.live.redis_listener
 from base.agents.impersonation import RELAY_HEARTBEAT_SECONDS
 from base.agents.impersonation.delivery import reserve_delivery
+from base.agents.impersonation.terminal_notices import notice_text
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -51,6 +52,7 @@ class _Lease(BaseModel):
     relay_batch_window_seconds: int = 0
     start_message: str = ""
     rejection_reason: str | None = None
+    terminal_notice_snapshot: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,7 @@ class InboxSnapshot:
     end_reason: str | None = None
     ack_window_seconds: int = 180
     max_delivery_attempts: int = 2
+    terminal_notice_snapshot: dict[str, Any] | None = None
 
     @property
     def active(self) -> bool:
@@ -198,12 +201,19 @@ def _ended(
         return False
     if snapshot.status == "released":
         return True  # The host-side durable notice owns release notification.
-    emit(
-        f"Ava impersonation lease {lease_id} for agent {agent_id} ended: {snapshot.status}. "
-        "Only this named lease has ended; no newer takeover or its work is cancelled. "
-        "Native control is available and its durable handoff may still be restoring. "
-        + (f"Reason: {snapshot.end_reason}" if snapshot.end_reason else "")
-    )
+    terminal = snapshot.terminal_notice_snapshot
+    if terminal is None:
+        # Pre-migration/synthetic snapshots have no immutable terminal record.
+        # Keep the supplied lease scope and disclose unavailable historical time.
+        terminal = {
+            "session_id": lease_id,
+            "lease_id": lease_id,
+            "agent_id": agent_id,
+            "status": snapshot.status,
+            "reason": snapshot.end_reason,
+            "ended_at": "unknown (legacy record)",
+        }
+    emit(notice_text(terminal))
     return True
 
 
@@ -259,7 +269,12 @@ def _read_inbox(
         raise ValueError("The impersonation lease does not belong to the requested agent")
     if lease.status != "active":
         return InboxSnapshot(
-            frozenset(), {}, lease.expires_at, lease.status, end_reason=lease.rejection_reason
+            frozenset(),
+            {},
+            lease.expires_at,
+            lease.status,
+            end_reason=lease.rejection_reason,
+            terminal_notice_snapshot=lease.terminal_notice_snapshot,
         )
     try:
         # relay_inbox validates same-machine active authority in its own transaction.
@@ -273,6 +288,7 @@ def _read_inbox(
                 latest.expires_at,
                 latest.status,
                 end_reason=latest.rejection_reason,
+                terminal_notice_snapshot=latest.terminal_notice_snapshot,
             )
         raise
     messages = {

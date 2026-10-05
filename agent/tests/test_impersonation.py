@@ -576,6 +576,7 @@ async def test_stale_session_relay_retains_authority_with_visible_unsupported_re
     gate_ctx: AvaContext,
 ) -> None:
     session = _relay_session("active", provider="claude")
+    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     degradation = Mock()
     monkeypatch.setattr("base.agents.impersonation.relay.record_degradation", degradation)
