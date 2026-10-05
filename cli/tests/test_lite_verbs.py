@@ -112,3 +112,90 @@ def test_status_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     so it stays offline-capable."""
     assert _dispatched_fetch_env(monkeypatch, ["status"]) == "skip"
     assert _dispatched_fetch_env(monkeypatch, ["status", "--json"]) == "skip"
+
+
+@pytest.mark.parametrize(
+    ("explicit", "capability_token", "expected"),
+    [
+        ("explicit-token", "runner-token", "explicit-token"),
+        (None, "runner-token", "runner-token"),
+        (None, None, None),
+    ],
+)
+def test_lite_cli_uses_its_local_runner_api_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    explicit: str | None,
+    capability_token: str | None,
+    expected: str | None,
+) -> None:
+    from base.cluster.authority import AuthorityRefusedError, unit
+    from base.cluster.machine import gateway_auth_headers
+    from base.config import settings
+
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.delenv("AVA_LAUNCHER_PROFILE", raising=False)
+    monkeypatch.delenv("AVA_PROCESS_PROFILE", raising=False)
+    monkeypatch.setenv("AVA_CONFIG_FETCH", "")
+    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    if explicit is None:
+        monkeypatch.setenv("AVA_API_TOKEN", "")
+        monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+    else:
+        monkeypatch.setenv("AVA_API_TOKEN", explicit)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
+
+    def consume(home: Path) -> types.SimpleNamespace:
+        assert home == tmp_path
+        if capability_token is None:
+            raise AuthorityRefusedError("no local capability")
+        return types.SimpleNamespace(api=types.SimpleNamespace(token=capability_token))
+
+    monkeypatch.setattr(unit, "consume_unit", consume)
+    seen: list[dict[str, str]] = []
+
+    def handler(_args: types.SimpleNamespace) -> int:
+        seen.append(gateway_auth_headers())
+        return 0
+
+    def parse_args(_argv: list[str] | None) -> types.SimpleNamespace:
+        return types.SimpleNamespace(func=handler)
+
+    parser = types.SimpleNamespace(parse_args=parse_args)
+    monkeypatch.setattr(cli_main, "_build_parser", lambda: parser)
+
+    assert cli_main.main(["agents"]) == 0
+    assert seen == ([{}] if expected is None else [{"Authorization": f"Bearer {expected}"}])
+
+
+def test_lite_cli_in_agent_profile_does_not_consume_operator_capability(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from base.cluster.authority import unit
+
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setenv("AVA_LAUNCHER_PROFILE", "")
+    monkeypatch.delenv("AVA_LAUNCHER_PROFILE", raising=False)
+    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+    monkeypatch.setenv("AVA_CONFIG_FETCH", "")
+    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
+
+    def no_operator_capability(_home: Path) -> None:
+        pytest.fail("an agent descendant must retain the launcher token boundary")
+
+    monkeypatch.setattr(unit, "consume_unit", no_operator_capability)
+
+    def handler(_args: types.SimpleNamespace) -> int:
+        return 0
+
+    def parse_args(_argv: list[str] | None) -> types.SimpleNamespace:
+        return types.SimpleNamespace(func=handler)
+
+    parser = types.SimpleNamespace(parse_args=parse_args)
+    monkeypatch.setattr(cli_main, "_build_parser", lambda: parser)
+
+    assert cli_main.main(["agents"]) == 0
+    assert "AVA_API_TOKEN" not in os.environ

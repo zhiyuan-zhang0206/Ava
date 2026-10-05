@@ -174,6 +174,35 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
         and (args_in[0] != "stop" or "--force" in args_in or unit_already_stopped())
     ):
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
+        _deliver_lite_api_token()
+
+
+def _deliver_lite_api_token() -> None:
+    """Give an operator's lite CLI the runner token from its installed capability.
+
+    Full runner boot consumes the same capability before fetching gateway config.
+    Lite verbs skip that boot pass, so they need its API token alone. A launcher
+    descendant must keep its delivered authority boundary, even when a token is
+    missing; no source leaves the existing bearer behavior in place.
+    """
+    from base.cluster.auth import API_TOKEN_ENV
+    from base.host.env.bootstrap import config_source_is_local
+    from base.host.env.dotenv_boot import launcher_context, resolve_ava_home
+
+    if os.environ.get(API_TOKEN_ENV) or launcher_context() is not None:
+        return
+    if config_source_is_local():
+        return
+
+    from base.cluster.authority import AuthorityRefusedError
+    from base.cluster.authority.unit import consume_unit
+
+    try:
+        capability = consume_unit(resolve_ava_home().resolve())
+    except (AuthorityRefusedError, OSError, ValueError):
+        return
+    if capability.api is not None:
+        os.environ[API_TOKEN_ENV] = capability.api.token
 
 
 def main(argv: list[str] | None = None) -> int:
