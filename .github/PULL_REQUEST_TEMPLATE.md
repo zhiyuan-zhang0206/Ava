@@ -1,4 +1,4 @@
-<!-- See .agents/skills/write-a-pr-description/SKILL.md. A PR description is not a summary + a
+<!-- See CONTRIBUTING.md. A PR description is not a summary + a
 list of changed files — give the reviewer the intermediate state needed to catch
 design errors without reading the whole diff. Delete these comments as you fill
 each section. -->

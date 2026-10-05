@@ -14,7 +14,7 @@ Beyond the `~/.ava/skills/` load dir, **project-local skills** mount at scan tim
 
 The standard directory is the open surface: a repo keeps its skills under `.agents/skills/` and links `.ava/skills` / `.claude/skills` back to it, so Ava, Claude Code and any Agent-Skills-standard client load the same set. The same content reached through several paths is deduped by content hash (`ava/skills/__init__.py:_scan_tree`).
 
-For Ava's own repo, this mount is the **only** distribution path for the 12
+For Ava's own repo, this mount is the **only** distribution path for the
 real repo-development workflow and Ava-cluster-operations skills since
 2026-08-21 (issue #146): converge stopped syncing `.agents/skills/`
 fleet-wide, so those skills load exactly when the agent works inside the

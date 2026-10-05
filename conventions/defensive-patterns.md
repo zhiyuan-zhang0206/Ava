@@ -218,7 +218,7 @@ the calls, assert the elapsed time, watch it go red) rather than inferring it
 from a pass. A third door — the guard itself being neutralized — is its own
 entry below.
 Evidence: [`postmortems/0002`](../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md);
-procedure in [`.agents/skills/run-local-tests/SKILL.md`](../.agents/skills/run-local-tests/SKILL.md).
+procedure in [testing guide](testing.md).
 
 ### Verify the world, not the self-report
 
@@ -236,7 +236,7 @@ exhaustiveness assertions over enums and field sets in the **consumer's** test
 file, as review forcing functions. Edit-adjacency is structurally blind to them.
 A `base/` change requires full-suite coverage in CI. Locally, select bounded
 consumer tests by dependency; never launch the full backend suite locally
-(user ruling 2026-09-22; see the run-local-tests skill).
+(user ruling 2026-09-22; see the testing guide).
 Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blast-radius.md).
 
 ### Prefer a mechanical guard where the boundary is nameable

@@ -42,10 +42,12 @@ Standard fork-and-PR — use whatever local git setup you like:
    (linear history, every commit kept — no merge commits, no squash), so
    make each commit stand on its own.
 
-For a larger change, a description that shows the reviewer *where the critical
-path is* — the file-tree-diff style in
-[.agents/skills/write-a-pr-description/SKILL.md](.agents/skills/write-a-pr-description/SKILL.md) — gets reviewed
-faster. It's a suggestion, not a gate.
+Explain the problem, resulting behavior and validation in the PR. For a larger
+change, a file tree and a short data-flow explanation help reviewers locate the
+critical paths; they are suggestions, not a required template.
+
+[Test commands and environment guidance](conventions/testing.md) and the
+[database migration guide](db/docs/migrations.md) cover specialized changes.
 
 ## A note on internal references
 

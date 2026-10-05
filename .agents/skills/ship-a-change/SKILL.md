@@ -126,11 +126,11 @@ Still on you:
    then confirm `.venv/lib/python3.12/site-packages/_editable_impl_ava.pth`
    names this worktree. For a test-only run with no worktree venv of its own,
    reuse another worktree's real venv instead — see
-   [run-local-tests](../run-local-tests/SKILL.md).
+   [testing guide](../../../conventions/testing.md).
 3. Rebase onto latest main: `git fetch origin main && git rebase origin/main`
 4. Run local checks on only what you changed before pushing (pytest on the
    affected test files, `-n 2`; pyright on the changed files only); full suites and whole-repo pyright run only in CI (including for
-   `base/` changes; user ruling 2026-09-22, pyright included 2026-10-01) — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
+   `base/` changes; user ruling 2026-09-22, pyright included 2026-10-01) — see [testing guide](../../../conventions/testing.md).
    An explicit user CI-only constraint overrides local execution; record the
    skipped local gates and confirm that the corresponding CI checks actually run.
 5. Push branch → `gh pr create --base main`
@@ -201,8 +201,9 @@ Exception: skip PR only when the user explicitly says "push directly".
 
 ## PR description
 
-See **[`write-a-pr-description`](../write-a-pr-description/SKILL.md)** for the full spec — must have
-file-tree diff with ★ critical paths + prose data flow.
+See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for PR submission guidance.
+Explain the problem, resulting behavior and validation; use a file tree and
+data-flow explanation when they help reviewers understand a larger change.
 
 ## When a pre-commit hook cannot run: `SKIP=`, never `--no-verify`
 

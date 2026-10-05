@@ -47,6 +47,9 @@ changes). It nails down the soft skill of "how to do a vague task solidly" into 
   closer to the goal? Is there a better way? Failures route back to Calibrate / Align / Plan rather than
   being papered over.
 
+Additional review is optional. Parallel work, a written plan or an absent user
+does not require a separate reviewer agent or approval comment.
+
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava_builtins/skills/coordination/ava-dynamic-workflow/docs/ava-dynamic-workflow.ava.okf.md|ava-dynamic-workflow]] — parallel orchestration when the task is big enough to be split among multiple workers (methodology vs mechanics); the workflow delegates "spawn the moment a slice is locked" to its explore→fork→join→reduce pattern

@@ -192,7 +192,7 @@ Process, rule, and observed-behaviour changes → the doc that owns them:
 | Backup schedule / retention / restore | `.agents/skills/operating-ava-cluster/references/db-restore.md` — the `pg-backup` service's own behaviour moved with the restore procedure rather than staying in the runtime model |
 | Runtime model (clusters, data plane, logging, CI) | `runbook.md` |
 | Dev environment setup | `dev-setup.md` |
-| PR process | `.agents/skills/write-a-pr-description/SKILL.md` |
+| PR process | `CONTRIBUTING.md` |
 | Coding conventions | `python-conventions.md` |
 | Agent communication style | `communicating-with-user.md` |
 | Design philosophy / deliberate omissions | `philosophy.md` + `non-goals.md` |
