@@ -7,6 +7,8 @@ fresh login shell and then act on that job's process.
 from __future__ import annotations
 
 import contextlib
+import os
+import subprocess
 import time
 
 import psutil
@@ -39,4 +41,21 @@ def wait_for_job(shell: psutil.Process, argv: list[str]) -> psutil.Process:
                     return child
         if time.monotonic() >= deadline:
             raise AssertionError(f"{argv} never appeared as a child of shell {shell.pid}")
+        time.sleep(_POLL_INTERVAL_S)
+
+
+def wait_for_foreground(process: psutil.Process, *, timeout: float = JOB_APPEARS_TIMEOUT_S) -> None:
+    """Wait until the terminal foreground is the process's group."""
+    # tcgetpgrp on the slave requires the caller's controlling terminal;
+    # pytest lives outside this session. ps exposes the same kernel fact.
+    group = os.getpgid(process.pid)
+    deadline = time.monotonic() + timeout
+    while True:
+        foreground = int(
+            subprocess.check_output(["ps", "-o", "tpgid=", "-p", str(process.pid)], text=True)  # noqa: S603 -- fixed OS query
+        )
+        if foreground == group:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"process {process.pid} never gained terminal foreground")
         time.sleep(_POLL_INTERVAL_S)

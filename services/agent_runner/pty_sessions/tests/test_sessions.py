@@ -8,7 +8,9 @@ uses. POSIX-only (pty.fork + bash).
 from __future__ import annotations
 
 import os
+import shlex
 import signal
+import sys
 from pathlib import Path
 
 import psutil
@@ -16,7 +18,7 @@ import pytest
 
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.pty import client
-from base.sessions.pty.tests.job_wait import wait_for_job
+from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
 from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
@@ -123,11 +125,59 @@ def test_send_keys_ctrl_c_interrupts_the_foreground(unit_home: Path) -> None:
     name = "ava-test-cc-1"
     new(name, unit_home)
     type_line(name, "cat")
-    wait_for_job(shell_process(name), ["cat"])
+    shell = shell_process(name)
+    job = wait_for_job(shell, ["cat"])
+    wait_for_foreground(job)
     press(name, "C-c")
+    wait_for_foreground(shell)
     type_line(name, "echo after-interrupt")
     output_until(name, "after-interrupt")
     assert client.has_session(name)
+
+
+def test_shell_foreground_wait_does_not_accept_an_interrupted_live_job(
+    unit_home: Path,
+) -> None:
+    """A controlled SIGINT handler keeps the job foreground until explicitly released."""
+    ready, interrupted, consumed, release = (
+        unit_home / item for item in ("ready", "interrupted", "consumed", "release")
+    )
+    code = (
+        "import pathlib,signal,sys,time\n"
+        "def interrupt(*_):\n"
+        f"    pathlib.Path({str(interrupted)!r}).touch()\n"
+        f"    target = pathlib.Path({str(consumed)!r})\n"
+        "    temporary = target.with_suffix('.tmp')\n"
+        "    temporary.write_text(sys.stdin.readline())\n"
+        "    temporary.replace(target)\n"
+        f"    while not pathlib.Path({str(release)!r}).exists(): time.sleep(0.01)\n"
+        "    raise SystemExit(0)\n"
+        "signal.signal(signal.SIGINT,interrupt)\n"
+        f"pathlib.Path({str(ready)!r}).touch()\n"
+        "while True: time.sleep(1)\n"
+    )
+    name = "ava-test-foreground-sync-1"
+    new(name, unit_home)
+    shell = shell_process(name)
+    type_line(name, shlex.join([sys.executable, "-u", "-c", code]))
+    assert wait_for(ready.exists)
+    try:
+        press(name, "C-c")
+        assert wait_for(interrupted.exists)
+        # Reproduce the old order: the next line still belongs to the job,
+        # so the shell cannot execute it even though SIGINT was delivered.
+        type_line(name, "echo premature-input")
+        assert wait_for(consumed.exists)
+        assert consumed.read_text() == "echo premature-input\n"
+        with pytest.raises(AssertionError, match="never gained terminal foreground"):
+            wait_for_foreground(shell, timeout=0.1)
+        release.touch()
+        wait_for_foreground(shell)
+        type_line(name, "echo synchronized-input")
+        output_until(name, "synchronized-input")
+        assert "premature-input" not in [line.strip() for line in screen(name).splitlines()]
+    finally:
+        release.touch()
 
 
 def test_send_keys_up_arrow_recalls_history(unit_home: Path) -> None:

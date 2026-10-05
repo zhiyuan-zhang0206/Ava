@@ -38,8 +38,16 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 ### boundary:supervisor-intent-fixture-stop-window
 - **class**: boundary
 - **status**: open
-- **evidence**: `services/supervision/ava_root/tests/test_ava_root_intent.py:_supervisor` sets a 0.2s real-process stop budget for intent tests. In `test_restart_up_half_failure_retry_replaces_and_clears`, attempt 1 of [PR #4321, run 37318714866, shard 10](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/37318714866/job/111792197420) exhausted that window in `services/supervision/ava_root/stopping.py:_stop_posix_generation`, retaining live PID 10633 rather than falsely certifying closure. The next configured attempt passed this test; it failed a separate single-box port fixture instead. The fixture ties an intent-state assertion to a short native-process deadline. Root cause of the delayed exit remains unknown: the trace does not establish CPU load, signal-delivery failure or a production ownership-guard defect. Diagnose before changing the timeout or runtime behavior.
+- **evidence**: `services/supervision/ava_root/tests/test_ava_root_intent.py:_supervisor` sets a 0.2s real-process stop budget for intent tests. In `test_restart_up_half_failure_retry_replaces_and_clears`, attempt 1 of [PR #4321, run 37318714866, shard 10](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/37318714866/job/111792197420) exhausted that window on the first `await owner.restart("svc")` (before the intentional up-half seal failure) in `services/supervision/ava_root/stopping.py:_stop_posix_generation`. The loop still classified leader PID 10633 as living; this was not an already-killed zombie waiting for its parent to reap. It retained PID 10633 rather than falsely certifying closure. The next configured attempt passed this test; it failed a separate single-box port fixture instead. The fixture ties an intent-state assertion to a short native-process deadline. Root cause of the delayed exit remains unknown: the trace does not establish CPU load, signal-delivery failure or a production ownership-guard defect. Diagnose before changing the timeout or runtime behavior.
 - **first-seen**: 2026-10-05 (PR #4321)
+- **last-verified**: 2026-10-05
+
+
+### boundary:interactive-bash-smoke-first-write
+- **class**: boundary
+- **status**: open
+- **evidence**: `tests/skills/test_impersonation_launch.py::test_app_server_command_executes_in_an_interactive_bash` blocked on macOS at the first `os.write(master, export-PATH)` before submitting the app-server command. The unchanged main node also exceeded a 65-second bound with a fresh temporary `AVA_HOME`; a separate 25-second diagnostic with a 10-second faulthandler dump located that write. This stand-in pane is created with `pty.openpty` and `Popen(start_new_session=True)`, while the service uses `pty.fork`; that difference is an investigation lead, not a proven cause. The Linux CI check remains selected. Do not infer an app-server or production transport defect, add a timeout, or skip the check from this evidence.
+- **first-seen**: 2026-10-05 (literal coding-session refresh)
 - **last-verified**: 2026-10-05
 
 
