@@ -1,0 +1,10 @@
+# config file version
+apiVersion: 1
+
+# Alert rule UIDs retired from rules.yml that must be deleted from running
+# instances (see README "Retired rules"). Grafana never deletes a provisioned
+# rule that disappears from its files; without a tombstone it stays orphaned
+# and keeps evaluating. Deletion is idempotent, so entries stay here.
+deleteRules:
+  - orgId: 1
+    uid: ava-ops-pitr-storage-growth
