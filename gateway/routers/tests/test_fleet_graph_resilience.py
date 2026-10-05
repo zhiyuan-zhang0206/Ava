@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
 from base import telemetry
-from base.agents import AgentStatus
+from base.agents import AgentStatus, LivenessState
 from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
 from gateway.routers.tests.staleness_support import use_heartbeat_age
@@ -78,7 +78,7 @@ def _last_good_graph() -> FleetGraphResponse:
                 agent_id=999,
                 label="last good",
                 status=AgentStatus.RUNNING,
-                liveness_state="online",
+                liveness_state=LivenessState.ONLINE,
                 spawner="test",
                 machine=None,
                 node_score=12.5,
