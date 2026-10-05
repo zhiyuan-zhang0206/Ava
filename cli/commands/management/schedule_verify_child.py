@@ -2,11 +2,21 @@
 
 Run as `python -m cli.commands.management.schedule_verify_child` from the repo root, in the
 checkout's own venv (the interpreter that would launch the schedule). Stdlib only at module level.
-Two checks; nothing from the script's body runs:
+Three checks; nothing from the script's body runs:
 
 1. **Imports** — `compile()` the script, then execute ONLY its top-level import statements. A moved
    module (the #2678 / R3 Wave-2 drift class) fails here.
-2. **Call sites** — every call whose callee resolves through those imports to repo code
+2. **Names** — every `Name` the script reads (any scope) must be one it binds, a builtin, or an
+   implicit module global (`__name__`, ...). This is the read the import check cannot see: after the
+   `shared` -> `base` rename, `_ROOT = Path(base.__file__)` reads a `base` nothing imports — the
+   import check stays green and the first real fire dies with `NameError` (2026-10-01 audit: three
+   of 16 copies). Conservative by construction: a name bound anywhere counts as bound (a PEP 695
+   type parameter's own name included: `def f[T]`, `class C[T]`, `type A[T]`), annotation
+   expressions are never read (house style: `from __future__ import annotations`; type-parameter
+   bounds and defaults likewise), and a `from x import *` disables the check outright. Names only
+   a runtime would create (`exec`/`eval`, `globals()` writes) are not modeled: a read of one is
+   reported, never guessed around.
+3. **Call sites** — every call whose callee resolves through those imports to repo code
    (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`) must
    `inspect.signature(...).bind` the arguments the script passes. A signature that moved on
    (2026-10-03: `catch_up()` and `fire_slot_once()` gained a required `db`) fails here, where the
@@ -19,12 +29,14 @@ Two checks; nothing from the script's body runs:
    set of names nor the call contract.
 
 Output: the last stdout line is the verdict — `CHILD-OK`, `CHILD-COMPILE-ERROR:<line>:<msg>` (rc 3),
-`CHILD-MODULE:<name>` (rc 4), `CHILD-EXC:<type>:<msg>` (rc 5), or `CHILD-SIG:<detail> | <detail>` (rc 6).
+`CHILD-MODULE:<name>` (rc 4), `CHILD-EXC:<type>:<msg>` (rc 5), `CHILD-UNDEF:<detail> | <detail>` (rc 6),
+or `CHILD-SIG:<detail> | <detail>` (rc 7).
 """
 
 from __future__ import annotations
 
 import ast
+import builtins
 import inspect
 import sys
 import types
@@ -33,6 +45,25 @@ from pathlib import Path
 from typing import Any
 
 _DETAIL_MAX = 160
+
+# What a script may read without binding it: the builtins and the module-internal implicit
+# globals the runtime provides.
+_BUILTIN_NAMES = frozenset(dir(builtins))
+_IMPLICIT_GLOBALS = frozenset(
+    {
+        "__annotations__",
+        "__builtins__",
+        "__class__",
+        "__debug__",
+        "__dict__",
+        "__doc__",
+        "__file__",
+        "__loader__",
+        "__name__",
+        "__package__",
+        "__spec__",
+    }
+)
 
 
 def _rebound_names(tree: ast.Module) -> set[str]:
@@ -45,7 +76,15 @@ def _rebound_names(tree: ast.Module) -> set[str]:
             continue
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
             names.add(node.id)
-        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        elif isinstance(
+            node,
+            ast.FunctionDef
+            | ast.AsyncFunctionDef
+            | ast.ClassDef
+            | ast.TypeVar
+            | ast.ParamSpec
+            | ast.TypeVarTuple,
+        ):
             names.add(node.name)
         elif isinstance(node, ast.arg):
             names.add(node.arg)
@@ -150,6 +189,92 @@ def call_site_problems(tree: ast.Module, namespace: dict[str, Any], root: Path) 
     return [problem for problem in found if problem is not None]
 
 
+def _bound_names(tree: ast.Module) -> set[str]:
+    """Every name the script binds: its rebinds (`_rebound_names`, which excludes the top-level
+    imports), those imports themselves, the pattern-matching captures, and what the language
+    provides."""
+    bound = _rebound_names(tree)
+    for node in tree.body:
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            bound.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.MatchAs | ast.MatchStar) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.add(node.rest)
+    return bound | _BUILTIN_NAMES | _IMPLICIT_GLOBALS
+
+
+class _NameReads(ast.NodeVisitor):
+    """First line of every `Name` read, annotations excluded: the house style imports
+    `from __future__ import annotations`, so annotation expressions are never evaluated."""
+
+    def __init__(self) -> None:
+        self.first_line: dict[str, int] = {}
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load):
+            self.first_line.setdefault(node.id, node.lineno)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self.visit(node.target)
+        if node.value is not None:
+            self.visit(node.value)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Decorators, bases, keywords and body read as usual; type-parameter bounds/defaults are
+        annotation-like and never read."""
+        for child in (*node.decorator_list, *node.bases, *node.keywords, *node.body):
+            self.visit(child)
+
+    def visit_TypeAlias(self, node: ast.TypeAlias) -> None:
+        """Only the value reads; the name binds and type-parameter bounds/defaults never read."""
+        self.visit(node.value)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._visit_defaults(node.args)
+        self.visit(node.body)
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        self._visit_defaults(node.args)
+        for statement in node.body:
+            self.visit(statement)
+
+    def _visit_defaults(self, arguments: ast.arguments) -> None:
+        """Only the default expressions: an arg node contributes nothing but an annotation."""
+        for default in (*arguments.defaults, *arguments.kw_defaults):
+            if default is not None:
+                self.visit(default)
+
+
+def undefined_name_problems(tree: ast.Module) -> list[str]:
+    """One `L<line> <name>` per name the script reads but never binds.
+
+    The conservative F821-shaped read: a name bound anywhere counts as bound, a
+    `from x import *` leaves the file's name set open and disables the check. What
+    remains is the class the import check cannot see — a statement reading a name
+    nothing at all binds (#2678-adjacent; 2026-10-01 audit).
+    """
+    if any(
+        isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names)
+        for node in ast.walk(tree)
+    ):
+        return []
+    reads = _NameReads()
+    reads.visit(tree)
+    bound = _bound_names(tree)
+    unbound = {name: line for name, line in reads.first_line.items() if name not in bound}
+    return [f"L{line} {name}" for name, line in sorted(unbound.items(), key=lambda item: item[1])]
+
+
 def main() -> int:
     src = sys.stdin.read()
     try:
@@ -174,10 +299,14 @@ def main() -> int:
         print(f"CHILD-EXC:{type(exc).__name__}:{str(exc)[:120].replace(chr(10), ' ')}")
         return 5
     namespace.pop("__builtins__", None)
+    undefined = undefined_name_problems(tree)
+    if undefined:
+        print("CHILD-UNDEF:" + " | ".join(name[:_DETAIL_MAX] for name in undefined))
+        return 6
     problems = call_site_problems(tree, namespace, Path.cwd().resolve())
     if problems:
         print("CHILD-SIG:" + " | ".join(p.replace("\n", " ")[:_DETAIL_MAX] for p in problems))
-        return 6
+        return 7
     print("CHILD-OK")
     return 0
 
