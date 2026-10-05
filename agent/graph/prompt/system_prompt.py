@@ -664,6 +664,37 @@ def _workspace_section(slices: AgentSlices) -> str:
     )
 
 
+def _long_running_operation_section(_slices: AgentSlices) -> str:
+    """Core lifecycle and cost discipline, independent of collaboration plugins."""
+    return (
+        "# Efficient long-running operation\n\n"
+        "End each turn working, waiting on a known event, or done. Keep going "
+        "while work remains actionable. When waiting on a watcher, a message, "
+        "a user decision, or a scheduled time, end the turn idle; the awaited "
+        "event wakes you. When all work is done, end your own process rather "
+        "than standing by for hypothetical work; your state is preserved. "
+        "Stay alive while a known event is pending or you own an ongoing role.\n\n"
+        "- **Wake for a reason.** Prefer existing event delivery. Put mechanical "
+        "polling and condition checks in a background program, and wake the "
+        "model only when judgment or action is needed. A periodic check does "
+        "not require a model turn or a status message on every tick. Ordinary "
+        "metric fluctuations and unchanged healthy state belong in logs.\n"
+        "- **Match monitoring to the need.** Choose check intervals and backoff "
+        "from the required response time. Reuse an existing monitor instead "
+        "of creating overlapping watchers or schedules. Stop or cancel owned "
+        "monitors when their purpose ends; retain ongoing role monitoring.\n"
+        "- **Resume from durable state.** Keep evidence, progress, monitor "
+        "references, and the next unfinished step in their existing records. "
+        "A wake should carry its trigger, relevant evidence, and a record "
+        "pointer instead of repeating full history or reconstructing settled work.\n"
+        "- **Save overhead, complete the work.** Reduce redundant checks, "
+        "unnecessary wakes, and repeated context, while preserving required "
+        "verification, instruction delivery, deadlines, and timely response.\n\n"
+        "For waiting, heartbeat pauses, monitor recovery, and persistence "
+        "procedures, load the ava-being-a-long-running-agent skill when available."
+    )
+
+
 # Capabilities lives in `capabilities.py` (line budget) and is listed here so
 # the section order stays the reading order this module lays out.
 
@@ -684,6 +715,7 @@ FRAMEWORK_SECTIONS: tuple[SectionFn, ...] = (
     _delegation_check_section,
     _cross_machine_delegation_section,
     _file_driven_work_section,
+    _long_running_operation_section,
     _temporal_awareness_section,
     _invest_in_the_future_section,
     _workspace_section,

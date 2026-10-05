@@ -19,6 +19,14 @@ A watcher is a small Python program that runs in the background, independent of 
 
 `timeout` **is mandatory**: watchers are always bounded; even if you forget one, it won't run forever. **A watcher that stops on its own sends an exit notification** (exit code + full output pointer + output tail); the platform's own reclaim paths do too for a TTL deadline or a normal `ava stop`/update, but not for `ava stop --force`, a Windows unit, or a crashed host (see [[ava/docs/watcher.ava.okf.md|ava.watcher]]).
 
+## Wake conditions
+
+The core prompt owns operating cost principles; this skill supplies watcher
+mechanics. Compare conditions relevant to action rather than raw readings.
+The first poll wakes only if the relevant condition already holds. Ordinary
+samples stay in logs; useful wakes include their trigger, evidence, and record
+pointer. Fleet communication guidance also applies to generated publishers.
+
 ## Key Dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/docs/watcher.ava.okf.md|ava.watcher]] — `at` / `cron` / `launch` SDK itself

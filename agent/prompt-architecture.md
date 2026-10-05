@@ -169,6 +169,12 @@ Capabilities rather than standing as its own section.
     debugging mindset, opt-in by adding `ava_code_workflow` to
     `settings.agent.system_prompt_extra` (env `AVA_SYSTEM_PROMPT_EXTRA`).
     Coding-specific, so it is owned by the plugin rather than the core prompt.
+- **Efficient long-running operation** — core `_long_running_operation_section`,
+  always present, including without fleet. Owns lifecycle and cost principles;
+  the long-running-agent skill supplies waiting and recovery procedures.
+- **Agent-to-agent communication** — fleet `_fleet_self_section`. Owns useful
+  updates, commitments, receipt boundaries, and deduplicated delivery, including
+  generated watchers and schedules. Independent of the human guidance toggle.
 - **Reduce context switch for the human** —
   `ava_builtins/plugins/ava_fleet/agent_runtime.py:_reduce_context_switch_section`,
   on by default via `settings.agent.reduce_context_switch` (env

@@ -101,30 +101,31 @@ def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     assert "that write can notify the task owner too" in prompt
 
 
-def test_prompt_section_idle_vs_terminate_rule(_load_activity_plugin: None):
-    """The Long-running agent section must make the end-of-turn choice
-    explicit in plain language: waiting on a known event -> idle; all done ->
-    end your own process (no idle standing by); unsure whether more follows ->
-    still end your own process (being brought back is cheaper than standing
-    by). The delegator side says a finished worker ends itself. SDK call
-    names stay out of the fleet section — the agent decides the mechanics
-    (heartbeat pause etc.) itself."""
+def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
+    """Fleet adds collaboration guidance without owning the core lifecycle."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section(AgentSlices.resolve())
-    # Waiting branch: end the turn idle, the awaited event still wakes you.
-    assert "end the turn idle" in section
-    # Done branch: end your own process instead of idling on.
-    assert "end your own process" in section
-    # Unsure branch: being brought back later is cheaper than standing by.
-    assert "cheaper than standing by" in section
-    # Delegator side: a finished worker ends itself; ending it is the fallback.
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    assert "# Efficient long-running operation" not in section
+    assert prompt.count("# Efficient long-running operation") == 1
     assert "do not plan to terminate it yourself" in section
-    # Semantic-only: no SDK call names in the fleet section; the mechanics
-    # (pause_heartbeat etc.) are the agent's own call.
-    assert "pause_heartbeat" not in section
-    assert "ava.self.terminate" not in section
-    assert "ava.agents.terminate" not in section
+
+
+def test_peer_communication_survives_human_guidance_toggle(
+    _load_activity_plugin: None,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Turning off human interruption guidance must not remove peer discipline."""
+    from base.config import settings
+
+    monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    assert prompt.count("## Agent-to-agent communication") == 1
+    assert "## Reduce context switch for the human" not in prompt
+    assert "Protocol receipt ACKs remain required" in prompt
+    assert "periodic checking does not imply periodic broadcasting" in prompt
+    assert "Receiving a message does not require a conversational reply" in prompt
 
 
 def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin: None):
