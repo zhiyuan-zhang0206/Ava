@@ -1132,3 +1132,15 @@ def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> 
     assert "ava_event_log_drop_last_dropped_at_ratio" in query["model"]["expr"]
     threshold = next(q for q in rule["data"] if q["refId"] == "D")
     assert threshold["model"]["conditions"][0]["evaluator"] == {"type": "lt", "params": [300]}
+
+
+def test_delete_rules_tombstones_never_name_live_rules() -> None:
+    """Grafana deletes every tombstoned UID on reload: a tombstone that names
+    a live rule would delete it (README "Retired rules")."""
+    doc = yaml.safe_load((_RULES.parent / "delete-rules.yml").read_text(encoding="utf-8"))
+    assert doc["apiVersion"] == 1
+    live = {r["uid"] for r in _load_rules()}
+    for entry in doc["deleteRules"]:
+        assert set(entry) == {"orgId", "uid"}
+        assert len(entry["uid"]) <= 40
+        assert entry["uid"] not in live
