@@ -39,6 +39,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - `_cross_machine_delegation_section` — One sentence (user-finalized wording, verbatim): when work spans machines, let an agent on the target machine do it rather than reaching across. Toggle `AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION` (default on); semantic steer only — no API detail, so it cannot go stale.
 - `_delegation_check_section` — The 30-second check before taking on work; the prompt's only mandatory-flagged process. The skill-index step (match the task against `# Capabilities`, load the covering skill) sits here rather than in the index itself, because an agent that never reads the index cannot know it is rebuilding one of its own skills. It is dropped and the remaining steps renumbered when this agent renders no Capabilities section at all (`capability_index_is_empty`). The other four steps are the delegation half
 - `_file_driven_work_section` — File-driven workflow
+- `_long_running_operation_section` — Lifecycle and cost principles without fleet; the long-running-agent skill supplies procedures.
 - `_temporal_awareness_section` — Time awareness, including the `ai-capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
 - `ava_memory.memory_discipline_section` — Cross-session durable-knowledge behavior
 - `_invest_in_the_future_section` — Framework's one cross-domain future-signal rule; `AVA_SYSTEM_PROMPT_INVEST_FUTURE` defaults on and selects the smallest closing action for a signal that could improve later work
@@ -55,10 +56,6 @@ The system prompt carried in every LLM call, built **once per context window** �
 - A framework-owned `before_llm` hook diffs the live membership against that record each turn and names whatever appeared in one `new_skills` system note, in the index's own line shape; the snapshot advances with the note, so one install produces one note no matter who installed it. Drift is the trigger, not a timer
 - `indexed_skills()` is the single definition of membership, so narrowing needs no special case: a configured name that resolved to nothing at build time and resolves now is drift, and a skill outside a narrowed list never becomes drift
 - `indexed: None` means no snapshot exists for this window (a checkpoint predating the field). The check then adopts the live catalog silently rather than announcing the whole catalog as new
-
-### SDK Configuration Switches
-- `AVA_SYSTEM_PROMPT_*` / `AVA_SDK_*` environment variables control enabling/disabling of each section
-- `_disabled_by_sdk_config()` checks these switches
 
 ## Entry Points
 

@@ -54,3 +54,18 @@ tags:
 
 - Enable/disable uses per-machine `~/.ava/plugins_config.json` (`base/packages/plugins/enable_config.py:set_local_enabled` is the only writer), CLI `ava plugins enable/disable <name>` — no `AVA_FLEET_ENABLED` or similar env switch
 - After disabling: `ava.ui` falls back to pure page mode (no notifications), `ava.self`'s log/label methods disappear, `ava.tasks` namespace disappears, `spawn(label=…)` raises TypeError
+
+## Communication ownership
+
+`ava_builtins/plugins/ava_fleet/agent_runtime.py:_fleet_self_section` owns the agent-to-agent communication
+contract in the system prompt: actionable updates, necessary commitments,
+explicit reporting agreements, protocol receipts, direct delivery to action
+owners, and one reporter per milestone. The contract also applies to generated
+watchers, schedules, and background publishers; periodic checks do not imply
+periodic broadcasts. The fleet skill supplies the delivery procedure.
+
+The core prompt owns general lifecycle and operating cost discipline, including
+for agents without fleet. `ava-being-a-long-running-agent` supplies waiting,
+monitoring, recovery, and persistence procedures. The separate
+`_reduce_context_switch_section` continues to own human interruption guidance;
+its toggle does not disable peer communication guidance.

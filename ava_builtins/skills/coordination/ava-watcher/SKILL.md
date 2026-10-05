@@ -102,16 +102,17 @@ startup, plus alerts when the probe itself fails):
   total) and exit 2 when every attempt failed, so the loss surfaces in the
   exit notice. Keep the retry budget inside the watcher's `timeout`.
 
-## Report on change, not on every poll
+## Wake on an actionable condition
 
 A watcher's `send_message` wakes you for a full turn, so every message is a
 cost even when it carries no news (user ruling 2026-09-03). Two rules keep a
 watcher cheap:
 
-1. **Message only when the observed state changed.** Keep the last-seen
-   state and compare on every poll; a poll that observes the same state as
-   the previous one stays silent. Initialize the previous-state variable
-   before the loop so the first poll still counts as a change:
+1. **Message when the relevant condition needs judgment or action.** Compare
+   the condition, not every raw metric fluctuation. Keep ordinary samples in
+   logs; suppress repeated healthy readings and unchanged state. Initialize
+   the previous state before the loop, and notify on the first poll only if
+   it already meets the condition you are waiting for:
 
    ```python
    code = '''
@@ -130,8 +131,10 @@ watcher cheap:
    '''
    ```
 
-   The `last`-comparison is the whole trick: compare the *state*, not the
-   clock, and message only on the transitions you care about. A watcher
+   Compare the condition relevant to action, not the clock or raw readings.
+   Disk usage fluctuating within a healthy range stays silent; crossing an
+   intervention threshold can wake the agent. Include the trigger, evidence,
+   and durable record pointer in the message. A watcher
    that would re-send the same message on the next poll is buggy, not
    cautious.
 

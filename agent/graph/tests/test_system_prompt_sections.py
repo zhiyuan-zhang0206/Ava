@@ -709,3 +709,16 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
         ("myplugin", "systemPromptSections", "loud_section")
     ]
     assert recorded[0][3].startswith(f"chars={len('## Loud\n\nsomething.')} sha=")
+
+
+def test_long_running_operation_without_fleet(monkeypatch: pytest.MonkeyPatch):
+    """An isolated agent gets cost/lifecycle guidance without loading a skill or fleet."""
+    monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    assert prompt.count("# Efficient long-running operation") == 1
+    assert "## Agent-to-agent communication" not in prompt
+    assert "end the turn idle" in prompt
+    assert "end your own process" in prompt
+    assert "required response time" in prompt
+    assert "preserving required verification" in prompt

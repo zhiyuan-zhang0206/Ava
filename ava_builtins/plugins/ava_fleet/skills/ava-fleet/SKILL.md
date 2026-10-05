@@ -91,21 +91,28 @@ Every agent in a fleet is either an **orchestrator** (delegating work to others)
 | **Orchestrator** | Decompose a goal, spawn workers with the right skills, supervise them, gather and judge results | [reference/orchestrator.md](reference/orchestrator.md) |
 | **Worker** | Own a mission end to end, report results to your delegator, reach the user for their decisions | [reference/worker.md](reference/worker.md) |
 
-Both roles share the same communication primitives: `send_message` for peer-to-peer, `ava.ui.notify` for the user, and task updates for the durable record. Reporting responsibility is split in two: anything needing the user's **authorization or decision** goes to the user directly, from any agent — that authority is never relayed. **Progress and conclusions** roll up to the delegator (the parent task's owner), who aggregates before the user sees anything — raw per-worker results do not land in the user's queue. An agent with no delegator delivers directly. **Roll-ups are milestone-based by default** (user ruling 2026-09-03): send on a real milestone, a blocker, a completion, or when the other side genuinely needs something — never for routine progress, and never a bare acknowledgment. A delegator that wants a different pattern names it in the brief; silence between milestones is the default, not a failure. Interruption discipline while the user is away: the `reduce-context-switch-for-human` skill.
+## Communication procedure
 
-### One reporter per milestone
+The fleet plugin's **Agent-to-agent communication** system-prompt section owns
+the shared communication contract. Use `send_message` for peer delivery,
+`ava.ui.notify` for the user, and task updates for the durable record.
 
-Name a single reporter and the agent that must act on each shared milestone
-in the brief. The reporter delivers the authoritative artifact or record
-directly to that action owner. Once delivered, other participants do not
-relay the same result or acknowledge it without new information. Report new
-evidence, a blocker, or a changed result promptly; completion of a later stage
-is a new milestone.
+For each milestone, name its reporter and the agent that must act in the brief.
+Publish the result in its existing artifact or task record and send that owner
+its reference with a concise explanation of what changed and what is needed.
+Combine related findings; other participants send only additional evidence,
+blockers, or changed results. Do not append an unchanged milestone to another
+agent's task log merely to record forwarding: that write can notify its owner.
 
-Keep the result in its existing record instead of copying its unchanged
-status into several places. In particular, `ava.tasks.log` by a non-owner
-also notifies the task owner: do not append a duplicate milestone merely to
-record that you forwarded it. Still record actual task outcomes and blockers.
+When a requester needs your acceptance or timing to coordinate, communicate
+that commitment. Otherwise, act on received messages without a courtesy reply.
+An explicit reporting agreement and protocol receipt ACKs still apply.
+
+Progress and conclusions reach the delegator for aggregation; user authorization
+or decisions reach the user directly. With no delegator, deliver directly.
+For communication with the user, follow `reduce-context-switch-for-human`.
+For mechanical monitoring and waiting, use `ava-being-a-long-running-agent` and
+`ava-watcher`; generated watchers and schedules follow the same fleet contract.
 
 ## Two Dials: Effort and Autonomy
 

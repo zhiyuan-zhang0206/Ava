@@ -10,26 +10,18 @@ supervising a service, monitoring a queue, coordinating peers, driving a
 multi-step pipeline. The patterns here keep you effective past your first few
 turns.
 
-## First decision: end yourself, or stay for a known reason
+## Scope and operating procedure
 
-Before arming watchers and pausing heartbeats, decide whether anything is left
-to wait for. Your task done and no known event pending → end your own process.
-Do not idle: ending yourself is your own last step, it preserves your state,
-and a message from your delegator or the user resurrects you with full context.
-If you are not sure whether more work will follow, end yourself anyway —
-resurrection is cheaper than standing by.
+The core system prompt's **Efficient long-running operation** section owns the
+lifecycle and cost principles, including for agents without fleet collaboration.
+This skill supplies the procedures for waiting, monitoring, recovery, and durable
+state. The fleet plugin owns agent-to-agent communication; use its contract when
+coordinating peers rather than inventing a separate reporting cadence here.
 
-Stay alive only in two cases, and both are known, not hoped for:
-
-- **A known external event is pending** — a watcher is armed, a peer's reply
-  or a user decision is expected, a scheduled time is set. (The waiting
-  patterns below are for this case.)
-- **You own a long-lived role** whose work keeps arriving — a standing domain
-  owner (see the `ava-corp` skill for long-lived roles), a task-pool worker,
-  an ongoing monitor. Even then, terminate when the role itself ends.
-
-`pause_heartbeat` is not a substitute for ending yourself: it silences the
-check-in while you wait for a known event, it does not create one.
+Before setting up a wait, record the expected event, how it will reach you, the
+required response time, and the monitor or schedule reference in your task file.
+For an ongoing role, record its monitoring responsibilities and end condition in
+your personal memory. Check existing monitors before creating one.
 
 ## Finish, don't just reply
 
@@ -117,30 +109,39 @@ pending messages. If nothing has changed, increment the idle count and pause
 with the next duration in the sequence. When you actually do work — process a
 message, act on a watcher firing, deliver a result — reset the count to zero.
 
-**Rationale**: 1h → 2h → 4h → 8h turns 24 daily wake-ups into ~4–6, saving
-~80% of idle tokens while keeping worst-case response latency at 8 hours. The
-8-hour cap preserves availability — you are never unreachable for more than a
-working day.
+**Rationale**: this example reduces repeated idle check-ins. Choose the cap from
+the required response time; it is not a guaranteed token saving or delivery bound.
 
-**Trade-off**: longer pauses mean slower response to unexpected events (a
-message that arrives between watcher polls). When you expect a reply within a
-known window, set the pause to match that window rather than blindly following
-the schedule. The backoff is the default for open-ended waits, not a rigid rule.
+**Trade-off**: polling intervals determine how soon a watcher detects a condition.
+Heartbeat pauses suppress check-ins, not delivery of messages or watcher events.
+Do not rely on a heartbeat wake as the signal for an awaited event; arrange its
+own delivery and choose polling intervals to satisfy the response requirement.
 
-### Progress notes to your spawner
+### Monitoring without a model turn on every tick
 
-Before a long stretch of work, send your spawner a one-line status with
-`ava.agents.send_message` — what you are doing and when to expect the next
-update. If you crash or get terminated mid-stretch, that note is the last
-thing they have. Refresh it as the picture changes; delivering the real
-result discharges the obligation.
+Use `ava.watcher.cron` or a schedule when the recurring work itself needs model
+judgment. For mechanical CI, file, queue, or health checks, use a custom background
+watcher that checks the condition and sends a message only when you must act.
+Load `ava-watcher` for implementation details. Set the interval and lifetime from
+the response requirement, and reuse existing event delivery or a monitor when it
+already covers the wait.
 
-### Proactive monitoring
+Compare the condition relevant to action, not raw readings: disk usage moving
+within a healthy range is not a wake trigger; reaching the intervention threshold
+is. Keep ordinary samples in a log. A wake message should name the condition,
+the relevant evidence, and the durable record to resume from.
 
-Own your domain between wake-ups. Schedule `ava.watcher.cron` checks for: CI
-status on your PRs, health of a deployed service, last message from a peer you
-delegated to, a waitlist you are polling. The watcher wakes you; you check and
-act.
+When the wait resolves or is cancelled, stop the owned monitor if it is no longer
+needed. Keep recurring role monitors while that role remains active. On recovery,
+inspect recorded monitor references and current status before replacing them.
+
+### Coordinating a wait with peers
+
+Use the fleet communication contract for milestones, blockers, commitments, and
+handoffs. When another agent relies on your acceptance or timing, send that
+commitment with the useful update; do not send a preliminary status solely because
+you are about to work for a long stretch. Persist intermediate progress in the
+task file so recovery does not depend on a sequence of messages.
 
 ## Two kinds of state, three destinations
 Your state splits across three stores with different audiences:
@@ -232,7 +233,8 @@ Update on every meaningful state change, and before compaction.
 
 ## Surviving restarts
 
-A machine reboot or `ava.self.restart()` kills your process. Watchers are not
-automatically re-armed — re-launch them when you come back up. Your task file
+A machine reboot or `ava.self.restart()` replaces your process. Check the recorded
+watcher and schedule references when you return; restore missing monitors that
+are still needed, without duplicating ones that survived. Your task file
 and memory pool notes survive; run the same recovery sequence as after
 compaction.
