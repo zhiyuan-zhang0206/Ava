@@ -1135,12 +1135,14 @@ def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> 
 
 
 def test_delete_rules_tombstones_never_name_live_rules() -> None:
-    """Grafana deletes every tombstoned UID on reload: a tombstone that names
-    a live rule would delete it (README "Retired rules")."""
+    """The R23 tombstone must stay listed (orgId 1) and never name a live rule;
+    a dropped entry silently re-orphans the retire (README "Retired rules")."""
     doc = yaml.safe_load((_RULES.parent / "delete-rules.yml").read_text(encoding="utf-8"))
     assert doc["apiVersion"] == 1
+    entries = doc["deleteRules"]
+    assert entries, "an empty deleteRules re-orphans every retired rule"
     live = {r["uid"] for r in _load_rules()}
-    for entry in doc["deleteRules"]:
-        assert set(entry) == {"orgId", "uid"}
-        assert len(entry["uid"]) <= 40
-        assert entry["uid"] not in live
+    for entry in entries:
+        assert set(entry) == {"orgId", "uid"} and entry["orgId"] == 1
+        assert entry["uid"] and len(entry["uid"]) <= 40 and entry["uid"] not in live
+    assert {"orgId": 1, "uid": "ava-ops-pitr-storage-growth"} in entries
