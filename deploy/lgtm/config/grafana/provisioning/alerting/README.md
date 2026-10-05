@@ -45,8 +45,9 @@ removed from the station 2026-10-05).
 
 ## Where these run (LGTM stack)
 
-Native Grafana on the LGTM host (port 3003) evaluates these rules from the
-converge-rendered provisioning tree (`$AVA_HOME/lgtm/native/config/
+Native Grafana on the LGTM host (port 3003 by default, 53003 on the station via
+`AVA_LGTM_GRAFANA_PORT`) evaluates these rules from the converge-rendered
+provisioning tree (`$AVA_HOME/lgtm/native/config/
 provisioning/`, copied verbatim by `cli/commands/observability/lgtm_native.py` from the
 source checkout's `deploy/lgtm/config/grafana/provisioning` — rendered files
 carry content-hash user-edit protection; the webhook URL is a Grafana-native
