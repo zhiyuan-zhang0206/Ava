@@ -71,7 +71,7 @@ ava status    # check status (includes the pg/redis view)
 ```
 
 For coordinated downtime and recovery, use the shared
-[stop procedure](../../../../../docs/conventions/graceful-maintenance.md).
+`docs/conventions/graceful-maintenance.md` in the Ava source checkout.
 
 **Bring-up ordering is strict.** Agent processes are never started directly —
 they are always created through the gateway (`POST /api/agents`, which

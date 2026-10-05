@@ -46,7 +46,7 @@ from cli.commands.extensions._external_skill_ledger import (
     _write_ledger,
 )
 
-_SKILL_NAMES = (_SKILL_NAME, "deploy-ava-cluster")
+_SKILL_NAMES: tuple[str, ...] = ("ava-guide",)
 _MARKER_NAME = ".ava-managed.json"
 _CLIENTS = (("Codex", ".codex", "codex"), ("Claude Code", ".claude", "claude"))
 
@@ -508,7 +508,11 @@ def _converge_locked(
 
 
 def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = None) -> None:
-    """Copy deployment and operations skills into present Codex and Claude Code homes."""
+    """Copy the complete Ava Guide into present Codex and Claude Code homes.
+
+    Legacy standalone targets and their ledgers remain untouched; the guide
+    uses a separate per-client ledger and never adopts or overwrites them.
+    """
     home = Path.home() if host_home is None else host_home
     try:
         _validate_directory(home, "host home is not a regular directory")

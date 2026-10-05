@@ -179,7 +179,7 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`npm
 install -g @deepseek-ai/dsh`; verified with 0.1.5-rc.3) has no external input
 channel into a live session, so its relay is a Cordis plugin inside the dsh
-process: `ava_builtins/skills/coordination/ava-use-other-agents/scripts/ava-relay-dsh/ava-relay.mjs`
+process: `ava_builtins/skills/platform/ava-guide/external-agents/scripts/ava-relay-dsh/ava-relay.mjs`
 (plain ESM on Node built-ins; dsh developer-preview APIs may change). Load it
 by absolute path with a patch file, either per launch (`dsh --profile web
 --patch ava-relay.patch.yml`; launcher flags precede the app's own) or for
@@ -188,7 +188,7 @@ every profile in `$DSH_HOME/cordis.patch.yml`:
 ```yaml
 - insert:
     - id: ava-relay
-      name: /path/to/checkout/ava_builtins/skills/coordination/ava-use-other-agents/scripts/ava-relay-dsh/ava-relay.mjs
+      name: /path/to/checkout/ava_builtins/skills/platform/ava-guide/external-agents/scripts/ava-relay-dsh/ava-relay.mjs
 ```
 
 The plugin exports `DSH_AVA_RELAY_STUB` — a per-session path in a private

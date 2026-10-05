@@ -395,7 +395,7 @@ check-typed-exception = true
 # base scripts/*.py entry above, not a replacement.
 "ava_builtins/skills/coordination/ava-dynamic-workflow/scripts/*.py" = ["DTZ005", "N806"]
 "ava_builtins/skills/platform/ava-self-evolution/scripts/*.py" = ["S112", "RUF059", "PLR0915", "PLW0603"]
-"ava_builtins/skills/coordination/ava-use-other-agents/scripts/*.py" = ["PLR0915"]
+"ava_builtins/skills/platform/ava-guide/external-agents/scripts/*.py" = ["PLR0915"]
 # A skill's references/ holds genuine reference material — mostly prose, but
 # occasionally a Python snippet the agent reads and adapts rather than runs in
 # place (e.g. ava-dynamic-workflow's orchestrator templates, string-patched

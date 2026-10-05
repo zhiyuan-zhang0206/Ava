@@ -37,7 +37,7 @@ Repeated start does not change the recorded identity; conflicting inputs refuse.
 ## Joining a runner
 
 Acquire the checkout's dependencies using the
-[deployment procedure](../../.agents/skills/deploy-ava-cluster/SKILL.md). A split
+[deployment procedure](../../ava_builtins/skills/platform/ava-guide/deploy/SKILL.md). A split
 gateway must already be serving and have a cluster bearer. On the new host,
 join the private network, then run (the runner never needs the gateway's
 bearer: its capability bundle authenticates it):

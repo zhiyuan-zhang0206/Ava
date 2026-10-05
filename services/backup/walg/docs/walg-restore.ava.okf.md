@@ -62,7 +62,7 @@ one code path with two callers.
 
 ## Notes
 - Operator procedure and the drill's failure texts: [WAL-G operations](operations.md),
-  `.agents/skills/operating-ava-cluster/references/walg-restore.md`.
+  `.agents/skills/ava-guide/operations/references/walg-restore.md`.
 - Scope: the database under the same home identity. Rebuilding a lost host's identity state is not covered.
 - The directory a restore leaves is a promoted database on a new timeline; before it backs a new
   primary, start a new WAL-G prefix and take a new full backup.

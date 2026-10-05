@@ -37,10 +37,7 @@ behavioral discipline for long-running/ultra-speed agents.
 
 | Skill | Purpose | Detail |
 |------|------|------|
-| ava-guide | Operate / extend yourself via the `ava` CLI; root SKILL.md is an index, seven bare-name sub-skills bear the load (`ops`, `mcp`, `packages`, `agents`, `presets`, `models`, `onboarding`) | [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md]] |
-| deploy-ava-cluster | Install Ava, initialize a home and join runner units | [[okf/skills/external-agent-operator-bridge.ava.okf.md]] |
-| operating-ava-cluster | Diagnose and recover deployment infrastructure | [[okf/skills/external-agent-operator-bridge.ava.okf.md]] |
-| ava-schedule-writer | Natural language → gateway managed scheduled task (resumable script + `/api/schedules`) | [[ava_builtins/skills/coordination/ava-schedule-writer/docs/ava-schedule-writer.ava.okf.md]] |
+| ava-guide | Shared guide for humans and internal/external agents: deploy, operate, extend, schedule, and manage agents; root routes to sub-skills | [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md]] |
 | ava-watcher | Start a background watcher that wakes you on event/time triggers (stop in-turn polling) | [[ava_builtins/skills/coordination/ava-watcher/docs/ava-watcher.ava.okf.md]] |
 | ava-being-a-long-running-agent | Operating as a long-running process: manage lifecycle, wait for external events, persist before compaction | [[ava_builtins/skills/coordination/ava-being-a-long-running-agent/docs/ava-being-a-long-running-agent.ava.okf.md]] |
 | ava-ultra-speed | Speed discipline for ultra-fast turnover workers: report as you go, never wait silently | [[ava_builtins/skills/coordination/ava-ultra-speed/docs/ava-ultra-speed.ava.okf.md]] |
@@ -53,7 +50,6 @@ Breaking large tasks into multi-agent / long tasks and driving them.
 | ava-workflow | Select working strategy, optional goal definition and supervision, peer or script orchestration, and verification | [[ava_builtins/skills/practice/ava-workflow/docs/ava-workflow.ava.okf.md]] |
 | ava-dynamic-workflow | Orchestrate parallel workers: explore→fork→join→reduce | [[ava_builtins/skills/coordination/ava-dynamic-workflow/docs/ava-dynamic-workflow.ava.okf.md]] |
 | ava-goal | Supervise another agent to achieve a goal (watcher wakes up on target idle to judge) | [[ava_builtins/skills/coordination/ava-goal/docs/ava-goal.ava.okf.md]] |
-| ava-use-other-agents | Drive Claude Code / OpenAI Codex CLI for long tasks; hand the agent's identity to Codex, Claude Code or DeepSeek Harness | [[ava_builtins/skills/coordination/ava-use-other-agents/docs/ava-use-other-agents.ava.okf.md]] |
 
 ## Self-improvement
 Ava improving itself — mining regressions, reviewing/creating skills, and
@@ -76,11 +72,12 @@ adapters, transcription.
 | audio-transcribe | Transcribe audio/video / YouTube / URL to text (OpenAI, requires ffmpeg) | [[ava_builtins/skills/integrations/audio-transcribe/docs/audio-transcribe.ava.okf.md]] |
 
 ## Not indexed here
-The rest of `ava_builtins/skills/` (e.g. `ai-capability-timescale`,
-`ava-corp`, `ava-deep-research`, `ava-modification-layers`,
-`ava-package-installer`, `ava-serious-engineering`,
-`ava-serious-research`, `develop-a-plugin`, `telegram-send-file`) carries no
-OKF node — `SKILL.md` in each is the reference.
+The remaining top-level built-ins (such as `ava-corp`, `ava-deep-research`,
+`ava-serious-engineering`, `ava-serious-research`, and `telegram-send-file`)
+have no OKF node; their `SKILL.md` is the reference. Capability/timescale
+calibration belongs to `ava-workflow`; deployment, incident operations,
+modification layers, installation, plugin development, schedules, and external
+agent execution belong to `ava-guide`.
 
 ## Key dependencies
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — skill mechanism and core-vs-instance origin axis

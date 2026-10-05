@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import ava
+import base.paths
 from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.log import logger
 from base.sessions import coding_session_owner
@@ -50,13 +51,13 @@ def init_file(path: Path, initial: str) -> None:
     path.write_text(initial, encoding="utf-8")
 
 
-def impersonator_guide(skill_dir: Path) -> Path:
-    """The takeover executor's manual, from the calling skill's own directory.
+def impersonator_guide() -> Path:
+    """The executor manual in the checkout owning this Ava runtime.
 
-    The skill lives at ``<repo>/ava_builtins/skills/<group>/<skill>``; the guide is
-    the repository's own ``impersonator-guide`` skill.
+    Skill sources and installed copies can have different directory depths;
+    the runtime source owner supplies this project-local manual.
     """
-    return skill_dir.parents[3] / ".agents" / "skills" / "impersonator-guide" / "SKILL.md"
+    return base.paths.repo_root() / ".agents" / "skills" / "impersonator-guide" / "SKILL.md"
 
 
 def worker_bootstrap(

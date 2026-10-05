@@ -6,7 +6,7 @@
 > **Update 2026-06-09: the local leg landed.** `services/backup/dump.py` runs a
 > daily `pg_dump --format=custom` on the gateway host via the watchdog tick
 > (03:00 local, `$AVA_HOME/backups/db/`, `BACKUP_KEEP=1` — retention was cut
-> from 3 to 1 in #832 when daily dumps filled the Mac mini's disk) — see `.agents/skills/operating-ava-cluster/references/db-restore.md`. The old R2-era `scripts/pg_backup.sh` was removed
+> from 3 to 1 in #832 when daily dumps filled the Mac mini's disk) — see `.agents/skills/ava-guide/operations/references/db-restore.md`. The old R2-era `scripts/pg_backup.sh` was removed
 > with it. Local dumps cover bad migrations / accidental deletes / DB
 > corruption; what remains open here is the **disk-loss** scenario — and a
 > one-dump local window makes the off-site leg below the *only* history.

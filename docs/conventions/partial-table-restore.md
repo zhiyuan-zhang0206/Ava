@@ -4,9 +4,9 @@ Recovering a table — or a set of rows — out of the WAL-G physical backup whi
 the live database keeps serving: a `DELETE`, a `DROP` or an `UPDATE` went wrong
 and the goal is to put only that data back, not to restore the cluster. The
 whole-database paths are separate documents:
-[`walg-restore.md`](../../.agents/skills/operating-ava-cluster/references/walg-restore.md)
+[`walg-restore.md`](../../ava_builtins/skills/platform/ava-guide/operations/references/walg-restore.md)
 (physical restore to a time, an LSN or the end of the archive) and
-[`db-restore.md`](../../.agents/skills/operating-ava-cluster/references/db-restore.md)
+[`db-restore.md`](../../ava_builtins/skills/platform/ava-guide/operations/references/db-restore.md)
 (the encrypted logical dump).
 
 **Never restore into the live database, and never point a recovered copy at the

@@ -15,7 +15,7 @@ Current topology and authority have component owners:
 
 Initialize the home before starting it. For a split cluster, start the gateway
 before joining or starting runners; their Settings construction requires its
-bootstrap endpoint. Use the [deployment capability](../../.agents/skills/deploy-ava-cluster/SKILL.md)
+bootstrap endpoint. Use the [deployment capability](../../.agents/skills/ava-guide/deploy/SKILL.md)
 for the installation sequence. Ordinary start refuses missing or contradictory
 identity rather than inferring it from an existing listener or directory.
 
@@ -82,8 +82,8 @@ Runtime facts needed to choose the checkout and operation have component owners:
 | External agent skill ownership and update | [Package commands](../../cli/commands/extensions/docs/packages.ava.okf.md) |
 | Schedule source, provisioning and stored-script verification | [Schedules](../../schedules/README.md) |
 
-Use the [deployment capability](../../ava_builtins/skills/platform/deploy-ava-cluster/SKILL.md)
-for a new unit and the [operations capability](../../ava_builtins/skills/platform/operating-ava-cluster/SKILL.md)
+Use the [deployment capability](../../ava_builtins/skills/platform/ava-guide/deploy/SKILL.md)
+for a new unit and the [operations capability](../../ava_builtins/skills/platform/ava-guide/operations/SKILL.md)
 for an existing cluster. Development preparation and a repository merge do not
 authorize a runtime rollout.
 
@@ -179,7 +179,7 @@ them) and retry. A controller killed while launching can only be proven after
 a reboot. A closed operation whose quarantine keeps failing shows as blocked
 and `retire --confirm` retries it. An upload-interrupted dump keeps
 its complete encrypted artifact in quarantine: restore from it directly
-(`.agents/skills/operating-ava-cluster/references/db-restore.md`) or copy it
+(`.agents/skills/ava-guide/operations/references/db-restore.md`) or copy it
 into `backups/db/` (0600); the next scheduled run dumps again.
 
 Application service commands, admitted PATH and process ancestry belong to
@@ -209,10 +209,10 @@ For a bounded host cleanup, keep the order explicit:
 
 ### Canonical Codex workspace sessions
 
-The [Codex ownership reference](../../ava_builtins/skills/coordination/ava-use-other-agents/references/canonical_codex_owner.md)
+The [Codex ownership reference](../../ava_builtins/skills/platform/ava-guide/external-agents/references/canonical_codex_owner.md)
 owns generation records, status and exact-generation cancellation. The
-[launcher guide](../../ava_builtins/skills/coordination/ava-use-other-agents/references/codex.md)
-and [resume reference](../../ava_builtins/skills/coordination/ava-use-other-agents/references/resume_after_interruption.md)
+[launcher guide](../../ava_builtins/skills/platform/ava-guide/external-agents/references/codex.md)
+and [resume reference](../../ava_builtins/skills/platform/ava-guide/external-agents/references/resume_after_interruption.md)
 own commands and conversation recovery. Inspect the printed generation before
 cancelling; a shared workspace can contain several live generations.
 

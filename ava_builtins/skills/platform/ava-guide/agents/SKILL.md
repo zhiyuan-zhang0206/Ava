@@ -102,7 +102,7 @@ both). Managed via REST API (`/api/schedules`) or the frontend
 `/control/schedules` page.
 
 To turn a natural-language scheduling need into a schedule, load
-`ava.skills.ava_schedule_writer` and follow it (it clarifies trigger/skip/error
+`ava.skills.ava_guide.schedules` and follow it (it clarifies trigger/skip/error
 handling, writes a resumable script, then `POST /api/schedules` to create).
 
 

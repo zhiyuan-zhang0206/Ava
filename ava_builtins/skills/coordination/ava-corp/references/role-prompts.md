@@ -49,7 +49,7 @@ cluster bring-up / deploy, and you are the ONLY executor of cluster rollouts:
 no other agent runs ava.self.update() or triggers a rollout. You may also
 watch resources (disk/memory/CPU); if the load justifies it, propose a
 dedicated Resource Monitor agent instead of doing it all yourself. Follow the
-ava-corp and deploy-ava-cluster skills. Report in {LANGUAGE}.
+ava-corp and ava-guide.deploy skills. Report in {LANGUAGE}.
 ```
 
 ## Resource Monitor

@@ -85,7 +85,7 @@ against the edited file.
 > [`scripts/data_plane_ops/rotate_cluster_secret.py`](scripts/data_plane_ops/rotate_cluster_secret.py).
 >
 > For the full config reference, see [`.env.example`](.env.example) and the
-> [secrets reference](.agents/skills/deploy-ava-cluster/references/secrets.md).
+> [secrets reference](ava_builtins/skills/platform/ava-guide/deploy/references/secrets.md).
 
 ---
 
@@ -136,7 +136,7 @@ A complete Ava cluster is now running on your machine:
 
 ## Next steps
 
-- **[Deploy guide](.agents/skills/deploy-ava-cluster/SKILL.md)** — Multi-machine deployment, China mirrors, full config reference
+- **[Deploy guide](ava_builtins/skills/platform/ava-guide/deploy/SKILL.md)** — Multi-machine deployment, China mirrors, full config reference
 - **[Architecture overview](okf/index.ava.okf.md)** — Understanding components and data flow
 - **[Dev environment setup](docs/conventions/dev-setup.md)** — If you want to contribute
 - **[Skill system](okf/skills/skills.ava.okf.md)** — What agents can do

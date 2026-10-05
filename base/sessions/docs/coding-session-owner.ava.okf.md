@@ -80,7 +80,7 @@ anything is launched.
 
 - [[base/sessions/pty/docs/pty_sessions.ava.okf.md]] — full-name PTY liveness and
   termination used by exact generation cleanup
-- [[ava_builtins/skills/coordination/ava-use-other-agents/docs/ava-use-other-agents.ava.okf.md]]
+- [[ava_builtins/skills/platform/ava-guide/external-agents/docs/external-agents.ava.okf.md]]
   — Codex launcher and supervisor that consume this owner contract
 
 `CodingSessionStatus` in `base/sessions/coding_session_owner_record.py` owns both

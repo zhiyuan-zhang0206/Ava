@@ -370,4 +370,4 @@ class TestLogsRunsDraft:
         assert calls["label"] == "ava-schedule-writer"
         prompt = str(calls["prompt"])
         assert "consolidate memory nightly" in prompt
-        assert "ava.skills.ava_schedule_writer" in prompt
+        assert "ava.skills.ava_guide.schedules" in prompt

@@ -9,6 +9,10 @@ Don't start building on vague requirements. Invest a few turns asking questions 
 
 The goal is to resolve every branch of the **decision tree** — surface each open fork, make an explicit choice, and close it — until no material ambiguity remains. Routine method choices within the authorized scope belong to the agent.
 
+For AI-dependent feasibility, scheduling, or pace assumptions, use
+[capability-timescale](../capability-timescale/SKILL.md) and carry verified
+evidence and uncertainty into this phase's output.
+
 ## What Align syncs
 
 Align calibrates **intent** — what the human wants and what the agents will do — rather than calibrating facts (that's Calibrate's job; see below). The alignment document is the contract that both sides sign: it says what "good" means, what's off-limits, and what ranks first. **The success criteria in this document are the evaluation standard for everything that follows** — evaluation first shows up here, not at the end.

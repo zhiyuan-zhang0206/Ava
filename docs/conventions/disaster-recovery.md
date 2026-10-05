@@ -39,9 +39,9 @@ re-proves closure (`docs/conventions/runbook.md`).
 ## Restore procedure
 
 For the isolated logical restore commands and acceptance checks, follow
-[`db-restore.md`](../../.agents/skills/operating-ava-cluster/references/db-restore.md).
+[`db-restore.md`](../../ava_builtins/skills/platform/ava-guide/operations/references/db-restore.md).
 For recovery from the WAL-G physical backup (to a time or LSN), follow
-[`walg-restore.md`](../../.agents/skills/operating-ava-cluster/references/walg-restore.md)
+[`walg-restore.md`](../../ava_builtins/skills/platform/ava-guide/operations/references/walg-restore.md)
 and the "WAL-G archiving" section of the runbook.
 There is no migration rollback (no down migrations): a bad migration is
 fixed forward with a new one, or recovered from the WAL-G chain; the retired mutable-checkout updater drill is not a supported recovery

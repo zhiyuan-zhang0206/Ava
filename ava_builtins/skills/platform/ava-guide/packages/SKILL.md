@@ -18,7 +18,7 @@ next time you use it — either way **no restart needed**.
 
 This skill is the CLI reference. When the job is "the user wants a capability,
 find something and get it working", read
-`ava.help(ava.skills.ava_package_installer)` instead — it owns the whole flow
+`ava.help(ava.skills.ava_guide.packages.install)` instead — it owns the whole flow
 (find candidates, confirm, install, verify with a test agent, judge).
 
 ## Skill (Reusable Instruction Pack)

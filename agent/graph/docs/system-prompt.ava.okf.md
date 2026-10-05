@@ -40,7 +40,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - `_delegation_check_section` — Consult the capability index and load `ava-workflow` when available for non-trivial or consequential work. Select methods and peer collaboration by need, without forcing interviews, plans, supervision, or delegation. The index step is omitted and steps renumbered when the index is empty.
 - `_file_driven_work_section` — File-driven workflow
 - `_long_running_operation_section` — Lifecycle and cost principles without fleet; the long-running-agent skill supplies procedures.
-- `_temporal_awareness_section` — Time awareness, including the `ai-capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
+- `_temporal_awareness_section` — Time awareness, including the `ava-workflow.capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
 - `ava_memory.memory_discipline_section` — Cross-session durable-knowledge behavior
 - `_invest_in_the_future_section` — Framework's one cross-domain future-signal rule; `AVA_SYSTEM_PROMPT_INVEST_FUTURE` defaults on and selects the smallest closing action for a signal that could improve later work
 - `_workspace_section` — Workspace description (id-free for fork safety; the concrete path is stated by the agent-ID context note)

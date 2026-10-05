@@ -2,7 +2,7 @@
 
 Hands a natural-language "I want a capability like X" request to an
 ava-package-installer agent: spawns an agent that loads
-`ava.skills.ava_package_installer` and returns its id so the Control page can
+`ava.skills.ava_guide.packages.install` and returns its id so the Control page can
 open the conversation. Mirrors the schedule / guide draft endpoints — a fixed
 prompt pointed at the skill + `create_and_launch_agent`; the user finishes the
 task in the spawned agent's session.
@@ -61,7 +61,7 @@ async def draft_package(body: PackageDraftRequest, request: Request) -> PackageD
     and return its id so the UI can open the conversation. 422 on an unknown kind."""
     prompt = (
         "You are installing a package for the user. Read and follow "
-        "ava.skills.ava_package_installer and run the whole lifecycle it describes: "
+        "ava.skills.ava_guide.packages.install and run the whole lifecycle it describes: "
         "clarify what is actually wanted, find candidates, confirm with the user "
         "before installing anything that runs code, install, spawn a test agent to "
         "verify it works, read the package to judge whether it is any good, and "

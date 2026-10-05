@@ -54,6 +54,22 @@ Users may explicitly choose any method, or delegate the choice. Existing consent
 remains valid; loading a skill or producing a plan does not create another
 approval gate. A chosen method never grants additional spending or permissions.
 
+## Capability and timescale calibration
+
+Before setting scope, scheduling work, or estimating AI-dependent feasibility,
+load [capability-timescale](capability-timescale/SKILL.md). Verify relevant
+capability against current sources and, when practical, a representative probe.
+Carry the evidence and uncertainty into Align's criteria and Plan's checkpoints.
+
+## Delegation decisions
+
+Delegate when the task has a clear scope, a useful independent execution context,
+and results you can verify. Keep simple local steps with the current agent; weigh
+supervision and integration cost against the benefit of another worker. Choose
+tools by demonstrated capability for the task, not fixed file-count thresholds.
+For Ava's external-worker launch, supervision, resume, or takeover mechanics,
+load `ava.skills.ava_guide.external_agents`.
+
 ## Capability Matching
 
 1. Identify the current gap: domain knowledge, execution access, verification,
