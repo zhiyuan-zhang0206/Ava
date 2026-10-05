@@ -18,7 +18,7 @@ reports are allowed; ordinary test jobs must execute tests. See the
 | Read or mutate ambient host state | lintable now | Existing: fixture-scope and environment-write lints |
 | Depend on ordering | lintable with new rule | New: fixed-port heuristic; isolation guards |
 | Leave process-global state behind | not lintable (operational) | New: root leak guard names the leaker |
-| Quarantine timing races by default | not lintable (operational) | Existing: serial-group admission and exit policy |
+| Serialize timing races without causal investigation | not lintable (operational) | Existing: serial-group admission and exit policy |
 | Assume runner-load readiness | lintable with new rule | New: fake-timer-loop heuristic; bounded waits |
 | Pin wall-clock values or counts | lintable now | Existing: clock-lattice lint and topology tests |
 | Generate visual references outside the comparison runner | not lintable (operational) | Runner-native check and refresh workflow |
@@ -152,7 +152,7 @@ merge-gated job.
 binds in tests, but collection order and cross-test durable-state dependence are
 not statically decidable.
 
-## 5. Quarantine only timing races whose root cause is still unknown
+## 5. Serial isolation does not fix timing races
 
 **Rule.** Find a deterministic cause before serializing a test. The `flaky`
 marker temporarily selects serial execution, not a cure for a race against
@@ -171,8 +171,10 @@ fix for every timing race: their opponents were the asynchronous OS reaper and
 daemon readiness, not sibling tests.
 
 **Correct form.** First make the test deterministic with an ownership-adoption
-gate, bounded poll, or hermetic read. Admit a test only when its root cause is
-unknown and it has failed at least twice in one day; appendix C governs exit.
+gate, bounded poll, or hermetic read. If serial execution is needed, record
+why and keep failures gating. Remove the marker after the dependency is fixed
+and validated. The historical appendix records earlier admission thresholds;
+it does not govern current marker decisions.
 
 **Lintability — not lintable (operational).** Marker admission and removal are
 reviewer decisions. CI can audit marker counts and justification, but no repository
