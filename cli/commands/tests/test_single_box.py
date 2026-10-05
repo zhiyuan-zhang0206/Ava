@@ -17,6 +17,7 @@ import getpass
 import json
 import os
 import shutil
+import socket
 import subprocess
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
@@ -37,7 +38,7 @@ from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from services.backup.artifact import passphrase
-from tests._containers import _free_port
+from tests.fixtures.env_bootstrap import distinct_free_ports
 
 pytestmark = pytest.mark.skipif(
     not (Path(pooler.pgbouncer_bin()).exists() or shutil.which(pooler.pgbouncer_bin())),
@@ -119,8 +120,11 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
     monkeypatch.setenv("AVA_HOME", str(home))
-    ports = dict(cluster.new_home_ports())
-    ports.update(postgres=_free_port(), redis=_free_port(), pgbouncer=_free_port())
+    # Allocate the entire roster while every socket stays held: replacing only
+    # storage slots with independent closed probes can duplicate another slot.
+    ports = dict(
+        zip(cluster.FIXED_PORTS, distinct_free_ports(len(cluster.FIXED_PORTS)), strict=True)
+    )
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports), gateway_home=str(home), created_at="test"
     )
@@ -160,6 +164,40 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
 
     monkeypatch.setattr(cluster, "get_record", _record)
     return Born(home=home, record=record, values=values)
+
+
+def test_configured_roster_survives_kernel_reuse_of_closed_ports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cli.start_identity import read_intent
+
+    held: set[int] = set()
+
+    class ReusingSocket:
+        """The kernel may reuse a released port but cannot reuse a held one."""
+
+        def __init__(self, *_args: Any) -> None:
+            self.port: int | None = None
+
+        def bind(self, _address: tuple[str, int]) -> None:
+            self.port = next(port for port in range(35000, 65536) if port not in held)
+            held.add(self.port)
+
+        def getsockname(self) -> tuple[str, int]:
+            assert self.port is not None
+            return "127.0.0.1", self.port
+
+        def close(self) -> None:
+            assert self.port is not None
+            held.remove(self.port)
+
+    monkeypatch.setattr(socket, "socket", ReusingSocket)
+    configured = _configure(monkeypatch, tmp_path)
+    intent = read_intent(configured.home)
+    assert intent is not None
+    assert set(configured.record.ports) == set(cluster.FIXED_PORTS)
+    assert len(set(configured.record.ports.values())) == len(cluster.FIXED_PORTS)
+    assert not held
 
 
 def _birth(born: Born) -> None:
