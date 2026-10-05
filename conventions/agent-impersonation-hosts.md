@@ -321,7 +321,7 @@ the stale window plus one scan interval (≈75 s).
 
 Steer input reaches the active turn at its next processing opportunity; it
 does not promise to interrupt an in-flight tool. Transport success also
-does not prove that the model processed the message. Keep processing ACKs in
+does not prove that the model processed the message. Keep receipt ACKs in
 Ava, and make actions safe to retry when their completion is ambiguous.
 
 The retired `AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS` setting is ignored
