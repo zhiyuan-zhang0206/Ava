@@ -13,6 +13,7 @@ import pytest
 from ava.impersonation.launch import bootstrap_message
 from ava.shell.coding_tools import codex
 from base.sessions import coding_session_owner
+from base.sessions.coding_session_owner_record import CodingSessionStatus
 
 _SKILL_DIR = Path(__file__).parents[2] / "ava_builtins/skills/coordination/ava-use-other-agents"
 _ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
@@ -23,7 +24,7 @@ def _owner(state_dir: Path) -> coding_session_owner.CodingSessionOwner:
         cluster="/cluster", workspace="/workspace", tool="codex"
     )
     return coding_session_owner.CodingSessionOwner(
-        key=key, status="active", owner_agent_id=1, state_dir=state_dir
+        key=key, status=CodingSessionStatus.ACTIVE, owner_agent_id=1, state_dir=state_dir
     )
 
 

@@ -29,6 +29,7 @@ from base.native_process.os_platform import IS_MACOS, file_lock
 from base.sessions.coding_session_owner_record import (
     CodingSessionKey,
     CodingSessionOwner,
+    CodingSessionStatus,
     InvalidCodingSessionOwnerError,
     canonical_key,
     display_label,
@@ -92,7 +93,7 @@ def launch_is_stale(
     now: dt.datetime | None = None,
 ) -> bool:
     """Return whether a claimant died before publishing its active handle."""
-    if owner.status != "launching" or owner.created_at is None:
+    if owner.status != CodingSessionStatus.LAUNCHING or owner.created_at is None:
         return False
     timestamp = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
     return timestamp - owner.created_at >= _UNPUBLISHED_CLAIM_WINDOW
@@ -235,13 +236,13 @@ def _reclaimable(
     owner_terminated: OwnerTerminated,
 ) -> bool:
     """Whether a sibling generation is over and may be cleaned up by another launch."""
-    if owner.status == "terminal":
+    if owner.status == CodingSessionStatus.TERMINAL:
         return True
-    if owner.status not in ("launching", "active"):
+    if owner.status not in (CodingSessionStatus.LAUNCHING, CodingSessionStatus.ACTIVE):
         return False  # inactive or invalid: nothing to reclaim, never guess
     if owner.owner_agent_id is not None and owner_terminated(owner.owner_agent_id):
         return True
-    if owner.status == "launching":
+    if owner.status == CodingSessionStatus.LAUNCHING:
         return launch_is_stale(owner, now=now) and not any(
             session_live(name) for name in _candidate_sessions(owner, list_sessions)
         )
@@ -277,7 +278,7 @@ def _reclaim_siblings_unlocked(
             owner_terminated=owner_terminated,
         ):
             continue
-        if owner.status != "terminal":
+        if owner.status != CodingSessionStatus.TERMINAL:
             _cleanup_unlocked(
                 owner,
                 list_sessions=list_sessions,
@@ -324,7 +325,7 @@ def launch_generation(
         generation = str(uuid.uuid4())
         owner = CodingSessionOwner(
             key=key,
-            status="launching",
+            status=CodingSessionStatus.LAUNCHING,
             generation=generation,
             owner_agent_id=owner_agent_id,
             display_label=display_label(key.workspace),
@@ -349,7 +350,7 @@ def attach_supervisor(
     """CAS-publish the supervisor handle before launching the coding PTY."""
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
         current = read_unlocked(key, generation)
-        if current.status != "launching":
+        if current.status != CodingSessionStatus.LAUNCHING:
             raise CodingSessionGenerationChangedError("owner generation changed before supervision")
         if current.work_file is None:
             raise RuntimeError("cannot attach a supervisor to a file-less takeover generation")
@@ -380,7 +381,7 @@ def publish_active(
     """CAS-publish the ready PTY handle for one launching generation."""
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
         current = read_unlocked(key, generation)
-        if current.status != "launching":
+        if current.status != CodingSessionStatus.LAUNCHING:
             raise CodingSessionGenerationChangedError("owner generation changed during launch")
         if current.work_file is not None and (
             current.supervisor_session_id is None or current.supervisor_session_name is None
@@ -396,7 +397,7 @@ def publish_active(
             raise ValueError("session name does not match this generation's owner and id")
         updated = replace(
             current,
-            status="active",
+            status=CodingSessionStatus.ACTIVE,
             session_id=session_id,
             session_name=session_name,
         )
@@ -419,13 +420,13 @@ def terminate_generation(
         raise ValueError("terminal reason must be non-empty")
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
         current = read_unlocked(key, generation)
-        if current.status == "invalid":
+        if current.status == CodingSessionStatus.INVALID:
             raise InvalidCodingSessionOwnerError(
                 f"invalid owner record {state_path(key, generation)}: {current.error}"
             )
-        if current.status == "inactive":
+        if current.status == CodingSessionStatus.INACTIVE:
             return False
-        if current.status == "terminal":
+        if current.status == CodingSessionStatus.TERMINAL:
             return True
         _cleanup_unlocked(
             current,
@@ -435,7 +436,7 @@ def terminate_generation(
         )
         terminal = replace(
             current,
-            status="terminal",
+            status=CodingSessionStatus.TERMINAL,
             terminalized_at=(now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC),
             terminal_reason=reason,
         )
