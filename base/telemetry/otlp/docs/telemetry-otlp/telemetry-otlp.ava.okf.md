@@ -135,5 +135,5 @@ single-box hosts collapse to the local receiver even when their secret is set.
   `shutdown_on_exit=False`; the single ordered exit seam and its accepted
   semantics: [[exit-flush.ava.okf.md|OTLP exit flush]].
 - The stack's operational story (collector, Grafana) is in
-  `conventions/runbook.md` (Observability / Tracing).
+  `docs/conventions/runbook.md` (Observability / Tracing).
 - Parent node: [[base.ava.okf.md|Base Library]].

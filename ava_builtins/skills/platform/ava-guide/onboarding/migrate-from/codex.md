@@ -28,7 +28,7 @@ one-shot `codex exec` runs, cloud tasks, and a GitHub Action. It reads
 
 The bridge works in both directions: the gateway `/mcp` endpoint exposes the fleet as
 an MCP server, so Codex can keep driving it (`codex mcp add`, same shape as Claude Code;
-token setup: `conventions/mcp-client-access.md`).
+token setup: `docs/conventions/mcp-client-access.md`).
 
 ## Migration steps
 

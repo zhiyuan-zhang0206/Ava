@@ -18,7 +18,7 @@ retry loop. Two outcomes matter:
 Probes traverse what they certify: a real GET
 /meta for the numpy service, a read-only `pg_available_extensions` check
 for pgvector — not a bare TCP connect
-(`conventions/defensive-patterns.md`).
+(`docs/conventions/defensive-patterns.md`).
 """
 
 from __future__ import annotations

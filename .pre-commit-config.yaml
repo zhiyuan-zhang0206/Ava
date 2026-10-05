@@ -235,7 +235,7 @@ repos:
 
       # A broad handler (`except Exception`, `suppress(Exception)`) must re-raise or report
       # (WARNING+ log, emit, stderr, or pass the exception on): a swallowed failure is
-      # indistinguishable from success (decisions/2026-10-04-no-silent-failures.md).
+      # indistinguishable from success (docs/decisions/2026-10-04-no-silent-failures.md).
       # Exemption: `# silent-ok: <reason>` on the handler line, reserved for a reporting
       # channel's own failure path. See scripts/lint/diagnostics/no_silent_failures.py header.
       - id: lint-no-silent-failures
@@ -354,7 +354,7 @@ repos:
 
       # AGENTS.md line-count ceiling (constants in the script; hard + a
       # transitional note zone below it). Prevents progressive bloat —
-      # specialized rules go in conventions/.
+      # specialized rules go in docs/conventions/.
       - id: lint-agents-md-size
         name: lint AGENTS.md size (100-line ceiling)
         entry: .venv/bin/python scripts/lint/agents_md_size.py
@@ -407,7 +407,7 @@ repos:
         name: lint-doc-roster
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_roster.py
-        files: ^(cli/commands/_repo\.py|conventions/runbook\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
+        files: ^(cli/commands/_repo\.py|docs/conventions/runbook\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
         pass_filenames: false
 
       # Every `ava.<name>` reference in the procedural docs — conventions and
@@ -420,7 +420,7 @@ repos:
         name: lint-doc-symbols
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_symbols.py
-        files: ^(conventions/.*\.md|\.agents/skills/.*\.md|ava/__init__\.py|scripts/content_lint/lint_doc_symbols\.py)$
+        files: ^(docs/conventions/.*\.md|\.agents/skills/.*\.md|ava/__init__\.py|scripts/content_lint/lint_doc_symbols\.py)$
         pass_filenames: false
 
       # The other half of the same guard: every `path/to/file.py:symbol` anchor
@@ -435,7 +435,7 @@ repos:
         name: lint-doc-anchors
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_anchors.py
-        files: ^(conventions/.*|\.agents/skills/.*|ava_builtins/skills/.*|.*\.ava\.okf\.md|.*\.py)$
+        files: ^(docs/conventions/.*|\.agents/skills/.*|ava_builtins/skills/.*|.*\.ava\.okf\.md|.*\.py)$
         pass_filenames: false
 
       # Every CLI flag written as a command invocation, and every relative
@@ -443,7 +443,7 @@ repos:
       # argparse tree / scripts/*.sh case arms / the tree on disk. Runs the
       # whole doc set regardless of which files changed (pass_filenames: false):
       # a link goes stale from a move anywhere, not just an edit to the doc
-      # citing it. decisions/ is exempt entirely; future/ only skips
+      # citing it. docs/decisions/ is exempt entirely; future/ only skips
       # flag checks (a `(planned)` marker opts a specific link out) — see
       # scripts/content_lint/check_doc_references.py's own docstring for the full rationale
       # (including issue #1045, why future/ is no longer a blanket skip).
@@ -484,7 +484,7 @@ repos:
         entry: .venv/bin/python scripts/lint/termination_source.py --only
         files: \.py$
 
-      # The stop window is database-quiet (decisions/2026-09-12-stop-window-contract.md):
+      # The stop window is database-quiet (docs/decisions/2026-09-12-stop-window-contract.md):
       # a resident periodic loop that borrows the pool every tick keeps a paused
       # runner's idle clients alive and blocks PgBouncer's stop. Every such loop
       # in services/, gateway/ and ops/ gates on `admission.quiesced()` or says
@@ -543,14 +543,14 @@ repos:
       # lint-config-scope hook retired.)
 
       # Import-direction contracts (config in pyproject [tool.importlinter];
-      # the rules and their blind spots: conventions/import-layering.md).
+      # the rules and their blind spots: docs/conventions/import-layering.md).
       # Analyzes the whole import graph, so pass_filenames: false + trigger on
       # any .py change.
       - id: lint-imports
         name: lint import direction (layered architecture)
         # import-linter has no pyproject.toml cache-dir key (cache_dir is a CLI/API
         # arg only) — pass it explicitly so its cache lands under .cache/ like
-        # every other tool (conventions/dev-setup.md "Tool caches").
+        # every other tool (docs/conventions/dev-setup.md "Tool caches").
         entry: .venv/bin/lint-imports --cache-dir .cache/import-linter
         language: system
         types: [python]
@@ -581,7 +581,7 @@ repos:
       # `psql` for the baseline apply + trigger poke. That toolchain is in the
       # CI image but not on every dev machine, so as a commit hook it would fail
       # for reasons unrelated to the commit — which is precisely the pressure
-      # that produces a `--no-verify` habit (see .agents/skills/ship-a-change/SKILL.md).
+      # that produces a `--no-verify` habit.
       - id: lint-migrations
         name: lint migrations (timestamp-id format + merged files immutable + baseline seed)
         entry: .venv/bin/python scripts/content_lint/lint_migrations.py
@@ -637,7 +637,7 @@ repos:
 
       # Full frontend unit suite belongs at push: measured ~23s locally.
       # CI independently runs vitest with coverage; keep the full local suite.
-      # Decision: decisions/2026-09-24-vitest-prepush-selection.md.
+      # Decision: docs/decisions/2026-09-24-vitest-prepush-selection.md.
       - id: frontend-vitest
         name: frontend vitest run
         entry: bash scripts/prepush-guard.sh vitest -- bash -c 'cd ui/web && npx --no-install vitest run'

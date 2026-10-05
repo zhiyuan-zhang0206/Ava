@@ -8,7 +8,7 @@ and `ops.spec.plugin_services()` discovers + folds it into the single
 all still derive from one place). Discovery keys on this plugin's code being
 PRESENT on the machine, not the agent-facing enable-state — the cluster-level
 on/off is the explicit `AVA_TASK_MAINTENANCE_ENABLED` settings gate below. See
-`decisions/2026-07-19-plugin-registered-services.md`.
+`docs/decisions/2026-07-19-plugin-registered-services.md`.
 
 This module is deliberately light: it imports only the ops service contract and
 roster probe helper plus `base` — never `plugin.py` or the fleet

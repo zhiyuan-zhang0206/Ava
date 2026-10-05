@@ -5,7 +5,7 @@ created via ``ava.shell.sessions.new(ttl=)`` / ``run_background(ttl=)``; the TTL
 is the only reclamation mechanism. Every session — a plain shell or a watcher
 (``ava.watcher.at/cron/launch``), which is just a shell session running a
 generated script with no registry or deadline of its own
-(decisions/2026-09-27-watchers-are-never-restarted.md) — carries one
+(docs/decisions/2026-09-27-watchers-are-never-restarted.md) — carries one
 ``agent_shell_ttls`` row, and every expired row is reclaimed the same way: a
 ``shell_kill`` op to the owning agent's machine, then the row is deleted.
 

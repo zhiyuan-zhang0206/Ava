@@ -163,7 +163,7 @@ def test_docs_only_skips_but_schedule_docs_stay_conservative(tmp_path: Path) -> 
     """A schedule document is operational input, not a harmless docs-only change."""
     repo_root = _selector_repo(tmp_path)
 
-    docs = test_selector.select_tests(["conventions/guide.md"], repo_root=repo_root)
+    docs = test_selector.select_tests(["docs/conventions/guide.md"], repo_root=repo_root)
     schedule_doc = test_selector.select_tests(["schedules/guide.md"], repo_root=repo_root)
 
     assert docs.decision == "SKIP"
@@ -436,3 +436,18 @@ def test_a_package_test_without_a_timing_entry_costs_the_average(tmp_path: Path)
     assert result.decision == "SELECTED"
     assert result.tests == ("scripts/tests/test_script.py",)
     assert abs(result.est_seconds - 10 / 3) < 1e-9
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/contributing.md",
+        "docs/conventions/testing.md",
+        "docs/decisions/record.md",
+        "docs/postmortems/incident.md",
+    ],
+)
+def test_relocated_project_docs_skip_backend_tests(tmp_path: Path, path: str) -> None:
+    result = test_selector.select_tests([path], repo_root=tmp_path)
+    assert result.decision == "SKIP"
+    assert result.reason == "docs-only"

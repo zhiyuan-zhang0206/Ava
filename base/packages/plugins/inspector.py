@@ -54,7 +54,7 @@ class InspectWidgetSpec(BaseModel):
     ``order`` positions the widget among the panel's sections: the built-in
     sections carry documented order keys (100 page / 200 shells / 300 liveness
     / 400 config overlay / 500 cost / 600 activity / 700 run-timeline link /
-    800 notice — see `conventions/plugin-spec-v2.md`), any int slots between
+    800 notice — see `docs/conventions/plugin-spec-v2.md`), any int slots between
     them, and equal orders stack kernel-first, then by (plugin, id). ``title``
     is an optional section header; without it the widget renders headerless —
     except kinds the console titles by default (``taskList``: "Tasks"),

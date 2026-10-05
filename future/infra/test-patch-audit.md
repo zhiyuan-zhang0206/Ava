@@ -9,7 +9,7 @@ The numbers are the output of `scripts/lint/patch_targets.py --report` on `ab1ca
 (839 test files with patch points). Regenerate after every package move or injection
 refactor: the class D counts fall as seams appear, and the frozen `patch_targets` section of
 `scripts/structure/baseline/` (325 keys, 685 sites now) shrinks in step. Rule and
-fixes: [python-conventions](../../conventions/python-conventions.md), Rule 8.
+fixes: [python-conventions](../../docs/conventions/python-conventions.md), Rule 8.
 
 ## The five classes
 

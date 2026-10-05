@@ -6,7 +6,7 @@
 // so a value below/above/among these slots it anywhere. Equal orders stack
 // built-in sections first, then widgets by (plugin, id) — deterministic, no
 // reliance on registration order. Plugin authors read these values from
-// `conventions/plugin-spec-v2.md`; renumbering is a deliberate contract change
+// `docs/conventions/plugin-spec-v2.md`; renumbering is a deliberate contract change
 // (the panel's tests pin the rendered order).
 
 export const INSPECT_SECTION_ORDER = {

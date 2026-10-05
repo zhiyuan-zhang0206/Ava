@@ -4,13 +4,13 @@ This is the remaining implementation plan for the September 25 architecture
 revision. Current implemented behavior belongs in
 [Ava Root](../../services/supervision/ava_root/docs/ava_root.ava.okf.md) and
 [start identity](../../cli/docs/start_identity.ava.okf.md). The earlier
-[decision](../../decisions/2026-09-12-process-lifecycle-final-state.md) remains a
+[decision](../../docs/decisions/2026-09-12-process-lifecycle-final-state.md) remains a
 historical record; its same-PID replacement and intermediate migration paths
 are not implementation requirements for this revision.
 
 ## Status: the retained-image release path was removed
 
-[The decision](../../decisions/2026-09-30-remove-release-image-path.md) deleted the
+[The decision](../../docs/decisions/2026-09-30-remove-release-image-path.md) deleted the
 image-based update path this plan grew around: image preparation, the frozen
 image-exec handoff, the finite external executor and its launchers, the fleet
 coordinator and its enrollment channel, per-rollout write-generation rotation
@@ -88,7 +88,7 @@ state.
 The old controller graph, hold-watchdog state machine, stranded-hold writers,
 alerts and status fields were removed from code, and migration
 `20261001T055030_drop-retired-deploy-and-watcher-storage` dropped their storage
-([decision](../../decisions/2026-10-01-contract-the-retired-deploy-storage.md)).
+([decision](../../docs/decisions/2026-10-01-contract-the-retired-deploy-storage.md)).
 
 Not done: the cutover must also reconcile any historical `deploy-probe` alert
 named `update failed: host left held`; its retired heartbeat writer no longer
@@ -98,7 +98,7 @@ cleanup was performed by the source deletion.
 ## Planned: unowned-termination follow-ups
 
 Three changes the
-[unowned-termination decision](../../decisions/2026-09-29-unowned-termination-resurrects.md)
+[unowned-termination decision](../../docs/decisions/2026-09-29-unowned-termination-resurrects.md)
 left for later:
 
 - Record a predecessor-closure refusal as a durable `resource_fence`. Today a
@@ -168,7 +168,7 @@ after this boundary is proven can the preparation grants, legacy selector
 parser, protocol-zero fallback and their dead controllers be deleted together. No permanent row-adoption compatibility path belongs in the
 new runtime.
 
-Implemented for existing agents (FC-4a; why: `decisions/2026-09-27-existing-agent-closed-predecessor-admission.md`):
+Implemented for existing agents (FC-4a; why: `docs/decisions/2026-09-27-existing-agent-closed-predecessor-admission.md`):
 a retired-shape row is admissible only in the closed-predecessor form,
 `IncarnationResources(G, O, host_process=null, requests={})` for the
 incarnation the retired value names, backed by that incarnation's existing
@@ -180,10 +180,10 @@ the complete empty recorded set of the released incarnation. A never-admitted
 row resurrects as a fresh birth only with its birth marker intact, or when the
 runtime's own force recorded that it ended the row unowned after the
 runtime's own lifecycle had left it so
-(`decisions/2026-09-29-unowned-termination-resurrects.md`).
+(`docs/decisions/2026-09-29-unowned-termination-resurrects.md`).
 
 Implemented for agents terminated before the runtime incarnation (why:
-`decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`):
+`docs/decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`):
 a terminated row with NULL resources and an incomplete runtime identity
 resurrects only when it carries a minted hosted identity (fresh generation and
 owner, no pid), which only passes the resurrection gate and which the
@@ -194,11 +194,11 @@ every other such row keeps refusing.
 
 Per-rollout write-generation rotation belonged to the removed path. The ledger
 keeps generation 0 and nothing replaces it
-([decision](../../decisions/2026-10-03-retire-write-generation-rotation.md)).
+([decision](../../docs/decisions/2026-10-03-retire-write-generation-rotation.md)).
 
 PostgreSQL and pooler connections always authenticate, even when the
 frontend/control-plane bearer is empty
-([decision](../../decisions/2026-09-26-internal-data-plane-always-authenticated.md)).
+([decision](../../docs/decisions/2026-09-26-internal-data-plane-always-authenticated.md)).
 Implemented for a single local plane: Redis always authenticates with generated
 admin and runtime passwords, which do not rotate per rollout; `pg_hba` admits
 the OS-user administrator by `peer` and every other role by SCRAM; PgBouncer
@@ -221,7 +221,7 @@ API is authenticated. Remote units never hold the human secret (bootstrap does
 not serve it); their OTLP relay uses a telemetry token derived from it
 ([API tokens](../../base/cluster/authority/docs/api-tokens.ava.okf.md)).
 A home born before this model is refused; no conversion exists
-([credential split](../../conventions/data-plane-secret-split.md#homes-born-before-this-model)).
+([credential split](../../docs/conventions/data-plane-secret-split.md#homes-born-before-this-model)).
 
 ## Verification and recovery policy
 

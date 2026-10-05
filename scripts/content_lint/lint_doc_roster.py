@@ -3,7 +3,7 @@
 
 Two tables are checked, both by set equality in both directions:
 
-1. the runbook daemon roster (`conventions/runbook.md`) against
+1. the runbook daemon roster (`docs/conventions/runbook.md`) against
    `ops/spec.py:build_services()` (re-exported by `cli/commands/_repo.py`) —
    the single source of truth for the long-running sessions the cluster runs.
    The runbook carries a human-readable roster
@@ -58,7 +58,7 @@ if __name__ == "__main__":
 from cli.commands._repo import build_services
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_RUNBOOK = _REPO_ROOT / "conventions" / "runbook.md"
+_RUNBOOK = _REPO_ROOT / "docs" / "conventions" / "runbook.md"
 
 _SENTINEL = "<!-- lint:roster-table -->"
 

@@ -3,7 +3,7 @@
 
 When an SDK module is deleted (the recent `ava.monitor` / `ava.schedule` removal),
 nothing keeps the docs from carrying a now-dangling `ava.monitor.*` reference for
-nobody to catch. This lint closes that gap: it scans `conventions/**/*.md` and
+nobody to catch. This lint closes that gap: it scans `docs/conventions/**/*.md` and
 `.agents/skills/**/*.md`, pulls every `ava.<name>` reference, and asserts the FIRST
 segment after `ava.` is a real member of the live `ava` namespace. A deletion that
 forgets to scrub a doc fails the commit, at the source, in the same PR.
@@ -39,7 +39,7 @@ a wall, not a nuisance:
   - **Code-span restriction.** Only `ava.<name>` references that sit inside an
     inline-code span (`` `...` ``) or a fenced code block (``` ``` ```) are checked. A
     bare prose mention is never flagged — it is exactly the ambiguous case the
-    graduation test (`conventions/lint-vs-sweeper.md`) says belongs in the sweeper, not
+    graduation test (`docs/conventions/lint-vs-sweeper.md`) says belongs in the sweeper, not
     a commit-blocking lint.
   - **Non-symbol forms excluded.** Even inside code, three forms are not symbols and
     are skipped: a name segment followed by a domain-style suffix (`ava.host.com`) is a
@@ -52,9 +52,9 @@ What remains after those guards is an unambiguous `ava.<identifier>` written as 
 whose first segment is not a live member — a genuine dangling reference. `_EXEMPT`
 carries the rare legitimate reference the heuristics can't model.
 
-Scope is the *procedural* docs — `conventions/` plus the repo's own dev skills under
+Scope is the *procedural* docs — `docs/conventions/` plus the repo's own dev skills under
 `.agents/skills/` (`.ava/skills` and `.claude/skills` are links back to it). Both tell an agent what to do right now, so a stale `ava.*` in either one
-is a live instruction to call a symbol that no longer exists. `decisions/` is a
+is a live instruction to call a symbol that no longer exists. `docs/decisions/` is a
 point-in-time archive that is never rewritten (its `ava.monitor` snapshots are correct
 history, not drift) and `future/` is design space that may name not-yet-built
 surface — both are out of scope to stay zero-FP.
@@ -76,7 +76,7 @@ if __name__ == "__main__":
 import ava
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_DOCS_CONVENTIONS = _REPO_ROOT / "conventions"
+_DOCS_CONVENTIONS = _REPO_ROOT / "docs" / "conventions"
 _DEV_SKILLS = _REPO_ROOT / ".agents" / "skills"
 
 # `ava.<name>` — first segment only. `\b` anchors so `lava.x` doesn't match; the

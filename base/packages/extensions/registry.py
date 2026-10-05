@@ -2,7 +2,7 @@
 
 Slice S2 of `future/infra/extension-ownership.md` (issue #39); the ownership
 model it implements is
-`decisions/2026-08-21-extension-ownership-three-tiers.md`: the **cluster** owns
+`docs/decisions/2026-08-21-extension-ownership-three-tiers.md`: the **cluster** owns
 content, identity and default enablement; the machine owns only capabilities;
 the agent owns an activation delta.
 

@@ -348,7 +348,7 @@ def preloaded_skills_note(slices: AgentSlices) -> HumanMessage | None:
 # added that the inherited context does not carry. Appended at the very TAIL of
 # the rebuilt head (after the fork marker and the on_fork notes), so nothing in
 # front of it changes: the inherited prefix stays byte-identical for the
-# provider's prefix cache (decisions/2026-09-10-preset-in-config-overlay-fork-cache).
+# provider's prefix cache (docs/decisions/2026-09-10-preset-in-config-overlay-fork-cache).
 _FORK_TAIL_SKILLS_FRAMING = (
     "Skills added by your spawn configuration at fork time — they were not "
     "loaded in the inherited context, so their full text is appended here at "

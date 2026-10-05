@@ -64,7 +64,7 @@ What "blessed" adds (implementation slice, not new machinery):
    at `ui/web/openapi.json`; serve it from the gateway (`GET /api/openapi.json`
    is FastAPI-native) and say in the docs that this is the third-party frontend
    contract.
-2. **A stability statement**, in `conventions/`: additive changes are free;
+2. **A stability statement**, in `docs/conventions/`: additive changes are free;
    removing or renaming a path/field gets a CHANGELOG note. No versioned API,
    no deprecation windows — single-digit consumers, source-visible spec, the
    codegen diff makes every contract change reviewable in the PR that makes it.
@@ -370,12 +370,12 @@ composer/plugin extension point.
   closed-set kinds (`taskList` today) with its own components: no third-party
   code, no markup — unknown kinds are skipped, never interpreted. Widgets
   interleave with the panel's built-in sections by an `order` key (keys table
-  in `conventions/plugin-spec-v2.md`). Deliberate boundary vs U4: this lane is
+  in `docs/conventions/plugin-spec-v2.md`). Deliberate boundary vs U4: this lane is
   host-rendered closed-set data for targets that exist per agent; U4's
   sections stay for plugin-served content (markdown/kv/table/page over the
   plugin's own mount).
 - **U5 — bless the API**: serve `openapi.json` from the gateway + the
-  `conventions/` contract page with the stability statement (Lane 1).
+  `docs/conventions/` contract page with the stability statement (Lane 1).
 - **U6 — statistics-panel cards** — **shipped, declaration + values** (task
   #2911): `contributions.ui.stats` declares cards (`{id, label}`; the id keys
   the plugin's value row and must survive as a `plugin_stats` primary key),

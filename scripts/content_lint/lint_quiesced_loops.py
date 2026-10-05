@@ -7,7 +7,7 @@ pre-commit hook.
 
 ## Why
 
-`decisions/2026-09-12-stop-window-contract.md` makes the window between a
+`docs/decisions/2026-09-12-stop-window-contract.md` makes the window between a
 completed drain and the release of the hold database-quiet: a paused runner's
 idle pooled connections are what held PgBouncer's stop open. A loop that
 borrows the pool every tick breaks that on its own, and nothing but the

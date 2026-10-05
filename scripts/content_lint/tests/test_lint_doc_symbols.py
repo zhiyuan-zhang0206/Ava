@@ -17,7 +17,7 @@ def lint(monkeypatch, tmp_path):
     here would also scan the repo's real `.agents/skills/`, silently coupling these
     assertions to whatever a dev skill happens to reference."""
     mod = importlib.import_module("scripts.content_lint.lint_doc_symbols")
-    docs = tmp_path / "conventions"
+    docs = tmp_path / "docs" / "conventions"
     docs.mkdir(parents=True)
     skills = tmp_path / ".ava" / "skills"
     skills.mkdir(parents=True)
@@ -30,7 +30,7 @@ def lint(monkeypatch, tmp_path):
 def dev_skills(monkeypatch, tmp_path):
     """The `.agents/skills/` scan root, isolated; conventions pointed at an empty dir."""
     mod = importlib.import_module("scripts.content_lint.lint_doc_symbols")
-    docs = tmp_path / "conventions"
+    docs = tmp_path / "docs" / "conventions"
     docs.mkdir(parents=True)
     skills = tmp_path / ".ava" / "skills" / "ava-sweeper"
     skills.mkdir(parents=True)

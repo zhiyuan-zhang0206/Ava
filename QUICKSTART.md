@@ -23,7 +23,7 @@ the entire cluster.
 > **Windows users**: Windows runs the `agent-runner` capability natively — no
 > WSL2, no Docker — and enrolls against a gateway on macOS or Linux. It
 > cannot host the cluster itself. Follow the
-> [Windows setup guide](conventions/windows-setup.md) instead of this one.
+> [Windows setup guide](docs/conventions/windows-setup.md) instead of this one.
 
 ---
 
@@ -138,7 +138,7 @@ A complete Ava cluster is now running on your machine:
 
 - **[Deploy guide](.agents/skills/deploy-ava-cluster/SKILL.md)** — Multi-machine deployment, China mirrors, full config reference
 - **[Architecture overview](okf/index.ava.okf.md)** — Understanding components and data flow
-- **[Dev environment setup](conventions/dev-setup.md)** — If you want to contribute
+- **[Dev environment setup](docs/conventions/dev-setup.md)** — If you want to contribute
 - **[Skill system](okf/skills/skills.ava.okf.md)** — What agents can do
 
 ---
@@ -208,13 +208,13 @@ switching every checkout and starting again:
 .venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER --log-dir DIR
 ```
 
-See [the runbook](conventions/runbook.md#updating-a-networked-cluster-in-source-mode)
+See [the runbook](docs/conventions/runbook.md#updating-a-networked-cluster-in-source-mode)
 for the two halves. Never `git pull` + `ava start` by hand on a production checkout.
 
 ### Windows hardware
 
 Native Windows Ava services are retired. Install Ava inside a WSL2 Linux
-distribution and follow the [Windows host guidance](conventions/windows-setup.md).
+distribution and follow the [Windows host guidance](docs/conventions/windows-setup.md).
 For unattended gateway boot, use the separate WSL distribution anchor described
 there; `ava start` inside Linux uses the Linux service path.
 
@@ -222,5 +222,5 @@ there; `ava start` inside Linux uses the Linux service path.
 
 ## Getting help
 
-- Read the [full documentation](conventions/)
+- Read the [full documentation](docs/conventions)
 - File a [GitHub Issue](https://github.com/zhiyuan-zhang0206/Ava/issues)

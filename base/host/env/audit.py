@@ -175,7 +175,7 @@ def _emit_audit_event(event_type: str, payload: dict[str, object]) -> None:
     The record of a `.env` write is this module's per-home JSONL: its writers run
     where no database identity exists, so the event is a projection and is
     deliberately not recorded in `audit_events`
-    (decisions/2026-10-02-env-write-audit-stays-local.md).
+    (docs/decisions/2026-10-02-env-write-audit-stays-local.md).
     """
     from base import telemetry
     from base.telemetry.audit_events import prepare_event_log

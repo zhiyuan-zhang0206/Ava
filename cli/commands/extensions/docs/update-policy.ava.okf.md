@@ -84,5 +84,5 @@ fields at install time.
 - Parent: [[packages.ava.okf.md|Package Commands]]
 - [[install_registry.ava.okf.md]] — schema v2 (rows carry `update`; the registry carries `channels`)
 - [[okf/skills/load-directory-sync.ava.okf.md]] — the load directory this pass writes (the fourth bulk writer)
-- [host versioning](../../../../conventions/host-versioning.md) — the derived host version the gates compare against
+- [host versioning](../../../../docs/conventions/host-versioning.md) — the derived host version the gates compare against
 - Design: [core-package-update-channel](../../../../future/infra/core-package-update-channel.md) — tasks #2915 / #3267

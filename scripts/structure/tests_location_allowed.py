@@ -426,10 +426,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "readiness of a stopped generation through the cli, the gateway and ops: spans base, cli, gateway, ops, no one of which may import all the others",
     ),
-    "tests/skills/test_ci_watcher.py": (
-        "contract",
-        "tests the ci_watcher script of the .agents/skills/ship-a-change skill",
-    ),
     "tests/skills/test_impersonation_launch.py": (
         "contract",
         "tests the launch scripts of the ava_builtins/skills/coordination/ava-use-other-agents skill",

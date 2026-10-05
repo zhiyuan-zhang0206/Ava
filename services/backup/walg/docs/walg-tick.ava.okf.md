@@ -60,5 +60,5 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
 - `cli/commands/converge/_os_jobs.py` — `ensure_walg_job`
 
 ## Notes
-- Operator procedure and the alert texts: `conventions/runbook.md`, "WAL-G archiving", "The daily tick".
+- Operator procedure and the alert texts: `docs/conventions/runbook.md`, "WAL-G archiving", "The daily tick".
 - Retention is the only deleter under the prefix: a bucket lifecycle rule must not expire objects there.

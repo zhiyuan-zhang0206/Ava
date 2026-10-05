@@ -6,7 +6,7 @@ restarter, boot-attempt recovery and runtime-mode selector are removed.
 
 The implemented contracts live in [Agent Runtime](../../agent/docs/agent-runtime.ava.okf.md),
 [Hosted Runtime Admission](../../agent/startup/docs/admission.ava.okf.md) and
-[Graceful Maintenance](../../conventions/graceful-maintenance.md).
+[Graceful Maintenance](../../docs/conventions/graceful-maintenance.md).
 
 ## Resource boundaries
 

@@ -2,7 +2,7 @@
 
 No force escalation of the pooler or Redis, no snapshots, no remote management. A Postgres
 fast shutdown that outlives its share of the budget is ended by an immediate shutdown
-(decisions/2026-10-02-pg-stop-escalates-to-immediate.md). The stop semantics match
+(docs/decisions/2026-10-02-pg-stop-escalates-to-immediate.md). The stop semantics match
 what the preceding drain has already proven: the pooler gets SIGINT (safe
 shutdown — it disconnects clients and waits only for in-flight server
 transactions) and PostgreSQL native fast shutdown (disconnect idle sessions, roll

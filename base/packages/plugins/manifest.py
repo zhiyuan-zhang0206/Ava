@@ -1,7 +1,7 @@
 """`ava-plugin.json` manifest — parse, validate, range algebra, host checks.
 
 The contract layer of plugin spec v2 (S0-S2, task #1244). Normative spec:
-`conventions/plugin-spec-v2.md`. Install-time only: nothing here runs at agent
+`docs/conventions/plugin-spec-v2.md`. Install-time only: nothing here runs at agent
 runtime, and packages without a manifest keep flowing through the legacy
 detection paths untouched.
 

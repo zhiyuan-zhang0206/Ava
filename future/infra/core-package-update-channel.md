@@ -2,9 +2,9 @@
 
 Status: design for implementation (authored 2026-09-11; user rulings 2026-09-11 and 2026-09-13). Implementation: P0 landed (registry schema v2, `ava packages status`, derived host version — PR #2355) and P1 landed (content-channel executor — `ava packages refresh`/`rollback`/`policy` + OS job + rollout skip + host filter — PR #2368); remaining: P2 core-plugin materialization, then P3 alignment with [extension-ownership](extension-ownership.md).
 
-Ruling record: [`decisions/2026-09-13-core-package-update-channel.md`](../../decisions/2026-09-13-core-package-update-channel.md) — it revises the delivery half of `decisions/2026-08-19-four-layer-modification-model.md` ruling 2.
+Ruling record: [`docs/decisions/2026-09-13-core-package-update-channel.md`](../../docs/decisions/2026-09-13-core-package-update-channel.md) — it revises the delivery half of `docs/decisions/2026-08-19-four-layer-modification-model.md` ruling 2.
 
-Related: [extension-ownership](extension-ownership.md), [decentralized-install-and-config](decentralized-install-and-config.md), [release-dir-atomic-code-swap](release-dir-atomic-code-swap.md), [`conventions/plugin-spec-v2.md`](../../conventions/plugin-spec-v2.md), [`conventions/host-versioning.md`](../../conventions/host-versioning.md).
+Related: [extension-ownership](extension-ownership.md), [decentralized-install-and-config](decentralized-install-and-config.md), [release-dir-atomic-code-swap](release-dir-atomic-code-swap.md), [`docs/conventions/plugin-spec-v2.md`](../../docs/conventions/plugin-spec-v2.md), [`docs/conventions/host-versioning.md`](../../docs/conventions/host-versioning.md).
 
 ## 0. Summary
 
@@ -22,7 +22,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 
 ### R1 — "core plugin / core skill may stay coupled to this repo (a core skill may reference SDK names directly)"
 
-**Today: already true.** Core skills live in `<repo>/ava_builtins/skills/`, plugin-carried skills in `<repo>/ava_builtins/plugins/<p>/skills/`, core plugins in `<repo>/ava_builtins/plugins/<p>/`. They ship, get reviewed, and break — under the same PR/CI as the kernel. The plugin manifest (`ava-plugin.json`) already carries `version` / `engines.ava` / `dependencies` with a validator and install-time host-version check (`base/packages/plugins/manifest.py`, spec: `conventions/plugin-spec-v2.md`).
+**Today: already true.** Core skills live in `<repo>/ava_builtins/skills/`, plugin-carried skills in `<repo>/ava_builtins/plugins/<p>/skills/`, core plugins in `<repo>/ava_builtins/plugins/<p>/`. They ship, get reviewed, and break — under the same PR/CI as the kernel. The plugin manifest (`ava-plugin.json`) already carries `version` / `engines.ava` / `dependencies` with a validator and install-time host-version check (`base/packages/plugins/manifest.py`, spec: `docs/conventions/plugin-spec-v2.md`).
 
 **Gap: none structural.** What is missing is the *stated policy*, because this design's whole point is that core content leaves the L4 train for updates — and without a stated contract, the next natural step ("version your content API") would silently re-couple the cadence. The contract to state:
 - core content MAY reference internal SDK names, paths, and behaviors of the checkout it targets; no stable third-party API is promised;
@@ -56,18 +56,18 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 | Explicit update verbs | `ava skill update [name...]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name>`, `ava mcp upgrade` — a differing local copy is replaced (reported), with staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
 | Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `cli/commands/extensions/skills_sync.py`, `plugins.py`, `base/packages/plugins/enable_config.py` |
 | Supply-chain gate | `base/packages/skills/scan.py` on every ingest (critical → refuse, `--accept-risk` recorded, trust never auto-promoted) | `base/packages/skills/scan.py`, `base/packages/extensions/install_registry.py` |
-| Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `base/packages/plugins/manifest.py`, `conventions/plugin-spec-v2.md` |
+| Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `base/packages/plugins/manifest.py`, `docs/conventions/plugin-spec-v2.md` |
 | Per-machine OS jobs | launchd / crontab / schtasks registrars, idempotent, converge-registered (health probe, watchdog, autostart, logs), test switch `AVA_OS_JOBS_ENABLED=false` | `base/os_*.py`, `cli/commands/converge/_os_jobs.py` |
 | Cluster extension registry (S2, in progress) | `extensions` / `extension_blobs` tables; install writes row+blob; converge/boot materialize; adoption sweep; content-addressed by tree hash; trust rises only | `base/packages/extensions/registry.py`, `base/packages/extensions/materialize.py` |
 | Update coordination | per-home refresh flock; source-tree tamper detection (health-probe check 8, alert-only) | `cli/commands/extensions/packages_refresh.py`, `base/deploy/git/source_tree_guard.py` |
-| Existing boundaries | four-layer modification model; extension ownership (cluster/machine/agent); CLI scope convention; CLI-only updates | `decisions/2026-08-19-four-layer-modification-model.md`, `decisions/2026-08-21-extension-ownership-three-tiers.md`, `2026-08-02-cli-scope-convention.md`, `2026-08-05-cli-only-updates.md` |
+| Existing boundaries | four-layer modification model; extension ownership (cluster/machine/agent); CLI scope convention; CLI-only updates | `docs/decisions/2026-08-19-four-layer-modification-model.md`, `docs/decisions/2026-08-21-extension-ownership-three-tiers.md`, `2026-08-02-cli-scope-convention.md`, `2026-08-05-cli-only-updates.md` |
 
 ## 3. Constraints the design must respect (hard facts)
 
 1. **Skills are hot; plugins are process-bound.** Skill content takes effect on the next scan/read. Plugin code (agent-side) takes effect at agent-process start (`load_extensions()` at graph build, `agent/extensions/__init__.py`); provider plugins (`provider.py`) load once per process, lazily, in *every* process that builds or validates a chat model — agent, gateway, labeler, eval harness. There is no in-process reload surface today.
 2. **The prod checkout must stay clean.** On a source-run home the health probe alerts on changed tracked files and untracked files outside the runtime-artifact whitelist (`base/deploy/git/source_tree_guard.py`). Derived/runtime content must therefore live OUTSIDE the checkout — in `$AVA_HOME` data dirs — or it raises a permanent tamper alert (or forces a permanent whitelist exception).
 3. **Rollouts own the code channel.** The fleet update (`python -m cli.fleet_update`, operator only; agents cannot trigger it — ruling 2026-08-05) is the only path that moves code, schema, and services. Content refresh must be a *distinct, non-service-touching* pass — never a rollout, never a service restart.
-4. **Installs are per-machine today; ownership is moving cluster-side** (`decisions/2026-08-21`, issue #39, S2 landed for skills). The design must work per-machine now and migrate cleanly to cluster rows later (policy as data, not as machine-local law).
+4. **Installs are per-machine today; ownership is moving cluster-side** (`docs/decisions/2026-08-21`, issue #39, S2 landed for skills). The design must work per-machine now and migrate cleanly to cluster rows later (policy as data, not as machine-local law).
 5. **Everything ingestible passes the scan gate and never auto-promotes trust.** Auto-update must keep this intact — no `--accept-risk` override in automatic paths.
 6. **Repo doc/CLI conventions**: updates stay reachable via the CLI (top-level `packages` namespace fits the convention); docs are English-only; per-machine verbs are top-level without a scope marker.
 7. **Disk discipline.** Any mirror/rollback retention must be bounded (the fleet runs on pet machines; macmini disk discipline is an explicit standing rule).
@@ -255,7 +255,7 @@ Rules:
 **Axes (v3 — commit-date axis, chosen over a hand-maintained `pyproject` number; see the decision record).**
 - **Host version = derived from the commit, never hand-maintained.** The version the gates compare against is `YYYY.M.D` (commit date of the running build; display adds the short SHA, e.g. `2026.9.11+gabc1234`). It always exists on every machine (the commit identity is already recorded — `installed_sha` / `running_sha`), it advances automatically, and it needs no release process and no bump discipline. Assessment of the alternatives:
   - *Static `pyproject.toml` `[project].version`* (v2's anchor) — vestigial in this repo: `0.1.5`, frozen since the initial public release, read by nothing in the deploy path (rollouts pin commits). Rejected as the gate source.
-  - *The dated release tags* (`vX.Y.Z-YYYYMMDD[-HHMM]`; the cutting and parsing tooling is removed, and no update targets them: `cli/fleet_update.py` switches every unit to the SHA it is given) — the intended long-term human-facing release identity, and the same *date* axis this model uses. But the cadence is deleted ([decision](../../decisions/2026-10-03-delete-dated-release-tag-cadence.md); last dated tag 2026-08-08; nothing pushed to origin — Ava's releases are manual milestones v0.2…v0.7). So the gate must not depend on it: commit date is always derived, and when a dated release exists its date agrees with the commit date by construction.
+  - *The dated release tags* (`vX.Y.Z-YYYYMMDD[-HHMM]`; the cutting and parsing tooling is removed, and no update targets them: `cli/fleet_update.py` switches every unit to the SHA it is given) — the intended long-term human-facing release identity, and the same *date* axis this model uses. But the cadence is deleted ([decision](../../docs/decisions/2026-10-03-delete-dated-release-tag-cadence.md); last dated tag 2026-08-08; nothing pushed to origin — Ava's releases are manual milestones v0.2…v0.7). So the gate must not depend on it: commit date is always derived, and when a dated release exists its date agrees with the commit date by construction.
   - *Pure calendar version in `pyproject`* (e.g. `2026.9.11`) — mechanically fine, but it re-introduces the hand-maintenance rejected above; the derived form needs no file edit at all.
 - **Precision layer — commit ancestry.** Anything that must be exact ("needs the commit that added X") declares `requires_commit: "<sha>"`; the host passes iff its commit contains it (`git merge-base --is-ancestor` against the recorded SHA). Zero discipline, exact within a day. Day-level date granularity plus this layer covers everything: text (skills) can live on the date axis; executable content (plugins) uses both.
 - **Package version** — the semver `version` in a package manifest; recorded per package for status and rollback reasoning (core content may set it to the date of its last change; not load-bearing).
@@ -279,7 +279,7 @@ Rules:
 - Core content that depends on a fresh kernel capability declares `requires_commit` (the merge that introduced it) — mechanical, no bump, no CI-side bookkeeping.
 - Date-axis ranges (`engines.ava`) remain for third-party content, which targets *released* Ava versions; they compare against the derived host version.
 - CI keeps one check: a declared `requires_commit` must be an ancestor of the merge (a typo'd or future SHA is red).
-- Separate observation (flagged 2026-09-11): the dated release pipeline was dormant and has since been deleted ([decision](../../decisions/2026-10-03-delete-dated-release-tag-cadence.md)). If a release identity returns, released commits gain a first-class human version and third-party ranges get their natural reference points — that is a release-process decision, not a dependency of this design.
+- Separate observation (flagged 2026-09-11): the dated release pipeline was dormant and has since been deleted ([decision](../../docs/decisions/2026-10-03-delete-dated-release-tag-cadence.md)). If a release identity returns, released commits gain a first-class human version and third-party ranges get their natural reference points — that is a release-process decision, not a dependency of this design.
 
 **Edge cases.**
 - Host rollback (the version moves backwards): the load gates catch it; status explains; `ava packages rollback` recovers content.
@@ -307,7 +307,7 @@ Rules:
 2. **Converge seeding stays as-is (bootstrap-only)** for machines that have never channeled: the checkout copy remains the seed for fresh installs and for wheel-mode. Once a package is channel-managed, the channel is the writer.
 3. **The source-tree guard is untouched.** Content lives in `$AVA_HOME` data dirs; the checkout is never a content destination. This is also why the submodule candidate is rejected.
 4. **S2 cluster rows (issue #39) are the migration target, not a competitor.** P1 keeps machine-local channel state (works today, zero DB dependency). When S4 lands (plugins as cluster rows), the policy fields become cluster columns and the machine executor only materializes + fetches locally; the refresh pass keeps its interface ("make this machine match the policy").
-5. **Wheel-mode**: the retained-image update path that served it was removed (`decisions/2026-09-30-remove-release-image-path.md`); every unit runs from its source checkout, so P2 targets checkout-mode deployments only.
+5. **Wheel-mode**: the retained-image update path that served it was removed (`docs/decisions/2026-09-30-remove-release-image-path.md`); every unit runs from its source checkout, so P2 targets checkout-mode deployments only.
 6. **Dev worktree clusters**: OS job registration is per-home; dev homes follow their existing converge behavior (and tests switch jobs off globally).
 7. **Disk**: bounded retention — keep exactly one previous tree per package for rollback (`$AVA_HOME/…/.<name>.prev`, dot-prefixed and discovery-ignored), prune on next successful apply; no unbounded mirror growth (objects fetched into `.git` are the checkout's own repo growth, managed by existing gc).
 
@@ -323,7 +323,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 ### P0 — schema and read-only surface (no behavior change) — **landed: PR #2355**
 - Registry schema v2: `UpdateState` / `ChannelState` fields, lazy migration (retired, batch b5 2026-09-20: a v1 file is refused), defaults resolution from settings (`base/config/domains/packages.py`: per-class default mode/interval, base tick, master switch).
 - `ava packages status` (read-only) + `--json` — including the host version and each package's declared range (§5.5).
-- Version plumbing: optional manifest support for skill packages; the core-content CI check (declared ranges must include the repo's current version); the derived host-version policy recorded in [`conventions/host-versioning.md`](../../conventions/host-versioning.md) (no bump discipline; `[project].version` remains only as the wheel-mode fallback).
+- Version plumbing: optional manifest support for skill packages; the core-content CI check (declared ranges must include the repo's current version); the derived host-version policy recorded in [`docs/conventions/host-versioning.md`](../../docs/conventions/host-versioning.md) (no bump discipline; `[project].version` remains only as the wheel-mode fallback).
 - Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/extensions/docs/packages.ava.okf.md`, and the `ava-modification-layers` / `develop-a-plugin` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
 - Acceptance at landing: v1 file loads, migrates on next write, defaults visible in status; no behavior change elsewhere (test lock: registry round-trip + migration) — the v1 leg later retired, batch b5 2026-09-20: v1 files are refused.
 
@@ -386,7 +386,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 
 ## 9. Decisions and defaults
 
-**All three decision points ruled 2026-09-13 (option A each; recorded in [`decisions/2026-09-13-core-package-update-channel.md`](../../decisions/2026-09-13-core-package-update-channel.md)):**
+**All three decision points ruled 2026-09-13 (option A each; recorded in [`docs/decisions/2026-09-13-core-package-update-channel.md`](../../docs/decisions/2026-09-13-core-package-update-channel.md)):**
 1. **Activation** = natural process boundaries only (§5.4 rule 3).
 2. **Host version** = commit-date-derived + `requires_commit` precision layer (§5.5 v3). The dormant dated-release pipeline stays out of this design — reviving it remains a separate candidate work item.
 3. **P2 timing** = scheduled after P1.
@@ -400,15 +400,15 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Builtin skill sync (bootstrap-only, missing copies): `cli/commands/converge/host.py:_converge_skills_step` -> `cli/commands/extensions/skills_sync.py:converge_skills` (superseded the pre-unified-lifecycle updater's `_update_local`/`_update_agent_runner` rollout legs).
 - Registry model: `base/packages/extensions/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
 - Plugin discovery + loaders: `base/packages/plugins/enable_config.py:discover_plugins`, `agent/extensions/__init__.py:load_extensions`, `base/lm/plugin_providers.py`; roots: `base/paths/__init__.py:repo_plugins_dir/plugins_dir`, `base/deploy/release/runtime_interpreter.py:external_plugin_read_root`.
-- Manifest/engines gate: `base/packages/plugins/manifest.py` (`host_version_from_repo`, `check_host_engine`), `conventions/plugin-spec-v2.md`.
+- Manifest/engines gate: `base/packages/plugins/manifest.py` (`host_version_from_repo`, `check_host_engine`), `docs/conventions/plugin-spec-v2.md`.
 - OS jobs: `base/host/system/cron.py` (5-min health tick as the registrar template), `cli/commands/converge/_os_jobs.py`, `AVA_OS_JOBS_ENABLED`.
 - Update coordination: the per-home flock and objects-only fetch in `cli/commands/extensions/packages_refresh.py`; `base/deploy/git/source_tree_guard.py` (tamper detection, alert-only).
-- Extension ownership S1/S2: `decisions/2026-08-21-extension-ownership-three-tiers.md`, `future/infra/extension-ownership.md`, `base/packages/extensions/registry.py`, `base/packages/extensions/materialize.py`.
-- Four-layer model / builtin-plugin ruling: `decisions/2026-08-19-four-layer-modification-model.md` (revised in part: builtin plugins stay *authored* in the kernel but are *delivered* via the content channel).
+- Extension ownership S1/S2: `docs/decisions/2026-08-21-extension-ownership-three-tiers.md`, `future/infra/extension-ownership.md`, `base/packages/extensions/registry.py`, `base/packages/extensions/materialize.py`.
+- Four-layer model / builtin-plugin ruling: `docs/decisions/2026-08-19-four-layer-modification-model.md` (revised in part: builtin plugins stay *authored* in the kernel but are *delivered* via the content channel).
 - Historical incident class: skill edit merged to main, runtime stale for two days (2026-08-27). R5 background: task #1013.
 - Plugin load-context incidents (2026-08-28: a relative import crashed under a top-level exec; 2026-09-10: a hand-placed plugin stopped agent starts). The pause they triggered was lifted 2026-09-11 10:06; the standing red line: never hand-place code into a production load path.
 - Loader unification (the current contract): `okf/plugins/module-loading/module-loading.ava.okf.md` + `okf/plugins/module-loading/fail-closed-boundaries.ava.okf.md`; task #2985 (done 2026-09-11; PRs #2201, #2206) — one contract for boot + graph build, `plugins.<name>` namespace chain for external plugins, fail-soft containment on every load site.
-- Host version evidence: `pyproject.toml` `[project].version = 0.1.5`, set at the initial public release and never changed since (deploys pin commits; nothing reads it in the deploy path). Release machinery (dated tags `vX.Y.Z-YYYYMMDD[-HHMM]`, daily/weekly cut) was dormant at the time and is now deleted ([decision](../../decisions/2026-10-03-delete-dated-release-tag-cadence.md)); no setting or update path selects a dated tag — last dated tag 2026-08-08; origin carries no dated tags; recent releases were manual milestones (v0.2…v0.7).
+- Host version evidence: `pyproject.toml` `[project].version = 0.1.5`, set at the initial public release and never changed since (deploys pin commits; nothing reads it in the deploy path). Release machinery (dated tags `vX.Y.Z-YYYYMMDD[-HHMM]`, daily/weekly cut) was dormant at the time and is now deleted ([decision](../../docs/decisions/2026-10-03-delete-dated-release-tag-cadence.md)); no setting or update path selects a dated tag — last dated tag 2026-08-08; origin carries no dated tags; recent releases were manual milestones (v0.2…v0.7).
 
 ## Appendix B — worked example (the P1 acceptance narrative)
 

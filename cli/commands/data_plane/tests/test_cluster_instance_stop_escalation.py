@@ -3,7 +3,7 @@
 `stop_cluster_instance` serves `ava stop --force` (via `_stop_data_plane`) and
 `ava cluster instance stop`. Neither owns a stop journal, but both must still be
 loud: stderr plus the `postgres_stop_escalated` event
-(decisions/2026-10-02-pg-stop-escalates-to-immediate.md).
+(docs/decisions/2026-10-02-pg-stop-escalates-to-immediate.md).
 """
 
 from __future__ import annotations

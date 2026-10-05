@@ -68,7 +68,7 @@ of serving ops under a stale `stopped` marker. `up_since_at` is a boot/announce
 stamp, not a heartbeat — the name it earned in #981, after `last_seen_at` had spent
 its life promising a heartbeat these tables have never had; liveness is the live
 `status_probe`
-([why](../../../decisions/2026-07-29-liveness-is-written-by-the-live-process.md)).
+([why](../../../docs/decisions/2026-07-29-liveness-is-written-by-the-live-process.md)).
 
 Cross-machine spawn is a direct dial, not a queue: after committing the row and
 first prompt, the gateway POSTs a `spawn-launch-v2` op to the target runner's ops
@@ -87,7 +87,7 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
 
 - Any endpoint returning or fanning out per-machine data must declare its
   role scope; the classification rule is in
-  `conventions/python-conventions.md`.
+  `docs/conventions/python-conventions.md`.
 - Enrolling a split runner (`ava start`) does not birth a cluster — its cluster
   identity **is** the gateway URL + the capability bundle it installed.
 - `gateway_auth_headers` presents `gateway_bearer()`: this process's delivered machine

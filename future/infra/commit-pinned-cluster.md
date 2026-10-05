@@ -2,7 +2,7 @@
 
 > **Status: superseded. Both increments and the drift response were retired by
 > the unified cluster lifecycle rework
-> ([`../infra/unified-cluster-lifecycle.md`](../infra/unified-cluster-lifecycle.md));
+> ([`../infra/unified-cluster-lifecycle.md`](unified-cluster-lifecycle.md));
 > what remains open is re-litigated against that model, not this one.**
 >
 > - **Increment A (persist + visualize) — superseded.** Nothing writes
@@ -24,7 +24,7 @@
 >   `ops/controllers/` in the old in-place updater's removal; nothing
 >   force-updates or flags a node against the pin any more.
 > - **Still not built:** the *hard* half — a drifted node **refusing work**. But
->   [`2026-07-19-fail-fast-vs-reconcile-boundary.md`](../../decisions/2026-07-19-fail-fast-vs-reconcile-boundary.md)
+>   [`2026-07-19-fail-fast-vs-reconcile-boundary.md`](../../docs/decisions/2026-07-19-fail-fast-vs-reconcile-boundary.md)
 >   classifies pin drift as **world drift → reconcile toward spec** (no learner in
 >   the causal chain, and a refusal converts drift into an outage), which is the
 >   opposite posture from the one this doc argues for. So the open question is no
@@ -34,9 +34,9 @@
 > The down-migration foundation this rests on (`apply_down` / `rollback_to`, #687)
 > was removed: it had no production caller, and schema mistakes are fixed forward
 > — see
-> [`../../decisions/2026-10-02-no-down-migrations.md`](../../decisions/2026-10-02-no-down-migrations.md).
+> [`../../decisions/2026-10-02-no-down-migrations.md`](../../docs/decisions/2026-10-02-no-down-migrations.md).
 > The rationale for pinning at all is the
-> [`philosophy.md`](../../conventions/philosophy.md) "strong invariant over managed
+> [`philosophy.md`](../../docs/conventions/philosophy.md) "strong invariant over managed
 > ambiguity" thread. Triggered by the 2026-06-01 self-upgrade incident.
 
 ## Today: schema-level consistency

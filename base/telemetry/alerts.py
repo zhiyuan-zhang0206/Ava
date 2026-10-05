@@ -4,7 +4,7 @@ Alert is fully separate from Notice (Task #1224, user design 2026-08-12: own
 table, own UI, own IM channel), and there is one way in: the gateway router
 (gateway/alerts/router.py) ingests the Grafana embedded-Alertmanager webhook
 on ``POST /api/alerts``. Every rule, grouping, repetition and window silence
-is Grafana's (decisions/2026-10-04-alerting-on-grafana-alerting.md); no other
+is Grafana's (docs/decisions/2026-10-04-alerting-on-grafana-alerting.md); no other
 process writes the ``alerts`` table or pushes an alert to IM.
 
 The functions take the Alertmanager webhook *alert shape as a plain dict*

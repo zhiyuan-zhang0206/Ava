@@ -6,7 +6,7 @@ built by hand (see "Run results" under Recipe C), and the Tart clone-inheritance
 experiment (Experiment B, below) has run. The golden-image build script has run only as
 `--dry-run` and under test.** This is slice 6 of
 [one cluster per host](one-cluster-per-host.md); the ruling and its reasons are in
-[one cluster per host](../../decisions/2026-09-30-one-cluster-per-host.md). The native
+[one cluster per host](../../docs/decisions/2026-09-30-one-cluster-per-host.md). The native
 local preview is deleted. This doc says what replaces it: which isolation boundaries
 exist, what each one can prove, how a cluster is born and destroyed inside each, what
 the container run showed, and which questions are still open.
@@ -104,7 +104,7 @@ every step and every observer check passed and the container is gone.
   converge registers no cron, boot or logs jobs.
 - **Data plane is native inside the container**, as everywhere; this is the opposite of
   the retired compose data plane
-  ([decision](../../decisions/2026-09-28-retire-windows-docker-compose.md)). Postgres
+  ([decision](../../docs/decisions/2026-09-28-retire-windows-docker-compose.md)). Postgres
   keeps shared memory in mmap files under its data directory
   (`base/cluster/dataplane/pg_tools.py`).
 

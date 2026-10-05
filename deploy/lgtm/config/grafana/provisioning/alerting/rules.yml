@@ -41,7 +41,7 @@
 # counts as "too much CPU" depends on box specs and co-tenancy (a PyTorch job
 # legitimately saturates a machine). They live here, as rule config an
 # operator edits, and the response to a firing instance is the
-# cluster-operator agent's judgment — see conventions/runbook.md, "The
+# cluster-operator agent's judgment — see docs/conventions/runbook.md, "The
 # operator's SRE loop".
 #
 # Index-label selectors (task #1467): since the 2026-08-23 cutover

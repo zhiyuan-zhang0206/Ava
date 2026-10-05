@@ -42,7 +42,7 @@ is literally a gen-2 work item — see "Repo issues are the gen-2 work queue".)
 
 ## Why this does NOT wait on the sandbox fuse (a fence to split)
 
-[`non-goals.md`](../../conventions/non-goals.md) fences *"Self-evolution: agent modifies `ava.*` /
+[`non-goals.md`](../../docs/conventions/non-goals.md) fences *"Self-evolution: agent modifies `ava.*` /
 system prompt / policy files"* behind *"evaluation harness lands first; without
 evals, no go,"* and the sandbox item gates on *"agent starts modifying its own
 code."* Read literally that lumps two very different targets under one fuse.

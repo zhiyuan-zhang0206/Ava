@@ -11,7 +11,7 @@ class TransportEncryptionUndeclared(RuntimeError):  # noqa: N818 — public exce
         super().__init__(
             "An authenticated cluster serving off-box must declare "
             "AVA_TRANSPORT_ENCRYPTION as one of: tls, mtls, overlay. See "
-            "conventions/runbook.md#transport-encryption."
+            "docs/conventions/runbook.md#transport-encryption."
         )
 
 

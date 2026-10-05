@@ -21,7 +21,7 @@ top-level `tests/` ([[scripts/lint/docs/tests-location.ava.okf.md]]).
 sibling module in the same package that is never called from the gate: its
 two metrics need a rolling window of git history and judgement to turn a
 signal into a fix, which is sweeper territory under
-`conventions/lint-vs-sweeper.md`'s graduation test, not a lint's.
+`docs/conventions/lint-vs-sweeper.md`'s graduation test, not a lint's.
 
 ## `cochange.py`
 

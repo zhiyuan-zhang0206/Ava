@@ -116,5 +116,5 @@ apply; it does not promise the normal drain's continuation guarantee.
 safety for a failed arbitrary external effect. A stop that failed past the drain
 is retried with `ava stop`, or finished with `ava start`.
 
-See [operator procedure](../../../../conventions/graceful-maintenance.md) for
+See [operator procedure](../../../../docs/conventions/graceful-maintenance.md) for
 resource scopes, recovery and the first-deployment limitation.

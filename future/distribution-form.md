@@ -61,4 +61,4 @@ stranger clone and run*:
   **unlocked** GUI session (synthetic input / capture are dropped on a locked
   screen).
 - Windows hardware uses the Linux lifecycle in WSL2; a native Windows root
-  adapter remains unavailable ([setup](../conventions/windows-setup.md)).
+  adapter remains unavailable ([setup](../docs/conventions/windows-setup.md)).

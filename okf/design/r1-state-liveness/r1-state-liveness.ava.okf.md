@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "R1 — State & Liveness (explicit model)"
-description: "Planned concept model (v3.3, awaiting user): deployment state becomes two explicit tables, liveness becomes leases, the event stream returns to pure facts, migrations get a single applier. Final state of a Big Bang migration. (The watcher-registry piece of this plan shipped, then was reversed 2026-09-27 — decisions/2026-09-27-watchers-are-never-restarted.md; watchers are not part of this frame any more.)"
+description: "Planned concept model (v3.3, awaiting user): deployment state becomes two explicit tables, liveness becomes leases, the event stream returns to pure facts, migrations get a single applier. Final state of a Big Bang migration. (The watcher-registry piece of this plan shipped, then was reversed 2026-09-27 — docs/decisions/2026-09-27-watchers-are-never-restarted.md; watchers are not part of this frame any more.)"
 tags:
 - design
 - planned
@@ -13,7 +13,7 @@ tags:
 
 > Design lead #2861 · design concept v3.3 (2026-08-07) · **design-phase node — the current system is NOT this; see the as-is nodes linked at the bottom.**
 
-> **As landed:** the cluster deploy lease and the per-host updater lease described below were retired with the in-place updater ([decision](../../../decisions/2026-09-30-remove-deployment-lease.md)). `host_deploy_state` is `machine`, the `idle`/`paused` posture and `updated_at`, and `deployment_state` is `id` plus the code-version gate's `min_code_version` ([decision](../../../decisions/2026-10-01-contract-the-retired-deploy-storage.md)). The `stable` / `updating` / `settling` phases, the settle note and `recover` do not exist; agent leases (`agents_meta.lease_expires_at`) landed as designed, and the agent state machine has three states (`restarting` was retired).
+> **As landed:** the cluster deploy lease and the per-host updater lease described below were retired with the in-place updater ([decision](../../../docs/decisions/2026-09-30-remove-deployment-lease.md)). `host_deploy_state` is `machine`, the `idle`/`paused` posture and `updated_at`, and `deployment_state` is `id` plus the code-version gate's `min_code_version` ([decision](../../../docs/decisions/2026-10-01-contract-the-retired-deploy-storage.md)). The `stable` / `updating` / `settling` phases, the settle note and `recover` do not exist; agent leases (`agents_meta.lease_expires_at`) landed as designed, and the agent state machine has three states (`restarting` was retired).
 
 ## Problem in one sentence
 
@@ -40,7 +40,7 @@ tags:
 
 ### Liveness: registry × lease, one mechanism, many objects
 
-The registry×lease frame for every managed object and the single `alive` predicate: [[okf/design/r1-state-liveness/liveness.ava.okf.md]] (watchers were pulled back out of this frame 2026-09-27 — decisions/2026-09-27-watchers-are-never-restarted.md).
+The registry×lease frame for every managed object and the single `alive` predicate: [[okf/design/r1-state-liveness/liveness.ava.okf.md]] (watchers were pulled back out of this frame 2026-09-27 — docs/decisions/2026-09-27-watchers-are-never-restarted.md).
 
 ### Agent state machine: one matrix
 

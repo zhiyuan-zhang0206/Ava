@@ -7,7 +7,7 @@ Run: `.venv/bin/python scripts/structure/cochange.py [--days N | --commits N]
 This is a sweeper tool (`.agents/skills/ava-sweeper/SKILL.md`, debt class
 "locality (whole-repo)"), not a pre-commit gate: it reports on debt that
 accumulates across many commits with no single owner or door, which
-`conventions/lint-vs-sweeper.md`'s graduation test puts on the sweeper side —
+`docs/conventions/lint-vs-sweeper.md`'s graduation test puts on the sweeper side —
 detection needs a rolling window of history and the fix needs judgement, so
 neither half of the lint test holds. It always exits 0 on a successful scan
 (an index, not a wall) and reuses `scripts.structure.locality._package_of`

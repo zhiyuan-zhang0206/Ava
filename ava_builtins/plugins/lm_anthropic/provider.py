@@ -211,7 +211,7 @@ PROVIDER = ProviderContribution(
             tuning=ModelTuning(
                 # Pinned 2026-08-01 (user decision, task #568): the picker must
                 # show a concrete default, and Anthropic documents `high` as this
-                # family's default effort (decisions/2026-07-25-per-model-
+                # family's default effort (docs/decisions/2026-07-25-per-model-
                 # tuning-values.md Decision 4; "" is exactly equivalent to omitting
                 # the parameter, whose default is high). NOT the ladder floor.
                 reasoning_effort="high",

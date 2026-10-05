@@ -3,7 +3,7 @@
 Use this to recover the database from the WAL-G physical backup (to a time, an LSN or
 the end of the archive), or to read the weekly drill's result. The logical dump is a
 separate path: [`db-restore.md`](db-restore.md). Operator detail and the alert texts:
-`conventions/runbook.md`, "WAL-G archiving". Never restore into a live data directory.
+`docs/conventions/runbook.md`, "WAL-G archiving". Never restore into a live data directory.
 
 ## Read the drill first
 

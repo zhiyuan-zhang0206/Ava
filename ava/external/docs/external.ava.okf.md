@@ -61,4 +61,4 @@ Peer messages carry the same borrowed identity: `ava impersonate send
 `agent:<agent_id>` (task #4102).
 
 The usage procedure and CLI commands live in
-[External agent impersonation](../../../conventions/agent-impersonation.md).
+[External agent impersonation](../../../docs/conventions/agent-impersonation.md).

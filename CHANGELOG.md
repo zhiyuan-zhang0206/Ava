@@ -22,7 +22,7 @@ and the matching GitHub Releases.
   INFO) and the agent db pool reports a slow borrow after
   `AVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS` (default 10s, was 3s).
 - Alert notification is Grafana Alerting's alone
-  ([decision](decisions/2026-10-04-alerting-on-grafana-alerting.md)): signal ->
+  ([decision](docs/decisions/2026-10-04-alerting-on-grafana-alerting.md)): signal ->
   rule (`for:` is the debounce) -> notification policy (grouping, repeat) ->
   the webhook into the gateway's `POST /api/alerts` ingest -> IM. The health
   probe, the machine/station liveness pass, the exec boot failure, the
@@ -47,12 +47,12 @@ and the matching GitHub Releases.
   stop`, `ava restart`, an update, a service crash and a reboot end every session, and `ava stop`
   and `ava restart` notify the owners of busy ones. A shell's base environment is the service's
   plus the forwarded env, so a variable only the creating process held is not carried over
-  ([decision](decisions/2026-10-03-pty-sessions-service.md)).
+  ([decision](docs/decisions/2026-10-03-pty-sessions-service.md)).
 - Owners of busy shells are also told when a `pty-sessions` service dies uncleanly (a crash, a
   SIGKILL, a reboot): the next service start, or an `ava stop` that finds no service, writes a
   notice for each session the ledger last saw running a job. A database that cannot be reached
   only logs
-  ([decision](decisions/2026-10-04-pty-crash-notices.md)).
+  ([decision](docs/decisions/2026-10-04-pty-crash-notices.md)).
 
 - `ava start` settles a maintenance hold's failed continuation receipts instead of refusing
   to run: once the unit serves, each failed agent's restart pointer is re-delivered with the
@@ -60,48 +60,48 @@ and the matching GitHub Releases.
   row plus IM push), and the hold releases. `ava start` is also the exit for a hold that never
   stopped services. `ava status` prints the maintenance hold, and `ava status --json` prints
   only it as one JSON object (`{"hold": {...}}`)
-  ([decision](decisions/2026-10-04-delete-ava-maintenance.md)).
+  ([decision](docs/decisions/2026-10-04-delete-ava-maintenance.md)).
 
 ### Removed
 - `ava maintenance` in full (`status`, `repair`, `cancel`), with `repair`'s operator-identity
   record in the hold journal (`repaired`, `repair_record`; a journal that carries them still
   reads) and the agent-host absence probe only it used
-  ([decision](decisions/2026-10-04-delete-ava-maintenance.md)).
+  ([decision](docs/decisions/2026-10-04-delete-ava-maintenance.md)).
 - Zero-effect CLI surfaces: `restart --force-reap` (identical to `--mode force`), the
   unreachable `boot` lite-verbs entry, the `mcp ls` / `plugins ls` aliases, the no-op
   `stop --stop-browser`, and `cluster health-probe`'s `--agent-min` /
   `--crash-loop-max-restarts` / `--crash-loop-window-minutes` plus
   `health-probe-register --interval` — the defaults are the contract and the config keys
   stay; the flags now fail at argument parsing
-  ([decision](decisions/2026-10-03-deletion-sweep.md)).
+  ([decision](docs/decisions/2026-10-03-deletion-sweep.md)).
 - Four read endpoints with no consumer: `GET /api/agents/{id}/activity` (its writer went
   with `ava.self.log` in 2026-08-02; the `agent_activity` table drops separately — the
   "remain (history)" note in the notice-SDK-slimming decision is overturned),
   `GET /api/agents/{id}/completion-notice-policy`, and `GET /api/notices/escalations` /
   `GET /api/notices/resolved` (the unified `GET /api/notices` feed carries the resolved
-  page) ([decision](decisions/2026-10-03-deletion-sweep.md)).
+  page) ([decision](docs/decisions/2026-10-03-deletion-sweep.md)).
 - The Loki read side in `base/telemetry/loki_index_labels.py` (`event_stream_selector`,
   `archive_stream_selector`, `split_index_label_window`, `ledger_gap_plan`,
   `retention_floor`, the read-era/slice/plan types) and `INDEX_LABEL_CUTOVER_AT`: the last
   Loki event readers went in the telemetry-readers-on-postgres move
-  ([decision](decisions/2026-10-03-deletion-sweep.md)).
+  ([decision](docs/decisions/2026-10-03-deletion-sweep.md)).
 - The mcp-daemon pre-rename compatibility (the `ava._mcps_daemon` argv arm): a
   four-machine process census shows no pre-rename process left
-  ([decision](decisions/2026-10-03-deletion-sweep.md)).
+  ([decision](docs/decisions/2026-10-03-deletion-sweep.md)).
 - The `AVA_RUNNER_MODE` setting in the visual-baselines workflow and the lazy-import
   tests' clean-env strips: nothing reads it
-  ([decision](decisions/2026-10-03-deletion-sweep.md)).
+  ([decision](docs/decisions/2026-10-03-deletion-sweep.md)).
 - `ava maintenance prepare`, `drain`, `stop`, `start`, `resume` and `stop-data-plane`, with
   `--keep-terminals` and `--gateway-last`: the same kernel as `ava stop` and `ava start`, taken
   one step at a time, with no caller. `ava maintenance` kept `status`, `repair` and `cancel`
   (formerly `resume --cancel`) until it was deleted whole
-  ([decision](decisions/2026-10-03-delete-manual-maintenance-verbs.md)).
+  ([decision](docs/decisions/2026-10-03-delete-manual-maintenance-verbs.md)).
 - The per-session pty hosts with their records, orphan reaper, envfile handoff and CLI transport,
   `ava restart` no longer keeps shells; the generic `--keep-service pty-sessions` does.
 - `ava pause`: a stop that kept the data plane, browser, helper and persistent shells.
   `ava stop --keep-infra --keep-service NAME` names the retained services, and `ava
   restart` keeps the data plane, browser and helper as before
-  ([decision](decisions/2026-10-03-delete-ava-pause.md)).
+  ([decision](docs/decisions/2026-10-03-delete-ava-pause.md)).
 - Port-block allocation and the start-time port scan and `.env` drift check:
   every home records one fixed port table (25 slots,
   `base/host/env/port_table.py`) at birth, and the health-port-base start option
@@ -112,22 +112,22 @@ and the matching GitHub Releases.
   finite executor, the fleet coordinator, write-generation rotation by rollout,
   PITR activation and their CI workflows) and the `shared/` release-probe shell.
   A cluster is updated from source with `python -m cli.fleet_update`
-  ([decision](decisions/2026-09-30-remove-release-image-path.md)).
+  ([decision](docs/decisions/2026-09-30-remove-release-image-path.md)).
 - The update straggler reap: a drain that truncated and released an agent still
   in a long turn, with its `reaped` hold receipts, settle-at-boot, four events
   and the `AVA_UPDATE_STRAGGLER_REAP_SECONDS` and
   `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` settings. A stop still never kills a
   straggler; it waits out `--timeout` and the operator escalates with `--force`
-  ([decision](decisions/2026-09-30-remove-straggler-reap.md)).
+  ([decision](docs/decisions/2026-09-30-remove-straggler-reap.md)).
 - The managed-writer publication fence (`base/deploy/writers/`): hosted admission
   no longer locks `deployment_state` or defers a birth on its phase, and always
-  advertises protocol zero ([decision](decisions/2026-09-30-remove-publication.md)).
+  advertises protocol zero ([decision](docs/decisions/2026-09-30-remove-publication.md)).
 - The cluster deploy lease (`base.deploy.state.cluster_lock`), `ava cluster
   recover`, the roster's `deploy_hold` field and banner, and the lease readers in
   the deploy window, heartbeat, log sink, package refresh and `ava stop`. A
   stranded pause is read with `ava maintenance status` and ended with
   `ava maintenance cancel` or `repair`; an unreadable journal is removed
-  by hand ([decision](decisions/2026-09-30-remove-deployment-lease.md)).
+  by hand ([decision](docs/decisions/2026-09-30-remove-deployment-lease.md)).
 
 ### Changed
 - `lint_ava_okf` no longer reports `[[wikilinks]]` quoted inside inline code spans or
@@ -234,7 +234,7 @@ and the matching GitHub Releases.
   verbs, display bounds, safe-mode switches) now carry their reasons behind
   a `task #4092 cli-default inventory` marker; the discipline and the
   inventory entry point are documented in
-  `conventions/cli-argument-discipline.md`.
+  `docs/conventions/cli-argument-discipline.md`.
 - CLI parameter discipline, batch B3 (task #4092): `mcp add` requires exactly
   one of `--json` / `--command` and validates both at the parse layer (bad or
   non-object JSON, a `--env` pair without `=`, and `--arg`/`--env` without

@@ -108,10 +108,10 @@ PROVIDER = ProviderContribution(
             # asymmetry is more likely an artifact of the timeouts this commit
             # fixes: the streaming path was killed by a 30s TTFT while the
             # non-streaming fallback got 600s. See
-            # decisions/2026-07-25-per-model-tuning-values.md.
+            # docs/decisions/2026-07-25-per-model-tuning-values.md.
             tuning=ModelTuning(
                 # Pinned 2026-08-01 (task #568): Moonshot documents K3's default
-                # effort as `max` (decisions/2026-07-25-per-model-tuning-
+                # effort as `max` (docs/decisions/2026-07-25-per-model-tuning-
                 # values.md Decision 4).
                 reasoning_effort="max",
                 # Moonshot's rate limits are account-wide across every key AND every

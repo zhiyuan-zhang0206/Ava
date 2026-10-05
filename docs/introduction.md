@@ -17,7 +17,7 @@ the fleet update script (`python -m cli.fleet_update`).
 The core is deliberately small. From day one every layer is built asking *can
 this scaffolding be stripped once the model is strong enough to not need it?* —
 so the stronger the model gets, the less of Ava there is. (The design thread is
-in [`conventions/philosophy.md`](../conventions/philosophy.md).)
+in [`docs/conventions/philosophy.md`](conventions/philosophy.md).)
 
 ---
 
@@ -41,7 +41,7 @@ units start again. An update is an attended, full-cluster outage by design,
 and it never rolls back on its own: a failure stops the half, the operator
 fixes the cause and reruns it — each half is idempotent.
 
-→ [Why: self-rolling release](../decisions/2026-05-09-self-rolling-release.md)
+→ [Why: self-rolling release](decisions/2026-05-09-self-rolling-release.md)
 
 ### 2. CodeAct — one tool, the whole Python namespace
 
@@ -66,7 +66,7 @@ research goal into three waves of 18 workers by itself — wave split,
 checkpoint placement, and model tiering were all its own choices — and the
 orchestrator was woken only six times.
 
-→ [Why a single tool](../decisions/2026-05-04-single-execute-code-tool.md)
+→ [Why a single tool](decisions/2026-05-04-single-execute-code-tool.md)
 
 ### 3. Fleet — a graph of peers, not a chain
 
@@ -125,7 +125,7 @@ form a cluster**. Authentication is always on and fail-closed. macOS, Linux,
 and Windows are all supported — Windows joins natively as an agent-runner, no
 WSL, no Docker. A single box is just the N=1 case: no flag, no opt-in.
 
-→ [How multi-machine deployment works](../decisions/2026-06-11-multihost-deployment.md)
+→ [How multi-machine deployment works](decisions/2026-06-11-multihost-deployment.md)
 
 ### 7. Plugins — typed extension points in the runtime
 
@@ -189,7 +189,7 @@ ten-product × fifteen-dimension matrix with per-cell evidence:
 The gateway `/mcp` endpoint exposes the cluster's control plane as an MCP server over
 Streamable HTTP, so a coding agent can run the fleet: start agents, message them,
 read what they did, stop them. Create a client token and register it once
-(setup: [`conventions/mcp-client-access.md`](../conventions/mcp-client-access.md)) —
+(setup: [`docs/conventions/mcp-client-access.md`](conventions/mcp-client-access.md)) —
 
 ```bash
 claude mcp add --transport http ava http://<gateway-host>/mcp \
@@ -274,7 +274,7 @@ supervision surface — plus chat channels (e.g. X, via `ava mcp install`)
 for talking to individual agents. An always-on fleet's state (many concurrent
 agents, the spawn/fork/message graph, task tracking) doesn't compress into a
 terminal's single-pane model without losing most of what supervision needs;
-see [`conventions/non-goals.md`](../conventions/non-goals.md).
+see [`docs/conventions/non-goals.md`](conventions/non-goals.md).
 
 ### Deployment footprint & memory
 
@@ -282,7 +282,7 @@ Postgres, Redis and LangGraph checkpoints retain durable agent context. One
 `agent-host` daemon runs local agents as asyncio tasks; idle has no active task.
 Bounded caches may retain model/runtime objects. Disposable execution children
 and persistent PTY shells have their own resource lifetimes. Full verified breakdown:
-[`conventions/runbook.md#deployment-footprint--memory`](../conventions/runbook.md#deployment-footprint--memory).
+[`docs/conventions/runbook.md#deployment-footprint--memory`](conventions/runbook.md#deployment-footprint--memory).
 
 ---
 
@@ -291,7 +291,7 @@ and persistent PTY shells have their own resource lifetimes. Full verified break
 Ava does not sandbox model-authored code. `execute_code` runs the agent's
 generated Python in a disposable subprocess on the host, with the
 permissions of whichever user started it. The `before_exec` hook
-([`demos/permission-hooks/`](../demos/permission-hooks/)) can intercept dangerous
+([`demos/permission-hooks/`](../demos/permission-hooks)) can intercept dangerous
 patterns before they run, but it is a mitigation layer, not a boundary.
 
 The isolation Ava relies on is **where you deploy the cluster** — a dedicated
@@ -311,7 +311,7 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 | Cache | Redis 8.2 |
 | Framework | LangGraph (8-node self-looping graph) |
 | SDK | `ava` (this repo) |
-| Models | 8 providers side by side (DeepSeek, Claude, Gemini, GPT, MiMo, Kimi, GLM, Qwen) — picked once per agent at spawn, never routed at runtime ([why](../conventions/non-goals.md)) |
+| Models | 8 providers side by side (DeepSeek, Claude, Gemini, GPT, MiMo, Kimi, GLM, Qwen) — picked once per agent at spawn, never routed at runtime ([why](conventions/non-goals.md)) |
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 
@@ -339,11 +339,11 @@ node for the full design.
 | Get started | **[QUICKSTART.md](../QUICKSTART.md)** |
 | Understand architecture | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) |
 | Install / deploy | [`.agents/skills/deploy-ava-cluster/SKILL.md`](../.agents/skills/deploy-ava-cluster/SKILL.md) |
-| Set up dev environment | [`conventions/dev-setup.md`](../conventions/dev-setup.md) |
-| Run ops / troubleshoot | [`conventions/runbook.md`](../conventions/runbook.md) |
+| Set up dev environment | [`docs/conventions/dev-setup.md`](conventions/dev-setup.md) |
+| Run ops / troubleshoot | [`docs/conventions/runbook.md`](conventions/runbook.md) |
 | Write a PR | [CONTRIBUTING.md](../CONTRIBUTING.md) |
-| Follow coding conventions | [`conventions/python-conventions.md`](../conventions/python-conventions.md) |
-| Know what NOT to do | [`conventions/non-goals.md`](../conventions/non-goals.md) |
+| Follow coding conventions | [`docs/conventions/python-conventions.md`](conventions/python-conventions.md) |
+| Know what NOT to do | [`docs/conventions/non-goals.md`](conventions/non-goals.md) |
 | See glossary | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) (OKF terminology sections) |
 
 ## Agent instruction files

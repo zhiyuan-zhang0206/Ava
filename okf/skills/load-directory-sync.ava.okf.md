@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Skill sources — load-directory sync
-description: One load directory ~/.ava/skills/; converge syncs repo built-ins (ava_builtins/skills/) and plugin-carried skills into it, and user installs land directly (untouched). The 12 real .agents/skills project skills are NOT converged — they reach agents through the project-local mount.
+description: One load directory ~/.ava/skills/; converge syncs repo built-ins (ava_builtins/skills/) and plugin-carried skills into it, and user installs land directly (untouched). The repo-local .agents/skills project skills are NOT converged — they reach agents through the project-local mount.
 tags:
 - extensions
 - agent-instruction
@@ -48,12 +48,12 @@ channels]]):
   the catalog/index, with the reason visible in `ava packages status`.
 
 **Not converged — the real `.agents/skills/` project skills.** The
-repo-development workflow and Ava-cluster-operations family (ship-a-change,
+repo-development workflow and Ava-cluster-operations family (review-contribution,
 ava-self-development, …) stopped being
 fleet-distributed (issue #146;
-`decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`,
+`docs/decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`,
 resolving the open point in
-`decisions/2026-08-19-four-layer-modification-model.md`). A converge pass
+`docs/decisions/2026-08-19-four-layer-modification-model.md`). A converge pass
 treats them as gone sources: untouched copies they used to land are removed
 and deregistered, so runtime agents' indexes lose the L4 noise. They reach
 agents only through the project-local mount — see

@@ -560,7 +560,7 @@ async def _handle_fork(
         )
     )
     st.new_msgs.extend(context_notes.fork_notes(extensions, slices))
-    # Tail-graft skill additions (decisions/2026-09-10-preset-in-config-overlay-
+    # Tail-graft skill additions (docs/decisions/2026-09-10-preset-in-config-overlay-
     # fork-cache): skills the fork's config added to
     # skills_to_inject_into_system_prompt (minus what the expand list already
     # grafts) arrive in the fork inbound's payload. Their full bodies append

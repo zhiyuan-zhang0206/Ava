@@ -5,7 +5,7 @@
 > a single gateway daemon (`services/wake/heartbeat/`) that nudges idle agents on a
 > fixed interval, with an agent-driven **opt-out** (`ava.self.pause_heartbeat`)
 > instead of the exponential-backoff + miss-counter + escalation chain below.
-> See [`runbook.md`](../../conventions/runbook.md) (the `heartbeat` service row) for current
+> See [`runbook.md`](../../docs/conventions/runbook.md) (the `heartbeat` service row) for current
 > behavior and the git log (heartbeat-opt-out design)
 > for why the simpler design won. This file is kept as the original research
 > record (OpenClaw study + the rejected two-tier proposal). The Tier-1 liveness

@@ -80,7 +80,7 @@ env:
   # no PR gates on the subset — the full fan-out gates and the subset plus its
   # comparison report run informational beside it. Set back to "shadow" to
   # restore that behavior; all routing below derives from this one value.
-  # See conventions/test-selection.md.
+  # See docs/conventions/test-selection.md.
   TEST_SELECTION_MODE: "enforce"
   # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
   UV_FROZEN: "1"

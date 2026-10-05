@@ -56,4 +56,4 @@ every tool call the model made. The Ava side shows the same takeover on the
 agent's normal timeline.
 
 Relay mechanics and the operator-side setup are in
-[host relay setup](../../../../../conventions/agent-impersonation-hosts.md#deepseek-harness-dsh).
+[host relay setup](../../../../../docs/conventions/agent-impersonation-hosts.md#deepseek-harness-dsh).

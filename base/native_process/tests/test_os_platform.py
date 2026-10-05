@@ -129,7 +129,7 @@ class TestLaunchdOwnership:
 
     The inherited `XPC_SERVICE_NAME` is not trustworthy: only the job's direct
     child reads the label, every exec'd descendant reads "0" (2026-09-17,
-    postmortems/0008). So the tree check asks launchd for the job's pid and
+    docs/postmortems/0008). So the tree check asks launchd for the job's pid and
     walks this process's ancestry with ps.
     """
 

@@ -16,7 +16,7 @@ tags:
 
 A watcher is nothing more than a shell session running a generated script —
 there is no separate registry, desired-state record, or boot reconcile
-(decisions/2026-09-27-watchers-are-never-restarted.md). Everything that
+(docs/decisions/2026-09-27-watchers-are-never-restarted.md). Everything that
 applies to an ordinary `ava.shell.sessions` session applies to a watcher's
 session too: list it, capture its output, renew its TTL deadline, or kill it.
 Nothing ever restarts a watcher automatically — write watcher scripts

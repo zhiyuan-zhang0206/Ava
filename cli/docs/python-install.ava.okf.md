@@ -63,4 +63,4 @@ one that resolves outside the checkout. An explicit `--python` is the caller's
 choice, so its existing target is reused without that check.
 
 Configuration precedence, limits, and first-rollout cautions:
-[Machine Python indexes](../../conventions/dev-setup.md#machine-python-indexes).
+[Machine Python indexes](../../docs/conventions/dev-setup.md#machine-python-indexes).

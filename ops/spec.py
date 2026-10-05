@@ -14,7 +14,7 @@ module. ``plugin_services()`` discovers code-present plugins and appends them
 to the roster: plugin declares, ops discovers. Each plugin service's
 own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``_gate_reason``.
 The fleet task daemon follows this path; see
-``decisions/2026-07-19-plugin-registered-services.md``.
+``docs/decisions/2026-07-19-plugin-registered-services.md``.
 
 Layer: the ``ops`` module family imports ``base``, plus lazy function-local
 reaches into the shared-tier browser identity probe and gate app-port source.

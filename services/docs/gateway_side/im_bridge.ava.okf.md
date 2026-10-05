@@ -8,7 +8,7 @@ tags: []
 # IM Bridge — the product frontend
 
 ## What it is
-The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat / Feishu — one adapter per channel, sharing the bridge core). Since 2026-08 the bridge **is the product frontend** (user ruling: IM is the only frontend; the Telegram skill was removed — see `decisions/2026-08-03-telegram-skill-removed.md`): user-facing channels are not a side feature but the primary surface.
+The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat / Feishu — one adapter per channel, sharing the bridge core). Since 2026-08 the bridge **is the product frontend** (user ruling: IM is the only frontend; the Telegram skill was removed — see `docs/decisions/2026-08-03-telegram-skill-removed.md`): user-facing channels are not a side feature but the primary surface.
 
 **Role affiliation**: gateway side — the roster entry in `ops/roster/__init__.py` declares `ServiceSpec.capabilities=_GATEWAY` and `requires_db=True` (R3 door ④: notice_bridge reads and lazily expires `agent_notices` directly — previously declared False with the drift noted in-okf; the spec now matches). Kept alive by the root supervisor's health monitor through the roster's `/healthz` identity probe.
 

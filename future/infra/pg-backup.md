@@ -71,7 +71,7 @@
 > custody verb. The in-process pre-activation snapshot is gone.
 
 > **Update 2026-10-02:** the self-written physical PITR stack is deleted
-> ([decision](../../decisions/2026-10-02-delete-the-self-written-pitr-stack.md)).
+> ([decision](../../docs/decisions/2026-10-02-delete-the-self-written-pitr-stack.md)).
 > The off-site destination is configured as `AVA_BACKUP_OFFSITE_ENDPOINT`,
 > `AVA_BACKUP_OFFSITE_BUCKET` and `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE`
 > (`ava config set`); the PITR-era keys and the backend switch are gone.

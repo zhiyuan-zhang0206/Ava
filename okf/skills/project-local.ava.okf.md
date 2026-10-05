@@ -29,6 +29,10 @@ The five general skills mirrored alongside them — `ava-serious-engineering`,
 the mirror preserves the open-standard path while content-hash dedup keeps the
 same skill from loading twice in a checkout.
 
+Contributor entry: [docs/contributing.md](../../docs/contributing.md).
+The repo-specific `review-contribution` skill routes a contributor self-check to
+current convention and component owners; it does not require a reviewer agent.
+
 ## Key Dependencies
 - [[okf/skills/skills.ava.okf.md|Skill System]] — the mount/scan machinery this node extends
 - `ava_builtins/plugins/ava_code/_walk.py` — `project_skill_roots`, the three candidate paths
