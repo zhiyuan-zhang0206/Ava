@@ -26,7 +26,7 @@ from gateway.agents.schemas import (
 
 
 def test_agent_row_wire_shape() -> None:
-    from base.agents import AgentStatus
+    from base.agents import AgentStatus, LivenessState
 
     t = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
     m = AgentRow(
@@ -43,7 +43,7 @@ def test_agent_row_wire_shape() -> None:
         label="agent-1",
         machine="test-machine",
         supports_vision=True,
-        liveness_state="online",
+        liveness_state=LivenessState.ONLINE,
         last_probe_at=None,
         notices_awaiting_response=[],
         unread_notice_count=0,

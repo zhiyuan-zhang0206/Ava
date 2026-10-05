@@ -469,7 +469,7 @@ async def resurrect_if_terminated(
                 ).status
             else:
                 raise
-        if result_status == "spawned":
+        if result_status == ResurrectResult.SPAWNED:
             await asyncio.to_thread(_clear_wake_suppression, db, agent_id)
             status = await asyncio.to_thread(get_agent_status, db, agent_id)
     except _cluster_rpc.ClusterOpUnreachable as exc:
