@@ -18,6 +18,7 @@ from base.agents.impersonation._store import (
     require_relay_active_locked,
     token_hash,
 )
+from base.agents.impersonation.status import ImpersonationStatus
 from base.agents.messages.caller_identity import caller_payload
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -38,7 +39,7 @@ def relay_get(db: Database, bus: EventBus, lease_id: str, relay_token: str) -> d
         authenticate_relay(lease, relay_token)
         was_open = lease["status"] in OPEN
         result = public(expire(conn, lease))
-    if was_open and result["status"] == "expired":
+    if was_open and result["status"] == ImpersonationStatus.EXPIRED:
         wake_agent(db, bus, lease["agent_id"], roster_changed=True)
     return result
 
@@ -106,8 +107,8 @@ def provision_relay(
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         if lease["agent_id"] != incarnation.agent_id or lease["status"] not in (
-            "accepted",
-            "active",
+            ImpersonationStatus.ACCEPTED,
+            ImpersonationStatus.ACTIVE,
         ):
             raise ImpersonationError("Relay provisioning requires the native-held lease")
         if (lease["accepted_generation"], lease["accepted_owner"]) != (
@@ -185,7 +186,10 @@ def fail_acceptance(
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
-        if lease["agent_id"] != incarnation.agent_id or lease["status"] != "accepted":
+        if (
+            lease["agent_id"] != incarnation.agent_id
+            or lease["status"] != ImpersonationStatus.ACCEPTED
+        ):
             raise ImpersonationError("Only the accepted native agent can fail relay establishment")
         if (lease["accepted_generation"], lease["accepted_owner"]) != (
             incarnation.generation,
@@ -228,7 +232,10 @@ def record_relay_failure(db: Database, lease_id: str, incarnation: RuntimeIncarn
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
-        if lease["agent_id"] != incarnation.agent_id or lease["status"] != "active":
+        if (
+            lease["agent_id"] != incarnation.agent_id
+            or lease["status"] != ImpersonationStatus.ACTIVE
+        ):
             raise ImpersonationError("Relay failure stamps require the active native-held lease")
         row = conn.execute(
             "UPDATE agent_impersonations SET relay_last_failure_at=clock_timestamp() "
@@ -284,7 +291,7 @@ def abort_lease(
         if is_log_native(lease):
             close_event_admission(conn, lease_id)
         inbound_id = None
-        if lease["status"] == "active" and not lease["automatic"]:
+        if lease["status"] == ImpersonationStatus.ACTIVE and not lease["automatic"]:
             inbound_id = insert_handoff(
                 conn,
                 lease,

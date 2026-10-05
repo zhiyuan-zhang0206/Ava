@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,7 @@ class ImpersonationMetadata(BaseModel):
     seq: int | None = None
 
 
-def metadata(lease: dict[str, Any]) -> ImpersonationMetadata:
+def metadata(lease: Mapping[str, Any]) -> ImpersonationMetadata:
     return ImpersonationMetadata(
         agent_id=lease["agent_id"],
         session_id=lease["session_id"],
@@ -70,7 +71,7 @@ def metadata(lease: dict[str, Any]) -> ImpersonationMetadata:
     )
 
 
-def public_session(lease: dict[str, Any]) -> dict[str, Any]:
+def public_session(lease: Mapping[str, Any]) -> dict[str, Any]:
     """Expose the numeric handle without legacy UUIDs or credentials."""
     fields = (
         "agent_id",
@@ -168,7 +169,7 @@ def append(
     return seq
 
 
-def capture_pending(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
+def capture_pending(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
     """Include the backlog handed to this session, even if it predates activation."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
@@ -377,7 +378,7 @@ def _sdk_statistics(sdk: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _event_delivery_statistics(
-    lease: dict[str, Any], sdk: list[dict[str, Any]], api: list[dict[str, Any]]
+    lease: Mapping[str, Any], sdk: list[dict[str, Any]], api: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """Describe whether the handoff's event log is complete for the emitted events.
 
@@ -400,7 +401,7 @@ def _event_delivery_statistics(
     }
 
 
-def _pending_delivery_reason(lease: dict[str, Any]) -> str:
+def _pending_delivery_reason(lease: Mapping[str, Any]) -> str:
     from base.agents.impersonation_manifest import pending_reason
 
     result = pending_reason(lease)
@@ -415,7 +416,7 @@ def _by_occurrence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: (row["created_at"], row["seq"]))
 
 
-def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+def build_document(lease: Mapping[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Derive counts only from recorded facts; preserve the original events too."""
     sdk = _by_occurrence([row for row in rows if row["kind"] == "sdk_call"])
     api = _by_occurrence([row for row in rows if row["kind"] == "api_event"])
@@ -440,7 +441,9 @@ def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[st
     }
 
 
-def export_handoff(lease: dict[str, Any], conn: psycopg.Connection) -> tuple[dict[str, Any], str]:
+def export_handoff(
+    lease: Mapping[str, Any], conn: psycopg.Connection
+) -> tuple[dict[str, Any], str]:
     """Write one JSON file atomically in the agent workspace, before native resumption."""
     document = lease["handoff_document"]
     if document is None or document["version"] != 2:

@@ -136,3 +136,8 @@ claim is made. `relay_degraded_reason` and `relay_degraded_at` describe the last
 observed failure, not an assertion that the channel is currently unhealthy.
 `terminal_notices.py` owns independently retried ended-lease injection, while
 `host_transport.py` owns actual Codex acceptance and CLI compatibility imports.
+
+Lease status is owned by `base/agents/impersonation/status.py` (`ImpersonationStatus`):
+requested, accepted, active, released, rejected, expired. Raw lifecycle query rows
+validate their status before dispatch; other row fields keep their existing database
+contracts. The open roster projection admits only requested, accepted and active.
