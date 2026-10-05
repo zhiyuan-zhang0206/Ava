@@ -89,34 +89,23 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     openImpersonationStatus === "active" && row.status !== "terminated"
       ? "impersonated"
       : projectAgentStatusValue(row.status);
-  if (
-    status === row.status &&
-    "awaiting_response_count" in row
-  ) {
-    return row;
+  if ("awaiting_response_count" in row) {
+    return status === row.status ? row : { ...row, status };
   }
-  // Hand-rebuilt allowlist: an omitted optional field vanishes silently (availability, task #4723).
+  // Keep future wire fields by default; selected-detail bodies and lineage/probe
+  // evidence are deliberately excluded from the operator-facing card.
+  const {
+    notices_awaiting_response,
+    fork_source_checkpoint_id: _forkSourceCheckpointId,
+    last_probe_at: _lastProbeAt,
+    ...cardFields
+  } = row;
   return {
-    agent_id: row.agent_id,
-    spawner: row.spawner,
-    fork_source_agent_id: row.fork_source_agent_id,
+    ...cardFields,
     status,
-    pid: row.pid,
-    spawned_at: row.spawned_at,
-    started_at: row.started_at,
-    last_active_at: row.last_active_at,
-    last_inbound_at: row.last_inbound_at,
-    label: row.label,
-    machine: row.machine,
-    supports_vision: row.supports_vision,
-    liveness_state: row.liveness_state,
-    availability: row.availability,
-    observation: row.observation,
-    awaiting_response_count: "awaiting_response_count" in row ? row.awaiting_response_count : row.notices_awaiting_response.length,
-    highest_notice_priority: "highest_notice_priority" in row ? row.highest_notice_priority : (row.notices_awaiting_response.map((n) => n.priority).sort()[0] ?? null),
-    unread_notice_count: row.unread_notice_count,
-    heartbeat_paused_until: row.heartbeat_paused_until,
-    open_impersonation_session_id: "open_impersonation_session_id" in row ? row.open_impersonation_session_id : null,
+    awaiting_response_count: notices_awaiting_response.length,
+    highest_notice_priority: notices_awaiting_response.map((n) => n.priority).sort()[0] ?? null,
+    open_impersonation_session_id: null,
     open_impersonation_status: openImpersonationStatus,
   };
 }
