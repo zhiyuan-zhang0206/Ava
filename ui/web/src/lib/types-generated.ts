@@ -4607,14 +4607,16 @@ export interface components {
          * @description Platform-only completion metadata carried with a shell or watcher chat.
          */
         CompletionNoticeIn: {
-            /**
-             * Outcome
-             * @enum {string}
-             */
-            outcome: "exit" | "missed";
+            outcome: components["schemas"]["CompletionNoticeOutcome"];
             /** Exit Code */
             exit_code?: number | null;
         };
+        /**
+         * CompletionNoticeOutcome
+         * @description What happened to the process or watcher represented by a notice.
+         * @enum {string}
+         */
+        CompletionNoticeOutcome: "exit" | "missed";
         /**
          * ConfigAuditView
          * @description GET /api/config/audit response — merged `.env`-write audit records, newest first.

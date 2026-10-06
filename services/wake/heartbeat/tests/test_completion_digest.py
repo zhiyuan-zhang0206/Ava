@@ -8,7 +8,11 @@ from datetime import UTC, datetime
 import psycopg
 import pytest
 
-from base.daemon.schedules.completion_notices import CompletionNotice, record_hourly_notice
+from base.daemon.schedules.completion_notices import (
+    CompletionNotice,
+    CompletionNoticeOutcome,
+    record_hourly_notice,
+)
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from services.wake.heartbeat import completion_digest
@@ -37,7 +41,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         CompletionNotice(
             source="shell:70",
             content="Background command 'ok' exited with code 0. Full output at ok.log.",
-            outcome="exit",
+            outcome=CompletionNoticeOutcome.EXIT,
             exit_code=0,
         ),
     )
@@ -47,7 +51,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         CompletionNotice(
             source="shell:71",
             content="Background command 'failed' exited with code 1. Full output at bad.log.",
-            outcome="exit",
+            outcome=CompletionNoticeOutcome.EXIT,
             exit_code=1,
         ),
     )
@@ -134,7 +138,7 @@ def test_flush_once_continues_after_one_digest_delivery_failure(
             CompletionNotice(
                 source=f"shell:{agent_id}",
                 content="Background command 'ok' exited with code 0. Full output at ok.log.",
-                outcome="exit",
+                outcome=CompletionNoticeOutcome.EXIT,
                 exit_code=0,
             ),
         )

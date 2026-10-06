@@ -8864,12 +8864,7 @@
       "CompletionNoticeIn": {
         "properties": {
           "outcome": {
-            "type": "string",
-            "enum": [
-              "exit",
-              "missed"
-            ],
-            "title": "Outcome"
+            "$ref": "#/components/schemas/CompletionNoticeOutcome"
           },
           "exit_code": {
             "anyOf": [
@@ -8890,6 +8885,15 @@
         ],
         "title": "CompletionNoticeIn",
         "description": "Platform-only completion metadata carried with a shell or watcher chat."
+      },
+      "CompletionNoticeOutcome": {
+        "type": "string",
+        "enum": [
+          "exit",
+          "missed"
+        ],
+        "title": "CompletionNoticeOutcome",
+        "description": "What happened to the process or watcher represented by a notice."
       },
       "ConfigAuditView": {
         "properties": {
