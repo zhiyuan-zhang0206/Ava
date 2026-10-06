@@ -26,6 +26,7 @@ import pytest
 from base.native_process.os_platform import IS_WINDOWS
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client
+from base.sessions.pty.tests.job_wait import wait_for_job
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 from tests.path_scoped.pty_service import pty_service as pty_service
@@ -163,8 +164,7 @@ def test_kill_takes_a_background_job_and_spares_an_unrelated_process(
     unrelated = _unrelated(unit_home)
     try:
         type_line(name, "sleep 300 &")
-        assert wait_for(lambda: bool(psutil.Process(shell.pid).children())), "job never started"
-        (job,) = psutil.Process(shell.pid).children()
+        job = wait_for_job(psutil.Process(shell.pid), ["sleep", "300"])
         pty_reaper.track(job)
         assert os.getpgid(job.pid) != shell.pid, "precondition: the job has its own group"
 

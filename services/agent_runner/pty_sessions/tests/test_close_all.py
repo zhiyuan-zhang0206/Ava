@@ -18,10 +18,11 @@ import pytest
 
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.pty import client, closure
+from base.sessions.pty.tests.job_wait import wait_for_job
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import new, type_line, wait_for
+from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"),
@@ -36,6 +37,7 @@ def _names(outcome: closure.Outcome) -> list[str]:
 def test_a_regular_job_and_its_shell_close_within_the_grace(unit_home: Path) -> None:
     name = "ava-agent-987-shell-2045-job"
     shell = jobs.start(name, unit_home, jobs.TERM_OK)
+    output_until(name, "job-ready")
     (job,) = jobs.live_children(shell)
     (info,) = client.list_sessions()
 
@@ -73,7 +75,7 @@ def test_a_restart_loop_shell_cannot_outlive_the_closure(unit_home: Path) -> Non
     name = "ava-agent-987-shell-2045-loop"
     new(name, unit_home, cmd=jobs.LOOP_SHELL)
     shell = support.shell_process(name)
-    assert wait_for(lambda: bool(jobs.live_children(shell)))
+    wait_for_job(shell, ["bash", "-c", "while true; do sleep 1; done"])
 
     outcome = client.close_all(grace_s=10.0, kill_s=3.0)
 
@@ -84,6 +86,7 @@ def test_a_restart_loop_shell_cannot_outlive_the_closure(unit_home: Path) -> Non
 def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Path) -> None:
     name = "ava-agent-987-shell-2045-stubborn"
     shell = jobs.start(name, unit_home, jobs.STUBBORN)
+    output_until(name, "stubborn-ready")
     (job,) = jobs.live_children(shell)
 
     started = time.monotonic()
@@ -245,6 +248,8 @@ def test_the_last_hop_of_a_fork_chain_started_on_term_is_killed(
 def test_the_closure_covers_every_session_at_once(unit_home: Path) -> None:
     busy = [f"ava-agent-987-shell-{n}-multi" for n in range(5)]
     shells = [jobs.start(name, unit_home, jobs.STUBBORN) for name in busy]
+    for name in busy:
+        output_until(name, "stubborn-ready")
     idle = "ava-agent-987-shell-99-quiet"
     new(idle, unit_home)
 
@@ -264,6 +269,7 @@ def test_no_session_is_born_while_the_closure_runs(unit_home: Path) -> None:
     meanwhile would outlive the closure. Allocation is refused for its duration and open
     again once it is done."""
     jobs.start("ava-agent-987-shell-2060-slow", unit_home, jobs.STUBBORN)
+    output_until("ava-agent-987-shell-2060-slow", "stubborn-ready")
     closing = threading.Thread(target=client.close_all, kwargs={"grace_s": 3.0, "kill_s": 3.0})
     closing.start()
     try:
@@ -288,6 +294,7 @@ def test_no_session_is_born_while_the_closure_runs(unit_home: Path) -> None:
 def test_the_closure_outcome_survives_the_wire(unit_home: Path) -> None:
     name = "ava-agent-987-shell-2070-wire"
     jobs.start(name, unit_home, jobs.STUBBORN)
+    output_until(name, "stubborn-ready")
     (info,) = client.list_sessions()
 
     outcome = client.close_all(grace_s=0.5, kill_s=3.0)
