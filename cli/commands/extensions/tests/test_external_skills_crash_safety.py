@@ -9,9 +9,9 @@ from typing import Any, cast
 import pytest
 
 from cli.commands.converge.spec import ConvergeCtx
-from cli.commands.extensions import _external_skill_cleanup as bridge_cleanup
-from cli.commands.extensions import _external_skill_fs as bridge_fs
 from cli.commands.extensions import external_skills as bridge
+from cli.commands.extensions.external_skill_host import cleanup as bridge_cleanup
+from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
 
 SKILL = "operating-ava-cluster"
 
@@ -55,7 +55,7 @@ def test_restart_reconciles_stage_published_before_post_write(
 ) -> None:
     _, client, context = _world(tmp_path)
     target = _target(client)
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     interrupted = False
 
     def interrupt_after_stage_publish(source_path: Path, destination: Path) -> None:
@@ -65,7 +65,7 @@ def test_restart_reconciles_stage_published_before_post_write(
             interrupted = True
             raise SystemExit("process killed after stage publication")
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", interrupt_after_stage_publish)
+    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_stage_publish)
     with pytest.raises(SystemExit, match="stage publication"):
         bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -73,7 +73,7 @@ def test_restart_reconciles_stage_published_before_post_write(
     assert _ledger(context)["transaction"]["stage_state"] == "publishing"
     target.mkdir()
     (target / "user.txt").write_text("late user target\n")
-    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -97,7 +97,7 @@ def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
     target = _target(client)
     installed_before = _ledger(context)["installed"]
     source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     interrupted = False
 
     def interrupt_after_claim(source_path: Path, destination: Path) -> None:
@@ -107,7 +107,7 @@ def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
             interrupted = True
             raise SystemExit("process killed after target claim")
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", interrupt_after_claim)
+    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_claim)
     with pytest.raises(SystemExit, match="target claim"):
         bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -115,7 +115,7 @@ def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
     assert _ledger(context)["transaction"]["claim_state"] == "claiming"
     target.mkdir()
     (target / "user.txt").write_text("late user target\n")
-    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -142,7 +142,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
     outside.write_text("outside\n")
     outside.chmod(0o444)
     outside_before = outside.stat()
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     injected = False
 
     def swap_before_cleanup_claim(source_path: Path, destination: Path) -> None:
@@ -154,7 +154,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
             injected = True
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", swap_before_cleanup_claim)
+    monkeypatch.setattr(bridge, "rename_no_replace", swap_before_cleanup_claim)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -167,7 +167,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
     assert _ledger(context)["garbage"][0]["location"] == "source"
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     swapped.unlink()
     swapped.write_text("operator v1\n")
     bridge.converge_external_agent_skill(context, host_home=client.parent)
@@ -183,7 +183,7 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
     source, client, context = _world(tmp_path)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     interrupted = False
 
     def interrupt_after_cleanup_claim(source_path: Path, destination: Path) -> None:
@@ -193,13 +193,13 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
             interrupted = True
             raise SystemExit("process killed after cleanup claim")
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", interrupt_after_cleanup_claim)
+    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_cleanup_claim)
     with pytest.raises(SystemExit, match="cleanup claim"):
         bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert interrupted
     assert _ledger(context)["garbage"][0]["location"] == "claiming"
-    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
@@ -215,7 +215,7 @@ def test_unsupported_cleanup_never_changes_directory_permissions(
     nested = residue / "nested"
     nested.mkdir(parents=True)
     nested.chmod(0o500)
-    manifest = bridge_fs._tree_manifest(residue)
+    manifest = bridge_fs.tree_manifest(residue)
     outside = tmp_path / "outside"
     outside.mkdir()
     outside.chmod(0o755)
@@ -227,8 +227,8 @@ def test_unsupported_cleanup_never_changes_directory_permissions(
     monkeypatch.setattr(Path, "chmod", chmod_forbidden)
     monkeypatch.setattr(bridge_fs.os, "fchmod", chmod_forbidden)
 
-    with pytest.raises(bridge_fs._ClientConflictError):
-        bridge_fs._remove_manifest_subset(residue, manifest)
+    with pytest.raises(bridge_fs.ClientConflictError):
+        bridge_fs.remove_manifest_subset(residue, manifest)
 
     assert nested.is_dir()
     assert stat.S_IMODE(nested.stat().st_mode) == 0o500
@@ -241,7 +241,7 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
     source, client, context = _world(tmp_path)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     interrupted = False
 
     def interrupt_after_file_claim(source_path: Path, destination: Path) -> None:
@@ -260,7 +260,7 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
             interrupted = True
             raise SystemExit("process killed after per-file claim")
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", interrupt_after_file_claim)
+    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_file_claim)
     with pytest.raises(SystemExit, match="per-file claim"):
         bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -268,7 +268,7 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
     assert ledger["garbage"][0]["location"] == "quarantine"
     assert "claiming" in {claim["state"] for claim in ledger["garbage"][0]["file_claims"]}
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     ledger = _ledger(context)
@@ -284,7 +284,7 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
     source, client, context = _world(tmp_path)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_preserve = bridge_cleanup._preserve_claimed_tree
+    original_preserve = bridge_cleanup.preserve_claimed_tree
     collision: Path | None = None
 
     def inject_collision_after_root_verification(
@@ -302,7 +302,7 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
         original_preserve(ledger_path, ledger, item, quarantine, rename)
 
     monkeypatch.setattr(
-        bridge_cleanup, "_preserve_claimed_tree", inject_collision_after_root_verification
+        bridge_cleanup, "preserve_claimed_tree", inject_collision_after_root_verification
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -322,7 +322,7 @@ def test_per_file_claim_failure_is_terminal_after_private_root_claim(
     source, client, context = _world(tmp_path)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     attempts = 0
 
     def fail_file_claim(source_path: Path, destination: Path) -> None:
@@ -332,7 +332,7 @@ def test_per_file_claim_failure_is_terminal_after_private_root_claim(
             raise PermissionError("private residue is not writable")
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", fail_file_claim)
+    monkeypatch.setattr(bridge, "rename_no_replace", fail_file_claim)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert attempts >= 1
     attempts_after_cleanup = attempts
@@ -353,12 +353,12 @@ def test_cleanup_preserves_late_replacement_after_final_file_verification(
     residue.mkdir()
     victim = residue / "SKILL.md"
     victim.write_text("operator\n")
-    manifest = bridge_fs._tree_manifest(residue)
+    manifest = bridge_fs.tree_manifest(residue)
     outside = tmp_path / "outside.md"
     outside.write_text("outside\n")
     outside.chmod(0o444)
     outside_before = outside.stat()
-    original_verify = bridge_fs._verify_cleanup_file
+    original_verify = bridge_fs.verify_cleanup_file
     late_replacement: Path | None = None
 
     def swap_after_verification(path: Path, expected: dict[str, Any]) -> None:
@@ -369,10 +369,10 @@ def test_cleanup_preserves_late_replacement_after_final_file_verification(
         path.symlink_to(outside)
         late_replacement = path
 
-    monkeypatch.setattr(bridge_fs, "_verify_cleanup_file", swap_after_verification)
+    monkeypatch.setattr(bridge_fs, "verify_cleanup_file", swap_after_verification)
 
-    with pytest.raises(bridge_fs._ClientConflictError):
-        bridge_fs._remove_manifest_subset(residue, manifest)
+    with pytest.raises(bridge_fs.ClientConflictError):
+        bridge_fs.remove_manifest_subset(residue, manifest)
 
     assert late_replacement is not None
     assert late_replacement.is_symlink()
@@ -390,7 +390,7 @@ def test_converge_terminally_records_post_verification_replacement(
     outside.write_text("outside\n")
     outside.chmod(0o444)
     outside_before = outside.stat()
-    original_verify = bridge_cleanup._verify_cleanup_file
+    original_verify = bridge_cleanup.verify_cleanup_file
     late_replacement: Path | None = None
 
     def swap_after_verification(path: Path, expected: dict[str, Any]) -> None:
@@ -402,7 +402,7 @@ def test_converge_terminally_records_post_verification_replacement(
             path.symlink_to(outside)
             late_replacement = path
 
-    monkeypatch.setattr(bridge_cleanup, "_verify_cleanup_file", swap_after_verification)
+    monkeypatch.setattr(bridge_cleanup, "verify_cleanup_file", swap_after_verification)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert late_replacement is not None
@@ -414,7 +414,7 @@ def test_converge_terminally_records_post_verification_replacement(
     assert len(ledger["retained"]) == 1
     assert all(claim["state"] == "retained" for claim in ledger["retained"][0]["file_claims"])
 
-    monkeypatch.setattr(bridge_cleanup, "_verify_cleanup_file", original_verify)
+    monkeypatch.setattr(bridge_cleanup, "verify_cleanup_file", original_verify)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert late_replacement.is_symlink()

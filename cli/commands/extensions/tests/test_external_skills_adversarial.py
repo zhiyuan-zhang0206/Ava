@@ -12,8 +12,8 @@ from typing import Any, cast
 import pytest
 
 from cli.commands.converge.spec import ConvergeCtx
-from cli.commands.extensions import _external_skill_fs as bridge_fs
 from cli.commands.extensions import external_skills as bridge
+from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
 
 SKILL = "operating-ava-cluster"
 
@@ -182,7 +182,7 @@ def test_path_and_open_handle_metadata_variants_are_not_a_source_change(
 
     monkeypatch.setattr(bridge_fs.os, "fstat", fstat_with_platform_metadata)
 
-    data, mode = bridge_fs._read_regular(source_file, source=True)
+    data, mode = bridge_fs.read_regular(source_file, source=True)
 
     assert data == b"operator\n"
     assert mode == stat.S_IMODE(source_file.stat().st_mode)
@@ -210,7 +210,7 @@ def test_linked_target_is_preserved_without_following(
 def test_windows_reparse_attribute_is_rejected() -> None:
     current = SimpleNamespace(st_file_attributes=0x400)
 
-    assert bridge_fs._attributes_reparse(cast(Any, current))
+    assert bridge_fs.attributes_reparse(cast(Any, current))
 
 
 def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
@@ -267,14 +267,14 @@ def test_target_appearing_after_claim_is_not_replaced(
     outside = tmp_path / "late-target"
     outside.mkdir()
     (outside / "SKILL.md").write_text("late user target\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
 
     def insert_target_then_rename(source_path: Path, destination: Path) -> None:
         if ".ava-stage-" in source_path.name and destination == target:
             destination.symlink_to(outside, target_is_directory=True)
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", insert_target_then_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", insert_target_then_rename)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -294,7 +294,7 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
     target = _target(client, tmp_path)
     installed_before = _ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     collision: Path | None = None
 
     def collide_with_claim(source_path: Path, destination: Path) -> None:
@@ -305,7 +305,7 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
             (destination / "user.txt").write_text("not Ava owned\n")
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", collide_with_claim)
+    monkeypatch.setattr(bridge, "rename_no_replace", collide_with_claim)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -330,14 +330,14 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     installed_before = _ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
     original_verify = bridge._verify_marker
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     late_target = False
 
     def reject_claimed_previous(
         root: Path, installation_id: str, generation_id: str, *, skill_name: str = SKILL
     ) -> None:
         if ".ava-previous-" in root.name:
-            raise bridge._ClientConflictError("claimed copy changed")
+            raise bridge.ClientConflictError("claimed copy changed")
         original_verify(root, installation_id, generation_id, skill_name=skill_name)
 
     def collide_with_restore(source_path: Path, destination: Path) -> None:
@@ -349,7 +349,7 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
         original_rename(source_path, destination)
 
     monkeypatch.setattr(bridge, "_verify_marker", reject_claimed_previous)
-    monkeypatch.setattr(bridge, "_rename_no_replace", collide_with_restore)
+    monkeypatch.setattr(bridge, "rename_no_replace", collide_with_restore)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -372,7 +372,7 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
     target = _target(client, tmp_path)
     installed_before = _ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     late_target = False
 
     def fail_activation_then_collide_with_restore(source_path: Path, destination: Path) -> None:
@@ -385,7 +385,7 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
             (destination / "user.txt").write_text("late user target\n")
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", fail_activation_then_collide_with_restore)
+    monkeypatch.setattr(bridge, "rename_no_replace", fail_activation_then_collide_with_restore)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -437,7 +437,7 @@ def test_concurrent_converges_serialize_transaction_owned_absence(
     claimed = threading.Event()
     release = threading.Event()
     second_activated_during_claim = threading.Event()
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     first_thread_id: int | None = None
 
     def pause_after_claim(path: Path, destination: Path) -> None:
@@ -452,7 +452,7 @@ def test_concurrent_converges_serialize_transaction_owned_absence(
         ):
             second_activated_during_claim.set()
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", pause_after_claim)
+    monkeypatch.setattr(bridge, "rename_no_replace", pause_after_claim)
     errors: list[BaseException] = []
 
     def run() -> None:
@@ -487,7 +487,7 @@ def test_marker_spoof_without_external_ledger_is_unmanaged(
     target = _target(client, tmp_path)
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("spoofed user skill\n")
-    digest = bridge._tree_digest(target)
+    digest = bridge.tree_digest(target)
     (target / ".ava-managed.json").write_text(
         json.dumps(
             {
@@ -603,7 +603,7 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = _target(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
     failed = False
 
     def fail_previous_once(source_path: Path, destination: Path) -> None:
@@ -613,9 +613,9 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
             raise PermissionError("cleanup denied")
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", fail_previous_once)
+    monkeypatch.setattr(bridge, "rename_no_replace", fail_previous_once)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
-    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert (target / "SKILL.md").read_text() == "operator v2\n"
@@ -667,7 +667,7 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     _source(repo)
     client = _client_home(tmp_path)
     context = _context(repo, tmp_path)
-    original_materialize = bridge._materialize_source_snapshot
+    original_materialize = bridge.materialize_source_snapshot
     failed = False
 
     def fail_after_one_entry(snapshot: Any, destination: Path) -> None:
@@ -675,13 +675,13 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
         if not failed:
             failed = True
             first = snapshot.files[0]
-            bridge._write_new(destination / first.path, first.data, first.mode)
+            bridge.write_new(destination / first.path, first.data, first.mode)
             raise PermissionError("copy interrupted")
         original_materialize(snapshot, destination)
 
-    monkeypatch.setattr(bridge, "_materialize_source_snapshot", fail_after_one_entry)
+    monkeypatch.setattr(bridge, "materialize_source_snapshot", fail_after_one_entry)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
-    monkeypatch.setattr(bridge, "_materialize_source_snapshot", original_materialize)
+    monkeypatch.setattr(bridge, "materialize_source_snapshot", original_materialize)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
@@ -703,16 +703,16 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
     outside = tmp_path / "late-owned-by-user"
     outside.mkdir()
     (outside / "SKILL.md").write_text("user target\n")
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
 
     def insert_target(source_path: Path, destination: Path) -> None:
         if ".ava-stage-" in source_path.name and destination == target:
             destination.symlink_to(outside, target_is_directory=True)
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", insert_target)
+    monkeypatch.setattr(bridge, "rename_no_replace", insert_target)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
-    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -774,7 +774,7 @@ def test_cleanup_rejects_same_content_hard_link_without_changing_outside_inode(
     residue_file = residue / "SKILL.md"
     residue_file.write_text("operator\n")
     residue_file.chmod(0o444)
-    manifest = bridge_fs._tree_manifest(residue)
+    manifest = bridge_fs.tree_manifest(residue)
     residue_file.unlink()
     outside = tmp_path / "outside.md"
     outside.write_text("operator\n")
@@ -782,8 +782,8 @@ def test_cleanup_rejects_same_content_hard_link_without_changing_outside_inode(
     os.link(outside, residue_file)
     outside_before = outside.stat()
 
-    with pytest.raises(bridge_fs._ClientConflictError, match="link"):
-        bridge_fs._remove_manifest_subset(residue, manifest)
+    with pytest.raises(bridge_fs.ClientConflictError, match="link"):
+        bridge_fs.remove_manifest_subset(residue, manifest)
 
     assert residue_file.exists()
     assert outside.exists()
