@@ -164,8 +164,9 @@ def exec_timeout_note(_slices: AgentSlices) -> HumanMessage | None:
 
 
 _TIMEZONE_FRAMING = (
-    "Current timezone: {name} (UTC{offset}). All timestamps you see are in "
-    "this timezone — they carry no timezone suffix of their own. When you "
+    "Conversation timezone: {name} (UTC{offset}). Conversation timestamps "
+    "without an offset use this timezone. Tool output, files and source "
+    "messages may use other timezones; honor any explicit offset. When you "
     "record a time anywhere outside this conversation (a file, a memory note, "
     "a message to another machine), write ISO-8601 with an offset instead."
 )

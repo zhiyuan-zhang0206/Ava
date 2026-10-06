@@ -150,17 +150,16 @@ def notify(
       that agent via ava.agents.send_message instead.
     - `blocking=True` -- you cannot make progress until it is answered.
 
-    Does not block: post, end your turn, and idle -- the reply arrives later
-    as an ordinary message. You can have one open notice at a time; a new
-    notify() auto-resolves the old one ("superseded"). Use edit_notice to add
+    Posting returns immediately. A user reply arrives later as an ordinary
+    message; continue work you can do while waiting. You can have one open notice
+    at a time; a new notify() auto-resolves the old one ("superseded"). Use edit_notice to add
     to the current notice instead of replacing it.
 
     Args:
         content: optional detail. Offer discrete choices as A / B / C so the
             user can reply with one letter (the reply is always free text).
         task: groups your notices by task in the user's queue.
-        expire_at: lifetime deadline as datetime, timedelta, or ISO string;
-            omitted defaults to the cluster-configured TTL limit.
+        expire_at: expiration deadline; omit it to use the configured lifetime.
 
     Returns:
         The notice id (an int); its `.superseded` attribute lists the ids
@@ -321,7 +320,7 @@ def _spawn_with_label(
         fork_from: copy that agent's conversation state into the new one.
         machine: defaults to your own.
         config_overlay: per-agent settings overlay, e.g. {"llm_model": ...};
-            a preset is named inside it as {"preset": "name"} (task #4086).
+            a preset is named inside it as {"preset": "name"}.
         label: initial role name; omitted = auto-named.
     """
     return ava.agents.spawn_impl(

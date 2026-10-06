@@ -619,13 +619,11 @@ def record_skill_invoked_by_path(path: str | Path) -> bool:
 
 
 def read(name: str) -> str:
-    """Read a skill's SKILL.md body by name and record the `skill_invoked`
-    attribution — the explicit API for consuming a skill body.
+    """Read the full instructions for a skill.
 
-    `name` accepts the display identifier (`"web-ai:deep-research"`) or any
-    spelling that folds to it (`"web_ai.deep_research"`, bare frontmatter name
-    for a flat skill). Returns the same shape a proxy's `__doc__` carries.
-    Unknown names raise ValueError."""
+    `name` accepts its display identifier, such as `"web-ai:deep-research"`, the
+    corresponding Python spelling, such as `"web_ai.deep_research"`, or the skill's
+    frontmatter name. Returns the skill's instructions. Unknown names raise ValueError."""
     from ava.sdk_surface.validation import coerce_str
 
     key = match_key(coerce_str(name, "name"))

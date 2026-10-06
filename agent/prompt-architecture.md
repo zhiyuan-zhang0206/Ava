@@ -89,8 +89,8 @@ Capabilities rather than standing as its own section.
 - **Core CodeAct batching** — `agent/graph/prompt/_codeact.py:_codeact_section` (registered by `system_prompt.py`),
   **off by default** via `settings.agent.prompt_codeact_enabled` (env
   `AVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
-  call — batch file reads, fold branches into if-else logic — because each
-  call is one LLM API round-trip. Opt-in (user ruling 2026-08-26): unlike the
+  call when no intermediate review is needed. Split for decisions, approval
+  and execution/output limits. Opt-in (user ruling 2026-08-26): unlike the
   on-by-default behavioral sections, an unconfigured cluster never pays for it.
 - **Core capabilities index** — `agent/graph/prompt/capabilities.py:capabilities_section`:
   always-on name + one-line description of the capabilities the agent already

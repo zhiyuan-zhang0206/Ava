@@ -240,13 +240,14 @@ def test_dispatch_crash_with_unknown_code_reached_stays_honest(
 def test_dispatch_crash_after_code_ran_but_printed_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """code_reached=True: the code ran — the envelope says so instead of lying."""
+    """Code phase reached: missing output does not prove completion or no effects."""
     from agent.graph.exec._result import ExecChildError
 
     exc = ExecChildError("OSError", "result envelope write failed", None)
     halted, text, _code = _dispatch(_boot_crash(exc, True), monkeypatch)
     assert halted is False
-    assert "executed and produced no output" in text
+    assert "your code may have had effects, but no output was recovered" in text
+    assert "inspect state before retrying" in text
     assert "(no output)" not in text
 
 

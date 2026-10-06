@@ -29,9 +29,9 @@ Two repair passes share `dangling_tool_pairing_repairs`:
   dangling tool_use mid-history (the 2026-07-13 shape: wedged 236/238 in a
   permanent per-turn 400 retry loop for 18h).
 
-The synthetic tool_result records the interruption truthfully rather than
-masking a model error: the model never produced bad output, the process was
-killed mid-tool, so this does not violate fail-fast.
+The synthetic tool_result records the missing result without inventing an
+execution outcome. Effects may already exist, so the agent must inspect state
+before retrying. This repairs history shape without masking model errors.
 
 Shape contract: detection treats an unpaired tool_call as a crash artifact,
 because every live path preserves pairing — exec always writes a ToolMessage,
@@ -73,7 +73,16 @@ from base.agents.context import AvaContext, agent_id_from_config
 from base.log import logger
 
 _INTERRUPTED_TOOL_RESULT = (
-    "[interrupted: the agent process was cancelled before this tool produced a result]"
+    "[interrupted: no result was recovered for this tool call. It may already "
+    "have had effects; inspect the current state before retrying.]"
+)
+
+# Persisted checkpoints may still contain the earlier marker.
+_INTERRUPTED_TOOL_RESULTS = frozenset(
+    {
+        _INTERRUPTED_TOOL_RESULT,
+        "[interrupted: the agent process was cancelled before this tool produced a result]",
+    }
 )
 
 
@@ -107,7 +116,8 @@ def _unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list
 
 def _is_synthetic_tool_result(message: ToolMessage) -> bool:
     """Whether this ToolMessage is the recovery marker, not a real result."""
-    return cast(Any, message).content == _INTERRUPTED_TOOL_RESULT
+    content = cast(Any, message).content
+    return isinstance(content, str) and content in _INTERRUPTED_TOOL_RESULTS
 
 
 def _redundant_tool_results(messages: Sequence[AnyMessage]) -> list[int]:

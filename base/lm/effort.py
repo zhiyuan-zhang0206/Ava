@@ -22,12 +22,9 @@ EFFORT_VOCAB: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xh
 
 
 class ReasoningEffort(StrEnum):
-    """Public reasoning-effort levels for `ava.understand` / `ava.web.fetch`.
+    """Reasoning-effort levels, ordered from weakest to strongest.
 
-    Ordered weakest → strongest. `minimal` is deliberately absent — it is a
-    gemini-only `thinking_level`, not a cross-provider effort level. Members
-    are plain `str`, so a member and its literal value are interchangeable.
-    """
+    A member and its string value are interchangeable."""
 
     NONE = "none"
     LOW = "low"

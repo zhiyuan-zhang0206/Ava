@@ -160,9 +160,11 @@ def _publish_self_inbound_wake() -> None:
 
 
 def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
-    """`config_overlay`: a flat `{field_name: value}` dict merged into your
-    persistent per-agent settings.
-    """
+    """Restart yourself under the same identity, preserving your conversation.
+
+    This call ends the current execution; finish required work before calling it.
+    `config_overlay` is a flat `{field_name: value}` mapping merged into your
+    persistent per-agent settings."""
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
     from ava import agent_identity
 
@@ -215,9 +217,10 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
 
 
 def terminate() -> NoReturn:
-    """Your conversation state is preserved; a message from a peer or the
-    user resurrects you with full context.
-    """
+    """Stop yourself and end the current execution; your conversation is preserved.
+
+    A new message, including one from background work, can wake you again. Stop
+    background work that should no longer wake you before calling this."""
     from ava import agent_identity
 
     agent_identity.assert_self_action("terminate")
@@ -281,8 +284,9 @@ def pause_heartbeat(duration: float) -> None:
 
 
 def compact(summary: str) -> NoReturn:
-    """Replace your whole message history with `summary` — it becomes your
-    entire memory of everything before it; nothing raw is kept beside it.
+    """Replace the messages in your current context with `summary` and end execution.
+    The summary becomes your working record of the earlier conversation. If an
+    archived-history note is provided, use its file to recover omitted details.
 
     First persist durable state: your personal memory (`memory/` in your
     workspace) and the shared pool (`ava.memory`; facts other agents need). Then

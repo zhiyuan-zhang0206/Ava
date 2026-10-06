@@ -436,15 +436,11 @@ def new(name: str, *, ttl: float) -> int:
 # `id` / `list` shadow builtins intentionally: these are the agent-facing names.
 # (flake8-builtins `A` is not in this repo's ruff select, so no noqa is needed.)
 def send(id: int, cmd: str, *, enter: bool = True) -> None:
-    """Asynchronous — returns immediately without waiting for the command.
+    """Send text asynchronously, without waiting for the command to finish.
 
-    Set `enter=False` to type the string without pressing Enter.
-
-    Long text (over roughly 1K characters) sent into a terminal UI can be
-    folded by its input handling and arrive silently incomplete (Claude Code
-    drops the folded part on a mixed submission; task #4364). Wrap such text
-    as a bracketed paste, or send a short pointer to a file the receiver
-    reads."""
+    Set `enter=False` to type without submitting. Terminal applications may
+    truncate long input. For long instructions, use the receiver's supported
+    paste mode or send a short pointer to a file it can read."""
     id = coerce_typed(id, "id", int)
     cmd = coerce_str(cmd, "cmd")
     enter = coerce_typed(enter, "enter", bool)
@@ -491,17 +487,15 @@ def kill_all() -> int:
 
 
 def renew(id: int, *, ttl: float) -> datetime:
-    """Move a live session's TTL deadline to now + `ttl` seconds.
+    """Move a live session's expiry to now + `ttl` seconds.
 
-    Never stacked on the current deadline; `ttl` is capped at 24h per call and
-    renewal has no lifetime cap. Only your own live, unexpired sessions renew —
-    watcher sessions included. Only the reclamation deadline moves, never the
-    script's own end (a cron's `_END`, a launch's watchdog, an at's fire time),
-    so a 24h-capped renewal can pull a standing cron's reclaim earlier.
+    Each renewal accepts at most 24 hours and replaces, rather than extends, the
+    existing deadline. Only your own unexpired sessions can be renewed, including
+    watcher sessions. Renewal does not change a watcher's scheduled end or timeout;
+    renewing a longer-lived session can shorten its expiry.
 
     Returns:
-        The new deadline (DB clock).
-    """
+        The new expiry time."""
     id = coerce_typed(id, "id", int)
     ttl = _validate_ttl(coerce_typed(ttl, "ttl", (int, float)))
     return _handle().renew(id, ttl)

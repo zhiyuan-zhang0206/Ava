@@ -68,18 +68,11 @@ def _pool_root() -> Path:
 def _search(
     query: str, k: int = 5, *, timeout: float | None = None
 ) -> list[tuple[Path, str, list[str]]]:
-    """Semantic search; return the most relevant notes as (absolute path,
-    description, tags) tuples. The description is "" when absent; tags carry
-    the note's `type/<x>` tag.
+    """Find relevant shared memory notes.
 
-    `timeout` bounds one attempt (seconds) — default is the gateway's own
-    search deadline plus a 3s margin (18s). Under a congested index the
-    gateway answers 503 (`IndexerUnavailable`) in about a second instead of
-    queueing the request, so an explicit search degrades fast instead of
-    piling up behind the fleet's shared gate. Pass a value only when the
-    default is wrong for this call; keep it above
-    `AVA_MEMORY_SEARCH_DEADLINE_SECONDS`, or the caller reads out first.
-    """
+    Return (absolute path, description, tags) for each match; missing descriptions
+    are empty strings. Tags include the note's `type/<x>` tag. `timeout` bounds each
+    search attempt in seconds; omit it to use the configured limit."""
     query = coerce_str(query, "query")
     k = coerce_typed(k, "k", int)
     timeout = coerce_typed(timeout, "timeout", (int, float), allow_none=True)
@@ -603,7 +596,7 @@ def write(
     tags: list[str] | None = None,
     store: str = "personal",
 ) -> Path:
-    """Upsert the store's MEMORY.md pointer.
+    """Write or replace a memory entry and update its index.
 
     Personal entries use a flat kebab-case name in your workspace; shared entries
     may use topic directories in the memory pool. A shared subdirectory entry is

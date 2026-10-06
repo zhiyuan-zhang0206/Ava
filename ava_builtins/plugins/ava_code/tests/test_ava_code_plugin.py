@@ -103,12 +103,10 @@ def test_get_cwd_returns_state_value(tmp_path: Path):
 
 
 def test_files_module_docstring_keeps_core_path_claim(_load_ava_code_plugin):
-    """ava_code must not overwrite `ava.files.__doc__`: the SDK core's claim
-    (relative paths default to the workspace folder) is the single source of
-    truth for path resolution — cwd tracking is a runtime layer on top, not a
-    docstring contract (user ruling 2026-08-01, memory-leak audit #577)."""
+    """The core owns the overview, including the optional coding directory."""
     assert ava.files.__doc__ is not None
-    assert "resolve to your workspace folder" in ava.files.__doc__
+    assert "workspace by default" in ava.files.__doc__
+    assert "`ava.cwd` when available" in ava.files.__doc__
     assert "tracked working directory" not in ava.files.__doc__
 
 
@@ -976,7 +974,7 @@ def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pyte
     assert "## ava.files" not in text  # expanded by the framework -> skipped
     assert "## ava.shell" in text  # only the child is expanded -> parent stays
     assert "## ava.cwd" not in text  # plugin-registered expand -> skipped too
-    assert "Prefer the tools below" in text  # preamble always renders
+    assert "Use the Ava file and shell tools" in text  # preamble always renders
 
 
 def test_coding_tools_section_all_expanded_keeps_preamble_only(
@@ -988,7 +986,7 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only(
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["cwd", "files", "shell"])
     text = _coding_tools_section(AgentSlices.resolve())
     assert text.startswith("# Coding tools")
-    assert "Prefer the tools below" in text
+    assert "Use the Ava file and shell tools" in text
     # search steering: rg over recursive grep/find (recursive grep times out on
     # the worktree-heavy checkout) — guard for the user-reported slowness
     assert "`rg` (ripgrep)" in text

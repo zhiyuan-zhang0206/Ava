@@ -44,7 +44,7 @@ def _coding_tools_section(slices: AgentSlices) -> str:
         pieces.append(buf.getvalue().rstrip())
     body = "\n\n".join(pieces)
     preamble = (
-        "**Prefer the tools below** for file and shell operations. "
+        "Use the Ava file and shell tools for coding work. "
         "When you start a coding task:\n\n"
         "- Point your working directory at the project root once when you start.\n"
         "- Read `AGENTS.md` first (via the file tools) before reading other "

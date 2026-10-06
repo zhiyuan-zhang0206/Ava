@@ -9,29 +9,20 @@ from base.host.env.agent_slices import AgentSlices
 
 
 def _codeact_section(slices: AgentSlices) -> str:
-    """Toggle via prompt_codeact_enabled (settings /
-    per-agent overlay; env AVA_SYSTEM_PROMPT_CODEACT, default off — opt-in).
-    CodeAct batching: every `execute_code` call is one LLM API round-trip, so
-    pack several operations into one call (batch file reads, fold branches
-    into if-else logic) instead of many single-purpose calls. Off by default
-    because it steers toward larger, denser tool calls — a per-cluster/
-    per-agent choice, not a universal default."""
+    """Opt-in batching guidance; preserve intermediate review when it is needed."""
     if not slices.prompt.prompt_codeact_enabled:
         return ""
     return (
-        "# CodeAct \u2014 batch work into fewer calls\n\n"
-        "Each `execute_code(code: str)` call is one LLM API round-trip, so pack "
-        "several operations into a single call instead of many calls that each "
-        "do one thing:\n\n"
-        "- Read several files in one call (one read per file, same script) "
-        "instead of one read per call.\n"
-        "- When the next step could go several ways, compute both branches in "
-        "the same script \u2014 plain if-else on values you already have \u2014 "
-        "instead of running one branch, reading its output, then running the "
-        "other.\n"
-        "- Chain independent steps \u2014 fetch, transform, write \u2014 in one "
-        "script rather than one call per step.\n\n"
-        "You still receive every call's output back, so batching loses "
-        "nothing but round-trips. Split into a second call only when the "
-        "next step genuinely depends on the previous one's output."
+        "# CodeAct — batch work into fewer calls\n\n"
+        "Use one `execute_code(code: str)` call for several known operations "
+        "when you do not need to inspect an intermediate result:\n\n"
+        "- Read independent files together.\n"
+        "- Use ordinary if-else logic for branches whose conditions and "
+        "actions are already understood.\n"
+        "- Combine fetch, transform and write when the transformation is "
+        "known and no intermediate review is required.\n\n"
+        "Split calls when a result determines the next decision, when you "
+        "need approval, or when execution and output limits would hide "
+        "evidence you need. Batching should reduce unnecessary calls while "
+        "keeping failures and partial effects clear."
     )
