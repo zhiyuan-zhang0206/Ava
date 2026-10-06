@@ -34,12 +34,13 @@ block with its own `AVA_SYSTEM_PROMPT_*` toggle.
    Lives in the base prompt, always first.
 2. **SDK detail** — full contracts (signatures + docstrings) for the configured
    namespaces, rendered directly after the SDK overview so the agent calls them
-   without a drill-down turn. Config-selected (`AVA_SDK_EXPAND`), default `*` =
-   every top-level public namespace **except the capability surfaces**
-   (`ava.skills`, `ava.mcps`); an explicit list (no `*`) narrows to a
-   frequency-driven subset (Huffman) when guessed signatures cluster in the
-   most-used namespaces, leaving rare ones to progressive disclosure via
-   `ava.help`. The two-bucket split is load-bearing: this bucket carries **call
+   without a drill-down turn. Config-selected (`AVA_SDK_EXPAND`), default
+   `shell,files,agents,tasks` = the stable production P95 module set.
+   Explicit `*` expands all public
+   namespaces except the capability surfaces (`ava.skills`, `ava.mcps`).
+   The frequency-driven subset keeps common contracts resident, leaving rare
+   ones to progressive disclosure via `ava.help`. The two-bucket split is
+   load-bearing: this bucket carries **call
    contracts**, Capabilities carries **what you can do**. Skills and MCP servers
    are members of a capability surface rather than SDK API, so expanding them
    here would render a full second index of exactly what Capabilities lists —
@@ -64,7 +65,7 @@ Capabilities rather than standing as its own section.
 - **Core expanded SDK reference** — `agent/graph/prompt/system_prompt.py:_sdk_expand_section`,
   rendering `effective_sdk_expand()`: plugin registrations
   (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. ava_code's `cwd`) first, then
-  `settings.sdk_expand_in_system_prompt` (env `AVA_SDK_EXPAND`, default `*`),
+  `settings.sdk_expand_in_system_prompt` (env `AVA_SDK_EXPAND`, default `shell,files,agents,tasks`),
   deduped keep-first — full `ava.help(ava.<path>)` stubs right after the
   overview. `*` expands to every top-level public namespace (discovered from
   `help(ava)`, sorted; top-level functions like `help`/`understand` are skipped
@@ -79,8 +80,9 @@ Capabilities rather than standing as its own section.
   is consulted before resolution (a disabled entry is skipped unconditionally
   and silently, and excluded from `*`); any other resolution miss warns. The
   `ava_code` plugin's `_coding_tools_section` consults the same effective view
-  and skips a module already expanded (exact path match) — with the default `*`
-  every framework module is expanded, so it stays preamble-only.
+  and skips a module already expanded (exact path match) — the P95 default
+  expands files and shell, and the plugin promotes cwd,
+  so the coding section stays preamble-only.
 - **Core prefer-SDK nudge** — `agent/graph/prompt/system_prompt.py:_prefer_sdk_section`,
   on by default via `settings.prompt_prefer_sdk_enabled` (env
   `AVA_SYSTEM_PROMPT_PREFER_SDK`): one line steering the agent to `ava.*` tools over
@@ -231,8 +233,15 @@ eligible call volume. Top-level functions are already in the overview; skills
 and MCPs belong in the capability index. Review workload mix and missing mirrors
 before applying its suggested `AVA_SDK_EXPAND` list. Plugin-declared expansions
 still apply. The report never changes configuration, and an empty sample yields
-no recommendation. The shipped `*` SDK default is retained until representative
-evidence supports a narrower general-agent list.
+no recommendation. The shipped SDK default is `shell,files,agents,tasks`:
+these whole modules cover 95.410% of 134,744 eligible agent-attributed calls in the production
+database queried on 2026-10-06. The query used a 30-day window, but available
+SDK records span 2026-09-26 through 2026-10-03; subsequent SDK events were not
+persisted. This is a fixed default selected from recorded evidence, not an
+adaptive per-agent percentile. `*`, explicit lists and empty overrides retain
+their meanings. Nested namespaces such as `shell.sessions` remain available
+through `ava.help` unless explicitly expanded. Existing configured overrides
+are preserved; changing the source default does not redeploy a running cluster.
 
 ## Responsibility split: Ava core vs ava_code
 
@@ -411,8 +420,8 @@ Landed so far:
   exploring or planning; the user pins or defers the working rhythm. Distinct
   from action-caution: the direction of substantial work, not individual
   irreversible ops.
-- Expanded SDK reference (`AVA_SDK_EXPAND`, default `*` = every top-level public
-  namespace bar the capability surfaces) — full contracts after the overview.
+- Expanded SDK reference (`AVA_SDK_EXPAND`, default `shell,files,agents,tasks`) —
+  full contracts after the overview.
 - One skill index, a default-on match-first instruction, and a mandatory step
   that reads it: `# Capabilities` lists the whole catalog
   (`skills_to_inject_into_system_prompt` default `*`), the expanded SDK
