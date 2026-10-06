@@ -370,7 +370,7 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
     KeyError at render time rather than silently fall back."""
     from typing import get_args
 
-    from agent.graph.prompt.system_prompt import _COMMUNICATION_STYLE_SECTIONS
+    from agent.graph.prompt.conversation import COMMUNICATION_STYLE_SECTIONS
     from base.config.domains.agent.settings import AgentSettings
 
     annotation = AgentSettings.model_fields["agent_communication_style"].annotation
@@ -378,8 +378,8 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
     # per-model default); unwrap the union to the Literal member set.
     literal = next(a for a in get_args(annotation) if a is not type(None))
     members = set(get_args(literal))
-    assert set(_COMMUNICATION_STYLE_SECTIONS) == members - {"off"}
-    assert len(set(_COMMUNICATION_STYLE_SECTIONS.values())) == len(_COMMUNICATION_STYLE_SECTIONS)
+    assert set(COMMUNICATION_STYLE_SECTIONS) == members - {"off"}
+    assert len(set(COMMUNICATION_STYLE_SECTIONS.values())) == len(COMMUNICATION_STYLE_SECTIONS)
 
 
 def test_off_style_omits_the_section_entirely(monkeypatch: pytest.MonkeyPatch) -> None:

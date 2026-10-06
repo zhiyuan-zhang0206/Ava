@@ -100,7 +100,7 @@ with ava.external.attach(0, agent_id=405):
     ava.agents.send_message(406, "Please review the login change")
 ```
 
-User-visible replies never go through the attachment — send them with the CLI (`ava impersonate say`, see *Talk to the human*; peer messages have their own CLI form, see *Message another agent as the borrowed identity*).
+Replies to human requests delivered through Ava never go through the attachment — send them with the CLI (`ava impersonate say`, see *Talk to the human*; peer messages have their own CLI form, see *Message another agent as the borrowed identity*).
 
 Direct Python is the normal SDK path; `ava impersonate exec` is an optional
 wrapper. Use the cluster checkout's `.venv/bin/python` inside the controller's
@@ -136,6 +136,17 @@ message from stdin. Sending under an identity that is not one's own is exactly
 what the lease attests — there is no declared form (task #4102).
 
 ## Talk to the human
+
+Reply where each request entered. Direct human messages in the external host
+conversation, including a manually opened Codex in tmux, get plain text there.
+Human requests from Ava get progress, questions and results through `say` below.
+Ava relay envelopes carry agent, lease and message ids plus each item's source;
+the host message role alone cannot distinguish Ava delivery from direct input.
+Preserve the route for each request when messages interleave. Peer messages use
+the borrowed peer channel above. Do not duplicate replies across entries unless
+requested. Before investigating a human request, send a brief substantive reply
+at its entry point; an immediate answer needs no separate acknowledgment.
+Relay ACK and the final Ava release summary remain separate requirements.
 
 ```bash
 ava impersonate say 0 --agent 405 --key progress-1 'I found the cause.'

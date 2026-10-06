@@ -46,6 +46,7 @@ def _assert_takeover_protocol_uses_say_and_own_summary_release(message: str) -> 
     assert "work file" not in message
     assert "ava impersonate say" in message
     assert "ava.impersonation.say" not in message
+    _assert_reply_follows_request_entry(message)
     assert "release with your own summary" in message
     assert "transport acceptance is not host receipt" in message
     assert "as soon as you receive it" in message
@@ -53,6 +54,14 @@ def _assert_takeover_protocol_uses_say_and_own_summary_release(message: str) -> 
     assert "scripts/read_instructions.py" in message
     assert "system prompt and configured preloaded skills" in message
     assert "process and ACK inbound messages" not in message
+
+
+def _assert_reply_follows_request_entry(message: str) -> None:
+    assert "plain text for direct human requests in your host" in message
+    assert "delivered through Ava" in message
+    assert "even when requests interleave" in message
+    assert "substantive reply at that entry point" in message
+    assert "say for all" not in message
 
 
 def _assert_provider_specific_relay_instructions(message: str, provider: str) -> None:
@@ -591,3 +600,17 @@ def test_instruction_script_prints_only_after_successful_detach(
     with pytest.raises(RuntimeError, match="lease expired"):
         instruction_reader.main()
     assert capsys.readouterr().out == ""
+
+
+def test_impersonator_guide_routes_replies_by_request_origin() -> None:
+    guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
+    text = guide.read_text()
+
+    assert "Codex opened manually in tmux) gets plain text there" in text
+    assert "`ava impersonate say` in Ava" in text
+    assert "Ava message agent=... lease=... ids=..." in text
+    assert "item `from=` source" in text
+    assert "host's user role alone" in text
+    assert "Keep the reply route with each request" in text
+    assert "Relay ACK is separate" in text
+    assert "Host text does not replace the required Ava release summary" in text
