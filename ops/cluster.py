@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from base.agents import ShellKillMode
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins
@@ -71,13 +72,11 @@ def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
 
     ``interrupted`` reports whether the kill cut short a running job — the
     gateway notifies the owner only then (an empty shell's reaping is silent)."""
-    match kill_shell(agent_id, session_id):
-        case ("killed", interrupted, name):
-            return ShellKillResult(mode="killed", interrupted=interrupted, name=name)
-        case ("absent", _interrupted, _name):
-            return ShellKillResult(mode="absent")
-        case mode:
-            raise AssertionError(f"unknown shell kill mode {mode!r}")
+    raw_mode, interrupted, name = kill_shell(agent_id, session_id)
+    mode = ShellKillMode(raw_mode)
+    if mode is ShellKillMode.ABSENT:
+        return ShellKillResult(mode=mode)
+    return ShellKillResult(mode=mode, interrupted=interrupted, name=name)
 
 
 def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list[str] | None]:

@@ -17,7 +17,7 @@ Two resident sequential loops under one `TaskGroup` (`services/upkeep/ttl_reaper
 - **`remote`** (`remote.py`) — calls out: TTL-expired persistent shell sessions are killed on their home machines (`shells.py`; machines concurrently, one machine's rows in order, each dispatch under a deadline sized from the RPC client's budget).
 
 ## Semantics that matter
-- A shell row is deleted only on a definitive verdict (`killed` / `absent` / `machine_absent`); an unreachable machine, a failed op or a dispatch past its deadline leaves it for the next round. Each kill re-checks the row is still expired against `clock_timestamp()`, which pairs with the renewal guard so a renewed session is never killed.
+- A shell row is deleted only on a definitive verdict (`killed` / `absent` / `machine_absent`); runner results use `ShellKillMode` from `base/agents/contract.py` (`killed` / `absent`), while `machine_absent` requires local registry evidence and cannot come from a runner payload. Unknown or missing runner modes are logged and deferred; an unreachable machine, a failed op or a dispatch past its deadline leaves it for the next round. Each kill re-checks the row is still expired against `clock_timestamp()`, which pairs with the renewal guard so a renewed session is never killed.
 - Owners are notified (system inbound) only while `running` / `idling`, never resurrected; a shell reclaim notifies only when it interrupted a running job.
 - The cadence stamp is the claim, not the outcome: a slow phase that fails waits out its interval, and a restart resumes the clocks instead of running every slow phase at once.
 - Known gap, unchanged: a kill dispatched but cut off before its row is deleted loses the "interrupted" notice (the next round's kill answers `absent`, silent).

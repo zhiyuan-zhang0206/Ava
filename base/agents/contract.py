@@ -97,6 +97,13 @@ class TerminateResult(StrEnum):
     ALREADY_TERMINATED = "already_terminated"
 
 
+class ShellKillMode(StrEnum):
+    """The home runner's verdict for killing one agent-owned shell session."""
+
+    KILLED = "killed"
+    ABSENT = "absent"
+
+
 class ShellSessionKillTiming(StrEnum):
     """When a terminate request applies its shell-session cleanup."""
 
