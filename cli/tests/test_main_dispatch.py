@@ -23,13 +23,13 @@ from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from base.native_process import code_version
 from cli import main as _main
 from cli.commands.agents import parsers as _agents
+from cli.commands.extensions.parsers import mcp as _mcp
+from cli.commands.extensions.parsers import plugins as _plugins
 from cli.parsers import backup as _backup
 from cli.parsers import build_parser
 from cli.parsers import cluster as _cluster
 from cli.parsers import host as _host
 from cli.parsers import logs as _logs
-from cli.parsers import mcp as _mcp
-from cli.parsers import plugins as _plugins
 from cli.parsers import pty as _pty
 
 
@@ -87,6 +87,10 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
             assert module == "cli.commands.agents.parsers", (leaf.prog, module)
         elif leaf.prog.startswith("ava impersonate "):
             assert module == "cli.commands.agents.impersonation_parsers", (leaf.prog, module)
+        elif leaf.prog.startswith(
+            ("ava mcp ", "ava memory ", "ava packages ", "ava plugins ", "ava skill ")
+        ):
+            assert module.startswith("cli.commands.extensions.parsers."), (leaf.prog, module)
         else:
             assert module.startswith("cli.parsers."), (leaf.prog, module)
 
@@ -691,7 +695,10 @@ if sys.argv[1] == 'parser':
     assert args.session_id == 0
     assert args.provider == 'codex'
     loaded = {name for name in sys.modules if name.startswith('cli.commands.')}
-    assert loaded == {'cli.commands.agents', 'cli.commands.agents.parsers', 'cli.commands.agents.impersonation_parsers'}, loaded
+    assert loaded == {'cli.commands.agents', 'cli.commands.agents.parsers', 'cli.commands.agents.impersonation_parsers',
+        'cli.commands.extensions', 'cli.commands.extensions.parsers',
+        'cli.commands.extensions.parsers.mcp', 'cli.commands.extensions.parsers.packages',
+        'cli.commands.extensions.parsers.plugins'}, loaded
 elif sys.argv[1] == 'config':
     import cli.commands.management.config
 assert 'base.config' not in sys.modules

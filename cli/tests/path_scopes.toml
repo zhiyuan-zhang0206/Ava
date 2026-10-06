@@ -8,7 +8,6 @@
     "test_logs_rotate.py",
     "test_main_dispatch.py",
     "test_main_log_init.py",
-    "test_mcp_install_parser.py",
     "test_memory_cmd.py",
     "test_schedules_parser.py",
     "test_plugin_scaffold.py",

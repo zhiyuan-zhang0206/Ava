@@ -16,7 +16,7 @@ from typing import Any
 _MARKER_NAME = ".ava-managed.json"
 
 
-def _is_posix() -> bool:
+def is_posix() -> bool:
     return os.name != "nt"
 
 
@@ -30,16 +30,16 @@ def _platform_mode(mode: int, *, is_dir: bool) -> int:
     pipeline's canonical private modes (0o600 / 0o700).  POSIX is authoritative
     and passed through unchanged.
     """
-    if _is_posix():
+    if is_posix():
         return mode
     return 0o700 if is_dir else 0o600
 
 
-class _SourceIntegrityError(RuntimeError):
+class SourceIntegrityError(RuntimeError):
     """The repository source cannot safely be copied."""
 
 
-class _ClientConflictError(RuntimeError):
+class ClientConflictError(RuntimeError):
     """A user-owned client path cannot safely be changed."""
 
 
@@ -51,7 +51,7 @@ class _SourceFile:
 
 
 @dataclass(frozen=True, slots=True)
-class _SourceSnapshot:
+class SourceSnapshot:
     """One immutable read of the operator skill source tree."""
 
     directories: tuple[tuple[str, int], ...]
@@ -78,30 +78,30 @@ class _SourceSnapshot:
         )
 
 
-def _attributes_reparse(current: os.stat_result) -> bool:
+def attributes_reparse(current: os.stat_result) -> bool:
     attribute = getattr(current, "st_file_attributes", 0)
     flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     return bool(attribute & flag)
 
 
-def _lstat(path: Path) -> os.stat_result:
+def lstat(path: Path) -> os.stat_result:
     current = path.lstat()
-    if stat.S_ISLNK(current.st_mode) or _attributes_reparse(current):
-        raise _ClientConflictError("linked or reparse filesystem component")
+    if stat.S_ISLNK(current.st_mode) or attributes_reparse(current):
+        raise ClientConflictError("linked or reparse filesystem component")
     return current
 
 
-def _source_lstat(path: Path) -> os.stat_result:
+def source_lstat(path: Path) -> os.stat_result:
     try:
         current = path.lstat()
     except OSError as exc:
-        raise _SourceIntegrityError("operator skill source cannot be inspected") from exc
-    if stat.S_ISLNK(current.st_mode) or _attributes_reparse(current):
-        raise _SourceIntegrityError("operator skill source contains a linked entry")
+        raise SourceIntegrityError("operator skill source cannot be inspected") from exc
+    if stat.S_ISLNK(current.st_mode) or attributes_reparse(current):
+        raise SourceIntegrityError("operator skill source contains a linked entry")
     return current
 
 
-def _exists(path: Path) -> bool:
+def exists(path: Path) -> bool:
     try:
         path.lstat()
     except FileNotFoundError:
@@ -126,16 +126,16 @@ def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
     # CPython 3.12's Windows pathname stat keeps legacy st_ctime = birthtime,
     # while fstat reports the handle's metadata-change time.  Compare the two
     # API families only on identity; each family gets its own full before/after
-    # stability check in _read_regular.
+    # stability check in read_regular.
     left_identity = (left.st_dev, left.st_ino)
     right_identity = (right.st_dev, right.st_ino)
     return left_identity != (0, 0) and left_identity == right_identity
 
 
-def _read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
-    inspect = _source_lstat if source else _lstat
+def read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
+    inspect = source_lstat if source else lstat
     before = inspect(path)
-    error = _SourceIntegrityError if source else _ClientConflictError
+    error = SourceIntegrityError if source else ClientConflictError
     if not stat.S_ISREG(before.st_mode):
         raise error("operator skill tree contains a non-regular file")
     if before.st_nlink != 1:
@@ -161,11 +161,11 @@ def _read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
     return data, _platform_mode(stat.S_IMODE(before.st_mode), is_dir=False)
 
 
-def _source_snapshot(root: Path) -> _SourceSnapshot:
+def source_snapshot(root: Path) -> SourceSnapshot:
     """Capture validated source bytes once so publication never re-reads live Git files."""
-    root_before = _source_lstat(root)
+    root_before = source_lstat(root)
     if not stat.S_ISDIR(root_before.st_mode):
-        raise _SourceIntegrityError("operator skill tree root is not a directory")
+        raise SourceIntegrityError("operator skill tree root is not a directory")
     directories: list[tuple[str, int]] = [
         (".", _platform_mode(stat.S_IMODE(root_before.st_mode), is_dir=True))
     ]
@@ -174,15 +174,15 @@ def _source_snapshot(root: Path) -> _SourceSnapshot:
 
     def visit(directory: Path) -> None:
         relative_directory = directory.relative_to(root).as_posix() or "."
-        before = _source_lstat(directory)
+        before = source_lstat(directory)
         try:
             children = sorted(directory.iterdir(), key=lambda item: item.name)
         except OSError as exc:
-            raise _SourceIntegrityError("operator skill tree cannot be enumerated safely") from exc
+            raise SourceIntegrityError("operator skill tree cannot be enumerated safely") from exc
         for child in children:
             if directory == root and child.name == _MARKER_NAME:
-                raise _SourceIntegrityError("operator skill source reserves its ownership marker")
-            current = _source_lstat(child)
+                raise SourceIntegrityError("operator skill source reserves its ownership marker")
+            current = source_lstat(child)
             relative = child.relative_to(root).as_posix()
             source_stats[relative] = current
             if stat.S_ISDIR(current.st_mode):
@@ -194,42 +194,40 @@ def _source_snapshot(root: Path) -> _SourceSnapshot:
                 )
                 visit(child)
             elif stat.S_ISREG(current.st_mode):
-                data, mode = _read_regular(child, source=True)
+                data, mode = read_regular(child, source=True)
                 files.append(_SourceFile(path=relative, mode=mode, data=data))
             else:
-                raise _SourceIntegrityError("operator skill source contains an unsupported entry")
-        if _signature(_source_lstat(directory)) != _signature(before):
-            raise _SourceIntegrityError("operator skill source changed while being copied")
+                raise SourceIntegrityError("operator skill source contains an unsupported entry")
+        if _signature(source_lstat(directory)) != _signature(before):
+            raise SourceIntegrityError("operator skill source changed while being copied")
         source_stats[relative_directory] = before
 
     visit(root)
     for relative, expected in source_stats.items():
-        current = _source_lstat(root if relative == "." else root / relative)
+        current = source_lstat(root if relative == "." else root / relative)
         if _signature(current) != _signature(expected):
-            raise _SourceIntegrityError("operator skill source changed while being copied")
-    return _SourceSnapshot(directories=tuple(directories), files=tuple(files))
+            raise SourceIntegrityError("operator skill source changed while being copied")
+    return SourceSnapshot(directories=tuple(directories), files=tuple(files))
 
 
-def _tree_digest(
+def tree_digest(
     root: Path, *, source: bool = False, ignore_root_names: frozenset[str] = frozenset()
 ) -> str:
     """Hash the validated manifest without following filesystem links."""
-    return _manifest_digest(
-        _tree_manifest(root, source=source, ignore_root_names=ignore_root_names)
-    )
+    return manifest_digest(tree_manifest(root, source=source, ignore_root_names=ignore_root_names))
 
 
-def _manifest_digest(manifest: list[dict[str, Any]]) -> str:
+def manifest_digest(manifest: list[dict[str, Any]]) -> str:
     encoded = json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _tree_manifest(
+def tree_manifest(
     root: Path, *, source: bool = False, ignore_root_names: frozenset[str] = frozenset()
 ) -> list[dict[str, Any]]:
     """Describe each path Ava may later verify or reclaim."""
-    inspect = _source_lstat if source else _lstat
-    error = _SourceIntegrityError if source else _ClientConflictError
+    inspect = source_lstat if source else lstat
+    error = SourceIntegrityError if source else ClientConflictError
     root_before = inspect(root)
     if not stat.S_ISDIR(root_before.st_mode):
         raise error("operator skill tree root is not a directory")
@@ -262,7 +260,7 @@ def _tree_manifest(
                 )
                 visit(child)
             elif stat.S_ISREG(current.st_mode):
-                data, mode = _read_regular(child, source=source)
+                data, mode = read_regular(child, source=source)
                 manifest.append(
                     {
                         "kind": "file",
@@ -292,37 +290,37 @@ def _validate_manifest_subset(
         path = str(item["path"])
         wanted = expected_by_path.get(path)
         if wanted is None or item["kind"] != wanted["kind"]:
-            raise _ClientConflictError("transaction residue contains an unexpected entry")
+            raise ClientConflictError("transaction residue contains an unexpected entry")
         expected_mode = int(wanted["mode"])
         cleanup_mode = expected_mode | stat.S_IRWXU
         allowed_modes = {expected_mode, cleanup_mode}
         if item["kind"] == "directory":
             allowed_modes.add(stat.S_IRWXU)
-        if _is_posix() and int(item["mode"]) not in allowed_modes:
-            raise _ClientConflictError("transaction residue metadata was modified")
+        if is_posix() and int(item["mode"]) not in allowed_modes:
+            raise ClientConflictError("transaction residue metadata was modified")
         if item["kind"] == "file" and item["sha256"] != wanted["sha256"]:
-            raise _ClientConflictError("transaction residue content was modified")
+            raise ClientConflictError("transaction residue content was modified")
 
 
-def _verify_cleanup_file(path: Path, expected: dict[str, Any]) -> None:
-    data, mode = _read_regular(path, source=False)
+def verify_cleanup_file(path: Path, expected: dict[str, Any]) -> None:
+    data, mode = read_regular(path, source=False)
     if hashlib.sha256(data).hexdigest() != expected["sha256"] or (
-        _is_posix() and mode != int(expected["mode"])
+        is_posix() and mode != int(expected["mode"])
     ):
-        raise _ClientConflictError("transaction residue file changed during cleanup")
+        raise ClientConflictError("transaction residue file changed during cleanup")
 
 
-def _remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
+def remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
     """Refuse path-based deletion after validating the caller's preservation candidate."""
-    current = _tree_manifest(root)
+    current = tree_manifest(root)
     _validate_manifest_subset(current, expected)
     for item in current:
         if item["kind"] == "file":
-            _verify_cleanup_file(root / str(item["path"]), item)
-    raise _ClientConflictError("path-bound deletion is unsupported; residue was preserved")
+            verify_cleanup_file(root / str(item["path"]), item)
+    raise ClientConflictError("path-bound deletion is unsupported; residue was preserved")
 
 
-def _write_new(path: Path, data: bytes, mode: int) -> None:
+def write_new(path: Path, data: bytes, mode: int) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags, mode)
     try:
@@ -335,7 +333,7 @@ def _write_new(path: Path, data: bytes, mode: int) -> None:
             os.close(fd)
 
 
-def _rename_no_replace(source: Path, destination: Path) -> None:
+def rename_no_replace(source: Path, destination: Path) -> None:
     """Atomically rename a directory only when the destination is absent."""
     library = ctypes.CDLL(None, use_errno=True)
     source_bytes = os.fsencode(source)
@@ -364,7 +362,7 @@ def _rename_no_replace(source: Path, destination: Path) -> None:
         raise OSError(error_number, os.strerror(error_number))
 
 
-def _materialize_source_snapshot(snapshot: _SourceSnapshot, destination: Path) -> None:
+def materialize_source_snapshot(snapshot: SourceSnapshot, destination: Path) -> None:
     """Write one captured source generation without consulting the live checkout."""
     for relative, _mode in sorted(
         (item for item in snapshot.directories if item[0] != "."),
@@ -372,7 +370,7 @@ def _materialize_source_snapshot(snapshot: _SourceSnapshot, destination: Path) -
     ):
         (destination / relative).mkdir(mode=0o700)
     for item in snapshot.files:
-        _write_new(destination / item.path, item.data, item.mode)
+        write_new(destination / item.path, item.data, item.mode)
     for relative, mode in sorted(
         snapshot.directories,
         key=lambda item: len(Path(item[0]).parts),

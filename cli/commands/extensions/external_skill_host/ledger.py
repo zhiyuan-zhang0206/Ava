@@ -9,31 +9,31 @@ from pathlib import Path
 from typing import Any, cast
 
 from base.host.private_storage import write_private_bytes
-from cli.commands.extensions._external_skill_fs import (
-    _ClientConflictError,
-    _exists,
-    _manifest_digest,
-    _read_regular,
+from cli.commands.extensions.external_skill_host.filesystem import (
+    ClientConflictError,
+    exists,
+    manifest_digest,
+    read_regular,
 )
 
-_FORMAT = 6
+FORMAT = 6
 _MARKER_NAME = ".ava-managed.json"
-_SKILL_NAME = "operating-ava-cluster"
+SKILL_NAME = "operating-ava-cluster"
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[0-9a-f]{32}$")
 
 
-def _ownership_marker(
+def ownership_marker(
     installation_id: str,
     generation_id: str,
     source_digest: str,
     *,
-    skill_name: str = _SKILL_NAME,
+    skill_name: str = SKILL_NAME,
 ) -> bytes:
     return (
         json.dumps(
             {
-                "format": _FORMAT,
+                "format": FORMAT,
                 "generation_id": generation_id,
                 "installation_id": installation_id,
                 "owner": "ava",
@@ -47,7 +47,7 @@ def _ownership_marker(
     ).encode()
 
 
-def _stage_manifest(source_manifest: list[dict[str, Any]], marker: bytes) -> list[dict[str, Any]]:
+def stage_manifest(source_manifest: list[dict[str, Any]], marker: bytes) -> list[dict[str, Any]]:
     return sorted(
         [
             *source_manifest,
@@ -62,16 +62,16 @@ def _stage_manifest(source_manifest: list[dict[str, Any]], marker: bytes) -> lis
     )
 
 
-def _parse_record(path: Path) -> dict[str, Any] | None:
-    if not _exists(path):
+def parse_record(path: Path) -> dict[str, Any] | None:
+    if not exists(path):
         return None
-    data, _ = _read_regular(path, source=False)
+    data, _ = read_regular(path, source=False)
     try:
         value: object = json.loads(data)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise _ClientConflictError("Ava ownership ledger is invalid") from exc
+        raise ClientConflictError("Ava ownership ledger is invalid") from exc
     if not isinstance(value, dict):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Ava ownership ledger is invalid")
     return cast(dict[str, Any], value)
 
 
@@ -202,21 +202,21 @@ def _valid_cleanup_item(value: object, *, retained: bool) -> bool:
 
 def _check_installed(installed_value: object) -> None:
     if not isinstance(installed_value, dict):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Ava ownership ledger is invalid")
     installed = cast(dict[str, Any], installed_value)
     if (
         set(installed) != {"digest", "generation_id", "manifest", "source_digest"}
         or not all(_valid_digest(installed[key]) for key in ("digest", "source_digest"))
         or not _valid_id(installed["generation_id"])
         or not _valid_manifest(installed["manifest"])
-        or _manifest_digest(installed["manifest"]) != installed["digest"]
+        or manifest_digest(installed["manifest"]) != installed["digest"]
     ):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Ava ownership ledger is invalid")
 
 
 def _check_transaction(transaction_value: object, *, has_installed: bool) -> None:
     if not isinstance(transaction_value, dict):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Ava ownership ledger is invalid")
     transaction = cast(dict[str, Any], transaction_value)
     if (
         set(transaction)
@@ -232,17 +232,17 @@ def _check_transaction(transaction_value: object, *, has_installed: bool) -> Non
         or not _valid_digest(transaction["source_digest"])
         or not _valid_digest(transaction["expected_digest"])
         or not _valid_manifest(transaction["expected_manifest"])
-        or _manifest_digest(transaction["expected_manifest"]) != transaction["expected_digest"]
+        or manifest_digest(transaction["expected_manifest"]) != transaction["expected_digest"]
         or transaction["claim_state"] not in {"idle", "claiming", "claimed"}
         or transaction["stage_state"] not in {"preparing", "publishing", "published"}
         or (transaction["claim_state"] != "idle" and transaction["stage_state"] != "published")
         or (transaction["claim_state"] != "idle" and not has_installed)
     ):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Ava ownership ledger is invalid")
 
 
-def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
-    record = _parse_record(path)
+def load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
+    record = parse_record(path)
     if record is None:
         return None
     required = {
@@ -254,10 +254,10 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
         "transaction",
         "garbage",
     }
-    if set(record) != required or record["client"] != client_key or record["format"] != _FORMAT:
-        raise _ClientConflictError("Ava ownership ledger is invalid")
+    if set(record) != required or record["client"] != client_key or record["format"] != FORMAT:
+        raise ClientConflictError("Ava ownership ledger is invalid")
     if not _valid_id(record["installation_id"]):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Ava ownership ledger is invalid")
     installed_value: object = record["installed"]
     if installed_value is not None:
         _check_installed(installed_value)
@@ -267,12 +267,12 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
     for key, retained in (("garbage", False), ("retained", True)):
         items: object = record[key]
         if not isinstance(items, list):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
+            raise ClientConflictError("Ava ownership ledger is invalid")
         for item_value in cast(list[object], items):
             if not _valid_cleanup_item(item_value, retained=retained):
-                raise _ClientConflictError("Ava ownership ledger is invalid")
+                raise ClientConflictError("Ava ownership ledger is invalid")
     return record
 
 
-def _write_ledger(path: Path, ledger: dict[str, Any]) -> None:
+def write_ledger(path: Path, ledger: dict[str, Any]) -> None:
     write_private_bytes(path, (json.dumps(ledger, indent=2, sort_keys=True) + "\n").encode())

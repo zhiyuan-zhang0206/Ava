@@ -1,0 +1,1 @@
+"tests.path_scoped.cli_tests" = ["test_mcp_install_parser.py"]
