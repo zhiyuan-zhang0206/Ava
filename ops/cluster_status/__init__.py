@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 import base.cluster
 import base.deploy.state.host_deploy_state
+from base.agents import ShellKillMode
 from base.api_contracts.status import PausedReason, SchemaMismatchStatus
 from base.clock import Clock
 from base.cluster.machine import (
@@ -280,7 +281,7 @@ def capture_shell(
     return full_name, captured_lines, shell.created_at, shell.uptime_seconds
 
 
-def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
+def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str | None]:
     """Kill one host-local persistent shell, or report that it is already absent.
 
     Returns ``(mode, interrupted, name)``: ``mode`` is ``"killed"`` or
@@ -295,7 +296,7 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
     cannot be proven idle may well be running work)."""
     shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
     if shell is None:
-        return "absent", False, None
+        return ShellKillMode.ABSENT, False, None
     full_name = _shell_session_name(agent_id, shell)
     from base.sessions.backend import get_shell_backend
 
@@ -307,7 +308,7 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
         ok, _mode = backend.kill_session(full_name)
     if not ok:
         raise RuntimeError(f"failed to kill session {full_name!r}")
-    return "killed", interrupted, shell.name
+    return ShellKillMode.KILLED, interrupted, shell.name
 
 
 # Parallel kills bound one kill-all to roughly one PTY CLI round trip: the

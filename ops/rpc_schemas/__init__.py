@@ -25,7 +25,7 @@ from pydantic import (
     model_validator,
 )
 
-from base.agents import RestartResult, ResurrectResult
+from base.agents import RestartResult, ResurrectResult, ShellKillMode
 from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
@@ -619,7 +619,7 @@ class ShellKillResult(BaseModel):
     sessions always report False. `name` is the shell's optional display
     name, for a notice that names what was interrupted."""
 
-    mode: Literal["killed", "absent"]
+    mode: ShellKillMode
     interrupted: bool = False
     name: str | None = None
 

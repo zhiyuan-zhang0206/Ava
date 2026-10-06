@@ -48,6 +48,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents import ShellKillMode
 from base.clock import Clock
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
@@ -204,9 +205,13 @@ def delete_shell_row(
             )
 
 
+class _MachineAbsent:
+    """Local registry evidence, never a verdict accepted from a runner payload."""
+
+
 async def _dispatch_shell_kill(
     db: Database, machine: str, agent_id: int, session_id: int
-) -> dict[str, Any] | None:
+) -> dict[str, Any] | _MachineAbsent | None:
     """One ``shell_kill`` dispatch; None means "defer to the next round".
 
     A machine absent from the machines registry (task #4143) cannot be dialed:
@@ -233,7 +238,7 @@ async def _dispatch_shell_kill(
             agent_id,
             machine,
         )
-        return {"mode": "machine_absent"}
+        return _MachineAbsent()
     except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed, TimeoutError) as exc:
         _log.warning(
             "[ttl-reaper] shell_kill for agent %s session %s deferred: %r",
@@ -259,21 +264,29 @@ async def _reclaim_row(
     result = await _dispatch_shell_kill(db, machine, agent_id, session_id)
     if result is None:
         return None
-    mode = result.get("mode")
-    if mode not in ("killed", "absent", "machine_absent"):
-        _log.warning(
-            "[ttl-reaper] shell_kill for agent %s session %s returned %r",
-            agent_id,
-            session_id,
-            result,
-        )
-        return None
+    if isinstance(result, _MachineAbsent):
+        mode = None
+    else:
+        try:
+            mode = ShellKillMode(result["mode"])
+        except (KeyError, ValueError):
+            _log.warning(
+                "[ttl-reaper] shell_kill for agent %s session %s returned %r",
+                agent_id,
+                session_id,
+                result,
+            )
+            return None
     # Notify only when the reap cut short a running job. A missing
     # `interrupted` field means a pre-policy runner — default True so a
     # version-skewed fleet keeps the old notify-always behavior instead of
     # silently swallowing a legit interruption notice. Absent sessions
     # never notify (nothing was interrupted).
-    interrupted = mode == "killed" and bool(result.get("interrupted", True))
+    interrupted = (
+        mode is ShellKillMode.KILLED
+        and isinstance(result, dict)
+        and bool(result.get("interrupted", True))
+    )
     await asyncio.to_thread(
         functools.partial(
             delete_shell_row,
@@ -283,7 +296,7 @@ async def _reclaim_row(
             agent_id,
             session_id,
             interrupted=interrupted,
-            name=result.get("name"),
+            name=result.get("name") if isinstance(result, dict) else None,
             expires_at=row["expires_at"],
             created_at=row["created_at"],
         )
@@ -296,7 +309,7 @@ async def _reclaim_row(
         attributes={
             "agent_id": agent_id,
             "session_id": session_id,
-            "mode": mode,
+            "mode": mode.value if mode is not None else "machine_absent",
             "interrupted": interrupted,
         },
     )
