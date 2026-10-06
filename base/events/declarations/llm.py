@@ -27,8 +27,6 @@ class LlmUsage(TypedDict):
     Counter, not from a histogram's count, which drops the agent_id key).
     ``unpriced`` is 1 exactly when the price snapshot is absent (so unpriced
     call volume is countable in Prometheus); it is omitted on priced calls.
-    ``task_id`` is present only when the turn was explicitly driven by a
-    task-associated system note; untagged calls do not belong to a task.
 
     ``cache_mechanism`` / ``cache_scope`` are present only when the call site
     knows the request's cache provenance (task #2660): the Gemini explicit
@@ -49,7 +47,6 @@ class LlmUsage(TypedDict):
     price_hit: float | None
     price_out: float | None
     unpriced: int | None
-    task_id: NotRequired[int]
     usage_kind: str
     source: NotRequired[str]
     cache_mechanism: NotRequired[str]

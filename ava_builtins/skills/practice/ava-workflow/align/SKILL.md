@@ -92,7 +92,7 @@ A useful checklist for what the frontier's earliest rounds should surface:
 
 **Every question carries your recommended answer — no exceptions.** This is the heart of the technique. Committing to an answer first forces you to actually think it through; it lets the user just accept or reject instead of composing from scratch; and any gap between your recommendation and their reality surfaces on the spot. A question with no recommendation attached is one you haven't done your homework on — don't ask it yet.
 
-**Fact reconnaissance during grilling is non-blocking.** When a frontier question turns on a *fact* you could look up rather than a *decision* only the user can make, dispatch a sub-agent (`ava.agents.spawn`) to find it — never ask the user for something you could discover yourself. Don't stall the round on it: a running lookup is just an unsettled prerequisite, so only the questions *downstream* of that fact wait for the sub-agent to report — ask the rest of the frontier now. (This is the dynamic counterpart to §0: §0 is the static sweep before you open your mouth; this is the reconnaissance you spin up mid-interview as new unknowns appear.)
+**Fact reconnaissance during grilling is non-blocking.** When a frontier question turns on a *fact* you could look up rather than a *decision* only the user can make, ask a suitable peer to investigate it when delegation helps — never ask the user for something you could discover yourself. Don't stall the round on it: a running lookup is just an unsettled prerequisite, so only the questions *downstream* of that fact wait for the peer to report — ask the rest of the frontier now. (This is the dynamic counterpart to §0: §0 is the static sweep before you open your mouth; this is the reconnaissance you spin up mid-interview as new unknowns appear.)
 
 ### 3. Questioning technique
 
@@ -164,7 +164,11 @@ only what remains unsettled; an inferred purpose never grants new authority.
 
 **The alignment document is the input to the Plan phase — or straight to execution.** After confirmation, if the task is small or serial, start executing directly; only very large or parallel tasks need a Plan phase (see `plan/SKILL.md`).
 
-**When the aligned work will run autonomously** — a batch you execute unsupervised rather than step by step — the confirmation doubles as the single authorization for the whole run. Fold the alignment into one `ava.ui.notify(require_response=True)` stating the scope, the task list you will open (the `ava.tasks.create()` items), and the budget ceiling in dollars; the user's reply is the grant, recorded verbatim in the driving task's `description`. This one approval is what buys high Autonomy — after it you run without further check-ins (`ava_fleet`'s Autonomy dial and its boundaries).
+**When the aligned work will run autonomously**, settle any unresolved scope,
+spending, authority, and reporting choices before dependent work. Existing
+instructions may already settle them. Preserve the agreement and recovery notes
+in a durable artifact appropriate to the environment; no particular task system,
+notification interface, or collaboration plugin is required.
 
 ## The Evaluation Connection
 
@@ -185,6 +189,6 @@ Align can be used independently — any time you feel the task isn't clear enoug
 - Don't dump 20 questions in one round — keep each round compact (≤5-8), but keep running rounds until the frontier is empty. A tight round cap is not a total-question cap; no branch gets silently assumed to stay under some number.
 - Don't ask a question without your recommended answer attached — if you can't recommend one, you haven't explored enough to be asking it yet
 - Don't reopen settled choices; clarify the worst acceptable outcome when that unresolved trade-off would change the work
-- Don't ask the user for facts you can look up — explore the environment first, and spin up a sub-agent for facts that surface mid-grilling
+- Don't ask the user for facts you can look up — explore the environment first, and investigate facts that surface mid-grilling, using a peer when useful
 - Don't leave material branches unresolved; make routine method choices within the agreed scope
 - Don't align on top of an uncalibrated model — if the user's picture of the subject is wrong, calibrate that slice first

@@ -262,7 +262,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `idle_wake` | agent woken from idle | noise | degraded, elapsed_s, rounds, timeout_s, wake_state | — | events | ✓ |
 | `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events | — |
 | `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events | — |
-| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced, task_id, usage_kind, source, cache_mechanism, cache_scope | — | events | ✓ |
+| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced, usage_kind, source, cache_mechanism, cache_scope | — | events | ✓ |
 | `turn_end` | one turn finished | observation | ok, duration_seconds | — | events | ✓ |
 | `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events | ✓ |
 | `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events | — |
@@ -294,7 +294,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `ci_runs_run` | CI-run sampler breadcrumb | observation | repo, window_days, window_runs, window_prs, api_requests | — | events | — |
 | `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events | — |
 | `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events | — |
-| `task_usage_record_failed` | task usage recording failed | anomaly | — | — | events | — |
 | `label_generated` | label auto-generated | noise | — | — | events | — |
 | `label_generate_failed` | label generation failed | anomaly | — | — | events | — |
 | `label_generate_skipped` | label generation skipped | noise | — | — | events | — |

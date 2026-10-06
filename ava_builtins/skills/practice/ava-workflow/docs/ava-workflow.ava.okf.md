@@ -36,6 +36,11 @@ Context and access are chosen for each role. Budget and authority boundaries
 apply to every combination. Agent persistence alone does not make scripts or
 watchers recoverable.
 
+Workflow describes responsibilities, coordination, and evidence in natural
+language. Fleet task records and labels are optional collaboration conveniences,
+not prerequisites. Usage reminders leave agents responsible for preserving
+results, handing off, or revising remaining work; they do not force termination.
+
 ## Owners
 
 - [Workflow](../SKILL.md) owns strategy and capability selection.

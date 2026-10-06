@@ -29,7 +29,7 @@ payment operation."
 
 ## Hand Off or Continue
 
-Keep the result concise; use the existing task or working notes when persistence
+Keep the result concise; use durable working notes or an existing work record when persistence
 is needed. Choose execution, supervision, collaboration, and evaluation through
 [Workflow](../SKILL.md) independently. A goal definition neither starts a
 supervisor nor authorizes new spending. If supervision is selected, load its

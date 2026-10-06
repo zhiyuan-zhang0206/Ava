@@ -136,12 +136,13 @@ Authorization widens what you may do on your own; it does not remove the rails. 
 - **Don't touch prod** — no deploys, no prod data-plane writes, no rollout.
 - **Spend only what was authorized** — the budget in the approval is a ceiling, not a target.
 
-The budget ceiling is enforced softly: a watcher meters, a human decides the hard stop. The spawner points a watcher (`ava.watcher.launch` / `ava.watcher.cron`) at `reference/usage.py`, which reports per-agent and total spend from Postgres (the durable cost ledger + the `telemetry_events` tail):
-
-- **Approaching the ceiling** → message the worker to converge: finish the current thread, stop opening new ones.
-- **Over the ceiling** → message the worker to clean up and stop: finish the in-flight unit, update its task status.
-
-There is no automatic force-kill. A worker that ignores the message is caught by the same self-healing loop as any stalled worker: its overdue task draws a task-maintenance reminder, and if reminders go unanswered the escalation chain (after `AVA_TASK_ESCALATE_N` reminders, default 3, the parent task's owner is notified) hands the kill-or-not decision to whoever is above it. Budget numbers are per-approval, written into the authorization text (e.g. soft ceiling $3, hard stop $3.5 — an example, not a constant).
+Usage reminders are independent of Fleet task records. Load `ava-watcher` for
+its agent usage script: choose IDs, a time window, and spawn/fork birth lineage,
+then notify the peers responsible for the work when the agreed threshold is
+reached. The receiving agent decides how to converge, finish a safe unit,
+preserve results, prepare a handoff, or ask for a revised budget. Task ownership
+and reminder escalation do not meter or enforce spending. No automatic kill is
+part of a budget reminder.
 
 ## Reaching the User vs Another Agent
 

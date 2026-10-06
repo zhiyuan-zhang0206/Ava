@@ -15,8 +15,9 @@ from existing capabilities -- `ava.agents.spawn` / `ava.agents.send_message` and
 `ava.watcher.launch`. There is no special framework support and nothing to
 install.
 
-Goal mode is for terminal work — tasks that finish. Here idle means "stopped too
-early," so the move is to nudge it onward. Do **not** put a perpetual,
+Goal mode is for terminal work — tasks that finish. Idle prompts a review; it
+does not itself authorize more work. Continue only while the work remains
+authorized and the worker has not deliberately paused. Do **not** put a perpetual,
 trigger-driven agent in goal mode (an inbox poller, a daily disk check): its idle
 means "finished this round correctly, waiting for the next trigger," so nudging it
 is pure harassment. Perpetual work is a `ava-watcher`'s job. To quality-check one such
@@ -32,15 +33,17 @@ round, spawn a separate quality-check supervisor that judges *this round's* outp
    target_id = ava.agents.spawn(prompt="<the goal, stated as a concrete task>")
    ```
 
-2. **Launch the watcher BEFORE the target starts working.** Read the reference
-   watcher from this skill's directory, substitute the target id, and launch it.
-   Launch it first so you do not miss the target's idle transition.
+2. **Launch the watcher as soon as the target ID is known.** Read the reference
+   watcher from this skill's directory, substitute the target ID, and launch it.
+   Its initial status check also covers a worker that has already gone idle.
 
    ```python
    watcher = ava.files.read(f"{ava.skills.ava_goal.path}/scripts/watch_idle.py")
    watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {target_id}")
-   ava.watcher.launch(watcher, timeout="6h")
+   watcher_session_id = ava.watcher.launch(watcher, timeout="6h", name="goal-idle")
    ```
+
+   Record the returned session ID with your run notes.
 
    The watcher subscribes to the target's lifecycle updates and, the moment the
    target goes idle, sends you a reminder. Then it exits (one-shot). `timeout` is
@@ -50,7 +53,18 @@ round, spawn a separate quality-check supervisor that judges *this round's* outp
 3. **Idle and wait.** Do not return a tool call this turn. The watcher's
    reminder will wake you when the target idles.
 
-4. **On the reminder, judge and respond — checklist + evidence, not impression.**
+4. **On the reminder, check authority and the latest handoff before evaluating.**
+   A budget reminder is a reason to reassess, not a termination command. If you
+   or the worker decide to pause, preserve results and write that decision before
+   returning idle. Record the goal as incomplete, with the reason, artifact paths,
+   verified checks, remaining work, peer IDs, watcher session IDs and the condition
+   for resuming (for example a revised budget or a smaller authorized scope).
+   Tell the other peer where to read the handoff. Do not automatically re-arm or
+   send defect nudges while paused. Late idle/checkpoint/exit notices and a restart
+   do not satisfy the recorded resume condition. Read the handoff first after
+   recovery; preserve the same IDs and completed work when resuming.
+
+   **While continuing, judge with checklist + evidence, not impression.**
    Keep a definition-of-done checklist (derived from the goal) in your own notes.
    For each item, verify the ARTIFACT yourself: re-run its checks, read the code,
    drive the UI where you can. Every defect you name must carry evidence —
@@ -76,23 +90,19 @@ round, spawn a separate quality-check supervisor that judges *this round's* outp
      ```python
      ava.agents.send_message(
          target_id,
-         "Not done. Defects:
-"
+         "Not done. Defects:\n"
          "1. [omitted] <requirement not implemented at all> — <path:line where it "
-         "should be; what you observed instead>.
-"
+         "should be; what you observed instead>.\n"
          "2. [misunderstood] <requirement implemented wrong> — <path:line, what the code "
-         "does vs what the goal says>.
-"
+         "does vs what the goal says>.\n"
          "3. [slacked] <check skipped or shallow> — <e.g. test.js has no case for X; "
-         "repro: node test.js | grep X>.
-"
+         "repro: node test.js | grep X>.\n"
          "Fix all of the above; anything marked omitted needs a real implementation, "
          "not a comment.",
      )
      watcher = ava.files.read(f"{ava.skills.ava_goal.path}/scripts/watch_idle.py")
      watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {target_id}")
-     ava.watcher.launch(watcher, timeout="6h")
+     watcher_session_id = ava.watcher.launch(watcher, timeout="6h", name="goal-idle")
      ```
 
    Categories: **[omitted]** — a required piece is absent; **[misunderstood]**
@@ -100,7 +110,8 @@ round, spawn a separate quality-check supervisor that judges *this round's* outp
    check or test is skipped, shallow, or fake-green. Keep a per-round log
    (verdict + defects + evidence) — it is the run record you report later.
 
-   Repeat until the goal is met.
+   Repeat while continuation is authorized, until the goal is met or deliberately
+   paused. A preserved partial result is a handoff, not evidence that the goal is met.
 
 ## Long tasks
 
@@ -108,7 +119,8 @@ Goals that span many hours need two extra disciplines, both cheap:
 
 - **Worker keeps a progress file** in its OWN workspace (never the artifact
   repo), updated at the end of every round: `DONE` (files/features finished),
-  `MISSING` (numbered against the goal), `CHECKS` (latest command results). A
+  `MISSING` (numbered against the goal), `CHECKS` (latest command results),
+  and any pause decision with its resume condition. A
   compacted worker re-reads this file and its goal message to re-anchor — the
   run survives context loss. Require it in the goal's process rules.
 - **Supervisor re-anchors on regression**: if the worker repeats finished work,

@@ -126,10 +126,17 @@ restarter / `resurrect_agent` INSERT of these rows is the only definitive marker
   and comparison share one rendering environment; a structurally broken run
   can never become the golden.
 
+The browser-free `lifecycle/test_budget_handoff.py` exercises the usage observer
+as a separate process: a new fork joins an already observed spawn lineage,
+actual telemetry crosses a threshold, and the reminder reaches the owner's model
+input. Scripted goal and orchestration decisions preserve partial results,
+leave peers alive, and honor a saved pause after a late checkpoint and restart.
+This validates runtime composition, not unprompted model compliance with skills.
+
 ## Scope (not done in this phase)
 
 - Real character-level LLM streaming
-- Multi-turn cross-agent interactions
+- Unscripted model judgment in multi-turn cross-agent interactions
 - Record-and-replay (fake always follows SCRIPT)
 - Performance baseline
 - pytest-xdist parallelization

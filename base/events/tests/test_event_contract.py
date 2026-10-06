@@ -211,7 +211,6 @@ _DECLARED_PAYLOAD_KEYS = {
         "price_hit",
         "price_out",
         "unpriced",
-        "task_id",
         "usage_kind",
         "source",
         "cache_mechanism",

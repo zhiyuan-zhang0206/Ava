@@ -38,11 +38,8 @@ def hf(wave: int, role: str) -> Path:
     return HD / f"w{wave}_{role}.json"
 
 
-def spawn(prompt: str, label: str = "") -> int:
-    # `label` is added by the ava_fleet `agents.spawn` wrap
-    # (ava_builtins/plugins/ava_fleet/plugin.py); the core signature does not
-    # carry it.
-    return ava.agents.spawn(prompt=prompt, label=label)  # pyright: ignore[reportCallIssue]
+def spawn(prompt: str) -> int:
+    return ava.agents.spawn(prompt=prompt)
 
 
 def read_state() -> dict:
@@ -113,7 +110,6 @@ After completion:
    {{"role":"{role}","claims":[{{"claim":"...","source":"url","confidence":"high|medium|low"}}]}}
 Do not message anyone — writing the file IS the handoff.
 """,
-            label=role,
         )
         log(f"  [{role}] spawned #{wid}")
 
@@ -156,7 +152,6 @@ Return JSON written to {hf(2, f"verify_{i + 1}")}:
 }}
 After writing, message no one — the file IS the handoff.
 """,
-            label=f"verifier-{i + 1}",
         )
         log(f"  [verifier-{i + 1}] spawned #{wid}")
 
@@ -193,7 +188,6 @@ Write a Markdown draft report, structure:
 Write to {hf(3, "draft")}, wrapped in JSON: {{"report":"markdown..."}}
 After writing, message no one — the file IS the handoff.
 """,
-        label="report-writer",
     )
     log(f"  [report-writer] spawned #{wid}")
 
@@ -240,7 +234,6 @@ Return JSON written to {hf(4, role)}:
 {{"role":"{role}","critiques":[{{"target":"...","issue":"...","suggestion":"..."}}]}}
 After writing, message no one — the file IS the handoff.
 """,
-            label=role,
         )
         log(f"  [{role}] spawned #{wid}")
 
@@ -275,7 +268,6 @@ ava.ui.serve(page_dir, name="deep-research-lite", title="AI Coding Agent 2026 Co
 
 After completion, message no one.
 """,
-        label="publisher",
     )
     log(f"  [publisher] spawned #{wid}")
 

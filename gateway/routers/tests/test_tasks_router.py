@@ -554,10 +554,6 @@ _TASK_SUMMARY_FIELDS = frozenset(
         "remind_interval_seconds",
         "last_reminded_at",
         "reminder_count",
-        "token_budget",
-        "usd_budget",
-        "token_used",
-        "usd_used",
         "ghost",
     }
 )
@@ -613,8 +609,7 @@ class TestGetTaskFields:
         ).partition(", a.label AS owner_label FROM agent_tasks t ")[0]
         assert selected_columns == (
             "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
-            "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
-            "t.token_budget, t.usd_budget, t.token_used, t.usd_used"
+            "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
         )
 
     def test_unknown_fields_value_is_rejected(self, db_conn: psycopg.Connection) -> None:
