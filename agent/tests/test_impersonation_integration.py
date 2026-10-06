@@ -453,7 +453,11 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     durable = await saver.aget_tuple(config)
     assert durable is not None
     messages = durable.checkpoint["channel_values"]["messages"]
-    assert [m.id for m in messages] == [f"impersonation-start:{owner.agent_id}:0"]
+    assert [m.id for m in messages] == [
+        "impersonation-introduction",
+        f"impersonation-start:{owner.agent_id}:0",
+    ]
+    assert durable.checkpoint["channel_values"]["impersonation_introduced"] is True
     assert (
         leases.get(database, event_bus, requested["id"], attested_caller(requested))["status"]
         == "active"

@@ -11,6 +11,9 @@ tags: []
 
 Ava agent's LangGraph state management system. Base `BaseAgentState` carries conversation and lifecycle channels, plus nested `compact`, `circuit`, `attach`, `memory`, `context_reset`, and `capabilities` state. Plugins declare whole Pydantic BaseModel chunks in `PluginContributions.state`, and the framework merges them into `AgentState`.
 
+`impersonation_introduced` retains the native conversation's first-takeover
+explanation receipt across compaction; context establishment restores that
+standing explanation only after a takeover has occurred.
 `impersonation_request_id` records the last consent request and version across
 compaction. `impersonation_applied` records the external lease and plugin-log
 version applied in the same checkpoint as its delta; recovery uses it to avoid

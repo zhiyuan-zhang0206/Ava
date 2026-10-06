@@ -11,6 +11,14 @@ tags: [agent-lifecycle, concurrency]
 `base/agents/impersonation/` to the native graph. The native runtime remains the
 only checkpoint writer; an external process executes the SDK directly.
 
+The first takeover in a native conversation appends an explanation of borrowed
+identity, exclusive execution, message/SDK routing and the return handoff before
+the session's start marker. `impersonation_introduced` is committed with those
+messages, so retries and later leases do not repeat the introduction. It defaults
+to false for older checkpoints. The context-establishment node restores the
+explanation after compaction without claiming a lease is active; agents that
+have never encountered a takeover carry no impersonation guidance.
+
 The claim gate accepts named automatic requests without a model decision and
 ends the invocation. The driver drains resources, reconciles the session's
 checkpoint marker (including an accepted request whose initial write failed),

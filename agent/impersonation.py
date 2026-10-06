@@ -82,7 +82,7 @@ async def claim_gate(
     if session is None:
         return None
     if session["status"] == ImpersonationStatus.REQUESTED and session["automatic"]:
-        from agent.impersonation_handoff import start_marker
+        from agent.impersonation_handoff import start_update
         from base.agents.impersonation import accept
 
         incarnation = current_incarnation(agent_id)
@@ -91,7 +91,7 @@ async def claim_gate(
         await asyncio.to_thread(accept, db, bus, session["id"], agent_id, incarnation, brief)
         return Command(
             update={
-                "messages": [start_marker(session)],
+                **start_update(session, introduced=state.impersonation_introduced),
                 "turn_active": False,
                 "turn_idle": True,
             },
@@ -178,10 +178,9 @@ async def _activate_accepted(
     # Continuations and managed exec resources must settle before activation.
     if not hosted_resources_settled():
         raise RuntimeError("cannot activate impersonation with unresolved native exec resources")
-    if session["automatic"]:
-        from agent.impersonation_handoff import ensure_start_marker
+    from agent.impersonation_handoff import ensure_start_marker
 
-        await ensure_start_marker(graph, session)
+    await ensure_start_marker(graph, session)
     # The bound relay must be live before the takeover stands. On failure
     # the lease is rolled back to 'rejected' with a loud reason and the
     # native agent resumes — no silent half-takeover.
