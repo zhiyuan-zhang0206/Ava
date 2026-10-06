@@ -27,6 +27,7 @@ import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
 from ava.gateway_client.transport import use_client
+from base.agents import ShellSessionKillTiming
 from base.db import Database
 from base.events.live.bus import EventBus
 from tests.fixtures.pin_agent import pin_agent
@@ -348,7 +349,9 @@ class TestTerminate:
         pin_agent(_spawn_agent())
         peer_id = ava.agents.spawn()
         result = ava.agents.terminate(peer_id, kill_all_shell_sessions=True)
-        assert result.shell_sessions == ava.agents.ShellSessionsKill(when="at_exit", killed=[])
+        assert result.shell_sessions == ava.agents.ShellSessionsKill(
+            when=ShellSessionKillTiming.AT_EXIT, killed=[]
+        )
         assert db_conn.execute(
             "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'terminate'",
             (peer_id,),
@@ -419,7 +422,24 @@ class TestTerminate:
 
         monkeypatch.setattr(gateway_client, "terminate", _terminate)
         result = ava.agents.terminate(7, kill_all_shell_sessions=True)
-        assert result.shell_sessions == ava.agents.ShellSessionsKill(when="now", killed=[2, 5])
+        assert result.shell_sessions == ava.agents.ShellSessionsKill(
+            when=ShellSessionKillTiming.NOW, killed=[2, 5]
+        )
+
+    @pytest.mark.parametrize("when", ["later", "", None])
+    def test_terminate_rejects_unknown_shell_cleanup_timing(
+        self, monkeypatch: pytest.MonkeyPatch, when: object
+    ) -> None:
+        def _terminate(*_args: object, **_kwargs: object) -> dict[str, Any]:
+            return {
+                "status": "enqueued",
+                "open_tasks": None,
+                "shell_sessions": {"when": when, "killed": []},
+            }
+
+        monkeypatch.setattr(gateway_client, "terminate", _terminate)
+        with pytest.raises(ValueError, match="ShellSessionKillTiming"):
+            ava.agents.terminate(7, kill_all_shell_sessions=True)
 
     def test_rejects_non_string_message_before_gateway_call(
         self, monkeypatch: pytest.MonkeyPatch

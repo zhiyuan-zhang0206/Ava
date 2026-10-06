@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from base.agents import TerminateResult
+from base.agents import ShellSessionKillTiming, TerminateResult
 from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 from ops.rpc_schemas.content import UserContent
 
@@ -95,7 +95,7 @@ class ShellSessionsKill(BaseModel):
         `killed` is empty — the set is fixed only at exit.
     """
 
-    when: Literal["now", "at_exit"]
+    when: ShellSessionKillTiming
     killed: list[int] = Field(default_factory=list[int])
 
 

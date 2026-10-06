@@ -97,6 +97,13 @@ class TerminateResult(StrEnum):
     ALREADY_TERMINATED = "already_terminated"
 
 
+class ShellSessionKillTiming(StrEnum):
+    """When a terminate request applies its shell-session cleanup."""
+
+    NOW = "now"
+    AT_EXIT = "at_exit"
+
+
 class RestartResult(StrEnum):
     ENQUEUED = "enqueued"
     ALREADY_TERMINATED = "already_terminated"
