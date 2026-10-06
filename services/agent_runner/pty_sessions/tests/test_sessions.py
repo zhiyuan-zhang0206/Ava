@@ -381,18 +381,20 @@ def test_kill_idle_reports_not_interrupted(unit_home: Path) -> None:
     assert not client.has_session(name)
 
 
-@pytest.mark.parametrize("job", ["sleep 300", "sleep 300 &"])
-def test_kill_a_session_with_work_reports_interrupted(unit_home: Path, job: str) -> None:
-    """Foreground and background jobs both count as running work; the verdict is
-    snapshotted by the kill itself, so a job starting between a separate probe and
-    the kill cannot be missed."""
+@pytest.mark.parametrize(("job", "interrupted"), [("sleep 300", True), ("sleep 300 &", False)])
+def test_kill_verdict_reports_foreground_work(unit_home: Path, job: str, interrupted: bool) -> None:
+    """The verdict describes known foreground work, not all background work."""
     name = "ava-test-verdict-job-1"
     new(name, unit_home)
     type_line(name, "echo verdict-job-ready")
     output_until(name, "verdict-job-ready")
     type_line(name, job)
-    wait_for_job(shell_process(name), ["sleep", "300"])
-    assert client.kill(name, graceful=False).interrupted is True
+    process = wait_for_job(shell_process(name), ["sleep", "300"])
+    if interrupted:
+        wait_for_foreground(process)
+    else:
+        assert wait_for(lambda: screen(name).rstrip().endswith(("$", "#")))
+    assert client.kill(name, graceful=False).interrupted is interrupted
     assert not client.has_session(name)
 
 

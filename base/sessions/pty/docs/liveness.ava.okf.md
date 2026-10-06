@@ -17,8 +17,9 @@ and reaps it on its next pass). Start-time identity still rejects recycled PIDs.
 rule, so a session whose shell exited reads as gone before the service has torn
 it down.
 
-Crash tests require the shell/child to be gone or zombie; running and
-unreadable survivors still fail. PID disappearance alone measures the parent's
+Closure requires the known shell to be gone or zombie. Known job leftovers
+are diagnostic; no all-descendant absence proof is made. PID disappearance
+alone measures the parent's
 reap timing, not whether the child can keep executing.
 
 ## Dependencies

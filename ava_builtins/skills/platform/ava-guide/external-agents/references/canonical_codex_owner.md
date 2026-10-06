@@ -72,10 +72,11 @@ push the path past the unix-socket limit (`sun_path`); a path that still would
 not fit fails before launch instead of timing out.
 
 Cleanup boundary: the janitor is the only cleanup owner — if it never starts,
-or is itself killed (for example with the whole session tree), an orphan app
+or is itself killed, an orphan app
 server and socket can remain; reap them by hand via the printed
 `codex_app_server=<endpoint>`. The normal stop paths (session death, expiry)
-leave no residue.
+perform their own cleanup. PTY closure is best effort and does not certify
+that every background or detached process disappeared.
 
 The default TTL is four hours and can be adapted with `--ttl-seconds` up to the
 Persistent Shell one-day maximum. TTL is a crash backstop. The automatically

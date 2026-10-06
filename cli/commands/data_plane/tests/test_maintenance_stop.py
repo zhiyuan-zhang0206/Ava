@@ -19,6 +19,7 @@ import pytest
 from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
+from base.deploy.maintenance import admission
 from base.native_process import pid_starttime_ticks
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
@@ -241,11 +242,13 @@ def _dead_shell(launch: Launcher) -> stop.OwnedProcess:
     return identity
 
 
-def test_a_dead_service_with_a_surviving_ledger_member_refuses(
+def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
     home: Path, launch: Launcher
 ) -> None:
-    """The service crashed; its shell is gone but a job it started outlived the hangup."""
-    del home
+    """A recorded job is not a live terminal and does not acquire/change a hold."""
+    before = admission.snapshot()
+    journal = home / "run/lifecycle-op.json"
+    assert not journal.exists()
     job = launch("surviving-job", _IGNORE)
     member = stop.OwnedProcess.capture(psutil.Process(job.pid))
     ledger.write(
@@ -253,9 +256,11 @@ def test_a_dead_service_with_a_surviving_ledger_member_refuses(
     )
     with pytest.raises(client.ServiceDownError):
         client.request("list")
-    with pytest.raises(RuntimeError, match="will not kill or replay"):
-        stop.require_no_terminals()
-    assert job.poll() is None
+    stop.require_no_terminals()
+    stop._await_no_terminals(time.monotonic(), "terminals")
+    assert job.poll() is None, "fixture teardown, not terminal-presence probing, owns this job"
+    assert admission.snapshot() == before
+    assert not journal.exists()
 
 
 def test_a_dead_service_whose_ledger_names_only_dead_processes_does_not_refuse(

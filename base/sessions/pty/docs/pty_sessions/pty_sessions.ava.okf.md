@@ -39,7 +39,7 @@ Client side, in this package:
   `/tmp/ava-pty-<uid>/<digest>.sock` when the home is too long for `sun_path`),
   the instance lock, the ledger and the transcript locations.
 - `closure.py` — the one terminal closure, see below.
-- `session_tree.py` — a session's membership and its kill, see
+- `process_groups.py` — bounded known-group signaling, see
   [[../session-kill.ava.okf.md|session kill]].
 - `allocation_freeze.py` — the home's marker and allocation mutex. The marker
   carries one operator-owned generation; only that generation can resume
@@ -60,7 +60,7 @@ start time and allocation generation), `new`, `send`, `capture`, `resize`,
 `kill` and `close_all`. `new` carries the cwd, the caller's env and the optional
 initial command in the request body of a 0600 socket (values never reach an
 argv, #974). The service's event loop reads every master and does only I/O;
-every request that can block (a fork, a kill that waits for its members, a
+every request that can block (a fork, a bounded kill, a
 capture render) runs on the executor, and `ping` is answered on the loop so the
 ownership probe, which times out at three seconds, never queues behind them.
 
@@ -84,7 +84,7 @@ Creation, death, kill, signals and the operator freeze are in
 next start sweep what a crashed service left running. Both are described in
 [[closure-and-ledger.ava.okf.md|closure and ledger]]. `ava stop` turns the
 closure's answer into owner notices (`ops/pty_close_notices.py`) and fails on a
-process that outlived its SIGKILL; new allocations are refused for its duration.
+surviving shell; known job leftovers are diagnostic; new allocations are refused for its duration.
 A crash's busy sessions are staged on disk and told by a one-shot child at the
 next start; a batch the child does not finish is re-sent by the start after.
 

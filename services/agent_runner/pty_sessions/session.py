@@ -28,18 +28,17 @@ import psutil
 from base.log import logger
 from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.sessions import log_prefix
-from base.sessions.pty import session_tree
+from base.sessions.pty import process_groups
 from base.sessions.record import SessionRecord
 
 # A pid is "the same process we launched" only if its start-time matches to
 # within this tolerance when no start tick is recorded (mirrors posixproc).
 _CREATE_TIME_TOLERANCE_S = 2.0
 
-# Graceful kill: SIGTERM to every session member, wait this long for the
-# reader to observe the exit before the SIGKILL sweep.
+# Graceful kill: TERM to the shell and known foreground group, then a bounded wait.
 _KILL_WAIT_S = 5.0
 
-# After SIGKILL, how long to wait for the members to exit and for the
+# After SIGKILL, how long to wait for known targets to exit and for the
 # reader's cleanup before concluding the kill failed.
 _KILL_FORCE_WAIT_S = 3.0
 
@@ -139,8 +138,8 @@ class PtySession:
         # Any keeps the screen module and pyte lazy; naming PtyScreen here
         # would import them eagerly (no TYPE_CHECKING by repo convention).
         self._screen: Any = None
-        # The session's membership as the ledger snapshots last saw it.
-        self.capture = session_tree.SessionCapture(self.shell, [self.shell], None)
+        # Only explicitly captured foreground leaders; no session membership scan.
+        self.known_groups: tuple[OwnedProcess, ...] = ()
         self._ring = bytearray()
         self._log_fd, created = log_prefix.open_session_log(log_path, name, pid=pid)
         self._log_written = os.fstat(self._log_fd).st_size if created else 0
@@ -152,6 +151,8 @@ class PtySession:
         self._lock = threading.Lock()
         self._build_lock = threading.Lock()
         self._dead = False
+        self._finished = threading.Event()
+        self._finish_error: Exception | None = None
         self._screen_feed_failed = False
         self._cond = threading.Condition(self._lock)
 
@@ -159,6 +160,31 @@ class PtySession:
     def shell(self) -> OwnedProcess:
         """The shell's recorded birth identity."""
         return OwnedProcess(self.pid, self.record.create_time, self.record.starttime)
+
+    def capture_foreground(self) -> bool:
+        """Record a verified foreground leader; return conservative interruption state.
+
+        The terminal supplies one process-group ID. A missing or unverifiable
+        leader is unknown work, never authority to signal a guessed group.
+        """
+        self.known_groups = ()
+        try:
+            if not self.shell.live():
+                return True
+            group = os.tcgetpgrp(self.master_fd)
+            if group == self.pid:
+                return False
+            if group <= 1:
+                return True
+            leader = OwnedProcess.capture(psutil.Process(group))
+            if os.getpgid(group) != group or os.getsid(group) != self.pid:
+                return True
+            if not leader.live() or not self.shell.live():
+                return True
+            self.known_groups = (leader,)
+        except (OSError, RuntimeError, psutil.Error) as exc:
+            logger.warning("pty {name}: foreground target unknown: {exc}", name=self.name, exc=exc)
+        return True
 
     def feed(self, data: bytes) -> None:
         """Ingest output: the live screen when one exists, the raw ring otherwise.
@@ -262,9 +288,12 @@ class PtySession:
             return True
 
     def wait_dead(self, timeout: float) -> bool:
-        with self._cond:
-            self._cond.wait_for(lambda: self._dead, timeout)
-            return self._dead
+        """Wait for actual descriptor teardown, not just its single-winner claim."""
+        if not self._finished.wait(timeout):
+            return False
+        if self._finish_error is not None:
+            raise self._finish_error
+        return True
 
     def pid_matches(self) -> bool:
         """True when this shell's pid has not been recycled and the shell still runs."""
@@ -317,8 +346,7 @@ def reap_child(session: PtySession) -> None:
     if pid:
         return
     for sig in (signal.SIGHUP, signal.SIGKILL):
-        with contextlib.suppress(ProcessLookupError, OSError):
-            os.kill(session.pid, sig)
+        session.shell.send_signal(sig)
         # SIGKILL delivery can lag on a loaded box; a single WNOHANG reap right
         # after can return 0 and leave an UNREAPED zombie. Poll briefly.
         deadline = time.monotonic() + _CHILD_EXIT_POLL_S
@@ -330,6 +358,8 @@ def reap_child(session: PtySession) -> None:
             if pid:
                 return
             time.sleep(0.02)
+    if session.shell.live():
+        raise RuntimeError(f"session {session.name}: shell survived teardown")
 
 
 def finish(session: PtySession, on_end: Callable[[PtySession], None]) -> None:
@@ -343,12 +373,26 @@ def finish(session: PtySession, on_end: Callable[[PtySession], None]) -> None:
     """
     if not session.begin_finish():
         return
-    on_end(session)
-    reap_child(session)
-    with contextlib.suppress(OSError):
-        os.close(session.master_fd)
-    with contextlib.suppress(OSError):
-        os.close(session._log_fd)
+    try:
+        for operation in (
+            lambda: on_end(session),
+            lambda: reap_child(session),
+            lambda: os.close(session.master_fd),
+            lambda: os.close(session._log_fd),
+        ):
+            try:
+                operation()
+            except Exception as exc:
+                if session._finish_error is None:
+                    session._finish_error = exc
+                else:
+                    logger.warning(
+                        "pty {name}: additional teardown failure: {exc}", name=session.name, exc=exc
+                    )
+    finally:
+        session._finished.set()
+    if session._finish_error is not None:
+        raise session._finish_error
     logger.info("pty session ended: {name} (pid={pid})", name=session.name, pid=session.pid)
 
 
@@ -388,54 +432,39 @@ class InitialCommand:
                 os.write(self._session.master_fd, self._cmd.encode() + b"\r")
 
 
-def kill_session(session: PtySession, *, graceful: bool) -> dict[str, Any]:
-    """End the session: every process in the shell's tree and POSIX session.
+def kill_session(
+    session: PtySession, *, graceful: bool, interrupted: bool | None = None
+) -> dict[str, Any]:
+    """Close the PTY shell and its known foreground group, best effort.
 
-    Job control gives each job its own process group, so a group signal never
-    reaches `cmd &`; the membership rule and its boundary (a setsid'd process
-    that left the tree is sovereign) live in `session_tree`. Returns the verdict
-    ``{"mode", "interrupted"[, "survivors"]}``; RuntimeError names a failed kill.
+    Background jobs and detached descendants are not discovered or certified
+    gone. Concrete signal failures propagate; only vanished births are noops.
     """
-    if not session.pid_matches():
-        # The shell died but the reader has not finished yet; its own reap
-        # check runs `finish` within one poll: report the noop.
-        logger.warning(
-            "pty kill {name}: recorded pid {pid} no longer matches",
-            name=session.name,
-            pid=session.pid,
-        )
-        return {"mode": "noop", "interrupted": False}
     shell = session.shell
-    # The interrupted verdict is snapshotted HERE, in the same request that
-    # kills; a separate idle probe cannot close that TOCTOU. Any live member
-    # beyond the shell is running work; a shell that no longer verifies answers
-    # busy (fail-open: it cannot be proven idle).
-    members = session_tree.session_members(shell)
-    interrupted = len(members) != 1
+    if not process_groups.live(shell):
+        return {"mode": "noop", "interrupted": False}
+    if interrupted is None:
+        interrupted = session.capture_foreground()
+    targets = (*session.known_groups, shell)
     mode = "forced"
+    remaining = targets
     if graceful:
-        session_tree.terminate(members)
-        if session.wait_dead(_KILL_WAIT_S):
+        process_groups.signal(targets, signal.SIGTERM)
+        remaining = process_groups.wait(targets, _KILL_WAIT_S)
+        if not remaining:
             mode = "graceful"
-    # Runs even after a graceful death: a TERM-ignoring job outlives its shell.
-    result = session_tree.kill_session_tree(shell, also=members, wait_s=_KILL_FORCE_WAIT_S)
-    if result.killed:
-        mode = "forced"
-    if result.stuck:
-        pids = sorted(identity.pid for identity in result.stuck)
-        raise RuntimeError(f"session {session.name}: processes survived the kill: {pids}")
+    if remaining:
+        process_groups.signal(remaining, signal.SIGKILL)
+        remaining = process_groups.wait(remaining, _KILL_FORCE_WAIT_S)
+    if process_groups.live(shell):
+        raise RuntimeError(f"session {session.name}: shell survived the kill")
     if not session.wait_dead(_KILL_FORCE_WAIT_S):
-        raise RuntimeError(f"session {session.name} survived the kill")
-    if not result.survivors:
-        return {"mode": mode, "interrupted": interrupted}
-    # Survivors left at this point are only processes this user may not signal (a
-    # root `sudo` on the pty): the session is over, and it cut short the work
-    # they did: `interrupted`, with them named.
-    return {
-        "mode": mode,
-        "interrupted": True,
-        "survivors": sorted(identity.pid for identity in result.survivors),
-    }
+        raise RuntimeError(f"session {session.name}: PTY teardown did not finish")
+    verdict: dict[str, Any] = {"mode": mode, "interrupted": interrupted}
+    if remaining:
+        verdict["survivors"] = sorted(identity.pid for identity in remaining)
+        verdict["interrupted"] = True
+    return verdict
 
 
 def decode_data(value: object) -> bytes:

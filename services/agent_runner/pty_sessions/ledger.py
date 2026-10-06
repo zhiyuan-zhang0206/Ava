@@ -1,12 +1,12 @@
 """The service's ledger of live shell identities, and the sweep of a crashed service's leftovers.
 
 The service is the only writer of ``$AVA_HOME/run/pty-sessions.json``: every
-live session's shell identity and the members of its session last seen alive,
-rewritten atomically as sessions come and go and every `SNAPSHOT_INTERVAL_S`. It
+live session's shell identity and any foreground leader explicitly captured at
+close or kill, rewritten atomically as sessions come and go. It
 exists for one reader, the next service start (or a stop that finds the service
-gone): a service that died uncleanly closed its masters, which hangs up every
-shell, but a shell that ignores the hangup, or a job that does, can outlive it.
-The sweep closes exactly the identities the ledger names, each verified by
+gone): a service that died uncleanly closed its masters. Hangup may end foreground
+work, but ignored hangup and background jobs can outlive it.
+The sweep attempts closure only for the identities the ledger names, each verified by
 birth before any signal, through the one terminal closure, and reports the busy
 ones it closed so their owners are told (`ops/pty_close_notices.py`).
 """
@@ -22,9 +22,6 @@ from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
-
-# How often the service re-reads each session's membership into the ledger.
-SNAPSHOT_INTERVAL_S = 10.0
 
 # A crashed service's leftovers are already hung up; the grace only lets a job
 # that handles TERM clean up before the SIGKILL.
@@ -86,12 +83,8 @@ def read(path: Path) -> list[closure.Target]:
 
 
 def leftovers(path: Path) -> list[str]:
-    """The recorded sessions that still have a live process, by name.
-
-    What a stop that finds the service gone must still close: the sessions whose
-    shell, or a recorded member of it, outlived the service.
-    """
-    return sorted(target.name for target in read(path) if _has_live_process(target))
+    """Recorded live shells, by name; known job survivors are diagnostics only."""
+    return sorted(target.name for target in read(path) if _alive(target.shell))
 
 
 def _has_live_process(target: closure.Target) -> bool:
@@ -99,15 +92,14 @@ def _has_live_process(target: closure.Target) -> bool:
 
 
 def sweep(path: Path) -> closure.Outcome:
-    """Close every recorded session that still has a live process, then clear the ledger.
+    """Attempt closure of the recorded known identities, retaining live shells for retry.
 
-    A shell that is still its recorded process is closed with its session; when
-    it is gone (the master's hangup ended it) the recorded members that outlived
-    it (a job that ignored the hangup) are closed. The returned outcome carries
-    the busy sessions that were closed, in the shape a caller turns into owner
-    notices. A session the crash itself ended entirely (every process gone, a
-    reboot included) is closed too, and counts when the ledger last saw a job in
-    it: its owner lost that job to the crash all the same.
+    A still-live recorded shell and its known groups are attempted; when the shell
+    is gone, only its recorded members are attempted. Known job-only survivors are
+    diagnostic evidence, not a terminal-presence gate, so they do not retain a
+    ledger entry. The outcome also names recorded busy sessions whose shells the
+    crash already ended, so their owners can be notified without claiming that
+    unrecorded descendants disappeared.
     """
     recorded = read(path)
     targets = [target for target in recorded if _has_live_process(target)]
@@ -119,7 +111,7 @@ def sweep(path: Path) -> closure.Outcome:
             names=sorted(target.name for target in targets),
         )
         outcome = closure.close_sessions(targets, grace_s=SWEEP_HANGUP_WAIT_S, kill_s=SWEEP_KILL_S)
-    write(path, [])
+    write(path, (target for target in recorded if _alive(target.shell)))
     return _with_ended_busy(outcome, recorded)
 
 
@@ -135,7 +127,7 @@ def _with_ended_busy(outcome: closure.Outcome, recorded: list[closure.Target]) -
 
 
 def _was_busy(target: closure.Target) -> bool:
-    """The ledger last saw a process in the session besides its shell."""
+    """The ledger records a known foreground target besides its shell."""
     return any(member != target.shell for member in target.members)
 
 

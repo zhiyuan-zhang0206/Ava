@@ -8,23 +8,19 @@ simulated refusal, which only works inside the test process).
 from __future__ import annotations
 
 import os
-import signal
-import subprocess
-import sys
 import threading
-import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 import psutil
 import pytest
 
-from base.native_process.ownership import stable_create_time
+from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client
-from base.sessions.record import SessionRecord, pid_starttime_ticks
+from base.sessions.record import SessionRecord
 from services.agent_runner.pty_sessions import session as session_module
+from services.agent_runner.pty_sessions.service import PtyService
 from services.agent_runner.pty_sessions.session import PtySession
-from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 MakeSession = Callable[[str, int], PtySession]
@@ -93,80 +89,149 @@ def test_transcript_log_is_capped(make_session: MakeSession, tmp_path: Path) -> 
     assert len(log_file.read_bytes()) == 200, "log must not grow past the cap"
 
 
-# A session leader with one sleeping member, the member's pid on the first output line.
-_LEADER_WITH_MEMBER = (
-    "import subprocess, sys, time\n"
-    "member = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)'])\n"
-    "print(member.pid, flush=True)\n"
-    "time.sleep(300)\n"
-)
+def _live(_identity: OwnedProcess) -> bool:
+    return True
 
 
-def test_a_kill_with_only_unsignallable_survivors_answers_interrupted_and_names_them(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+def _no_signal(_identities: Iterable[OwnedProcess], _signum: int) -> None:
+    pass
+
+
+def _still_waiting(identities: Iterable[OwnedProcess], _timeout: float) -> tuple[OwnedProcess, ...]:
+    return tuple(identities)
+
+
+def test_a_concrete_group_signal_error_is_not_a_success(
+    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The shell and everything this user may signal are gone; a member it may not
-    signal (a root `sudo` on the pty) survives. The session is over and its work was
-    cut short: the kill answers `interrupted` with the survivor named, not an error
-    that would lose the owner's interruption notice, and it does not spend its wait
-    on a member nothing could signal."""
-    leader = subprocess.Popen(  # noqa: S603 — the test's own interpreter and literal program
-        [sys.executable, "-c", _LEADER_WITH_MEMBER],
-        stdout=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-    assert leader.stdout is not None
-    member = int(leader.stdout.readline())
-    pty_reaper.track(psutil.Process(leader.pid), psutil.Process(member))
-    read_end, write_end = os.pipe()
-    record = SessionRecord(
-        pid=leader.pid,
-        create_time=stable_create_time(psutil.Process(leader.pid)),
-        cmd="",
-        cwd="",
-        started_at=0.0,
-        starttime=pid_starttime_ticks(leader.pid),
-    )
-    session = PtySession(
-        "ava-test-race-1", leader.pid, read_end, 80, 24, record, tmp_path / "t.log"
-    )
-    real_suspend, real_kill = psutil.Process.suspend, psutil.Process.kill
+    session = make_session("ava-test-denied", 1024)
+    monkeypatch.setattr(session_module.process_groups, "live", _live)
 
-    def suspend(self: psutil.Process) -> None:
-        if self.pid == member:
-            raise psutil.AccessDenied(self.pid)
-        real_suspend(self)
+    def denied(*_args: object) -> None:
+        raise PermissionError("known group signal denied")
 
-    def kill(self: psutil.Process) -> None:
-        if self.pid == member:
-            raise psutil.AccessDenied(self.pid)
-        real_kill(self)
+    monkeypatch.setattr(session_module.process_groups, "signal", denied)
+    with pytest.raises(PermissionError, match="known group signal denied"):
+        session_module.kill_session(session, graceful=False, interrupted=True)
 
-    monkeypatch.setattr(session_module, "_KILL_FORCE_WAIT_S", 5.0)
 
-    def reader() -> None:
-        leader.wait()
-        session.begin_finish()
+def test_a_live_shell_cannot_be_reported_closed(
+    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = make_session("ava-test-live", 1024)
+    monkeypatch.setattr(session_module.process_groups, "live", _live)
+    monkeypatch.setattr(session_module.process_groups, "signal", _no_signal)
+    monkeypatch.setattr(session_module.process_groups, "wait", _still_waiting)
+    with pytest.raises(RuntimeError, match="shell survived"):
+        session_module.kill_session(session, graceful=False, interrupted=False)
 
-    thread = threading.Thread(target=reader, daemon=True)
-    thread.start()
-    try:
-        # A scoped patch: undone before teardown SIGKILLs the member.
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(psutil.Process, "suspend", suspend)
-            patch.setattr(psutil.Process, "kill", kill)
-            started = time.monotonic()
-            verdict = session_module.kill_session(session, graceful=False)
-            elapsed = time.monotonic() - started
-    finally:
-        os.kill(member, signal.SIGKILL)
-        os.close(write_end)
-        os.close(session.master_fd)
-        os.close(session._log_fd)
-    thread.join(10)
-    assert verdict == {"mode": "forced", "interrupted": True, "survivors": [member]}
-    assert elapsed < 2.5, f"the kill waited {elapsed:.2f}s for a member it could not signal"
+
+def test_unknown_foreground_is_interrupted_without_discovering_processes(
+    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = make_session("ava-test-unknown", 1024)
+    monkeypatch.setattr(session_module.OwnedProcess, "live", _live)
+
+    def unavailable(_fd: int) -> int:
+        raise OSError("foreground unavailable")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("cleanup must not enumerate or freeze processes")
+
+    session.known_groups = (
+        session.shell,
+    )  # an earlier observation must not survive unknown foreground
+    monkeypatch.setattr(os, "tcgetpgrp", unavailable)
+    monkeypatch.setattr(psutil, "process_iter", forbidden)
+    monkeypatch.setattr(psutil, "pids", forbidden)
+    monkeypatch.setattr(psutil.Process, "children", forbidden)
+    monkeypatch.setattr(psutil.Process, "suspend", forbidden)
+    assert session.capture_foreground() is True
+    assert session.known_groups == ()
+
+
+def test_foreground_in_another_session_is_not_adopted(
+    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = make_session("ava-test-wrong-session", 1024)
+    monkeypatch.setattr(session_module.OwnedProcess, "live", _live)
+
+    def own_pid(_fd: int) -> int:
+        return os.getpid()
+
+    def another_session(_pid: int) -> int:
+        return session.pid + 1
+
+    monkeypatch.setattr(os, "tcgetpgrp", own_pid)
+    session.pid = os.getpid() + 1
+    monkeypatch.setattr(os, "getpgid", own_pid)
+    monkeypatch.setattr(os, "getsid", another_session)
+    assert session.capture_foreground() is True
+    assert session.known_groups == ()
+
+
+def test_master_close_failure_is_visible_after_the_teardown_claim(
+    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = make_session("ava-test-close-error", 1024)
+
+    def no_reap(_session: PtySession) -> None:
+        pass
+
+    monkeypatch.setattr(session_module, "reap_child", no_reap)
+    real_close = os.close
+
+    def close(fd: int) -> None:
+        if fd == session.master_fd:
+            raise OSError("master close failed")
+        real_close(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "close", close)
+        with pytest.raises(OSError, match="master close failed"):
+            session_module.finish(session, lambda _session: None)
+    with pytest.raises(OSError, match="master close failed"):
+        session.wait_dead(0)
+    # finish already closed the transcript; keep the factory cleanup valid.
+    session._log_fd = os.open(os.devnull, os.O_WRONLY)
+
+
+def test_reap_and_callback_errors_still_close_the_master(
+    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = make_session("ava-test-reap-error", 1024)
+
+    def failed_reap(_session: PtySession) -> None:
+        raise RuntimeError("reap failed")
+
+    def failed_callback(_session: PtySession) -> None:
+        raise RuntimeError("callback failed")
+
+    monkeypatch.setattr(session_module, "reap_child", failed_reap)
+    with pytest.raises(RuntimeError, match="callback failed"):
+        session_module.finish(session, failed_callback)
+    with pytest.raises(OSError):
+        os.fstat(session.master_fd)
+    with pytest.raises(RuntimeError, match="callback failed"):
+        session.wait_dead(0)
+    session.master_fd = os.open(os.devnull, os.O_RDONLY)
+    session._log_fd = os.open(os.devnull, os.O_WRONLY)
+
+
+def test_closure_preparation_error_releases_the_allocation_fence(
+    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = make_session("ava-test-preparation-error", 1024)
+    service = PtyService()
+    service._sessions[session.name] = session
+
+    def failed_capture() -> bool:
+        raise PermissionError("foreground preparation failed")
+
+    monkeypatch.setattr(session, "capture_foreground", failed_capture)
+    with pytest.raises(PermissionError, match="foreground preparation failed"):
+        service.close_everything(grace_s=0, kill_s=0)
+    assert service._closing is False
 
 
 def test_the_client_reads_survivors_from_a_kill_answer(monkeypatch: pytest.MonkeyPatch) -> None:
