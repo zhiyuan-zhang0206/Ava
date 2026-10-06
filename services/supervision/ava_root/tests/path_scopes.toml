@@ -8,7 +8,6 @@
     "test_ava_root_health.py",
     "test_ava_root_ipc.py",
     "test_ava_root_probes.py",
-    "test_ava_root_reconcile.py",
     "test_ava_root_selfcheck.py",
     "test_ava_root_stop_window.py",
     "test_ava_root_wiring.py",

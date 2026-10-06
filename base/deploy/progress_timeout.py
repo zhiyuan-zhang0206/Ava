@@ -96,30 +96,9 @@ SERVICE_READY_TIMEOUT_S = 180.0
 # CLI readiness and root monitoring. All other services use the shorter tier.
 CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-host", "im-bridge"})
 
-# How long `ava start` waits for a NON-CRITICAL service to pass its liveness
-# probe before it stops waiting on it (`cli.commands._probe`).
-#
-# The readiness gate is tiered: the critical roster keeps
-# `SERVICE_READY_TIMEOUT_S`, because a start that cannot serve the core
-# surface or the ops safety net is a failed start. The roster is the CTO
-# ruling (Task #2183, C2): gateway / frontend / restarter / the hosted
-# agent-runner / im-bridge / the two watchdogs (see
-# `cli.commands._probe.CRITICAL_SERVICE_SESSIONS`). Everything else —
-# the labeler, the browser, ... — shares one short window instead,
-# sized so a slow-but-healthy daemon still gets its beat to bind its port
-# while a dead one stops taxing every start. 2026-08-30 rollout-1788074072
-# spent 182 s of its 197.5 s local start waiting on one non-critical daemon's
-# healthz that never answered; the service's failure did not block the rollout's
-# conclusion (the watchdog covers it), so the gate was waiting on a service
-# whose verdict nothing depended on.
-#
-# Deliberately well below `SERVICE_READY_TIMEOUT_S`: the point of the tier is
-# that the short window ends long before the critical bound, so a healthy start
-# is never held to the long number by a straggling non-critical daemon. A
-# non-critical service that misses the window does NOT fail the start — it is
-# reported and emitted as a `service_start_unready` event instead (see
-# `cli.commands._probe._report_non_critical_unready_services`), so the
-# downgrade never goes silent.
+# Initial startup grace for optional services in the root health monitor.
+# CLI startup does not wait for optional capabilities: it reports their
+# current availability once the core is ready.
 NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 
 # How long a unit capability bundle (`ava cluster db-authority issue-unit`,

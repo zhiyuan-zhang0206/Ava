@@ -14,7 +14,6 @@ import pytest
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.supervision.ava_root import health as health_mod
-from services.supervision.ava_root.custody import ReconcileOutcome
 from services.supervision.ava_root.failure_state import (
     FailureKind,
     UnitFailureFacts,
@@ -61,7 +60,6 @@ def _view(
     intent_running: bool = True,
     restart_failed: RestartFailure | None = None,
     breaker_open: bool = False,
-    custody_held: bool = False,
     detail: str = "",
 ) -> UnitFailureView:
     return UnitFailureView(
@@ -69,7 +67,6 @@ def _view(
         facts=UnitFailureFacts(
             intent_running=intent_running,
             restart_failed=restart_failed,
-            custody_held=custody_held,
         ),
         breaker_open=breaker_open,
         detail=detail,
@@ -80,16 +77,13 @@ def test_derive_kind_priority_and_the_intent_gate() -> None:
     failure = _failure()
     assert derive_kind(_view()) is None
     assert derive_kind(_view(breaker_open=True)) is FailureKind.BREAKER_OPEN
-    assert derive_kind(_view(custody_held=True)) is FailureKind.CUSTODY_HELD
     assert derive_kind(_view(restart_failed=failure)) is FailureKind.RESTART_FAILED
-    # The recorded replacement failure wins over the breaker, which wins over custody.
-    both = _view(restart_failed=failure, breaker_open=True, custody_held=True)
+    # The recorded replacement failure wins over the breaker, which follows it.
+    both = _view(restart_failed=failure, breaker_open=True)
     assert derive_kind(both) is FailureKind.RESTART_FAILED
-    assert derive_kind(_view(breaker_open=True, custody_held=True)) is FailureKind.BREAKER_OPEN
+    assert derive_kind(_view(breaker_open=True)) is FailureKind.BREAKER_OPEN
     # A stop holds every failure state and still never reports.
-    stopped = _view(
-        intent_running=False, restart_failed=failure, breaker_open=True, custody_held=True
-    )
+    stopped = _view(intent_running=False, restart_failed=failure, breaker_open=True)
     assert derive_kind(stopped) is None
 
 
@@ -100,7 +94,6 @@ def test_describe_carries_the_kind_evidence() -> None:
     ) == ("replacement failed at its down half: stop refused")
     assert describe(_view(detail="no probe"), FailureKind.BREAKER_OPEN) == "no probe"
     assert describe(_view(), FailureKind.BREAKER_OPEN) == "restart breaker open"
-    assert "reconciliation" in describe(_view(), FailureKind.CUSTODY_HELD)
 
 
 class _Supervisor:
@@ -108,7 +101,7 @@ class _Supervisor:
 
     def __init__(self) -> None:
         self.generation = (OwnedProcess(42, 100.0, None), 0.0)
-        self.facts = UnitFailureFacts(intent_running=True, restart_failed=None, custody_held=False)
+        self.facts = UnitFailureFacts(intent_running=True, restart_failed=None)
 
     async def restart(self, unit_id: str) -> dict[str, object]:
         return {"verb": "restart", "units": []}
@@ -121,9 +114,6 @@ class _Supervisor:
 
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         return self.facts
-
-    async def reconcile_custody(self) -> list[ReconcileOutcome]:
-        return []
 
 
 class _Cell:
@@ -187,7 +177,7 @@ async def test_breaker_state_is_emitted_every_round_it_holds_then_stops(
     assert len(recorder.events("root_unit_failure_state")) == 2
 
 
-async def test_recorded_restart_failure_and_custody_are_state_signals(
+async def test_recorded_restart_failure_is_a_state_signal(
     clock: _Clock, recorder: _Recorder
 ) -> None:
     supervisor = _Supervisor()
@@ -195,18 +185,15 @@ async def test_recorded_restart_failure_and_custody_are_state_signals(
     supervisor.facts = UnitFailureFacts(
         intent_running=True,
         restart_failed=_failure(RestartStage.DOWN, "stop refused"),
-        custody_held=False,
     )
     await monitor.run_round()
     await monitor.run_round()
-    supervisor.facts = UnitFailureFacts(intent_running=True, restart_failed=None, custody_held=True)
+    supervisor.facts = UnitFailureFacts(intent_running=True, restart_failed=None)
     await monitor.run_round()
-    supervisor.facts = UnitFailureFacts(
-        intent_running=False, restart_failed=None, custody_held=True
-    )
+    supervisor.facts = UnitFailureFacts(intent_running=False, restart_failed=None)
     await monitor.run_round()  # an operator stop is expected, never a failure state
     states = recorder.events("root_unit_failure_state")
-    assert [s["kind"] for s in states] == ["restart_failed", "restart_failed", "custody_held"]
+    assert [s["kind"] for s in states] == ["restart_failed", "restart_failed"]
     assert states[0]["detail"] == "replacement failed at its down half: stop refused"
 
 

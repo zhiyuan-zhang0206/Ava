@@ -1,1 +1,1 @@
-"""Owned worker process groups and custody records for scheduled backup operations."""
+"""Trusted scheduled workers and private result staging."""

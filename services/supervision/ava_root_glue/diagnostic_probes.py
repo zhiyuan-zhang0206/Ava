@@ -1,22 +1,18 @@
-"""Deployment diagnostics: explicit native custody, observation, then alerting.
+"""Deployment diagnostics: protocol observation and alerting.
 
-Native data-plane resources outlive app-root maintenance and retain their own
-identity readers. App endpoints require root-captured lineage. No adapter calls
+Endpoint configuration and authentication follow their existing owners. No adapter calls
 an ensure, start, stop, launchd repair, or session command.
 """
 
 from __future__ import annotations
 
-import asyncio
 import shutil
-import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.native_process.os_platform import IS_MACOS
-from base.native_process.ownership import OwnedProcess
 from services.supervision.ava_root_glue.diagnostics import Diagnostic
 
 
@@ -52,42 +48,12 @@ def venv() -> DaemonProbe:
 
 def redis_acl() -> DaemonProbe:
     from base.cluster import ownership
-    from services.supervision.healthchecks import owned_service
+    from services.supervision.healthchecks import protocol_probe
     from services.supervision.healthchecks import redis_acl as check
 
     port = ownership.configured_redis_port()
     if port is None:
         return DaemonProbe.unavailable("no explicit local Redis endpoint")
-
-    async def capture() -> OwnedProcess | None:
-        from redis.asyncio import Redis
-        from redis.asyncio.retry import Retry
-        from redis.backoff import NoBackoff
-
-        custody = ownership.RedisConnectionCustody()
-        client = Redis(
-            host="127.0.0.1",
-            port=port,
-            password=settings.data_plane.redis_admin_password or None,
-            decode_responses=True,
-            single_connection_client=True,
-            socket_connect_timeout=3,
-            socket_timeout=3,
-            retry=Retry(NoBackoff(), 0),
-        )
-        try:
-            return await custody.capture(
-                client,
-                port=port,
-                data_dir=ownership.redis_data_dir(),
-                deadline=time.monotonic() + 5,
-            )
-        finally:
-            await client.aclose()
-
-    owner = asyncio.run(capture())
-    if owner is None:
-        return DaemonProbe.down("no native Redis listener at this home's endpoint")
 
     def ping() -> DaemonProbe:
         from redis.exceptions import RedisError
@@ -96,24 +62,21 @@ def redis_acl() -> DaemonProbe:
             check.ping(settings.data_plane.redis_url)
         except RedisError as exc:
             return DaemonProbe.down(f"native Redis runtime ACL PING failed: {type(exc).__name__}")
-        return DaemonProbe.up("native Redis runtime identity authenticated and answered PING")
+        return DaemonProbe.up("Redis runtime ACL authenticated and answered PING")
 
-    return owned_service.owned_tcp(owner, port, ping)
+    return protocol_probe.probe_protocol(ping)
 
 
 def pgbouncer() -> DaemonProbe:
-    from base.cluster import get_record, ownership
+    from base.cluster import get_record
     from base.cluster.authority import POOLER_ADMIN, AuthorityRefusedError, read_pooler_admin
     from base.cluster.dataplane import pooler
     from base.paths import ava_home
-    from services.supervision.healthchecks import owned_service
+    from services.supervision.healthchecks import protocol_probe
 
     record = get_record(ava_home())
     if record is None:
         return DaemonProbe.unavailable("no registry record for the local pooler")
-    owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
-    if owner is None:
-        return DaemonProbe.down("no native PgBouncer generation in this home's PID record")
     port = record.ports["pgbouncer"]
     try:
         admin_password = read_pooler_admin(ava_home().resolve()).password
@@ -129,13 +92,13 @@ def pgbouncer() -> DaemonProbe:
             return DaemonProbe.up("native pooler admin console and required listeners answered")
         return DaemonProbe.down(f"pooler listener failure: loopback={loopback}, public={public}")
 
-    return owned_service.owned_tcp(owner, port, protocol)
+    return protocol_probe.probe_protocol(protocol)
 
 
 def browser_reach() -> DaemonProbe:
     from services.desktop.browser.probe import probe_browser
     from services.supervision.healthchecks import browser_reach as check
-    from services.supervision.healthchecks import owned_service
+    from services.supervision.healthchecks import protocol_probe
 
     url = settings.services.gateway_health_url.strip()
     if not url:
@@ -157,7 +120,7 @@ def browser_reach() -> DaemonProbe:
             return DaemonProbe.unavailable(f"host baseline also failed: {detail}")
         return DaemonProbe.down(f"browser-specific reachability failure: {detail}")
 
-    return owned_service.probe_endpoint("browser", port, protocol)
+    return protocol_probe.probe_protocol(protocol)
 
 
 class StationProbe:
@@ -181,7 +144,7 @@ class StationProbe:
 
 def lgtm_write_path() -> DaemonProbe:
     from base.telemetry.lgtm_local import backend_urls
-    from services.supervision.healthchecks import lgtm, owned_service
+    from services.supervision.healthchecks import lgtm, protocol_probe
 
     port = urlsplit(backend_urls()["loki"]).port
     if port is None:
@@ -191,7 +154,7 @@ def lgtm_write_path() -> DaemonProbe:
         ok, reason = lgtm.write_path_probe()
         return DaemonProbe.up(reason) if ok else DaemonProbe.down(reason)
 
-    return owned_service.probe_endpoint("loki", port, protocol)
+    return protocol_probe.probe_protocol(protocol)
 
 
 class LokiReport:

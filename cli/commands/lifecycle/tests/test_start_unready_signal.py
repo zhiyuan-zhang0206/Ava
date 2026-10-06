@@ -37,16 +37,13 @@ def test_one_event_per_non_critical_service(emitted: list[dict[str, object]]) ->
     assert emitted == [{"service": "ava-labeler"}, {"service": "ava-watcher"}]
 
 
-def test_readiness_verdict_emits_for_non_critical_only_and_still_fails_the_start(
+def test_readiness_verdict_emits_for_non_critical_only_and_allows_the_start(
     emitted: list[dict[str, object]],
 ) -> None:
     launch = SimpleNamespace(failed=())
     wait = SimpleNamespace(unready=(), non_critical_unready=(_spec("labeler"),))
 
-    assert (
-        start_commands._readiness_verdict(launch, wait)
-        == start_commands.SERVICES_NOT_READY_EXIT_CODE
-    )
+    assert start_commands._readiness_verdict(launch, wait) is None
     assert emitted == [{"service": "ava-labeler"}]
 
 
@@ -56,3 +53,12 @@ def test_a_ready_start_emits_nothing(emitted: list[dict[str, object]]) -> None:
 
     assert start_commands._readiness_verdict(launch, wait) is None
     assert emitted == []
+
+
+@pytest.mark.parametrize("failed, expected", [("ava-browser-mcp", None), ("ava-gateway", 4)])
+def test_only_core_launch_failures_block_serving(
+    emitted: list[dict[str, object]], failed: str, expected: int | None
+) -> None:
+    launch = SimpleNamespace(failed=(failed,))
+    wait = SimpleNamespace(unready=(), non_critical_unready=())
+    assert start_commands._readiness_verdict(launch, wait) == expected

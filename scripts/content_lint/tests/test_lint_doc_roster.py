@@ -217,10 +217,10 @@ def test_diagnostic_imports_include_nested_and_aliased_modules(monkeypatch, tmp_
 
     source = tmp_path / "probes.py"
     source.write_text(
-        "def probe():\n    from services.supervision.healthchecks import redis_acl as check, owned_service\n    from services.supervision.healthchecks.permissions_helper import probe\n"
+        "def probe():\n    from services.supervision.healthchecks import redis_acl as check, protocol_probe\n    from services.supervision.healthchecks.permissions_helper import probe\n"
     )
     monkeypatch.setattr(lint, "_DIAGNOSTIC_PROBES", source)
-    assert lint.diagnostic_healthchecks() == {"redis_acl", "owned_service", "permissions_helper"}
+    assert lint.diagnostic_healthchecks() == {"redis_acl", "protocol_probe", "permissions_helper"}
 
 
 def test_real_healthcheck_documentation_matches_current_sources():

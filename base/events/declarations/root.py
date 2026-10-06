@@ -1,8 +1,8 @@
-"""Root supervisor, custody, backup, schedule and converge events."""
+"""Root supervisor, backup, schedule and converge events."""
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 from base.events.vocabulary import EventSpec, telemetry_event
 
@@ -41,34 +41,14 @@ class RootRestartCleared(TypedDict):
     failed_for_s: float
 
 
-class CustodyReconcile(TypedDict):
-    """One custody record's reconcile outcome (task #4872, route C audit).
-
-    Emitted for every record a reconcile pass examines — ``released`` when the
-    record was cleared (every recorded birth gone and the unit's process group
-    empty) or ``retained`` when one unproven fact kept it — so the decision and
-    its evidence replay from the stream. A repeatable pass reports a release
-    always and a retained outcome on first sight and on evidence change only,
-    so the stream carries the decision rather than a per-round heartbeat. A
-    record an active generation owns is its own bookkeeping: not examined, not
-    emitted.
-    """
-
-    unit: str
-    checked: int
-    found: int
-    decision: Literal["released", "retained"]
-    evidence: str
-
-
 class RootUnitFailureState(TypedDict):
     """One root unit sits in an explicit failure state (task #4872).
 
     Emitted on EVERY health round while the condition holds — the unit's intent
     is running and it has a recorded replacement failure, an open restart
-    breaker, or retained native custody — so a rule's pending period can debounce
+    breaker — so a rule's pending period can debounce
     it and the stream going quiet resolves it. ``kind`` is ``restart_failed``,
-    ``breaker_open`` or ``custody_held`` (the first that applies in that order);
+    ``breaker_open`` (the first that applies in that order);
     ``detail`` is the bounded evidence line, never a grouping key.
     """
 
@@ -116,21 +96,6 @@ class ScheduleStalled(TypedDict):
     schedule_id: int
     status: str
     stalled_seconds: float
-
-
-class BackupOperationCustody(TypedDict):
-    """`backup_operation_custody` payload — scheduled backup operation custody.
-
-    ``operation`` names the operation kind (``logical-dump`` or
-    ``logical-restore-drill``). ``custody`` is ``quarantined`` (closure proven; the next operation
-    proceeds), ``blocked`` (closure unproven; the kind refuses new work until
-    ``ava backup operations retire``) or ``retired`` (an operator retirement).
-    ``detail`` is the bounded diagnostic; it is never an alert grouping key.
-    """
-
-    operation: str
-    custody: str
-    detail: str
 
 
 class RecoveryDrillFailed(TypedDict):
@@ -256,18 +221,10 @@ EVENTS: dict[str, EventSpec] = {
         payload=RootRestartCleared,
         tier="noise",
     ),
-    "custody_reconcile": telemetry_event(
-        "custody_reconcile",
-        "custody record reconcile pass — releases always report; a retained record reports on "
-        "first sight and evidence change — with its birth and process-group evidence "
-        "(task #4872)",
-        payload=CustodyReconcile,
-        tier="observation",
-    ),
     "root_unit_failure_state": telemetry_event(
         "root_unit_failure_state",
         "root unit sits in an explicit failure state (intent running, and restart_failed, "
-        "breaker open, or retained custody) — emitted every health round while it holds "
+        "breaker open) — emitted every health round while it holds "
         "(task #4872)",
         payload=RootUnitFailureState,
         tier="anomaly",
@@ -311,13 +268,6 @@ EVENTS: dict[str, EventSpec] = {
         "root completed one service health and diagnostic observation round",
         payload=RootHealthTick,
         tier="noise",
-    ),
-    "backup_operation_custody": telemetry_event(
-        "backup_operation_custody",
-        "backup operation quarantined, blocked on unproven closure, or retired",
-        payload=BackupOperationCustody,
-        tier="anomaly",
-        site=("services/backup/scheduler/operation/custody.py:report (positional emit)"),
     ),
     "postgres_stop_escalated": telemetry_event(
         "postgres_stop_escalated",

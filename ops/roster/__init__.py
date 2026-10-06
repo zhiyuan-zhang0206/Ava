@@ -9,9 +9,7 @@ derives read-only service status from the roster.
 from __future__ import annotations
 
 import shlex
-from dataclasses import replace
 from functools import partial
-from urllib.parse import urlsplit
 
 from base.cluster import frontend_service_cmd
 from base.config import settings
@@ -74,29 +72,6 @@ def _browser_probe() -> DaemonProbe:
     return probe_browser()
 
 
-def _bind_owned_probe(spec: ServiceSpec) -> ServiceSpec:
-    """Bind each network readiness verdict to the root-owned process generation."""
-    from services.supervision.healthchecks.owned_service import probe_endpoint
-
-    if spec.session in {"frontend", "otel-collector", "loki", "prometheus", "grafana"}:
-        return spec  # These probes already bind every listener to root ownership.
-    port = spec.tcp_port
-    if spec.curl_url is not None:
-        url = urlsplit(spec.curl_url)
-        port = url.port
-        if port is None:
-            port = {"http": 80, "https": 443}[url.scheme]
-    if port is None:
-        return spec  # Unix protocols bind their connected peer to root directly.
-    if spec.identity_probe is None:
-        raise ValueError(f"service {spec.session!r} has no protocol readiness probe")
-    if not 0 < port < 65536:
-        raise ValueError(f"service {spec.session!r} has invalid readiness port {port}")
-    return replace(
-        spec, identity_probe=partial(probe_endpoint, spec.session, port, spec.identity_probe)
-    )
-
-
 def build_services() -> tuple[ServiceSpec, ...]:
     """Return the canonical service roster with probe ports/URLs derived from settings.
 
@@ -115,7 +90,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
     from services.entrypoints.gate.daemon import app_port, entry_port
     from services.supervision.healthchecks.gate import probe as probe_gate
     from services.supervision.healthchecks.otel_collector import probe_collector
-    from services.supervision.healthchecks.owned_service import probe as probe_owned_service
+    from services.supervision.healthchecks.protocol_probe import probe as probe_protocol_service
 
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
@@ -239,7 +214,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # a pg outage is not its business.
             requires_db=False,
             tcp_port=settings.services.memory_search_port,
-            identity_probe=partial(probe_owned_service, "memory-search"),
+            identity_probe=partial(probe_protocol_service, "memory-search"),
             healthcheck_module="services.supervision.healthchecks.memory_search",
         ),
         ServiceSpec(
@@ -332,7 +307,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # Same story: a Unix-socket multiplexer in front of chrome-devtools-mcp.
             # Its whole data plane is that socket plus CDP.
             requires_db=False,
-            identity_probe=partial(probe_owned_service, "browser-mcp"),
+            identity_probe=partial(probe_protocol_service, "browser-mcp"),
             healthcheck_module="services.supervision.healthchecks.browser_mcp",
             stop_ceiling_s=browser_mcp_budget.SHUTDOWN_CEILING_S,
         ),
@@ -347,7 +322,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             cmd=".venv/bin/python -m services.desktop.computer.mcp_daemon",
             capabilities=_AGENT_RUNNER,
             requires_db=True,
-            identity_probe=partial(probe_owned_service, "computer-mcp"),
+            identity_probe=partial(probe_protocol_service, "computer-mcp"),
             healthcheck_module="services.supervision.healthchecks.computer_mcp",
         ),
         # mcp-daemon: ONE shared MCP daemon for every agent on this machine
@@ -362,7 +337,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             capabilities=_AGENT_RUNNER,
             # Config is local files (mcp.json); no DB at boot or runtime.
             requires_db=False,
-            identity_probe=partial(probe_owned_service, "mcp-daemon"),
+            identity_probe=partial(probe_protocol_service, "mcp-daemon"),
             healthcheck_module="services.supervision.healthchecks.mcp_daemon",
         ),
     )
@@ -391,7 +366,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             cmd=".venv/bin/python -m services.agent_runner.pty_sessions.daemon",
             capabilities=_BOTH,
             requires_db=False,
-            identity_probe=partial(probe_owned_service, "pty-sessions"),
+            identity_probe=partial(probe_protocol_service, "pty-sessions"),
             stop_ceiling_s=pty_sessions_budget.SHUTDOWN_CEILING_S,
         ),
         ServiceSpec(
@@ -440,4 +415,4 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # unique for the watchdog/status derivations keyed on `session`.
     plugin = _plugin_services()
     _assert_unique_sessions(core, plugin)
-    return tuple(_bind_owned_probe(spec) for spec in core + plugin)
+    return core + plugin

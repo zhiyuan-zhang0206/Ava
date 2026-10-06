@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from pathlib import Path
 from time import monotonic
 from typing import Any, cast
@@ -22,9 +21,7 @@ from typing import Any, cast
 import psutil
 import pytest
 
-from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient
-from services.supervision.ava_root import stopping
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.server import ControlServer
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
@@ -92,7 +89,7 @@ async def test_unit_closing_past_the_default_window_stops_inside_its_declared_wi
     result = await owner.down("worker")
     assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "stopped"
     assert await state(owner) == "stopped"
-    assert not list((tmp_path / "custody").iterdir())
+    assert not (tmp_path / "custody").exists()
     await owner.shutdown()
 
 
@@ -107,13 +104,13 @@ async def test_unit_declaring_no_window_keeps_the_default_and_the_refusal_names_
     try:
         with pytest.raises(RuntimeError, match=r"did not stop within its 0\.2s window"):
             await owner.down("worker")
-        assert (tmp_path / "custody/worker.json").exists()
+        assert not (tmp_path / "custody").exists()
         for _ in range(100):  # the unit finishes closing on its own
             if await state(owner) == "stopped":
                 break
             await asyncio.sleep(0.02)
         await owner.down("worker")  # the retry the operator had to make: nothing is signalled
-        assert not list((tmp_path / "custody").iterdir())
+        assert not (tmp_path / "custody").exists()
     finally:
         await owner.shutdown()
 
@@ -163,59 +160,7 @@ async def test_down_over_the_control_socket_succeeds_for_a_unit_closing_past_ten
         )
         assert response["ok"] is True, response
         assert await state(owner) == "stopped"
-        assert not list((short_tmp / "custody").iterdir())
+        assert not (short_tmp / "custody").exists()
     finally:
         await owner.shutdown()
         await server.close()
-
-
-async def test_exit_during_custody_io_is_rechecked_at_the_deadline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A pre-I/O live read cannot certify that birth still lives after expiry."""
-    ready, release = tmp_path / "ready", tmp_path / "release"
-    code = (
-        "import pathlib,signal,sys,time\n"
-        "def close(*_):\n"
-        f"    while not pathlib.Path({str(release)!r}).exists(): time.sleep(0.001)\n"
-        "    sys.exit(0)\n"
-        "signal.signal(signal.SIGTERM, close)\n"
-        f"pathlib.Path({str(ready)!r}).touch()\n"
-        "time.sleep(60)\n"
-    )
-    owner = root(tmp_path, code)
-    await owner.start()
-    await wait_file(ready)
-    generation = owner._units["worker"].generation
-    assert generation is not None
-    identity, custody = generation.identity, generation.custody
-    assert identity is not None and custody is not None
-    retain = custody.retain
-    calls = 0
-    clock = [0.0]
-    monkeypatch.setattr(stopping, "monotonic", lambda: clock[0])
-
-    def retain_across_exit(identities: set[OwnedProcess], group: int) -> None:
-        nonlocal calls
-        calls += 1
-        retain(identities, group)  # keep the real durable custody write
-        if calls == 2:  # capture-before-TERM is first; the live poll is second
-            assert identity.live(), "the pre-I/O snapshot must be a genuinely live birth"
-            release.touch()
-            deadline = monotonic() + 2.0
-            while identity.live() and monotonic() < deadline:
-                time.sleep(0.001)
-            assert not identity.live(), "the TERM handler must actually exit this child"
-            clock[0] = _DEFAULT_WINDOW_S  # expiry while the synchronous I/O owns the loop
-
-    monkeypatch.setattr(custody, "retain", retain_across_exit)
-    try:
-        outcome = await owner.down("worker")
-        assert cast("list[dict[str, Any]]", outcome["units"])[0]["action"] == "stopped"
-        assert calls == 2, "the diagnostic must cross the live stop's custody write"
-        assert generation.exited.is_set(), "closure must still await the real watcher"
-        assert generation.proc.returncode == 0
-        assert not identity.live()
-        assert not custody.path.exists(), "only proven native closure releases custody"
-    finally:
-        await owner.shutdown()

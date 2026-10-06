@@ -244,84 +244,6 @@ def _stubborn(ready: Path) -> list[str]:
     ]
 
 
-def _assert_rest_of_tree_stopped(run_dir: Path, log: Path, peer: int) -> None:
-    """Both stubborn units' refusals are reported; the peer between them stopped."""
-    reported = _read_log(log)
-    assert "unit svc did not stop" in reported
-    assert "unit tail did not stop" in reported
-    _wait_dead(peer)
-    assert not (run_dir / "custody/peer.json").exists()
-
-
-def test_failed_shutdown_retains_owner_and_requires_explicit_closure(short_tmp: Path) -> None:
-    """A stubborn real child cannot turn ordinary root stop into orphaning or force.
-
-    Nor does it keep root from stopping the rest of its tree: the peer after it
-    in the stop order still stops, and each stubborn unit's refusal is reported.
-    """
-    ready, tail_ready = short_tmp / "child-ready", short_tmp / "tail-ready"
-    units: list[dict[str, object]] = [
-        {"id": "svc", "exec": _stubborn(ready), "restart": "never"},
-        {"id": "peer", "exec": _SLEEPER, "restart": "never"},
-        {"id": "tail", "exec": _stubborn(tail_ready), "restart": "never"},
-    ]
-    manifests = _write_manifests(short_tmp, units)
-    fixture = short_tmp / "fixtures"
-    fixture.mkdir()
-    (fixture / "short_deadline.py").write_text(
-        "from services.supervision.ava_root.supervisor import SupervisorConfig\n"
-        "def build(context):\n"
-        "    context.supervisor._config = SupervisorConfig(stop_timeout_s=0.15)\n"
-        "    return []\n"
-    )
-    run_dir = short_tmp / "run"
-    with _daemon(
-        run_dir,
-        manifests,
-        wiring="short_deadline:build",
-        env=_wiring_env(fixture, short_tmp / "markers"),
-    ) as (root, log):
-        client = _wait_ready(run_dir, root, log)
-        _wait_for(ready.exists, "child did not install its TERM handler")
-        _wait_for(tail_ready.exists, "tail did not install its TERM handler")
-        before, peer_unit, tail_unit = _units_of(client.status())
-        child, peer, tail = (
-            cast(int, before["pid"]),
-            cast(int, peer_unit["pid"]),
-            cast(int, tail_unit["pid"]),
-        )
-        try:
-            assert client.shutdown()["ok"]
-            _wait_for(
-                lambda: "retains custody after failed shutdown" in _read_log(log),
-                "root did not report retained custody after its shutdown deadline",
-            )
-            _assert_rest_of_tree_stopped(run_dir, log, peer)
-            assert root.poll() is None
-            _assert_alive(child)
-            assert (run_dir / "custody/svc.json").exists()
-            for _ in range(2):
-                observed = _units_of(client.status())[0]
-                assert (observed["pid"], observed["create_time"]) == (child, before["create_time"])
-            refusals = [
-                client.up("svc"),
-                client.restart("svc"),
-                client.resource("terminal.start", {}),
-            ]
-            assert all(not response["ok"] for response in refusals)
-            assert client.force_down("svc")["ok"]
-            assert client.force_down("tail")["ok"]
-            _wait_dead(child)
-            _wait_dead(tail)
-            assert not list((run_dir / "custody").iterdir())
-            assert client.shutdown()["ok"]
-            assert root.wait(timeout=5) == 0
-        finally:
-            _kill_quietly(child)
-            _kill_quietly(peer)
-            _kill_quietly(tail)
-
-
 # Wiring hook: asyncio's child watcher reaps each unit leader before root reads its birth.
 _REAPED_FIRST = (
     "import asyncio\n"
@@ -337,13 +259,11 @@ _REAPED_FIRST = (
 
 
 @pytest.mark.parametrize("reaped_first", [False, True])
-def test_termination_after_unit_exit_releases_custody_and_exits(
-    short_tmp: Path, reaped_first: bool
-) -> None:
+def test_termination_after_unit_exit_exits(short_tmp: Path, reaped_first: bool) -> None:
     """A unit that exited before any stop does not hold root past SIGTERM.
 
     systemd's root boot unit sets SendSIGKILL=no: TERM is the only stop, so a
-    root that kept the dead unit's custody would never exit. That holds too when
+    root must not wait for a second stop request. That holds too when
     the leader was reaped before root read its birth.
     """
     command = [sys.executable, "-c", "pass"]
@@ -364,14 +284,13 @@ def test_termination_after_unit_exit_releases_custody_and_exits(
         )
         if reaped_first:
             assert _units_of(client.status())[0]["create_time"] is None, "root read its birth"
-        assert (run_dir / "custody/svc.json").exists()
+        assert not (run_dir / "custody").exists()
         root.terminate()
         assert root.wait(timeout=10) == 0, _read_log(log)
-    assert not list((run_dir / "custody").iterdir())
 
 
 def test_lock_dies_with_the_daemon_and_is_not_inherited_by_units(short_tmp: Path) -> None:
-    """A released lock is not permission to duplicate orphaned application services."""
+    """A crashed owner releases its singleton lock, without a durable admission record."""
     run_dir = short_tmp / "run"
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
     with _daemon(run_dir, manifests) as (proc_a, log_a):
@@ -384,13 +303,13 @@ def test_lock_dies_with_the_daemon_and_is_not_inherited_by_units(short_tmp: Path
             _assert_alive(unit_pid)  # the unit outlives its parent
             _wait_orphaned(unit_pid)  # reparented to init — the chain root is gone
 
-            # The free lock cannot prove the former unit lineage is gone.
-            # A replacement must hold without spawning a competing generation.
             with _daemon(run_dir, manifests) as (proc_b, log_b):
-                assert proc_b.wait(timeout=10) != 0
-                assert "custody requires reconciliation" in _read_log(log_b)
-                _assert_alive(unit_pid)
-                assert (run_dir / "custody/svc.json").exists()
+                client_b = _wait_ready(run_dir, proc_b, log_b)
+                replacement = cast(int, _units_of(client_b.status())[0]["pid"])
+                assert replacement != unit_pid
+                _assert_alive(replacement)
+                assert client_b.shutdown()["ok"]
+                assert proc_b.wait(timeout=10) == 0
         finally:
             _kill_quietly(unit_pid)
 
@@ -700,3 +619,37 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
         native("rm", "-f", str(target))
         native("systemctl", "daemon-reload")
         native("systemctl", "reset-failed", unit)
+
+
+def test_failed_shutdown_reports_error_and_exits_without_another_stop(short_tmp: Path) -> None:
+    """A live child's refusal is concrete, without a persistent custody owner loop."""
+    ready = short_tmp / "child-ready"
+    manifests = _write_manifests(
+        short_tmp, [{"id": "svc", "exec": _stubborn(ready), "restart": "never"}]
+    )
+    fixture = short_tmp / "fixtures"
+    fixture.mkdir()
+    (fixture / "short_deadline.py").write_text(
+        "from services.supervision.ava_root.supervisor import SupervisorConfig\n"
+        "def build(context):\n"
+        "    context.supervisor._config = SupervisorConfig(stop_timeout_s=0.15)\n"
+        "    return []\n"
+    )
+    run_dir = short_tmp / "run"
+    with _daemon(
+        run_dir,
+        manifests,
+        wiring="short_deadline:build",
+        env=_wiring_env(fixture, short_tmp / "markers"),
+    ) as (proc, log):
+        client = _wait_ready(run_dir, proc, log)
+        _wait_for(ready.exists, "child did not install its TERM handler")
+        child = cast(int, _units_of(client.status())[0]["pid"])
+        try:
+            assert client.shutdown()["ok"]
+            assert proc.wait(timeout=5) != 0
+            assert "unit svc did not stop" in _read_log(log)
+            _assert_alive(child)
+            assert not (run_dir / "custody").exists()
+        finally:
+            _kill_quietly(child)

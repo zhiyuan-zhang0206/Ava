@@ -56,15 +56,11 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (67)
+## Rules
 
-The rules are split between `ava-ops` (33 rules, evaluated every minute:
-R1-R6, the root-health-round and gateway-metrics silence rules, the checkpoint
-guards, R8-R12, R14-R16, R24, and the R25/R26 backup-operation custody
-rules) and
-`ava-ops-slow` (nine rules, evaluated every five minutes: R7, R13, R17's two
-fast-route tiers, R18, and R19's two slow-route tiers, plus the Tempo-backend / LLM-rate-limit checks). Each rule retains its
-own `for` window.
+The rules are split between `ava-ops` (evaluated every minute) and
+`ava-ops-slow` (evaluated every five minutes). Each rule retains its own
+`for` window. The table below names the configured conditions.
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
@@ -90,8 +86,6 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-fleet-graph-stale` | `ava-ops` | fleet graph served stale | `fleet_graph_stale` episodes in 10m > 1 (Loki) | 0m | warning |
 | `ava-ops-telemetry-queue-loss` | `ava-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
 | `ava-ops-recovery-drill-failed` | `ava-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
-| `ava-ops-backup-operation-blocked` | `ava-ops` | backup operation kind blocked on unproven closure | `backup_operation_custody` custody=blocked (level=error) by operation in 1h > 0 (Loki) | 0m | error |
-| `ava-ops-backup-operation-quarantined` | `ava-ops` | backup operation failed or cancelled, quarantined | `backup_operation_custody` custody=quarantined (level=error) by operation in 1h > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
 | `ava-ops-llm-stall-pair` | `ava-ops` | LLM stream stall pair | `stream_stall_pair_terminated` in 15m > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-stall-burst` | `ava-ops` | LLM provider stall burst | `stream_stalled_retry` per vendor in 15m > 4 (Loki) | 0m | warning |

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -337,41 +336,30 @@ def test_every_service_declares_an_identity_probe() -> None:
 
 
 @pytest.mark.parametrize("service", ["gateway", "browser", "task-maintenance"])
-def test_healthy_protocol_cannot_certify_an_unowned_listener(
+def test_roster_uses_healthy_protocol_without_native_listener_proof(
     monkeypatch: pytest.MonkeyPatch, service: str
 ) -> None:
     from base.daemon.health import DaemonProbe
-    from base.native_process.ownership import OwnedProcess
-    from services.supervision.healthchecks import owned_service
 
-    def _fake_probe_home(*_a: object, **_kw: object) -> DaemonProbe:
+    def healthy(*_args: object, **_kwargs: object) -> DaemonProbe:
         return DaemonProbe.up("healthy")
 
-    def _fake_browser_probe() -> DaemonProbe:
-        return DaemonProbe.up("healthy")
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("roster protocol availability must not inspect native ownership")
 
-    def _fake_probe_daemon(*_a: object, **_kw: object) -> DaemonProbe:
-        return DaemonProbe.up("healthy")
+    monkeypatch.setattr(roster, "probe_home", healthy)
+    monkeypatch.setattr(roster, "_browser_probe", healthy)
+    monkeypatch.setattr("ops.roster.healthz.probe_daemon", healthy)
 
-    def _fake_daemon_identity(*_a: object) -> Callable[[], DaemonProbe]:
-        return lambda: DaemonProbe.up("healthy")
+    def identity(*_args: object) -> Callable[[], DaemonProbe]:
+        return healthy
 
-    def _fake_listener_pids(_port: int) -> set[int]:
-        return {12345}
-
-    def _fake_owned_process(_service: str) -> OwnedProcess | None:
-        return None
-
-    monkeypatch.setattr(roster, "probe_home", _fake_probe_home)
-    monkeypatch.setattr(roster, "_browser_probe", _fake_browser_probe)
-    monkeypatch.setattr("ops.roster.healthz.probe_daemon", _fake_probe_daemon)
-    monkeypatch.setattr(roster, "daemon_identity", _fake_daemon_identity)
-    monkeypatch.setattr(owned_service, "listener_pids", _fake_listener_pids)
-    monkeypatch.setattr(owned_service, "owned_process", _fake_owned_process)
-
+    monkeypatch.setattr(roster, "daemon_identity", identity)
+    monkeypatch.setattr("psutil.process_iter", forbidden)
+    monkeypatch.setattr("base.native_process.root_control.client.owned_process", forbidden)
     item = next(item for item in roster.build_services() if item.session == service)
     assert item.identity_probe is not None
-    assert item.identity_probe().terminal
+    assert item.identity_probe().alive
 
 
 def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
@@ -379,15 +367,11 @@ def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
     dialled), but the verdict comes from the profile-anchored probe — CDP itself
     carries no field we control, so a 200 there says nothing about whose Chrome
     answered."""
-    from base.daemon.health import DaemonProbe
     from services.desktop.browser.probe import probe_browser
 
     browser = next(s for s in roster.build_services() if s.session == "browser")
     probe = browser.identity_probe
-    assert isinstance(probe, partial)
-    probe = cast("partial[DaemonProbe]", probe)
-    assert probe.args[0] == "browser"
-    assert probe.args[2] is roster._browser_probe
+    assert probe is roster._browser_probe
     assert probe_browser is not None  # the lazy import target exists
 
 

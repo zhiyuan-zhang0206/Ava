@@ -14,7 +14,6 @@ from typing import Any, NamedTuple
 from base import telemetry
 from base.deploy.git.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
 from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS as CRITICAL_SERVICE_SESSIONS
-from base.deploy.progress_timeout import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from cli.commands._repo import ServiceSpec, session_name
 
@@ -151,10 +150,6 @@ def _occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort
     return tuple(occupied)
 
 
-# Require repeated positive stopped observations before ending readiness early.
-_SESSION_GONE_CONFIRMATIONS = 2
-
-
 class ReadinessWait(NamedTuple):
     """What the readiness wait found, and how it stopped looking.
 
@@ -171,7 +166,7 @@ class ReadinessWait(NamedTuple):
     `unready`; the deadline exit implies at least one of them was still alive (the
     early exit requires all of them to be gone). Both exits concern the CRITICAL
     roster only: `non_critical_unready` carries the demoted services that missed
-    their short window — they must be reported and signalled, but they can never
+    the current availability snapshot — they are reported and signalled, but never
     decide the exit code.
     """
 
@@ -223,7 +218,7 @@ def _print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
 
 
 def _print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
-    """Name the non-critical services that missed their short window.
+    """Report optional capabilities unavailable when core startup finishes.
 
     The counterpart of `_print_unready_services` for the tier that cannot fail
     the start. The cross must still appear — the tier downgrade is a verdict
@@ -231,8 +226,7 @@ def _print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None
     """
     names = ", ".join(session_name(s.session) for s in specs)
     print(
-        f"\n✗ {len(specs)} non-critical service(s) not ready within "
-        f"{NON_CRITICAL_SERVICE_READY_TIMEOUT_S:.0f}s: {names}\n"
+        f"\n✗ {len(specs)} non-critical service(s) currently unavailable: {names}\n"
         f"  They do not fail this start (the readiness gate waits for the critical roster "
         f"only),\n"
         f"  but a service_start_unready event was emitted; ava-root keeps trying to revive them and "
@@ -242,7 +236,7 @@ def _print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None
 
 
 def _report_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
-    """Emit one `service_start_unready` event per non-critical service that missed its window.
+    """Emit one `service_start_unready` event per unavailable optional service.
 
     The tier's second rail: the demotion must not go silent. The boot job's
     uncapped 60 s retries repeat the event while the failure stays open; it

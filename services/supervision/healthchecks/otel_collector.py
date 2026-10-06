@@ -6,10 +6,8 @@ from dataclasses import dataclass
 from http.client import HTTPException
 
 from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
-from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
 from base.config import settings
 from base.daemon.health import DaemonProbe
-from base.native_process.ownership import OwnedProcess, leader_owns_pids
 from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 
 _QUEUE_SAMPLE = re.compile(
@@ -43,14 +41,6 @@ def _metrics_url() -> str:
     return f"http://localhost:{settings.observability.otel_collector_metrics_port}/metrics"
 
 
-def _collector_ports() -> tuple[int, int]:
-    """Listener ports owned by this unit's collector process."""
-    return (
-        settings.observability.telemetry_otlp_port,
-        settings.observability.otel_collector_metrics_port,
-    )
-
-
 def _labels(text: str) -> dict[str, str]:
     return {match.group("key"): match.group("value") for match in _LABEL.finditer(text)}
 
@@ -70,53 +60,11 @@ def _is_alive() -> bool:
         return False
 
 
-def _foreign_listeners(holders: dict[int, set[int]], owner: OwnedProcess) -> list[int]:
-    """PIDs holding a probed port that fall outside root's collector process tree."""
-    return sorted(
-        pid for pids in holders.values() for pid in pids if not leader_owns_pids(owner, {pid})
-    )
-
-
-def _owned_collector_process() -> OwnedProcess | DaemonProbe:
-    """Root's captured collector process identity, or the probe explaining its absence."""
-    from base.native_process.root_control.client import RootClientError, owned_process
-
-    try:
-        owner = owned_process("otel-collector")
-    except RootClientError as exc:
-        return DaemonProbe.unavailable(str(exc))
-    if owner is None:
-        return DaemonProbe.unavailable("root has no live collector process identity")
-    return owner
-
-
 def probe_collector() -> DaemonProbe:
-    """Certify protocol health only for listeners owned by root's captured process."""
-    ports = _collector_ports()
-    try:
-        holders = {port: set(strict_listeners_on(port)) for port in ports}
-    except ListenerDiscoveryError as exc:
-        return DaemonProbe.unavailable(str(exc))
-    if not holders[ports[0]]:
-        return DaemonProbe.down(f"no collector listener on {ports[0]}")
-    owner_or_probe = _owned_collector_process()
-    if isinstance(owner_or_probe, DaemonProbe):
-        return owner_or_probe
-    owner = owner_or_probe
-    foreign = _foreign_listeners(holders, owner)
-    if foreign:
-        return DaemonProbe.port_taken(
-            f"collector ports {ports} include pid(s) {foreign} outside root's process tree"
-        )
-    if not _is_alive():
-        return DaemonProbe.down("root-owned collector does not accept a valid OTLP trace request")
-    try:
-        current = {port: set(strict_listeners_on(port)) for port in ports}
-    except ListenerDiscoveryError as exc:
-        return DaemonProbe.unavailable(str(exc))
-    if current != holders or _foreign_listeners(current, owner):
-        return DaemonProbe.down("collector listener generation changed during the OTLP probe")
-    return DaemonProbe.up("root-owned collector accepts OTLP trace requests")
+    """Observe whether the collector accepts a valid OTLP trace request."""
+    if _is_alive():
+        return DaemonProbe.up("collector accepts OTLP trace requests")
+    return DaemonProbe.down("collector does not accept a valid OTLP trace request")
 
 
 def _queue_pressure() -> CollectorPressure | None:

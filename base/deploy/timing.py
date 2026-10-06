@@ -87,8 +87,7 @@ CLOCKS: dict[str, Clock] = {
     "NON_CRITICAL_SERVICE_READY_TIMEOUT_S": Clock(
         "deploy",
         lambda: deploy.NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
-        "how long `ava start` waits for a non-critical service before it stops "
-        "blocking the start (reported and alerted instead)",
+        "the root health monitor startup grace for optional services",
     ),
     # --- unit-bundle family (values in base/deploy/progress_timeout.py) ---
     "UNIT_BUNDLE_TTL_S": Clock(
@@ -180,9 +179,7 @@ CONSTRAINTS: list[Constraint] = [
         "<",
         "NON_CRITICAL_SERVICE_READY_TIMEOUT_S",
         "SERVICE_READY_TIMEOUT_S",
-        "the tiered gate's premise: the non-critical window must end long before "
-        "the critical bound, so a healthy start is never held to the long number "
-        "by a straggling non-critical daemon",
+        "optional root-health startup grace is shorter than the core-service grace",
     ),
     # --- unit-bundle family ---
     Constraint(

@@ -1,7 +1,7 @@
 """Single start lifecycle: persisted identity, prepared storage, one ready root tree.
 
-Exit zero means the complete admitted roster is ready. Failed readiness never
-publishes serving or a known-good version, including during an update or boot.
+Exit zero means the selected core services are ready. Optional capabilities
+can remain unavailable without preventing the host from serving.
 """
 
 from __future__ import annotations
@@ -39,30 +39,13 @@ def _ensure_gateway_data_plane() -> int:
 
 
 def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
-    """0 when every health port in `roster` is this unit's to bind, else 1 + why.
-
-    The one thing a fixed port table cannot arrange in advance: another home's
-    daemon (a leaked test daemon, a stray from a previous checkout) may already
-    answer on this unit's health port. Detection does not depend on everyone
-    having agreed beforehand, so `ava start` asks the port who is there before it
-    launches anything onto it (issue #977).
-
-    Exits 1 rather than the readiness code: nothing has been launched, so this is
-    a step that failed, not a host that came up incomplete. That also keeps it
-    distinct from incomplete readiness: a port collision refuses the launch
-    before any application process is started.
-
-    One occupied port refuses the WHOLE start, gateway and frontend included —
-    there is no partial bring-up, because degrading to "start the other six"
-    would leave a mixed state. The escape hatch is `--disable-service <name>`,
-    which drops the daemon from the roster this gate reads and is therefore the
-    way to bring the rest of the unit up while the collision is being sorted out;
-    the message says so.
-    """
+    """Refuse known core-port conflicts; optional capabilities cannot block start."""
     # Read through the probe owner so the safety fixture guards this lookup.
     import cli.commands._probe as _probe_commands
 
-    occupied = _probe_commands._occupied_health_ports(roster)
+    occupied = _probe_commands._occupied_health_ports(
+        tuple(s for s in roster if s.session in _probe_commands.CRITICAL_SERVICE_SESSIONS)
+    )
     if not occupied:
         return 0
     print("\n✗ another unit already answers on this unit's daemon health ports:", file=sys.stderr)
@@ -358,12 +341,15 @@ def _print_gateway_hint() -> None:
         )
 
 
-def _readiness_verdict(launch: Any, wait: Any) -> int | None:
-    """Print the readiness verdict; the not-ready exit code, or None when everything is up.
+def _critical_launch_failures(launch: Any) -> tuple[str, ...]:
+    from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
 
-    Launch failures share the verdict: rollout reads `base.deploy.lifecycle.launch_failures`, while the
-    boot loop retries without an unbounded wait on one service (`base/host/system/boot_policy.py`).
-    """
+    names = {session_name(name) for name in CRITICAL_SERVICE_SESSIONS}
+    return tuple(name for name in launch.failed if name in names)
+
+
+def _readiness_verdict(launch: Any, wait: Any) -> int | None:
+    """Report all failures, but gate serving only on selected core services."""
     import cli.commands._probe as _probe_commands
 
     if launch.failed:
@@ -374,11 +360,10 @@ def _readiness_verdict(launch: Any, wait: Any) -> int | None:
         )
     if wait.unready:
         _probe_commands._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
-    # Diagnostic tiers remain visible without weakening the readiness verdict.
     if wait.non_critical_unready:
         _probe_commands._print_non_critical_unready_services(wait.non_critical_unready)
         _probe_commands._report_non_critical_unready_services(wait.non_critical_unready)
-    if wait.unready or wait.non_critical_unready or launch.failed:
+    if wait.unready or _critical_launch_failures(launch):
         return SERVICES_NOT_READY_EXIT_CODE
     return None
 
@@ -441,7 +426,7 @@ def _cmd_start_body(
     # because its `ava start` is a child and an exit code cannot carry names.
     from base.deploy.lifecycle import launch_failures
 
-    launch_failures.record(list(launch.failed))
+    launch_failures.record(list(_critical_launch_failures(launch)))
 
     # The exact maintenance generation stays held through readiness. Its
     # authorized owner, or resume_after_start, alone may release admission.

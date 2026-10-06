@@ -3,7 +3,7 @@
 `worker_process._BOOTSTRAP` names the packages it requires inside the
 controller's code root before it runs a worker. Naming a package that does not
 exist makes EVERY scheduled dump and restore drill exit at start (the 2026-10
-inventory's R1): the group closes, the attempt is quarantined, and the daily
+inventory's R1): the attempt fails without publishing an artifact, and the daily
 backup is down until fixed. Each test starts the real bootstrap in the same
 isolated interpreter the controller uses (`-I -B`), so a name that stops
 resolving fails here, not at 03:00.

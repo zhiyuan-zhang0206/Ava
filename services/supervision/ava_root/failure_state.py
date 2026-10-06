@@ -2,7 +2,7 @@
 
 The health monitor derives one condition per unit each round — the unit's
 intent is running and it sits in an explicit failure state: a recorded
-replacement failure, an open restart breaker, or retained native custody. The
+replacement failure, an open restart breaker. The
 condition is a STATE, so the monitor emits it on every round while it holds;
 the observability stack's rules read that stream (the pending period carries
 the debounce, silence after the last round resolves it).
@@ -25,9 +25,6 @@ class FailureKind(StrEnum):
     BREAKER_OPEN = "breaker_open"
     """Repeated non-alive rounds opened the restart breaker; restarts are held."""
 
-    CUSTODY_HELD = "custody_held"
-    """Retained native custody blocks revival until reconciliation."""
-
 
 @dataclass(frozen=True, slots=True)
 class UnitFailureFacts:
@@ -35,7 +32,6 @@ class UnitFailureFacts:
 
     intent_running: bool
     restart_failed: RestartFailure | None
-    custody_held: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +49,7 @@ def derive_kind(view: UnitFailureView) -> FailureKind | None:
 
     Only a unit whose intent is running can be failing; among its failure
     states, the recorded replacement failure wins over the open breaker, which
-    wins over retained custody.
+    follows it.
     """
     if not view.facts.intent_running:
         return None
@@ -61,8 +57,6 @@ def derive_kind(view: UnitFailureView) -> FailureKind | None:
         return FailureKind.RESTART_FAILED
     if view.breaker_open:
         return FailureKind.BREAKER_OPEN
-    if view.facts.custody_held:
-        return FailureKind.CUSTODY_HELD
     return None
 
 
@@ -73,6 +67,4 @@ def describe(view: UnitFailureView, kind: FailureKind) -> str:
         return f"replacement failed at its {failure.stage.value} half: {failure.detail}"
     if kind is FailureKind.BREAKER_OPEN:
         return view.detail or "restart breaker open"
-    if kind is FailureKind.CUSTODY_HELD:
-        return "native custody requires reconciliation"
     return view.detail

@@ -13,7 +13,7 @@ import signal
 import sys
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 import pytest
 
@@ -88,7 +88,7 @@ def _up_failure_supervisor(
     These three tests own single disposable sleepers with no descendants. Their
     contract is the input-seal failure and its durable episode, not TERM timing.
     Native refusal and graceful closure stay in the down-refusal and stop-window
-    tests. Await the real watcher before letting restart release native custody.
+    tests. Await the real watcher before testing the replacement half.
     """
     owner = _supervisor(run_dir, units)
     stop = owner._stop_unit
@@ -291,8 +291,8 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
     # The old fixture entered this boundary before it could test the seal.
     input_path, seal = _sealed_input(tmp_path)
     owner = _up_failure_supervisor(tmp_path, [_unit(_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
-    live_stop = AsyncMock(wraps=owner._stop_posix_generation)
-    monkeypatch.setattr(owner, "_stop_posix_generation", live_stop)
+    live_stop = Mock(wraps=owner._signal_owned)
+    monkeypatch.setattr(owner, "_signal_owned", live_stop)
     await owner.start()
     original = owner._units["svc"].generation
     assert original is not None

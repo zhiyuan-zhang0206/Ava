@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Process-group closure core
-description: The one standard-library primitive that proves a launched process group closed (SIGKILL rounds, a non-reaping leader-exit wait, a kernel group listing), shared by exec domains, backup operation custody and ava-root unit stop.
+description: The one standard-library primitive that proves a launched process group closed (SIGKILL rounds, a non-reaping leader-exit wait, a kernel group listing), used by execution domains.
 tags:
 - base
 - process
@@ -10,7 +10,7 @@ tags:
 # Process-group closure core
 
 `group_closure.py` imports only the standard library, so every group
-closure in the repo shares it.
+execution-domain closure uses it.
 
 ## Contract
 
@@ -46,8 +46,7 @@ This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 | Caller | Uses |
 |---|---|
 | `ExecProcessDomain.close_confirmed` | `confirm_closure` with its own round signal: under the domain lock and `Popen`'s wait lock, only while the root's native birth and parentage hold; EPERM passes only when no member is live |
-| Backup operation unadmitted launch (`ExecDomainBirthError`, held retries) | `confirm_closure` with the default signal |
-| ava-root unit stop | `group_empty` and `group_members`, after the unit leader is reaped |
 
-Consumers: [[base/agents/incarnation/docs/incarnation-resources.ava.okf.md|exec incarnation resources]],
-[[services/backup/scheduler/docs/operation-custody.ava.okf.md|backup operation custody]].
+Consumer: [[base/agents/incarnation/docs/incarnation-resources.ava.okf.md|exec incarnation resources]].
+Application-service and scheduled-backup custody are removed by
+[the lifecycle decision](../../../docs/decisions/2026-10-07-native-lifecycle-and-operational-recovery.md).

@@ -1,9 +1,8 @@
 """Launch one root-owned service tree and its control socket.
 
-The instance lock prevents competing roots; retained native custody prevents
-cold replacement after owner loss. Socket availability acknowledges the control
-plane only: readiness comes from each service's ownership-bound protocol probe.
-SIGTERM/SIGINT requests graceful tree closure; failed closure retains custody.
+The instance lock prevents competing roots. Socket availability acknowledges
+only the control plane; service readiness comes from protocol responses.
+SIGTERM/SIGINT requests bounded best-effort child closure.
 Release replacement stops the old root before launching another interpreter.
 """
 
@@ -152,40 +151,29 @@ async def run(options: DaemonOptions) -> int:
             socket_path,
             len(started),
         )
-        await _close_tree(stop, started, supervisor)
+        await stop.wait()
     finally:
         # Participants first: their loops touch the tree, so they stop while it
         # (and the control server) still exist. A failing stop never blocks the
         # tree shutdown below.
-        await stop_participants(started)
-        await server.close()
-        await supervisor.shutdown()
-        release_instance_lock(lock_fd)
+        await _finish(started, server, supervisor, lock_fd)
     return 0
 
 
-async def _close_tree(
-    stop: asyncio.Event,
-    started: list[WiringParticipant],
-    supervisor: Supervisor,
+async def _finish(
+    started: list[WiringParticipant], server: ControlServer, supervisor: Supervisor, lock_fd: int
 ) -> None:
-    """Keep original native custody and control alive when graceful closure fails.
-
-    Exiting root would strand POSIX custody or implicitly force native Job
-    members. Admission stays closed; only another explicit operator request
-    attempts closure again. No retry timer or alternate service owner exists.
-    """
-    while True:
-        await stop.wait()
-        stop.clear()
+    """Attempt each owned teardown once, releasing the singleton even on failure."""
+    try:
         await stop_participants(started)
-        started.clear()
+    finally:
         try:
-            await supervisor.shutdown()
-        except Exception:
-            _log.exception("root retains custody after failed shutdown")
-        else:
-            return
+            await server.close()
+        finally:
+            try:
+                await supervisor.shutdown()
+            finally:
+                release_instance_lock(lock_fd)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
