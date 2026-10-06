@@ -21,11 +21,11 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Python 3.12 + build tools — the base layer the pieces sit on.
+# Python 3.12 + build tools and cron for OS job registration and retirement.
 apt-get update
 apt-get install -y --no-install-recommends \
   python3.12 python3.12-venv python3.12-dev python3-pip \
-  build-essential ca-certificates curl gnupg locales
+  build-essential ca-certificates cron curl gnupg locales
 
 # Shared provision pieces: pg17 + redis servers (no initdb), node 22, CLI tools.
 bash "${HERE}/database.sh"
