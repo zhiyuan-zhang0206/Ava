@@ -396,11 +396,7 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
         f"expected wrap_code_output format, got: {content[:60]!r}"
     )
     assert "envelope_test" in content
-    # exit code not appearing in envelope text——it goes through ToolMessage metadata
     assert "[exit" not in content
-    # But metadata must retain (timeline / hook reading side contract)
-    assert msg.additional_kwargs["ava_exit_code"] == 0  # pyright: ignore[reportUnknownMemberType]
-    assert msg.additional_kwargs["ava_cancelled"] is False  # pyright: ignore[reportUnknownMemberType]
     # exec wall-clock captured (drives the 'ran in Xs' chip); a real run is
     # non-negative ms — just assert the contract that the field is populated.
     assert isinstance(msg.additional_kwargs["ava_exec_ms"], int)  # pyright: ignore[reportUnknownMemberType]

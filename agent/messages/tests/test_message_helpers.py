@@ -63,7 +63,7 @@ class TestMessageCreatedAtStamp:
         from agent.messages import exec_output_message
 
         dt = datetime(2026, 6, 19, 15, 30, tzinfo=UTC)
-        msg = exec_output_message(content="out", tool_call_id="t1", exit_code=0, created_at=dt)
+        msg = exec_output_message(content="out", tool_call_id="t1", created_at=dt)
         assert msg.additional_kwargs["ava_created_at"] == "2026-06-19T15:30:00+00:00"  # pyright: ignore[reportUnknownMemberType]
 
     def test_system_note_message_stamps_when_given(self):

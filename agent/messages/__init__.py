@@ -192,9 +192,6 @@ def exec_output_message(
     *,
     content: str,
     tool_call_id: str,
-    exit_code: int,
-    cancelled: bool = False,
-    timed_out: bool = False,
     exec_ms: int | None = None,
     sdk_calls: list[dict[str, Any]] | None = None,
     created_at: datetime | None = None,
@@ -207,11 +204,11 @@ def exec_output_message(
     server reports "An assistant message with 'tool_calls' must be followed
     by tool messages").
 
+    Normal return, error, timeout and cancellation share one shape: the
+    outcome lives in `content` text only, never in a structured field.
+
     additional_kwargs:
         ava_msg_type: "exec_output"
-        ava_exit_code: int (0 = continue / 42 = idle/terminate / 43 = compact / -1 = cancelled/timeout)
-        ava_cancelled: bool (set True on user cancel path)
-        ava_timed_out: bool (set True on timeout path)
         ava_exec_ms: int (wall-clock the code ran; surfaced on the code_output
             timeline item so the collapsed chip can read "ran in 1.3s")
         sdk_calls: the run's real SDK-call tally, `[{"method": ..., "count": N},
@@ -223,9 +220,6 @@ def exec_output_message(
     """
     kwargs: dict[str, object] = {
         "ava_msg_type": AvaMsgType.EXEC_OUTPUT.value,
-        "ava_exit_code": exit_code,
-        "ava_cancelled": cancelled,
-        "ava_timed_out": timed_out,
         "ava_exec_ms": exec_ms,
     }
     if sdk_calls is not None:

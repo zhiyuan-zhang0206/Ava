@@ -971,8 +971,6 @@ async def test_after_exec_leaves_exec_output_untouched(_loaded: Any):
     out = exec_output_message(
         content="original stdout",
         tool_call_id="c1",
-        exit_code=42,
-        cancelled=True,
         exec_ms=1300,
     )
     out.id = "out-1"

@@ -49,6 +49,6 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 - `agent/messages/__init__.py:inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope-wrapped inbound message
 - `agent/messages/__init__.py:system_note_message(...)` — system notification (with `NoteTag`)
 - `agent/messages/__init__.py:security_note_message(...)` — SECURITY note for one injection-scan finding
-- `agent/messages/__init__.py:exec_output_message(...)` — execution output
+- `agent/messages/__init__.py:exec_output_message(...)` — execution output; ok / error / timeout / cancelled share one shape (outcome is in the text only; the `exec_failed` / `exec_timeout` / `exec_cancelled` log events are the only record)
 - `agent/messages/__init__.py:attach_message(...)` — attached media for the next turn
 - `agent/graph/claim/_chat_inbound.py` — chat inbound → (HumanMessage, scan finding) assembly (multimodal inline)

@@ -163,14 +163,7 @@ def render_message(msg: BaseMessage, params: RenderParams | None = None) -> Rend
     if role is None:
         return None
     p = params or RenderParams()
-    if isinstance(msg, AIMessage):
-        body = _ai_body(msg)
-    else:
-        body = _content_text(message_content(msg))
-        if isinstance(msg, ToolMessage):
-            exit_code = read_ava_kwargs(msg).get("ava_exit_code")
-            if exit_code is not None:
-                body = f"[exit={exit_code}]\n{body}"
+    body = _ai_body(msg) if isinstance(msg, AIMessage) else _content_text(message_content(msg))
     if not body.strip():
         return None
     ts = read_ava_kwargs(msg).get("ava_created_at")

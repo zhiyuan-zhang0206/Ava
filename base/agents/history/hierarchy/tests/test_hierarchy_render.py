@@ -49,10 +49,8 @@ def ai(
     )
 
 
-def exec_out(text: str, exit_code: int | None = 0) -> ToolMessage:
+def exec_out(text: str) -> ToolMessage:
     kwargs: dict[str, object] = {"ava_msg_type": "exec_output", "ava_created_at": TS}
-    if exit_code is not None:
-        kwargs["ava_exit_code"] = exit_code
     return ToolMessage(content=text, tool_call_id="tc1", additional_kwargs=kwargs)
 
 
@@ -92,14 +90,11 @@ def test_ai_with_only_tool_calls_still_renders() -> None:
     assert r.text == "-> tool_call execute_code: {}"
 
 
-def test_exec_output_renders_with_exit_code() -> None:
-    r = render_message(exec_out("Code execution output [ts]:\nresult ok", exit_code=0))
+def test_exec_output_renders_content_verbatim() -> None:
+    r = render_message(exec_out("Code execution output [ts]:\nresult ok"))
     assert r is not None
     assert r.role == "tool"
-    assert r.text == "[exit=0]\nCode execution output [ts]:\nresult ok"
-    r2 = render_message(exec_out("boom", exit_code=None))
-    assert r2 is not None
-    assert not r2.text.startswith("[exit=")
+    assert r.text == "Code execution output [ts]:\nresult ok"
 
 
 def test_context_messages_do_not_render() -> None:
@@ -159,7 +154,7 @@ def test_block_assembly_carries_headers_in_stream_order() -> None:
             [{"type": "thinking", "thinking": "checking"}],
             tool_calls=[{"name": "execute_code", "args": {"code": "x"}, "id": "t1"}],
         ),
-        exec_out("Code execution output [ts]:\nall good", exit_code=0),
+        exec_out("Code execution output [ts]:\nall good"),
     ]
     block = Block(i0=0, i1=3, kind="ai")
     text = render_block_text(msgs, block)
@@ -168,7 +163,6 @@ def test_block_assembly_carries_headers_in_stream_order() -> None:
     assert "**[i0 | human | " in text
     assert "**[i2 | ai | " in text
     assert "**[i3 | tool | " in text
-    assert "[exit=0]" in text
     assert "please check" in text and "all good" in text
     assert "ambient refresh" not in text
 

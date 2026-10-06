@@ -131,7 +131,7 @@ def _sample_messages() -> list[AnyMessage]:
         ToolMessage(
             content="ran ok",
             tool_call_id="c1",
-            additional_kwargs={"ava_msg_type": "exec_output", "ava_exit_code": 0},
+            additional_kwargs={"ava_msg_type": "exec_output"},
         ),
         AIMessage(content="done"),
         system_note_message(
