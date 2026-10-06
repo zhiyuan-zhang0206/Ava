@@ -24,7 +24,6 @@ from base import paths
 from base.lm import plugin_providers as plugin_loader
 from base.lm import pricing, provider_api, stop
 from base.lm.catalog import CatalogBuilder
-from base.lm.concurrency import known_provider_keys
 from base.lm.factory import (
     build_chat_model,
     model_supports_vision,
@@ -373,7 +372,6 @@ def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None])
     assert model_catalog().context_windows["testp-1"] == 200_000
     assert model_catalog().knowledge_cutoffs["testp-1"] == "2026-01"
     assert provider_key_of_model("testp-1") == "testp"
-    assert "testp" in known_provider_keys()
     assert "testp-1" in pricing.MODEL_PRICING
     assert next(iter(pricing.RETIRED_MODEL_PRICING)) not in pricing.MODEL_PRICING
 

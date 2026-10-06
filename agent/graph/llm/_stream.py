@@ -376,11 +376,6 @@ async def _stream_with_cache_retry(
     # covers the stale-cache retry and the non-streaming fallback as one
     # logical LLM call. A raised call never stamps (no llm_usage row exists
     # for it either — usage is logged only on success).
-    #
-    # The concurrency limiter (AVA_LLM_MAX_CONCURRENT, no cap by default)
-    # wraps the whole exchange — stream, non-streaming fallback and the
-    # stale-cache retry share one slot, so a cap is about in-flight requests
-    # to the provider, not about retry attempts.
     async def _run() -> None:
         call_started = time.monotonic()
         invocation = await prepare_invocation(llm, messages, agent.llm_policy)
@@ -438,9 +433,4 @@ async def _stream_with_cache_retry(
             (last_ts - first_ts) * 1000.0 if first_ts is not None and last_ts is not None else None
         )
 
-    from base.lm.concurrency import get_limiter
-    from base.lm.factory import provider_key_of_model
-
-    provider = provider_key_of_model(getattr(llm, "model_name", "") or "")
-    async with get_limiter().async_acquire(provider):
-        await _run()
+    await _run()
