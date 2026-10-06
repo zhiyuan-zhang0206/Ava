@@ -13,14 +13,15 @@ import remarkAutolinkDelimiter from "@/lib/remark-autolink-delimiter";
 import remarkCjkLinkBoundary from "@/lib/remark-cjk-link-boundary";
 import { cn } from "@/lib/utils";
 
-// Renders every ChatMarkdown consumer — timeline chat items (3 sites),
-// open-notice detail, fleet-inbox detail, and the memory-note body — through
-// one markdown surface: GFM tables, fenced code, safe links, CJK-adjacent
+// Renders every ChatMarkdown consumer — timeline agent replies / reasoning,
+// compact summaries, inter-agent message bodies and memory markers, open-notice
+// detail, fleet-inbox detail, task descriptions / results (task graph card,
+// kanban row) and the memory-note body — through one markdown surface: GFM tables, fenced code, safe links, CJK-adjacent
 // emphasis via remark-cjk-friendly + its GFM-strikethrough companion
 // (required together while remark-gfm is in the pipeline). Both strikethrough
 // tokenizers run with singleTilde: false (#3653) so a lone ~ stays literal
 // (paths like ~/.ava, approximations like ~61G); only ~~...~~ strikes.
-// user / info / error stay as plain text.
+// Human messages, tool output, logs, JSON and the system prompt stay plain text.
 //
 // Security:
 // - rehype-raw is disabled → any raw HTML (e.g. <script>) is treated as text
