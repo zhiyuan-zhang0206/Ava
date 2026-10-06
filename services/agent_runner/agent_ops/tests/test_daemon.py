@@ -23,7 +23,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.agents import TerminateResult
+from base.agents import ShellKillMode, TerminateResult
 from base.daemon.tests.fakes import pin_endpoints
 from base.db import Database
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
@@ -159,7 +159,7 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
 
     def _fake_kill(agent_id: int, session_id: int) -> ShellKillResult:
         seen.update(agent_id=agent_id, session_id=session_id)
-        return ShellKillResult(mode="killed")
+        return ShellKillResult(mode=ShellKillMode.KILLED)
 
     monkeypatch.setattr(daemon.cluster, "shell_kill_op", _fake_kill)
     status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 5})
@@ -179,7 +179,7 @@ async def test_dispatch_shell_kill_reports_absent(
     monkeypatch.setattr(
         daemon.cluster,
         "shell_kill_op",
-        lambda _agent_id, _session_id: ShellKillResult(mode="absent"),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _agent_id, _session_id: ShellKillResult(mode=ShellKillMode.ABSENT),  # pyright: ignore[reportUnknownArgumentType]
     )
     status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 999})
     assert status == "completed"

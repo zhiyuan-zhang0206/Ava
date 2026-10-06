@@ -14,6 +14,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.agents import ShellKillMode
 from base.clock.tests.fakes import fix_zone
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
@@ -99,7 +100,9 @@ async def test_reap_expired_shells_deletes_on_killed(
         assert machine == "macmini"
         assert kind == "shell_kill"
         assert payload == {"agent_id": aid, "session_id": 3}
-        return ShellKillResult(mode="killed", interrupted=True, name="build").model_dump()
+        return ShellKillResult(
+            mode=ShellKillMode.KILLED, interrupted=True, name="build"
+        ).model_dump()
 
     monkeypatch.setattr(
         shells.cluster_rpc,
@@ -240,7 +243,7 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
     async def _dispatch(
         _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
-        return ShellKillResult(mode="killed", interrupted=False).model_dump()
+        return ShellKillResult(mode=ShellKillMode.KILLED, interrupted=False).model_dump()
 
     monkeypatch.setattr(
         shells.cluster_rpc,
@@ -276,7 +279,7 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
     async def _dispatch(
         _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
-        return ShellKillResult(mode="absent").model_dump()
+        return ShellKillResult(mode=ShellKillMode.ABSENT).model_dump()
 
     monkeypatch.setattr(
         shells.cluster_rpc,
@@ -351,7 +354,9 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     ) -> dict[str, object]:
         # A watcher's session always has a running job (its generated script,
         # sleeping toward its next fire) — the runner reports it as such.
-        return ShellKillResult(mode="killed", interrupted=True, name="test-watcher").model_dump()
+        return ShellKillResult(
+            mode=ShellKillMode.KILLED, interrupted=True, name="test-watcher"
+        ).model_dump()
 
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
     reaped = await _reap(reaper_pool)
@@ -404,7 +409,7 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
         _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         dispatched.append((kind, payload))
-        return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
+        return ShellKillResult(mode=ShellKillMode.KILLED, interrupted=True, name="x").model_dump()
 
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
     reaped = await _reap(reaper_pool)
@@ -521,3 +526,41 @@ def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch
         .astimezone(UTC)
     )
     assert shells._wall_clock(dt) == dt.astimezone(None).strftime("%H:%M")
+
+
+@pytest.mark.parametrize(
+    "payload", [{"mode": "machine_absent"}, {"mode": "later"}, {"mode": None}, {}]
+)
+async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    payload: dict[str, object],
+) -> None:
+    """Only local registry evidence proves machine absence; a runner cannot claim it."""
+    aid = _running_agent(db_conn)
+    _insert_shell_row(db_conn, aid, 3, expires_at=datetime.now(UTC) - timedelta(minutes=1))
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    async def dispatch(
+        _db: object, _machine: str, _kind: str, _payload: dict[str, object], **_kwargs: object
+    ) -> dict[str, object]:
+        return payload
+
+    emitted: list[str] = []
+
+    def emit(_kind: str, event: str, **_kwargs: object) -> None:
+        emitted.append(event)
+
+    monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(shells.telemetry, "emit", emit)
+    assert await _reap(reaper_pool) == []
+    assert db_conn.execute(
+        "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s", (aid,)
+    ).fetchall() == [(3,)]
+    assert _system_inbounds(db_conn, aid) == []
+    assert "shell_ttl_expired" not in emitted
+    assert "returned" in caplog.text
