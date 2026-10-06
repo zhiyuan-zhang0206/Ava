@@ -115,14 +115,14 @@ a copy:
 - **command** (`commands/compact.md`) and the **reminder** nudge — short openers that wind the
   agent down and tell it to compact "as the docstring specifies"; the agent reads the contract
   when it acts.
-- **forced** (`COMPACTION_INSTRUCTION`) — a short opener too. The contract is already in this
-  request's leading prompt because the SDK reference renders `self` (the docstring is part of the
-  rendered system prompt), so the model writing the summary sees it without it being restated.
+- **forced** (`COMPACTION_INSTRUCTION`) — the opener appends the SDK docstring's contract to
+  the final request message. The model cannot call tools while writing the summary, and the
+  standing P95 reference omits `self`, so forced compaction discloses the contract at that point.
 
 This is why the triggers can be short and still produce a structured summary, and why a single
 edit to the docstring changes every mode at once. A test pins both halves: the section headers are
-present in the docstring **and** rendered into the system prompt (so the forced path's reference
-resolves), and each trigger names `ava.self.compact`.
+present in the docstring **and** carried by the forced request even when `self` is not resident,
+the cached conversation prefix remains unchanged, and each trigger names `ava.self.compact`.
 
 > Open follow-up (deferred): post-compact the agent can still mis-locate its own files when its
 > working directory has drifted from its workspace — the docstring points at durable files but not
