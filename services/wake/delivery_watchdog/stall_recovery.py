@@ -79,7 +79,7 @@ async def _request_harvest(
 ) -> None:
     """Ask the owner's home runner for one harvest decision under the RPC
     deadline; emit it (the recovery-decision-rate metric)."""
-    from ops.lifecycle import recover_crash_marked_if_stalled
+    from ops.lifecycle import CrashRecoveryRequestFailure, recover_crash_marked_if_stalled
 
     try:
         try:
@@ -93,7 +93,7 @@ async def _request_harvest(
                 agent_id,
                 exc_info=True,
             )
-            decision, reason = "error", "harvest request failed"
+            decision, reason = CrashRecoveryRequestFailure.ERROR, "harvest request failed"
     finally:
         await asyncio.to_thread(attempts.finish_attempt, pool, attempts.HARVEST, agent_id)
     detail = f" ({reason})" if reason else ""

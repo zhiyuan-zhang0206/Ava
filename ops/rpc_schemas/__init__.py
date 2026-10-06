@@ -25,7 +25,7 @@ from pydantic import (
     model_validator,
 )
 
-from base.agents import RestartResult, ResurrectResult, ShellKillMode
+from base.agents import CrashRecoveryResult, RestartResult, ResurrectResult, ShellKillMode
 from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
@@ -320,7 +320,7 @@ class RecoverCrashMarkedResponse(BaseModel):
         reason — 'permanent_provider_reject' when the recovery breaker
         halted the agent)."""
 
-    status: Literal["harvested", "already_terminated", "refused"]
+    status: CrashRecoveryResult
     reason: str | None = None
 
 

@@ -121,6 +121,14 @@ class ResurrectResult(StrEnum):
     ALREADY_ALIVE = "already_alive"
 
 
+class CrashRecoveryResult(StrEnum):
+    """Home runner adjudication of a stalled crash-marked agent."""
+
+    HARVESTED = "harvested"
+    ALREADY_TERMINATED = "already_terminated"
+    REFUSED = "refused"
+
+
 class ErrorReason(StrEnum):
     """Error identifiers on the SDK <-> Gateway HTTP wire.
 
