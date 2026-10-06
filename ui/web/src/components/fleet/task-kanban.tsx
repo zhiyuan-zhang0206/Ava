@@ -13,6 +13,7 @@ import { useEffect, useRef } from "react";
 import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notices";
 import type { TaskRow, TaskStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ChatMarkdown } from "@/components/markdown";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 
 const KANBAN_LANE_KEYS = ["inProgress", "done", "canceled"] as const;
@@ -193,8 +194,8 @@ function KanbanCard({
           <span className="text-muted-foreground">#{task.id}</span> {task.title}
         </div>
         {task.description && (
-          <div className="mt-1 whitespace-pre-wrap break-words text-[10px] text-muted-foreground/70">
-            {task.description}
+          <div className="mt-1 break-words text-[10px] text-muted-foreground/70">
+            <ChatMarkdown content={task.description} />
           </div>
         )}
       </div>
