@@ -123,7 +123,7 @@ def _env_pair(value: str) -> str:
     return value
 
 
-def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava mcp` — manage MCP servers: install/uninstall out-of-core packages
     # (under $AVA_HOME/mcps/) and edit the machine config ($AVA_HOME/mcp.json,
     # the cross-vendor `mcpServers` shape Claude Code / Codex also consume).
@@ -199,7 +199,7 @@ def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     mcp_disable_p.set_defaults(func=_h_mcp_disable)
 
 
-def _add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """`ava memory` — memory pool operations.
 
     init          Initialize the memory pool and plugin-owned templates

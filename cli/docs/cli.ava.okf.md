@@ -10,7 +10,13 @@ tags:
 
 # CLI
 
-The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` composes settings-free domain builders via `cli.parsers.build_parser`: agents/notices and impersonation are owned by `cli.commands.agents.parsers` and `cli.commands.agents.impersonation_parsers` beside their implementations; other parsers remain under `cli/parsers/`. Builders bind their own `_h_*` adapters, which lazy-import `cmd_*` implementations only at dispatch. Package markers export no commands. Registered in `pyproject.toml [project.scripts]`, available as `.venv/bin/ava` after `uv sync`.
+The `ava` CLI entry point (`cli/main.py`) composes settings-free builders through
+`cli.parsers.build_parser`. Agents/notices and impersonation belong to
+`cli.commands.agents.parsers` and `cli.commands.agents.impersonation_parsers`;
+extension verbs belong to `cli.commands.extensions.parsers`; other builders
+remain in `cli/parsers/`. Each builder binds its own `_h_*` adapters, which
+lazy-import `cmd_*` implementations on dispatch. Package markers export no
+commands. `pyproject.toml [project.scripts]` installs `.venv/bin/ava` via `uv sync`.
 
 ## Top-Level Commands
 

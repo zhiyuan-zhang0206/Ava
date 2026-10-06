@@ -36,7 +36,7 @@ def _bridge_module():
 
 
 def _filesystem_module():
-    return importlib.import_module("cli.commands.extensions._external_skill_fs")
+    return importlib.import_module("cli.commands.extensions.external_skill_host.filesystem")
 
 
 def _ntfs_lstat(
@@ -188,9 +188,9 @@ def test_ntfs_synthetic_modes_do_not_break_converge(
     client_home = home / ".codex"
     client_home.mkdir()
     filesystem = _filesystem_module()
-    monkeypatch.setattr(filesystem, "_is_posix", lambda: False)
-    monkeypatch.setattr(filesystem, "_lstat", _ntfs_lstat(filesystem._lstat))
-    monkeypatch.setattr(filesystem, "_source_lstat", _ntfs_lstat(filesystem._source_lstat))
+    monkeypatch.setattr(filesystem, "is_posix", lambda: False)
+    monkeypatch.setattr(filesystem, "lstat", _ntfs_lstat(filesystem.lstat))
+    monkeypatch.setattr(filesystem, "source_lstat", _ntfs_lstat(filesystem.source_lstat))
 
     _run(repo, home)
 
@@ -259,20 +259,20 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     unrelated.mkdir()
     (unrelated / "keep").write_text("untouched\n")
     (source / "SKILL.md").write_text("operator v2\n")
-    original_rename = module._rename_no_replace
+    original_rename = module.rename_no_replace
 
     def fail_staged_activation(path: Path, destination: Path) -> None:
         if path.name.startswith(f".{SKILL_NAME}.ava-stage-") and destination == target:
             raise OSError("injected activation failure")
         original_rename(path, destination)
 
-    monkeypatch.setattr(module, "_rename_no_replace", fail_staged_activation)
+    monkeypatch.setattr(module, "rename_no_replace", fail_staged_activation)
 
     module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
 
     assert _tree_snapshot(target) == before
     assert (unrelated / "keep").read_text() == "untouched\n"
-    monkeypatch.setattr(module, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(module, "rename_no_replace", original_rename)
     module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert _temp_entries(client_home / "skills") == []
@@ -352,17 +352,17 @@ def test_deployment_publication_crash_recovers_without_changing_operator(
     _run(repo, home)  # Legacy one-skill installation, with its original ledger filename.
     operator_before = _tree_snapshot(_target(home / ".codex"))
     monkeypatch.setattr(bridge, "_SKILL_NAMES", _DISTRIBUTED_SKILLS)
-    original_rename = bridge._rename_no_replace
+    original_rename = bridge.rename_no_replace
 
     def interrupt_publication(source: Path, destination: Path) -> None:
         original_rename(source, destination)
         if destination.name.startswith(".deploy-ava-cluster.ava-stage-"):
             raise SystemExit("interrupted deployment publication")
 
-    monkeypatch.setattr(bridge, "_rename_no_replace", interrupt_publication)
+    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_publication)
     with pytest.raises(SystemExit, match="deployment publication"):
         _run(repo, home)
-    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     _run(repo, home)
     assert _tree_snapshot(_target(home / ".codex")) == operator_before
     assert (
