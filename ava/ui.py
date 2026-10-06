@@ -310,6 +310,10 @@ def show(
     Declares the page with the platform, which routes it to the user; the server
     stays yours — show() creates no session and does not probe whether the
     server answers, and expiry unregisters the page without stopping it.
+    The server must answer GET /health with status 200. Only one page can be
+    open at a time; a successful new registration closes your previous page.
+    Share the returned authenticated page URL. Keep assets relative to that URL;
+    development WebSockets and application POST routes are not forwarded.
 
     Args:
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
@@ -333,6 +337,10 @@ def serve(
     ttl: float | None = None,
 ) -> Page:
     """Start an HTTP server for `dir` and show it to the user, in one call.
+
+    The browser receives static file bytes; build source files and render
+    Markdown to HTML before serving them. Open the returned authenticated page
+    URL, and use relative asset links beneath it.
 
     The server runs inside a persistent shell session of this agent, listed as
     `page-<name>`; a new call auto-closes any existing page. End the page with

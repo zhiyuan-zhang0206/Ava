@@ -264,7 +264,7 @@ def check_flags(
 def _in_code_span(line: str, pos: int) -> bool:
     """True when `pos` sits inside an inline-code span.
 
-    A doc that explains markdown shows markdown: the ava-ui widget README writes
+    A doc that explains markdown shows markdown: the page Markdown resource README writes
     ``` `![alt](images/1.jpg)` ``` to describe how image paths resolve. That is
     syntax being displayed, not a link to follow."""
     return line.count("`", 0, pos) % 2 == 1
@@ -348,7 +348,7 @@ def check_skill_backtick_refs(doc: Path, line: str) -> list[str]:
 # `ava_builtins/skills/` (+ project skills to `.agents/skills/`), so a bare
 # `skills/<name>/...` reference can only resolve from a stale checkout — and a
 # SKILL.md command written that way fails when the agent runs it (audit round 2,
-# skills-plugins #2: gmail/sms/web-sources/web-ai/ava-self-evolution/ava-ui all
+# skills-plugins #2: gmail/sms/web-sources/web-ai/ava-self-evolution/ava-guide/pages all
 # shipped dead `.venv/bin/python skills/<name>/...` invocations). The load-dir
 # form is `$AVA_HOME/skills/<name>/...` (or `~/.ava/skills/...`).
 _SKILLS_PREFIX_REF = re.compile(r"(?<![\w$./])skills/[A-Za-z0-9_-]+/")

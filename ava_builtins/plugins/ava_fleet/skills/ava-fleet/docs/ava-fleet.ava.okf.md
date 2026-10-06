@@ -49,13 +49,13 @@ The Autonomy axis of the Two Dials (who consumes evidence to make decisions) con
 
 - **One approval buys high Autonomy**: before batch autonomy, package the scope + task list (`ava.tasks.create()` items) + budget cap into a **single** `ava.ui.notify(require_response=True)`; the user's reply authorizes it, and **the original text is recorded** into the driving task's `description`. After approval, do not ask step-by-step; whether the user is online does not change behavior.
 - **Safety boundary** (the authorization broadens what can be done, does not remove guardrails): only produce PRs without merging, do not send outward messages, do not touch prod, do not spend money beyond the authorization.
-- **Usage reminders**: the independent `ava-watcher` usage script selects agents, a window, and birth lineage. It notifies responsible peers; agents choose graceful convergence, preservation, or handoff. Task records and task escalation do not attribute or enforce costs.
+- **Usage reminders**: the independent `ava-being-a-long-running-agent` usage script selects agents, a window, and birth lineage. It notifies responsible peers; agents choose graceful convergence, preservation, or handoff. Task records and task escalation do not attribute or enforce costs.
 
 ## Reference Sub-documents
 
 - `reference/orchestrator.md` / `reference/worker.md` — per-role deep-dive manuals: delegator semantics of the first prompt, delivery path (results = write a file + send the path, siblings only consume published artifacts), reporting discipline.
 - `reference/watch_idle.py` — reference script for a goal-mode watcher (wake and judge when the goal is idle).
-- `ava-watcher` owns the independent usage report and optional notification script; Fleet provides task coordination only.
+- `ava-being-a-long-running-agent` owns the independent usage report and optional notification script; Fleet provides task coordination only.
 
 ## Key Dependencies
 

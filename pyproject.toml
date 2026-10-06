@@ -749,7 +749,7 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/coordination/ava-watcher/tests"
+root = "ava_builtins/skills/coordination/ava-being-a-long-running-agent/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

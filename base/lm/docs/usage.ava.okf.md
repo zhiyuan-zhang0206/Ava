@@ -30,7 +30,7 @@ tags:
 ## Selecting usage scopes
 
 LLM usage is attributed to agents, not Fleet task records. The independent
-`ava-watcher` [usage script](../../../ava_builtins/skills/coordination/ava-watcher/references/usage.md)
+`ava-being-a-long-running-agent` [usage script](../../../ava_builtins/skills/coordination/ava-being-a-long-running-agent/references/usage.md)
 selects IDs, windows, and birth ancestry. `base/telemetry/usage.py` owns its
 read-only aggregation over retained events or lifetime ledger + tail. Threshold
 notifications leave convergence, preservation, and handoff to the agent.

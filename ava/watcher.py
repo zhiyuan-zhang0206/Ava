@@ -1,4 +1,14 @@
-"""Background watchers that wake you when something happens."""
+"""Run temporary background waits that can wake you with a message.
+
+A watcher continues after you end a turn or terminate, and its next message can
+wake you again. Stop unwanted watchers before ending their task. Watchers are
+never restarted automatically after their execution stops; use a schedule for
+recurring work that must recover from interruptions.
+
+Completion reports follow the notification policy and are not liveness signals.
+An explicit cancellation sends no additional report; an abrupt machine failure
+may leave no report. Inspect recorded waits when resuming work.
+"""
 
 from __future__ import annotations
 
@@ -426,7 +436,8 @@ def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str | None 
     """Run `code` as a background watcher, bounded by `timeout`.
 
     `code` calls `ava.agents.send_message(ava.self.AGENT_ID, content)` to wake you;
-    the watcher runs until its exit, your kill, or `timeout`, then reports its exit code and output.
+    the watcher runs until its exit, your kill, or `timeout`. On exit, its code
+    and output are available through the completion policy; timeout exits with code 124.
 
     Args:
         timeout: seconds, a `timedelta`, or `"<n>{s,m,h,d}"` (e.g. `"30m"`).
@@ -540,7 +551,8 @@ def at(
     name: str,
     notify: str | None = None,
 ) -> int:
-    """
+    """Wake you once at a future time, then finish the watcher.
+
     Args:
         when: a TZ-aware datetime, a timedelta from now (UTC), or an ISO-8601
             string with timezone. Must be in the future.

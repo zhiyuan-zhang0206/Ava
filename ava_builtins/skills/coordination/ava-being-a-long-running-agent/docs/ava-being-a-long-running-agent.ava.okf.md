@@ -28,5 +28,5 @@ cadence. The human interruption section remains separate.
 
 ## Key Dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava_builtins/skills/coordination/ava-watcher/docs/ava-watcher.ava.okf.md|watcher skill]] — the "use watchers" primitive
+- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — the "use watchers" primitive
 - [[ava/docs/self.ava.okf.md|ava.self]] — `pause_heartbeat` / `compact` / identity (AGENT_ID)

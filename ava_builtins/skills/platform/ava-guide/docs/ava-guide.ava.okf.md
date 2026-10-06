@@ -34,6 +34,8 @@ sub-skills carry executable procedures and their bundled resources.
 - `mcp`, `plugins` / `plugins.develop`: MCP management and native plugin development.
 - `agents`, `presets`, `models`: agent concepts, configuration, and model choice.
 - `schedules`: persistent work; [[ava_builtins/skills/platform/ava-guide/schedules/docs/schedules.ava.okf.md]].
+- `pages`: artifact publishing, user input, and frontend resources;
+  [[ava_builtins/skills/platform/ava-guide/pages/docs/pages.ava.okf.md]].
 - `external-agents`: delegated workers and identity takeover;
   [[ava_builtins/skills/platform/ava-guide/external-agents/docs/external-agents.ava.okf.md]].
 - `workspace-cleanup`, `onboarding`: workspace disposal and first use/migration.

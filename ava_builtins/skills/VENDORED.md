@@ -34,9 +34,9 @@ Content extracted from a closed-source distribution does not become
 redistributable by resembling something that is. Vendor from a source whose
 license you can point at.
 
-## Vendored frontend libraries (`ava-ui/widgets/markdown/vendor/`)
+## Vendored frontend libraries (`ava-guide/pages/widgets/markdown/vendor/`)
 
-`ava-ui/widgets/markdown` ships a zero-build HTML renderer whose dependencies
+`ava-guide/pages/widgets/markdown` ships a zero-build HTML renderer whose dependencies
 are vendored under `vendor/` (no CDN pulling): KaTeX **0.16.21** (`katex.min.js`
 + `katex.min.css` + fonts, MIT), marked **14.1.3** (`marked.min.js`, MIT),
 highlight.js **11.10.0** (`highlight.min.js`, BSD-3-Clause), DOMPurify **3.2.3**

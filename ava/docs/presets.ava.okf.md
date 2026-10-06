@@ -34,7 +34,7 @@ CRUD (create / update / delete) **is not in the SDK**—presets are operational 
 ## What config stores
 `config` is a JSON mapping per-agent config field names → values (available fields are returned by `per_agent_field_names()` in `base/config`). Two skill fields, only one of which differentiates a role:
 - `skills_to_inject_into_system_prompt` — the `# Capabilities` index (name + one-line description, drill down on demand). Cluster default is `["*"]` (every loaded skill), so a list here **narrows** that agent's index. The five seeded presets carry no config at all for this reason (see the v0.1.0 baseline seed in `db/schema.sql` (the pre-release 20260731T084500 migration was squashed into it at the 2026-08-14 reset)).
-- `skills_to_expand_at_start` — **Full-text preload** (system note, effective at spawn, not lost on compact); use this for discipline-like short skills (e.g., `ultra-speed-worker` preset loads ava-ultra-speed).
+- `skills_to_expand_at_start` — **Full-text preload** (system note, effective at spawn, not lost on compact); use this for discipline-like short skills (for example, a role-specific instruction pack).
 
 ## Usage
 ```python

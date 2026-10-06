@@ -40,6 +40,7 @@ def test_converged_namespaces_load_real_task_instructions(tmp_path: Path, unit_h
         ("ava_guide", "plugins", "develop"): "plugin.py",
         ("ava_guide", "schedules"): "resumable",
         ("ava_guide", "external_agents"): "Mode B",
+        ("ava_guide", "pages"): "user input",
         ("ava_workflow", "capability_timescale"): "Gather evidence",
     }
     for segments, instruction in expected.items():
@@ -50,7 +51,14 @@ def test_converged_namespaces_load_real_task_instructions(tmp_path: Path, unit_h
         assert isinstance(body, str)
         assert instruction in body
 
-    for old in ("ava_package_installer", "ava_schedule_writer", "ava_use_other_agents"):
+    for old in (
+        "ava_package_installer",
+        "ava_schedule_writer",
+        "ava_use_other_agents",
+        "ava_ui",
+        "ava_watcher",
+        "ava_ultra_speed",
+    ):
         with pytest.raises(AttributeError):
             getattr(ava.skills, old)
 
@@ -58,7 +66,8 @@ def test_converged_namespaces_load_real_task_instructions(tmp_path: Path, unit_h
 def _assert_portable_reading_links(target: Path) -> None:
     """Installed reading links must resolve within their complete skill package."""
     for document in target.rglob("*.md"):
-        for link in re.findall(r"\]\(([^)]+)\)", document.read_text()):
+        prose = re.sub(r"```.*?```|`[^`]*`", "", document.read_text(), flags=re.DOTALL)
+        for link in re.findall(r"\]\(([^)]+)\)", prose):
             if "://" in link or link.startswith("#"):
                 continue
             destination = (document.parent / link.split("#")[0]).resolve()
@@ -98,6 +107,9 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         "packages/install/SKILL.md",
         "schedules/SKILL.md",
         "external-agents/scripts/spawn_codex.py",
+        "pages/widgets/ava_reply/reply.js",
+        "pages/widgets/markdown/md.html",
+        "pages/widgets/markdown/vendor/katex.min.js",
         "external-agents/references/collaboration_protocol.md",
         "external-agents/scripts/ava-relay/.claude-plugin/plugin.json",
     ):

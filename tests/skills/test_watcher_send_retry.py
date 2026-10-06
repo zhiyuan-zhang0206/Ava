@@ -2,7 +2,7 @@
 ava-dynamic-workflow orchestrator scripts' handoff-dir resolution.
 
 Five reference watchers wake the launching agent with a single send at their
-trigger point: ``watch_idle.py`` (ava-watcher, ava-goal, and ava-fleet), ``watch_work.py``
+trigger point: ``watch_idle.py`` (long-running-agent, ava-goal, and ava-fleet), ``watch_work.py``
 (ava-guide.external-agents), and ``gather_files.py``
 (ava-dynamic-workflow). A gateway / agent restart window (an update wave,
 the fleet update) outlasts the SDK's own 3 quick retries; before this the
@@ -58,7 +58,8 @@ def _load(name: str, path: Path) -> ModuleType:
 
 
 _WATCH_IDLE_PATHS = {
-    "ava-watcher": _REPO / "ava_builtins/skills/coordination/ava-watcher/scripts/watch_idle.py",
+    "long-running-agent": _REPO
+    / "ava_builtins/skills/coordination/ava-being-a-long-running-agent/scripts/watch_idle.py",
     "ava-goal": _REPO / "ava_builtins/skills/coordination/ava-goal/scripts/watch_idle.py",
     "ava-fleet": _REPO / "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py",
 }
@@ -138,9 +139,9 @@ def test_watch_idle_bodies_match_after_module_docstring() -> None:
         offset = sum(map(len, lines[: first.end_lineno - 1])) + first.end_col_offset
         bodies[label] = source[offset:]
 
-    reference = bodies["ava-watcher"]
+    reference = bodies["long-running-agent"]
     for label, body in bodies.items():
-        assert body == reference, f"{label} watch_idle body differs from ava-watcher"
+        assert body == reference, f"{label} watch_idle body differs from long-running-agent"
 
 
 def _rewrite_as_done_after_first_sleep(
