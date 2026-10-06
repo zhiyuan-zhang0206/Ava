@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import psycopg
+import pytest
 
 from base.agents import impersonation as leases
 from base.db import Database
@@ -163,3 +164,72 @@ def test_expiry_dismisses_its_pending_reminder(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),
     ).fetchone() == ("done",)
+
+
+@pytest.mark.parametrize(
+    ("ttl", "remaining", "expected"),
+    [
+        (1800, 299, 1),
+        (1800, 301, 0),
+        (3600, 359, 1),
+        (3600, 361, 0),
+        (86400, 8639, 1),
+        (86400, 8641, 0),
+        (120, 119, 1),
+        (120, 121, 0),
+        (3600, -1, 0),
+    ],
+)
+def test_reminder_window_tracks_current_ttl(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    ttl: int,
+    remaining: int,
+    expected: int,
+) -> None:
+    from base.agents.impersonation.maintenance import remind_expiring_impersonations
+    from base.db import pool
+
+    lease = _active(_agent(db_conn))
+    db_conn.execute(
+        "UPDATE agent_impersonations SET ttl_seconds=%s, "
+        "expires_at=clock_timestamp()+make_interval(secs=>%s) WHERE id=%s",
+        (ttl, remaining, lease["id"]),
+    )
+    db_conn.commit()
+    with pool(max_size=2) as reaper_pool:
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == expected
+
+
+def test_renewal_recomputes_window_and_allows_a_new_reminder(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    from base.agents.impersonation.maintenance import remind_expiring_impersonations
+    from base.db import pool
+
+    lease = _active(_agent(db_conn))
+    caller = attested_caller(lease)
+    with pool(max_size=2) as reaper_pool:
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
+        first = leases.inbox(database, lease["id"], caller)
+        leases.ack(database, event_bus, lease["id"], caller, [m["id"] for m in first])
+        leases.renew(database, event_bus, lease["id"], caller, ttl_seconds=3600)
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
+        db_conn.execute(
+            "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '350 seconds' "
+            "WHERE id=%s",
+            (lease["id"],),
+        )
+        db_conn.commit()
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
+    rows = db_conn.execute(
+        "SELECT status,payload->>'expires_at' FROM inbound_messages "
+        "WHERE agent_id=%s AND kind='reminder' ORDER BY id",
+        (lease["agent_id"],),
+    ).fetchall()
+    assert [r[0] for r in rows] == ["done", "pending"]
+    assert rows[0][1] != rows[1][1]

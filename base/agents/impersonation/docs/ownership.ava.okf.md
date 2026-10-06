@@ -49,7 +49,11 @@ session. The external executor remains outside this DB action.
 
 Explicit renewal replaces the database deadline; attaching and relay heartbeats
 never renew. The existing TTL reaper expires abandoned sessions even when the
-runner is offline, and sends a reminder once per approaching deadline. This is
+runner is offline, and sends one reminder per approaching deadline. Its lead
+time is `min(ttl_seconds, max(ttl_seconds * 0.1, 300))` seconds, based on the
+current requested or renewed TTL. Delivery follows the reaper scan (default
+60 seconds); short leases enter the reminder window immediately. ACK alone
+does not cause another reminder; a new renewal deadline can. This is
 coordination among processes already holding local cluster authority, not a
 security boundary against arbitrary shell execution. Capability, machine,
 incarnation and caller-attestation checks still prevent accidental
