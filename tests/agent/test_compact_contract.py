@@ -20,8 +20,8 @@ def _ava_compact_loaded():
 
 def test_compact_triggers_point_at_the_contract(_ava_compact_loaded):
     """Each compaction trigger (forced/auto instruction, the reminder nudge, the
-    /compact command) is a short opener that defers to the `ava.self.compact`
-    contract rather than carrying its own copy of the template."""
+    /compact command) names the `ava.self.compact` contract. Forced compaction
+    appends the SDK-owned text; other triggers can discover it on demand."""
     from agent.hooks import compact as _p
     from base.paths import repo_root
 

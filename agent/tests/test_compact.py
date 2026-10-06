@@ -254,7 +254,7 @@ async def test_generate_summary_includes_whole_conversation():
     [llm_input] = call.args
     assert llm_input[:-1] == convo  # whole conversation, no hold-out
     assert isinstance(llm_input[-1], HumanMessage)
-    assert llm_input[-1].content == COMPACTION_INSTRUCTION
+    assert llm_input[-1].content.startswith(COMPACTION_INSTRUCTION)
 
 
 async def test_generate_summary_reuses_conversation_prefix_for_cache():
@@ -270,7 +270,7 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
     [llm_input] = call.args
     assert llm_input[0] is sys_msg  # original object in-place — same byte-for-byte prefix
     assert llm_input[:-1] == [sys_msg, *content]
-    assert llm_input[-1].content == COMPACTION_INSTRUCTION
+    assert llm_input[-1].content.startswith(COMPACTION_INSTRUCTION)
 
 
 async def test_generate_summary_raises_on_empty_llm_text():
@@ -777,27 +777,42 @@ _COMPACT_SECTIONS = (
 )
 
 
-def test_compact_contract_lives_in_docstring_and_reaches_prompt(_ava_compact_loaded):
+async def test_compact_contract_reaches_request_without_resident_self(
+    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
+):
     """The one compaction contract — the summary's sections + how to write it —
-    lives in a single place, the `ava.self.compact` docstring, and is rendered
-    into the agent's leading prompt (the SDK reference expands `self`). That is
-    what lets every trigger be a short pointer instead of restating the
-    template: the agent reads it in its own SDK, and the forced-compact request
-    carries it in its own prompt. Pin both halves so the contract cannot be
-    gutted or fall out of the prompt unnoticed."""
+    lives in the SDK docstring and reaches the forced request even when the
+    standing P95 reference omits `self`. The cached conversation prefix stays
+    unchanged; the contract is disclosed in the final instruction."""
     from agent.graph.prompt.system_prompt import build_system_prompt
     from ava.self import compact
+    from base.config import settings
+
+    monkeypatch.setattr(
+        settings.agent, "sdk_expand_in_system_prompt", ["shell", "files", "agents", "tasks"]
+    )
 
     contract = compact.__doc__
     assert contract is not None
     for section in _COMPACT_SECTIONS:
         assert section in contract, f"section {section!r} missing from the compact contract"
 
-    # The contract must actually reach the prompt — otherwise the short triggers
-    # below point at something the agent / forced-compact model never sees.
     system_prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    assert "## ava.self\n" not in system_prompt
+    head = SystemMessage(content=system_prompt)
+    llm = _fake_llm()
+    await generate_summary([head, HumanMessage(content="Keep my work")], llm, AgentSlices.resolve())
+    [call] = _compaction_ainvoke(llm).call_args_list
+    [request] = call.args
+    assert request[0] is head
+    from inspect import cleandoc
+
+    assert request[-1].content.startswith(COMPACTION_INSTRUCTION)
+    assert cleandoc(contract) in request[-1].content
     for section in _COMPACT_SECTIONS:
-        assert section in system_prompt, f"section {section!r} not rendered into the system prompt"
+        assert section in request[-1].content, (
+            f"section {section!r} missing from compaction request"
+        )
 
 
 # ============================================================
