@@ -7444,6 +7444,12 @@ export interface components {
             expires_at?: string | null;
         };
         /**
+         * ShellSessionKillTiming
+         * @description When a terminate request applies its shell-session cleanup.
+         * @enum {string}
+         */
+        ShellSessionKillTiming: "now" | "at_exit";
+        /**
          * ShellSessionsKill
          * @description What `kill_all_shell_sessions` did for one terminate request.
          *
@@ -7459,11 +7465,7 @@ export interface components {
          *         `killed` is empty — the set is fixed only at exit.
          */
         ShellSessionsKill: {
-            /**
-             * When
-             * @enum {string}
-             */
-            when: "now" | "at_exit";
+            when: components["schemas"]["ShellSessionKillTiming"];
             /** Killed */
             killed?: number[];
         };

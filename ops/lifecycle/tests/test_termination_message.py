@@ -14,6 +14,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base.agents import ShellSessionKillTiming
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
@@ -298,7 +299,9 @@ class TestKillAllShellSessions:
         )
 
         assert resp.status == "enqueued"
-        assert resp.shell_sessions == ShellSessionsKill(when="at_exit", killed=[])
+        assert resp.shell_sessions == ShellSessionsKill(
+            when=ShellSessionKillTiming.AT_EXIT, killed=[]
+        )
         assert kills == []  # the last step still runs; its sessions stay up until exit
         assert _terminate_payloads(db_conn, running_agent_id) == [{"kill_all_shell_sessions": True}]
         assert [event.attributes for event in events] == [
@@ -356,7 +359,9 @@ class TestKillAllShellSessions:
         )
 
         assert resp.status == "enqueued"
-        assert resp.shell_sessions == ShellSessionsKill(when="now", killed=[0, 3])
+        assert resp.shell_sessions == ShellSessionsKill(
+            when=ShellSessionKillTiming.NOW, killed=[0, 3]
+        )
         assert kills == [running_agent_id]
         assert _terminate_payloads(db_conn, running_agent_id) == [{"kill_all_shell_sessions": True}]
 
@@ -420,7 +425,9 @@ class TestKillAllShellSessions:
         )
 
         assert resp.status == "already_terminated"
-        assert resp.shell_sessions == ShellSessionsKill(when="now", killed=[0, 3])
+        assert resp.shell_sessions == ShellSessionsKill(
+            when=ShellSessionKillTiming.NOW, killed=[0, 3]
+        )
         assert kills == [agent_id]
         assert _terminate_payloads(db_conn, agent_id) == []
 
@@ -503,7 +510,9 @@ class TestKillAllShellSessions:
             resp = await op
 
         assert resp.status == "already_terminated"
-        assert resp.shell_sessions == ShellSessionsKill(when="now", killed=[0, 3])
+        assert resp.shell_sessions == ShellSessionsKill(
+            when=ShellSessionKillTiming.NOW, killed=[0, 3]
+        )
         assert kills == [running_agent_id]
         assert _terminate_payloads(db_conn, running_agent_id) == []
 
@@ -619,7 +628,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         db_pool,
     )
 
-    assert resp.shell_sessions == ShellSessionsKill(when="now", killed=[0, 1])
+    assert resp.shell_sessions == ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=[0, 1])
     assert set(backend.list_sessions()) == {page, foreign}
     assert not _pid_alive(shells[shell]) and not _pid_alive(shells[watcher])
     assert not _pid_alive(job_pid)
