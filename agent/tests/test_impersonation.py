@@ -339,6 +339,8 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
     activate = Mock()
     monkeypatch.setattr("base.agents.impersonation.activate", activate)
     monkeypatch.setattr(impersonation, "hosted_resources_settled", lambda: True)
+    checkpoint = AsyncMock()
+    monkeypatch.setattr("agent.impersonation_handoff.ensure_start_marker", checkpoint)
 
     def refused(*_args: object) -> bool:
         return False
@@ -346,6 +348,7 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
     monkeypatch.setattr(impersonation, "establish_relay", refused)
     assert not await impersonation.settle_checkpoint(MagicMock(), database, event_bus, 42, relays)
     activate.assert_not_called()
+    checkpoint.assert_awaited_once()
 
 
 async def test_settle_checkpoint_activates_only_after_relay_ready(
@@ -361,9 +364,12 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
     activate = Mock(return_value=_relay_session("active"))
     monkeypatch.setattr("base.agents.impersonation.activate", activate)
     monkeypatch.setattr(impersonation, "hosted_resources_settled", lambda: True)
+    checkpoint = AsyncMock()
+    monkeypatch.setattr("agent.impersonation_handoff.ensure_start_marker", checkpoint)
     establish = Mock(return_value=True)
     monkeypatch.setattr(impersonation, "establish_relay", establish)
     assert await impersonation.settle_checkpoint(MagicMock(), database, event_bus, 42, relays)
+    checkpoint.assert_awaited_once()
     establish.assert_called_once()
     activate.assert_called_once()
 
