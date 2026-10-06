@@ -5,7 +5,7 @@ No DB / LangGraph state needed — just construct messages and verify metadata s
 
 from langchain_core.messages import HumanMessage
 
-from agent.messages import inbound_message
+from agent.messages import NoteTag, exec_output_message, inbound_message, system_note_message
 
 
 class TestInboundMessageMetadata:
@@ -30,6 +30,7 @@ class TestInboundMessageMetadata:
             "ava_msg_type": "inbound",
             "ava_source": "agent:42",
             "ava_inbound_id": 3,
+            "ava_picked_up_at": msg.additional_kwargs["ava_picked_up_at"],  # pyright: ignore[reportUnknownMemberType]
         }
 
     def test_source_value_propagates_distinct_inputs(self):
@@ -157,3 +158,46 @@ def test_has_conversation_true_for_a_post_compact_summary() -> None:
         HumanMessage(content="[system] Your context was just compacted. ..."),
     ]
     assert has_conversation(msgs) is True
+
+
+class TestPickedUpAtStamp:
+    """`ava_created_at` keeps its meaning (an inbound's ARRIVAL time);
+    `ava_picked_up_at` is when an injected message entered the LLM context.
+    Produced-in-context messages (exec output) carry no picked-up stamp: their
+    `ava_created_at` is already their read time."""
+
+    def test_inbound_keeps_arrival_and_adds_picked_up(self):
+        from datetime import UTC, datetime
+
+        arrival = datetime(2026, 6, 19, 15, 30, tzinfo=UTC)
+        before = datetime.now(UTC)
+        msg = inbound_message(content="hi", source="user", inbound_id=1, created_at=arrival)
+        kw = msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+        assert kw["ava_created_at"] == arrival.isoformat()
+        assert datetime.fromisoformat(kw["ava_picked_up_at"]) >= before
+
+    def test_picked_up_never_before_previous_message(self):
+        from datetime import UTC, datetime
+
+        from agent.messages import attach_message
+
+        now = datetime.now(UTC)
+        prior = exec_output_message(content="o", tool_call_id="t", created_at=now)
+        note = system_note_message(content="n", tag=NoteTag.MEMORY, created_at=now)
+        attach = attach_message(blocks=[], text="a", created_at=now)
+        inbound = inbound_message(
+            content="x", source="user", inbound_id=1, created_at=datetime(2020, 1, 1, tzinfo=UTC)
+        )
+        stamps = [
+            datetime.fromisoformat(m.additional_kwargs["ava_picked_up_at"])  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
+            for m in (note, attach, inbound)
+        ]
+        floor = datetime.fromisoformat(prior.additional_kwargs["ava_created_at"])  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
+        assert all(t >= floor for t in stamps)
+        assert stamps == sorted(stamps)
+
+    def test_exec_output_has_no_picked_up(self):
+        from datetime import UTC, datetime
+
+        msg = exec_output_message(content="o", tool_call_id="t", created_at=datetime.now(UTC))
+        assert "ava_picked_up_at" not in msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]

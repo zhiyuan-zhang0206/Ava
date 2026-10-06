@@ -17,6 +17,7 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 - `inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope wrapper (product of `base/agents/messages/envelope.py:wrap_inbound`)
 - `source` is the original source string (`"system"` / `"agent:N"` / `"user"`), `ava_inbound_id` records the source row id for startup reconcile
 - `content` plain text or multimodal block list
+- Two times in metadata: `ava_created_at` keeps its meaning (an inbound's is its ARRIVAL time, the source row's `created_at`; other messages' is when they were produced). `ava_picked_up_at` is when an injected message (inbound, note, attachment) was put into the LLM context, i.e. when the model reads it; the builders stamp it. AIMessage and tool output are produced inside the context, so their `ava_created_at` already is the read time and they carry no `ava_picked_up_at`. Time-ordered readers (timeline, history tree, history dump) use `message_read_time()` (`ava_picked_up_at`, else `ava_created_at`); delivery tracking uses `inbound_messages.created_at`. The body envelope header (`wrap_inbound`) keeps the arrival time so the agent knows when a message came in.
 
 ### NoteTag Enum
 - Marks the source and nature of the message
