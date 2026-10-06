@@ -407,8 +407,8 @@ class AgentHost:
             # An active external lease owns decisions and its claim gate never
             # runs while held, so the held-controls wake is the lease's only
             # native relay-supervision point. Hot path: one native_status read
-            # plus a heartbeat comparison (supervise_relay escalates only on a
-            # stale heartbeat — provision, spawn, rate-limited stamp; no model
+            # plus known relay exit/heartbeat checks (recovery handles confirmed
+            # exit or stale heartbeat — provision, spawn, rate-limited stamp; no model
             # calls, no polling). A supervision failure rides the existing
             # held-wake error path (record_failure is a no-op outside a
             # maintenance hold) and the next wake re-drives.
