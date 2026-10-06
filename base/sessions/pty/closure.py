@@ -193,9 +193,9 @@ def _await_members(entries: list[_Entry], until: float) -> bool:
     """Wait for every captured member to exit; False when `until` passes first.
 
     Each poll folds each session's newcomers into its capture
-    (`session_tree.refresh`). A member can fork while the poll that finds it
-    gone is still scanning, so a quiet poll only counts once a second one,
-    whose scan began after every member was gone, is quiet too.
+    (`session_tree.refresh`). Its PID census follows births during the reads;
+    an incomplete census is never quiet. Two complete quiet polls are required
+    so the second starts after the first finished observing membership.
     """
     captures = [entry.capture for entry in entries]
     quiet = False
