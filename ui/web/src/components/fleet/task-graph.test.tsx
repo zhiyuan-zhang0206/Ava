@@ -862,7 +862,7 @@ describe("TaskGraph hover detail card", () => {
   it("shows the detail card instantly on hover, with the registry fields", async () => {
     const fullTask = task(2, {
         title: "Build the widget",
-        description: "A longer description\nspanning two lines",
+        description: "A longer **description**\nspanning two lines",
         results: "Shipped in #1",
         status: "in_progress",
         priority: "P1",
@@ -907,6 +907,9 @@ describe("TaskGraph hover detail card", () => {
     expect(text).toContain("every 2h"); // remind interval
     expect(text).toContain("3 reminders");
     expect(text).toContain("A longer description");
+    // Task description / results are Markdown-authored: rendered, not raw.
+    expect(text).not.toContain("**");
+    expect(card.querySelector("strong")?.textContent).toBe("description");
     expect(text).toContain("Shipped in #1");
     expect(text).toContain("Double-click the node to open the owner");
   });
