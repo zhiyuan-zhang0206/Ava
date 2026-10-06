@@ -16,8 +16,7 @@ One module per domain:
 - ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
 - ``cli.commands.agents.impersonation_parsers`` — external sessions and relays
 - ``backup`` — scheduled backup operation custody
-- ``plugins`` — plugins + skill
-- ``mcp`` — mcp + memory initialization, refresh, and search
+- ``cli.commands.extensions.parsers`` — plugins, skill, MCP, memory and packages
 - ``management`` — config + presets + schedules
 """
 
@@ -27,6 +26,9 @@ import argparse
 
 from cli.commands.agents.impersonation_parsers import add_impersonation_parser
 from cli.commands.agents.parsers import add_agents_parser
+from cli.commands.extensions.parsers.mcp import add_mcp_parser, add_memory_parser
+from cli.commands.extensions.parsers.packages import add_packages_parser
+from cli.commands.extensions.parsers.plugins import add_plugins_parser, add_skill_parser
 from cli.parsers.backup import _add_backup_parser
 from cli.parsers.cluster import _add_cluster_parser
 from cli.parsers.computer import _add_computer_parser
@@ -47,9 +49,6 @@ from cli.parsers.management import (
     _add_presets_parser,
     _add_schedules_parser,
 )
-from cli.parsers.mcp import _add_mcp_parser, _add_memory_parser
-from cli.parsers.packages import _add_packages_parser
-from cli.parsers.plugins import _add_plugins_parser, _add_skill_parser
 from cli.parsers.pty import _add_pty_parser
 
 
@@ -84,10 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_parser(sub)
     _add_presets_parser(sub)
     _add_schedules_parser(sub)
-    _add_plugins_parser(sub)
-    _add_skill_parser(sub)
-    _add_mcp_parser(sub)
-    _add_memory_parser(sub)
-    _add_packages_parser(sub)
+    add_plugins_parser(sub)
+    add_skill_parser(sub)
+    add_mcp_parser(sub)
+    add_memory_parser(sub)
+    add_packages_parser(sub)
 
     return parser

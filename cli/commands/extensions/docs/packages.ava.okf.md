@@ -24,6 +24,10 @@ install, verify with a test agent, judge, report. No install-by-URL field
 exists, because a user generally cannot tell a good package from a bad one,
 which is the reason an agent is in the loop at all.
 
+`parsers/` owns settings-free builders and handlers; `cli.parsers` composes
+them. `external_skills.py` delegates filesystem, ledger and recovery to
+`external_skill_host/`.
+
 ## Verbs
 
 ```bash

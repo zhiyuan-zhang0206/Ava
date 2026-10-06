@@ -58,7 +58,7 @@ def _h_packages_policy(args: argparse.Namespace) -> int:
     )
 
 
-def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     packages_p = sub.add_parser(
         "packages",
         help="inspect per-package update policy, channels, and refresh state (this machine)",

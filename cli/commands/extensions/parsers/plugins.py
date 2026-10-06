@@ -134,7 +134,7 @@ def _h_skill_trust(args: argparse.Namespace) -> int:
     return cmd_skill_trust(args.name, revoke=args.revoke)
 
 
-def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava plugins` — plugin config update + external skill package install lifecycle.
     plugins_p = sub.add_parser(
         "plugins",
@@ -217,7 +217,7 @@ def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     plugins_disable_p.set_defaults(func=_h_plugins_disable)
 
 
-def _add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava skill` — install into + toggle $AVA_HOME/skills/ (the single skill
     # load dir). installed (dir on disk) and enabled (scanner loads it) are
     # orthogonal; removal lives under `ava plugins uninstall`.
