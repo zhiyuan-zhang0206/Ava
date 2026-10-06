@@ -81,6 +81,15 @@ executor-death judgments and fenced delivery recovery;
 checkpoints, the compiled graph, a real exec child, peer inbox acknowledgement,
 release summary, native resumption with plugin state, and the abort→resume
 chain including the death-caused end note.
+`agent/tests/test_impersonation_transport_integration.py` combines real
+PostgreSQL and a compiled graph with controlled process-query failures and
+stubbed relay establishment. Repeated unknown/permission-denied executor
+probes preserve the active lease, original expiry, pending input and delivery
+budget without native model calls. Delivery reservations exhaust the push
+budget without preventing a valid late ACK. Successor admission fences the
+previous runtime, aligns the active lease's native binding, and preserves
+unacknowledged input in the handoff record before native resumption. These
+tests do not start or restart a real agent host or Codex relay process.
 
 `agent/impersonation_handoff.py` saves one JSON file under the agent workspace,
 then appends the impersonator summary and path as the first new system note.
