@@ -52,7 +52,12 @@ from ops.rpc_schemas import (
     BillingResurrectAgentResponse,
     BillingResurrectResponse,
 )
-from ops.rpc_schemas.billing_recovery import BillingRecoveryHomeResult, BillingRecoveryOutcome
+from ops.rpc_schemas.billing_recovery import (
+    BillingRecoveryHomeResult,
+    BillingRecoveryMode,
+    BillingRecoveryOutcome,
+    BillingRecoveryRunOutcome,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -246,8 +251,8 @@ async def run_billing_recovery(
     balance = await asyncio.to_thread(fetch_provider_balance)
     if not execute:
         return BillingResurrectResponse(
-            mode="dry_run",
-            outcome="preview",
+            mode=BillingRecoveryMode.DRY_RUN,
+            outcome=BillingRecoveryRunOutcome.PREVIEW,
             balance=balance,
             agents=[_candidate_outcome(c) for c in candidates],
             halted_alive=halted_alive,
@@ -255,8 +260,8 @@ async def run_billing_recovery(
     if not balance.ok:
         _log.info("billing recovery refused: balance gate not satisfied (%s)", balance.detail)
         return BillingResurrectResponse(
-            mode="execute",
-            outcome="refused",
+            mode=BillingRecoveryMode.EXECUTE,
+            outcome=BillingRecoveryRunOutcome.REFUSED,
             refusal_reason=f"balance gate not satisfied: {balance.detail}",
             balance=balance,
             agents=[_candidate_outcome(c) for c in candidates],
@@ -266,8 +271,8 @@ async def run_billing_recovery(
     if not held:
         _log.info("billing recovery refused: another run holds the single-flight lock")
         return BillingResurrectResponse(
-            mode="execute",
-            outcome="refused",
+            mode=BillingRecoveryMode.EXECUTE,
+            outcome=BillingRecoveryRunOutcome.REFUSED,
             refusal_reason="another billing-recovery run is in progress",
             balance=balance,
             agents=[_candidate_outcome(c) for c in candidates],
@@ -283,8 +288,8 @@ async def run_billing_recovery(
         await asyncio.to_thread(_release_run_lock, pool, lock_conn)
     await asyncio.to_thread(_record_run_event, db, balance, outcomes)
     return BillingResurrectResponse(
-        mode="execute",
-        outcome="executed",
+        mode=BillingRecoveryMode.EXECUTE,
+        outcome=BillingRecoveryRunOutcome.EXECUTED,
         balance=balance,
         agents=outcomes,
         halted_alive=halted_alive,

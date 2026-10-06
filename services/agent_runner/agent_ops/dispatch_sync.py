@@ -22,6 +22,7 @@ from ops.rpc_schemas import (
     ConfigAuditReadPayload,
     ConfigWritePayload,
     InventoryWritePayload,
+    OpStatus,
     ShellCapturePayload,
     ShellKillPayload,
     ShellProbePayload,
@@ -45,7 +46,7 @@ _state_write_lock = threading.Lock()
 
 def dispatch_sync(
     kind: str, payload: dict[str, Any], *, pool: ConnectionPool | None, db: Database
-) -> tuple[str, dict[str, object]]:
+) -> tuple[OpStatus, dict[str, object]]:
     """Run synchronous ops on the daemon's worker pool, never the event loop.
 
     Configuration and inventory writes share a lock because both read and
@@ -54,33 +55,35 @@ def dispatch_sync(
     """
     match kind:
         case "status_probe":
-            return "completed", cluster.cluster_status_op(db, pool).model_dump(mode="json")
+            return OpStatus.COMPLETED, cluster.cluster_status_op(db, pool).model_dump(mode="json")
         case "config_read":
-            return "completed", host_config.config_read_op().model_dump(mode="json")
+            return OpStatus.COMPLETED, host_config.config_read_op().model_dump(mode="json")
         case "config_audit_read":
             ca = ConfigAuditReadPayload.model_validate(payload)
-            return "completed", host_config.config_audit_read_op(ca.last).model_dump(mode="json")
+            return OpStatus.COMPLETED, host_config.config_audit_read_op(ca.last).model_dump(
+                mode="json"
+            )
         case "config_write":
             cw = ConfigWritePayload.model_validate(payload)
             with _state_write_lock:
-                return "completed", host_config.config_write_op(
+                return OpStatus.COMPLETED, host_config.config_write_op(
                     cw.overrides, local=cw.local, actor=cw.actor, trace_id=cw.trace_id
                 ).model_dump(mode="json")
         case "inventory_read":
-            return "completed", inventory.inventory_read_op().model_dump(mode="json")
+            return OpStatus.COMPLETED, inventory.inventory_read_op().model_dump(mode="json")
         case "inventory_write":
             iw = InventoryWritePayload.model_validate(payload)
             with _state_write_lock:
-                return "completed", inventory.inventory_write_op(
+                return OpStatus.COMPLETED, inventory.inventory_write_op(
                     iw.plugins, iw.mcp_servers
                 ).model_dump(mode="json")
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
-            return "completed", _agent_arm(kind, payload, pool)
+            return OpStatus.COMPLETED, _agent_arm(kind, payload, pool)
         case "upload_receive":
             ur = UploadReceivePayload.model_validate(payload)
-            return "completed", uploads.upload_receive_op(ur).model_dump(mode="json")
+            return OpStatus.COMPLETED, uploads.upload_receive_op(ur).model_dump(mode="json")
         case _:
-            return "failed", {"error": f"unknown kind: {kind!r}"}
+            return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
 
 
 def _agent_arm(

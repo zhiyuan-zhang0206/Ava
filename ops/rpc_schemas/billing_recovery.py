@@ -5,7 +5,6 @@ The `ops.rpc_schemas` door re-exports these names.
 """
 
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import BaseModel
 
@@ -28,6 +27,21 @@ class BillingRecoveryOutcome(StrEnum):
     REFUSED = "refused"
     DEFERRED = "deferred"
     FAILED = "failed"
+
+
+class BillingRecoveryMode(StrEnum):
+    """The operator's requested billing batch action."""
+
+    DRY_RUN = "dry_run"
+    EXECUTE = "execute"
+
+
+class BillingRecoveryRunOutcome(StrEnum):
+    """Result of the entire run, separate from any one agent's recovery outcome."""
+
+    PREVIEW = "preview"
+    EXECUTED = "executed"
+    REFUSED = "refused"
 
 
 class BillingResurrectRequest(BaseModel):
@@ -117,8 +131,8 @@ class BillingResurrectResponse(BaseModel):
     still alive — never actioned.
     """
 
-    mode: Literal["dry_run", "execute"]
-    outcome: Literal["preview", "executed", "refused"]
+    mode: BillingRecoveryMode
+    outcome: BillingRecoveryRunOutcome
     refusal_reason: str | None = None
     balance: BillingBalanceReport
     agents: list[BillingResurrectAgentOutcome]
