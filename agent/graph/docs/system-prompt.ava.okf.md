@@ -47,13 +47,13 @@ The system prompt carried in every LLM call, built **once per context window** �
 - `_workspace_section` — Workspace description (id-free for fork safety; the concrete path is stated by the agent-ID context note)
 
 **Capabilities group** (lives in `capabilities.py`, registered by `system_prompt` so the render order stays the reading order):
-- `capabilities_section` — The skill + MCP tool index (dynamically generated). `skills_to_inject_into_system_prompt` defaults to `*` = the whole loaded catalog; an explicit list narrows one agent's index. Narrowing hides entries from THIS listing only — `ava.help(ava.skills)` still enumerates the full catalog and an unlisted skill stays reachable by name, which the header says out loud
-- Header prose is assembled from whichever halves rendered, so an agent with MCP servers but no skill index is never pointed at a skill listing it does not have
-- Each index line is flattened to one line and truncated (`_one_line`): a description is free-form frontmatter from whoever wrote the SKILL.md, including a drop-in under `~/.ava/skills/`
+- `capabilities_section` — The skill + MCP index. `*` selects the full catalog, but folds descendants under real entry skills with counts and inspection paths. Namespace-only folders retain leaves. Explicit lists render every selected entry; all skills stay reachable through `ava.help(ava.skills)`.
+- Header prose names only the halves actually rendered.
+- Descriptions flatten to one line, capped at 300 characters. The initial index has no total cap.
 
 ### Keeping the index from going stale (`agent/graph/prompt/capabilities.py:index_drift` + `agent/hooks/capabilities.py`)
 - The rendered index is a **snapshot**, built once per window; `ava.skills.names()` under it is an **uncached filesystem scan**. Nothing reconciles them by itself, so a skill installed mid-window would be reachable by name and absent from the listing the delegation check orders the agent to match every task against — until a compaction happened to rebuild the prompt
-- `init_context` records the membership it rendered into `state.capabilities.indexed` (see [[../../docs/state.ava.okf.md]]). Snapshot taken **before** the render, so a skill landing between the two is named once too many rather than dropped
+- `init_context` records the full selected catalog membership (including folded descendants) into `state.capabilities.indexed` (see [[../../docs/state.ava.okf.md]]). Snapshot taken **before** the render, so a skill landing between the two is named once too many rather than dropped
 - A framework-owned `before_llm` hook diffs the live membership against that record each turn and names whatever appeared in one `new_skills` system note, in the index's own line shape; the snapshot advances with the note, so one install produces one note no matter who installed it. Drift is the trigger, not a timer
 - `indexed_skills()` is the single definition of membership, so narrowing needs no special case: a configured name that resolved to nothing at build time and resolves now is drift, and a skill outside a narrowed list never becomes drift
 - `indexed: None` means no snapshot exists for this window (a checkpoint predating the field). The check then adopts the live catalog silently rather than announcing the whole catalog as new

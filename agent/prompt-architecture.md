@@ -100,7 +100,10 @@ Capabilities rather than standing as its own section.
   servers (`_mcp_index_lines`, keyed by `ava.mcps.<server>`, descriptions from
   each server's optional `description` field in its `.mcp.json`). Both keys use
   the same form the expanded-SDK section uses.
-  `skills_to_inject_into_system_prompt` defaults to `*` (the whole catalog); an
+  `skills_to_inject_into_system_prompt` defaults to `*`: the selected catalog is
+  complete, but the prompt displays entry skills and folds descendants under
+  real ancestor skills, with a count and an inspection path. Namespace-only
+  folders keep their leaf entries visible. Bodies remain on demand. An
   explicit list narrows one agent's index — hiding entries from this listing
   only, which is why the header says so and points at `ava.help(ava.skills)`.
   The section first tells the agent to match every task against the index before
@@ -183,15 +186,53 @@ Capabilities rather than standing as its own section.
   `ava_builtins/plugins/ava_fleet/agent_runtime.py:_reduce_context_switch_section`,
   on by default via `settings.agent.reduce_context_switch` (env
   `AVA_REDUCE_CONTEXT_SWITCH`; user ruling 2026-09-20): the human-attention default
-  every fleet agent carries — queue-never-push (out-of-band push only for a true
-  emergency), one notice per manager updated in place, milestone cadence, decisions
-  direct and progress rolled up. Plugin-owned: a deployment that disables the fleet
+  every fleet agent carries — essential delivery and interruption semantics.
+  Detailed label, task, delegation, lifecycle, cadence and roll-up procedures
+  belong to `ava-fleet/reference/operating-contract.md`, loaded through the
+  Fleet skill only when using those capabilities. Plugin-owned: a deployment that disables the fleet
   surface (no human supervision) drops it with the rest of that surface. The
   `reduce-context-switch-for-human` skill stays as the deep playbook and no longer
   carries the whole mechanism by itself.
 
 Everything else (git/PR protocol, scope discipline, doc discipline) is loaded at
 runtime from the project's `AGENTS.md`, not baked into the framework prompt.
+
+### Choosing default exposure
+
+Skill installation, catalog exposure, and full-body preloading are separate.
+`skills_to_expand_at_start` stays empty by default: naming a capability is not
+invoking it. General agents expose entry skills; specialist agents can supply an
+explicit `skills_to_inject_into_system_prompt` list. Root selection should follow
+the work, not alphabetical truncation:
+
+- `ava-workflow` selects methods for non-trivial work. Alignment, calibration,
+  planning and evaluation guides are discovered through it.
+- `ava-guide` routes Ava operations; engineering and research root skills route
+  their own domain practices. Their individual sub-skills do not need independent
+  permanent descriptions.
+- Goal pursuit, dynamic orchestration and long-running operation are available
+  methods, loaded when chosen. They are not universally preloaded disciplines.
+- Integration entry skills advertise installed capabilities (web, mail, media).
+  Their bodies and platform adapters load only for relevant tasks.
+- Fleet and Memory entry skills accompany those installed plugins. Specialized
+  organization, sweeping and self-evolution skills are task-specific, not reasons
+  for every agent to adopt a standing role.
+
+User-installed entry skills and orphan leaves remain visible under `*`. Narrow a
+specialist's explicit list deliberately instead of silently uninstalling or
+hiding its capabilities. Do not treat stale installed skills as current built-ins;
+reconcile package provenance separately from prompt rendering.
+
+For SDK exposure, run `scripts/audit/sdk_usage.py` over copied JSONL event mirrors
+from representative runners, with an explicit `--start`, `--end` and
+`--coverage 70`. It ranks real outermost calls, weights sampled events, reports
+observed-agent reach, and recommends whole modules covering at least 70% of
+eligible call volume. Top-level functions are already in the overview; skills
+and MCPs belong in the capability index. Review workload mix and missing mirrors
+before applying its suggested `AVA_SDK_EXPAND` list. Plugin-declared expansions
+still apply. The report never changes configuration, and an empty sample yields
+no recommendation. The shipped `*` SDK default is retained until representative
+evidence supports a narrower general-agent list.
 
 ## Responsibility split: Ava core vs ava_code
 

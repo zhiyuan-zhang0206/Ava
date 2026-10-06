@@ -207,9 +207,35 @@ def _index_line(skill: Any) -> str:
 
 
 def _skill_index_lines(prompt: Prompt) -> list[str]:
-    """The skills half of the capabilities index: one `ava.skills.<path>` +
-    one-line-description entry per injected skill."""
-    return [_index_line(s) for s in indexed_skills(prompt)]
+    """Render the wildcard catalog through its entry skills; explicit lists stay exact.
+
+    A child is folded only when an actual ancestor skill is selected. Namespace
+    folders without a SKILL.md never hide their otherwise undiscoverable leaves.
+    Catalog membership remains complete for drift tracking and preloading.
+    """
+    import ava
+
+    skills = indexed_skills(prompt)
+    if "*" not in prompt.skills_to_inject_into_system_prompt:
+        return [_index_line(s) for s in skills]
+    by_path = {match_key(ava.skills.identifier(s)): s for s in skills}
+    descendants: dict[str, int] = {}
+    for path in by_path:
+        segments = path.split(".")
+        ancestors = (".".join(segments[:i]) for i in range(1, len(segments)))
+        entry = next((parent for parent in ancestors if parent in by_path), path)
+        descendants[entry] = descendants.get(entry, 0) + (entry != path)
+    lines: list[str] = []
+    for path, count in descendants.items():
+        skill = by_path[path]
+        line = _index_line(skill)
+        if count:
+            line += (
+                f" ({count} sub-skills; inspect with "
+                f"`ava.help(ava.skills.{ava.skills.target(skill)})`)"
+            )
+        lines.append(line)
+    return lines
 
 
 def indexed_skill_identifiers(prompt: Prompt) -> set[str]:
@@ -330,7 +356,8 @@ _SKILLS_HOWTO = (
     "loadable spelling of the same path is `ava.skills.web_ai.deep_research`. "
     "This listing may be a subset of what is installed — "
     "`ava.help(ava.skills)` enumerates the full catalog, and an unlisted skill "
-    "is still reachable by name."
+    "is still reachable by name. Entry skills group their sub-skills: inspect "
+    "the matching entry to discover specialized playbooks before choosing one."
 )
 
 _MCP_HOWTO = (
