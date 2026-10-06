@@ -108,22 +108,26 @@ def test_budget_reminds_named_peers_without_lifecycle_actions(
 
     monkeypatch.setattr(ava.agents, "send_message", record)
     monkeypatch.setattr(ava.agents, "terminate", refuse_termination)
-    report = {
+    report: dict[str, Any] = {
         "totals": {"total_tokens": 100, "recorded_cost_usd": 0.25, "unpriced_calls": 1},
         "agents": [{"agent_id": 1}],
         "lineage": "self",
         "start": "start",
         "end": "end",
     }
-    assert usage.budget_message(report, token_limit=101, usd_limit=1.0) is None
-    message = usage.budget_message(report, token_limit=100, usd_limit=None)
+    assert usage.budget_message(report, usd_limit=1.0) is None
+    assert usage.budget_message(report, usd_limit=None) is None
+    report["totals"]["total_tokens"] = 1_000_000_000
+    assert usage.budget_message(report, usd_limit=1.0) is None
+    report["totals"]["total_tokens"] = 0
+    message = usage.budget_message(report, usd_limit=0.25)
     assert "handoff" in message and "Unpriced calls: 1" in message
     usage.notify_agents([20, 10, 20], message)
     assert [row[0] for row in sent] == [10, 20]
-    assert usage.budget_message(report, token_limit=None, usd_limit=0.25) is not None
-    for limit in (float("nan"), float("inf"), -1):
+    assert "recorded USD 0.250000 >= 0.25" in message
+    for limit in (float("nan"), float("inf"), -1, 0, True):
         with pytest.raises(ValueError, match="positive and finite"):
-            usage.budget_message(report, token_limit=None, usd_limit=limit)
+            usage.budget_message(report, usd_limit=limit)
     with pytest.raises(ValueError, match="timezone"):
         usage.parse_time("2026-10-06T12:00:00")
 
@@ -135,7 +139,8 @@ def test_budget_reminds_named_peers_without_lifecycle_actions(
         ["--end", "2026-10-06T00:00:00+00:00"],
         ["--poll-seconds", "30"],
         ["--notify-agent", "2"],
-        ["--poll-seconds", "nan", "--token-limit", "100", "--notify-agent", "2"],
+        ["--poll-seconds", "nan", "--usd-limit", "1", "--notify-agent", "2"],
+        ["--token-limit", "100"],
     ],
 )
 def test_cli_rejects_invalid_observation_modes(options: list[str]) -> None:
@@ -174,8 +179,8 @@ def test_cli_reads_a_real_window_and_sends_one_reminder(
             str(root),
             "--start",
             start.isoformat(),
-            "--token-limit",
-            "120",
+            "--usd-limit",
+            "0.1",
             "--notify-agent",
             str(root),
         ],

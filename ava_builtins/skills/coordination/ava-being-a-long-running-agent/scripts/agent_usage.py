@@ -32,27 +32,19 @@ def positive_id(value: str) -> int:
     return result
 
 
-def budget_message(
-    report: dict[str, Any], *, token_limit: int | None, usd_limit: float | None
-) -> str | None:
+def budget_message(report: dict[str, Any], *, usd_limit: float | None) -> str | None:
     """A reminder leaves the receiving agent in charge of graceful disposition."""
-    if token_limit is not None and (type(token_limit) is not int or token_limit <= 0):
-        raise ValueError("token limit must be a positive integer")
     if usd_limit is not None and (
         isinstance(usd_limit, bool) or not math.isfinite(usd_limit) or usd_limit <= 0
     ):
         raise ValueError("USD limit must be positive and finite")
     totals = report["totals"]
-    breaches: list[str] = []
-    if token_limit is not None and totals["total_tokens"] >= token_limit:
-        breaches.append(f"tokens {totals['total_tokens']} >= {token_limit}")
-    if usd_limit is not None and totals["recorded_cost_usd"] >= usd_limit:
-        breaches.append(f"recorded USD {totals['recorded_cost_usd']:.6f} >= {usd_limit}")
-    if not breaches:
+    if usd_limit is None or totals["recorded_cost_usd"] < usd_limit:
         return None
     ids = [agent["agent_id"] for agent in report["agents"]]
     return (
-        f"Usage budget reminder: {', '.join(breaches)}. Agents: {ids}; "
+        f"Usage budget reminder: recorded USD {totals['recorded_cost_usd']:.6f} "
+        f">= {usd_limit}. Agents: {ids}; "
         f"lineage: {report['lineage']}; window: [{report['start']}, {report['end']}). "
         f"Unpriced calls: {totals['unpriced_calls']}. Reassess before adding work. "
         "Preserve useful results and recovery notes; finish a safe in-flight unit, "
@@ -79,7 +71,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--lifetime", action="store_true", help="Folded lifetime ledger plus current event tail"
     )
     parser.add_argument("--end", type=parse_time, help="Default: current time on each poll")
-    parser.add_argument("--token-limit", type=int)
     parser.add_argument("--usd-limit", type=float)
     parser.add_argument("--notify-agent", type=positive_id, action="append", default=[])
     parser.add_argument(
@@ -96,20 +87,15 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     if args.poll_seconds is not None:
         if not math.isfinite(args.poll_seconds) or args.poll_seconds <= 0:
             parser.error("--poll-seconds must be positive and finite")
-        if (
-            args.end
-            or not args.notify_agent
-            or (args.token_limit is None and args.usd_limit is None)
-        ):
+        if args.end or not args.notify_agent or args.usd_limit is None:
             parser.error("polling requires a moving end, a limit, and notification recipients")
-    if args.notify_agent and args.token_limit is None and args.usd_limit is None:
-        parser.error("notification requires --token-limit or --usd-limit")
+    if args.notify_agent and args.usd_limit is None:
+        parser.error("notification requires --usd-limit")
     if args.lifetime and args.end:
         parser.error("--lifetime cannot end at a historical timestamp")
     # Validate thresholds before database access, even on an empty report.
     budget_message(
         {"totals": {"total_tokens": 0, "recorded_cost_usd": 0}},
-        token_limit=args.token_limit,
         usd_limit=args.usd_limit,
     )
 
@@ -127,7 +113,7 @@ def main() -> None:
                 start=args.start,
                 end=args.end or datetime.now(UTC),
             )
-        message = budget_message(report, token_limit=args.token_limit, usd_limit=args.usd_limit)
+        message = budget_message(report, usd_limit=args.usd_limit)
         print(
             json.dumps(report, sort_keys=True), flush=True
         )  # script output, not framework logging
