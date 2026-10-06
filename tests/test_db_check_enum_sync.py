@@ -32,6 +32,7 @@ from base.agents.impersonation.status import ImpersonationStatus
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.status import TaskStatus
 from base.cluster.machine import MachineRole
+from base.daemon.schedules.completion_notices import CompletionNoticeOutcome
 from base.packages.extensions.install_registry import TrustTier
 from base.packages.extensions.registry import ExtensionKind
 
@@ -46,6 +47,7 @@ _SCHEMA = re.sub(
 
 # (table, column) -> the Python value-set that is the source of truth for it.
 _CASES: dict[tuple[str, str], set[str]] = {
+    ("completion_notice_events", "outcome"): {s.value for s in CompletionNoticeOutcome},
     ("agents_meta", "status"): {s.value for s in AgentStatus},
     ("agents_meta", "liveness_state"): {s.value for s in LivenessState},
     ("agent_impersonations", "status"): {s.value for s in ImpersonationStatus},

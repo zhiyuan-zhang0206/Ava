@@ -4,6 +4,8 @@ DB wait/pool timeouts and the node-stall hang diagnostic: operational bounds of 
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from base.config.base import EnvSettings
@@ -11,8 +13,10 @@ from base.daemon.schedules.completion_notices import CompletionNoticePolicy
 
 
 class AgentRuntimeSettings(EnvSettings):
-    completion_notice_policy: CompletionNoticePolicy = Field(
-        default="all",
+    completion_notice_policy: Literal[
+        CompletionNoticePolicy.ALL, CompletionNoticePolicy.FAILURES, CompletionNoticePolicy.HOURLY
+    ] = Field(
+        default=CompletionNoticePolicy.ALL,
         alias="AVA_COMPLETION_NOTICE_POLICY",
         description="Per-agent completion notification policy: all preserves one notice per completion, failures suppresses successful completions, and hourly aggregates every completion in a durable hourly digest while failures remain immediate.",
         json_schema_extra={

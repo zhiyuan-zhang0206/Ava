@@ -8,6 +8,8 @@ import psycopg
 
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
+    CompletionNoticeOutcome,
+    CompletionNoticePolicy,
     delivery_required_for_agent,
     format_digest,
     immediate_delivery_required,
@@ -18,18 +20,18 @@ def test_hourly_keeps_failures_immediate_and_counts_them_in_the_digest() -> None
     success = CompletionNotice(
         source="shell:1",
         content="Background command 'build' exited with code 0. Full output at build.log.",
-        outcome="exit",
+        outcome=CompletionNoticeOutcome.EXIT,
         exit_code=0,
     )
     failure = CompletionNotice(
         source="watcher:2",
         content="Watcher 'check' exited with code 1. Full output at check.log.",
-        outcome="exit",
+        outcome=CompletionNoticeOutcome.EXIT,
         exit_code=1,
     )
 
-    assert not immediate_delivery_required("hourly", success)
-    assert immediate_delivery_required("hourly", failure)
+    assert not immediate_delivery_required(CompletionNoticePolicy.HOURLY, success)
+    assert immediate_delivery_required(CompletionNoticePolicy.HOURLY, failure)
 
     digest = format_digest(
         agent_id=7,
@@ -47,16 +49,22 @@ def test_hourly_keeps_failures_immediate_and_counts_them_in_the_digest() -> None
 
 def test_failures_policy_suppresses_only_successes() -> None:
     assert not immediate_delivery_required(
-        "failures",
-        CompletionNotice(source="shell:1", content="ok", outcome="exit", exit_code=0),
+        CompletionNoticePolicy.FAILURES,
+        CompletionNotice(
+            source="shell:1", content="ok", outcome=CompletionNoticeOutcome.EXIT, exit_code=0
+        ),
     )
     assert immediate_delivery_required(
-        "failures",
-        CompletionNotice(source="shell:1", content="failed", outcome="exit", exit_code=1),
+        CompletionNoticePolicy.FAILURES,
+        CompletionNotice(
+            source="shell:1", content="failed", outcome=CompletionNoticeOutcome.EXIT, exit_code=1
+        ),
     )
     assert immediate_delivery_required(
-        "failures",
-        CompletionNotice(source="watcher:1", content="missed", outcome="missed"),
+        CompletionNoticePolicy.FAILURES,
+        CompletionNotice(
+            source="watcher:1", content="missed", outcome=CompletionNoticeOutcome.MISSED
+        ),
     )
 
 
@@ -65,7 +73,7 @@ def test_digest_bounds_rendered_logs_but_keeps_the_total_count() -> None:
         CompletionNotice(
             source=f"shell:{index}",
             content=f"Background command '{index}' exited with code 0. Full output at {index}.log.",
-            outcome="exit",
+            outcome=CompletionNoticeOutcome.EXIT,
             exit_code=0,
         )
         for index in range(23)
@@ -100,7 +108,7 @@ def test_buffered_success_stays_suppressed_after_a_policy_flip(
     notice = CompletionNotice(
         source="shell:91",
         content="Background command 'build' exited with code 0. Full output at build.log.",
-        outcome="exit",
+        outcome=CompletionNoticeOutcome.EXIT,
         exit_code=0,
     )
     assert not delivery_required_for_agent(db_conn, agent_id, notice, "all")
