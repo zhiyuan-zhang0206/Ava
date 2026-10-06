@@ -208,19 +208,20 @@ class StoppingMixin:
         deadline = monotonic() + window
         # quiesce-exempt: a bounded wait for a stopping generation to exit; no database
         while True:
-            living = {item for item in generation.tracked if item.live()}
-            if not living:
-                await generation.exited.wait()
-                if group_empty(identity.pid):
-                    custody.clear()
-                    runtime.generation = None
-                    runtime.state = UnitState.STOPPED
-                    return
-                living = capture_group(generation.tracked, identity.pid)
+            living = await self._observe_posix_stop(runtime, generation, identity, custody)
+            if living is None:
+                return
             for item in living:
                 retain_processes(generation.tracked, capture_tree(item))
             custody.retain(generation.tracked, identity.pid)
             expired = monotonic() >= deadline
+            if expired and living:
+                # Custody I/O can outlive the last birth observation. Recheck before
+                # refusing or escalating; an exited generation still needs the
+                # watcher and group-empty certification at the top of the loop.
+                living = self._live_captured_births(generation)
+                if not living:
+                    continue
             if expired and not force:
                 raise ownership_retained(runtime.manifest.id, living, identity.pid, window)
             if not identity.live() or expired:
@@ -229,6 +230,33 @@ class StoppingMixin:
                 force = False
                 deadline = monotonic() + window
             await asyncio.sleep(0.05)
+
+    @staticmethod
+    async def _observe_posix_stop(
+        runtime: _UnitRuntime,
+        generation: _Generation,
+        identity: OwnedProcess,
+        custody: ServiceCustody,
+    ) -> set[OwnedProcess] | None:
+        """Return observed births, or certify the reaped generation's empty group.
+
+        An empty capture is still unproven closure; only None releases custody.
+        """
+        living = StoppingMixin._live_captured_births(generation)
+        if living:
+            return living
+        await generation.exited.wait()
+        if not group_empty(identity.pid):
+            return capture_group(generation.tracked, identity.pid)
+        custody.clear()
+        runtime.generation = None
+        runtime.state = UnitState.STOPPED
+        return None
+
+    @staticmethod
+    def _live_captured_births(generation: _Generation) -> set[OwnedProcess]:
+        """Read captured native identities now, propagating unverifiable births."""
+        return {item for item in generation.tracked if item.live()}
 
     def _stop_window(self, runtime: _UnitRuntime) -> float:
         """The TERM window for one unit: what its manifest declares, else the default."""
