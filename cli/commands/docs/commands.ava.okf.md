@@ -13,8 +13,10 @@ tags:
 
 `cli/commands/` holds the `ava` command domains. `cli.parsers.build_parser`
 composes settings-free domain builders. Agents/notices are owned by
-`agents/parsers.py` beside `control.py`, `notices.py` and `timeline.py`; other
-builders remain in `cli/parsers/`. Each builder binds its own `_h_*` adapter,
+`agents/parsers.py` beside `control.py`, `notices.py` and `timeline.py`.
+`agents/impersonation_parsers.py` owns external-session and relay arguments beside
+`impersonation.py` and `impersonation_relay.py`; other builders remain in
+`cli/parsers/`. Each builder binds its own `_h_*` adapter,
 which lazy-imports the runtime `cmd_*` implementation at dispatch. There is
 no registry or plugin mechanism; the wiring is the parser.
 
