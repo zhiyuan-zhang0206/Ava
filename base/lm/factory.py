@@ -144,8 +144,7 @@ def provider_key_of_model(model: str) -> str | None:
     """Provider key for a model name, or None for an unregistered prefix.
 
     Each registered plugin's explicit provider key or stripped dispatch
-    prefix — the same keys `AVA_LLM_MAX_CONCURRENT` accepts
-    (`base/lm/concurrency.py`). None means the limiter passes through.
+    prefix. None means the model id matches no registered plugin.
     """
     return model_catalog().provider_key_of(model)
 
@@ -153,8 +152,7 @@ def provider_key_of_model(model: str) -> str | None:
 def provider_key_map() -> dict[str, tuple[str, str]]:
     """Provider dispatch prefix/key → (display name, key env var).
 
-    The single source for `_ensure_provider_key` and the concurrency limiter's
-    known-key set. The key lives in the process environment only (bootstrap
+    The single source for `_ensure_provider_key`. The key lives in the process environment only (bootstrap
     plugin-secrets section on a split runner; the cluster `.env` file at the
     spawn boundary).
     """
