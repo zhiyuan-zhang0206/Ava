@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 
 from base import telemetry
 from base.agents import (
     AgentNotFound,
+    CrashRecoveryResult,
 )
 from base.cluster.machine import machine_name
 from base.db import Database
@@ -45,6 +47,13 @@ from ops.rpc_schemas import (
 )
 
 _log = logging.getLogger(__name__)
+
+
+class CrashRecoveryRequestFailure(StrEnum):
+    """Local request failure, never a home runner adjudication."""
+
+    UNREACHABLE = "unreachable"
+    ERROR = "error"
 
 
 def _recover_crash_marked_blocking(
@@ -99,26 +108,35 @@ def _recover_crash_marked_blocking(
         ) = row
         if breaker_halted:
             return RecoverCrashMarkedResponse(
-                status="refused", reason=SUPPRESS_REASON_PERMANENT_REJECT
+                status=CrashRecoveryResult.REFUSED, reason=SUPPRESS_REASON_PERMANENT_REJECT
             )
         if suppress_active:
             return RecoverCrashMarkedResponse(
-                status="refused", reason=suppress_reason or "wake_suppressed"
+                status=CrashRecoveryResult.REFUSED, reason=suppress_reason or "wake_suppressed"
             )
         if last_fatal_at is None:
-            return RecoverCrashMarkedResponse(status="refused", reason="not_marked")
+            return RecoverCrashMarkedResponse(
+                status=CrashRecoveryResult.REFUSED, reason="not_marked"
+            )
         if status == "terminated":
-            return RecoverCrashMarkedResponse(status="already_terminated")
+            return RecoverCrashMarkedResponse(status=CrashRecoveryResult.ALREADY_TERMINATED)
         if status != "idling":
-            return RecoverCrashMarkedResponse(status="refused", reason=f"not_settled:{status}")
+            return RecoverCrashMarkedResponse(
+                status=CrashRecoveryResult.REFUSED, reason=f"not_settled:{status}"
+            )
         if runtime_kind != "hosted":
             return RecoverCrashMarkedResponse(
-                status="refused", reason=f"not_settled:runtime_kind={runtime_kind}"
+                status=CrashRecoveryResult.REFUSED,
+                reason=f"not_settled:runtime_kind={runtime_kind}",
             )
         if machine != machine_name():
-            return RecoverCrashMarkedResponse(status="refused", reason="wrong_machine")
+            return RecoverCrashMarkedResponse(
+                status=CrashRecoveryResult.REFUSED, reason="wrong_machine"
+            )
         if lease_alive:
-            return RecoverCrashMarkedResponse(status="refused", reason="lease_alive")
+            return RecoverCrashMarkedResponse(
+                status=CrashRecoveryResult.REFUSED, reason="lease_alive"
+            )
         conn.execute(
             "UPDATE agents_meta SET status = 'terminated', "
             "termination_source = 'reaper', lease_expires_at = NULL, "
@@ -147,4 +165,4 @@ def _recover_crash_marked_blocking(
         _log.exception(
             "recover-crash-marked-v2: lifecycle hint publish failed for agent %s", agent_id
         )
-    return RecoverCrashMarkedResponse(status="harvested")
+    return RecoverCrashMarkedResponse(status=CrashRecoveryResult.HARVESTED)

@@ -33,6 +33,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents import (
     AgentStatus,
+    CrashRecoveryResult,
     RestartResult,
     ResurrectAlreadyAlive,
     ResurrectResult,
@@ -55,6 +56,9 @@ from ops.agents.resurrection_retry import report_auto_resurrect_failure
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.cluster_status import kill_agent_shells
 from ops.lifecycle import termination
+from ops.lifecycle.crash_harvest import (
+    CrashRecoveryRequestFailure as CrashRecoveryRequestFailure,
+)
 from ops.lifecycle.crash_harvest import (
     _recover_crash_marked_blocking as _recover_crash_marked_blocking,
 )
@@ -571,7 +575,7 @@ async def recover_crash_marked_op(
 
 async def recover_crash_marked_if_stalled(
     db: Database, bus: EventBus, agent_id: int, *, stalled_inbound_id: int
-) -> tuple[str, str | None]:
+) -> tuple[CrashRecoveryResult | CrashRecoveryRequestFailure, str | None]:
     """Ask `agent_id`'s home machine to adjudicate harvesting its crash-marked
     corpse, so the stalled chat `stalled_inbound_id` stops waiting on a dead
     owner (delivery-watchdog escalation, task #3618).
@@ -594,7 +598,7 @@ async def recover_crash_marked_if_stalled(
             halt_reason,
             stalled_inbound_id,
         )
-        return "refused", halt_reason
+        return CrashRecoveryResult.REFUSED, halt_reason
     try:
         home = await asyncio.to_thread(get_agent_machine, db, agent_id)
         try:
@@ -625,7 +629,7 @@ async def recover_crash_marked_if_stalled(
             exc,
             stalled_inbound_id,
         )
-        return "unreachable", str(exc)
+        return CrashRecoveryRequestFailure.UNREACHABLE, str(exc)
     except Exception:
         _log.warning(
             "recover_crash_marked_if_stalled: harvest request for agent %s (inbound %s) failed",
@@ -633,7 +637,7 @@ async def recover_crash_marked_if_stalled(
             stalled_inbound_id,
             exc_info=True,
         )
-        return "error", "harvest request failed"
+        return CrashRecoveryRequestFailure.ERROR, "harvest request failed"
 
 
 _LIFECYCLE_PATH = re.compile(
