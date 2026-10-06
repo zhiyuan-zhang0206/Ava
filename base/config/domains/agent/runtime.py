@@ -13,20 +13,20 @@ from base.daemon.schedules.completion_notices import CompletionNoticePolicy
 
 
 class AgentRuntimeSettings(EnvSettings):
-    completion_notice_policy: Literal[
-        CompletionNoticePolicy.ALL, CompletionNoticePolicy.FAILURES, CompletionNoticePolicy.HOURLY
-    ] = Field(
-        default=CompletionNoticePolicy.ALL,
-        alias="AVA_COMPLETION_NOTICE_POLICY",
-        description="Per-agent completion notification policy: all preserves one notice per completion, failures suppresses successful completions, and hourly aggregates every completion in a durable hourly digest while failures remain immediate.",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
+    completion_notice_policy: Literal[CompletionNoticePolicy.ALL, CompletionNoticePolicy.HOURLY] = (
+        Field(
+            default=CompletionNoticePolicy.ALL,
+            alias="AVA_COMPLETION_NOTICE_POLICY",
+            description="Per-agent completion notification policy: all delivers one notice per completion, and hourly aggregates every completion in a durable hourly digest.",
+            json_schema_extra={
+                "restart_required": "agent",
+                "writable": True,
+                "sensitive": False,
+                "scope": "cluster-default",
+                "per_agent": True,
+                "lifecycle": "live",
+            },
+        )
     )
 
     checkpoint_interval: int = Field(

@@ -442,10 +442,10 @@ def test_watcher_apis_forward_failure_notify(
     when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    watcher.launch("pass", timeout="1h", name="test-launch-notify", notify="failure")
-    watcher.at(when, "ping later", name="test-at-notify", notify="failure")
-    watcher.cron("0 3 * * *", "daily", name="test-cron-notify", notify="failure")
-    assert captured == ["failure", "failure", "failure"]
+    watcher.launch("pass", timeout="1h", name="test-launch-notify", notify="always")
+    watcher.at(when, "ping later", name="test-at-notify", notify="always")
+    watcher.cron("0 3 * * *", "daily", name="test-cron-notify", notify="always")
+    assert captured == ["always", "always", "always"]
 
 
 def test_watcher_rejects_unknown_notify(_agent_row: int) -> None:
@@ -533,7 +533,8 @@ def test_spawn_line_tees_and_notifies(_agent_row: int, monkeypatch: pytest.Monke
     assert "_ec=${PIPESTATUS[0]}" in cmd
     assert "agents send" in cmd
     assert f"--source watcher:{wid}" in cmd
-    assert "exited with code ${_ec}" in cmd
+    assert "finished. Full output at" in cmd
+    assert "exited with code" not in cmd
     assert "--tail-file" in cmd
     assert cmd.endswith("; exit $_ec")
 
@@ -564,7 +565,8 @@ def test_watcher_completion_notice_e2e(
     assert argv[0] == "agents"
     assert argv[1] == "send"
     assert argv[2] == str(ava.self.AGENT_ID)
-    assert "exited with code" in argv[3]  # ${_ec} expanded by the session shell
+    assert "finished" in argv[3]
+    assert "exited with code" not in argv[3]
     assert "--source" in argv
     assert f"watcher:{wid}" in argv
 
@@ -601,7 +603,7 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
     wid = watcher.launch("raise SystemExit(7)\n", timeout="1h", name="test-long-path")
     assert wait_for(argv_file.exists, timeout=15), ava.shell.sessions.capture(wid, lines=30)
     argv = argv_file.read_text().splitlines()
-    assert "exited with code 7." in argv[3]
+    assert "finished." in argv[3]
     assert f"watcher:{wid}" in argv
     output_path = long_dir / f"{wid}_test-long-path.log"
     assert f"Full output at {output_path}." in argv[3]

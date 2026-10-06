@@ -14,77 +14,23 @@ class CompletionNoticePolicy(StrEnum):
     """How admitted platform completions reach an agent."""
 
     ALL = "all"
-    FAILURES = "failures"
     HOURLY = "hourly"
 
 
-class CompletionNoticeOutcome(StrEnum):
-    """What happened to the process or watcher represented by a notice."""
-
-    EXIT = "exit"
-    MISSED = "missed"
-
-
-CompletionNoticePayload = dict[str, object]
-
 _MAX_DIGEST_LOGS = 20
-_MAX_DIGEST_FAILURES = 5
 
 
 @dataclass(frozen=True)
 class CompletionNotice:
-    """One platform-generated completion or missed-watcher notification."""
+    """One platform-generated completion notification (no outcome is recorded)."""
 
     source: str
     content: str
-    outcome: CompletionNoticeOutcome
-    exit_code: int | None = None
-
-    def __post_init__(self) -> None:
-        """Validate the outcome even for direct or restored construction."""
-        object.__setattr__(self, "outcome", CompletionNoticeOutcome(self.outcome))
-
-    @property
-    def failed(self) -> bool:
-        """Whether this notice represents a failed or missed completion."""
-        return self.outcome is CompletionNoticeOutcome.MISSED or self.exit_code not in (None, 0)
 
     @property
     def summary(self) -> str:
         """The completion line without its optional output-tail rider."""
         return self.content.split("\n\n", maxsplit=1)[0]
-
-
-class CompletionNoticePayloadError(ValueError):
-    """A persisted completion marker cannot safely be replayed."""
-
-
-def completion_notice_from_metadata(
-    source: str,
-    content: object,
-    text: str,
-    metadata: CompletionNoticePayload | None,
-) -> CompletionNotice | None:
-    """Rebuild a completion notice from persisted transport metadata."""
-    if metadata is None:
-        return None
-    if not isinstance(content, str):
-        raise CompletionNoticePayloadError("completion_notice_content")
-    try:
-        outcome = CompletionNoticeOutcome(metadata.get("outcome"))
-    except (ValueError, TypeError) as exc:
-        raise CompletionNoticePayloadError("completion_notice_payload") from exc
-    exit_code = metadata.get("exit_code")
-    if exit_code is not None and not isinstance(exit_code, int):
-        raise CompletionNoticePayloadError("completion_notice_payload")
-    if (outcome is CompletionNoticeOutcome.EXIT) != (exit_code is not None):
-        raise CompletionNoticePayloadError("completion_notice_payload")
-    return CompletionNotice(
-        source=source,
-        content=text,
-        outcome=outcome,
-        exit_code=exit_code,
-    )
 
 
 @dataclass(frozen=True)
@@ -130,9 +76,8 @@ def effective_completion_notice_policy(
 
 def immediate_delivery_required(policy: CompletionNoticePolicy, notice: CompletionNotice) -> bool:
     """Whether one completion notice must enter the agent inbox immediately."""
-    if policy is CompletionNoticePolicy.ALL:
-        return True
-    return notice.failed
+    del notice
+    return policy is CompletionNoticePolicy.ALL
 
 
 def policy_for_agent(conn: Any, agent_id: int, default: str) -> CompletionNoticePolicy:
@@ -164,11 +109,11 @@ def delivery_required_for_agent(
     and the authoritative count source for the canary conservation check.
     """
     # An outbox replay must retain the policy decision made by its first
-    # successful gateway admission. For a success buffered under hourly, a
+    # successful gateway admission. For a notice buffered under hourly, a
     # later config flip to `all` must not turn the replay into a second direct
     # inbox message. Sources are session-scoped, so the event identity is
     # stable for that replay.
-    if not notice.failed and hourly_notice_recorded(conn, agent_id, notice):
+    if hourly_notice_recorded(conn, agent_id, notice):
         return False
     policy = policy_for_agent(conn, agent_id, default)
     if policy is CompletionNoticePolicy.HOURLY:
@@ -177,12 +122,11 @@ def delivery_required_for_agent(
 
 
 def hourly_notice_recorded(conn: Any, agent_id: int, notice: CompletionNotice) -> bool:
-    """Whether this exact successful event was already admitted to the digest."""
+    """Whether this exact event was already admitted to the digest."""
     with conn.cursor() as cursor:
         cursor.execute(
-            "SELECT 1 FROM completion_notice_events "
-            "WHERE agent_id = %s AND source = %s AND outcome = %s",
-            (agent_id, notice.source, notice.outcome),
+            "SELECT 1 FROM completion_notice_events WHERE agent_id = %s AND source = %s",
+            (agent_id, notice.source),
         )
         return cursor.fetchone() is not None
 
@@ -192,25 +136,15 @@ def format_digest(*, agent_id: int, window_start: datetime, notices: list[Comple
     if not notices:
         raise ValueError("cannot format an empty completion-notice digest")
     timestamp = window_start.isoformat()
-    successes = [notice for notice in notices if not notice.failed]
-    failures = [notice for notice in notices if notice.failed]
     lines = [
         f"[completion-digest] Agent {agent_id}, hour starting {timestamp}: "
         f"{len(notices)} completion notices.",
         f"Logs (latest {_MAX_DIGEST_LOGS}):",
     ]
-    lines.extend(f"- {notice.summary}" for notice in successes[-_MAX_DIGEST_LOGS:])
-    omitted_successes = len(successes) - _MAX_DIGEST_LOGS
-    if omitted_successes > 0:
-        lines.append(f"- {omitted_successes} older successful completion(s) omitted")
-    if failures:
-        lines.append(
-            f"Recent failures (already delivered immediately; latest {_MAX_DIGEST_FAILURES}):"
-        )
-        lines.extend(f"- {notice.summary}" for notice in failures[-_MAX_DIGEST_FAILURES:])
-        omitted_failures = len(failures) - _MAX_DIGEST_FAILURES
-        if omitted_failures > 0:
-            lines.append(f"- {omitted_failures} older failure(s) omitted")
+    lines.extend(f"- {notice.summary}" for notice in notices[-_MAX_DIGEST_LOGS:])
+    omitted = len(notices) - _MAX_DIGEST_LOGS
+    if omitted > 0:
+        lines.append(f"- {omitted} older completion(s) omitted")
     return "\n".join(lines)
 
 
@@ -219,9 +153,9 @@ def record_hourly_notice(conn: Any, agent_id: int, notice: CompletionNotice) -> 
     with conn.cursor() as cursor:
         cursor.execute(
             "INSERT INTO completion_notice_events "
-            "(agent_id, source, content, outcome, exit_code) VALUES (%s, %s, %s, %s, %s) "
-            "ON CONFLICT (agent_id, source, outcome) DO NOTHING",
-            (agent_id, notice.source, notice.content, notice.outcome, notice.exit_code),
+            "(agent_id, source, content) VALUES (%s, %s, %s) "
+            "ON CONFLICT (agent_id, source) DO NOTHING",
+            (agent_id, notice.source, notice.content),
         )
 
 
@@ -229,7 +163,7 @@ def pending_digests(conn: Any, now: datetime) -> list[CompletionDigest]:
     """Read every completed, non-empty hour that still needs its digest."""
     with conn.cursor() as cursor:
         cursor.execute(
-            "SELECT id, agent_id, source, content, outcome, exit_code, "
+            "SELECT id, agent_id, source, content, "
             "date_trunc('hour', created_at) "
             "FROM completion_notice_events "
             "WHERE digest_inbound_id IS NULL AND created_at < date_trunc('hour', %s) "
@@ -238,21 +172,9 @@ def pending_digests(conn: Any, now: datetime) -> list[CompletionDigest]:
         )
         rows = cursor.fetchall()
     grouped: dict[tuple[int, datetime], list[tuple[int, CompletionNotice]]] = defaultdict(list)
-    for event_id, agent_id, source, content, outcome, exit_code, window_start in rows:
-        try:
-            validated_outcome = CompletionNoticeOutcome(outcome)
-        except (ValueError, TypeError) as exc:
-            raise ValueError(f"unknown completion notice outcome in database: {outcome!r}") from exc
+    for event_id, agent_id, source, content, window_start in rows:
         grouped[(int(agent_id), cast(datetime, window_start))].append(
-            (
-                int(event_id),
-                CompletionNotice(
-                    source=str(source),
-                    content=str(content),
-                    outcome=validated_outcome,
-                    exit_code=None if exit_code is None else int(exit_code),
-                ),
-            )
+            (int(event_id), CompletionNotice(source=str(source), content=str(content)))
         )
     return [
         CompletionDigest(

@@ -259,15 +259,10 @@ async def post_agent_message(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if existing is not None:
             return AgentMessageEnqueued(status=existing.status, inbound_id=existing.inbound_id)
-    if body.completion_notice is not None:
+    if body.completion_notice:
         if not isinstance(body.content, str):
             raise RuntimeError("completion notice schema admitted non-string content")
-        notice = CompletionNotice(
-            source=body.source,
-            content=body.content,
-            outcome=body.completion_notice.outcome,
-            exit_code=body.completion_notice.exit_code,
-        )
+        notice = CompletionNotice(source=body.source, content=body.content)
         if not await asyncio.to_thread(
             _completion_delivery_required,
             agent_id,

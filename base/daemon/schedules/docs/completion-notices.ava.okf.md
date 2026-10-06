@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Completion Notice Vocabulary
-description: Separate completion outcomes and notification policies, shared by RPC admission and persisted digest/outbox restoration.
+description: Completion notification policies and the outcome-free notice shared by RPC admission and persisted digest/outbox restoration.
 tags:
 - base
 - contract
@@ -9,11 +9,15 @@ tags:
 
 # Completion Notice Vocabulary
 
-Platform completion metadata and the restart-safe hourly digest share
-`CompletionNoticeOutcome` in `base/daemon/schedules/completion_notices.py`:
-`exit` carries a process exit code; `missed` carries none. The separate
-`CompletionNoticePolicy` (`all`, `failures`, `hourly`) decides delivery, not
-completion outcome. RPC validation and persisted metadata/database restoration
-produce outcome members and reject unknown values. Damaged outbox metadata
-retains its payload-error isolation. Config editors retain the exact policy
-member choices; stored strings and JSON values use the same spelling.
+A platform completion notice is only `(source, content)`: no outcome, exit
+code or success/failure distinction exists on the wire (`completion_notice` is a
+boolean marker on the message), in the outbox or in `completion_notice_events`.
+The `CompletionNoticePolicy` (`all`, `hourly`) in
+`base/daemon/schedules/completion_notices.py` decides delivery. Config editors
+retain the exact policy member choices; stored strings and JSON values use the
+same spelling. A stored unknown policy (including the retired `failures`) is
+rejected loudly.
+
+`completion_notice_events.outcome` / `exit_code` and the old
+`(agent_id, source, outcome)` unique constraint are unread and unwritten; the
+columns remain until a contract migration drops them.

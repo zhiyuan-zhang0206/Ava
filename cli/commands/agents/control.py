@@ -122,9 +122,11 @@ def cmd_agents_ls(
     return 0
 
 
-# How much of a --tail-file is appended to the message (bytes read from the
-# end; decoded with errors="replace" so a mid-character cut cannot break the
-# POST). Fixed — a caller who needs more reads the file itself.
+# How much of a --tail-file is appended to the message: its last _TAIL_LINES
+# lines, read from at most the last _TAIL_BYTES bytes (decoded with
+# errors="replace" so a mid-character cut cannot break the POST). Fixed — a
+# caller who needs more reads the file itself.
+_TAIL_LINES = 3
 _TAIL_BYTES = 2048
 
 
@@ -154,7 +156,8 @@ def cmd_agents_send(
     content: str,
     source: str | None,
     tail_file: str | None = None,
-    completion_exit_code: int | None = None,
+    *,
+    completion: bool = False,
 ) -> int:
     """`ava agents send <id> <content> --source S [--tail-file PATH]` — deliver a
     chat inbound via POST /api/agents/{id}/messages.
@@ -169,7 +172,7 @@ def cmd_agents_send(
     printed. A programmatic caller with no source gets this option list as a
     ProvenanceError, which the CLI handlers report without a traceback.
 
-    `--tail-file` appends the last `_TAIL_BYTES` bytes of PATH to the message —
+    `--tail-file` appends the last `_TAIL_LINES` lines of PATH to the message —
     the background-run / watcher completion notices use it to carry the end of
     the command's output (result line or traceback) so the agent usually does
     not need a follow-up read. Delivery auto-resurrects a terminated target
@@ -188,14 +191,14 @@ def cmd_agents_send(
         content,
         source=source,
         tail_file=tail_file,
-        completion_exit_code=completion_exit_code,
+        completion=completion,
     )
     print(f"  ✓ agent {agent_id} send: {status}")
     return 0
 
 
 def _with_tail(content: str, tail_file: str) -> str:
-    """`content` with the last `_TAIL_BYTES` of `tail_file` appended (or why it is unavailable)."""
+    """`content` with the last `_TAIL_LINES` lines of `tail_file` appended (or why it is unavailable)."""
     import os
     from pathlib import Path
 
@@ -207,7 +210,7 @@ def _with_tail(content: str, tail_file: str) -> str:
         with Path(tail_file).open("rb") as f:
             f.seek(0, os.SEEK_END)
             f.seek(max(0, f.tell() - _TAIL_BYTES))
-            tail = f.read().decode("utf-8", errors="replace")
+            tail = "\n".join(f.read().decode("utf-8", errors="replace").splitlines()[-_TAIL_LINES:])
     except OSError as e:
         return content + f"\n\n[tail unavailable: {e}]"
     if tail.strip():
@@ -221,7 +224,7 @@ def send_agent_message(
     *,
     source: str,
     tail_file: str | None = None,
-    completion_exit_code: int | None = None,
+    completion: bool = False,
 ) -> str:
     """Deliver one chat inbound to `agent_id` carrying `source` — the single transport.
 
@@ -229,7 +232,7 @@ def send_agent_message(
     leased identity): one idempotency keying, one deferred-delivery outbox
     safety net, one error surface.
 
-    `--tail-file` appends the last `_TAIL_BYTES` bytes of PATH to the message —
+    `--tail-file` appends the last `_TAIL_LINES` lines of PATH to the message —
     the background-run / watcher completion notices use it to carry the end of
     the command's output (result line or traceback) so the agent usually does
     not need a follow-up read.
@@ -251,10 +254,7 @@ def send_agent_message(
 
     if tail_file is not None:
         content = _with_tail(content, tail_file)
-    completion_notice: dict[str, object] | None = None
-    if completion_exit_code is not None:
-        completion_notice = {"outcome": "exit", "exit_code": completion_exit_code}
-    # All attempts of one logical message share one key; minting it here also
+        # All attempts of one logical message share one key; minting it here also
     # arms the server's client_message_id receipt for the flush replay.
     key: str | None = None
     try:
@@ -262,7 +262,7 @@ def send_agent_message(
             agent_id=agent_id,
             source=source,
             content=content,
-            completion_notice=completion_notice,
+            completion_notice=completion,
         )
     except Exception:
         # The outbox is a safety net for a failing send, never a reason for
@@ -282,7 +282,7 @@ def send_agent_message(
             json={
                 "content": content,
                 "source": source,
-                **({"completion_notice": completion_notice} if completion_notice else {}),
+                **({"completion_notice": True} if completion else {}),
             },
             timeout=_TIMEOUT_S,
             headers=headers,
@@ -294,7 +294,7 @@ def send_agent_message(
                 source=source,
                 content=content,
                 client_message_id=key,
-                completion_notice=completion_notice,
+                completion_notice=completion,
             )
         raise
     if key is not None:
@@ -304,7 +304,7 @@ def send_agent_message(
                 source=source,
                 content=content,
                 client_message_id=key,
-                completion_notice=completion_notice,
+                completion_notice=completion,
             )
         elif resp.is_success:
             delivery_outbox.note_send_succeeded(
@@ -312,7 +312,7 @@ def send_agent_message(
                 source=source,
                 content=content,
                 key=key,
-                completion_notice=completion_notice,
+                completion_notice=completion,
             )
     if resp.status_code >= 400:
         # Surface the response body before raising: the 422 detail carries the

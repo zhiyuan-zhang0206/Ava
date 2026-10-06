@@ -10,7 +10,6 @@ import pytest
 
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
-    CompletionNoticeOutcome,
     record_hourly_notice,
 )
 from base.db import Database, create_agent
@@ -40,9 +39,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         agent_id,
         CompletionNotice(
             source="shell:70",
-            content="Background command 'ok' exited with code 0. Full output at ok.log.",
-            outcome=CompletionNoticeOutcome.EXIT,
-            exit_code=0,
+            content="Background command 'ok' finished. Full output at ok.log.",
         ),
     )
     record_hourly_notice(
@@ -50,9 +47,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         agent_id,
         CompletionNotice(
             source="shell:71",
-            content="Background command 'failed' exited with code 1. Full output at bad.log.",
-            outcome=CompletionNoticeOutcome.EXIT,
-            exit_code=1,
+            content="Background command 'failed' finished. Full output at bad.log.",
         ),
     )
     with db_conn.cursor() as cur:
@@ -93,7 +88,6 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
     assert digest is not None
     assert digest[1] == "system:completion-digest"
     assert "2 completion notices" in digest[0]
-    assert "Recent failures" in digest[0]
 
     with db_conn.cursor() as cur:
         cur.execute(
@@ -137,9 +131,7 @@ def test_flush_once_continues_after_one_digest_delivery_failure(
             agent_id,
             CompletionNotice(
                 source=f"shell:{agent_id}",
-                content="Background command 'ok' exited with code 0. Full output at ok.log.",
-                outcome=CompletionNoticeOutcome.EXIT,
-                exit_code=0,
+                content="Background command 'ok' finished. Full output at ok.log.",
             ),
         )
     with db_conn.cursor() as cur:
