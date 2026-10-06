@@ -37,6 +37,10 @@ or deployment is performed by this contribution.
   windows, lifetime ledger + event tail, per-model usage, missing-price counts,
   and optional one-shot threshold messages to named peers. Accounting logic
   moves from the Fleet reference script into `base/telemetry/usage.py`.
+- Deliberate pause guidance: record partial artifacts, outstanding work, peer
+  and watcher IDs, and the resume condition. Goal supervisors check this before
+  nudging; orchestration scripts check before a new wave or script re-entry.
+  Late notices and a restart are not authorization to resume.
 
 ## Follow-up boundaries
 
@@ -71,3 +75,38 @@ cover real SQL lineage selection, windows, lifetime folding, unpriced calls,
 notification-only thresholds, task contracts, claim/timeline links, LLM usage,
 and affected prompt routing. Generated OpenAPI, frontend types, and event
 registry are regenerated from their owners.
+
+## Budget-handoff verification follow-up
+
+The initial CI run found an omitted event-contract expectation for the retired
+`llm_usage.task_id` field. The declared-key regression is corrected; the SDK note
+docstring and feature inventory now distinguish timeline task links from usage
+attribution.
+
+Additional selected checks: 25 event-contract tests and 40 usage/watcher tests
+passed. Two browser-free e2e cases passed on real isolated Postgres, Redis,
+gateway, agent host and exec children. They run the observer as a separate
+process, observe a spawn lineage before a fork exists, verify discovery and
+actual metered usage, deliver a threshold message, and preserve partial results
+without termination. Scripted goal supervision checks the saved pause before
+nudging; a generated orchestration script checks it before a second wave. Both
+preserve notes after a late checkpoint and a cold restart. These scripted
+responses verify runtime composition, not a language model's independent choice
+or adherence to the skills. The observer's own automatic recovery is not tested
+or implemented. Scoped Pyright reports zero errors and warnings. A fault
+injection that bypassed both saved-pause checks failed both cases: the goal
+supervisor added peer model calls and the orchestration script consumed the next
+unit and added another peer. The injected code was restored before submission.
+
+Next priorities:
+
+1. Run bounded live-model evaluations of both roles with adversarial late notices
+   and explicit observed token limits. Preserve prompts, artifacts and actual
+   usage; judge whether the agent chooses preservation and honors its own resume
+   condition, rather than merely reporting compliance.
+2. Help agents select an optional observation plan at work opening: existing
+   authorization, IDs, lineage, window, available accounting coverage, recipient
+   and watcher recovery notes. Do not infer task cost or create mandatory gates.
+3. Introduce externally evidenced expenses only when a real source is chosen.
+   Keep incurred cost, estimates and commitments distinct, with source identity
+   and deduplication; an LLM usage report must not claim all business costs.

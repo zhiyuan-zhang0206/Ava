@@ -55,3 +55,10 @@ Treat the reminder like a context-compaction warning: reassess, preserve useful
 results, finish a safe unit, prepare a handoff, or request a revised budget.
 The responsible agent decides whether and how to stop further work. Notification
 neither kills peers nor grants additional spending.
+
+When choosing to pause, record the decision, preserved artifacts, remaining
+work, peer and watcher IDs, and the condition for resuming. Notify any supervisor
+that may otherwise nudge the work onward. Re-read this handoff after restart or
+a late checkpoint; those events do not authorize continuation. A polling script
+that exited or was lost must be deliberately re-armed if observation is still
+needed, using the original window rather than silently resetting usage.
