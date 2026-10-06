@@ -484,3 +484,11 @@ def test_closure_receipt_stores_the_canonical_ops_status(db_conn: psycopg.Connec
     assert db_conn.execute(
         "SELECT op_status FROM api_idempotency WHERE method='ops' AND path='closure-notice'"
     ).fetchall() == [(OpStatus.COMPLETED.value,)]
+
+
+def test_notice_does_not_certify_background_process_absence() -> None:
+    text = notices._content(_notice(survivors=((4242, "worker"),)))
+    assert "was closed" in text
+    assert "Known processes observed" in text
+    assert "does not prove" in text
+    assert "another user" not in text

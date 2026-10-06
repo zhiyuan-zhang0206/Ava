@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "PTY session lifetime"
-description: "How a pty-sessions service session is created under the allocation lock, dies with its shell, is killed whole, and is fenced by the operator freeze."
+description: "How a pty-sessions service session is created under the allocation lock, dies with its shell, closes best effort, and is fenced by the operator freeze."
 tags:
 - base
 - pty
@@ -23,8 +23,8 @@ tags:
   1-second exit check when a background child keeps the slave open), removes the
   session from the table first (a concurrent same-name `new` can never adopt a
   dying session), then reaps the child and closes the master.
-- **kill** — takes the shell's whole tree and POSIX session, frozen then
-  SIGKILLed ([[../session-kill.ava.okf.md|session kill]]).
+- **kill** — closes the known shell and terminal with bounded known-group
+  signaling ([[../session-kill.ava.okf.md|session kill]]).
 - **signals** — a stray signal at the shell's tree cannot take the service
   down; the service handles SIGTERM and SIGINT by closing what is alive and
   exiting.

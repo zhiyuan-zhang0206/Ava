@@ -7,7 +7,7 @@ is the thing under test:
 
 - `close_terminals` asks the service to close everything within a grace capped by
   the stop's deadline, writes one owner notice per closed busy session, and fails
-  the stop (keeping the maintenance hold) when a process outlives the SIGKILL;
+  the stop when a shell survives; known job leftovers are diagnostic;
 - a stop finding the service gone closes the leftovers its ledger names;
 - `live_terminals` reads the service while it listens and the ledger when it does not;
 - `--force` closes terminals with no grace and no notices.
@@ -240,18 +240,15 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     assert [notice.name for notice in written] == [closed, stuck]
 
 
-def test_stop_keeps_hold_when_a_process_outlives_the_kill(
+def test_known_job_leftover_is_reported_without_failing_stop(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     written: list[pty_close_notices.ClosureNotice],
 ) -> None:
-    """The kill ends the shell, but a job outlives its SIGKILL (another user's, which
-    this stop may not signal). The stop is incomplete: the hold stays and the
-    failure names the phase, the session and the process. The session is over for
-    its owner, so its notice is recorded, naming the process left running. A retry
-    no longer sees the session and adds no second notice."""
+    """A known job can survive closure: report it and notify its owner, but release
+    stop successfully once the shell and terminal are closed."""
     dependencies(monkeypatch)
     stop_env(monkeypatch, home)
     name = "ava-agent-987-shell-2044-stubborn"
@@ -265,14 +262,13 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
         closure.Outcome(),
     )
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
-    assert admission.held(), "the hold must survive an incomplete stop"
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert admission.held(), "a successful stop still fences the stopped unit"
     assert psutil.pid_exists(job.pid)
     err = capsys.readouterr().err
-    assert "terminals" in err, "the failure must name the phase"
-    assert name in err, "the failure must name the owning session"
-    assert f"pid={job.pid}" in err, "the failure must name the process"
-    assert "nothing was force-killed" not in err, "the survivors outlived a SIGKILL"
+    assert name in err
+    assert f"pid={job.pid}" in err
+    assert "inspect the process" in err
     assert [notice.name for notice in written] == [name]
     assert written[0].survivors == ((job.pid, "python3"),)
 
@@ -440,8 +436,11 @@ def test_force_close_closes_every_session_at_once_without_notices(
     assert written == []
 
 
-def test_force_close_fails_naming_the_session_whose_process_outlives_the_kill(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+def test_force_close_reports_known_job_without_failing(
+    home: Path,
+    launch: Launcher,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(home))
     name = "ava-agent-987-shell-2055-denied"
@@ -450,6 +449,37 @@ def test_force_close_fails_naming_the_session_whose_process_outlives_the_kill(
         monkeypatch,
         closure.Outcome(survivors=(closure.Survivor(name, identity_of(job), "job"),)),
     )
+    strict.force_close_terminals()
+    assert name in capsys.readouterr().err
+    assert asked == [(0.0, strict._TERMINAL_KILL_WAIT_S)]
+
+
+def test_force_close_still_fails_when_known_shell_survives(
+    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AVA_HOME", str(home))
+    name = "private-surviving-shell"
+    shell = launch(name, _STUBBORN_PROCESS)
+    stub_closure(
+        monkeypatch,
+        closure.Outcome(survivors=(closure.Survivor(name, identity_of(shell), "terminal"),)),
+    )
     with pytest.raises(RuntimeError, match=name):
         strict.force_close_terminals()
-    assert asked == [(0.0, strict._TERMINAL_KILL_WAIT_S)]
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_operational_terminal_close_failure_is_not_best_effort_success(
+    monkeypatch: pytest.MonkeyPatch, force: bool
+) -> None:
+    def failed_close(_grace_s: float, _kill_s: float) -> closure.Outcome:
+        raise client.ServiceError(1, "known group signal denied")
+
+    monkeypatch.setattr(strict, "_close_via_service", failed_close)
+    with pytest.raises(client.ServiceError, match="known group signal denied"):
+        if force:
+            strict.force_close_terminals()
+        else:
+            strict.close_terminals(
+                time.monotonic() + 1, "stop-test", datetime.now(UTC), direct_db=False
+            )

@@ -17,10 +17,10 @@ The primitives for ending a process Ava started. Normal `stop`
 uses `cli/commands/lifecycle/service_stop.py`: deliver a verified graceful signal and
 wait for actual process exit without implicit escalation. Its shared deadline
 reports an incomplete stop if resources remain. Persistent terminals are the
-exception: a stop HUPs/TERMs each shell's
-captured session and SIGKILLs what outlives a bounded grace
+exception: a stop closes known shells/terminals with bounded known-group
+signaling; job leftovers are diagnostic, while surviving shells fail closure
 ([[base/sessions/pty/docs/session-kill.ava.okf.md|session kill]];
-docs/decisions/2026-09-28-stop-escalates-to-sigkill.md). Explicit force may use a
+docs/decisions/2026-10-07-pty-best-effort-closure.md). Explicit force may use a
 backend's `kill_session`; non-session processes use `base/host/proc.py` primitives.
 The lower-level escalating APIs below retain their own explicit contracts.
 
@@ -28,7 +28,10 @@ The lower-level escalating APIs below retain their own explicit contracts.
 
 ### Kill contract
 
-`kill_session(name, graceful=...)` → `(ok, mode)` with mode in `{graceful, forced, noop}`. `mode` reports what **happened**, not what was requested: a graceful stop that had to escalate to the SIGKILL fallback returns `forced`, so the caller's escalation marker fires instead of a clean-stop one that hides a hard kill. Idempotent: an absent/dead session is a `noop`. `ok` means **the session is confirmed gone**, not "the kill command was accepted" — backends re-ask their own existence check after killing, because a kill that reports success it did not achieve turns a live-but-unbacked session into a service nothing starts (issue #1015). `graceful=True` SIGTERMs only the top process and waits up to the timeout, then hard-kills the tree; `graceful=False` SIGKILLs children first so a parent cannot respawn a child mid-teardown. `expected=True` marks an operator-initiated transition (rollout/update/stop) so backends that escalate a kill log at INFO instead of WARNING/ERROR there.
+`kill_session(name, graceful=...)` → `(ok, mode)` with mode in `{graceful, forced, noop}`. `mode` reports what **happened**, not what was requested: a graceful stop that had to escalate to the SIGKILL fallback returns `forced`, so the caller's escalation marker fires instead of a clean-stop one that hides a hard kill. Idempotent: an absent/dead session is a `noop`. `ok` means **the session is confirmed gone**, not "the kill command was accepted" — backends re-ask their own existence check after killing, because a kill that reports success it did not achieve turns a live-but-unbacked session into a service nothing starts (issue #1015). For the native service backend, `graceful=True` SIGTERMs only the top process and waits up to the timeout, then hard-kills the tree; `graceful=False` SIGKILLs children first so a parent cannot respawn a child mid-teardown. `expected=True` marks an operator-initiated transition (rollout/update/stop) so backends that escalate a kill log at INFO instead of WARNING/ERROR there.
+
+PTY success confirms the known shell/terminal closed; it never certifies every
+background or detached process disappeared. Known survivors are diagnostics.
 
 Signal delivery follows the verified launch shape. POSIX launchers exec into
 the daemon, so SIGTERM reaches the recorded PID directly.

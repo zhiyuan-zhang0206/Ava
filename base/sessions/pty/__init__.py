@@ -6,6 +6,8 @@ pty master and its screen model. A session therefore outlives an agent, an agent
 host or a gateway restarting; it ends with its shell, a ``kill``, a stop's
 closure, or the service stopping (docs/decisions/2026-10-03-pty-sessions-service.md).
 
+Closure is best effort; background/detached process absence is not certified.
+
 This package is what agent, schedule, page-server and stop processes import:
 
 - ``client.py`` — the unix-socket client and the data types it returns;
@@ -14,8 +16,7 @@ This package is what agent, schedule, page-server and stop processes import:
 - ``keys.py`` — the send-keys key vocabulary, translated to bytes before dialing;
 - ``closure.py`` — the one terminal closure (hang up, a grace, SIGKILL), run by
   the service for a stop, a shutdown and the sweep of a crashed service;
-- ``session_tree.py`` — the processes a session owns, captured by identity and
-  killed whole;
+- ``process_groups.py`` — bounded signals to known shell/foreground groups;
 - ``allocation_freeze.py`` — the home's generation-owned admission freeze;
 - ``screen.py`` — the pyte wrapper the service renders captures with.
 """
