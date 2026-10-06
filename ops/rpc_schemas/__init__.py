@@ -14,6 +14,7 @@ the door re-exports the models its importers use.
 """
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Literal, TypeGuard, get_args
 from uuid import UUID
 
@@ -25,7 +26,13 @@ from pydantic import (
     model_validator,
 )
 
-from base.agents import CrashRecoveryResult, RestartResult, ResurrectResult, ShellKillMode
+from base.agents import (
+    CancelResult,
+    CrashRecoveryResult,
+    RestartResult,
+    ResurrectResult,
+    ShellKillMode,
+)
 from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
@@ -65,7 +72,7 @@ class CancelRequested(BaseModel):
         claim pass halts the agent to idle. The process stays alive.
     `already_terminated`: agent is dead — nothing to pause."""
 
-    status: Literal["enqueued", "already_terminated"]
+    status: CancelResult
 
 
 class SpawnAgentRequest(BaseModel):
@@ -408,11 +415,18 @@ def is_op_kind(kind: str) -> TypeGuard[OpKind]:
     return kind in get_args(OpKind)
 
 
+class OpStatus(StrEnum):
+    """Completion of one machine RPC, independent of its per-kind business result."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class OpResponse(BaseModel):
     """`POST /ops` response envelope. `result` is the per-kind result model's dict
     on 'completed', or an OpFailure dict on 'failed'."""
 
-    status: Literal["completed", "failed"]
+    status: OpStatus
     result: dict[str, Any]
 
 

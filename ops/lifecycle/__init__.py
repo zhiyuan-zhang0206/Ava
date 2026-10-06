@@ -33,6 +33,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents import (
     AgentStatus,
+    CancelResult,
     CrashRecoveryResult,
     RestartResult,
     ResurrectAlreadyAlive,
@@ -157,9 +158,9 @@ async def cancel_agent_op(
     """
     iid = await asyncio.to_thread(_cancel_blocking, db, bus, agent_id, db_pool)
     if iid is None:
-        return CancelRequested(status="already_terminated")
+        return CancelRequested(status=CancelResult.ALREADY_TERMINATED)
     await publish_inbound_arrived(bus, agent_id, iid, "cancel", "user", "")
-    return CancelRequested(status="enqueued")
+    return CancelRequested(status=CancelResult.ENQUEUED)
 
 
 async def terminate_agent_op(
