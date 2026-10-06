@@ -25,9 +25,8 @@ def _standard_daemons() -> list[ServiceSpec]:
 
 
 def _inner_probe(spec: ServiceSpec) -> partial[DaemonProbe]:
-    """The daemon probe inside the root-ownership wrapper `build_services` adds."""
-    outer = cast("partial[DaemonProbe]", spec.identity_probe)
-    return cast("partial[DaemonProbe]", outer.args[2])
+    """The standard daemon declares its protocol probe directly."""
+    return cast("partial[DaemonProbe]", spec.identity_probe)
 
 
 def test_every_standard_daemon_probe_is_scoped_to_its_name_url_and_pidfile() -> None:

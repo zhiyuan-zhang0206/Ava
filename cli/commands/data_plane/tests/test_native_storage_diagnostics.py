@@ -1,9 +1,8 @@
-"""Root diagnostics observe native storage ownership without repairing permissions."""
+"""Root diagnostics use storage protocols without repairing permissions."""
 
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -11,7 +10,6 @@ import pytest
 import redis
 
 from base import cluster
-from base.cluster import ownership
 from base.config import settings
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.tests.test_pooler_stop import native_pooler as native_pooler
@@ -22,38 +20,37 @@ from tests._containers import _free_port, redis_server
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="native POSIX data plane")
 
 
-@pytest.mark.parametrize("owned", [True, False])
-async def test_native_redis_diagnostic_observes_custody_without_acl_or_config_writes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owned: bool
+async def test_native_redis_diagnostic_uses_authenticated_ping_without_acl_or_config_writes(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with redis_server() as url:
-        monkeypatch.setattr(settings.data_plane, "redis_url", url)
-        monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
-        with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — redis client stubs
-            configuration = client.config_get("*")  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-            acl = client.acl_list()  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-            directory = Path(str(configuration["dir"])) if owned else tmp_path / "another-home"
-            monkeypatch.setattr(ownership, "redis_data_dir", lambda: directory)
-            result = await ProbeRunner().observe(probes.redis_acl, 5)
-            assert result.verdict.value == ("alive" if owned else "unavailable"), result.detail
-            assert client.ping(), "diagnostics must leave the native server running"  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-            assert client.acl_list() == acl  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-            assert client.config_get("*") == configuration  # pyright: ignore[reportUnknownMemberType] — redis command stubs
+    with (
+        redis_server() as url,
+        redis.Redis.from_url(url, decode_responses=True) as client,  # pyright: ignore[reportUnknownMemberType] — redis client stubs
+    ):
+        client.execute_command(  # pyright: ignore[reportUnknownMemberType] — redis command stubs
+            "ACL", "SETUSER", "ava_probe_fixture", "on", ">fixture-password", "+ping"
+        )
+        runtime_url = url.replace("redis://", "redis://ava_probe_fixture:fixture-password@")
+        monkeypatch.setattr(settings.data_plane, "redis_url", runtime_url)
+        configuration = client.config_get("*")  # pyright: ignore[reportUnknownMemberType] — redis command stubs
+        acl = client.acl_list()  # pyright: ignore[reportUnknownMemberType] — redis command stubs
+        result = await ProbeRunner().observe(probes.redis_acl, 5)
+        assert result.verdict.value == "alive", result.detail
+        assert client.ping(), "diagnostics must leave the native server running"  # pyright: ignore[reportUnknownMemberType] — redis command stubs
+        assert client.acl_list() == acl  # pyright: ignore[reportUnknownMemberType] — redis command stubs
+        assert client.config_get("*") == configuration  # pyright: ignore[reportUnknownMemberType] — redis command stubs
 
 
-async def test_absent_native_redis_diagnostic_is_down(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_absent_native_redis_diagnostic_is_down(monkeypatch: pytest.MonkeyPatch) -> None:
     port = _free_port()
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{port}/0")
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
-    monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     result = await ProbeRunner().observe(probes.redis_acl, 5)
     assert result.verdict.value == "down", result.detail
-    assert "no native Redis listener" in result.detail
+    assert "PING failed" in result.detail
 
 
-async def test_native_pooler_diagnostic_uses_shared_custody(
+async def test_native_pooler_diagnostic_authenticates_without_config_writes(
     native_pooler: tuple[OwnedPooler, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     custodian, _pooled, _direct = native_pooler
