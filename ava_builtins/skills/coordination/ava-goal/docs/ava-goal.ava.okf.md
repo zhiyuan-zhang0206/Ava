@@ -18,4 +18,4 @@ Goal mode is only for **final-state tasks** (tasks that end) — here, idle mean
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/docs/watcher.ava.okf.md|ava.watcher]] — primitive to subscribe to target lifecycle and wake you up on idle
-- [[ava_builtins/skills/coordination/ava-watcher/docs/ava-watcher.ava.okf.md|watcher skill]] — persistent trigger-based tasks (explicitly not for goal mode) should use it
+- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — temporary event waits; durable recurring tasks use Ava Guide schedules

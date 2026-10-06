@@ -212,7 +212,7 @@ for wid in worker_ids.values():
 ## Budget reminders and deliberate pauses
 
 When budget observation is useful, choose the IDs, birth lineage, time window,
-thresholds and reminder recipients before dispatch, using `ava-watcher`'s usage
+thresholds and reminder recipients before dispatch, using `ava-being-a-long-running-agent`'s usage
 script. Reuse agreed limits; do not invent spending authority. Keep the report
 scope and watcher session ID with the run notes. A reminder asks
 for a decision; it neither terminates peers nor grants more spending.

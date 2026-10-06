@@ -35,7 +35,7 @@ the orchestrator costs N LLM turns, N-1 of which have nothing to do.
 ## Key Dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/agents/docs/agents.ava.okf.md|ava.agents]] — `spawn` fan-out; `send_message` is the checkpoint's wake-up channel, not the workers'
-- [[ava_builtins/skills/coordination/ava-watcher/docs/ava-watcher.ava.okf.md|ava-watcher]] — the checkpoint is a watcher
+- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — the checkpoint is a watcher
 - [[ava_builtins/plugins/ava_fleet/docs/spawn.ava.okf.md|Spawn]] — fleet-side spawn semantics (label / machine / preset)
 
 The core orchestration recipes do not require Fleet labels or task records. Local

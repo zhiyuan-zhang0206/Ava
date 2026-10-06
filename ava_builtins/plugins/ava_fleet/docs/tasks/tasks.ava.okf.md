@@ -58,7 +58,7 @@ The write paths of `create`/`update` publish `task_created`/`task_updated` (Redi
 
 ## Costs are independent of task records
 
-Task ownership and task notes do not attribute LLM usage. Use the `ava-watcher`
+Task ownership and task notes do not attribute LLM usage. Use the `ava-being-a-long-running-agent`
 usage script to select agents, a time window, and birth lineage. Retired budget
 and accumulated-cost database columns remain inactive for expand-contract
 upgrade compatibility; they are absent from the SDK and task API.

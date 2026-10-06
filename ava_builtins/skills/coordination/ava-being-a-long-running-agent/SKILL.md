@@ -76,9 +76,26 @@ cases:
   await genuinely is turn text; for liveness use `ava.agents.get_status(target)`.
 - **Scheduled time**: `ava.watcher.at(...)`.
 - **File to land**: poll `os.path.exists(...)` in a custom watcher.
-- **Recurring check**: `ava.watcher.cron(...)` for periodic CI/health/deadline checks.
+- **Temporary recurring model check**: `ava.watcher.cron(...)`; durable recurring work belongs in a schedule.
 
-For the watcher primitives, see the `ava-watcher` skill.
+Read `ava.help(ava.watcher)` for watcher contracts and
+`ava.help(ava.shell.sessions)` to inspect or stop the returned session.
+Use temporary watchers for a bounded wait you own. Use
+`ava.skills.ava_guide.schedules` for recurring work that must resume after an
+interruption. Peer messages already provide a wake path; do not add a watcher
+when the existing delivery meets the need.
+
+Record a baseline when arming a custom probe, along with its target and as-of
+time. Wake only when the awaited condition needs action, including if it already
+holds on the first check. Keep healthy samples in logs. Treat probe failures as
+failures, not as an unmet condition; alert after repeated failures and stop when
+the target is definitively gone. Use stable paths and refresh copied state before
+checking it. Arrange bounded, visible delivery retries when a lost wake would
+leave the task unattended.
+
+The bundled `scripts/watch_idle.py` is a reference body for an idle-agent wait.
+Read it only when implementing that wait; it uses authoritative status checks
+and bounded delivery retries. Do not start a duplicate monitor.
 
 ### pause_heartbeat
 
@@ -122,7 +139,7 @@ own delivery and choose polling intervals to satisfy the response requirement.
 Use `ava.watcher.cron` or a schedule when the recurring work itself needs model
 judgment. For mechanical CI, file, queue, or health checks, use a custom background
 watcher that checks the condition and sends a message only when you must act.
-Load `ava-watcher` for implementation details. Set the interval and lifetime from
+Read `ava.help(ava.watcher)` for API semantics. Set the interval and lifetime from
 the response requirement, and reuse existing event delivery or a monitor when it
 already covers the wait.
 
@@ -142,6 +159,18 @@ handoffs. When another agent relies on your acceptance or timing, send that
 commitment with the useful update; do not send a preliminary status solely because
 you are about to work for a long stretch. Persist intermediate progress in the
 task file so recovery does not depend on a sequence of messages.
+
+## Usage budget reminders
+
+For agent tokens or recorded API costs, read [usage reports](references/usage.md)
+and use `scripts/agent_usage.py`. Select explicit IDs, a time window or lifetime,
+and spawn/fork birth lineage; task records are not a spending ledger. Optional
+polling sends a one-shot reminder to named peers and exits without termination.
+
+Treat a reminder as a decision point. Preserve useful work and recovery notes,
+converge, hand off, or seek a revised budget according to remaining work and
+existing authority. Bound the observer lifetime and retain its session identity
+if it needs cancellation or recovery. A reminder does not authorize more spending.
 
 ## Two kinds of state, three destinations
 Your state splits across three stores with different audiences:

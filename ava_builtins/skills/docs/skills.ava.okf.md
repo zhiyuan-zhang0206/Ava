@@ -27,20 +27,18 @@ verification codes on macOS, and a full Gmail client.
 
 | Skill | Purpose | Detail |
 |-------|---------|--------|
-| ava-ui | Launch web pages to display content / collect replies (markdown+LaTeX, choice/confirm/form/compare panels) | [[ava_builtins/skills/platform/ava-ui/docs/ava-ui.ava.okf.md]] |
+| ava-guide.pages | Compose page publishing and user input with reusable frontend resources | [[ava_builtins/skills/platform/ava-guide/pages/docs/pages.ava.okf.md]] |
 | sms | Read SMS/iMessage verification codes via macOS Messages.app (on-demand script, not a daemon) | [[ava_builtins/skills/integrations/sms/docs/sms.ava.okf.md]] |
 | gmail | Full Gmail client (read/search/send/reply/forward/draft + newsletter, pure stdlib IMAP/SMTP) | [[ava_builtins/skills/integrations/gmail/docs/gmail.ava.okf.md]] |
 
 ## Ops, scheduling & lifecycle
 Operating and extending Ava, scheduling timed tasks, background watchers, and
-behavioral discipline for long-running/ultra-speed agents.
+behavioral discipline for long-running agents.
 
 | Skill | Purpose | Detail |
 |------|------|------|
 | ava-guide | Shared guide for humans and internal/external agents: deploy, operate, extend, schedule, and manage agents; root routes to sub-skills | [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md]] |
-| ava-watcher | Start a background watcher that wakes you on event/time triggers (stop in-turn polling) | [[ava_builtins/skills/coordination/ava-watcher/docs/ava-watcher.ava.okf.md]] |
 | ava-being-a-long-running-agent | Operating as a long-running process: manage lifecycle, wait for external events, persist before compaction | [[ava_builtins/skills/coordination/ava-being-a-long-running-agent/docs/ava-being-a-long-running-agent.ava.okf.md]] |
-| ava-ultra-speed | Speed discipline for ultra-fast turnover workers: report as you go, never wait silently | [[ava_builtins/skills/coordination/ava-ultra-speed/docs/ava-ultra-speed.ava.okf.md]] |
 
 ## Orchestration & workflow
 Breaking large tasks into multi-agent / long tasks and driving them.
@@ -77,7 +75,9 @@ The remaining top-level built-ins (such as `ava-corp`, `ava-deep-research`,
 have no OKF node; their `SKILL.md` is the reference. Capability/timescale
 calibration belongs to `ava-workflow`; deployment, incident operations,
 modification layers, installation, plugin development, schedules, and external
-agent execution belong to `ava-guide`.
+agent execution and page composition belong to `ava-guide`. Temporary waiting
+contracts belong to `ava.watcher`; waiting and recovery methods belong to
+`ava-being-a-long-running-agent`. Model speed and feedback settings belong to presets.
 
 ## Key dependencies
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — skill mechanism and core-vs-instance origin axis

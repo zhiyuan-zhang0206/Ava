@@ -1,6 +1,6 @@
 ---
 name: ava-guide
-description: Guides humans, external agents, and Ava agents in understanding, deploying, operating, and extending Ava. Use for Ava CLI or SDK operations, cluster health, packages, plugins, schedules, agent configuration, or external-agent delegation and takeover.
+description: Guides humans, external agents, and Ava agents in understanding, deploying, operating, and extending Ava. Use for Ava CLI or SDK operations, cluster health, packages, plugins, schedules, agent configuration, page publishing and user input, or external-agent delegation and takeover.
 ---
 
 # Ava Guide
@@ -44,6 +44,7 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Create and manage reusable agent configurations | [presets](presets/SKILL.md) |
 | Choose a model for an agent | [models](models/SKILL.md) |
 | Write, create, inspect, or change persistent scheduled work | [schedules](schedules/SKILL.md) |
+| Publish an artifact or collect user input through a page | [pages](pages/SKILL.md) |
 | Launch and supervise an external coding agent, or arrange a takeover | [external-agents](external-agents/SKILL.md) |
 | Dispose of dead agents' workspaces | [workspace-cleanup](workspace-cleanup/SKILL.md) |
 | Begin using Ava or migrate from another tool | [onboarding](onboarding/SKILL.md) |

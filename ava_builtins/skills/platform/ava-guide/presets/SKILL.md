@@ -54,7 +54,8 @@ include:
 | `auto_compact_fraction` | Auto compact threshold (as fraction of window) | float |
 | `auto_compact_ceiling_tokens` | Absolute cap on auto compact threshold in tokens (0=no cap; actual threshold is the smaller of the two) | int |
 | `passive_memory_recall_enabled` | Enable passive memory recall | bool |
-| `agent_reply_reminder_cadence` | Reply reminder cadence | int |
+| `agent_reply_reminder_cadence` | Peer-reply reminder cadence (`once_per_compaction` / `every_time`) | string |
+| `agent_communication_style` | Feedback style (`oriented` / `concise` / `silent` / `off`) | string |
 
 > **Model ids come from the registry, not from memory.** `llm_model` values must
 > be ids on the current roster — list them with `GET /api/models` or read
@@ -78,13 +79,23 @@ Based on the user's description, assemble a config object:
 
 ```python
 config = {
-    # Full SKILL.md text loaded before the first turn — the field that actually
-    # differentiates a role. Keep it to short disciplinary skills; a large
-    # reference skill is already one ava.help() away via the index.
-    "skills_to_expand_at_start": ["ava-ultra-speed"],
-    "llm_model": "deepseek-flash",
+    "llm_model": "<registered-model-id>",
+    "agent_communication_style": "oriented",
+    "agent_reply_reminder_cadence": "every_time",
 }
 ```
+
+Choose the model from the current roster and select feedback behavior separately.
+A fast model does not require a speed-named skill. Shared lifecycle and fleet
+rules already cover completion, useful progress reports, and peer replies; do
+not duplicate them or require short repeated polls. Role-specific knowledge can
+still be preloaded through `skills_to_expand_at_start`.
+
+For an existing preset that names the retired `ava-ultra-speed` skill, remove
+that entry from `skills_to_expand_at_start` before using it for a new agent and
+choose the feedback settings above as needed. A preset is a configuration
+snapshot, not an arbitrary prompt-text field. Running agents retain their
+existing snapshot; a repository edit does not rewrite stored presets.
 
 **Do not** hand a preset a `skills_to_inject_into_system_prompt` list unless the
 intent is to SHORTEN what that agent reads: the cluster default is `*` (every

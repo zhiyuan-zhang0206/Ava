@@ -28,7 +28,7 @@ from tests.e2e.fakes._recording import model_inputs, reset_record, scratch_root
 
 _OBSERVER = (
     Path(__file__).resolve().parents[3]
-    / "ava_builtins/skills/coordination/ava-watcher/scripts/agent_usage.py"
+    / "ava_builtins/skills/coordination/ava-being-a-long-running-agent/scripts/agent_usage.py"
 )
 
 

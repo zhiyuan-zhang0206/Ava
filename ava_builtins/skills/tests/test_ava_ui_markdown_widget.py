@@ -1,6 +1,6 @@
-"""Invariant tests for the ava-ui markdown widget template.
+"""Invariant tests for the Ava Guide page Markdown resource template.
 
-`ava_builtins/skills/platform/ava-ui/widgets/markdown/md.html` is a template an agent
+`ava_builtins/skills/platform/ava-guide/pages/widgets/markdown/md.html` is a template an agent
 copies into a page directory and injects Markdown into. It used to carry the
 `{{MARKDOWN_CONTENT}}` token twice — once in the descriptive header comment and
 once in the real `<script type="text/markdown" id="md-source">` slot — while the
@@ -24,7 +24,8 @@ _TEMPLATE = (
     / "ava_builtins"
     / "skills"
     / "platform"
-    / "ava-ui"
+    / "ava-guide"
+    / "pages"
     / "widgets"
     / "markdown"
     / "md.html"

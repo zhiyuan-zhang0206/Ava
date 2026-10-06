@@ -476,7 +476,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/test_goal_watch_filter.py": (
         "contract",
-        "tests the watch_idle reference snippets of the ava-goal, ava-watcher and ava-fleet skills",
+        "tests the watch_idle reference snippets of the ava-goal, long-running-agent and ava-fleet skills",
     ),
     "tests/test_helperproc.py": (
         "integration",

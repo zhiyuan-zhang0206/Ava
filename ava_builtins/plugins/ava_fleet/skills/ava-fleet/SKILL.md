@@ -111,8 +111,8 @@ An explicit reporting agreement and protocol receipt ACKs still apply.
 Progress and conclusions reach the delegator for aggregation; user authorization
 or decisions reach the user directly. With no delegator, deliver directly.
 For communication with the user, follow `reduce-context-switch-for-human`.
-For mechanical monitoring and waiting, use `ava-being-a-long-running-agent` and
-`ava-watcher`; generated watchers and schedules follow the same fleet contract.
+For mechanical monitoring and waiting, use `ava-being-a-long-running-agent`
+and `ava.help(ava.watcher)`; generated watchers and schedules follow the same fleet contract.
 
 ## Two Dials: Effort and Autonomy
 
@@ -136,7 +136,7 @@ Authorization widens what you may do on your own; it does not remove the rails. 
 - **Don't touch prod** — no deploys, no prod data-plane writes, no rollout.
 - **Spend only what was authorized** — the budget in the approval is a ceiling, not a target.
 
-Usage reminders are independent of Fleet task records. Load `ava-watcher` for
+Usage reminders are independent of Fleet task records. Load `ava-being-a-long-running-agent` for
 its agent usage script: choose IDs, a time window, and spawn/fork birth lineage,
 then notify the peers responsible for the work when the agreed threshold is
 reached. The receiving agent decides how to converge, finish a safe unit,

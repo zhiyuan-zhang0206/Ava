@@ -200,6 +200,15 @@ The [engineering review](../ava-serious-engineering/practices/review/SKILL.md)
 guide offers failure-path questions when useful. Project contributors follow the
 project's contributing guidance; maintainers choose its merge process.
 
+## Presenting a question to the human
+
+Use a page when an artifact comparison or structured input is clearer than chat.
+State the decision, its consequences, and the action each choice authorizes.
+Use a general frontend skill for design and `ava.skills.ava_guide.pages` for Ava
+publishing and reply resources. Record the awaited input, end the turn, and
+continue when it arrives. Interpret the response within the existing task scope;
+a confirmation label does not grant authority for unrelated actions.
+
 ## Detailed Guides
 
 - [Calibrate](calibrate/SKILL.md) — investigate and correct factual understanding.
@@ -209,4 +218,4 @@ project's contributing guidance; maintainers choose its merge process.
 - [Work & Evaluate](work-eval/SKILL.md) — execute and verify against the chosen criteria.
 - [Goal supervision](../../coordination/ava-goal/SKILL.md) — sustain a peer's work toward a terminal outcome.
 - [Dynamic Workflow](../../coordination/ava-dynamic-workflow/SKILL.md) — generate a Python script to coordinate peers and aggregate results.
-- [Watcher](../../coordination/ava-watcher/SKILL.md) — wait for an event or time without repeated model turns.
+- [Long-running work](../../coordination/ava-being-a-long-running-agent/SKILL.md) — arrange event delivery, bounded waits, and recovery without repeated model turns.

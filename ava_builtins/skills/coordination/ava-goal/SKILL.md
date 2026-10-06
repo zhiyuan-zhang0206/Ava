@@ -20,8 +20,8 @@ does not itself authorize more work. Continue only while the work remains
 authorized and the worker has not deliberately paused. Do **not** put a perpetual,
 trigger-driven agent in goal mode (an inbox poller, a daily disk check): its idle
 means "finished this round correctly, waiting for the next trigger," so nudging it
-is pure harassment. Perpetual work is a `ava-watcher`'s job. To quality-check one such
-round, spawn a separate quality-check supervisor that judges *this round's* output
+is pure harassment. Persistent recurring work belongs in `ava-guide.schedules`;
+temporary waits use `ava.watcher`. To quality-check one such round, spawn a separate quality-check supervisor that judges *this round's* output
 — not a completion driver that says "keep going."
 
 ## Procedure
