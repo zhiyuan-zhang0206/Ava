@@ -248,8 +248,6 @@ async def _handle_compile_failure(
     tool_msg = exec_output_message(
         content=error_text,
         tool_call_id=tool_call_id,
-        exit_code=1,
-        cancelled=False,
     )
     return {
         "goto": "after_exec",

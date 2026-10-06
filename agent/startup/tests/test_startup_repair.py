@@ -182,7 +182,6 @@ def test_repairs_single_dangling_tool_use_at_tail() -> None:
     assert rebuilt[0] is original
     assert isinstance(rebuilt[1], ToolMessage)
     assert rebuilt[1].tool_call_id == "call_abc"
-    assert rebuilt[1].additional_kwargs["ava_cancelled"] is True  # pyright: ignore[reportUnknownMemberType]
     assert rebuilt[1].additional_kwargs["ava_msg_type"] == "exec_output"  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -218,7 +217,6 @@ def test_buried_dangling_rebuilds_with_inserted_tool_result() -> None:
     # synthetic tool_result lands immediately after the dangling AIMessage
     assert isinstance(rebuilt[2], ToolMessage)
     assert rebuilt[2].tool_call_id == "call_x"
-    assert rebuilt[2].additional_kwargs["ava_cancelled"] is True  # pyright: ignore[reportUnknownMemberType]
     # original messages preserved, in order, by identity
     assert [m for m in rebuilt if m is not rebuilt[2]] == msgs
 

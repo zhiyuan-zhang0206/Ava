@@ -68,7 +68,6 @@ from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
 from base.agents.context import AvaContext, agent_id_from_config
-from base.agents.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
 from base.config import settings
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
@@ -229,8 +228,8 @@ def _dispatch_exec_result(
     agent_id: int,
     *,
     referenced_messages: Sequence[AnyMessage] = (),
-) -> tuple[bool, str, int]:
-    """Map the `_ExecResult` sum type to (halted, result_text, exit_code_for_msg).
+) -> tuple[bool, str]:
+    """Map the `_ExecResult` sum type to (halted, result_text).
 
     Lifecycle priority (lifecycle always wins the cancel/timeout race) is
     implemented at the construction site in `_construct_exec_result` (`_result.py`); the match directly
@@ -251,7 +250,6 @@ def _dispatch_exec_result(
             result_text = wrap_code_output(
                 output, stream_cap=stream_cap, referenced_messages=referenced_messages
             )
-            exit_code_for_msg = SYSTEM_HALT_EXIT_CODE
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info("[{label}] {body}", label="halt", body="system_halt (compact)")
         case _ExecLifecycle(
@@ -264,7 +262,6 @@ def _dispatch_exec_result(
             result_text = wrap_code_output(
                 output, stream_cap=stream_cap, referenced_messages=referenced_messages
             )
-            exit_code_for_msg = IDLE_EXIT_CODE
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info(
                 "[{label}] {body}",
@@ -289,7 +286,6 @@ def _dispatch_exec_result(
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
-            exit_code_for_msg = -1
             logger.info(
                 "[{label}] {body}", label="exec-cancelled", body=result_text, event="exec_cancelled"
             )
@@ -307,7 +303,6 @@ def _dispatch_exec_result(
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
-            exit_code_for_msg = -1
             logger.info(
                 "[{label}] {body}", label="exec-timeout", body=result_text, event="exec_timeout"
             )
@@ -334,7 +329,6 @@ def _dispatch_exec_result(
             result_text = wrap_code_output(
                 output, stream_cap=stream_cap, referenced_messages=referenced_messages
             )
-            exit_code_for_msg = 0
             logger.info(
                 "[{label}] {body}\n[full traceback]\n{full_traceback}",
                 label="exec-failed",
@@ -354,9 +348,8 @@ def _dispatch_exec_result(
             result_text = wrap_code_output(
                 output, stream_cap=stream_cap, referenced_messages=referenced_messages
             )
-            exit_code_for_msg = 0
             logger.info("[{label}] {body}", label="exec", body=result_text)
-    return halted, result_text, exit_code_for_msg
+    return halted, result_text
 
 
 def _attach_model(ctx: AvaContext) -> str:
@@ -391,7 +384,6 @@ async def _exec_single_call(
         error = exec_output_message(
             content=f"unknown tool {call['name']!r}; only `execute_code(code: str)` is registered",
             tool_call_id=call["id"] or "",
-            exit_code=0,
             created_at=datetime.now(UTC),
         )
         ctx.event_publisher.emit(
@@ -424,7 +416,7 @@ async def _exec_single_call(
         code_from_args(call["args"], source=f"tool_call {call['id']!r}"),
         chunk_publisher,
     )
-    halted, result_text, exit_code_for_msg = _dispatch_exec_result(
+    halted, result_text = _dispatch_exec_result(
         result, ctx, agent_id, referenced_messages=state.messages
     )
 
@@ -456,9 +448,6 @@ async def _exec_single_call(
         msg = exec_output_message(
             content=result_text,
             tool_call_id=call["id"] or "",
-            exit_code=exit_code_for_msg,
-            cancelled=isinstance(result, _ExecCancelled),
-            timed_out=isinstance(result, _ExecTimedOut),
             exec_ms=exec_ms,
             sdk_calls=envelope_sdk_calls,
             created_at=datetime.now(UTC),
@@ -519,7 +508,6 @@ def _skipped_call_results(
         message = exec_output_message(
             content="Not executed: an earlier tool call halted or cancelled this turn.",
             tool_call_id=call["id"] or "",
-            exit_code=-1,
             created_at=datetime.now(UTC),
         )
         results.append(message)

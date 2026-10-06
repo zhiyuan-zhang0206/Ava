@@ -313,7 +313,6 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     message = cast(ToolMessage, result.update["messages"][0])
     assert f"[cancelled by {expected}]" in message.content
     assert "external side effect already happened" in message.content
-    assert message.additional_kwargs["ava_cancelled"] is True
     assert db_conn.execute(
         "SELECT status,claimed_at,applied_at,observed_at FROM inbound_messages WHERE id=%s",
         (command[0],),
@@ -350,8 +349,6 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     assert "[cancelled by user]" in content
     assert "partial work" in content
     assert update["halted"] is True
-    assert msg.additional_kwargs["ava_cancelled"] is True
-    assert msg.additional_kwargs["ava_exit_code"] == -1
     assert _has_cancelled_event(pub, agent_id=7)
 
 
@@ -360,7 +357,7 @@ async def test_exec_node_cancel_event_race_normal_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """cancel_event not set, the exec completes normally → exec_node returns Command with
-    wrap_code_output format ('Code execution output:'), exit_code=0."""
+    wrap_code_output format ('Code execution output:')."""
 
     async def _fake_normal(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
@@ -380,8 +377,6 @@ async def test_exec_node_cancel_event_race_normal_completion(
     assert "Code execution output" in content
     assert "hello" in content
     assert "[exit" not in content
-    assert msg.additional_kwargs["ava_exit_code"] == 0  # pyright: ignore[reportUnknownMemberType]
-    assert msg.additional_kwargs["ava_cancelled"] is False  # pyright: ignore[reportUnknownMemberType]
 
 
 # ---------------------------------------------------------------------------
@@ -425,9 +420,6 @@ async def test_exec_node_timeout_path(
     assert "[timeout after 60s]" in content
     assert "[cancelled by user]" not in content
     assert update["halted"] is False
-    assert msg.additional_kwargs["ava_timed_out"] is True
-    assert msg.additional_kwargs["ava_cancelled"] is False
-    assert msg.additional_kwargs["ava_exit_code"] == -1
 
 
 async def test_exec_node_timeout_empty_output(
@@ -452,7 +444,6 @@ async def test_exec_node_timeout_empty_output(
     content = msg.content  # pyright: ignore[reportUnknownMemberType]
     assert "[timeout after 60s]" in content
     assert "(no output)" in content
-    assert msg.additional_kwargs["ava_timed_out"] is True  # pyright: ignore[reportUnknownMemberType]
 
 
 # ---------------------------------------------------------------------------
@@ -582,10 +573,8 @@ async def test_exec_node_dispatch_agent_termination(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_ExecLifecycle(AgentTermination) → halted=True + no envelope marker +
-    exit_code_for_msg=IDLE_EXIT_CODE (claim side writes the lifecycle marker)."""
+    """_ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
     from ava.self import AgentTermination
-    from base.agents.exit_codes import IDLE_EXIT_CODE
 
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
@@ -602,7 +591,6 @@ async def test_exec_node_dispatch_agent_termination(
     assert "[cancelled by user]" not in msg.content  # pyright: ignore[reportUnknownMemberType]
     assert "[timeout after 60s]" not in msg.content  # pyright: ignore[reportUnknownMemberType]
     assert "[system halt]" not in msg.content  # pyright: ignore[reportUnknownMemberType]
-    assert msg.additional_kwargs["ava_exit_code"] == IDLE_EXIT_CODE  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_exec_node_dispatch_agent_restart(
@@ -612,7 +600,6 @@ async def test_exec_node_dispatch_agent_restart(
     """_ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
     with AgentTermination path)."""
     from ava.self import AgentRestart
-    from base.agents.exit_codes import IDLE_EXIT_CODE
 
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
@@ -625,8 +612,6 @@ async def test_exec_node_dispatch_agent_restart(
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
-    msg = result.update["messages"][0]
-    assert msg.additional_kwargs["ava_exit_code"] == IDLE_EXIT_CODE  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_exec_node_dispatch_ordinary_exception(
@@ -654,8 +639,6 @@ async def test_exec_node_dispatch_ordinary_exception(
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is False
-    msg = result.update["messages"][0]
-    assert msg.additional_kwargs["ava_exit_code"] == 0  # pyright: ignore[reportUnknownMemberType]
     # INFO level — a failed execute_code is ordinary dev feedback, not an
     # operator alert (the event name still feeds per-event metrics).
     failed = [r for r in loguru_records if r["extra"].get("event") == "exec_failed"]  # pyright: ignore[reportUnknownMemberType]
