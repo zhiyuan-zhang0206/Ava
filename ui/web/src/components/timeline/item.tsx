@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 
 import { EphemeralSystemMarker, MarkerBody, classifyMarker } from "./markers";
 import { isLiveReasoning } from "./reasoning-clock";
+import { inboundKind } from "./runs";
 import { FLEX } from "@/lib/layout";
 
 // Cap how often a streaming item re-parses its content (markdown / Prism).
@@ -249,6 +250,7 @@ function EnvelopeContent({
   showCopy = false,
   attachMode = false,
   plainMessage = false,
+  markdown = false,
   imageCaptions = null,
 }: {
   payload: string;
@@ -261,6 +263,8 @@ function EnvelopeContent({
   attachMode?: boolean;
   /** Impersonation messages store the original body without an envelope. */
   plainMessage?: boolean;
+  /** The body is model-authored Markdown (compact summary, inter-agent message): render it through ChatMarkdown. */
+  markdown?: boolean;
   /** Backend caption line per image (1:1 with `images`) — attach items only. */
   imageCaptions?: string[] | null;
 }) {
@@ -295,7 +299,7 @@ function EnvelopeContent({
         </div>
       ) : null}
       {showBody ? (
-        plainMessage ? <ChatMarkdown content={body} /> : showCopy ? (
+        plainMessage || markdown ? <ChatMarkdown content={body} /> : showCopy ? (
           <div className="group relative">
             <CopyButton text={body} label={t("commandOutput")} />
             <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-foreground/90 m-0">
@@ -356,8 +360,16 @@ export const ItemView = memo(function ItemView({
 
   switch (item.kind) {
     case "inbound_chat":
-      return <EnvelopeContent payload={item.payload} images={item.images} plainMessage={!!item.impersonation} />;
+      return (
+        <EnvelopeContent
+          payload={item.payload}
+          images={item.images}
+          plainMessage={!!item.impersonation}
+          markdown={inboundKind(item.source) === "agent"}
+        />
+      );
     case "inbound_compact_summary":
+      return <EnvelopeContent payload={item.payload} images={item.images} markdown />;
     case "inbound_compact_request":
       return <EnvelopeContent payload={item.payload} images={item.images} />;
 
@@ -452,7 +464,7 @@ export const ItemView = memo(function ItemView({
       if (cls.kind === "ephemeral") {
         return <EphemeralSystemMarker source={item.source} payload={item.payload} />;
       }
-      return <MarkerBody payload={item.payload} />;
+      return <MarkerBody payload={item.payload} markdown={cls.kind === "memory"} />;
     }
   }
 
