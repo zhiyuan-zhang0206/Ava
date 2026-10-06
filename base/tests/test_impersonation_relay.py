@@ -210,15 +210,16 @@ def test_active_lease_binding_inherits_the_replacement_incarnation(
         leases.provision_relay(database, lease["id"], owner, "old-incarnation-credential")
 
 
+@pytest.mark.parametrize("kind", ["chat", "heartbeat"])
 def test_relay_inbox_uses_the_scoped_credential_only(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus, kind: str
 ) -> None:
     owner = _agent(db_conn)
     lease = _request(owner, provider="claude", thread=None)
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(database, event_bus, lease["id"], owner)
     insert_inbound_message(
-        db_conn, owner.agent_id, "hello", "user", kind="chat", bus=event_bus, database=database
+        db_conn, owner.agent_id, "hello", "system", kind=kind, bus=event_bus, database=database
     )
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):

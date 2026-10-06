@@ -138,6 +138,11 @@ Messages carry a `kind` that tells you how to treat them:
 - `chat` — instructions and questions from the Ava agent or the user. The work.
 - `reminder` — a lease-expiry renewal reminder from Ava, pushed about five
   minutes before the TTL elapses (see Renewal below).
+- `heartbeat` — a periodic check-in under the borrowed agent's heartbeat rules.
+  Acknowledge it and continue useful work, or call `ava.self.pause_heartbeat(seconds)`
+  under the SDK attachment for a known wait or uninterrupted work period. The
+  clock runs throughout an active lease, regardless of external activity; the
+  pause survives native return; it does not pause expiry reminders or renew the lease.
 - `cancel` — stop your current work now (see below).
 - `system_note` — platform lifecycle information (rare during a lease).
 

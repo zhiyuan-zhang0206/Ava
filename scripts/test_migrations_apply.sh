@@ -208,6 +208,8 @@ INSERT INTO agent_impersonations (
 -- Exercise allocation, both history writers, and the permanent-history guard.
 INSERT INTO inbound_messages(agent_id,kind,source,content)
 VALUES(991005,'chat','user','Permanent smoke message');
+INSERT INTO inbound_messages(agent_id,kind,source,content)
+VALUES(991005,'heartbeat','system','Heartbeat smoke message');
 UPDATE agent_impersonations SET expires_at=expires_at+interval '1 minute' WHERE agent_id=991005;
 DO $$
 DECLARE protected BOOLEAN := FALSE;
@@ -215,7 +217,12 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM agent_impersonations WHERE agent_id=991005 AND session_id=0 AND name='Session 0') THEN
         RAISE EXCEPTION 'Agent-scoped session allocation failed';
     END IF;
-    IF (SELECT count(*) FROM agent_impersonation_entries) <> 3 THEN
+    IF NOT EXISTS (SELECT 1 FROM agent_impersonation_entries
+                   WHERE payload->>'kind'='heartbeat'
+                     AND payload->>'content'='Heartbeat smoke message') THEN
+        RAISE EXCEPTION 'Impersonation heartbeat history trigger did not run';
+    END IF;
+    IF (SELECT count(*) FROM agent_impersonation_entries) <> 4 THEN
         RAISE EXCEPTION 'Lifecycle or inbound history trigger did not run';
     END IF;
     BEGIN

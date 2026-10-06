@@ -186,12 +186,12 @@ class TestSelectIdleAgents:
         db_conn.commit()
         assert aid not in _selected(pool)
 
-    @pytest.mark.parametrize("status", ["requested", "accepted", "active"])
+    @pytest.mark.parametrize("status", ["requested", "accepted"])
     def test_agent_under_open_impersonation_lease_excluded(
         self, pool: ConnectionPool, db_conn: psycopg.Connection, status: str
     ) -> None:
-        """Task #4872: while a lease is open, control is with the impersonation
-        plane — the native loop is not the consumer, so a check-in could not
+        """Task #4872: while a lease is preparing, neither executor can
+        receive a check-in, so it could not
         produce a turn and must not be queued (it would only age into a false
         delivery poison)."""
         aid = _make_idle(db_conn, status_changed_s_ago=400)

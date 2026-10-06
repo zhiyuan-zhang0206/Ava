@@ -1895,7 +1895,7 @@ CREATE TRIGGER agent_impersonations_lifecycle AFTER INSERT OR UPDATE OF status,e
 CREATE FUNCTION record_impersonation_inbound() RETURNS trigger AS $$
 DECLARE lease UUID; entry_no BIGINT;
 BEGIN
-    IF NEW.kind NOT IN ('chat','system_note','cancel','reminder') THEN RETURN NEW; END IF;
+    IF NEW.kind NOT IN ('chat','system_note','cancel','reminder','heartbeat') THEN RETURN NEW; END IF;
     -- Match native admission, activation and inbox claim lock order.
     PERFORM id FROM agents_meta WHERE id=NEW.agent_id FOR UPDATE;
     SELECT id INTO lease FROM agent_impersonations
