@@ -60,6 +60,13 @@ an immutable running release or seal ignored dependency directories.
   writes no PIDFile. `KillMode=process` preserves independent data-plane siblings.
 ## Unit intent and recorded failures
 
+The up-half/episode tests arrange child closure through a captured disposable
+birth and await its real watcher before restart releases custody. They retain
+input-seal validation, durable intent, failure episodes and fresh generation
+assertions without coupling them to a live TERM deadline. Native down-refusal
+in `tests/test_ava_root_intent.py` and `tests/test_ava_root_stop_window.py` retain
+real graceful-stop and refusal coverage.
+
 Each unit carries one policy fact: its `intent` (`running` | `stopped`) and the
 source that last set it (`operator` | `self` | `selection`), persisted per unit
 under the run directory (`intent/<unit>.json`, atomic writes). Classification of
