@@ -675,7 +675,7 @@ export function CallBadge({ call }: { call: SdkCall }) {
 
 function OutputSummary({ item, payload, now }: { item: BackendTimelineItem; payload: string; now: number }) {
   const t = useTranslations("timeline");
-  const { lines, hasError } = summarizeOutput(payload);
+  const { lines } = summarizeOutput(payload);
   // exec_ms is the real wall-clock the code ran (backend); lead with it since
   // "how long did it take" is the primary signal. Absent on historical rows
   // from before durations were persisted — then just show the line count. While
@@ -690,9 +690,8 @@ function OutputSummary({ item, payload, now }: { item: BackendTimelineItem; payl
   }
   return (
     <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Terminal className={cn("size-3.5 shrink-0", hasError && "text-destructive", liveExec && "text-sky-500")} />
+      <Terminal className={cn("size-3.5 shrink-0", liveExec && "text-sky-500")} />
       <span className="truncate tabular-nums">
-        {hasError ? <span className="text-destructive">{t("error")} · </span> : null}
         {ran ? <>{ran}<span className="opacity-60">{" · "}</span></> : null}
         {t("lineCount", { count: lines, unit: t(lines === 1 ? "line" : "lines") })}
       </span>

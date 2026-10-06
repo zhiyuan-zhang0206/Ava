@@ -1,6 +1,5 @@
 {
   "systemPrompt": "系统提示词",
-  "error": "错误",
   "thinking": "思考中",
   "thinkingFor": "思考中 {duration}",
   "thoughtFor": "思考了 {duration}",

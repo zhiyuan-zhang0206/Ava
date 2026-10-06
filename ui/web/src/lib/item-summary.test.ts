@@ -109,28 +109,10 @@ describe("summarizeOutput", () => {
     const s = summarizeOutput("a\nb\nc\n");
     expect(s.lines).toBe(3);
     expect(s.chars).toBe(6);
-    expect(s.hasError).toBe(false);
   });
 
   it("empty output is zero lines", () => {
     expect(summarizeOutput("").lines).toBe(0);
-  });
-
-  it("flags a traceback", () => {
-    const out = [
-      "Traceback (most recent call last):",
-      '  File "<stdin>", line 1, in <module>',
-      "ValueError: bad",
-    ].join("\n");
-    expect(summarizeOutput(out).hasError).toBe(true);
-  });
-
-  it("flags a bare trailing error line", () => {
-    expect(summarizeOutput("some output\nKeyError: 'x'").hasError).toBe(true);
-  });
-
-  it("does not flag the word error mid-sentence", () => {
-    expect(summarizeOutput("no error here, all good").hasError).toBe(false);
   });
 });
 
