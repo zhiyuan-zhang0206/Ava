@@ -91,6 +91,10 @@ and deletion closure as CI-only; a passing subset does not certify omitted
 consumers. Full suites remain CI-only. Fix genuine hook failures and report any checks that could not run. Do not use `--no-verify` to
 bypass unrelated checks.
 
+The generated HTTP OpenAPI schema and TypeScript declarations have no runtime
+Vitest imports. Their changes retain project typechecking, codegen freshness and
+known filesystem consumers; runtime source edits still use related-test selection.
+
 Record the tested revision and relevant commands/results. A missing workflow,
 empty test collection or skipped affected check is not successful verification.
 
