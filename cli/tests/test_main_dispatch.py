@@ -2,8 +2,8 @@
 
 main() builds the argparse parser, parses argv, then calls `args.func(args)`
 where `func` was bound at parser-build time via `set_defaults(func=...)`,
-referring to the `_h_*` handler defined in its own `cli.parsers.<domain>`
-module. Each handler lazy-imports the cmd_X impl; this test patches the
+referring to the `_h_*` handler defined in its owning parser module. Each handler
+lazy-imports the cmd_X impl; this test patches the
 handler binding (on the module that defines it, before the parser is built)
 to record routing without invoking real cmd_start / cmd_cluster_status / etc.
 """
@@ -22,7 +22,7 @@ import pytest
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from base.native_process import code_version
 from cli import main as _main
-from cli.parsers import agents as _agents
+from cli.commands.agents import parsers as _agents
 from cli.parsers import backup as _backup
 from cli.parsers import build_parser
 from cli.parsers import cluster as _cluster
@@ -74,7 +74,7 @@ def _iter_leaf_parsers(
 
 def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
     """Every leaf subcommand's `func` must be a callable defined in the
-    `cli.parsers.*` module that built it — guards against a builder left
+    owning parser module that built it — guards against a builder left
     pointing at a handler name that was renamed or removed (e.g. a stale
     `cli.main` re-export)."""
     leaves = _iter_leaf_parsers(build_parser())
@@ -83,9 +83,10 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
         func = leaf.get_default("func")
         assert callable(func), f"{leaf.prog!r} has no callable 'func' bound"
         module = getattr(func, "__module__", "")
-        assert module.startswith("cli.parsers."), (
-            f"{leaf.prog!r} binds {func!r} from {module!r}, not a cli.parsers module"
-        )
+        if leaf.prog.startswith(("ava agents ", "ava notices ")):
+            assert module == "cli.commands.agents.parsers", (leaf.prog, module)
+        else:
+            assert module.startswith("cli.parsers."), (leaf.prog, module)
 
 
 def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
@@ -95,6 +96,10 @@ import sys
 import cli.main
 assert 'base.log' not in sys.modules
 assert 'base.config' not in sys.modules
+assert not any(name in sys.modules for name in (
+    'cli.commands.agents.control', 'cli.commands.agents.notices',
+    'cli.commands.agents.timeline',
+))
 """
     result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
         [sys.executable, "-B", "-c", code],
@@ -109,7 +114,7 @@ assert 'base.config' not in sys.modules
 
 
 # Each top-level (and nested) ava sub-command maps to a _h_* handler defined
-# in its own cli.parsers.<domain> module.
+# in its owning settings-free parser module.
 _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
     (["stop"], _host, "_h_stop"),
     (["restart"], _host, "_h_restart"),
@@ -672,6 +677,13 @@ if sys.argv[1] == 'parser':
     parser = build_parser()
     args = parser.parse_args(['cluster', 'db-authority', 'issue-unit', '--machine', 'unit', '--home', '/unit', '--out', '/unused/bundle'])
     assert args.machine == 'unit'
+    args = parser.parse_args(['agents', 'restart', '7', '--config', '{}'])
+    assert args.agent_id == 7
+    assert args.config == '{}'
+    args = parser.parse_args(['notices', 'list', '--agent', '7'])
+    assert args.agent == 7
+    loaded = {name for name in sys.modules if name.startswith('cli.commands.')}
+    assert loaded == {'cli.commands.agents', 'cli.commands.agents.parsers'}, loaded
 elif sys.argv[1] == 'config':
     import cli.commands.management.config
 assert 'base.config' not in sys.modules

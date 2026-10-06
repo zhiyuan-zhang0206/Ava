@@ -243,9 +243,9 @@ def _add_resurrect_billing_parser(
     agents_resurrect_billing_p.set_defaults(func=_h_agents_resurrect_billing)
 
 
-def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava agents` — operator lifecycle ops (thin client over the gateway's
-    # /api/agents + /api/cancel routes). Handlers defer the cli.commands import so
+    # /api/agents + /api/cancel routes). Handlers defer runtime imports so
     # `ava --help` builds the parser without a configured .env. Verbs are ordered
     # by escalating force (cancel < restart < terminate < kill) plus ls.
     agents_p = sub.add_parser(
