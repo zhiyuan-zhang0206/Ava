@@ -55,6 +55,15 @@ tags:
 - Enable/disable uses per-machine `~/.ava/plugins_config.json` (`base/packages/plugins/enable_config.py:set_local_enabled` is the only writer), CLI `ava plugins enable/disable <name>` — no `AVA_FLEET_ENABLED` or similar env switch
 - After disabling: `ava.ui` falls back to pure page mode (no notifications), `ava.self`'s log/label methods disappear, `ava.tasks` namespace disappears, `spawn(label=…)` raises TypeError
 
+## Workflow boundary
+
+Fleet exposes optional collaboration and tracking capabilities. `ava-workflow`
+owns selection of direct execution, delegation, and orchestration. Enabling Fleet
+or reading its skill does not require spawning peers, creating registry tasks,
+setting a role label, or building a management tree. Task lifecycle rules apply
+when an agent chooses task tracking or accepts an existing task. Delegated result
+routing applies to an accepted assignment, not merely a spawn ancestry edge.
+
 ## Communication ownership
 
 `ava_builtins/plugins/ava_fleet/agent_runtime.py:_fleet_self_section` owns the agent-to-agent communication

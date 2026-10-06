@@ -1,21 +1,26 @@
 ---
 name: ava-fleet
-description: Coordinates disposable orchestrators and workers with explicit missions, skill names, reporting, and evaluation. Use when a goal exceeds one run, when spawning or supervising workers, or whenever the agent was spawned as part of a fleet.
+description: Explains Fleet collaboration and task-tracking conventions. Use after choosing Fleet coordination, when managing existing Fleet tasks, or when accepting delegated work; workflow selects whether to collaborate.
 ---
 
 # Working in a Fleet
+
+Fleet is one optional implementation of collaboration. Use `ava-workflow` to
+choose how to work; direct execution, peer cooperation, and script orchestration
+remain valid. Loading this skill does not require spawning, task creation, or a
+manager role. The procedures below apply to chosen Fleet work.
 
 A **fleet** is a graph of agents working toward a human's goals, supervised from one **fleet view** — a live picture of who is responsible for what, and what each is doing right now. The human steers *decomposition* (how the work is split) and judges *results* (what came back), without opening any agent's conversation. You are one node in that graph: you may direct other agents and be directed by them at any moment, and the relationships that matter are who is talking to whom right now, not any fixed rank.
 
 Agents are general-purpose. Every worker already indexes every skill on its machine, so division of labor comes from what each agent is asked to do. A spawn brief that does not name the skill(s) the worker must use is incomplete; the worker loads each named skill first. (`config_overlay` can still set `skills_to_inject_into_system_prompt`, but under a universal index that only *narrows* a worker's view; it grants nothing.)
 
-## Before taking on work: observe, ask, then spawn
+## When choosing a collaborator: observe, ask, then spawn
 
-New work arrives at an agent all the time — a task assigned, a message, a noticed gap. Before grabbing it yourself, check whether someone already owns this slice of the fleet. Three steps, cheapest first:
+When collaboration would help, check for existing ownership before duplicating work. Direct execution remains an option; these steps help choose a collaborator:
 
 1. **Observe** — look at the agents around you and their labels. A label names a domain ("health steward", "memory maintenance"); if one already names this work, that agent is the owner. Hand it over instead of taking over.
 2. **Ask** — if no label clearly covers the work, message the closest peers and ask who owns it, or who has the context for it. Labels are one-line summaries; the real division of labor lives in what agents know. A quick question beats a duplicate effort.
-3. **Spawn** — only when observing and asking place it nowhere: spawn a worker for it. The spawn brief must name the skill(s) it must use, and the worker loads them first; a brief without a skill name is incomplete. Spawning is the fallback, not the default — every spawn you avoid is context and memory you did not duplicate.
+3. **Spawn** — only when observing and asking place it nowhere: consider spawning a peer if collaboration is still useful. The spawn brief must name the skill(s) it must use, and the worker loads them first; a brief without a skill name is incomplete. Spawning is the fallback, not the default — every spawn you avoid is context and memory you did not duplicate.
 
 If you were spawned for a specific sub-task, skip the check and finish that sub-task — do not expand into adjacent domains.
 
@@ -25,7 +30,7 @@ The task registry is the durable record of work; the spawn graph is the ephemera
 
 ### Future-signal tasks
 
-This is the task-domain application of the framework's Invest in the future rule. When a noticed signal needs work beyond this turn, create a concrete task directly; signals that can be resolved now or need only a decision take those actions instead. A task is a commitment, not a parking lot.
+When you choose Fleet task tracking for a noticed signal that needs work beyond this turn, create a concrete task directly. Registry availability alone does not require a task; signals that can be resolved now or need only a decision take those actions instead. A task is a commitment, not a parking lot.
 
 - Put the task under the current responsibility chain with `parent` unless it is genuinely top-level, and give it an owner: yourself by default or a known agent when that agent should do the work.
 - Put the motivating evidence and what done looks like in the description, so the task carries the signal that created it.
@@ -84,7 +89,7 @@ The reminder is sent at most once per overdue window — updating the task reset
 Reminders fire automatically — the cluster runs a task-maintenance daemon that reminds overdue task owners. You do not launch anything. After 3 unanswered reminders the daemon escalates to the parent task's owner.
 ## Two Roles
 
-Every agent in a fleet is either an **orchestrator** (delegating work to others) or a **worker** (carrying out a delegated mission). These are roles you slip into at runtime, not fixed identities — the agent you spawned this morning may spawn its own workers this afternoon.
+**Orchestrator** (coordinating delegated work) and **worker** (carrying out an accepted mission) are optional descriptions of current work, not exhaustive agent types or fixed identities. An agent may execute directly, collaborate as a peer, or combine these activities without adopting either role.
 
 | Role | What you do | Read |
 |---|---|---|
@@ -125,7 +130,7 @@ A small parallel delegation you eyeball yourself is just **low Effort + low Auto
 
 **Setting Autonomy is not a config flag — it is a message.** When you want the user to make a reduce-point call, you do not write a new state field; you `ava.ui.notify(..., require_response=True)`; their answer arrives as a message. The user "turning the dial down" on a node is simply you waiting for their decision. No shared mutable state, no schema — the existing message paths *are* the dial.
 
-**High Autonomy is bought with one upfront approval, not many.** Before a batch of autonomous work, package the whole ask into a single `ava.ui.notify(require_response=True)`: the scope you intend to cover, the task list you will work (the `ava.tasks.create()` items), and the budget ceiling in dollars. The user's reply is the authorization — record it verbatim in the driving task's `description`, so any agent that picks the work up sees exactly what was granted. Once granted you run: no step-by-step check-ins, and whether the user is online or away changes nothing about how you proceed.
+**High Autonomy is bought with one upfront approval, not many.** Before a batch of autonomous work, package the whole ask into a single `ava.ui.notify(require_response=True)`: the scope and intended work (registry tasks if you chose task tracking), and the budget ceiling in dollars. The user's reply is the authorization — record it verbatim in the agreed handoff record (the task's `description` when using registry tracking), so any agent that picks the work up sees exactly what was granted. Once granted you run: no step-by-step check-ins, and whether the user is online or away changes nothing about how you proceed.
 
 ## Autonomy's boundaries
 
