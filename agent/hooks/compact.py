@@ -62,7 +62,7 @@ from agent.state import AgentState, CompactState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.history.checkpoint_cleanup import mark_compact_boundary
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.events.live.projection import Cancelled, CompactDone
+from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.log import logger
@@ -555,7 +555,7 @@ async def auto_compact_for_llm(
     )
     agent_id = agent_id_from_config(config)
     publisher = runtime.context.event_publisher
-    compact_run_id = emit_compact_started(publisher, agent_id, mode="auto")
+    compact_run_id = emit_compact_started(publisher, agent_id, mode=CompactionMode.AUTO)
 
     try:
         async with subscribe_interrupt(runtime.context.ops_pool, agent_id) as interrupted:
@@ -566,13 +566,13 @@ async def auto_compact_for_llm(
                 interrupted,
             )
     except ModelInterruptedError:
-        emit_compact_finished(publisher, agent_id, compact_run_id, status="replaced")
+        emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.REPLACED)
         if publisher is not None:
             publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
         # No replacement or version bump: claim owns the still-pending command.
         return {"halted": True, "goto": CLAIM}
     except BaseException:
-        emit_compact_finished(publisher, agent_id, compact_run_id, status="failure")
+        emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.FAILURE)
         raise
 
     logger.info(
@@ -643,7 +643,7 @@ async def auto_compact_for_llm(
     )
     await stamp_compact_boundary(runtime.context.ops_pool, agent_id)
     transition["compact"] = state.compact.model_copy(update={"version": state.compact.version + 1})
-    emit_compact_finished(publisher, agent_id, compact_run_id, status="success")
+    emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS)
     return transition
 
 
