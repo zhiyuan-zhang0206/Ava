@@ -112,7 +112,7 @@ def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
     sender.set_defaults(func=_h_impersonate)
 
 
-def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     group = sub.add_parser("impersonate", help="start and use named external sessions")
     commands = group.add_subparsers(dest="impersonation_cmd", required=True)
     request = commands.add_parser(

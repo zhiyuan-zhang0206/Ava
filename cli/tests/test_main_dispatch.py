@@ -54,7 +54,7 @@ def _iter_leaf_parsers(
     parser: argparse.ArgumentParser,
 ) -> list[argparse.ArgumentParser]:
     """Every parser in the tree with no subcommands of its own — the ones a
-    dispatch actually lands on (every `add_subparsers` call in cli/parsers/ is
+    dispatch actually lands on (every domain builder's `add_subparsers` call is
     `required=True`, so a group parser itself never carries its own `func`)."""
     subparsers_actions = [
         children for action in parser._actions if (children := _subparser_children(action))
@@ -85,6 +85,8 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
         module = getattr(func, "__module__", "")
         if leaf.prog.startswith(("ava agents ", "ava notices ")):
             assert module == "cli.commands.agents.parsers", (leaf.prog, module)
+        elif leaf.prog.startswith("ava impersonate "):
+            assert module == "cli.commands.agents.impersonation_parsers", (leaf.prog, module)
         else:
             assert module.startswith("cli.parsers."), (leaf.prog, module)
 
@@ -98,7 +100,8 @@ assert 'base.log' not in sys.modules
 assert 'base.config' not in sys.modules
 assert not any(name in sys.modules for name in (
     'cli.commands.agents.control', 'cli.commands.agents.notices',
-    'cli.commands.agents.timeline',
+    'cli.commands.agents.timeline', 'cli.commands.agents.impersonation',
+    'cli.commands.agents.impersonation_relay', 'cli.commands.agents.codex_app_server',
 ))
 """
     result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
@@ -682,8 +685,13 @@ if sys.argv[1] == 'parser':
     assert args.config == '{}'
     args = parser.parse_args(['notices', 'list', '--agent', '7'])
     assert args.agent == 7
+    args = parser.parse_args(['impersonate', 'list', '--agent', '7'])
+    assert args.agent_id == 7
+    args = parser.parse_args(['impersonate', 'relay', '7', '--session', '0', '--provider', 'codex', '--thread-id', 'thread'])
+    assert args.session_id == 0
+    assert args.provider == 'codex'
     loaded = {name for name in sys.modules if name.startswith('cli.commands.')}
-    assert loaded == {'cli.commands.agents', 'cli.commands.agents.parsers'}, loaded
+    assert loaded == {'cli.commands.agents', 'cli.commands.agents.parsers', 'cli.commands.agents.impersonation_parsers'}, loaded
 elif sys.argv[1] == 'config':
     import cli.commands.management.config
 assert 'base.config' not in sys.modules

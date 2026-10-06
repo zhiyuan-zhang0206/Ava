@@ -59,13 +59,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **last-verified**: 2026-10-06
 
 
-### locality:cli/commands/agents/impersonation.py:cli/parsers/impersonation.py
-- **class**: locality
-- **status**: open
-- **evidence**: The 2026-09-28 `cochange.py` audit found `cli/commands/agents/impersonation.py` (c=11, confidence 79%) and `impersonation_relay.py` (c=10, 71%) changing with `cli/parsers/impersonation.py`: argparse flags and their command parameters remain in separate package trees. The agents/notices parser and its tests now live beside their implementations under `cli/commands/agents/`; the central `cli.parsers.build_parser` composes its settings-free public builder and dispatch still lazy-loads runtime modules. Impersonation remains the next locality slice; trace its consumers and preserve Settings-free help, argument/alias compatibility and lazy dispatch before relocating it. No command-schema registry is needed.
-- **first-seen**: 2026-09-28 (locality class first run)
-- **last-verified**: 2026-10-06
-
 ### boundary:checkpoint-postgres-historical-walk-patch
 - **class**: boundary
 - **status**: open
