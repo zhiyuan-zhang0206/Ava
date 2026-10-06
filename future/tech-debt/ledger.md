@@ -73,6 +73,13 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **first-seen**: 2026-09-21
 - **last-verified**: 2026-09-23
 
+### boundary:pty-session-proof-expiry
+- **class**: boundary
+- **status**: open
+- **evidence**: `base/sessions/pty/session_tree.py:SessionCapture.active` requires a live captured birth or a fresh session-id proof. `test_a_session_nothing_proves_is_still_looked_at_and_logged` verifies a real same-session orphan remains busy and is logged but never captured or signalled after proof expiry. `base/sessions/pty/closure.py:_kill_leftovers` skips an inactive capture; its outcome names only captured survivors. The original `docs/decisions/2026-09-28-session-id-proven-by-a-live-member.md` explicitly records that such an unproven process does not affect the stop result. The census-completeness repair preserves this ownership policy. Decide separately how an unverified session affects completion and partial notices; never signal a process whose ownership is unproven.
+- **first-seen**: 2026-10-06 (PTY fork-chain diagnosis)
+- **last-verified**: 2026-10-06
+
 ## Wontfix
 
 ### docstring-budget:ava/security.py:module

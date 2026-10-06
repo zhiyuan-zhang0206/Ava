@@ -73,6 +73,10 @@ _STOP_SETTLE_S = 1.0
 # previous pass's stops landed, so a real session closes in two or three.
 _MAX_FREEZE_PASSES = 32
 
+# A census follows processes born while session ids are being read, but never
+# spins forever on a host that keeps creating processes.
+_MAX_CENSUS_PASSES = 32
+
 _POLL_S = 0.01
 
 # How long a session-id proof stands once no captured member is left to renew
@@ -154,6 +158,27 @@ class _Table(NamedTuple):
     parents: dict[int, int]
     sessions: dict[int, int]
     started: float
+    complete: bool
+
+
+def _session_ids() -> tuple[dict[int, int], bool]:
+    """Read newcomers until a final PID census contains no unread process.
+
+    A fork-and-exit hop can disappear after enumeration, leaving its successor
+    outside that list. An empty session map counts only after this census
+    closes; exhausting the pass budget leaves an explicitly incomplete scan.
+    """
+    seen: set[int] = set()
+    sessions: dict[int, int] = {}
+    for _ in range(_MAX_CENSUS_PASSES):
+        pending = set(psutil.pids()) - seen
+        if not pending:
+            return sessions, True
+        seen.update(pending)
+        for pid in sorted(pending, reverse=True):
+            with contextlib.suppress(OSError):
+                sessions[pid] = os.getsid(pid)
+    return sessions, not (set(psutil.pids()) - seen)
 
 
 def _scan() -> _Table:
@@ -163,9 +188,9 @@ def _scan() -> _Table:
     ~800 processes against ~16 ms for the psutil pass. Swept after that pass,
     a fork-and-exit hop of a few ms is read while it exists and pinned (in a
     kill, frozen) about a millisecond later; every pin re-reads its parent,
-    so the older parent map costs nothing. Highest pid first reads the newest
-    first only until pids wrap; after that they come last, still inside the
-    sweep's fraction of a millisecond.
+    so the older parent map costs nothing. The final census follows any PIDs born
+    during those reads: ordering and an assumed fast sweep cannot certify an
+    empty session across a fork-and-exit handoff.
     """
     started = time.monotonic()
     parents: dict[int, int] = {}
@@ -173,11 +198,8 @@ def _scan() -> _Table:
         ppid = proc.info["ppid"]
         if isinstance(ppid, int):
             parents[proc.pid] = ppid
-    sessions: dict[int, int] = {}
-    for pid in sorted(psutil.pids(), reverse=True):
-        with contextlib.suppress(OSError):
-            sessions[pid] = os.getsid(pid)
-    return _Table(parents, sessions, started)
+    sessions, complete = _session_ids()
+    return _Table(parents, sessions, started, complete)
 
 
 def _occupied(sessions: dict[int, int], sid: int) -> bool:
@@ -501,7 +523,14 @@ def _close(members: dict[int, _Member], leader: OwnedProcess, proof: _Proof) -> 
     """Freeze passes until one adds nobody; False when the pass cap ran out first."""
     for _ in range(_MAX_FREEZE_PASSES):
         _await_stopped(members.values())
-        if not _capture_pass(members, leader, proof, freeze=True):
+        table = _scan()
+        fresh = _capture_pass(members, leader, proof, freeze=True, table=table)
+        if not table.complete:
+            raise RuntimeError(
+                f"pty session {leader.pid}: PID census incomplete after "
+                f"{_MAX_CENSUS_PASSES} passes; membership could not be verified"
+            )
+        if not fresh:
             return True
     return False
 
@@ -649,7 +678,7 @@ def _absorb(capture: SessionCapture, members: dict[int, _Member], table: _Table)
     ]
     if any(_live(member.identity) for member in members.values()):
         return True
-    return _occupied(table.sessions, capture.leader.pid)
+    return not table.complete or _occupied(table.sessions, capture.leader.pid)
 
 
 def capture_session(leader: OwnedProcess) -> SessionCapture:

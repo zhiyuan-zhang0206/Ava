@@ -48,11 +48,12 @@ while True:
 """
 
 _COUNTER_JOB = (
-    "import sys, time\n"
+    "import os, sys, time\n"
     "n = 0\n"
     "while True:\n"
     "    n += 1\n"
-    "    open(sys.argv[1], 'w').write(str(n))\n"
+    "    with open(sys.argv[1] + '.tmp', 'w') as output: output.write(str(n))\n"
+    "    os.replace(sys.argv[1] + '.tmp', sys.argv[1])\n"
     "    time.sleep(0.1)\n"
 )
 
