@@ -54,7 +54,7 @@ from base.cluster.machines import (
 )
 from base.config import settings
 from base.db import Database
-from ops.rpc_schemas import OpEnvelope, OpKind, OpResponse, is_op_kind
+from ops.rpc_schemas import OpEnvelope, OpKind, OpResponse, OpStatus, is_op_kind
 
 __all__ = [
     "ClusterOpFailed",
@@ -285,7 +285,7 @@ async def _dispatch_once(
             f"ops server for machine={target_machine!r} returned a malformed response at {url}: "
             f"{resp.text[:200]}"
         ) from exc
-    if envelope.status == "completed":
+    if envelope.status is OpStatus.COMPLETED:
         return envelope.result
     raise ClusterOpFailed(envelope.result)
 
