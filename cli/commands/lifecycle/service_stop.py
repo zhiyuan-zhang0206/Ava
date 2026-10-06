@@ -4,16 +4,12 @@ The caller owns the maintenance journal and admission fence. These functions
 prove only local recorded process identities; they do not prove remote drain or
 stop OS-managed extras. Service stops never escalate to force.
 
-Persistent terminals have one closure (`base.sessions.pty.closure`), run by the
-pty-sessions service that holds every shell: HUP the shells and TERM the rest of
-each captured POSIX session, wait a bounded grace, SIGKILL what is left, each
-session whole. `close_terminals` asks the service for it at `ava stop`
-(docs/decisions/2026-09-28-stop-escalates-to-sigkill.md) and gives every busy session
-whose shell it verified gone its owner's notice, naming what of it outlived the
-SIGKILL. A service that is not running is closed from its ledger instead
-(`services.agent_runner.pty_sessions.ledger.sweep`), and its owners are told it crashed, not
-that this stop closed their sessions. KILL reaches only identities the service
-captured from its sessions' shells.
+Persistent terminals use a bounded best-effort closure: close the known shell
+and terminal, signal known shell/foreground groups, and report known leftovers.
+A surviving shell fails the stop; a known job leftover is diagnostic. Closure
+never proves that every descendant or detached process disappeared. A stopped
+service's ledger supplies only recorded birth identities, never a global scan.
+See docs/decisions/2026-10-07-pty-best-effort-closure.md.
 """
 
 from __future__ import annotations
@@ -153,13 +149,12 @@ def _close_terminals_now(grace_s: float, kill_s: float) -> tuple[closure.Outcome
 
 
 def _terminals_incomplete(outcome: closure.Outcome, stage: str) -> StopIncompleteError:
-    """The report for processes that outlived their SIGKILL (issue #2162's inventory).
-
-    Each survivor names its owning session and its identity so the operator
-    can find and judge the exact process — typically another user's (a root
-    `sudo`), which this closure may not signal.
-    """
-    live = {s.process: s for s in outcome.survivors if live_identities([s.process])}
+    """Report known shells that remain alive after bounded closure."""
+    live = {
+        s.process: s
+        for s in outcome.survivors
+        if s.role == "terminal" and live_identities([s.process])
+    }
     report = [
         capture_survivor(identity, service=found.session, role=found.role)
         for identity, found in sorted(live.items(), key=lambda item: item[0].pid)
@@ -167,12 +162,23 @@ def _terminals_incomplete(outcome: closure.Outcome, stage: str) -> StopIncomplet
     surviving = sorted({found.session for found in live.values()})
     inventory = SurvivorInventory(survivors=report, groups=[])
     return StopIncompleteError(
-        f"terminal closure incomplete — processes outlived their SIGKILL: "
+        f"terminal closure incomplete — known shells remain alive: "
         f"{[identity.pid for identity in live]} from sessions: {surviving}\n"
         f"{inventory.render(stage=stage, killed=True)}",
         stage=stage,
         survivors=[survivor.payload() for survivor in report],
     )
+
+
+def _report_terminal_job_leftovers(outcome: closure.Outcome) -> None:
+    """Report known living jobs without turning best-effort closure into a stop gate."""
+    for survivor in outcome.survivors:
+        if survivor.role != "terminal" and live_identities([survivor.process]):
+            print(
+                f"terminal closure {survivor.session!r}: known job still running: "
+                f"pid={survivor.process.pid}; inspect the process before taking action",
+                file=sys.stderr,
+            )
 
 
 @dataclass(frozen=True)
@@ -209,8 +215,7 @@ def _record_close_notices(
 ) -> None:
     """Write one closure notice per closed busy session to the database (issue #2044).
 
-    Each entry names the session's shell and the processes of it that outlived
-    the SIGKILL. The write is one short connection and one transaction, made
+    Each entry names the session's shell and known observed job leftovers. The write is one short connection and one transaction, made
     here while the data plane is still up and closed before this returns
     (`pty_close_notices`): the batch commits or rolls back as one, so a failed
     write leaves nothing behind to skip a later re-send. An idle session or one
@@ -243,8 +248,9 @@ def close_terminals(
     the SIGKILL leg is bounded by `_TERMINAL_KILL_WAIT_S` and runs even when
     the grace spent the rest of the deadline — a stop that reached its
     terminal phase closes its terminals
-    (docs/decisions/2026-09-28-stop-escalates-to-sigkill.md). A process that
-    outlives its SIGKILL fails the stop, which keeps its maintenance hold. A
+    (docs/decisions/2026-10-07-pty-best-effort-closure.md). A shell that
+    survives fails the stop, which keeps its maintenance hold. Known job
+    leftovers are reported without failing the stop. A
     terminal still tearing down after that gets the rest of the deadline, and
     at least `_TERMINAL_KILL_WAIT_S`, to leave the service's table.
 
@@ -263,7 +269,8 @@ def close_terminals(
         _Notice(operation, acquired_at, reason),
         direct_db=direct_db,
     )
-    if any(live_identities([s.process]) for s in outcome.survivors):
+    _report_terminal_job_leftovers(outcome)
+    if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):
         raise _terminals_incomplete(outcome, "terminals")
     _await_no_terminals(max(deadline, time.monotonic() + _TERMINAL_KILL_WAIT_S), "terminals")
 
@@ -271,13 +278,14 @@ def close_terminals(
 def force_close_terminals() -> None:
     """Close this unit's terminals at `ava stop --force`: no grace, no notices.
 
-    Force skips the owner notices and the drain guarantees by definition; a process
-    that outlives the SIGKILL still fails it, naming the session.
+    Force skips owner notices and drain guarantees. A surviving shell still
+    fails it; known job leftovers remain diagnostics.
     """
     outcome, _reason = _close_terminals_now(0.0, _TERMINAL_KILL_WAIT_S)
-    if any(live_identities([s.process]) for s in outcome.survivors):
+    _report_terminal_job_leftovers(outcome)
+    if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):
         raise RuntimeError(
-            f"force stop did not close terminals: {sorted({s.session for s in outcome.survivors})}"
+            f"force stop did not close terminals: {sorted({s.session for s in outcome.survivors if s.role == 'terminal'})}"
         )
 
 

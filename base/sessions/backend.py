@@ -96,7 +96,9 @@ class SessionBackend(abc.ABC):
         Returns ``(ok, mode)`` where *mode* is one of ``{'graceful', 'forced',
         'noop'}``. Idempotent — killing an absent/dead session is a noop.
 
-        ``ok`` means **the session is confirmed gone**, not "the kill command was
+        For a PTY, success confirms shell/session closure, not the absence of all
+        background or detached work. ``ok`` means **the session is confirmed gone**,
+        not "the kill command was
         accepted". A backend must re-ask its own existence check after killing and
         answer False when the session outlived it: the caller's next move is to
         launch that service again, and a kill that reports success it did not
