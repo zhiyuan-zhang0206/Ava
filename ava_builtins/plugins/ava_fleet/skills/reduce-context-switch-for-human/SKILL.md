@@ -18,6 +18,10 @@ The human-facing channel is `ava.ui.notify` — a queue the user reads when they
 
 ## Cadence is a delegation contract
 
+These routing conventions apply to accepted delegated work. They do not require
+creating a manager role or a delegation tree; without a delegator, deliver to the
+user directly.
+
 One notice per manager — its single rolled-up view of the subtree, updated in place: a new `ava.ui.notify` supersedes the old one, so the queue never accumulates a manager's history.
 
 Updates are **milestone-based by default** (user ruling 2026-09-03): roll

@@ -101,6 +101,24 @@ def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     assert "that write can notify the task owner too" in prompt
 
 
+def test_enabled_fleet_preserves_workflow_choice(_load_activity_plugin: None):
+    """Installing Fleet exposes capabilities without imposing a work strategy."""
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    assert "Workflow selection belongs to `ava-workflow`" in prompt
+    assert "Fleet does not require delegation, a registry task, or a management tree" in prompt
+    assert "If you choose Fleet task tracking" in prompt
+    assert "When you accept delegated work" in prompt
+    assert "With no delegator, deliver directly" in prompt
+    for instruction in (
+        "Doing everything yourself is the fallback",
+        "spawn one agent per part",
+        "delegation is the expected pattern",
+        "When the task registry is available and a noticed signal",
+        "Progress and conclusions go to your manager",
+    ):
+        assert instruction not in prompt
+
+
 def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
     """Fleet adds collaboration guidance without owning the core lifecycle."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
@@ -196,12 +214,12 @@ def test_prompt_section_reduce_context_switch_content(
     assert "Queue, never push" in section
     assert "irreversible risk in motion" in section
     assert "everything else queues" in section
-    assert "One notice per manager, updated in place" in section
-    assert "never accumulates a manager's history" in section
+    assert "One notice per agent, updated in place" in section
+    assert "do not create a management tree for reporting" in section
     assert "Milestones, not motion" in section
     assert "never routine progress" in section
     assert "A decision only the human can make" in section
-    assert "With no manager, deliver directly" in section
+    assert "With no delegator, deliver directly" in section
 
 
 def test_reduce_context_switch_reaches_the_prompt(
@@ -220,12 +238,12 @@ def test_reduce_context_switch_reaches_the_prompt(
 
 
 def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
-    """The fleet section turns a future signal into an owned, deduplicated
-    task without inventing registry routing behavior."""
+    """Chosen Fleet tracking creates owned tasks without inventing routing."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section(AgentSlices.resolve())
     assert "## Fleet task interaction" in section
+    assert "If you choose Fleet task tracking" in section
     assert "create directly with `ava.tasks.create`" in section
     assert "do not add an ask-someone-first round" in section
     assert "parent's active children" in section
