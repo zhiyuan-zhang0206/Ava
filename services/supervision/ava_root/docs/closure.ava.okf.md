@@ -19,6 +19,9 @@ and the manifest generator sets the window to that ceiling plus `STOP_MARGIN_S`
 closing inside its own bound as unstopped. Explicit force escalates to KILL only
 after that same window. A window is the unit's promise, not root's guess: a unit
 that overruns its declared ceiling is refused like any other, naming the window.
+At expiry, root rechecks captured live births after custody I/O before refusing
+or escalating. Births that exited during that I/O still require the watcher's
+reap and an empty group before custody can be released.
 
 POSIX units each lead a process group (setpgid; same session and macOS
 responsible process). A stop that finds the leader live is certified only once
