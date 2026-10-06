@@ -66,15 +66,20 @@ routing applies to an accepted assignment, not merely a spawn ancestry edge.
 
 ## Communication ownership
 
-`ava_builtins/plugins/ava_fleet/agent_runtime.py:_fleet_self_section` owns the agent-to-agent communication
-contract in the system prompt: actionable updates, necessary commitments,
-explicit reporting agreements, protocol receipts, direct delivery to action
-owners, and one reporter per milestone. The contract also applies to generated
-watchers, schedules, and background publishers; periodic checks do not imply
-periodic broadcasts. The fleet skill supplies the delivery procedure.
+`ava_builtins/plugins/ava_fleet/agent_runtime.py:_fleet_self_section` keeps the
+optional capability entry point and essential delivery semantics resident:
+conversation output is not peer delivery, useful messages go to action owners,
+protocol receipts are distinct from completion, duplicate reporting is avoided,
+and user decisions/results reach the appropriate live or asynchronous channel.
+
+The Fleet skill's `reference/operating-contract.md` owns the detailed label,
+notice, delegation, completion, and task lifecycle procedures. Load the skill and
+applicable contract when choosing those capabilities; those procedures are not
+repeated in every system prompt. `reduce-context-switch-for-human` owns reporting
+cadence, aggregation, and interruption procedures; the resident toggle-gated
+section preserves only the interruption boundary and notice replacement fact.
+Turning that toggle off does not remove peer-delivery semantics.
 
 The core prompt owns general lifecycle and operating cost discipline, including
-for agents without fleet. `ava-being-a-long-running-agent` supplies waiting,
-monitoring, recovery, and persistence procedures. The separate
-`_reduce_context_switch_section` continues to own human interruption guidance;
-its toggle does not disable peer communication guidance.
+for agents without Fleet. `ava-being-a-long-running-agent` supplies waiting,
+monitoring, recovery, and persistence procedures.

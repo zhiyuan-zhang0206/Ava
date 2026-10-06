@@ -8,9 +8,10 @@ description: Rolls delegated progress up the manager tree and reserves user inte
 Every push costs the human a context switch. When their attention is elsewhere, the default is silence: work lands in queues they drain on their own schedule.
 
 Since 2026-09-20 this discipline is a platform default: every agent's system
-prompt carries its core rules directly, gated by
+prompt carries its interruption boundary and notice replacement semantics, gated by
 `settings.agent.reduce_context_switch` (env `AVA_REDUCE_CONTEXT_SWITCH`,
-default on). Read this skill as the full playbook behind those rules.
+default on). Reporting cadence, aggregation, and delivery procedures live here
+and load on demand. Read this skill as the full playbook behind those rules.
 
 ## Default: queue, never push
 

@@ -8,7 +8,9 @@ description: Explains Fleet collaboration and task-tracking conventions. Use aft
 Fleet is one optional implementation of collaboration. Use `ava-workflow` to
 choose how to work; direct execution, peer cooperation, and script orchestration
 remain valid. Loading this skill does not require spawning, task creation, or a
-manager role. The procedures below apply to chosen Fleet work.
+manager role. The procedures below apply to chosen Fleet work. Read the
+[operating contract](reference/operating-contract.md) before using its labels,
+notices, delegation, or task tracking; it owns detailed operating obligations.
 
 A **fleet** is a graph of agents working toward a human's goals, supervised from one **fleet view** — a live picture of who is responsible for what, and what each is doing right now. The human steers *decomposition* (how the work is split) and judges *results* (what came back), without opening any agent's conversation. You are one node in that graph: you may direct other agents and be directed by them at any moment, and the relationships that matter are who is talking to whom right now, not any fixed rank.
 
@@ -98,8 +100,9 @@ Reminders fire automatically — the cluster runs a task-maintenance daemon that
 
 ## Communication procedure
 
-The fleet plugin's **Agent-to-agent communication** system-prompt section owns
-the shared communication contract. Use `send_message` for peer delivery,
+The Fleet system prompt keeps message-delivery semantics resident. The
+[operating contract](reference/operating-contract.md) owns detailed coordination,
+completion, and task procedures. Use `send_message` for peer delivery,
 `ava.ui.notify` for the user, and task updates for the durable record.
 
 For each milestone, name its reporter and the agent that must act in the brief.
