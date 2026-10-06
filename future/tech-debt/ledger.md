@@ -43,6 +43,14 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **last-verified**: 2026-10-06
 
 
+### boundary:pty-kill-verdict-job-readiness
+- **class**: boundary
+- **status**: open
+- **evidence**: In [PR #4356, run 37405453654, shard 14](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/37405453654/job/112082738845), the raw first-attempt JUnit report (`junit-backend-shard-14-a1.xml`) records `base/sessions/tests/test_pty_backend.py::test_kill_session_with_verdict_reports_whether_work_was_cut_short` receiving `(True, "forced", False)` after its busy-shell predicate saw a child. The job's configured retry passed; that is not a repair or proof of the first child's identity. The test waited for any child, not the intended `sleep 300`; `base/sessions/pty/tests/job_wait.py:wait_for_job` already documents transient login-shell helpers and matches actual argv. The backend test now waits for a bare ready output line and then that exact job, preserving its real kill/verdict assertion, using the same arrangement as `services/agent_runner/pty_sessions/tests/test_sessions.py::test_kill_a_session_with_work_reports_interrupted`. The missing intended-job precondition is repaired. The observed first-attempt child's identity was not captured, so the original failure's cause remains unproven; do not infer a production membership defect or close the Bash/TERM incidents from this change.
+- **first-seen**: 2026-10-06 (PR #4356)
+- **last-verified**: 2026-10-06
+
+
 ### boundary:interactive-bash-smoke-first-write
 - **class**: boundary
 - **status**: open

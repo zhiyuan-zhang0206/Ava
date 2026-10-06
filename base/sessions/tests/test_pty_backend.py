@@ -32,6 +32,7 @@ from base.sessions.backend import (
 )
 from base.sessions.pty import allocation_freeze, client
 from base.sessions.pty.paths import service_socket_path
+from base.sessions.pty.tests.job_wait import wait_for_job
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import (
@@ -261,8 +262,10 @@ def test_kill_session_with_verdict_reports_whether_work_was_cut_short(unit_home:
     assert (ok, mode, interrupted) == (True, "forced", False)
 
     _new("ava-test-busy-1", unit_home)
+    type_line("ava-test-busy-1", "echo busy-ready")
+    output_until("ava-test-busy-1", "busy-ready")
     type_line("ava-test-busy-1", "sleep 300")
-    assert wait_for(lambda: bool(shell_process("ava-test-busy-1").children()))
+    wait_for_job(shell_process("ava-test-busy-1"), ["sleep", "300"])
     ok, mode, interrupted = _backend().kill_session_with_verdict("ava-test-busy-1")
     assert (ok, mode, interrupted) == (True, "forced", True)
     assert not _backend().has_session("ava-test-busy-1")
