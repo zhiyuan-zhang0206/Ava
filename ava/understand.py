@@ -312,7 +312,7 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
     (`max` → deepseek's max, `none` → reasoning off via the thinking switch).
     """
     from base.lm.call import invoke_text
-    from base.lm.factory import build_chat_model, provider_key_of_model
+    from base.lm.factory import build_chat_model
 
     model = settings.lm.understand_text_model
     try:
@@ -331,7 +331,6 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
         retry_attempts=settings.lm.llm_invoke_retry_attempts,
         retry_delay_seconds=settings.lm.llm_invoke_retry_delay_seconds,
         retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
-        provider=provider_key_of_model(model),
         model=model,
         usage_source="understand",
     )
@@ -412,7 +411,6 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
         retry_attempts=settings.lm.llm_invoke_retry_attempts,
         retry_delay_seconds=settings.lm.llm_invoke_retry_delay_seconds,
         retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
-        provider=provider_key_of_model(model),
         model=model,
         usage_source="understand.media",
     )

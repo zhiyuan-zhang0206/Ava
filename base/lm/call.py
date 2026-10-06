@@ -21,15 +21,6 @@ from base.host.net.resilience import extract_retry_after, jittered
 from base.lm.effort import ReasoningEffort
 
 
-def _limiter_sync(provider: str | None) -> Any:
-    """The concurrency-limiter context for one sync invoke (no-op when
-    disabled or provider unknown). Imported lazily so hot paths that never
-    enable the limiter pay nothing at import time."""
-    from base.lm.concurrency import get_limiter
-
-    return get_limiter().sync(provider)
-
-
 def extract_text(response: Any) -> str:
     """Flatten a model response's content to plain text.
 
@@ -67,7 +58,6 @@ def invoke_response(
     retry_attempts: int = 0,
     retry_delay_seconds: float = 2.0,
     retry_max_delay_seconds: float = 30.0,
-    provider: str | None = None,
     model: str | None = None,
     usage_source: str | None = None,
 ) -> Any:
@@ -99,10 +89,7 @@ def invoke_response(
     to twice before this loop sees an exception, so this is the second-order
     retry.
 
-    `provider` is the `base/lm/factory.py` provider key (`deepseek` /
-    `claude` / …) for the outbound concurrency limiter
-    (`base/lm/concurrency.py`, no cap unless configured); `None` skips
-    the limiter. A successful invoke logs its
+    A successful invoke logs its
     `llm_usage` row (with `usage_source` as the discriminator) before
     returning; a failed one raises `error_type` with the reason. Empty-response
     rejection stays with the callers — they differ on what empty means.
@@ -115,9 +102,8 @@ def invoke_response(
     latency_ms: float | None = None
     for attempt in range(retry_attempts + 1):
         try:
-            with _limiter_sync(provider):
-                started = time.monotonic()
-                response = runnable.invoke(messages)
+            started = time.monotonic()
+            response = runnable.invoke(messages)
             latency_ms = (time.monotonic() - started) * 1_000
             break
         except Exception as e:
@@ -166,7 +152,6 @@ def invoke_text(
     retry_attempts: int = 0,
     retry_delay_seconds: float = 2.0,
     retry_max_delay_seconds: float = 30.0,
-    provider: str | None = None,
     model: str | None = None,
     usage_source: str | None = None,
 ) -> str:
@@ -175,7 +160,7 @@ def invoke_text(
     `desc` labels failure messages (e.g. `deepseek-flash, text`, or
     `deepseek-flash for <url>` on the fetch path). A failed invoke or an
     empty (safety-blocked) response raises `error_type` with the reason.
-    Retry classes/spacing, the outbound limiter, and the `llm_usage` row are
+    Retry classes/spacing and the `llm_usage` row are
     `invoke_response`'s contract — this wrapper only builds the single
     HumanMessage and rejects an empty answer.
     """
@@ -189,7 +174,6 @@ def invoke_text(
         retry_attempts=retry_attempts,
         retry_delay_seconds=retry_delay_seconds,
         retry_max_delay_seconds=retry_max_delay_seconds,
-        provider=provider,
         model=model,
         usage_source=usage_source,
     )
@@ -226,9 +210,7 @@ def answer_text(
     `error_type(str(e))`. `retry_attempts` / `retry_delay_seconds` /
     `retry_max_delay_seconds` pass through to `invoke_text`'s
     transient-failure retry; `timeout` is the provider-client request timeout
-    (None = provider SDK default). `provider` is derived from `model` for the
-    concurrency limiter (None when the model prefix is unregistered — the
-    limiter then passes through). `usage_source` forwards to `invoke_text`.
+    (None = provider SDK default). `usage_source` forwards to `invoke_text`.
     """
     from base.lm.factory import build_chat_model
 
@@ -238,8 +220,6 @@ def answer_text(
         if build_error is not None:
             raise build_error(model, e) from e
         raise error_type(str(e)) from e
-    from base.lm.factory import provider_key_of_model
-
     return invoke_text(
         llm,
         [
@@ -251,7 +231,6 @@ def answer_text(
         retry_attempts=retry_attempts,
         retry_delay_seconds=retry_delay_seconds,
         retry_max_delay_seconds=retry_max_delay_seconds,
-        provider=provider_key_of_model(model),
         model=model,
         usage_source=usage_source,
     )

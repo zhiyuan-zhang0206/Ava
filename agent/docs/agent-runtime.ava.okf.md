@@ -51,8 +51,9 @@ the same clients consume server connections instead of pooled capacity.
 The control pool reserves client connections only: both pools use the same role
 and share PgBouncer's backend capacity. Transaction pooling releases a backend
 between transactions; a client connection is not a dedicated PostgreSQL backend.
-Provider limits such as `AVA_LLM_MAX_CONCURRENT` do not scale with the admission
-limit and must be allocated separately across processes and hosts.
+Provider rate limits do not scale with the admission limit; the application
+applies no LLM concurrency cap, and provider 429s are absorbed by the
+exponential-backoff retry (`base/lm/call.py`, `agent/graph/llm/_retry.py`).
 
 The graph is the eight-node self-loop `after_init -> init_context -> claim ->
 before_llm -> llm -> before_exec -> exec -> after_exec`. Claim returns to init

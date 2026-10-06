@@ -336,14 +336,10 @@ def generate_nodes(
     if self_built:
         llm = build_generation_llm(model, p)
     try:
-        from base.lm.factory import provider_key_of_model
-
-        provider = provider_key_of_model(model)
         worker = partial(
             _generate_one,
             llm,
             model=model,
-            provider=provider,
             params=p,
             retry_attempts=retry_attempts,
             tools=tools,
@@ -374,7 +370,6 @@ def _generate_one(
     req: GenRequest,
     *,
     model: str,
-    provider: str | None,
     params: GenParams,
     retry_attempts: int,
     tools: Sequence[Any] | None = None,
@@ -398,7 +393,6 @@ def _generate_one(
             tools=tools,
             desc=f"{model}, node {req.nid}",
             model=model,
-            provider=provider,
             retry_attempts=retry_attempts,
             params=params,
         )
@@ -412,7 +406,6 @@ def _generate_one(
                 out_tok,
                 budget=budget,
                 model=model,
-                provider=provider,
                 params=params,
                 retry_attempts=retry_attempts,
             )
@@ -446,7 +439,6 @@ def _invoke_node(
     tools: Sequence[Any] | None,
     desc: str,
     model: str,
-    provider: str | None,
     retry_attempts: int,
     params: GenParams,
 ) -> str:
@@ -467,7 +459,6 @@ def _invoke_node(
             desc=desc,
             error_type=GenerateError,
             retry_attempts=retry_attempts,
-            provider=provider,
             model=model,
             usage_source="hierarchy.generate",
         )
@@ -493,7 +484,6 @@ def _invoke_node(
             desc=desc,
             error_type=GenerateError,
             retry_attempts=retry_attempts,
-            provider=provider,
             model=model,
             usage_source="hierarchy.generate",
         )
@@ -528,7 +518,6 @@ def _compress_toward_budget(
     *,
     budget: int,
     model: str,
-    provider: str | None,
     params: GenParams,
     retry_attempts: int,
 ) -> tuple[str, int]:
@@ -554,7 +543,6 @@ def _compress_toward_budget(
                 desc=f"{model}, node {nid} compress",
                 error_type=GenerateError,
                 retry_attempts=retry_attempts,
-                provider=provider,
                 model=model,
                 usage_source="hierarchy.generate",
             )

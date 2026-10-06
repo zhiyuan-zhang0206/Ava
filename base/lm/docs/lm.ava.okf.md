@@ -52,7 +52,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 
 ### durable usage — [[usage.ava.okf.md]]
 
-### outbound concurrency — [[outbound-concurrency.ava.okf.md]]
+### provider errors — [[provider-errors.ava.okf.md]]
 
 ### context budget (`context_budget.py`)
 - `resolve_context_budget(model, overrides=None)` → `ContextBudget(max_context_tokens, soft_compact_tokens, hard_compact_tokens)`: hard = `min(auto_compact_fraction × window, auto_compact_ceiling_tokens)`; soft = `compact_reminder_fraction × window` (scaled down when the ceiling bites). One flat rule for the whole roster — soft 30% / hard 40% of each model's own window (`DEFAULT_TUNING` 0.3/0.4, ceiling 0 = no cap, no per-model compact override), per-agent overridable (the agent passes its slices' `overrides`, which `resolve_setting` takes as the explicit layer; the stream timeouts, reasoning effort and thinking budget resolve the same way); registry entry ⇒ correct thresholds, no parallel table. Unregistered models raise `UnknownModelWindowError` (compact hook bubbles it; gateway display degrades to 0/0/0).
