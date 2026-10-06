@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 import sys
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -27,6 +29,7 @@ from services.supervision.ava_root.intent_store import (
 )
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.ava_root.unit_records import _UnitRuntime
 
 _SLEEP_FOREVER = "import time; time.sleep(60)"
 
@@ -75,6 +78,33 @@ def _supervisor(run_dir: Path, units: list[UnitManifest]) -> Supervisor:
     return Supervisor(
         UnitRegistry(units), run_dir=run_dir, config=SupervisorConfig(stop_timeout_s=0.2)
     )
+
+
+def _up_failure_supervisor(
+    run_dir: Path, units: list[UnitManifest], monkeypatch: pytest.MonkeyPatch
+) -> Supervisor:
+    """Arrange a proven down half, retaining real intent and activation behavior.
+
+    These three tests own single disposable sleepers with no descendants. Their
+    contract is the input-seal failure and its durable episode, not TERM timing.
+    Native refusal and graceful closure stay in the down-refusal and stop-window
+    tests. Await the real watcher before letting restart release native custody.
+    """
+    owner = _supervisor(run_dir, units)
+    stop = owner._stop_unit
+
+    async def stop_after_exit(runtime: _UnitRuntime, *, force: bool = False) -> None:
+        generation = runtime.generation
+        if generation is not None and generation.proc.returncode is None:
+            identity = generation.identity
+            assert identity is not None, "the fixture must capture its disposable sleeper"
+            identity.send_signal(signal.SIGKILL)
+            await generation.exited.wait()
+            assert generation.proc.returncode is not None
+        await stop(runtime, force=force)
+
+    monkeypatch.setattr(owner, "_stop_unit", stop_after_exit)
+    return owner
 
 
 def _sealed_input(tmp_path: Path, unit_id: str = "svc") -> tuple[Path, InputSeal]:
@@ -230,10 +260,10 @@ async def test_boot_supersedes_a_stored_root_stop(tmp_path: Path) -> None:
 
 
 async def test_restart_up_half_failure_records_explicit_state(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
-    owner = _supervisor(tmp_path, [_unit(_SLEEP_FOREVER, inputs=(seal,))])
+    owner = _up_failure_supervisor(tmp_path, [_unit(_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
     await owner.start()
     try:
         input_path.write_text("v2")  # the seal no longer matches: the up half must fail
@@ -255,21 +285,38 @@ async def test_restart_up_half_failure_records_explicit_state(
 
 
 async def test_restart_up_half_failure_retry_replaces_and_clears(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The up-half episode must not depend on a live child's TERM deadline.
+    # The old fixture entered this boundary before it could test the seal.
     input_path, seal = _sealed_input(tmp_path)
-    owner = _supervisor(tmp_path, [_unit(_SLEEP_FOREVER, inputs=(seal,))])
+    owner = _up_failure_supervisor(tmp_path, [_unit(_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
+    live_stop = AsyncMock(wraps=owner._stop_posix_generation)
+    monkeypatch.setattr(owner, "_stop_posix_generation", live_stop)
     await owner.start()
+    original = owner._units["svc"].generation
+    assert original is not None
     try:
         input_path.write_text("v2")
         await owner.restart("svc")
+        assert original.exited.is_set() and original.proc.returncode is not None
+        failed = intent_store.read(tmp_path, "svc")
+        assert failed is not None and failed.intent is UnitIntent.RUNNING
+        assert failed.restart_failed is not None and failed.restart_failed.stage is RestartStage.UP
         input_path.write_text("v1")  # the retry can activate again
         result = await owner.restart("svc")
         assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "restarted"
         status = await _entry(owner)
         assert status["restart_failed"] is None
         assert status["state"] == "running"
+        replacement = owner._units["svc"].generation
+        assert replacement is not None and replacement is not original
+        assert replacement.identity is not None and replacement.identity.live()
         assert owner._units["svc"].restart_count == 1
+        assert intent_store.read(tmp_path, "svc") == IntentRecord(
+            UnitIntent.RUNNING, IntentSource.SELECTION, None
+        )
+        live_stop.assert_not_called()
         assert len(recorder.events("root_restart_failed")) == 1
         assert len(recorder.events("root_restart_cleared")) == 1
     finally:
@@ -315,11 +362,11 @@ async def test_restart_down_refusal_records_stage_down_and_retry_settles(tmp_pat
 
 
 async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
     unit = _unit(_SLEEP_FOREVER, inputs=(seal,))
-    first = _supervisor(tmp_path, [unit])
+    first = _up_failure_supervisor(tmp_path, [unit], monkeypatch)
     await first.start()
     input_path.write_text("v2")
     await first.restart("svc")
@@ -327,7 +374,7 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
     assert stored is not None and stored.restart_failed is not None
     since = stored.restart_failed.since
     # Simulated root restart: a fresh supervisor over the same run directory.
-    second = _supervisor(tmp_path, [unit])
+    second = _up_failure_supervisor(tmp_path, [unit], monkeypatch)
     await second.start()  # the carried failure blocks nothing; the start attempt fails
     try:
         entry = await _entry(second)
