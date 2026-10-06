@@ -76,16 +76,16 @@ def _protocol_readiness(name: str) -> DaemonProbe:
 
 
 def probe_backend(name: str) -> DaemonProbe:
-    """Require native root ownership and a successful backend readiness response."""
+    """Observe the configured backend readiness protocol."""
     from functools import partial
 
     from base.telemetry.lgtm_local import backend_urls
-    from services.supervision.healthchecks.owned_service import probe_endpoint
+    from services.supervision.healthchecks.protocol_probe import probe_protocol
 
     port = urllib.parse.urlsplit(backend_urls()[name]).port
     if port is None:
         return DaemonProbe.unavailable("backend has no explicit local port")
-    return probe_endpoint(name, port, partial(_protocol_readiness, name))
+    return probe_protocol(partial(_protocol_readiness, name))
 
 
 def write_path_probe() -> tuple[bool, str]:

@@ -1,29 +1,4 @@
-"""One directly owned worker process group per scheduled backup operation.
-
-The controller launches a fixed worker module in a new session, retains the
-unreaped direct child, and alone signals that group. Trusted tools inherit it;
-each postmaster the worker starts is receipted, because its children setsid()
-out of the group and close as a recorded family instead.
-A bootstrap puts the controller's own code root first on the worker's path and
-refuses any other import origin. Secrets reach the worker on stdin, never in a
-retained control file.
-
-Every outcome settles custody (`services.backup.scheduler.operation.custody`):
-
-- **accepted**: confirmed closure, a zero exit, a valid result and the
-  caller's commit under the kind lock; the controls retire.
-- **deferred**: the worker declined before creating evidence (a busy lock,
-  missing space); the controls retire and the caller reschedules.
-- **quarantined**: any other outcome whose group closure the controller
-  proved, stop and drain cancellation included; an alert is raised and the
-  next operation of the kind proceeds.
-- **blocked**: closure is unproven; the kind refuses new work and alerts until
-  `ava backup operations retire` re-proves closure.
-
-Custody steps (launch, closure, commit, quarantine) run to completion off the
-event loop. A stop that arrives meanwhile waits for the step's real outcome,
-then propagates as a stop; it is never absorbed into an ordinary error.
-"""
+"""Run a trusted backup worker with bounded stop and private artifact staging."""
 
 from __future__ import annotations
 
@@ -31,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -40,40 +14,21 @@ import time
 import types
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack, suppress
-from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
 
-import psutil
-
-from base.cluster.dataplane.pg_foreground import record_postmasters_in
-from base.native_process import native_boot_id
-from base.native_process.exec_domain import ExecDomainBirthError, ExecProcessDomain
-from base.native_process.group_closure import confirm_closure
 from base.native_process.os_platform import LockTimeoutError, file_lock
-from services.backup.scheduler.operation.custody import (
-    NativeProcess,
+from services.backup.scheduler.operation.staging import (
     OperationBusyError,
     OperationDeferred,
     OperationKind,
-    admit,
-    close_operation,
-    hold,
-    is_stop,
+    cleanup,
     publish_result,
-    quarantine,
-    record_closure,
-    report,
-    retire_controls,
 )
 
 _log = logging.getLogger(__name__)
-CLOSE_DEADLINE_S = 20.0
-_FAILURE_TEXT_LIMIT = 16_000
 _CODE_ROOT = Path(__file__).resolve().parents[4]
-# Runs before any worker import: the controller's checkout, not whatever the
-# interpreter's editable install names, supplies every module the worker runs.
 _BOOTSTRAP = """\
 import importlib.util, pathlib, runpy, sys
 root, module = pathlib.Path(sys.argv[1]), sys.argv[2]
@@ -101,17 +56,14 @@ def _interrupt(signum: int, _frame: types.FrameType | None) -> None:
 
 
 def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
-    """Enter one fixed worker; SIGTERM unwinds its cleanup, never its closure.
+    """Enter one fixed worker; SIGTERM unwinds its normal cleanup.
 
     The request is complete before launch. The worker never signals its own
-    group: its controller alone closes inherited descendants before acceptance.
+    group: its controller owns bounded stop signaling.
     """
     signal.signal(signal.SIGTERM, _interrupt)
     if len(argv) != 3:
         raise SystemExit("usage: python -m <operation worker> REQUEST RESULT")
-    # Every postmaster this worker starts is receipted in its controls, so the
-    # controller can close the family that setsid() puts outside this group.
-    record_postmasters_in(Path(argv[2]).parent)
     value = json.loads(Path(argv[1]).read_text())
     if not isinstance(value, dict):
         raise TypeError("operation request must be an object")
@@ -197,10 +149,10 @@ class _Tail:
 async def _to_completion[T](
     step: Callable[[], T],
 ) -> tuple[asyncio.Future[T], BaseException | None]:
-    """Finish one custody step off the event loop, even when this task is stopped.
+    """Finish one launch, cleanup or commit step off the event loop, even when this task is stopped.
 
     A cancellation or KeyboardInterrupt that arrives meanwhile is returned, not
-    raised: the caller settles custody with the step's real outcome and then
+    raised: the caller receives the step's real outcome and then
     propagates the stop. The loop and its health server stay responsive.
     """
     future = asyncio.get_running_loop().run_in_executor(None, step)
@@ -221,7 +173,7 @@ def _complete[T](future: asyncio.Future[T], stopped: BaseException | None) -> T:
         return future.result()
     failure = future.exception()
     if failure is not None:
-        stopped.add_note(f"interrupted custody step failed: {failure!r}")
+        stopped.add_note(f"interrupted worker step failed: {failure!r}")
     raise stopped
 
 
@@ -236,94 +188,74 @@ async def run_operation(
     timeout_s: float = 6 * 3600,
     progress: Callable[[str], None] | None = None,
 ) -> CompletedOperation:
-    """Run a fixed trusted worker and settle its custody on every outcome.
+    """Run a trusted worker; accept only zero exit and a valid result object.
 
-    The living controller alone owns cancellation: stop, timeout or task
-    cancellation sends SIGTERM for the kind's grace, then closes the group.
-    Proven closure quarantines a failed operation; unproven closure blocks the
-    kind. `progress` receives the worker's stderr lines as they are written.
-    Persisted files cannot adopt this group after controller death: that
-    needs `ava backup operations retire` to re-prove closure first.
+    Each operation uses independent private scratch. Cancellation asks the
+    worker to unwind, then bounds termination of its known child/group. There
+    is no durable custody, orphan census, quarantine or blocked-kind retirement.
     """
     if os.name != "posix":
         raise RuntimeError("backup operation workers require POSIX")
-    for root in (kind.control_root, kind.quarantine_root):
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with ExitStack() as lock:
-        try:
-            lock.enter_context(file_lock(kind.control_root / ".lock", timeout_s=0))
-        except LockTimeoutError as exc:
-            raise OperationBusyError(f"{kind.name} operations are held elsewhere") from exc
-        _complete(*await _to_completion(lambda: admit(kind)))
-        completed = await _run_owned(module, request, kind, env, secrets, stop, timeout_s, progress)
-        # The commit keeps the kind lock: until `committed.json` exists another
-        # controller's admission would read these controls as a stopped one.
-        return replace(completed, held=lock.pop_all())
-
-
-async def _run_owned(
-    module: str,
-    request: Mapping[str, object],
-    kind: OperationKind,
-    env: dict[str, str],
-    secrets: Mapping[str, str] | None,
-    stop: StopSignal | None,
-    timeout_s: float,
-    progress: Callable[[str], None] | None,
-) -> CompletedOperation:
-    work = Path(tempfile.mkdtemp(prefix=".operation-", dir=kind.control_root))
+    kind.control_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    held = ExitStack()
     try:
-        publish_result(
-            work / "operation.json",
-            {"kind": kind.name, "module": module, "boot_id": native_boot_id(), "at": _now()},
-        )
-        publish_result(work / "request.json", request)
+        held.enter_context(file_lock(kind.control_root / ".lock", timeout_s=0))
+    except LockTimeoutError as exc:
+        held.close()
+        raise OperationBusyError(f"{kind.name} operation is already running") from exc
+    try:
+        work = Path(tempfile.mkdtemp(prefix=".operation-", dir=kind.control_root))
     except BaseException:
-        shutil.rmtree(work, ignore_errors=True)  # Nothing was launched.
+        held.close()
         raise
-    tail = None if progress is None else _Tail(work / "stderr.log", progress)
-    future, stopped = await _to_completion(lambda: _launch(module, work, env, secrets))
-    launch_error = future.exception()
-    if isinstance(launch_error, ExecDomainBirthError):
-        raise await _settle_unowned_birth(kind, work, launch_error, stopped)
-    if launch_error is not None:
-        # Popen raised before creating a child, or reaped its failed exec.
-        record_closure(work, "no-process", None)
-        raise await _quarantined(kind, work, launch_error, stopped)
-    process, domain = future.result()
-    if stopped is not None:
-        with suppress(OSError):  # Lets a later retirement name the group.
-            publish_result(work / "worker.json", {"pid": process.pid, "native": None})
-        raise await _abort(kind, work, process, domain, stopped, tail)
+    process: subprocess.Popen[bytes] | None = None
     try:
-        worker = _record_worker(work, process)
-        await _await_operation(domain, stop, time.monotonic() + timeout_s, tail)
+        publish_result(work / "request.json", request)
+        future, cancelled = await _to_completion(lambda: _launch(module, work, env, secrets))
+        process = future.result()
+        _raise_stopped(cancelled)
+        tail = None if progress is None else _Tail(work / "stderr.log", progress)
+        await _await_operation(process, stop, time.monotonic() + timeout_s, tail)
+        if tail is not None:
+            tail.flush()
+        result = _finished_result(process, work)
+        return CompletedOperation(kind, work, result, held)
     except BaseException as original:
-        aborted = original
-    else:
-        return await _accept(kind, work, process, domain, worker, tail)
-    raise await _abort(kind, work, process, domain, aborted, tail)
+        try:
+            if process is not None:
+                (await _to_completion(lambda: _stop_worker(process, kind.grace_s)))[0].result()
+            (await _to_completion(lambda: cleanup(kind, work)))[0].result()
+        except BaseException as failure:
+            original.add_note(f"operation cleanup failed at {work}: {failure!r}")
+            _log.error("backup staging cleanup failed at %s: %r", work, failure)
+        held.close()
+        raise
 
 
-def _record_worker(work: Path, process: subprocess.Popen[bytes]) -> NativeProcess:
-    """Record the leader's PID at once, then its native birth for later proofs."""
-    publish_result(work / "worker.json", {"pid": process.pid, "native": None})
-    worker = NativeProcess.capture(psutil.Process(process.pid))
-    publish_result(work / "worker.json", {"pid": process.pid, "native": worker.value()})
-    return worker
+def _raise_stopped(stopped: BaseException | None) -> None:
+    if stopped is not None:
+        raise stopped
 
 
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
+def _finished_result(process: subprocess.Popen[bytes], work: Path) -> dict[str, object]:
+    if process.returncode != 0:
+        raise RuntimeError(
+            f"operation exited {process.returncode}: {_operation_tail(work / 'stderr.log')}"
+        )
+    result = _result_object(work / "result.json")
+    deferred = _deferral(result)
+    if deferred is not None:
+        raise deferred
+    return result
 
 
 def _launch(
     module: str, work: Path, env: dict[str, str], secrets: Mapping[str, str] | None
-) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
+) -> subprocess.Popen[bytes]:
     with (work / "stdout.log").open("xb") as stdout, (work / "stderr.log").open("xb") as stderr:
         os.fchmod(stdout.fileno(), 0o600)
         os.fchmod(stderr.fileno(), 0o600)
-        process, domain = ExecProcessDomain.launch_posix(
+        process = subprocess.Popen(  # noqa: S603 -- fixed trusted worker in this checkout
             [
                 sys.executable,
                 "-I",
@@ -335,7 +267,7 @@ def _launch(
                 str(work / "request.json"),
                 str(work / "result.json"),
             ],
-            new_session=True,
+            start_new_session=True,
             stdin=subprocess.DEVNULL if secrets is None else subprocess.PIPE,
             stdout=stdout,
             stderr=stderr,
@@ -344,19 +276,17 @@ def _launch(
             close_fds=True,
         )
     if secrets is not None and process.stdin is not None:
-        # Never raises after launch: the handle must reach custody. A worker
-        # that cannot read its secrets fails on its own and is closed normally.
         with suppress(OSError):
             process.stdin.write(json.dumps(dict(secrets)).encode())
         with suppress(OSError):
             process.stdin.close()
-    return process, domain
+    return process
 
 
 async def _await_operation(
-    domain: ExecProcessDomain, stop: StopSignal | None, deadline: float, tail: _Tail | None
+    process: subprocess.Popen[bytes], stop: StopSignal | None, deadline: float, tail: _Tail | None
 ) -> None:
-    while domain.leader_alive():
+    while process.poll() is None:
         if tail is not None:
             tail.pump()
         if stop is not None and stop.is_set():
@@ -366,190 +296,33 @@ async def _await_operation(
         await asyncio.sleep(0.05)
 
 
-async def _request_stop(domain: ExecProcessDomain, grace_s: float) -> None:
-    """Let a live worker unwind its private cleanup; this never proves closure."""
-    if not domain.leader_alive():
+def _stop_worker(process: subprocess.Popen[bytes], grace_s: float) -> None:
+    """Bound stop of the known live worker/group; no family-disappearance proof."""
+    if process.poll() is not None:
         return
-    domain.signal(signal.SIGTERM)
-    deadline = time.monotonic() + grace_s
-    while domain.leader_alive() and time.monotonic() < deadline:
-        await asyncio.sleep(0.05)
-
-
-def _close_and_reap(domain: ExecProcessDomain, process: subprocess.Popen[bytes], work: Path) -> int:
-    # No census authorizes release: signal the actual launch-owned group while
-    # its direct child still pins the native number, then observe. Receipted
-    # postgres families, which left the group, close by recorded birth.
-    return close_operation(work, process, domain.close_confirmed, CLOSE_DEADLINE_S)
-
-
-async def _abort(
-    kind: OperationKind,
-    work: Path,
-    process: subprocess.Popen[bytes],
-    domain: ExecProcessDomain,
-    original: BaseException,
-    tail: _Tail | None,
-) -> BaseException:
-    """Close an aborted operation, then quarantine it or block its kind.
-
-    A stop that arrives during the cooperative grace or the close still reaches
-    the confirmed close, then propagates so the awaiting task stays stopped;
-    the quarantine still records the original failure. Returns the exception
-    the caller raises.
-    """
-    stopped: BaseException | None = None
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
     try:
-        await _request_stop(domain, kind.grace_s)
-    except Exception as exc:  # The courtesy signal never replaces confirmed closure.
-        original.add_note(f"cooperative stop failed: {exc!r}")
-    except BaseException as exc:
-        stopped = exc
-    future, more = await _to_completion(lambda: _close_and_reap(domain, process, work))
-    stopped = stopped or more
-    if stopped is not None and stopped is not original:
-        stopped.add_note(f"stopped while closing after: {original!r}")
-    cleanup = future.exception()
-    if cleanup is not None:
-        failure = original if stopped is None or is_stop(original) else stopped
-        return hold(kind, work, process, domain, cleanup, failure)
-    record_closure(work, "controller", future.result())
-    if tail is not None:
-        tail.flush()
-    return await _quarantined(kind, work, original, stopped)
-
-
-async def _accept(
-    kind: OperationKind,
-    work: Path,
-    process: subprocess.Popen[bytes],
-    domain: ExecProcessDomain,
-    worker: NativeProcess,
-    tail: _Tail | None,
-) -> CompletedOperation:
-    future, stopped = await _to_completion(lambda: _close_and_reap(domain, process, work))
-    cleanup = future.exception()
-    if cleanup is not None:
-        raise hold(kind, work, process, domain, cleanup, stopped)
-    returncode = future.result()
-    record_closure(work, "controller", returncode)
-    if tail is not None:
-        tail.flush()
-    if stopped is not None:
-        raise await _quarantined(kind, work, stopped)
-    if returncode != 0:
-        tail_text = _operation_tail(work / "stderr.log")
-        raise await _quarantined(
-            kind, work, RuntimeError(f"operation exited {returncode}: {tail_text}")
-        )
-    try:
-        result = _result_object(work / "result.json")
-        deferred = _deferral(result)
-    except (RuntimeError, TypeError) as exc:
-        invalid = exc
-    else:
-        if deferred is None:
-            return CompletedOperation(kind, work, worker, result)
-        _complete(*await _to_completion(lambda: retire_controls(work)))
-        raise deferred
-    raise await _quarantined(kind, work, invalid)
-
-
-async def _settle_unowned_birth(
-    kind: OperationKind,
-    work: Path,
-    error: ExecDomainBirthError,
-    stopped: BaseException | None,
-) -> BaseException:
-    """Close a launch whose native birth capture failed, through its pinned leader."""
-    process = error.proc
-    with suppress(OSError):
-        publish_result(work / "worker.json", {"pid": process.pid, "native": None})
-    if process.stdin is not None:
-        with suppress(OSError):
-            process.stdin.close()
-
-    def close_group(deadline: float) -> None:
-        confirm_closure(process, deadline)
-
-    def close() -> int:
-        return close_operation(work, process, close_group, CLOSE_DEADLINE_S)
-
-    future, more = await _to_completion(close)
-    stopped = stopped or more
-    cleanup = future.exception()
-    if cleanup is not None:
-        return hold(kind, work, process, None, cleanup, stopped or error)
-    record_closure(work, "controller", future.result())
-    error.add_note("the launched group was closed after its birth capture failed")
-    return await _quarantined(kind, work, error, stopped)
-
-
-async def _quarantined(
-    kind: OperationKind,
-    work: Path,
-    failure: BaseException,
-    stopped: BaseException | None = None,
-) -> BaseException:
-    """Quarantine controls whose group closure is proven; return what to raise."""
-    future, more = await _to_completion(lambda: quarantine(kind, work, _describe(failure)))
-    stopped = stopped or more
-    problem = future.exception()
-    if problem is None:
-        failure.add_note(f"operation quarantined: {future.result()}")
-    else:
-        failure.add_note(f"operation quarantine failed; its controls remain at {work}: {problem!r}")
-        report(kind, "blocked", f"quarantine failed for {work.name}: {problem!r}")
-    if stopped is not None and not is_stop(failure):
-        stopped.__cause__ = failure
-        return stopped
-    return failure
-
-
-def _describe(failure: BaseException) -> str:
-    notes = "\n".join(getattr(failure, "__notes__", ()))
-    return f"{type(failure).__name__}: {failure}\n{notes}"[:_FAILURE_TEXT_LIMIT]
+        process.wait(timeout=grace_s)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=3)
 
 
 @dataclass(frozen=True)
 class CompletedOperation:
-    """A zero-exit result observed only after the launch-owned group closed.
-
-    This is completion evidence, never authority to adopt or signal a process.
-    `commit` validates and publishes the result, then retires the controls.
-    """
+    """A zero-exit worker result awaiting artifact validation and publication."""
 
     kind: OperationKind
     work: Path
-    worker: NativeProcess
     result: dict[str, object]
     held: ExitStack = field(default_factory=ExitStack, compare=False, repr=False)
 
     async def commit[T](self, accept: Callable[[], T]) -> T:
-        """Validate and commit off the event loop; success retires the controls.
-
-        Any failure quarantines the controls: the group is already closed. A
-        stop that arrives meanwhile waits for the commit, then propagates. The
-        kind lock `run_operation` handed over is released once custody settles.
-        """
+        """Validate/publish off the event loop, then remove private staging."""
         with self.held:
-            return await self._commit(accept)
-
-    async def _commit[T](self, accept: Callable[[], T]) -> T:
-
-        def committed() -> T:
-            value = accept()
-            publish_result(self.work / "committed.json", {"at": _now()})
-            retire_controls(self.work)
-            return value
-
-        future, stopped = await _to_completion(committed)
-        failure = future.exception()
-        if failure is None:
-            if stopped is not None:
-                raise stopped
-            return future.result()
-        if (self.work / "committed.json").exists():
-            failure.add_note(f"business commit completed; controls retire later: {self.work}")
-            raise stopped or failure
-        raise await _quarantined(self.kind, self.work, failure, stopped)
+            try:
+                return _complete(*await _to_completion(accept))
+            finally:
+                _complete(*await _to_completion(lambda: cleanup(self.kind, self.work)))

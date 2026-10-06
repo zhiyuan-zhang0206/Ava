@@ -1,6 +1,5 @@
-"""Browser-vs-host diagnostic evidence, under the root's ownership envelope."""
+"""Browser-vs-host diagnostic evidence, through application protocols."""
 
-from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,11 +23,6 @@ from services.supervision.healthchecks import browser_reach as hc
 def test_canary_distinguishes_browser_failure_from_unknown(
     monkeypatch: pytest.MonkeyPatch, outcome: str, host_ok: bool, expected: str
 ) -> None:
-    def _fake_probe_endpoint(
-        _name: str, _port: int, call: Callable[[], bool | DaemonProbe]
-    ) -> bool | DaemonProbe:
-        return call()
-
     def _fake_probe_browser(_port: int | None = None, _profile: Path | None = None) -> DaemonProbe:
         return DaemonProbe.up("owned")
 
@@ -48,9 +42,6 @@ def test_canary_distinguishes_browser_failure_from_unknown(
                 browser_reach_timeout_s=1,
             )
         ),
-    )
-    monkeypatch.setattr(
-        "services.supervision.healthchecks.owned_service.probe_endpoint", _fake_probe_endpoint
     )
     monkeypatch.setattr("services.desktop.browser.probe.probe_browser", _fake_probe_browser)
     monkeypatch.setattr(hc, "canary", _fake_canary)

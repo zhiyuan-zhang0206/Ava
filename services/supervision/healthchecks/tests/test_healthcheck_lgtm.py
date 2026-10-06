@@ -8,7 +8,6 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -271,10 +270,14 @@ def test_grafana_health_requires_database_ready(
     assert hc._protocol_readiness("grafana").alive is ready
 
 
-def test_unowned_listener_is_not_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
-    def not_owned(name: str, _port: int, _protocol: Callable[[], DaemonProbe]) -> DaemonProbe:
-        assert name == "loki"
-        return DaemonProbe.port_taken("foreign process")
+def test_backend_health_needs_no_native_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("backend protocol health must not inspect native ownership")
 
-    monkeypatch.setattr("services.supervision.healthchecks.owned_service.probe_endpoint", not_owned)
-    assert not hc.probe_backend("loki").alive
+    monkeypatch.setattr("base.native_process.root_control.client.owned_process", forbidden)
+
+    def ready(_name: str) -> DaemonProbe:
+        return DaemonProbe.up("ready")
+
+    monkeypatch.setattr(hc, "_protocol_readiness", ready)
+    assert hc.probe_backend("loki").alive

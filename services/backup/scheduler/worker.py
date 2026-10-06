@@ -1,11 +1,4 @@
-"""Fixed logical-backup operations in one launch-owned trusted process group.
-
-Daily dumps and the weekly logical restore drill are separate operation kinds
-with separate control roots, so a failed drill never stops the dumps. Each
-quarantines into its own `$AVA_HOME/backups/quarantine/<kind>/`, which keeps
-only complete encrypted artifacts: plaintext dump output never survives a
-closed worker.
-"""
+"""Scheduled logical backup workers with private staging and validated publication."""
 
 from __future__ import annotations
 
@@ -22,9 +15,8 @@ from typing import Literal
 from base.native_process.child_env import inherited_process_env
 from base.paths import ava_home
 from services.backup.artifact.names import DUMP_NAME_RE
-from services.backup.scheduler.operation.custody import (
+from services.backup.scheduler.operation.staging import (
     OperationKind,
-    OperationWorker,
     publish_result,
 )
 from services.backup.scheduler.operation.worker_process import (
@@ -36,7 +28,7 @@ from services.backup.scheduler.operation.worker_process import (
 Job = Literal["dump", "restore"]
 
 
-def _sanitize_dump(work: Path, _worker: OperationWorker | None) -> None:
+def _sanitize_dump(work: Path) -> None:
     """Keep only complete encrypted artifacts; drop plaintext and partial pipeline files."""
     staged = work / "artifact"
     if not staged.is_dir():
@@ -58,12 +50,12 @@ def _complete_artifact(path: Path) -> bool:
     )
 
 
-def _sanitize_restore_drill(work: Path, _worker: OperationWorker | None) -> None:
+def _sanitize_restore_drill(work: Path) -> None:
     """Remove the drill's decrypted dump and its restored throwaway cluster.
 
     The decrypted dump lives only in the private scratch. A worker killed
     before its own teardown leaves the restored database in its throwaway
-    cluster; after proven closure its owner lock is released, so the
+    cluster; after normal native shutdown its owner lock is released, so the
     throwaway sweep reaps it now instead of at the next throwaway start.
     """
     from base.cluster.dataplane.pg_tools import sweep_orphaned_throwaway_clusters
@@ -79,7 +71,6 @@ def dump_kind() -> OperationKind:
     return OperationKind(
         "logical-dump",
         root / "operations" / "dump",
-        root / "quarantine" / "logical-dump",
         _sanitize_dump,
     )
 
@@ -89,7 +80,6 @@ def restore_drill_kind() -> OperationKind:
     return OperationKind(
         "logical-restore-drill",
         root / "operations" / "restore-drill",
-        root / "quarantine" / "logical-restore-drill",
         _sanitize_restore_drill,
     )
 
@@ -100,7 +90,7 @@ def _sha256(path: Path) -> str:
 
 
 async def run_job(kind: Job, *, now: datetime | None = None) -> None:
-    """Accept a worker result only after its entire inherited group closed."""
+    """Validate and publish a zero-exit worker result."""
     completed = await run_operation(
         "services.backup.scheduler.worker",
         {"kind": kind, "now": now.isoformat() if now is not None else None},
@@ -133,10 +123,10 @@ def _accept_restore(completed: CompletedOperation) -> None:
 def commit_scheduled_backup(staged: Path, digest: str) -> Path:
     """Publish only the exact completed worker artifact; never overwrite one.
 
-    The caller invokes this only after the worker's group closed with a zero
+    The caller invokes this only after the worker returned a zero
     exit. A backup directory on another filesystem gets a verified private copy
     published the same exclusive way. Any refusal leaves the staged artifact in
-    the operation's controls for quarantine.
+    private staging until cleanup.
     """
     from base.host.private_storage import ensure_private_dir, ensure_private_file
     from services.backup.dump import backup_dir, prune_after_publish
@@ -178,7 +168,7 @@ def _publish_copy(staged: Path, target: Path, digest: str) -> None:
             output.seek(0)
             if hashlib.file_digest(output, "sha256").hexdigest() != digest:
                 raise RuntimeError(
-                    "scheduled backup copy differs from the closed worker's artifact"
+                    "scheduled backup copy differs from the completed worker's artifact"
                 )
             os.link(copy, target)
         dirfd = os.open(target.parent, os.O_RDONLY)

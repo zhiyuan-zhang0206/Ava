@@ -72,7 +72,6 @@ SIGNALS: dict[str, Signal] = {
     "ava-ops-root-unit-breaker-open": Signal(
         "root_unit_failure_state", "ava-ops", "0m", "critical"
     ),
-    "ava-ops-root-unit-custody-held": Signal("root_unit_failure_state", "ava-ops", "0m", "warning"),
     "ava-ops-root-unit-not-revivable": Signal(
         "root_unit_not_revivable", "ava-ops", "0m", "error", 1
     ),

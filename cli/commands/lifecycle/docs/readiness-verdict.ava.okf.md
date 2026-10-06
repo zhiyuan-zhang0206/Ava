@@ -10,26 +10,20 @@ tags:
 
 # Start readiness verdict
 
-`cli/commands/lifecycle/root_driver.py:wait_for_service_tree` checks the selected root
-roster after launch. A running process is insufficient: every service needs a
-fresh identity-bound protocol verdict. Root generations are observed before and
-after probing, so a replacement or stopped generation invalidates the response.
-Unavailable IPC is unknown, not proof that a unit stopped. Repeated positive
-stopped observations can end the wait early.
+`cli/commands/lifecycle/root_driver.py:wait_for_service_tree` observes the service
+table and calls the selected services' protocol probes. A running process alone
+is insufficient; the probe must respond. There is no native listener census or
+before/after process-generation proof around read-only health checks.
 
-The core serving functions receive `SERVICE_READY_TIMEOUT_S`; other services
-receive `NON_CRITICAL_SERVICE_READY_TIMEOUT_S`. Both kinds of incomplete result
-prevent startup success. The frontend is included, even while it builds. There
-is no readiness waiver for boot, update, or recovery callers.
+Only selected core services in `CRITICAL_SERVICE_SESSIONS` gate serving. They
+share `SERVICE_READY_TIMEOUT_S`. Optional services are sampled when the core is
+ready; their failures are reported and emitted as `service_start_unready`, without
+another waiting budget or a global startup failure. Optional launch failures also
+do not enter the rollout's fatal launch-failure record.
 
-The CLI reports 0 only for a fully ready selected roster, 4 for incomplete
-readiness, and 1 for failed setup or launch. `base.deploy.lifecycle.start_serving` admits work
-only after that successful generation is recorded. Failed startup preserves the
-closed serving boundary and the evidence needed for an idempotent retry.
-
-Operator status uses `_probe_service`, which returns unknown for unavailable or
-missing identity probes. It does not substitute a bare HTTP response, TCP connect,
-or PID-file liveness. Startup failure alerts retain their durable episode identity
-and resolve after a later positive readiness observation.
+The CLI reports 0 when the selected core is ready, 4 for incomplete core readiness,
+and 1 for failed setup. `base.deploy.lifecycle.start_serving` publishes serving
+after core readiness. Unknown or unavailable core protocol responses cannot
+become success. Optional services may remain unavailable and recover separately.
 
 Parent: [[cli/commands/lifecycle/docs/start-readiness.ava.okf.md|start readiness]].

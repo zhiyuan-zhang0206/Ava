@@ -9,8 +9,7 @@ tags:
 # Readiness roster ownership
 
 `ServiceSpec.identity_probe` is mandatory for selected root units. The roster
-centrally wraps network probes with native root identity, including plugin
-services. `healthcheck_module` identifies protocol code for documentation;
+uses each declared application protocol, including plugin services. `healthcheck_module` identifies protocol code for documentation;
 placing a module in this directory does not schedule it.
 
 The documentation linter compares module files with the table and with the
@@ -19,6 +18,5 @@ parses adapter source without constructing a live host roster or probing service
 
 PgBouncer diagnostics traverse its admin console and required listeners rather
 than an end-to-end Postgres query. Redis diagnostics traverse runtime ACL PING.
-Both first establish separate native data-plane custody; neither starts a
-process or repairs credentials. Their resources must remain available when the
+Neither performs native custody inspection, starts a process or repairs credentials. Their resources must remain available when the
 application tree is stopped for external maintenance.

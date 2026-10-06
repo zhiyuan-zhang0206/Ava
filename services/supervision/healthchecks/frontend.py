@@ -1,23 +1,16 @@
-"""Identity-bound frontend readiness. Service recovery belongs to ava-root."""
+"""Frontend application readiness. Service recovery belongs to ava-root."""
 
 import subprocess
 
-import psutil
-
 from base.config import settings
 from base.daemon.health import DaemonProbe
-from base.native_process.ownership import OwnedProcess, capture_tree
-from base.native_process.root_control.client import RootClientError, owned_process
-from services.supervision.healthchecks.owned_service import absent_listener
-from services.supervision.healthchecks.owned_service import listener_pids as _listener_pids
 
 
 def _app_port() -> int:
     """The Next.js app port (AVA_APP_PORT, default entry+1) — NOT the entry
     port: the entry is owned by the always-up gate, which answers 200 even
     while the app is down. Probing the entry would make a dead app look
-    alive, and probing a port answered by an old orphan would make it look
-    alive too (issue #2123)."""
+    alive."""
     from urllib.parse import urlsplit
 
     entry = urlsplit(settings.services.frontend_healthcheck_url).port or 3000
@@ -27,10 +20,6 @@ def _app_port() -> int:
 def _app_url() -> str:
     """The Next.js application endpoint, behind the entry gate."""
     return f"http://localhost:{_app_port()}"
-
-
-def _expected_owner() -> OwnedProcess | None:
-    return owned_process("frontend")
 
 
 def _http_ok() -> bool:
@@ -48,26 +37,8 @@ def _http_ok() -> bool:
 
 
 def probe_frontend() -> DaemonProbe:
-    """Distinguish owned readiness failure from an unrelated listener."""
+    """Probe the application behind the entry gate."""
     port = _app_port()
-    try:
-        listeners = _listener_pids(port)
-        if not listeners:
-            return absent_listener(port)
-        owner = _expected_owner()
-        members = {} if owner is None else {p.pid: p for p in capture_tree(owner)}
-    except (RootClientError, psutil.Error, RuntimeError) as exc:
-        return DaemonProbe.unavailable(f"frontend ownership unavailable: {exc}")
-    if owner is not None and listeners <= members.keys():
-        if (
-            _http_ok()
-            and _listener_pids(port) == listeners
-            and owner.live()
-            and all(members[p].live() for p in listeners)
-        ):
-            return DaemonProbe.up(f"frontend owns the {port} listener and it answers 2xx")
-        return DaemonProbe.down(f"frontend owns the {port} listener but is not ready")
-    return DaemonProbe.port_taken(
-        f"port {port} is answered by pid(s) {sorted(listeners)} outside the frontend's "
-        "expected owner — an old orphan's 200 is not frontend health"
-    )
+    if _http_ok():
+        return DaemonProbe.up(f"frontend application on {port} answers HTTP")
+    return DaemonProbe.down(f"frontend application on {port} is not ready")

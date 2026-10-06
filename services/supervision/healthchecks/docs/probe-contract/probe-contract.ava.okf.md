@@ -1,27 +1,22 @@
 ---
 type: doc
 title: Probe evidence contract
-description: Protocol evidence and captured native ownership jointly determine readiness; unknown evidence cannot authorize recovery.
+description: Application responses determine availability; lifecycle owners separately authorize recovery.
 tags:
 - ops
 ---
 
 # Probe evidence contract
 
-A service is ALIVE only when its actual protocol succeeds and its responding
-listener belongs to the captured current owner. `owned_service.probe_endpoint`
-checks TCP listener identity before and after protocol execution. Unix probes
-validate the connected peer PID and birth-validated ancestry. Frontend and
-collector observers make equivalent checks for their endpoints.
+A service is ALIVE when its configured application protocol succeeds. Frontend
+probes the application behind the entry gate; collector readiness sends a valid
+OTLP request; Unix services answer a bounded JSON ping. Read-only observations
+do not inspect native listener ancestry or compare process generations.
 
-A protocol failure from the owned endpoint is DOWN. A foreign listener is
-PORT_TAKEN. Missing permissions on a live member of the owned tree,
-inconsistent process identity, unavailable root status, or an observation
-deadline yields UNAVAILABLE. A member that has exited (an unreaped zombie stays
-in the tree, its sockets unreadable) owns no listener and is not an
-inspection failure. An exception in a custom
-probe also yields unavailable through root's `ProbeRunner`; it is never converted
-into permission to restart an unobserved process.
+A protocol failure is DOWN. Missing configuration or an exception in a custom
+probe yields UNAVAILABLE through root's `ProbeRunner`. A successful response is
+availability evidence, not authority to adopt or signal the responding process.
+Stop and restart retain their lifecycle owner's scope.
 
 Each runner retains at most one outstanding worker. A timed-out native call
 cannot be canceled by Python, so subsequent rounds report it as unavailable

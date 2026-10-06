@@ -1,48 +1,29 @@
 ---
 type: doc
 title: Backup Job Shutdown
-description: Ownership and completion of scheduled logical-backup and restore jobs.
+description: Bounded scheduled worker stop and private artifact cleanup.
 tags: []
 ---
 
 # Backup job shutdown
 
-`services/backup/scheduler/daemon.py` passes scheduled dumps and logical restore
-drills to `services/backup/scheduler/worker.py:run_job`. It launches one fixed
-worker module through `services/backup/scheduler/operation/worker_process.py:run_operation`: a fresh
-interpreter in a new session whose unreaped direct child the controller keeps.
-Its request is complete before launch. Dump, encryption, off-site upload and
-restore tools are ordinary children in that group, so blocking work stays out
-of the scheduler's asyncio loop and executor.
+The scheduler sends dumps and restore drills to `services/backup/scheduler/worker.py:run_job`. A fixed
+worker in an isolated interpreter and new group performs blocking tools;
+requests and results use unique private staging, and secrets travel on stdin.
 
-Scheduler SIGTERM cancels the job. The controller sends SIGTERM to the group:
-the worker converts it into `KeyboardInterrupt`, so its `finally` blocks remove
-key files, plaintext partials and decrypted scratch and stop a foreground
-Postgres. After a three-second grace it closes the group with confirmed SIGKILL
-in a thread, so a stop that lands inside the close waits for its outcome and
-still stops the scheduler. A result is accepted only after group closure, a
-zero exit and validation; the dump is then linked into the backup directory.
-Cancellation never advances scheduler success or the weekly restore marker.
+SIGTERM cancellation asks the worker to unwind normal cleanup. After the
+bounded grace, its controller can KILL the known group and wait for the direct
+child. The controller sanitizes staging and reports cleanup failures with the
+private path. There is no full-family disappearance proof or durable operation
+custody. No quarantine/blocked-kind/retirement workflow survives controller exit.
 
-Dumps and weekly logical restore drills have separate control roots under
-`$AVA_HOME/backups/operations/`, so a failed drill never stops the dumps. A
-failed or cancelled job whose closure was proven is quarantined under its
-kind's `$AVA_HOME/backups/quarantine/<kind>/`: request, logs and failure note,
-plus a complete encrypted artifact when the off-site upload was interrupted;
-plaintext dump output and key files are removed even when the worker was
-killed, and a killed drill's restored throwaway cluster is reaped. The next
-scheduled run proceeds. Closure doubt keeps the unreaped worker, blocks that
-kind and alerts until `ava backup operations retire` re-proves closure; a killed
-scheduler leaves the same block.
+Results require zero exit and validation. Encrypted dump publication retains
+its digest, exclusive atomic publish and permissions checks. Cancellation or
+failure never advances the backup or weekly restore success marker.
 
-Scheduled restore drills opt into `throwaway_postgres(foreground=True)`.
-`base/cluster/dataplane/pg_foreground.py` starts Postgres directly in the worker group,
-receipts it in the operation's controls and verifies its data directory before
-readiness. The caller owns its handle before readiness checks can fail. Every
-postmaster child calls `setsid`, so the group close alone never reaches them:
-the owner's stop is an immediate shutdown that reaps them, a postmaster that
-outlives it is killed with every descendant recorded by exact birth, and the
-controller proves that family gone before closure (see
-[[services/backup/scheduler/docs/operation-custody.ava.okf.md|Operation custody]]). A stop that
-cannot confirm the postmaster exited retains PGDATA and its registration. Other throwaway callers keep the default
-pg_ctl behavior; orphaned throwaway directories are handled by their own sweep.
+Foreground disposable Postgres is a known direct child: readiness checks its
+actual data directory, native `pg_ctl` performs immediate shutdown, and a
+failed stop retains PGDATA and its owner lock. Existing unique scratch and
+orphan directory handling remain; no custom process-family/cwd census is made.
+
+[[services/backup/scheduler/docs/scheduled-workers.ava.okf.md|Scheduled workers]]

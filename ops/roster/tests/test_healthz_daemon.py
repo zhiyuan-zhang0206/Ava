@@ -50,9 +50,8 @@ def _module(spec: ServiceSpec) -> str:
 
 
 def _daemon_probe(spec: ServiceSpec) -> partial[DaemonProbe]:
-    """The daemon probe inside the root-ownership wrapper `build_services` adds."""
-    outer = cast("partial[DaemonProbe]", spec.identity_probe)
-    return cast("partial[DaemonProbe]", outer.args[2])
+    """The standard daemon declares its protocol probe directly."""
+    return cast("partial[DaemonProbe]", spec.identity_probe)
 
 
 # ── the factory ──

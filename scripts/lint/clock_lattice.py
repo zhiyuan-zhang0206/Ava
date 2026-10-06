@@ -147,12 +147,10 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_TERMINATE_GRACE_S",
     ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
     (
-        "services/backup/scheduler/operation/custody.py",
+        "services/backup/scheduler/operation/staging.py",
         "TERMINATE_GRACE_S",
-    ): "independent: the SIGTERM courtesy window for one scheduled backup operation worker to "
-    "unwind its own private cleanup (key files, decrypted scratch) before the controller's "
-    "confirmed group closure; the same class as base/host/proc.py's TERM->KILL ladder wait, "
-    "no lattice neighbour",
+    ): "independent: bounded TERM grace for a scheduled worker to unwind private cleanup; "
+    "no family-disappearance proof or lattice neighbour",
     (
         "base/host/proc.py",
         "_REAP_TIMEOUT_S",

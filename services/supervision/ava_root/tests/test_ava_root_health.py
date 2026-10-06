@@ -22,7 +22,6 @@ from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.supervision.ava_root import health as health_mod
 from services.supervision.ava_root import manifest as manifest_mod
-from services.supervision.ava_root.custody import ReconcileOutcome
 from services.supervision.ava_root.failure_state import UnitFailureFacts
 from services.supervision.ava_root.health import HealthConfig, HealthMonitor
 from services.supervision.ava_root.inputs import InputSeal
@@ -73,9 +72,7 @@ class StubSupervisor:
         self.unknown_units: set[str] = set(unknown_units or ())
         self.on_restart: Callable[[], None] | None = None
         self.generation = (OwnedProcess(42, 100.0, None), 0.0)
-        self.failure_facts = UnitFailureFacts(
-            intent_running=True, restart_failed=None, custody_held=False
-        )
+        self.failure_facts = UnitFailureFacts(intent_running=True, restart_failed=None)
 
     async def restart(self, unit_id: str) -> dict[str, object]:
         self.restart_calls.append(unit_id)
@@ -97,9 +94,6 @@ class StubSupervisor:
         if unit_id in self.unknown_units:
             raise manifest_mod.UnknownUnitError(f"unknown unit {unit_id!r}")
         return self.failure_facts
-
-    async def reconcile_custody(self) -> list[ReconcileOutcome]:
-        return []
 
 
 class CellProbe:

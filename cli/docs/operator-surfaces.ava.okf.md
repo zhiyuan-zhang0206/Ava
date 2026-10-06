@@ -42,11 +42,6 @@ tags:
 - `ava logs retention`: local, non-recursive managed-log cleanup; legacy global
   14-day fallback or explicit family tiers across service and native archives;
   open handles are excluded.
-- `ava backup operations status/retire`: custody of the scheduled logical dump
-  and restore-drill operations. `status` lists blocked kinds and quarantine
-  (exit 1 while any kind is blocked); `retire` re-proves group closure of each
-  blocked operation, and `--confirm` quarantines the proven ones
-  ([[services/backup/scheduler/docs/operation-custody.ava.okf.md|Operation custody]]).
 - `ava backup walg check|run|drill|restore|status`: the WAL-G physical backup. `check` is the
   pre-flight: it proves the pinned binary, the configuration and key, and a
   put/list/get/delete round trip under the bucket prefix (exit 1 on the first failing

@@ -154,33 +154,18 @@ recovery exists only while WAL-G is on (["WAL-G archiving"](#wal-g-archiving) be
 `ava backup walg restore`, proved weekly by the recovery drill. Never state a
 recovery point newer than the last published dump unless the latest drill has passed.
 
-Backup operations (the daily dump and the weekly logical restore drill) each
-run as one owned worker group of their kind. A failed or cancelled operation
-whose group closure was proven -- including an `ava stop` during the nightly
-dump -- is quarantined under its kind's `$AVA_HOME/backups/quarantine/<kind>/`
-(request, logs, `failure.txt`, receipts; plaintext database material
-removed), raises the
-`ava-ops-backup-operation-quarantined` warning, and the next scheduled run
-proceeds. Unproven closure (or a controller killed mid-operation) blocks only
-that kind and raises `ava-ops-backup-operation-blocked`:
-
-```bash
-ava backup operations status            # blocked kinds, reasons, newest quarantine entries
-ava backup operations retire            # preview: re-prove closure of each blocked operation
-ava backup operations retire --confirm  # quarantine every proven one; the kind proceeds
-```
-
-Closure covers the PostgreSQL children that `setsid` out of the worker group:
-retire also requires every recorded postgres birth dead and no process working
-inside a receipted data directory. Each refusal names its type and the PIDs
-involved (`worker-present`, `group-members`, `postgres-family-alive`,
-`birth-unrecorded`, `unverifiable`, `quarantine-failed`); wait for them (or stop
-them) and retry. A controller killed while launching can only be proven after
-a reboot. A closed operation whose quarantine keeps failing shows as blocked
-and `retire --confirm` retries it. An upload-interrupted dump keeps
-its complete encrypted artifact in quarantine: restore from it directly
-(`.agents/skills/ava-guide/operations/references/db-restore.md`) or copy it
-into `backups/db/` (0600); the next scheduled run dumps again.
+Scheduled dumps and logical restore drills use separate private scratch roots
+under `$AVA_HOME/backups/operations/`. Workers run outside the scheduler event
+loop. Cancellation asks a worker to unwind its cleanup, then bounds stop of the
+known child/group. A zero exit and validated artifact are required before
+atomic publication; a failed or cancelled run does not advance success markers.
+Plaintext and secret staging are removed by normal worker/controller cleanup.
+If cleanup fails, the error names the private staging path for investigation.
+There is no durable operation custody, quarantine, blocked kind or retirement
+command. Independent scratch allows the next scheduled operation to proceed;
+old directories are not adopted as process authority or silently deleted.
+A temporary Postgres uses its native shutdown; failures preserve PGDATA for
+investigation. No full-family disappearance census is performed.
 
 Application service commands, admitted PATH and process ancestry belong to
 [start identity](../../cli/docs/start_identity.ava.okf.md) and
@@ -629,7 +614,7 @@ deleted code.
    Judge the next dump by its destination, not by silence: `ava-logical/<that
    dump's file name>` exists in the bucket with the size of the local
    `.dump.enc`, and the log carries `[backup] off-site published`. Also check
-   `ava backup operations status` (all ready), `pg_backup` health, and that
+   `pg_backup` health, its recent successful-run logs, and that
    `$AVA_HOME/run/ava-root/manifests.json` no longer lists `pitr-*` services.
 
 Everything else the stack left is inert and removed only with separate

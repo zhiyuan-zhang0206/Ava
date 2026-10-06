@@ -1,7 +1,7 @@
-"""The pty-sessions wire protocol and its ownership probe, against a real service.
+"""The pty-sessions wire protocol and its protocol probe, against a real service.
 
 Every request is one JSON line; every response echoes the request's `id`, which
-is what the shared ownership probe (`services.supervision.healthchecks.owned_service`) pairs
+is what the shared protocol probe (`services.supervision.healthchecks.protocol_probe`) pairs
 a ping with. A bad request must answer, never wedge or kill the service.
 """
 
@@ -16,14 +16,12 @@ import threading
 from pathlib import Path
 from typing import Any
 
-import psutil
 import pytest
 
 from base.daemon.health import ProbeVerdict
-from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, protocol
 from base.sessions.pty.paths import service_socket_path
-from services.supervision.healthchecks import owned_service
+from services.supervision.healthchecks import protocol_probe
 from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
@@ -49,23 +47,10 @@ def test_ping_echoes_the_request_id(pty_service: PtyServiceProcess) -> None:
     assert response["data"]["pid"] == pty_service.pid
 
 
-def test_the_ownership_probe_reads_the_service_as_up(pty_service: PtyServiceProcess) -> None:
-    """`probe_owned_service` pairs `{"id": 0, "method": "ping"}` with an `ok` answer
-    and requires the connected peer to belong to the root-owned generation."""
-    owner = OwnedProcess.capture(psutil.Process(pty_service.pid))
-    probe = owned_service._owned_ping(lambda: owner, service_socket_path())
-    assert probe.verdict is ProbeVerdict.ALIVE, probe.detail
-
-
-def test_the_ownership_probe_refuses_a_peer_outside_the_generation(
-    pty_service: PtyServiceProcess,
-) -> None:
+def test_protocol_ping_reads_the_service_as_up(pty_service: PtyServiceProcess) -> None:
     del pty_service
-    with subprocess.Popen(["sleep", "60"], start_new_session=True) as stranger:
-        owner = OwnedProcess.capture(psutil.Process(stranger.pid))
-        probe = owned_service._owned_ping(lambda: owner, service_socket_path())
-        stranger.kill()
-    assert probe.verdict is not ProbeVerdict.ALIVE
+    result = protocol_probe.ping(service_socket_path())
+    assert result.verdict is ProbeVerdict.ALIVE, result.detail
 
 
 @pytest.mark.parametrize(

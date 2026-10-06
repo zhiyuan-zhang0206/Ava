@@ -1,9 +1,7 @@
-"""One owner for application service births and native custody.
+"""Own direct application children and their ordinary bounded lifecycle.
 
-Children stay in the permission ancestry. Stop captures their native births
-before signalling, preserves uncertain custody, and never escalates implicitly.
-The health monitor is the sole retry scheduler; an unexplained leader exit
-requires reconciliation rather than permission to launch a duplicate.
+Children retain the permission ancestry. A known live leader's group receives
+stop signals; no durable custody or descendant-closure proof blocks replacement.
 """
 
 from __future__ import annotations
@@ -30,9 +28,7 @@ from base.native_process.root_control.ipc import (
     ok_response,
 )
 from services.supervision.ava_root import intent_store
-from services.supervision.ava_root.custody import require_clear
 from services.supervision.ava_root.failure_state import UnitFailureFacts
-from services.supervision.ava_root.group_scope import group_closed, record_survivors
 from services.supervision.ava_root.intent_store import (
     IntentRecord,
     IntentSource,
@@ -46,7 +42,6 @@ from services.supervision.ava_root.manifest import (
     UnitRegistry,
     UnknownUnitError,
 )
-from services.supervision.ava_root.reconciling import ReconcilingMixin
 from services.supervision.ava_root.stopping import StoppingMixin, SupervisorConfig
 from services.supervision.ava_root.unit_records import _Generation, _UnitRuntime
 
@@ -69,7 +64,7 @@ class MetricsSource(Protocol):
         ...
 
 
-class Supervisor(StoppingMixin, ReconcilingMixin):
+class Supervisor(StoppingMixin):
     """Owns the lifecycle of every unit in one registry.
 
     All mutating verbs serialize on one lock, so overlapping commands are
@@ -91,7 +86,6 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
         self._units: dict[str, _UnitRuntime] = {
             manifest.id: _UnitRuntime(manifest=manifest) for manifest in registry.units
         }
-        self._reconcile_reports: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._started_at: float | None = None
         self._running = False
@@ -103,17 +97,7 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start one clean root generation; unresolved custody reconciles first.
-
-        The custody gate clears every record it can prove gone and refuses only
-        on one that keeps an unproven fact, naming its steps and evidence (see
-        `custody.require_clear`). Each unit's stored record is merged first
-        (conservative, see
-        `intent_store.merge_record_for_boot`): a recorded operator stop holds
-        its unit down; a stop the root gave itself is superseded; a recorded
-        replacement failure is carried until a fresh generation proves it gone.
-        """
-        require_clear(self._run_dir)
+        """Start selected units, preserving recorded operator intent and failures."""
         self._log_dir.mkdir(parents=True, exist_ok=True)
         async with self._lock:
             self._running = True
@@ -131,7 +115,7 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
     async def shutdown(self) -> None:
         """Stop the whole tree (children before parents) and drain the tasks.
 
-        A refused unit keeps its generation and custody, and the units after it
+        A refused live child keeps its generation, and the units after it
         are still stopped; the refusals are then raised together, before any
         watch is cancelled, so each refused unit's reap is still observed.
         """
@@ -146,9 +130,7 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
                 except Exception as exc:
                     refusals.append(exc)
         if refusals:
-            raise ExceptionGroup(
-                f"root shutdown retained custody of {len(refusals)} unit(s)", refusals
-            )
+            raise ExceptionGroup(f"root shutdown could not stop {len(refusals)} unit(s)", refusals)
         pending = [
             task
             for runtime in self._units.values()
@@ -362,7 +344,7 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
         return generation.identity, generation.started_at
 
     def revival_deferral(self, unit_id: str) -> str | None:
-        """Preserve explicit stop, retained custody, and never-restart policy.
+        """Preserve explicit stop and never-restart policy.
 
         Classification reads the unit's intent — the policy fact — never a
         mechanical transition residue: only an explicit stop is the expected,
@@ -376,25 +358,18 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
         if runtime.intent is not UnitIntent.RUNNING:
             return "held down"
-        if runtime.generation is not None and not self._is_active(runtime):
-            return "native custody requires reconciliation"
         if runtime.manifest.restart is RestartPolicy.NEVER:
             return "policy never"
         return None
 
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
-        """The failure-state facts of one unit: intent, recorded failure, custody.
-
-        `custody_held` reads `revival_deferral`'s reconciliation clause — a
-        retained generation that is not active holds revival until reconciled.
-        """
+        """The unit's operator intent and recorded replacement failure."""
         runtime = self._units.get(unit_id)
         if runtime is None:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
         return UnitFailureFacts(
             intent_running=runtime.intent is UnitIntent.RUNNING,
             restart_failed=runtime.restart_failed,
-            custody_held=runtime.generation is not None and not self._is_active(runtime),
         )
 
     async def dispatch(self, request: RequestPayload) -> ResponsePayload:
@@ -540,7 +515,6 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
-            custody = self._new_custody(manifest.id)
             env = inherited_process_env() | dict(manifest.env)
             proc = await asyncio.create_subprocess_exec(
                 *manifest.exec,
@@ -561,11 +535,7 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
             proc=proc,
             started_at=monotonic(),
             identity=identity,
-            custody=custody,
-            tracked={identity} if identity else set(),
         )
-        if identity is not None:
-            custody.retain(generation.tracked, proc.pid)
         runtime.generation = generation
         runtime.state = UnitState.RUNNING
         runtime.last_error = None
@@ -578,30 +548,14 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
         )
 
     async def _watch(self, runtime: _UnitRuntime, generation: _Generation) -> None:
-        """Reap one generation, retaining unexpected native custody.
-
-        Everything after `await proc.wait()` is synchronous — `exited` must be
-        the final action so waiters never observe a half-processed exit.
-        """
+        """Reap one direct child and make an unexpected exit eligible for replacement."""
         returncode = await generation.proc.wait()
-        # asyncio's child watcher reaped the leader with waitpid a few loop
-        # turns before this resumes, on every POSIX host. A live member keeps the
-        # number reserved, so an empty group is the unit's closure and the
-        # members listed are its survivors; only a group that empties inside
-        # that window, its number then taken by another process, misleads this
-        # read. Once the survivors exit, a later group with that number may be a
-        # stranger's, so no later stop signals by it.
-        pgid = generation.proc.pid
-        generation.scope_closed_at_exit = group_closed(pgid)
-        if not generation.scope_closed_at_exit:
-            record_survivors(runtime.manifest.id, pgid, generation.tracked, generation.custody)
         if runtime.generation is generation:
             runtime.last_exit = _describe_exit(returncode)
             runtime.state = UnitState.STOPPED
+            runtime.generation = None
             if not generation.closing:
-                runtime.last_error = "unexpected exit; native custody requires reconciliation"
-        # Only a stop owner releases custody (`_stop_exited_generation` for an
-        # unexpected exit); until then it blocks revival and a duplicate root.
+                runtime.last_error = f"unexpected exit: {runtime.last_exit}"
         generation.exited.set()
 
     @staticmethod

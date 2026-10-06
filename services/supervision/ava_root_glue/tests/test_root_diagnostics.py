@@ -10,10 +10,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from base.cluster.dataplane import pooler as base_pooler
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
-from services.supervision.ava_root.custody import ReconcileOutcome
 from services.supervision.ava_root.failure_state import UnitFailureFacts
 from services.supervision.ava_root.health import HealthMonitor, ProbeRunner
 from services.supervision.ava_root.probes import ProbeRegistry
@@ -194,9 +192,6 @@ class _NoRevival:
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         raise AssertionError(f"unexpected failure facts lookup for {unit_id}")
 
-    async def reconcile_custody(self) -> list[ReconcileOutcome]:
-        raise AssertionError("unexpected custody reconcile pass")
-
 
 class _Health(HealthMonitor):
     """A service health round the test releases (or fails) explicitly."""
@@ -282,45 +277,6 @@ def test_station_no_credential_is_unknown_and_does_not_send(
     answers.assert_not_called()
 
 
-def test_browser_canary_runs_only_inside_owned_endpoint_probe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from services.supervision.healthchecks import browser_reach, owned_service
-
-    def foreign_listener(*_args: object) -> DaemonProbe:
-        return DaemonProbe.port_taken("foreign")
-
-    canary = Mock(side_effect=AssertionError("foreign browser must not be used"))
-    monkeypatch.setattr(browser_reach, "canary", canary)
-    monkeypatch.setattr(owned_service, "probe_endpoint", foreign_listener)
-    monkeypatch.setattr(
-        probes,
-        "settings",
-        SimpleNamespace(
-            services=SimpleNamespace(
-                gateway_health_url="https://example.invalid/api/health",
-                browser_cdp_port=9222,
-            )
-        ),
-    )
-    assert probes.browser_reach().verdict.value == "port-taken"
-    canary.assert_not_called()
-
-
-def test_pooler_requires_native_custody_before_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.cluster import ownership
-
-    def registered(_home: object) -> object:
-        return object()
-
-    listener = Mock(side_effect=AssertionError("unknown pooler must not be accepted"))
-    monkeypatch.setattr("base.cluster.get_record", registered)
-    monkeypatch.setattr(ownership, "pooler", Mock(return_value=None))
-    monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", listener)
-    assert probes.pgbouncer().verdict.value == "down"
-    listener.assert_not_called()
-
-
 def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -330,3 +286,24 @@ def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(
     monkeypatch.setattr("base.host.proc.run_bounded", missing)
     with pytest.raises(FileNotFoundError):
         probes.brew_pins()  # ProbeRunner maps inspection failure to UNAVAILABLE.
+
+
+def test_redis_acl_uses_runtime_ping_without_native_custody(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.cluster import ownership
+    from services.supervision.healthchecks import redis_acl
+
+    ping = Mock()
+    capture = Mock(side_effect=AssertionError("read-only health must not capture native custody"))
+    monkeypatch.setattr(ownership, "configured_redis_port", Mock(return_value=6380))
+    monkeypatch.setattr(ownership.RedisConnectionCustody, "capture", capture)
+    monkeypatch.setattr(redis_acl, "ping", ping)
+    monkeypatch.setattr(
+        probes,
+        "settings",
+        SimpleNamespace(data_plane=SimpleNamespace(redis_url="redis://localhost:6380")),
+    )
+    assert probes.redis_acl().alive
+    ping.assert_called_once_with("redis://localhost:6380")
+    capture.assert_not_called()

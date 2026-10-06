@@ -648,8 +648,8 @@ def throwaway_postgres(
             `select_throwaway_base(required_bytes)`, so the base it reports is the
             base used here.
         foreground: keep Postgres as a direct child in the caller's process group.
-            Cancellable restore workers use this so their group reaper also owns
-            the postmaster if the worker cannot finish normal cleanup.
+            Restore workers use native pg_ctl shutdown through their direct child
+            handle; this does not certify every detached descendant disappeared.
 
     Yields:
         A postgresql:// URL string.

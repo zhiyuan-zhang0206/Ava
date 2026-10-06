@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from .f12 import _f12_finish, _f12_point
-from .reconcile import _reconcile_phase
 from .support import (
     _ROOT_SOCKET,
     _ROOT_WAIT_S,
@@ -31,7 +30,6 @@ from .support import (
     _pid_alive,
     _ping_or_none,
     _ppid_of,
-    _probe_pids,
     _ps_line,
     _refusal,
     _relaunched_helper,
@@ -40,7 +38,6 @@ from .support import (
     _save,
     _status_if_conflict,
     _status_if_keeper_running,
-    _status_if_refused,
     _status_if_running,
     _tail,
     _unit_entry,
@@ -74,19 +71,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     parser.add_argument("--python", default=sys.executable, help="interpreter for root + units")
     parser.add_argument("--skip-attribution", action="store_true", help="skip the F11 tccd check")
     parser.add_argument(
-        "--sample-restart",
-        action="store_true",
-        help="sample chains + TCC attribution across the root crash restart (F12)",
-    )
-    parser.add_argument(
         "--sample-conflict",
         action="store_true",
         help="sample chains + TCC attribution across the helper crash conflict phase (F12b)",
-    )
-    parser.add_argument(
-        "--reconcile-case",
-        action="store_true",
-        help="append the cold-start reconcile case (dead generation -> release, no force)",
     )
     parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
     args = parser.parse_args()
@@ -168,8 +155,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
         # ---- fixtures ------------------------------------------------------
         # Fresh run surface: stale fixtures/logs from an earlier run must not
-        # satisfy this run's waits (the attribution split and the custody
-        # refusal check read files, not memory), and a stale run dir's custody
+        # satisfy this run's waits (the attribution split checks read files, not memory), and stale run-directory files
         # records or stop intents would refuse this run's root outright.
         shutil.rmtree(run_dir, ignore_errors=True)
         run_dir.mkdir(parents=True)
@@ -477,76 +463,6 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             )
         phase_pass(
             "conflict", f"orphan {root_pid} refused + closed natively; reseeded root {reseeded_pid}"
-        )
-
-        # ---- restart (root crash) -----------------------------------------
-        f12: dict[str, Any] = {"points": {}}
-        survivors = list(reseeded_units.items())
-        chain = [new_helper_pid, reseeded_pid, *reseeded_units.values()]
-        restarts_before = int(helper_root_status()["restarts"])
-        if args.sample_restart:
-            f12["points"]["pre"] = _f12_point(workdir, "pre", survivors, chain)
-        _kill(reseeded_pid, signal.SIGKILL)
-        if args.sample_restart:
-            f12["kill_ts"] = round(time.time(), 3)
-            f12["points"]["gap"] = _f12_point(workdir, "gap", survivors, chain)
-        keeper = _wait_for(
-            "replacement root refused",
-            lambda: _status_if_refused(helper_root_status, restarts_before),
-            _RESTART_WAIT_S,
-            "restart",
-        )
-        if "custody requires reconciliation" not in (workdir / "root.stderr.log").read_text():
-            _fail("restart", "the replacement root did not refuse on retained service custody")
-        dead_units = {unit_id: pid for unit_id, pid in survivors if not _pid_alive(pid)}
-        if dead_units:
-            _fail("restart", f"units died with the root: {dead_units}")
-        probes = _probe_pids(probe)
-        if probes != set(reseeded_units.values()):
-            _fail("restart", f"unit probes {sorted(probes)} are not just the survivors")
-        if args.sample_restart:
-            f12["points"]["refused"] = _f12_point(workdir, "refused", survivors, chain)
-            time.sleep(_F12_STABLE_S)
-            f12["points"]["stable"] = _f12_point(workdir, "stable", survivors, chain)
-            f12.update({"helper_pid": new_helper_pid, "root_pid": reseeded_pid, "keeper": keeper})
-            _f12_finish(
-                evidence,
-                f12,
-                "f12-restart",
-                [
-                    (point, list(reseeded_units.values()), new_helper_pid)
-                    for point in ("pre", "gap", "refused", "stable")
-                ],
-            )
-        _save(
-            evidence,
-            "restart.txt",
-            _ps_line(new_helper_pid, *reseeded_units.values())
-            + f"\nroot {reseeded_pid} killed; unit probes alive: {sorted(probes)}",
-        )
-        _save(evidence, "keeper-status-restart.json", json.dumps(keeper, indent=2))
-        phase_pass(
-            "restart",
-            f"root {reseeded_pid} killed; units kept running; replacement refused on custody"
-            + ("; F12 sampling saved" if args.sample_restart else ""),
-        )
-
-        # ---- reconcile (cold start over a dead generation) -----------------
-        # Opt-in (--reconcile-case). The gate lives inside the phase so main()
-        # keeps its frozen complexity budget: one call, not a new branch.
-        _reconcile_phase(
-            enabled=args.reconcile_case,
-            workdir=workdir,
-            evidence=evidence,
-            run_dir=run_dir,
-            probe=probe,
-            root_status=root_status,
-            helper_root_status=helper_root_status,
-            phase_pass=phase_pass,
-            recorded_pids=recorded_pids,
-            new_helper_pid=new_helper_pid,
-            reseeded_pid=reseeded_pid,
-            reseeded_units=reseeded_units,
         )
 
         print("\nSMOKE PASS: " + ", ".join(phases))

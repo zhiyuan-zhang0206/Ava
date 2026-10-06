@@ -1,7 +1,6 @@
 {
   "ambient_state": {
     "base/cluster/authority/api.py::ambient-container:_acceptance_cache": 1,
-    "base/cluster/dataplane/pg_foreground.py::global-rebind:_receipts": 1,
     "base/cluster/machine.py::ambient-instance:_identity": 1,
     "base/cluster/postgres.py::ambient-container:_CHILDREN": 1,
     "base/cluster/rate_limit.py::ambient-instance:login_limiter": 1

@@ -1,4 +1,4 @@
-"""Collector protocol health must belong to root-owned listeners."""
+"""Collector health uses the OTLP protocol response."""
 
 from __future__ import annotations
 
@@ -13,77 +13,17 @@ from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing
 from services.supervision.healthchecks import otel_collector as hc
 
 
-@pytest.mark.parametrize("owned", [True, False])
-def test_collector_protocol_success_requires_root_owned_listeners(
-    monkeypatch: pytest.MonkeyPatch, owned: bool
+@pytest.mark.parametrize("ready", [True, False])
+def test_collector_health_uses_otlp_without_native_inspection(
+    monkeypatch: pytest.MonkeyPatch, ready: bool
 ) -> None:
-    from base.native_process.ownership import OwnedProcess
-    from base.native_process.root_control import client
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("collector protocol health must not inspect listeners")
 
-    owner = OwnedProcess(101, 12.0, None)
-
-    def _fake_owned_process(_unit: str) -> OwnedProcess | None:
-        return owner
-
-    def _fake_strict_listeners_on(_port: int) -> list[int]:
-        return [202]
-
-    def _fake_leader_owns_pids(_expected: OwnedProcess, _pids: set[int]) -> bool:
-        return owned
-
-    monkeypatch.setattr(client, "owned_process", _fake_owned_process)
-    monkeypatch.setattr(hc, "strict_listeners_on", _fake_strict_listeners_on)
-    monkeypatch.setattr(hc, "leader_owns_pids", _fake_leader_owns_pids)
-    monkeypatch.setattr(hc, "_is_alive", lambda: True)
-
-    result = hc.probe_collector()
-    assert result.alive is owned
-    assert result.terminal is not owned
-
-
-def test_collector_cannot_certify_a_listener_without_root_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.daemon.health import ProbeVerdict
-    from base.native_process.ownership import OwnedProcess
-    from base.native_process.root_control import client
-
-    def _fake_owned_process(_unit: str) -> OwnedProcess | None:
-        return None
-
-    def _fake_strict_listeners_on(_port: int) -> list[int]:
-        return [202]
-
-    monkeypatch.setattr(client, "owned_process", _fake_owned_process)
-    monkeypatch.setattr(hc, "strict_listeners_on", _fake_strict_listeners_on)
-    monkeypatch.setattr(hc, "_is_alive", lambda: pytest.fail("unknown ownership must not pass"))
-    assert hc.probe_collector().verdict is ProbeVerdict.UNAVAILABLE
-
-
-def test_collector_discovery_failure_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.cluster.port_preflight import ListenerDiscoveryError
-    from base.daemon.health import ProbeVerdict
-
-    def fail(_port: int) -> list[int]:
-        raise ListenerDiscoveryError("cannot inspect listeners")
-
-    monkeypatch.setattr(hc, "strict_listeners_on", fail)
-    assert hc.probe_collector().verdict is ProbeVerdict.UNAVAILABLE
-
-
-def test_collector_root_failure_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.daemon.health import ProbeVerdict
-    from base.native_process.root_control import client
-
-    def fail(_unit: str) -> None:
-        raise client.RootClientError("root status unavailable")
-
-    def _fake_strict_listeners_on(_port: int) -> list[int]:
-        return [202]
-
-    monkeypatch.setattr(client, "owned_process", fail)
-    monkeypatch.setattr(hc, "strict_listeners_on", _fake_strict_listeners_on)
-    assert hc.probe_collector().verdict is ProbeVerdict.UNAVAILABLE
+    monkeypatch.setattr("base.cluster.port_preflight.strict_listeners_on", forbidden)
+    monkeypatch.setattr("base.native_process.root_control.client.owned_process", forbidden)
+    monkeypatch.setattr(hc, "_is_alive", lambda: ready)
+    assert hc.probe_collector().alive is ready
 
 
 def test_collector_serves_this_home_fails_closed_without_machine_role(

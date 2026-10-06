@@ -326,15 +326,13 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `root_restart_breaker_open` | root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round | anomaly | — | — | events | — |
 | `root_restart_failed` | root unit replacement failed at its down|up half — explicit failure state recorded; intent stays running and the health monitor retries under its backoff (task #4872) | anomaly | unit, stage, detail | — | events | — |
 | `root_restart_cleared` | root unit replacement succeeded — the recorded failure state was cleared (task #4872) | noise | unit, failed_for_s | — | events | — |
-| `custody_reconcile` | custody record reconcile pass — releases always report; a retained record reports on first sight and evidence change — with its birth and process-group evidence (task #4872) | observation | unit, checked, found, decision, evidence | — | events | — |
-| `root_unit_failure_state` | root unit sits in an explicit failure state (intent running, and restart_failed, breaker open, or retained custody) — emitted every health round while it holds (task #4872) | anomaly | unit, kind, detail | — | events | — |
+| `root_unit_failure_state` | root unit sits in an explicit failure state (intent running, and restart_failed, breaker open) — emitted every health round while it holds (task #4872) | anomaly | unit, kind, detail | — | events | — |
 | `root_unit_not_revivable` | root health round observed a terminal probe verdict the unit cannot revive (unknown identity, inspection error, foreign listener) — emitted every round it is observed, WARNING | anomaly | unit, detail | — | events | — |
 | `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events | — |
 | `schedule_stalled` | enabled non-completed schedule has had no live session for more than two hours | anomaly | schedule_id, status, stalled_seconds | — | events | — |
 | `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events | — |
 | `root_diagnostic` | root diagnostic sampled non-alive (every sample while it persists, WARNING) or recovered (once, INFO); observation only, no recovery authority | anomaly | diagnostic, verdict, detail, consecutive_failures | — | events | — |
 | `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events | — |
-| `backup_operation_custody` | backup operation quarantined, blocked on unproven closure, or retired | anomaly | operation, custody, detail | — | events | — |
 | `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events | — |
 | `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events | — |
 | `health_probe_failing` | the cluster health probe found a failing check; repeated on every unhealthy run | anomaly | check, failure_class, message | — | events | — |

@@ -229,16 +229,6 @@ def _status_if_conflict(helper_root_status):
     return status if status.get("state") == "conflict" else None
 
 
-def _status_if_refused(helper_root_status, restarts_before: int):
-    """The keeper once a replacement root has exited `refused` after the crash."""
-    try:
-        status = helper_root_status()
-    except _NOT_ANSWERING:
-        return None
-    refused = status.get("last_exit", {}).get("kind") == "refused"
-    return status if refused and int(status["restarts"]) > restarts_before else None
-
-
 def _probe_pids(probe: Path) -> set[int]:
     """Every live unit-probe process of this workdir, whoever spawned it."""
     return {int(pid) for pid in _run(["pgrep", "-f", str(probe)], check=False).stdout.split()}

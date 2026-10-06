@@ -76,18 +76,6 @@ def test_root_restart_payloads_name_the_evidence() -> None:
     assert payload_keys("root_restart_cleared") == ("unit", "failed_for_s")
 
 
-def test_custody_reconcile_payload_names_the_evidence() -> None:
-    from base.events.contract import payload_keys
-
-    assert payload_keys("custody_reconcile") == (
-        "unit",
-        "checked",
-        "found",
-        "decision",
-        "evidence",
-    )
-
-
 def test_root_unit_failure_payloads_name_the_evidence() -> None:
     from base.events.contract import payload_keys
 
@@ -155,13 +143,6 @@ def test_stall_wave_mitigation_event_contract() -> None:
         "timeout_s",
     )
     assert tier_for("stream_stall_pair_terminated", "telemetry", "warning") == "anomaly"
-
-
-def test_backup_operation_custody_payload() -> None:
-    """Custody alerts group by operation kind; the detail is never a label."""
-    from base.events.contract import payload_keys
-
-    assert payload_keys("backup_operation_custody") == ("operation", "custody", "detail")
 
 
 def test_recovery_drill_failed_payload() -> None:

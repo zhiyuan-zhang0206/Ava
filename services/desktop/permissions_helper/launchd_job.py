@@ -238,17 +238,14 @@ def unregister_helper(
         return
     if not home.is_absolute() or home.resolve() != home or not 0 < helper_port < 65536:
         raise ValueError("helper retirement requires a canonical home and registered port")
-    from services.supervision.ava_root.custody import require_clear
     from services.supervision.ava_root.singleton import acquire_instance_lock, release_instance_lock
 
     run_dir = home / "run" / "ava-root"
     run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    require_clear(run_dir)
     deadline = time.monotonic() + timeout_s
     original = None if force else _request_helper_shutdown(home, helper_port, deadline)
     lock_fd = acquire_instance_lock(run_dir)
     try:
-        require_clear(run_dir)
         _unregister_stopped_helper(home, helper_port, deadline, force=force, expected=original)
     finally:
         release_instance_lock(lock_fd)

@@ -1,4 +1,4 @@
-"""The root owner for one home's application services and native custody.
+"""The root owner for one home's application service children.
 
 macOS starts this tree under the stable signed permissions helper. Transport,
 health observation, and service manifests share this owner; there is no service
