@@ -34,8 +34,10 @@ from base.agents.messages.kwargs import (
     AvaMessageKwargs,
     AvaMsgType,
     NoteTag,
+    kwargs_read_time,
     message_addl_kwargs,
     message_content,
+    message_read_time,
     read_ava_kwargs,
 )
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
@@ -180,14 +182,15 @@ def build_timeline_items(
     sub_offset = 0
 
     def next_ts(msg: BaseMessage | None = None) -> str:
-        """The item's wall-clock ts: the message's own real `ava_created_at`
-        (stamped at creation by the producing node) when present, else a
+        """The item's wall-clock ts: the message's own real read time
+        (`message_read_time`: `ava_picked_up_at` for an injected message, else
+        `ava_created_at`; never an inbound's arrival time) when present, else a
         synthetic anchor+microsecond offset for legacy messages persisted
         before the field existed. The offset advances only on the synthetic
         path, so a turn's blocks that share one real ts collapse onto that ts
         while legacy blocks still fan out by a microsecond for stable ordering."""
         if msg is not None:
-            real = read_ava_kwargs(msg).get("ava_created_at")
+            real = message_read_time(msg)
             if real:
                 return real
         nonlocal sub_offset
@@ -346,7 +349,7 @@ def _inbound_item(
         source=kwargs.get("ava_source"),
         payload=_inbound_text(raw_content),
         created_at=(
-            kwargs.get("ava_created_at") or (current_anchor.isoformat() if nxt else next_ts(None))
+            kwargs_read_time(kwargs) or (current_anchor.isoformat() if nxt else next_ts(None))
         ),
         inbound_id=embedded_id if embedded_id is not None else (nxt.id if nxt else None),
         images=images if images else None,

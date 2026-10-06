@@ -28,7 +28,7 @@ channel reducers enforce). This door does not import it.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from langchain_core.messages import (
@@ -64,6 +64,16 @@ COMPACT_SUMMARY_HEADER = (
 )
 
 
+def _stamp_picked_up(kwargs: dict[str, object]) -> dict[str, object]:
+    """Add `ava_picked_up_at`: the moment this injected message is put into the
+    LLM context (builders run at the injection point). Distinct from
+    `ava_created_at`, which for an inbound is its arrival time. AIMessage and
+    tool output are produced inside the context, so their `ava_created_at`
+    already is the read time and they carry no `ava_picked_up_at`."""
+    kwargs["ava_picked_up_at"] = datetime.now(UTC).isoformat()
+    return kwargs
+
+
 def _stamp_created_at(kwargs: dict[str, object], created_at: datetime | None) -> dict[str, object]:
     """Add the ISO-8601 `ava_created_at` when a real creation time is known.
     The timeline read side prefers it over its synthetic anchor+offset ordering;
@@ -97,7 +107,11 @@ def inbound_message(
             whether a 'claimed' inbound's commit actually landed (see
             agent/db/__init__.py:reconcile_claimed_inbounds + claim_inbound_batch).
         ava_created_at: ISO-8601 wall-clock the inbound entered the conversation
-            (the source row's stored created_at). Omitted when not supplied.
+            (the source row's stored created_at, i.e. its ARRIVAL time).
+            Omitted when not supplied.
+        ava_picked_up_at: ISO-8601 wall-clock the inbound was put into the LLM
+            context (claim time) — the time the model reads it. Timeline and
+            history render by this, not by arrival.
         ava_image_urls: reference urls of any inlined images (timeline render).
             Omitted when the inbound carries no image.
     """
@@ -112,7 +126,7 @@ def inbound_message(
     # subset it accepts at runtime (a leading text block + native image blocks).
     return HumanMessage(
         content=cast("str | list[str | dict[str, Any]]", content),
-        additional_kwargs=_stamp_created_at(kwargs, created_at),
+        additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
     )
 
 
@@ -134,8 +148,10 @@ def system_note_message(
         ava_msg_type: "system_note"
         ava_note_tag: the NoteTag value (drives the timeline chip)
         ava_task_id: task attribution for a task-driven turn. Omitted otherwise.
-        ava_created_at: ISO-8601 wall-clock the note was injected. Omitted when
+        ava_created_at: ISO-8601 wall-clock the note was produced. Omitted when
             not supplied.
+        ava_picked_up_at: ISO-8601 wall-clock the note was put into the LLM
+            context.
     """
     kwargs: dict[str, object] = {
         "ava_msg_type": AvaMsgType.SYSTEM_NOTE.value,
@@ -145,7 +161,7 @@ def system_note_message(
         kwargs["ava_task_id"] = task_id
     return HumanMessage(
         content=f"[system] {content}",
-        additional_kwargs=_stamp_created_at(kwargs, created_at),
+        additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
     )
 
 
@@ -184,7 +200,9 @@ def attach_message(
     content_blocks = blocks or [{"type": "text", "text": text}]
     return HumanMessage(
         content=cast("str | list[str | dict[str, Any]]", content_blocks),
-        additional_kwargs=_stamp_created_at({"ava_msg_type": AvaMsgType.ATTACH.value}, created_at),
+        additional_kwargs=_stamp_created_at(
+            _stamp_picked_up({"ava_msg_type": AvaMsgType.ATTACH.value}), created_at
+        ),
     )
 
 
@@ -216,7 +234,8 @@ def exec_output_message(
             as the collapsed-code chip). Omitted when unknown — a boot-crashed
             child — while `[]` means "ran, called no SDK".
         ava_created_at: ISO-8601 wall-clock the output was produced. Omitted when
-            not supplied.
+            not supplied. Produced inside the context, so this is also its read
+            time (no `ava_picked_up_at`).
     """
     kwargs: dict[str, object] = {
         "ava_msg_type": AvaMsgType.EXEC_OUTPUT.value,

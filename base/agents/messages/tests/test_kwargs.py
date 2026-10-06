@@ -66,3 +66,21 @@ def test_read_ava_kwargs_is_live_view() -> None:
     kw = read_ava_kwargs(msg)
     assert kw is msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
     assert kw.get("ava_msg_type") == AvaMsgType.INBOUND
+
+
+def test_read_time_prefers_picked_up_over_created_at() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from base.agents.messages.kwargs import message_read_time
+
+    inbound = HumanMessage(
+        content="x",
+        additional_kwargs={
+            "ava_created_at": "2026-01-01T00:00:00+00:00",
+            "ava_picked_up_at": "2026-01-01T00:00:09+00:00",
+        },
+    )
+    ai = AIMessage(content="y", additional_kwargs={"ava_created_at": "2026-01-01T00:00:05+00:00"})
+    assert message_read_time(inbound) == "2026-01-01T00:00:09+00:00"
+    assert message_read_time(ai) == "2026-01-01T00:00:05+00:00"
+    assert message_read_time(HumanMessage(content="legacy")) is None

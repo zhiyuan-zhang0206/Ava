@@ -30,7 +30,12 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from base.agents.history.hierarchy.blocks import Block
 from base.agents.history.hierarchy.tokens import count_tokens
-from base.agents.messages.kwargs import AvaMsgType, message_content, read_ava_kwargs
+from base.agents.messages.kwargs import (
+    AvaMsgType,
+    message_content,
+    message_read_time,
+    read_ava_kwargs,
+)
 from base.lm.content import content_blocks
 from base.lm.reasoning import to_canonical_reasoning
 
@@ -66,7 +71,7 @@ class RenderedMessage:
     """One message's rendered projection: truncated body + true size."""
 
     role: str  # human | ai | tool
-    ts: str  # ava_created_at, "" for legacy messages that predate it
+    ts: str  # read time (message_read_time), "" for legacy messages that predate it
     text: str  # the truncated body
     tokens: int  # true (untruncated) body token count
 
@@ -166,8 +171,8 @@ def render_message(msg: BaseMessage, params: RenderParams | None = None) -> Rend
     body = _ai_body(msg) if isinstance(msg, AIMessage) else _content_text(message_content(msg))
     if not body.strip():
         return None
-    ts = read_ava_kwargs(msg).get("ava_created_at")
-    # Legacy messages predate ava_created_at; the render carries "" rather than
+    ts = message_read_time(msg)
+    # Legacy messages predate the stamps; the render carries "" rather than
     # a synthetic time (spans are informational here; the console's synthetic
     # anchor logic needs inbound rows this layer deliberately does not read).
     return RenderedMessage(
