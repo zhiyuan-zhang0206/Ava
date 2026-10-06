@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
 from uuid import UUID, uuid4
 
 import httpx
 import psycopg
 import pytest
 
+from base.agents.impersonation._store import token_hash
+from base.agents.impersonation.delivery import reserve_delivery
+from base.agents.impersonation.relay import relay_get, relay_inbox
+from base.cluster.machine import set_identity
 from base.config import settings
 from base.db import Database, publish_inbound_wake
 from base.events.live.announce import (
@@ -17,10 +22,11 @@ from base.events.live.announce import (
 from base.events.live.bus import EventBus
 from tests.base.poll_until import poll_until
 from tests.e2e._env import E2EEnv
+from tests.e2e.fakes._recording import model_inputs, reset_record
 from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY
 
 
-def _seed_active_lease(agent_id: int) -> tuple[UUID, int]:
+def _seed_active_lease(agent_id: int, relay_token: str) -> tuple[UUID, int]:
     """Insert one already-active lease without publishing intermediate consent wakes."""
     lease_id = uuid4()
     with psycopg.connect(settings.data_plane.db_url) as conn:
@@ -32,11 +38,12 @@ def _seed_active_lease(agent_id: int) -> tuple[UUID, int]:
         session_row = conn.execute(
             "INSERT INTO agent_impersonations(id,agent_id,session_id,source,machine,reason,"
             "status,ttl_seconds,expires_at,accepted_generation,accepted_owner,"
-            "activated_at,start_message,relay_provider,relay_thread_id,relay_heartbeat_at) "
+            "activated_at,start_message,relay_provider,relay_thread_id,relay_heartbeat_at,"
+            "relay_token_hash,ack_window_seconds,max_delivery_attempts) "
             "VALUES(%s,%s,0,'external_agent:codex:e2e',%s,'External work','active',3600,"
             "clock_timestamp()+interval '1 hour',%s,%s,clock_timestamp(),"
-            "'External work brief','codex',%s,clock_timestamp()) RETURNING session_id",
-            (lease_id, agent_id, row[2], row[0], row[1], str(uuid4())),
+            "'External work brief','codex',%s,clock_timestamp(),%s,2,2) RETURNING session_id",
+            (lease_id, agent_id, row[2], row[0], row[1], str(uuid4()), token_hash(relay_token)),
         ).fetchone()
         assert session_row is not None
         session_id = session_row[0]
@@ -49,8 +56,64 @@ def _seed_active_lease(agent_id: int) -> tuple[UUID, int]:
     return lease_id, session_id
 
 
+def _exhaust_delivery_budget(env: E2EEnv, lease_id: UUID, relay_token: str) -> str:
+    """Drive real relay reservations; leave the unanswered UI request for native recovery."""
+    request = "Please keep this unanswered request when the external session ends."
+    env.page.fill('[data-testid="composer-input"]', request)
+    env.page.click('[data-testid="composer-send"]')
+    db, bus = Database.from_settings(), EventBus.from_settings()
+    handle = str(lease_id)
+    pending: list[int] = []
+
+    def captured() -> tuple[bool, object]:
+        messages = relay_inbox(db, handle, relay_token)
+        pending[:] = [message["id"] for message in messages if message["content"] == request]
+        return len(pending) == 1, messages
+
+    poll_until(captured, timeout=10.0, what="UI request reaches the relay inbox")
+    before = relay_get(db, bus, handle, relay_token)
+    assert reserve_delivery(db, bus, handle, relay_token, pending) == frozenset(pending)
+    # A stale inbox snapshot must not spend a second attempt in the same window.
+    assert not reserve_delivery(db, bus, handle, relay_token, pending)
+
+    def retry_due() -> tuple[bool, object]:
+        reserved = reserve_delivery(db, bus, handle, relay_token, pending)
+        return reserved == frozenset(pending), reserved
+
+    poll_until(retry_due, timeout=10.0, what="second delivery becomes due")
+
+    def budget_exhausted() -> tuple[bool, object]:
+        # The real expiry check detects the elapsed final ACK window, without
+        # rewriting delivery timestamps or marking the input received.
+        session = relay_get(db, bus, handle, relay_token)
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            state = conn.execute(
+                "SELECT l.relay_degraded_reason,m.delivery_attempts,m.acknowledged_at,i.status "
+                "FROM agent_impersonations l JOIN agent_impersonation_messages m "
+                "ON m.lease_id=l.id JOIN inbound_messages i ON i.id=m.inbound_id "
+                "WHERE l.id=%s AND i.id=%s",
+                (lease_id, pending[0]),
+            ).fetchone()
+        assert session["status"] == "active"
+        assert session["expires_at"] == before["expires_at"]
+        assert state is not None and state[1:] == (2, None, "pending")
+        assert len(model_inputs(env.agent_id)) == 1  # Native execution remains parked.
+        return bool(state[0] and "exhausted its delivery budget" in state[0]), state
+
+    poll_until(budget_exhausted, timeout=10.0, what="final ACK window expires")
+    assert not reserve_delivery(db, bus, handle, relay_token, pending)
+    assert pending[0] in {message["id"] for message in relay_inbox(db, handle, relay_token)}
+    return request
+
+
+@pytest.mark.parametrize("exhaust_ack_budget", [False, True], ids=["ordinary", "ack-exhausted"])
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.force_expire:build")
-def test_sidebar_force_expires_takeover_and_agent_resumes(e2e_env: E2EEnv) -> None:
+def test_sidebar_force_expires_takeover_and_agent_resumes(
+    e2e_env: E2EEnv, exhaust_ack_budget: bool
+) -> None:
+    # The test-process relay driver uses the same machine as the real e2e host.
+    set_identity(name=os.environ["AVA_MACHINE_NAME"])
+    reset_record()
     page = e2e_env.page
     agent_id = e2e_env.agent_id
     page.goto(e2e_env.agent_url)
@@ -78,7 +141,11 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(e2e_env: E2EEnv) -> No
 
     poll_until(first_turn_committed, timeout=30.0, interval=0.5, what="first turn committed")
 
-    lease_id, session_id = _seed_active_lease(agent_id)
+    relay_token = str(uuid4())
+    lease_id, session_id = _seed_active_lease(agent_id, relay_token)
+    request = (
+        _exhaust_delivery_budget(e2e_env, lease_id, relay_token) if exhaust_ack_budget else None
+    )
 
     timeline = httpx.get(
         f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=10.0
@@ -135,3 +202,16 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(e2e_env: E2EEnv) -> No
 
     poll_until(resumed, timeout=60.0, interval=0.5, what="native agent resumes after force-expire")
     page.get_by_text(RESUMED_REPLY).wait_for(timeout=10_000)
+
+    if request is not None:
+        calls = model_inputs(agent_id)
+        assert len(calls) == 2
+        assert any(request in message["text"] for message in calls[-1])
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            received = conn.execute(
+                "SELECT i.status,m.delivery_attempts,m.acknowledged_at FROM inbound_messages i "
+                "JOIN agent_impersonation_messages m ON m.inbound_id=i.id "
+                "WHERE m.lease_id=%s AND i.content=%s",
+                (lease_id, request),
+            ).fetchone()
+        assert received == ("done", 2, None)  # Native consumed it; no external ACK was invented.
