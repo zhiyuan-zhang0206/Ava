@@ -301,13 +301,10 @@ def agent_id_note(_slices: AgentSlices) -> HumanMessage | None:
 # as the other context notes, so the framing mirrors them: standing guidance the
 # agent has already read, not something to go open.
 _PRELOADED_SKILLS_FRAMING = (
-    "Preloaded skills — the full text of the skills your configuration "
-    "(skills_to_expand_at_start) loads at the start of every session and "
-    "re-injects after each compact. Their instructions are active from your "
-    "first turn: treat them as standing guidance you have already read, not as "
-    "something to go open. Each section below is one skill's complete SKILL.md; "
-    "its other files live beside it — reach them with ava.help(ava.skills.<path>) "
-    "or ava.files.read."
+    "Preloaded skills — each section below contains a skill's complete SKILL.md. "
+    "Follow these instructions as standing guidance; you do not need to reload "
+    "these bodies. Read any supporting files referenced by a skill with "
+    "ava.help(ava.skills.<path>) or ava.files.read."
 )
 
 
@@ -350,9 +347,9 @@ def preloaded_skills_note(slices: AgentSlices) -> HumanMessage | None:
 # front of it changes: the inherited prefix stays byte-identical for the
 # provider's prefix cache (docs/decisions/2026-09-10-preset-in-config-overlay-fork-cache).
 _FORK_TAIL_SKILLS_FRAMING = (
-    "Skills added by your spawn configuration at fork time — they were not "
-    "loaded in the inherited context, so their full text is appended here at "
-    "the tail. Treat them as standing guidance you have already read."
+    "Additional skills for you — each section below contains a skill's complete "
+    "SKILL.md. Follow these instructions as standing guidance alongside the "
+    "skills already in your context; you do not need to reload these bodies."
 )
 
 
