@@ -24,6 +24,10 @@ transparent to avoid doubling the tint. The right shadow covers the scrollbar
 gutter and the 1px separator sits inside the bottom edge. Pinning changes no
 box dimensions or nested-header offsets.
 
+Event timestamps remain visible in message-card headers at narrow widths;
+headers and timestamp text wrap when needed. Standing context notes continue
+to omit timestamps according to their timeline item metadata.
+
 ## Segments and dividers
 
 Historical ranks group separately; localized dividers never enter items or anchor counts — the rank-0 dashed divider labels the live boundary into the current post-compact segment ("Context compacted", task #3698), while the other historical ranks carry the scroll-back label (original history before compact); the rule carries long dashes at a 1:1 ratio and a demoted tone, and a plain label carries no arrow glyph (user feedback 2026-09-17, task #3870). The dividers are pure labels — no load-earlier control exists (paging is driven by reaching the top; task #4186).
