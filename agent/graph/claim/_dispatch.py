@@ -36,7 +36,7 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.clock import Clock
 from base.config import settings
-from base.events.live.projection import Cancelled
+from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -237,7 +237,9 @@ def _close_superseded_compact(ctx: AvaContext, agent_id: int, st: _BatchState) -
     """
     prior = st.compact_payload
     if prior is not None and prior[2] is not None:
-        emit_compact_finished(ctx.event_publisher, agent_id, prior[2], status="replaced")
+        emit_compact_finished(
+            ctx.event_publisher, agent_id, prior[2], status=CompactionStatus.REPLACED
+        )
 
 
 async def _handle_compact_summary(
@@ -278,7 +280,9 @@ async def _handle_compact_request(
     # slot or by raising — a run already sitting in the slot can never be
     # applied, so its live block closes as `replaced` before this run starts.
     _close_superseded_compact(ctx, agent_id, st)
-    compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode="request")
+    compact_run_id = emit_compact_started(
+        ctx.event_publisher, agent_id, mode=CompactionMode.REQUEST
+    )
     # The compaction LLM call can fail (provider error, empty output). Retry
     # like the auto path (COMPACT_MAX_ATTEMPTS); when every attempt fails,
     # raise CompactionFailedError — the runloop turns that into a turn-abort
@@ -301,7 +305,9 @@ async def _handle_compact_request(
                 body=f"attempt {attempt}/{COMPACT_MAX_ATTEMPTS}: {e}; retrying",
             )
     else:
-        emit_compact_finished(ctx.event_publisher, agent_id, compact_run_id, status="failure")
+        emit_compact_finished(
+            ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.FAILURE
+        )
         raise CompactionFailedError(
             f"Compaction LLM produced no usable summary across {COMPACT_MAX_ATTEMPTS}"
             f" attempts (last: {last_error!r}) — compact_request not applied"
