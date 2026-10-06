@@ -3,13 +3,13 @@
 `effective_sdk_expand()` turns the configured expand list into the concrete
 paths the "# Expanded SDK reference" section renders. The `"*"` entry stands for
 every top-level public ava namespace, discovered live from `help(ava)` so a new
-namespace is covered without editing the default. These tests pin: what `"*"`
+namespace is covered without editing that override. These tests pin: what `"*"`
 discovers (and what it deliberately skips — top-level functions, private names,
 AVA_SDK_DISABLE entries, and the capability surfaces `skills` / `mcps` that the
 `# Capabilities` section indexes), how it merges with explicit and
 plugin-declared entries, that the legacy explicit-list format is untouched,
 that the rendered section reflects the wildcard, and that the field default is
-`["*"]`.
+the stable production P95 module set.
 """
 
 from collections.abc import Iterator
@@ -255,11 +255,56 @@ def test_section_renders_all_wildcard_namespaces(
     assert "## ava.shell.sessions" in text  # nested namespace rendered
 
 
-def test_field_default_is_wildcard() -> None:
-    """The shipped default is `["*"]` — expand everything by default."""
+def test_field_default_is_production_p95() -> None:
+    """The default covers the selected production P95 modules; `*` is opt-in."""
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
-    assert factory() == ["*"]  # type: ignore[call-arg]
+    assert factory() == ["shell", "files", "agents", "tasks"]  # type: ignore[call-arg]
+
+
+def test_p95_contracts_leave_rare_namespaces_on_demand(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from ava_builtins.plugins.ava_fleet import plugin as fleet
+
+    factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
+    assert factory is not None
+    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", factory())
+    install.install(ExtensionRegistry((("ava_fleet", fleet.contribute()),)))
+
+    text = _sdk_expand_section(AgentSlices.resolve())
+
+    for module in ["shell", "files", "agents", "tasks"]:
+        assert f"## ava.{module}\n" in text
+    for module in ["memory", "self", "ui", "watcher", "web", "shell.sessions"]:
+        assert f"## ava.{module}\n" not in text
+    import ava
+
+    # A module omitted from the standing reference remains available.
+    ava.help(ava.watcher)
+    assert "def launch(" in capsys.readouterr().out
+    ava.help(ava.shell.sessions)
+    assert "## ava.shell.sessions" in capsys.readouterr().out
+
+
+def test_plugin_expansions_merge_with_p95_without_duplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
+    assert factory is not None
+    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", factory())
+    install.install(
+        ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd", "tasks"))),))
+    )
+
+    assert effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable) == [
+        "cwd",
+        "tasks",
+        "shell",
+        "files",
+        "agents",
+    ]
 
 
 def test_env_comma_string_with_wildcard_parses() -> None:
