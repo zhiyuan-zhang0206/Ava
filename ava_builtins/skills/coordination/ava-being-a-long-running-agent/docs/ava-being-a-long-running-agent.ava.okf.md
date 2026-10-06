@@ -30,3 +30,10 @@ cadence. The human interruption section remains separate.
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — the "use watchers" primitive
 - [[ava/docs/self.ava.okf.md|ava.self]] — `pause_heartbeat` / `compact` / identity (AGENT_ID)
+
+## Usage reminders
+
+Usage budget reminders compare recorded USD cost with `--usd-limit`. Select
+explicit agent IDs, a window or lifetime, and immutable spawn/fork lineage.
+Token counts are usage observations, never budget thresholds. Reminders notify
+named peers once and leave graceful disposition to the receiving agents.

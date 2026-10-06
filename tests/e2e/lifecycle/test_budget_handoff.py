@@ -22,6 +22,7 @@ import pytest
 
 from base.config import settings
 from base.host.atomic_io import write_text_atomic
+from base.lm.pricing import cost_usd
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
@@ -72,6 +73,8 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
     spawned_agent: int, budget_world: Path, role: str
 ) -> None:
     owner = spawned_agent
+    usd_limit = cost_usd(settings.lm.llm_model, 50, 25, 0)
+    assert usd_limit is not None and usd_limit > 0
     root = budget_world
     (root / "role").write_text(role)
     peers: list[int] = []
@@ -102,8 +105,8 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
                     "--lineage",
                     "all",
                     "--lifetime",
-                    "--token-limit",
-                    "75",
+                    "--usd-limit",
+                    str(usd_limit),
                     "--notify-agent",
                     str(owner),
                     "--poll-seconds",
@@ -122,7 +125,7 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
         )
         first = json.loads(report_path.read_text().splitlines()[0])
         assert {a["agent_id"] for a in first["agents"]} == {owner, child}
-        assert first["totals"]["total_tokens"] < 75
+        assert first["totals"]["recorded_cost_usd"] < usd_limit
         fork = httpx.post(
             f"{GATEWAY_URL}/api/agents",
             json={
@@ -146,7 +149,7 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
         ).raise_for_status()
         _, err = observer.communicate(timeout=90)
         assert observer.returncode == 0, err
-        count = _assert_handoffs(owner, peers, root, report_path)
+        count = _assert_handoffs(owner, peers, root, report_path, usd_limit)
         _assert_recovery(owner, root, count)
     finally:
         if observer is not None and observer.poll() is None:
@@ -193,11 +196,11 @@ def _assert_recovery(owner: int, root: Path, count: tuple[Any, ...] | None) -> N
 
 
 def _assert_handoffs(
-    owner: int, peers: list[int], root: Path, report_path: Path
+    owner: int, peers: list[int], root: Path, report_path: Path, usd_limit: float
 ) -> tuple[Any, ...] | None:
     report = json.loads(report_path.read_text().splitlines()[-1])
     assert {a["agent_id"] for a in report["agents"]} == {owner, *peers}
-    assert report["totals"]["total_tokens"] >= 75
+    assert report["totals"]["recorded_cost_usd"] >= usd_limit
     for aid in [owner, *peers]:
         poll_until(
             lambda aid=aid: _paused(root, aid),

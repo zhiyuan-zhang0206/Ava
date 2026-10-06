@@ -19,6 +19,9 @@ reused peers may have unrelated work in the same scope. The agent chooses the
 scope appropriate to the question. Usage-time prices and unpriced-call counts
 remain the accounting facts; this is not a ledger of all business expenses.
 
+Budget thresholds compare recorded USD cost only. Token counts describe usage;
+model pricing and cache discounts make them unsuitable spending limits.
+
 Budget reminders follow the same pattern as context-compaction warnings: surface
 facts so the agent can converge, preserve results, prepare a handoff, or request
 a revised budget. The script may notify named peers, but does not terminate
