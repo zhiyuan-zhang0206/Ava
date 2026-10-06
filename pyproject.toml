@@ -1034,6 +1034,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "ops/rpc_schemas/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "ops/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

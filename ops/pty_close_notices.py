@@ -66,6 +66,7 @@ from base.native_process.ownership import OwnedProcess, shown_name
 from base.sessions.pty import closure
 from base.sessions.pty.paths import close_notices_path
 from ops.cluster_status import AGENT_SHELL_RE
+from ops.rpc_schemas import OpStatus
 
 # The reaper's notifiable boundary: only these statuses receive a closure
 # notice; anything else (terminated / missing) drops the notice.
@@ -336,7 +337,7 @@ def _claim_all(cur: psycopg.Cursor, batch: Sequence[ClosureNotice]) -> set[str]:
     re-sent notice is skipped, never delivered twice (issue #2044 acceptance
     #4).
     """
-    group = sql.SQL("(%s, 'ops', 'closure-notice', %s, 'completed', now())")
+    group = sql.SQL("(%s, 'ops', 'closure-notice', %s, %s, now())")
     query = sql.SQL(
         "INSERT INTO api_idempotency (key, method, path, response_body, op_status, completed_at) "
         "VALUES {} ON CONFLICT (key) DO NOTHING RETURNING key"
@@ -345,6 +346,7 @@ def _claim_all(cur: psycopg.Cursor, batch: Sequence[ClosureNotice]) -> set[str]:
     for notice in batch:
         params.append(_claim_key(notice))
         params.append(json.dumps(notice.as_dict(), default=str))
+        params.append(OpStatus.COMPLETED)
     cur.execute(query, params)
     return {str(row[0]) for row in cur.fetchall()}
 

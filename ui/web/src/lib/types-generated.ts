@@ -4361,11 +4361,23 @@ export interface components {
             streak: number;
         };
         /**
+         * BillingRecoveryMode
+         * @description The operator's requested billing batch action.
+         * @enum {string}
+         */
+        BillingRecoveryMode: "dry_run" | "execute";
+        /**
          * BillingRecoveryOutcome
          * @description One agent's outcome in the operator's billing recovery batch.
          * @enum {string}
          */
         BillingRecoveryOutcome: "candidate" | "resurrected" | "already_alive" | "refused" | "deferred" | "failed";
+        /**
+         * BillingRecoveryRunOutcome
+         * @description Result of the entire run, separate from any one agent's recovery outcome.
+         * @enum {string}
+         */
+        BillingRecoveryRunOutcome: "preview" | "executed" | "refused";
         /**
          * BillingResurrectAgentOutcome
          * @description One agent's line in the billing batch-recovery summary.
@@ -4415,16 +4427,8 @@ export interface components {
          *     still alive — never actioned.
          */
         BillingResurrectResponse: {
-            /**
-             * Mode
-             * @enum {string}
-             */
-            mode: "dry_run" | "execute";
-            /**
-             * Outcome
-             * @enum {string}
-             */
-            outcome: "preview" | "executed" | "refused";
+            mode: components["schemas"]["BillingRecoveryMode"];
+            outcome: components["schemas"]["BillingRecoveryRunOutcome"];
             /** Refusal Reason */
             refusal_reason?: string | null;
             balance: components["schemas"]["BillingBalanceReport"];
@@ -4484,12 +4488,14 @@ export interface components {
          *     `already_terminated`: agent is dead — nothing to pause.
          */
         CancelRequested: {
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "enqueued" | "already_terminated";
+            status: components["schemas"]["CancelResult"];
         };
+        /**
+         * CancelResult
+         * @description Acceptance of a durable cancel request; separate from process termination.
+         * @enum {string}
+         */
+        CancelResult: "enqueued" | "already_terminated";
         /**
          * ClusterPanel
          * @description GET /api/status cluster sub-section — multi-machine view.

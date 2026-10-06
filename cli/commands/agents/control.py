@@ -33,7 +33,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from base.agents import ShellSessionKillTiming
+from base.agents import CancelResult, ShellSessionKillTiming
+from ops.rpc_schemas.billing_recovery import BillingRecoveryMode, BillingRecoveryRunOutcome
 
 _TIMEOUT_S = 15.0
 
@@ -335,7 +336,8 @@ def cmd_agents_cancel(agent_id: int) -> int:
         url, json={"agent_id": agent_id}, timeout=_TIMEOUT_S, headers=gateway_auth_headers()
     )
     resp.raise_for_status()
-    print(f"  ✓ agent {agent_id} cancel: {resp.json().get('status')}")
+    status = CancelResult(resp.json()["status"])
+    print(f"  ✓ agent {agent_id} cancel: {status}")
     return 0
 
 
@@ -430,8 +432,10 @@ def cmd_agents_resurrect_billing(*, execute: bool) -> int:
     )
     resp.raise_for_status()
     data = resp.json()
+    mode = BillingRecoveryMode(data["mode"])
+    outcome = BillingRecoveryRunOutcome(data["outcome"])
     balance = data["balance"]
-    print(f"  mode: {data['mode']} — outcome: {data['outcome']}")
+    print(f"  mode: {mode} — outcome: {outcome}")
     if data.get("refusal_reason"):
         print(f"  refused: {data['refusal_reason']}")
     print(f"  balance: ok={balance['ok']} — {balance['detail']}")
@@ -450,7 +454,7 @@ def cmd_agents_resurrect_billing(*, execute: bool) -> int:
             print(f"  - agent {a['agent_id']} [{a['machine']}] streak={a['streak']}")
     if not execute:
         print("  (preview only; rerun with --execute to perform)")
-    return 1 if data.get("outcome") == "refused" else 0
+    return 1 if outcome is BillingRecoveryRunOutcome.REFUSED else 0
 
 
 def _terminate(

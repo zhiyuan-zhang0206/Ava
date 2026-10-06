@@ -474,3 +474,13 @@ def test_the_crash_child_with_nothing_staged_writes_nothing(
     monkeypatch.setattr(Database, "connect", never)
 
     assert notices.main() == 0
+
+
+def test_closure_receipt_stores_the_canonical_ops_status(db_conn: psycopg.Connection) -> None:
+    from ops.rpc_schemas import OpStatus
+
+    with db_conn.cursor() as cur:
+        assert notices._claim_all(cur, [_notice()])
+    assert db_conn.execute(
+        "SELECT op_status FROM api_idempotency WHERE method='ops' AND path='closure-notice'"
+    ).fetchall() == [(OpStatus.COMPLETED.value,)]

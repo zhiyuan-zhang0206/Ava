@@ -8403,6 +8403,15 @@
         "title": "BillingHaltedAliveRow",
         "description": "One billing-halted agent that is still alive — reported, never actioned.\n\nThe entry only resurrects terminated victims. A halted agent that is still\nalive parks heartbeats and clears its own halt on the next successful turn,\nso the batch lists these rows for operator visibility and deliberately\ntakes no action on them; releasing their hold is a follow-up candidate,\nnot part of this entry."
       },
+      "BillingRecoveryMode": {
+        "type": "string",
+        "enum": [
+          "dry_run",
+          "execute"
+        ],
+        "title": "BillingRecoveryMode",
+        "description": "The operator's requested billing batch action."
+      },
       "BillingRecoveryOutcome": {
         "type": "string",
         "enum": [
@@ -8415,6 +8424,16 @@
         ],
         "title": "BillingRecoveryOutcome",
         "description": "One agent's outcome in the operator's billing recovery batch."
+      },
+      "BillingRecoveryRunOutcome": {
+        "type": "string",
+        "enum": [
+          "preview",
+          "executed",
+          "refused"
+        ],
+        "title": "BillingRecoveryRunOutcome",
+        "description": "Result of the entire run, separate from any one agent's recovery outcome."
       },
       "BillingResurrectAgentOutcome": {
         "properties": {
@@ -8465,21 +8484,10 @@
       "BillingResurrectResponse": {
         "properties": {
           "mode": {
-            "type": "string",
-            "enum": [
-              "dry_run",
-              "execute"
-            ],
-            "title": "Mode"
+            "$ref": "#/components/schemas/BillingRecoveryMode"
           },
           "outcome": {
-            "type": "string",
-            "enum": [
-              "preview",
-              "executed",
-              "refused"
-            ],
-            "title": "Outcome"
+            "$ref": "#/components/schemas/BillingRecoveryRunOutcome"
           },
           "refusal_reason": {
             "anyOf": [
@@ -8621,12 +8629,7 @@
       "CancelRequested": {
         "properties": {
           "status": {
-            "type": "string",
-            "enum": [
-              "enqueued",
-              "already_terminated"
-            ],
-            "title": "Status"
+            "$ref": "#/components/schemas/CancelResult"
           }
         },
         "type": "object",
@@ -8635,6 +8638,15 @@
         ],
         "title": "CancelRequested",
         "description": "POST /api/cancel response.\n\n`enqueued`: a durable kind='cancel' inbound was INSERTed. The in-flight\n    llm/exec node interrupts on it if one is running; otherwise the next\n    claim pass halts the agent to idle. The process stays alive.\n`already_terminated`: agent is dead — nothing to pause."
+      },
+      "CancelResult": {
+        "type": "string",
+        "enum": [
+          "enqueued",
+          "already_terminated"
+        ],
+        "title": "CancelResult",
+        "description": "Acceptance of a durable cancel request; separate from process termination."
       },
       "ClusterPanel": {
         "properties": {
