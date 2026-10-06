@@ -742,3 +742,28 @@ def test_invalid_journal_state_is_isolated_from_healthy_delivery(
     report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
     assert report.delivered == 1 and report.unreadable == 1
     assert not good.exists() and corrupt.exists()
+
+
+def test_invalid_completion_outcome_isolated_from_other_replays(
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
+) -> None:
+    """A damaged completion marker is permanent while the next message still lands."""
+    agent_id = _agent(db_conn)
+    bad_path = outbox.record_failed_send(
+        agent_id=agent_id,
+        source="watcher:bad",
+        content="damaged",
+        client_message_id="bad-completion",
+        completion_notice={"outcome": "unknown"},
+        now=_NOW,
+    )
+    assert bad_path is not None
+    _record(agent_id=agent_id, key="good-chat", content="good", now=_NOW)
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
+    assert report.abandoned == 1 and report.delivered == 1
+    bad = outbox._read(bad_path)
+    assert bad is not None and bad.abandon_reason == "completion_notice_payload"
+    assert len(_inbounds(db_conn, agent_id)) == 1
