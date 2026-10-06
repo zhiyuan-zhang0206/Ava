@@ -26,7 +26,11 @@ from typing import Any
 import pytest
 
 import ava
-from agent.graph.prompt.capabilities import _disabled_by_sdk_config, capabilities_section
+from agent.graph.prompt.capabilities import (
+    _disabled_by_sdk_config,
+    capabilities_section,
+    indexed_skill_identifiers,
+)
 from agent.graph.prompt.system_prompt import _delegation_check_section, build_system_prompt
 from ava.sdk_surface import sdk_disable
 from base.config import FIELD_INFOS, settings
@@ -99,6 +103,47 @@ def test_explicit_list_narrows_the_index(
     text = capabilities_section(AgentSlices.resolve())
     assert "ava.skills.alpha" in text
     assert "ava.skills.gamma" not in text
+
+
+def test_wildcard_groups_descendants_under_real_entry_skills(
+    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
+    _write_skill(fake_skills_dir, "work-flow", "work-flow", "Choose how to work")
+    _write_skill(fake_skills_dir / "work-flow", "align", "align", "Align with the user")
+    _write_skill(fake_skills_dir / "work-flow" / "align", "deep", "deep", "Deep alignment")
+    _write_skill(fake_skills_dir / "orphans", "review", "review", "Independent review")
+
+    text = capabilities_section(AgentSlices.resolve())
+
+    assert "- `ava.skills.work-flow`" in text
+    assert "2 sub-skills; inspect with `ava.help(ava.skills.work_flow)`" in text
+    assert "- `ava.skills.work-flow:align`" not in text
+    assert "- `ava.skills.work-flow:align:deep`" not in text
+    assert "- `ava.skills.orphans:review`" in text
+    assert indexed_skill_identifiers(AgentSlices.resolve().prompt) == {
+        "work-flow",
+        "work-flow:align",
+        "work-flow:align:deep",
+        "orphans:review",
+    }
+    assert "Deep alignment" in ava.skills.read("work-flow:align:deep")
+
+
+def test_explicit_parent_and_child_both_remain_visible(
+    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        settings.agent, "skills_to_inject_into_system_prompt", ["workflow", "workflow:align"]
+    )
+    _write_skill(fake_skills_dir, "workflow", "workflow", "Choose how to work")
+    _write_skill(fake_skills_dir / "workflow", "align", "align", "Align with the user")
+
+    text = capabilities_section(AgentSlices.resolve())
+
+    assert "- `ava.skills.workflow`" in text
+    assert "- `ava.skills.workflow:align`" in text
+    assert "sub-skills; inspect" not in text
 
 
 def test_index_line_is_one_line_however_the_description_was_written(
