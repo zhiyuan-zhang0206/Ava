@@ -548,8 +548,8 @@ def send_system_note(
     directions (a task assignment), never for plain notifications (user
     ruling 2026-08-27).
 
-    `task_id` explicitly attributes the target's subsequent LLM work to one
-    task. Leave it unset for a notification that does not drive task work.
+    `task_id` links this note to a task in the timeline. It does not attribute
+    the target's LLM usage to that task.
 
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail

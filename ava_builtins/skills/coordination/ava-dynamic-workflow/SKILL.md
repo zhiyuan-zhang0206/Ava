@@ -46,8 +46,9 @@ Ava's orchestration is a Python script.
                     └──────────────────────────────┘
 ```
 
-The orchestrator is woken **only at checkpoints it chose**.  Workers never
-decide to wake it.
+Routine result collection wakes the orchestrator at its chosen checkpoints.
+Budget reminders, blockers and handoff decisions may also need a message;
+workers must not hide these behind an unfinished result-file condition.
 
 ## When to use dynamic workflow
 
@@ -208,6 +209,31 @@ for wid in worker_ids.values():
         pass  # already dead
 ```
 
+## Budget reminders and deliberate pauses
+
+When budget observation is useful, choose the IDs, birth lineage, time window,
+thresholds and reminder recipients before dispatch, using `ava-watcher`'s usage
+script. Reuse agreed limits; do not invent spending authority. Keep the report
+scope and watcher session ID with the run notes. A reminder asks
+for a decision; it neither terminates peers nor grants more spending.
+
+If the responsible agent chooses to pause, persist that decision before the next
+wave or batch dispatch. Collect available results, label partial artifacts as
+partial, and record unfinished units, peer IDs, checkpoints, observation scope
+and a concrete resume condition. Ask active peers to finish a safe unit and
+preserve their own handoff; do not hard-kill them just because a threshold fired.
+A worker that cannot complete its result must report that disposition rather
+than making a partial file look like a finished answer.
+
+On every checkpoint, heartbeat, script re-entry or restart, read the run notes
+before dispatching. A late result or watcher exit does not clear a pause. Update
+the inventory of preserved artifacts without automatically spawning replacements
+or advancing the next wave. Resume only when the recorded condition is met,
+using the existing IDs and completed results. Stop unneeded checkpoint watchers
+by their recorded session IDs when appropriate; late notices still require this
+same check. These notes belong to the generated script and peers' working files,
+not a new core workflow or budget controller.
+
 ## Reference scripts
 
 | Script | Purpose |
@@ -235,17 +261,10 @@ the next wave.  Progress is tracked in `orchestrator_state.json`.
 # Each invocation executes one wave, then idles. Repeat until "ALL DONE".
 ```
 
-## Compared to other frameworks
-
-| | Ava dynamic workflow | LangGraph / CrewAI / etc. |
-|---|---|---|
-| **Orchestration defined as** | Python script | YAML / JSON DAG / Python classes |
-| **Worker creation** | `ava.agents.spawn(prompt=...)` | Pre-defined agent nodes |
-| **Decomposition** | Runtime LLM decision | Compile-time by programmer |
-| **Communication** | Result files + orchestrator-chosen checkpoints | Framework-specific channels |
-| **Parallelism** | True process-level (multi-agent) | Thread/async within one process |
-| **Failure handling** | Per-worker: retry spawn; orchestrator adapts | Framework retry policies |
-| **External scheduler** | None — the script IS the scheduler | Often needs separate runner service |
+Each collaborator remains an ordinary persistent peer. The script assigns
+roles, dispatches work and chooses checkpoints; it does not introduce a separate
+worker type or workflow runtime. Peers retain their normal context and
+capabilities for evaluation, recovery and handoff.
 
 ## Topology
 
