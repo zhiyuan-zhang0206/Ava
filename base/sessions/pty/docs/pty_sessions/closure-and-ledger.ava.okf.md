@@ -21,6 +21,12 @@ outlived the SIGKILL) and every process that outlived the SIGKILL.
 fails on the second; new allocations are refused for its duration. The same
 closure runs at the service's SIGTERM and for the ledger sweep.
 
+Native closure and service-crash tests wait for the job's own bare readiness
+line before signaling when its signal dispositions are part of the precondition.
+Typed-job tests match the intended child argv; arbitrary shell children do not
+prove that the job or its handlers are ready. Dedicated fork-handler fixtures
+retain their own readiness files.
+
 ## The ledger
 
 The service alone writes `run/pty-sessions.json`: each live shell's identity
