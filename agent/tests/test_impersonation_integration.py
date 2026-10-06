@@ -569,14 +569,10 @@ def _assert_resume_note_delivery_contract(content: str) -> None:
     """Check that pending delivery cannot be read as no SDK activity."""
     assert "External work complete" in content
     assert "structured handoff" not in content
-    assert "the complete structured record of this session is available at:" in content
+    assert "The session record is available at:" in content
     assert "impersonation/0.json" in content
-    assert "zero means no events have been consumed yet" in content
-    assert "not that no SDK calls occurred" in content
-    assert "record of emitted SDK/API events" in content
-    assert "never proves no SDK calls" in content
-    assert "An ACK records receipt, not completion" in content
-    assert "does not show as finished" in content
+    assert "missing entries do not establish that an action never happened" in content
+    assert "Continue any requests whose completion is not established" in content
 
 
 async def test_end_note_resumes_an_empty_queue(
@@ -682,8 +678,8 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         await flush_checkpoint(saver, owner.agent_id)
         assert len(model_calls) == 1
         note = model_calls[0].messages[-1]
-        assert "An ACK records receipt, not completion" in note.content
-        assert "does not show as finished" in note.content
+        assert "Review the summary and incoming requests" in note.content
+        assert "Continue any requests whose completion is not established" in note.content
         document = json.loads((tmp_path / "impersonation" / "0.json").read_text())
         message = next(
             m for m in document["messages"] if m["payload"]["content"].startswith("Rebuild")

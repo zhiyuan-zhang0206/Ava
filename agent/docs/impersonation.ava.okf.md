@@ -95,8 +95,11 @@ a wake so a turn ending first still resumes the agent. File or checkpoint
 errors retain the native gate. An unavailable event backend leaves accounting explicitly
 pending without blocking the control handoff; the registered agent-host event
 reconciler supplements the same file after late events become readable. The
-resume note directs the native agent to `event_delivery`: pending coverage is
-unknown, so zero consumed events is not a zero-call claim. The upstream
+resume note asks the native agent to review incoming requests and continue work
+whose completion is not established, regardless of message receipt status. It
+warns that missing activity entries do not prove an action never happened. In the
+record, `event_delivery` describes coverage: pending coverage is unknown, so zero
+consumed events is not a zero-call claim. The upstream
 manifest's `complete_emitted_events` coverage is only a census of emitted
 events; SDK sampling policy remains unknown, so even a completed zero SDK count
 is not a zero-call claim.
