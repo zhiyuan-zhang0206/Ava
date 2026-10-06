@@ -99,7 +99,8 @@ a wake so a turn ending first still resumes the agent. File or checkpoint
 errors retain the native gate. An unavailable event backend leaves accounting explicitly
 pending without blocking the control handoff; the registered agent-host event
 reconciler supplements the same file after late events become readable. The
-resume note asks the native agent to review incoming requests and continue work
+resume note identifies ordinary assistant text in the current conversation as
+the reply channel, then asks the native agent to review incoming requests and continue work
 whose completion is not established, regardless of message receipt status. It
 warns that missing activity entries do not prove an action never happened. In the
 record, `event_delivery` describes coverage: pending coverage is unknown, so zero

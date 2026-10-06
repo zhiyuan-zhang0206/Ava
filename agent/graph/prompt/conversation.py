@@ -7,13 +7,22 @@ def user_reply_section(_slices: AgentSlices) -> str:
     """Always present, independently of optional progress narration."""
     return (
         "# Responding to human requests\n\n"
+        "Reply in ordinary assistant text in this conversation. Text alongside a "
+        "tool call also reaches the user; no separate SDK call is needed to send "
+        "it. `execute_code` output is tool feedback and does not replace a reply.\n\n"
         "On a new question or request from the human, respond promptly in the same "
         "conversation. If you can answer directly, give the answer; no separate "
         "acknowledgment is needed. If investigation or tool use is needed, give a "
         "brief, substantive reply before the first tool call, stating what you "
         "will check. Do not leave the user waiting silently while you investigate. "
         "Then do the work and deliver the result in that conversation. Do not "
-        "claim checks have already happened or send an empty receipt acknowledgment.\n\n"
+        "claim checks have already happened or send an empty receipt acknowledgment. "
+        "When you have enough evidence to answer, deliver the answer; further "
+        "investigation should address a concrete remaining question. Follow the "
+        "human's stated response requirements rather than inventing additional ones.\n\n"
+        "Apply the same response rule when resuming unfinished human requests "
+        "from a handoff, even when those requests are in the handoff record "
+        "rather than a new message here.\n\n"
         "This initial-response rule applies even when communication style is off "
         "or silent; the style controls subsequent progress narration. Peer messages, "
         "watcher events, scheduled wakes and system notes do not require courtesy "
@@ -21,20 +30,10 @@ def user_reply_section(_slices: AgentSlices) -> str:
     )
 
 
-# The channel map every communication style opens with: where each kind of output
-# actually lands. A fact about the system, not a preference, so it is shared
-# rather than restated per style.
-_OUTPUT_CHANNELS = (
-    "Your output goes to three different places. Know which is which:\n\n"
-    "- **Code output** (what `execute_code` returns) — execution feedback. "
-    "The user can inspect tool details, but this does not replace a reply.\n"
-    "- **Text content** (what you write here) — goes to your per-agent timeline. "
-    "Reply here when the user is talking to you in this dialog. When supervising many agents "
-    "at once they may not open every timeline.\n"
-    "- **`ava.ui.notify`** — the only channel that reliably reaches the user's "
-    "aggregated notification feed. For results, completed work, and decisions the "
-    "user must see outside a live dialog, use this channel. A reply already delivered "
-    "in the live dialog does not need a duplicate notification."
+_NOTIFICATION_GUIDANCE = (
+    "For results, completed work and decisions the user must see outside a live "
+    "dialog, use `ava.ui.notify` to reach the aggregated notification feed. "
+    "A reply already delivered in the live dialog does not need a duplicate notification."
 )
 
 _ORIENTED_BODY = (
@@ -90,7 +89,7 @@ _SILENT_BODY = (
 # raises rather than silently rendering nothing. 'off' is not a key here — it
 # is handled as a gate by system_prompt._communication_style_section.
 COMMUNICATION_STYLE_SECTIONS = {
-    "oriented": f"# Keeping the user oriented\n\n{_OUTPUT_CHANNELS}\n\n{_ORIENTED_BODY}",
-    "concise": f"# Talking to the user\n\n{_OUTPUT_CHANNELS}\n\n{_CONCISE_BODY}",
-    "silent": f"# Talking to the user\n\n{_OUTPUT_CHANNELS}\n\n{_SILENT_BODY}",
+    "oriented": f"# Keeping the user oriented\n\n{_NOTIFICATION_GUIDANCE}\n\n{_ORIENTED_BODY}",
+    "concise": f"# Talking to the user\n\n{_NOTIFICATION_GUIDANCE}\n\n{_CONCISE_BODY}",
+    "silent": f"# Talking to the user\n\n{_NOTIFICATION_GUIDANCE}\n\n{_SILENT_BODY}",
 }

@@ -29,3 +29,20 @@ def test_initial_human_response_is_present_without_plugins(
         assert "Silence here costs the user nothing" not in prompt
     if style != "off":
         assert "A reply already delivered in the live dialog does not need a duplicate" in prompt
+
+
+@pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
+def test_reply_routing_and_handoff_policy_survive_every_style(
+    monkeypatch: pytest.MonkeyPatch, style: str
+) -> None:
+    monkeypatch.setattr(settings.agent, "agent_communication_style", style)
+    slices = AgentSlices.resolve()
+    prompt = build_system_prompt(EMPTY, slices)
+
+    assert prompt.count("Reply in ordinary assistant text in this conversation") == 1
+    assert "Text alongside a tool call also reaches the user" in prompt
+    assert "no separate SDK call is needed" in prompt
+    assert "when resuming unfinished human requests from a handoff" in prompt
+    assert "further investigation should address a concrete remaining question" in prompt
+    assert "rather than inventing additional ones" in prompt
+    assert "ava.ui.notify" not in user_reply_section(slices)
