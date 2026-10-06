@@ -35,7 +35,12 @@ with an open lease periodically, pull-based from the database, so supervision
 does not depend on wake delivery. Executor authority is separate from relay
 transport: only confirmed provider-anchor death, explicit end or original TTL
 ends the lease. Unknown liveness remains visible until the original deadline.
-Codex delivery recovery retires the old recorded process birth, then claims one
+Confirmed Codex relay exit bypasses heartbeat freshness and startup grace on
+the next existing supervision pass. Known child handles or the recorded birth
+provide this observation; missing or unknown evidence is not confirmed exit.
+Alive senders keep the existing heartbeat/startup grace behavior. No additional
+scan or wake loop is introduced. Recovery still retires the old recorded process
+birth, then claims one
 transport generation under the lease lock. The new child receives its private
 credential only after its birth is persisted. Message attempts and ACK remain
 durable across replacement; exhaustion pauses a message, never identity.
