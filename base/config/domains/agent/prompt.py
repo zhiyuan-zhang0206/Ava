@@ -68,10 +68,8 @@ class AgentPromptSettings(EnvSettings):
     )
 
     skills_to_inject_into_system_prompt: Annotated[list[str], NoDecode] = Field(
-        # `*` = the whole loaded catalog. An index line costs one line per skill,
-        # and an agent cannot decide not to rebuild a capability it was never
-        # told it has — so the default is completeness, and a shorter list is a
-        # deliberate per-agent NARROWING, not the baseline.
+        # `*` selects the whole catalog. The renderer folds descendants under
+        # real entry skills; an explicit list keeps every selected line visible.
         default_factory=lambda: ["*"],
         alias="AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
         description=(
@@ -79,7 +77,8 @@ class AgentPromptSettings(EnvSettings):
             "injected into the system prompt as an always-on index; the agent loads "
             "the full body on demand. Each entry resolves by `.`-identifier "
             "(`ava-memory.consolidation`) then bare frontmatter name, dash and underscore "
-            "spellings alike; `*` (the default) injects every loaded skill. "
+            "spellings alike; `*` (the default) selects every loaded skill and "
+            "groups descendants under their entry skills for on-demand discovery. "
             "Unresolved names are skipped. Set an explicit list per agent to "
             "NARROW the index below the full catalog. Empty injects no "
             "index."
