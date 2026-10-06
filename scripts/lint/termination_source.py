@@ -33,10 +33,14 @@ For every `cur.execute(...)` / `await cur.execute(...)` whose SQL is an
 `UPDATE agents_meta`, look at the SET clause only (a `WHERE ... status = 'terminated'`
 filter is a read, not a write, and is ignored). If the SET clause assigns `status` a
 value that can be `'terminated'` — either the literal, or a `%s` placeholder whose
-corresponding argument mentions `TERMINATED` — then the SET clause must also assign
-`termination_source`. The stamped value must be a `base.agents.TerminationSource`
-member, so a typo'd source (which the DB CHECK would only catch at runtime, against
-a real database) fails here too.
+corresponding argument mentions `TERMINATED` or is the literal `'terminated'` —
+then the SET clause must also assign `termination_source`. A literal stamped value
+must belong to `base.agents.TerminationSource`, so a typo'd source (which the DB
+CHECK would only catch at runtime, against a real database) fails here too.
+
+Literal status/source bind arguments are checked too, including `None` sources.
+An enum member or another runtime expression is not statically evaluated; its
+boundary validation and consumer tests remain the author's responsibility.
 
 Positional `%s` placeholders are mapped to the params tuple by counting placeholders
 that precede them in the statement, so the parameterized form is checked as
@@ -128,12 +132,12 @@ def _sql_literal(node: ast.expr) -> str | None:
     return None
 
 
-def _param_sources(node: ast.expr | None) -> list[str] | None:
-    """Per-element source text of an execute() params tuple/list, or None if it is
+def _param_sources(node: ast.expr | None) -> list[ast.expr] | None:
+    """Elements of an execute() params tuple/list, or None if it is
     not a literal sequence (a variable, a dict, a comprehension — unmappable)."""
     if node is None or not isinstance(node, ast.Tuple | ast.List):
         return None
-    return [ast.unparse(el) for el in node.elts]
+    return list(node.elts)
 
 
 def _is_execute_call(node: ast.Call) -> bool:
@@ -154,7 +158,7 @@ def _status_param_index(sql: str, absolute_end: int) -> int:
 
 
 def _check_statement(
-    sql: str, params: list[str] | None, legal_sources: frozenset[str]
+    sql: str, params: list[ast.expr] | None, legal_sources: frozenset[str]
 ) -> str | None:
     """The violation reason for one SQL statement, or None if it is fine."""
     for m in _UPDATE_SET_PATTERN.finditer(sql):
@@ -171,7 +175,7 @@ def _check_statement(
                 # the write is legible to this lint (and to a human reviewer).
                 continue
             idx = _status_param_index(sql, m.start("set") + param_match.end())
-            if not (0 <= idx < len(params)) or "TERMINATED" not in params[idx]:
+            if not (0 <= idx < len(params)) or not _is_terminated(params[idx]):
                 continue
             writes_terminated = True
         if not writes_terminated:
@@ -186,28 +190,63 @@ def _check_statement(
                 "'<source>'` to this SET clause; pick the value from "
                 "base.agents.TerminationSource"
             )
-        value_match = _SET_SOURCE_VALUE.search(set_clause)
-        if value_match is None or value_match.group("param") is not None:
-            # Stamped from a bind parameter: the value set cannot be verified here,
-            # but the stamp itself is present, which is the invariant.
-            continue
-        if value_match.group("null") is not None:
-            return (
-                "UPDATE agents_meta sets status='terminated' with "
-                "termination_source = NULL — NULL means 'pre-column legacy row' and is "
-                "never resurrectable. A death that must not be auto-resurrected stamps "
-                "'user' / 'exit' / 'integrity' instead, so 'not eligible' stays "
-                "distinguishable from 'nobody stamped this'"
-            )
-        literal = value_match.group("lit")
-        if literal not in legal_sources:
-            return (
-                f"UPDATE agents_meta stamps termination_source = '{literal}', which is "
-                f"not a base.agents.TerminationSource member "
-                f"({sorted(legal_sources)}) — the column's CHECK would reject this "
-                f"write at runtime"
-            )
+        reason = _source_violation(sql, set_clause, m.start("set"), params, legal_sources)
+        if reason is not None:
+            return reason
     return None
+
+
+def _source_violation(
+    sql: str,
+    set_clause: str,
+    set_start: int,
+    params: list[ast.expr] | None,
+    legal_sources: frozenset[str],
+) -> str | None:
+    """Check literal SQL or bind values; runtime expressions remain boundary-owned."""
+    value_match = _SET_SOURCE_VALUE.search(set_clause)
+    if value_match is None:
+        return None
+    if value_match.group("param") is not None:
+        idx = _status_param_index(sql, set_start + value_match.end())
+        if params is None or not (0 <= idx < len(params)):
+            return None
+        value = params[idx]
+        if not isinstance(value, ast.Constant):
+            # Enum members and runtime values need their owner's validation;
+            # only literal bind values can be decided by this static rule.
+            return None
+        if value.value not in legal_sources:
+            return (
+                f"UPDATE agents_meta binds termination_source = {value.value!r}, "
+                "which is not a base.agents.TerminationSource value. Bind the "
+                "canonical enum member; NULL/None is legacy unstamped data"
+            )
+        return None
+    if value_match.group("null") is not None:
+        return (
+            "UPDATE agents_meta sets status='terminated' with "
+            "termination_source = NULL — NULL means 'pre-column legacy row' and is "
+            "never resurrectable. A death that must not be auto-resurrected stamps "
+            "'user' / 'exit' / 'integrity' instead, so 'not eligible' stays "
+            "distinguishable from 'nobody stamped this'"
+        )
+    literal = value_match.group("lit")
+    if literal not in legal_sources:
+        return (
+            f"UPDATE agents_meta stamps termination_source = '{literal}', which is "
+            f"not a base.agents.TerminationSource member "
+            f"({sorted(legal_sources)}) — the column's CHECK would reject this "
+            f"write at runtime"
+        )
+    return None
+
+
+def _is_terminated(value: ast.expr) -> bool:
+    """Recognize the terminal literal as well as the existing enum-expression form."""
+    if isinstance(value, ast.Constant):
+        return value.value == "terminated"
+    return "TERMINATED" in ast.unparse(value)
 
 
 def violations_in_source(

@@ -322,6 +322,30 @@ allowlist. Each `ContextVar` is also a frozen `contextvar` site of the
 [ambient-state rule](#ambient-state-inject-what-is-read-to-decide); the target is
 the LangGraph runtime context (`AvaContext`), not a module global.
 
+## Finite-domain vocabulary
+
+Give a finite operational domain (status, outcome, policy or mode) one named
+owner, normally a `StrEnum`. Producers, comparisons, transition tables and
+consumers use that owner's members. Keep distinct domains separate even when
+some serialized values coincide. Trace consumers before changing the vocabulary.
+
+Convert raw wire, configuration and database values at their receiving boundary;
+unknown values fail there. Preserve the boundary's existing error isolation.
+Defaults apply to an explicitly optional input, not to an invalid value. Persisted
+and wire strings are compatibility contracts; an enum refactor preserves them.
+
+Schema discriminators and configuration choice annotations may require `Literal`.
+Reference canonical members where that framework accepts them and verify the
+consumer's supported set against the owner. When a protocol requires literal
+discriminators, keep that declaration authoritative and derive its consumers.
+Check DB constraints and generated schemas/types when their domains change.
+
+Automation guards only the facts it can establish. The termination-source lint
+rejects literal SQL or bind values outside its enum and bound `None` on terminated
+writes. Dynamic SQL and runtime expressions need boundary validation and relevant
+consumer tests. Domain ownership and whether a fallback is legitimate belong in
+contribution review; a string search alone cannot decide them.
+
 ## Model new cross-process / cross-layer wire shapes
 
 A payload crossing a process boundary (gateway↔agent-runner RPC, SSE events,
