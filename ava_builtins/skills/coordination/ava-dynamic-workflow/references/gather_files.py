@@ -31,8 +31,10 @@ Usage:
 3. Launch with ava.watcher.launch(code, timeout="10m", name="gather-<checkpoint>")
 4. The watcher's message wakes you
 
-Launch it BEFORE spawning the workers so no result file is missed, and delete
-the previous wave's files first: a stale file counts as landed.
+Use a distinct run or input-version directory and preserve valid results on
+re-entry. Existence is only a readiness hint: validate contents after waking.
+Files remain observable when the watcher starts after successful dispatch;
+there is no lost event to prevent by launching before an uncertain spawn.
 """
 
 import time
