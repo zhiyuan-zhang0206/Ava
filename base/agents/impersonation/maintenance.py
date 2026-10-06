@@ -134,11 +134,10 @@ def force_expire_impersonation(
     return "expired"
 
 
-# How long before expiry a lease first gets its renewal reminder: 300s (5
-# minutes) is several 60s reaper cycles, so the reminder lands promptly and
-# still leaves the controller time to renew before the lease lapses; one
-# reminder per expiry deadline (issue #2054; task #3696 exception inventory).
+# Leave at least five minutes for renewal on ordinary leases, and more on long
+# leases. Short leases enter the window immediately; one reminder per deadline.
 REMINDER_WINDOW_SECONDS = 300.0
+REMINDER_TTL_FRACTION = 0.1
 
 
 def remind_expiring_impersonations(
@@ -151,8 +150,9 @@ def remind_expiring_impersonations(
     """Insert one pending renewal reminder per approaching expiry deadline.
 
     Runs in the TTL reaper cycle (default 60s), ahead of expiry
-    reconciliation, so a lease gets its reminder within the 300s window with
-    several scan chances. The reminder is an ordinary durable inbox row of
+    reconciliation. The lead time is max(10% of the current TTL,
+    `window_seconds`), capped at the TTL itself. Short leases are eligible from
+    activation; expired leases are left to the expiry pass. The reminder is an ordinary durable inbox row of
     kind='reminder' tagged with the lease id in its payload; the bound relay
     pushes it through the same envelope as any inbox message, and the external
     controller ACKs it the same way (with the same re-delivery window). One
@@ -169,13 +169,15 @@ def remind_expiring_impersonations(
             "SELECT l.id, l.agent_id, l.expires_at, l.session_id "
             "FROM agent_impersonations l "
             "WHERE l.status='active' "
-            "AND l.expires_at<=clock_timestamp()+make_interval(secs=>%s) "
+            "AND l.expires_at>clock_timestamp() "
+            "AND l.expires_at<=clock_timestamp()+make_interval(secs=>"
+            "LEAST(l.ttl_seconds,GREATEST(l.ttl_seconds*%s,%s))) "
             "AND NOT EXISTS (SELECT 1 FROM inbound_messages r "
             "WHERE r.agent_id=l.agent_id AND r.kind='reminder' "
             "AND r.payload->>'lease_id'=l.id::text "
             "AND (r.payload->>'expires_at')::timestamptz=l.expires_at) "
             "ORDER BY l.agent_id LIMIT %s",
-            (window_seconds, _PASS_BATCH),
+            (REMINDER_TTL_FRACTION, window_seconds, _PASS_BATCH),
         ).fetchall()
         for lease_id, agent_id, expires_at, session_id in candidates:
             lease = lock_lease(conn, str(lease_id))

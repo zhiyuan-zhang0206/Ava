@@ -136,8 +136,7 @@ work it asks for; the ACK confirms receipt, not completion.
 Messages carry a `kind` that tells you how to treat them:
 
 - `chat` — instructions and questions from the Ava agent or the user. The work.
-- `reminder` — a lease-expiry renewal reminder from Ava, pushed about five
-  minutes before the TTL elapses (see Renewal below).
+- `reminder` — a lease-expiry renewal reminder from Ava (see Renewal below).
 - `heartbeat` — a periodic check-in under the borrowed agent's heartbeat rules.
   Acknowledge it and continue useful work, or call `ava.self.pause_heartbeat(seconds)`
   under the SDK attachment for a known wait or uninterrupted work period. The
@@ -229,9 +228,9 @@ hung. Do not recreate that failure mode.
 
 The correct model:
 
-1. Roughly **five minutes before the lease expires**, the Ava side delivers a
-   renewal reminder — a `reminder` message pushed through the same envelope
-   path as everything else.
+1. Before expiry, Ava pushes one `reminder`: the lead time is **10% of the
+   current TTL or five minutes, whichever is longer**, capped at that TTL.
+   Short leases may be reminded immediately; delivery follows the reaper scan.
 2. Acknowledge the reminder as soon as it arrives — receipt, like any other
    message — then decide: renew once, or start wrapping up.
 3. To renew, extend from now for the time you still need:
