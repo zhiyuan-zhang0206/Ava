@@ -180,6 +180,7 @@ async def deliver_handoff(
             f'You have resumed execution after the takeover by external executor "{session["name"]}".\n\n'
             f"External summary:\n{summary}\n\n"
             f"The session record is available at: {path}\n"
+            "Reply to the user in ordinary assistant text in this conversation. "
             "Review the summary and incoming requests in the record. Continue any "
             "requests whose completion is not established by the summary or record. "
             "The activity log may be incomplete; missing entries do not establish "

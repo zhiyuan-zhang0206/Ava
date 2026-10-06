@@ -146,6 +146,7 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
         "impersonation-start:42:0",
         "impersonation-handoff:42:0",
     ]
+    assert "Reply to the user in ordinary assistant text in this conversation" in notes[-1].content
     date = "2026-10-06 Tue" if weekday else "2026-10-06"
     prefix = f"[system] [{date} 09:39:25] " if timestamps else "[system] Impersonation"
     for note in notes:

@@ -310,18 +310,17 @@ def test_ui_delivery_section_prefers_ui_over_file_paths(monkeypatch: pytest.Monk
 
 
 @pytest.mark.parametrize("style", ["oriented", "concise", "silent"])
-def test_communication_style_always_renders_the_channel_map(
+def test_communication_style_only_renders_optional_narration(
     monkeypatch: pytest.MonkeyPatch, style
 ) -> None:
-    """Which channel actually reaches the user is a fact about the system, so
-    every style carries it — the style only picks the narration guidance."""
+    """Reply routing has one unconditional owner, independent from narration."""
     monkeypatch.setattr(settings.agent, "agent_communication_style", style)  # pyright: ignore[reportUnknownArgumentType]
 
     rendered = _communication_style_section(AgentSlices.resolve())
 
     assert rendered.startswith("# ")
     assert "`ava.ui.notify`" in rendered
-    assert "Code output" in rendered and "Text content" in rendered
+    assert "Reply in ordinary assistant text" not in rendered
 
 
 def test_oriented_style_keeps_the_user_oriented(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -383,9 +382,7 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
 
 
 def test_off_style_omits_the_section_entirely(monkeypatch: pytest.MonkeyPatch) -> None:
-    """'off' is a gate, not a narration choice: no channel map, no style body,
-    nothing — an empty return, which `build_system_prompt` treats as
-    no contribution to the assembled system prompt."""
+    """Off omits optional narration while the core reply policy stays active."""
     monkeypatch.setattr(settings.agent, "agent_communication_style", "off")
 
     rendered = _communication_style_section(AgentSlices.resolve())

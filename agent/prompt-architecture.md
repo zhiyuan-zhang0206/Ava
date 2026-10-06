@@ -311,6 +311,9 @@ Review every section with these questions:
 
 An unconditional initial-response rule lives in `conversation.user_reply_section`: a
 human request gets a direct answer or a short reply before investigation/tools.
+It owns ordinary assistant-text reply routing, including text alongside tool calls,
+and applies to unfinished human requests resumed from handoff records. Once enough
+evidence is available, answer instead of investigating unstated response requirements.
 It applies with every communication style. Automated wakes and peer messages
 do not require courtesy replies. The optional style text is owned by the same
 `agent/graph/prompt/conversation.py` module.
@@ -319,11 +322,9 @@ A lightweight conversation section lives in the **Ava core** prompt
 (`_communication_style_section`) — it is general-agent behavior, not
 coding-specific. It is selected by an enum, `settings.agent.agent_communication_style`,
 env `AVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented` /
-`concise` / `silent`. The latter three carry the same output-channel map — which of code
-output, text content, and `ava.ui.notify` actually reaches the user is a fact about
-the system, not a preference — and differ only in how much the agent says while
-working. `off` is the exception: it is a true on/off gate, not a wording choice —
-the whole section, channel map included, is omitted from the prompt.
+`concise` / `silent`. These select subsequent narration volume; `off` omits only
+that optional section. Reply routing and the initial-response rule are always
+present, owned by `conversation.user_reply_section`.
 
 Intent: Ava already emits assistant text content alongside the `execute_code`
 tool call, so it is naturally suited to interleave short "here's what I'm doing"

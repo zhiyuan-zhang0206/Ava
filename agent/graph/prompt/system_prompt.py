@@ -246,11 +246,11 @@ def _keep_it_simple_section(slices: AgentSlices) -> str:
 def _communication_style_section(slices: AgentSlices) -> str:
     """Selected by agent_communication_style (env
     AVA_AGENT_COMMUNICATION_STYLE, default 'off'). Three styles carry the
-    same output-channel map and differ only in how much the agent says while it
+    narration guidance and differ in how much the agent says while it
     works: 'oriented' interleaves brief updates, 'concise' speaks at milestones
     only, 'silent' stays quiet and reports once at the end. 'off' is the one
-    gate in this set — no channel map, no narration guidance, the section is
-    omitted from the system prompt entirely."""
+    gate in this set: the optional narration section is omitted. Reply routing
+    and the initial human-response rule remain in conversation.user_reply_section."""
     style = _resolved("agent_communication_style", slices)
     if style == "off":
         return ""
