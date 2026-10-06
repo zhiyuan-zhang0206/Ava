@@ -17,6 +17,7 @@ Agent context window management — how message history is compressed as it appr
 - Agent invokes `ava.self.compact(summary)` to actively compact.
 - Replaces the entire message history with a summary.
 - The summary must follow a standard format: Requests / Progress / In flight / Dead ends / Pitfalls / Verbatim tail.
+- The SDK docstring owns this contract. Forced compaction appends it to the request because the model cannot call tools there; the standing P95 SDK reference need not expand `self`. Voluntary compaction can load it through `ava.help(ava.self.compact)`.
 - Before compaction, flush persistent state to disk (workspace files, handoff docs)
 - Every applied replacement emits telemetry `compaction_completed`: `compactions=1` is the frequency counter, while `history_chars`, `summary_chars`, and `summary_history_ratio` show the size reduction. The history excludes the standing system prompt because it is re-established rather than discarded; an empty history omits the ratio
 

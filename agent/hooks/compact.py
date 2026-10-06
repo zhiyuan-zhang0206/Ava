@@ -47,6 +47,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
+from agent.graph.prompt.compaction import compact_contract
 from agent.hooks import Hook
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
@@ -74,14 +75,12 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 
 # The one compaction contract — what a summary must contain and how to write
 # it — lives in one place: the `ava.self.compact` docstring, which the agent
-# reads in its own SDK and which is also part of this request's leading prompt
-# (the SDK reference renders `self`). This instruction therefore does not
-# restate the section template; it only frames the moment, the few rules
-# specific to a model writing the summary here, and points at that contract.
+# can read on demand. Forced compaction cannot call tools, so append that same
+# contract to its request independently of standing SDK expansion settings.
 COMPACTION_INSTRUCTION = """[system] Context compaction checkpoint: the conversation above is about to be
 replaced by the summary you write now. Produce it now as plain text — do not
 write code or call any tool; anything other than text is discarded. Write it
-exactly as the `ava.self.compact` contract above specifies: first person, every
+exactly as the `ava.self.compact` contract below specifies: first person, every
 section filled, "(none)" only when one genuinely has nothing. Refer to others as
 "the user" or "agent N". If a summary already appears above, rewrite it in place
 — one flat, updated summary, never a summary nested inside a summary.
@@ -235,7 +234,9 @@ async def generate_summary(
     compaction_input = [
         *system_head,
         *content_msgs,
-        HumanMessage(content=COMPACTION_INSTRUCTION),
+        HumanMessage(
+            content=f"{COMPACTION_INSTRUCTION}\nava.self.compact contract:\n{compact_contract()}"
+        ),
     ]
     # Same request shape as the llm node via prepare_invocation: when a
     # Gemini explicit cache is live the summary call rides it too (and its
@@ -699,7 +700,8 @@ def build_compact_transition(
 COMPACT_REMINDER_NOTE = (
     "Your working context is getting long — you may want to wind it "
     "down soon. Persist anything durable to files first, then call "
-    "ava.self.compact(summary), written as its docstring specifies."
+    "ava.self.compact(summary), written as its docstring specifies. "
+    "Read ava.help(ava.self.compact) if you need the contract."
 )
 
 
