@@ -12,7 +12,7 @@ import socket
 import subprocess
 import sys
 from collections.abc import Generator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 
 import pytest
@@ -218,6 +218,42 @@ def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.Monkey
     assert len(ran) == 1
     assert state.running is False
     assert state.last_success == ran[0].timestamp()
+
+
+def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    started = _at(hour=settings.services.backup_hour)
+    completed = started + timedelta(minutes=53, seconds=52)
+    times = iter((started, completed))
+    sleeps: list[float] = []
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:
+            assert tz is UTC
+            return next(times)
+
+    async def run_dump(kind: str, *, now: datetime) -> None:
+        assert kind == "dump"
+        assert now == started
+
+    async def skip_restore(_now: datetime) -> None:
+        pass
+
+    async def stop_after_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(daemon, "datetime", FrozenDatetime)
+    monkeypatch.setattr(daemon, "_cluster_tz", lambda: UTC)
+    monkeypatch.setattr(daemon, "is_due", _always_due)
+    monkeypatch.setattr(daemon, "run_job", run_dump)
+    monkeypatch.setattr(daemon, "_run_due_local_dump_restore", skip_restore)
+    monkeypatch.setattr(daemon, "_sleep", stop_after_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(daemon._backup_loop(daemon._BackupState()))
+
+    assert sleeps == [24 * 3600 - 53 * 60 - 52]
 
 
 def test_failed_backup_retries_before_tomorrow(monkeypatch: pytest.MonkeyPatch) -> None:

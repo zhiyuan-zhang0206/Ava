@@ -197,7 +197,7 @@ async def _backup_loop(state: _BackupState) -> None:
             continue
         finally:
             state.running = False
-        await _sleep_until_next_backup_hour(now)
+        await _sleep_until_next_backup_hour(datetime.now(UTC))
 
 
 async def run() -> None:
