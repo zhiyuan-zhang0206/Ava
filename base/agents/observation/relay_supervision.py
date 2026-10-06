@@ -10,6 +10,12 @@ regains control.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Mapping
+from typing import Any
+
+import psutil
+
+from base.native_process.ownership import OwnedProcess
 
 
 class RelayChild:
@@ -41,3 +47,24 @@ class RelaySupervision:
     def drop(self, agent_id: int) -> None:
         """Forget the handle; a terminal lease revokes the child independently."""
         self.children.pop(agent_id, None)
+
+
+def relay_exited(
+    child: RelayChild | None, identity: Mapping[str, Any] | None, *, provider: str = "codex"
+) -> bool:
+    """Read known child/birth evidence; alive, missing and unknown are not exit.
+
+    A reused PID means the recorded sender exited, never that its replacement
+    may be signaled. This observation does not retire or authorize a sender.
+    """
+    if provider != "codex":
+        return False
+    if child is not None:
+        return child.process.poll() is not None
+    if identity is None:
+        return False
+    process = OwnedProcess(identity["pid"], identity["birth"], identity["starttime"])
+    try:
+        return not process.live()
+    except (psutil.Error, OSError, RuntimeError):
+        return False
