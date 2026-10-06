@@ -38,7 +38,7 @@ from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from base.agents.context import AvaContext
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
-from base.events.live.projection import CompactDone
+from base.events.live.projection import CompactDone, CompactionMode, CompactionStatus
 from base.log import logger
 
 
@@ -85,7 +85,7 @@ def _cancel_outcome(ctx: AvaContext, agent_id: int, st: _BatchState) -> _Outcome
     # `replaced` (every started run reaches exactly one terminal state).
     if st.compact_payload is not None and st.compact_payload[2] is not None:
         emit_compact_finished(
-            ctx.event_publisher, agent_id, st.compact_payload[2], status="replaced"
+            ctx.event_publisher, agent_id, st.compact_payload[2], status=CompactionStatus.REPLACED
         )
     if st.committed_chat_ids:
         return _Outcome(
@@ -120,13 +120,15 @@ async def _force_circuit_compact(
         event="circuit_breaker_compact",
         agent_id=agent_id,
     )
-    compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode="auto")
+    compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode=CompactionMode.AUTO)
     try:
         summary = await emergency_compact_summary(state.messages, ctx.llm, ctx.require_agent())
     except CompactionFailedError:
         # Transient failures exhausted — the fallback rescue did not
         # happen either; close the live block before the turn aborts.
-        emit_compact_finished(ctx.event_publisher, agent_id, compact_run_id, status="failure")
+        emit_compact_finished(
+            ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.FAILURE
+        )
         raise
     st.compact_payload = (summary, AvaMsgType.COMPACT_REQUEST.value, compact_run_id)
 
@@ -147,7 +149,9 @@ async def _compact_outcome(
     ctx.event_publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
     # Terminal signal for the run's live block; CompactDone above keeps its
     # own meaning (messages modified in place — UI re-fetch).
-    emit_compact_finished(ctx.event_publisher, agent_id, compact_run_id, status="success")
+    emit_compact_finished(
+        ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS
+    )
     await stamp_compact_boundary(ctx.ops_pool, agent_id)
     # Defer any chats co-batched with the compact: they arrived while the
     # turn was in flight and were never part of the summarized history, so

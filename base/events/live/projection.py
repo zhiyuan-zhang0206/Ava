@@ -34,6 +34,7 @@ raises `ValidationError` on unknown roles — adding a role requires
 syncing producer and consumer; not forward-compat.
 """
 
+from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -105,6 +106,21 @@ class CompactDone(_Base):
     role: Literal["compact_done"] = "compact_done"
 
 
+class CompactionMode(StrEnum):
+    """The trigger of one externally visible compaction run."""
+
+    AUTO = "auto"
+    REQUEST = "request"
+
+
+class CompactionStatus(StrEnum):
+    """The terminal outcome of one externally visible compaction run."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    REPLACED = "replaced"
+
+
 class CompactStarted(_Base):
     """A forced/auto compaction began — the compaction LLM is running and
     the history has not been replaced yet; the UI renders a ticking
@@ -123,7 +139,7 @@ class CompactStarted(_Base):
     role: Literal["compact_started"] = "compact_started"
     compact_id: str
     started_at: str
-    mode: Literal["request", "auto"]
+    mode: CompactionMode
 
 
 class CompactFinished(_Base):
@@ -143,7 +159,7 @@ class CompactFinished(_Base):
 
     role: Literal["compact_finished"] = "compact_finished"
     compact_id: str
-    status: Literal["success", "failure", "replaced"]
+    status: CompactionStatus
     finished_at: str
 
 
