@@ -15,6 +15,7 @@
 import { GitFork, Info, NotebookText, PowerOff, RotateCw, type LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { ChatMarkdown } from "@/components/markdown";
 import { DEFAULT_TIMELINE_COLORS, type ColorSlotId, type TimelineColors } from "@/lib/timeline-colors";
 import { cn } from "@/lib/utils";
 
@@ -141,9 +142,17 @@ export function markerVisual(
   }
 }
 
-// The collapsible body of a card-rendered marker — the raw payload text. Color is
-// inherited from the card (markerVisual.text).
-export function MarkerBody({ payload }: { payload: string }) {
+// The collapsible body of a card-rendered marker — the raw payload text, or, for
+// the memory family (framing + the Markdown MEMORY.md index), rendered Markdown.
+// Color is inherited from the card (markerVisual.text).
+export function MarkerBody({ payload, markdown = false }: { payload: string; markdown?: boolean }) {
+  if (markdown) {
+    return (
+      <div className="text-[12px] leading-relaxed">
+        <ChatMarkdown content={payload} />
+      </div>
+    );
+  }
   return (
     <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0">{payload}</pre>
   );
