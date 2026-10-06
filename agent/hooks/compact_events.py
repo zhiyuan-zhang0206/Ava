@@ -10,10 +10,14 @@ when a forced/auto compaction begins, and exactly one `compact_finished`
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
 from uuid import uuid4
 
-from base.events.live.projection import CompactFinished, CompactStarted
+from base.events.live.projection import (
+    CompactFinished,
+    CompactionMode,
+    CompactionStatus,
+    CompactStarted,
+)
 from base.events.live.publisher import AgentEventPublisher
 
 
@@ -21,7 +25,7 @@ def emit_compact_started(
     publisher: AgentEventPublisher | None,
     agent_id: int,
     *,
-    mode: Literal["auto", "request"],
+    mode: CompactionMode,
 ) -> str | None:
     """Emit the start of one forced/auto compaction run; returns its
     ``compact_id`` — the pairing key for the terminal `emit_compact_finished`.
@@ -49,7 +53,7 @@ def emit_compact_finished(
     agent_id: int,
     compact_id: str | None,
     *,
-    status: Literal["success", "failure", "replaced"],
+    status: CompactionStatus,
 ) -> None:
     """Emit the terminal signal of one compaction run, closing its ticking
     "Compacting" block.
