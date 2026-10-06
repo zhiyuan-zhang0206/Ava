@@ -1,9 +1,9 @@
 """Heartbeat daemon — gateway-owned idle-agent check-in dispatcher.
 
-It selects idle agents that have been parked past `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`
-(default 5 min), have not paused their heartbeat, and are not under an in-flight
-impersonation lease (see `_select_idle_agents_needing_heartbeat`), then INSERTs
-a `heartbeat` check-in inbound to each. The inbound-insert trigger wakes the agent (on any
+It sends due, unpaused check-ins to idle native agents and active impersonators.
+Native clocks start at the last completed turn; impersonation clocks run from
+lease activation regardless of external activity. Each check-in is a durable
+`heartbeat` inbound. The inbound-insert trigger wakes the agent (on any
 machine — this is cluster-wide, not machine-scoped: unlike the agent host it never
 touches local sessions). Runs on the gateway, one per cluster.
 
@@ -161,28 +161,13 @@ def _select_idle_agents_needing_heartbeat(
     cycle (an idle agent runs no LLM turn through it), so an ops event never resets
     an agent's idle timer.
 
-    An agent is due when it is `idling`, has no pending inbound already queued
-    to wake it (one about to wake on a real message does not also need a
-    check-in), no impersonation lease is in flight for it, and `now()` has
-    reached its next check-in time. Its next
-    check-in is the later of the pause window, idle clock, and durable reminder
-    clock: `GREATEST(heartbeat_paused_until, last_active_at +
-    idle_threshold_s + jitter, last_heartbeat_at + heartbeat_interval_s)`. The
-    reminder floor starts in the same transaction as the inbound insert, so a
-    check-in that is consumed without producing an LLM turn cannot be re-added
-    every dispatch step. The pause window is a floor; while it dominates, no
-    check-in can arrive before its end. PostgreSQL `GREATEST` ignores a NULL
-    pause or reminder timestamp, preserving the existing behavior for agents
-    never reminded and pre-migration rows.
-
-    An in-flight impersonation lease — open (`requested`/`accepted`/`active`), or
-    carrying unapplied delta/handoff state (deliberately the same predicate the
-    impersonation subsystem itself gates on) — also excludes the agent: control
-    is with the impersonation plane then, and its relay consumes only chat /
-    system-note / cancel / reminder kinds, so a check-in could not produce a
-    turn — it would only sit pending and age into a false `delivery_poisoned`
-    (task #4872; first seen live during the 2026-10-05 impersonation windows).
-    The normal cadence resumes once the lease state clears.
+    Native agents must be idling; active impersonators are eligible while either
+    idling or running. During impersonation the clock runs from lease activation,
+    independent of native turns. The next check-in respects the pause window,
+    threshold plus jitter, and the durable last-heartbeat interval. Native no-op
+    backoff does not apply to an external executor whose progress is not observed
+    through native LLM turns. Preparation and unapplied terminal handoffs stay
+    excluded until a consumer can receive the heartbeat.
 
     `jitter_span_s` de-phases the idle-clock term by a deterministic per-agent
     offset `id mod jitter_span_s` seconds, spreading a fleet that went idle
@@ -210,34 +195,36 @@ def _select_idle_agents_needing_heartbeat(
     # EXTRACT returns numeric (Decimal); keep the observed clock compatible
     # with the float slack used when the next dispatch reconciles this reading.
     sql = (
-        "SELECT id, (EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision "
+        "SELECT agents_meta.id, (EXTRACT(EPOCH FROM (now() - "
+        "COALESCE(active.activated_at, active.created_at, last_active_at))) / 60.0)::double precision "
         "AS idle_minutes "
-        "FROM agents_meta "
-        "WHERE status = 'idling' "
+        "FROM agents_meta LEFT JOIN agent_impersonations active "
+        "ON active.agent_id = agents_meta.id AND active.status = 'active' "
+        "AND active.expires_at > now() "
+        "WHERE (agents_meta.status = 'idling' "
+        "OR (agents_meta.status = 'running' AND active.id IS NOT NULL)) "
         "AND now() >= GREATEST("
         "  heartbeat_paused_until, "
-        "  last_active_at "
-        "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)), "
+        "  COALESCE(active.activated_at, active.created_at, last_active_at) "
+        "  + make_interval(secs => %s + COALESCE(mod(agents_meta.id, NULLIF(%s, 0)::int), 0)), "
         "  last_heartbeat_at "
-        "  + make_interval(secs => LEAST(%s * power(2.0, heartbeat_backoff_level), 86400))"
+        "  + make_interval(secs => LEAST(%s * power(2.0, "
+        "CASE WHEN active.id IS NOT NULL THEN 0 ELSE heartbeat_backoff_level END), 86400))"
         ") "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM inbound_messages im "
         "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
         "    AND im.created_at >= now() - make_interval(secs => %s) "
         ") "
-        # An in-flight impersonation lease (open, or with unapplied delta/handoff
-        # state — the impersonation subsystem's own predicate): control is with
-        # the impersonation plane, so a check-in here cannot produce a native
-        # turn and would only age into a false `delivery_poisoned` (task #4872).
         "AND NOT EXISTS ("
         "  SELECT 1 FROM agent_impersonations lease "
         "  WHERE lease.agent_id = agents_meta.id "
-        "    AND (lease.status IN ('requested','accepted','active') "
-        "         OR lease.delta_version > lease.applied_version "
-        "         OR (lease.automatic AND lease.handoff_applied_at IS NULL)) "
+        "    AND (lease.status IN ('requested','accepted') "
+        "         OR (lease.status='active' AND lease.expires_at <= now()) "
+        "         OR (lease.status <> 'active' AND (lease.delta_version > lease.applied_version "
+        "             OR (lease.automatic AND lease.handoff_applied_at IS NULL)))) "
         ") "
-        "ORDER BY last_active_at ASC"
+        "ORDER BY COALESCE(active.activated_at, active.created_at, last_active_at) ASC"
     )
     params: list[object] = [
         idle_threshold_s,
@@ -327,13 +314,15 @@ def _reconcile_agent(
         "  SELECT 1 FROM inbound_messages im "
         "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
         "    AND im.created_at > agents_meta.last_heartbeat_at)) "
+        ", EXISTS (SELECT 1 FROM agent_impersonations lease "
+        "WHERE lease.agent_id=agents_meta.id AND lease.status='active') "
         "FROM agents_meta WHERE id = %s",
         (agent_id,),
     )
     row = cur.fetchone()
     sent_at = pending_checkin.pop(agent_id, None)
-    if row is None or row[0] not in ("idling", "running"):
-        # Gone, or parked outside the daemon's lanes — stop tracking.
+    if row is None or row[0] not in ("idling", "running") or bool(row[5]):
+        # External progress is not measured by native turns; never penalize it.
         failure_streak.pop(agent_id, None)
         noop_streak.pop(agent_id, None)
         return

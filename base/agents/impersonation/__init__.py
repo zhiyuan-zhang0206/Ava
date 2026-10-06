@@ -534,7 +534,7 @@ def inbox(db: Database, lease_id: str, caller: object, *, limit: int = 100) -> l
             cur.execute(
                 "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
                 "WHERE agent_id=%s AND status='pending' AND kind IN "
-                "('chat','system_note','cancel','reminder') "
+                "('chat','system_note','cancel','reminder','heartbeat') "
                 "ORDER BY id LIMIT %s",
                 (lease["agent_id"], limit),
             )

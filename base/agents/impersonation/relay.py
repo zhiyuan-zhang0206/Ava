@@ -62,7 +62,7 @@ def relay_inbox(
                 "FROM inbound_messages i LEFT JOIN agent_impersonation_messages m "
                 "ON m.inbound_id=i.id AND m.lease_id=%s "
                 "WHERE i.agent_id=%s AND i.status='pending' AND i.kind IN "
-                "('chat','system_note','cancel','reminder') "
+                "('chat','system_note','cancel','reminder','heartbeat') "
                 "ORDER BY i.id LIMIT %s",
                 (lease["ack_window_seconds"], lease_id, lease["agent_id"], limit),
             )

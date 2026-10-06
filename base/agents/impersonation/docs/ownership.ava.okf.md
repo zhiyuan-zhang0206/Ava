@@ -72,3 +72,18 @@ the first resumed system note, and finally marks the handoff applied in the DB.
 A crash retries the same note identity and flushes even when its checkpoint
 receipt is already visible. New sessions and ordinary input remain gated until
 this receipt succeeds. File or checkpoint failures cannot resume native work.
+
+## Heartbeat check-ins
+
+Active, unexpired leases receive ordinary heartbeat messages through the relay
+and controller inbox, with the same receipt ACK and retry policy as other
+inbound messages. The first check-in is due after the configured idle threshold
+from activation (plus jitter); subsequent check-ins follow the heartbeat
+interval. External activity does not reset this clock. The borrowed identity
+can call `ava.self.pause_heartbeat()` for a known wait or work period; its pause
+window also remains effective when native control resumes. Native turn-failure
+and no-op backoff do not judge external progress. Preparing leases and terminal
+leases with unapplied handoff state stay excluded. Heartbeats are recorded in
+permanent impersonation history, and unread messages remain for native return.
+Lease-expiry reminders and relay liveness heartbeats have independent clocks:
+pausing check-ins neither pauses those signals nor renews the lease.

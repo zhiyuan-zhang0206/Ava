@@ -181,7 +181,7 @@ def capture_pending(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
-            "WHERE agent_id=%s AND status='pending' AND kind IN ('chat','system_note','cancel','reminder') "
+            "WHERE agent_id=%s AND status='pending' AND kind IN ('chat','system_note','cancel','reminder','heartbeat') "
             "ORDER BY id",
             (lease["agent_id"],),
         )
