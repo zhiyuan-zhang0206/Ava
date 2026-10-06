@@ -576,6 +576,35 @@ async def test_startup_grace_does_not_retire_a_fresh_child(
     assert gate_ctx.relays.children[42].process is child
 
 
+async def test_confirmed_child_exit_bypasses_fresh_heartbeat_and_startup_grace(
+    monkeypatch: pytest.MonkeyPatch,
+    incarnation: RuntimeIncarnation,
+    gate_ctx: AvaContext,
+) -> None:
+    session = _relay_session(
+        "active", relay_heartbeat_at=datetime.now(UTC), relay_minted_at=datetime.now(UTC)
+    )
+    old = MagicMock()
+    old.poll.return_value = 1
+    gate_ctx.relays.children[42] = RelayChild(
+        "lease-1", old, "old-token", impersonation.time.monotonic(), 1
+    )
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
+    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    provision = Mock(return_value={"relay_generation": 2})
+    monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
+    new = MagicMock()
+    spawn = Mock(return_value=new)
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    decision = await impersonation.claim_gate(BaseAgentState(), 42, gate_ctx)
+    assert decision is not None and decision.goto == END
+    assert provision.call_args.kwargs == {"expected_generation": 1}
+    assert gate_ctx.relays.children[42].process is new
+    spawn.assert_called_once()
+    old.terminate.assert_not_called()
+    assert session["relay_generation"] == 1
+
+
 async def test_stale_session_relay_retains_authority_with_visible_unsupported_recovery(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
@@ -658,20 +687,33 @@ async def test_claim_gate_records_unknown_without_recorded_anchors(
     assert "unknown" in degradation.call_args.args[-1]
 
 
+@pytest.mark.parametrize("fresh", [False, True])
 async def test_unknown_previous_relay_withholds_spawn_without_ending_lease(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
     gate_ctx: AvaContext,
+    fresh: bool,
 ) -> None:
-    session = _relay_session("active", relay_generation=0)
+    from base.native_process.ownership import OwnedProcess
+
+    session = _relay_session(
+        "active",
+        relay_heartbeat_at=datetime.now(UTC) if fresh else None,
+        relay_identity={"pid": 123, "birth": 1.0, "starttime": 1},
+    )
+    before = dict(session)
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
+    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable")))
     degradation = Mock()
     monkeypatch.setattr("base.agents.impersonation.relay.record_degradation", degradation)
-    spawn = Mock()
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
-    await impersonation.claim_gate(BaseAgentState(), 42, gate_ctx)
-    degradation.assert_called_once()
-    spawn.assert_not_called()
+    provision = Mock()
+    monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
+    decision = await impersonation.claim_gate(BaseAgentState(), 42, gate_ctx)
+    assert decision is not None and decision.goto == END
+    assert degradation.call_count == int(not fresh)
+    provision.assert_not_called()
+    assert session == before
 
 
 async def test_successor_admission_aligns_active_lease_binding_before_release(

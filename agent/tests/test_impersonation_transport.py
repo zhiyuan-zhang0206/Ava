@@ -14,6 +14,7 @@ import psutil
 import pytest
 
 from agent import impersonation
+from base.agents.observation.relay_supervision import relay_exited
 from base.native_process.ownership import OwnedProcess
 
 
@@ -39,6 +40,7 @@ def test_recorded_birth_retirement_prevents_new_old_sender_submission(
                 identity.birth + 1,
                 identity.starttime + 1 if identity.starttime is not None else None,
             )
+        assert relay_exited(None, asdict(identity)) is wrong_birth
         assert impersonation._retire_recorded_relay(
             {"relay_identity": asdict(identity), "relay_generation": 1}
         )
@@ -69,6 +71,7 @@ def test_unknown_retirement_does_not_signal_live_pid(
         monkeypatch.setattr(
             OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable"))
         )
+        assert not relay_exited(None, asdict(identity))
         assert not impersonation._retire_recorded_relay(
             {"relay_identity": asdict(identity), "relay_generation": 1}
         )
@@ -131,6 +134,7 @@ def test_spawn_never_releases_private_token_before_birth_registration(
 
 
 def test_new_claim_without_birth_is_safe_but_legacy_unknown_is_not() -> None:
+    assert not relay_exited(None, None), "missing birth is not confirmed exit"
     assert impersonation._retire_recorded_relay({"relay_identity": None, "relay_generation": 1})
     assert not impersonation._retire_recorded_relay({"relay_identity": None, "relay_generation": 0})
 
@@ -215,12 +219,13 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
     identity = OwnedProcess.capture(psutil.Process(dead.pid))
     dead.wait(timeout=5)
     db_conn.execute(
-        "UPDATE agent_impersonations SET relay_identity=%s,relay_minted_at=clock_timestamp()-interval '2 minutes' WHERE id=%s",
+        "UPDATE agent_impersonations SET relay_identity=%s,relay_minted_at=clock_timestamp(),relay_heartbeat_at=clock_timestamp() WHERE id=%s",
         (Jsonb(asdict(identity)), session["id"]),
     )
     db_conn.commit()
     current = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert current is not None
+    assert impersonation._heartbeat_fresh(current["relay_heartbeat_at"])
     expires_at = current["expires_at"]
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
     relays = RelaySupervision()
@@ -252,7 +257,7 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
         child = relays.children[owner.agent_id]
         deadline = datetime.now(UTC) + timedelta(seconds=10)
         try:
-            live = current
+            live = leases.get(database, event_bus, session["id"], attested_caller(session))
             while datetime.now(UTC) < deadline and live["relay_heartbeat_at"] is None:
                 await asyncio.sleep(0.05)
                 live = leases.native_status(database, event_bus, owner.agent_id, owner)
