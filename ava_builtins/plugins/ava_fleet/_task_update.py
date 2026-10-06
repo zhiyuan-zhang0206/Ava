@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import builtins
-import math
 from typing import TYPE_CHECKING
 
 from base.agents.tasks.notes import task_note_line
@@ -129,24 +128,6 @@ def _resolve_create_args(
         remind_interval_seconds = DEFAULT_REMIND_INTERVAL_SECONDS[Priority(priority)]
     _validate_remind_interval_seconds(remind_interval_seconds)
     return remind_interval_seconds, priority
-
-
-def _validate_budgets(
-    token_budget: int | None, usd_budget: float | int | None
-) -> tuple[int | None, float | None]:
-    """Validate optional task ceilings and normalize the USD value to float."""
-    if isinstance(token_budget, bool):
-        raise TypeError("token_budget must be int or None, got bool")
-    if isinstance(usd_budget, bool):
-        raise TypeError("usd_budget must be int, float, or None, got bool")
-    if token_budget is not None and token_budget <= 0:
-        raise ValueError(f"token_budget must be a positive integer, got {token_budget!r}")
-    if usd_budget is None:
-        return token_budget, None
-    normalized_usd = float(usd_budget)
-    if not math.isfinite(normalized_usd) or normalized_usd <= 0:
-        raise ValueError(f"usd_budget must be a positive finite number, got {usd_budget!r}")
-    return token_budget, normalized_usd
 
 
 def _owner_is_changing(owner: int | None) -> bool:

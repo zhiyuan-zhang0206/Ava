@@ -5,7 +5,6 @@ task; owners are reminded periodically, and a task may nest under a parent.
 from __future__ import annotations
 
 import builtins
-import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeGuard
 
@@ -33,7 +32,6 @@ from ._task_update import (
     _nothing_to_update,
     _owner_actually_changed,
     _resolve_create_args,
-    _validate_budgets,
     _validate_status,
     _write_task_update,
 )
@@ -70,7 +68,7 @@ __all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", 
 
 # Column order matches the Task field order and the Task(*row) unpacking in
 # _row_to_task; keep the three aligned.
-_COLS = "id, parent_id, title, description, results, status, owner, created_by, created_at, updated_at, remind_interval_seconds, last_reminded_at, reminder_count, priority, token_budget, usd_budget, token_used, usd_used"
+_COLS = "id, parent_id, title, description, results, status, owner, created_by, created_at, updated_at, remind_interval_seconds, last_reminded_at, reminder_count, priority"
 
 
 @dataclass
@@ -92,27 +90,11 @@ class Task:
     last_reminded_at: str | None = None
     reminder_count: int = 0
     priority: str = _DEFAULT_PRIORITY
-    token_budget: int | None = None
-    usd_budget: float | None = None
-    token_used: int = 0
-    usd_used: float = 0.0
 
     def __str__(self) -> str:
         owner = f"owner=#{self.owner}" if self.owner is not None else "unowned"
         parent = f" parent=#{self.parent_id}" if self.parent_id is not None else ""
         return f"#{self.id} [{self.status}] {self.title}  {owner}{parent}"
-
-
-@dataclass(frozen=True)
-class TaskBudgetBreach:
-    """One task ceiling crossed for the first time by tagged LLM usage."""
-
-    task_id: int
-    title: str
-    owner: int | None
-    budget_kind: str
-    used: int | float
-    budget: int | float
 
 
 def _row_to_task(row: tuple) -> Task:
@@ -165,8 +147,6 @@ def _insert_task(
     effective_owner: int,
     remind_interval_seconds: int,
     priority: str,
-    token_budget: int | None,
-    usd_budget: float | None,
     actor: int,
 ) -> tuple[Task, Event]:
     """INSERT a task row + record its create audit fact inside the caller's transaction.
@@ -184,7 +164,7 @@ def _insert_task(
             f"task with title {title!r} already exists (task #{existing[0]} is {existing[1]}) — "
             f"duplicate in_progress titles are not allowed"
         )
-    sql = f"INSERT INTO agent_tasks (parent_id, title, description, created_by, owner, remind_interval_seconds, priority, token_budget, usd_budget) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {_COLS}"  # noqa: S608
+    sql = f"INSERT INTO agent_tasks (parent_id, title, description, created_by, owner, remind_interval_seconds, priority) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {_COLS}"  # noqa: S608
     try:
         cur.execute(
             sql,
@@ -196,8 +176,6 @@ def _insert_task(
                 effective_owner,
                 remind_interval_seconds,
                 priority,
-                token_budget,
-                usd_budget,
             ),
         )
     except psycopg.errors.UniqueViolation as exc:
@@ -229,8 +207,6 @@ def _insert_task(
                 "owner": effective_owner,
                 "remind_interval_seconds": remind_interval_seconds,
                 "priority": priority,
-                "token_budget": token_budget,
-                "usd_budget": usd_budget,
             },
         ),
     )
@@ -245,8 +221,6 @@ def create(
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
-    token_budget: int | None = None,
-    usd_budget: float | int | None = None,
 ) -> Task:
     """Args:
     title: unique among in_progress tasks.
@@ -256,8 +230,6 @@ def create(
         (P0 30m / P1 1h / P2 2h / P3 4h), capped at 24h.
     owner: agent to assign to; None means you.
     priority: "P0" (highest) through "P3" (lowest).
-    token_budget: optional positive ceiling for task-tagged LLM tokens.
-    usd_budget: optional positive ceiling for task-tagged LLM cost.
     """
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
@@ -267,10 +239,7 @@ def create(
     )
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     priority = coerce_str(priority, "priority")
-    token_budget = coerce_typed(token_budget, "token_budget", int, allow_none=True)
-    usd_budget = coerce_typed(usd_budget, "usd_budget", (int, float), allow_none=True)
     remind_interval_seconds, priority = _resolve_create_args(remind_interval_seconds, priority)
-    token_budget, usd_budget = _validate_budgets(token_budget, usd_budget)
     actor = ava.agent_identity.require_agent_id()
     effective_owner = owner if owner is not None else actor
     with ava.DB.transaction(), ava.DB.cursor() as cur:
@@ -287,8 +256,6 @@ def create(
             effective_owner,
             remind_interval_seconds,
             priority,
-            token_budget,
-            usd_budget,
             actor,
         )
     from base import telemetry  # deferred (task #3816)
@@ -321,8 +288,6 @@ def create_and_assign(
     parent: int,
     remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
-    token_budget: int | None = None,
-    usd_budget: float | int | None = None,
 ) -> tuple[Task, int]:
     """Spawn an agent and assign it a task in one call.
 
@@ -346,9 +311,6 @@ def create_and_assign(
         remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
     )
     priority = coerce_str(priority, "priority")
-    token_budget = coerce_typed(token_budget, "token_budget", int, allow_none=True)
-    usd_budget = coerce_typed(usd_budget, "usd_budget", (int, float), allow_none=True)
-    token_budget, usd_budget = _validate_budgets(token_budget, usd_budget)
     # 0. Validate the parent before spawning: create() would reject a bad
     # parent after the agent exists, leaving an orphaned agent behind.
     with ava.DB.transaction(), ava.DB.cursor() as cur:
@@ -377,8 +339,6 @@ def create_and_assign(
         remind_interval_seconds=remind_interval_seconds,
         owner=agent_id,
         priority=priority,
-        token_budget=token_budget,
-        usd_budget=usd_budget,
     )
 
     # 3. Return both so the caller can track the task and the agent.
@@ -628,73 +588,6 @@ def _is_terminated(agent_id: int) -> bool:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
         meta = cur.fetchone()
     return meta is None or meta[0] == "terminated"
-
-
-def _budget_crossed(budget: float | None, notified_at: object, used: float) -> bool:
-    return budget is not None and notified_at is None and used >= budget
-
-
-def record_task_usage(task_id: int, *, token_count: int, cost_usd: float) -> None:
-    """Add one explicitly task-tagged LLM call and notify on a first breach.
-
-    The row lock makes the cumulative totals and one-shot notification markers
-    atomic across concurrent task turns. Calls without an explicit task id do
-    not reach this function and are intentionally absent from every task total.
-    """
-    if token_count < 0:
-        raise ValueError(f"token_count must be non-negative, got {token_count!r}")
-    if not math.isfinite(cost_usd) or cost_usd < 0:
-        raise ValueError(f"cost_usd must be a finite non-negative number, got {cost_usd!r}")
-    with ava.DB.transaction(), ava.DB.cursor() as cur:
-        cur.execute(
-            "SELECT title, owner, token_budget, usd_budget, token_used, usd_used, "
-            "token_budget_notified_at, usd_budget_notified_at "
-            "FROM agent_tasks WHERE id = %s FOR UPDATE",
-            (task_id,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            raise ValueError(f"task {task_id} does not exist")
-        (
-            title,
-            owner,
-            token_budget,
-            usd_budget,
-            token_used,
-            usd_used,
-            token_notified,
-            usd_notified,
-        ) = row
-        new_token_used = token_used + token_count
-        new_usd_used = usd_used + cost_usd
-        token_breached = _budget_crossed(token_budget, token_notified, new_token_used)
-        usd_breached = _budget_crossed(usd_budget, usd_notified, new_usd_used)
-        cur.execute(
-            "UPDATE agent_tasks SET token_used = %s, usd_used = %s, "
-            "token_budget_notified_at = CASE WHEN %s THEN now() ELSE token_budget_notified_at END, "
-            "usd_budget_notified_at = CASE WHEN %s THEN now() ELSE usd_budget_notified_at END "
-            "WHERE id = %s",
-            (new_token_used, new_usd_used, token_breached, usd_breached, task_id),
-        )
-
-    breaches: builtins.list[TaskBudgetBreach] = []
-    if token_breached and token_budget is not None:
-        breaches.append(
-            TaskBudgetBreach(task_id, title, owner, "token", new_token_used, token_budget)
-        )
-    if usd_breached and usd_budget is not None:
-        breaches.append(TaskBudgetBreach(task_id, title, owner, "USD", new_usd_used, usd_budget))
-    for breach in breaches:
-        if breach.owner is None:
-            continue
-        ava.agents.send_system_note(
-            breach.owner,
-            f'Task #{breach.task_id} "{breach.title}" exceeded its {breach.budget_kind} budget: '
-            f"{breach.used} used of {breach.budget}. Finish the in-flight unit, update the task, "
-            "and do not begin additional work without a new budget.",
-            task_id=breach.task_id,
-            resurrect=False,
-        )
 
 
 def log(task_id: int, message: str) -> None:

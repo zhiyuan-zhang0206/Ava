@@ -7795,20 +7795,6 @@ export interface components {
              * @default 0
              */
             reminder_count: number;
-            /** Token Budget */
-            token_budget?: number | null;
-            /** Usd Budget */
-            usd_budget?: number | null;
-            /**
-             * Token Used
-             * @default 0
-             */
-            token_used: number;
-            /**
-             * Usd Used
-             * @default 0
-             */
-            usd_used: number;
             /**
              * Ghost
              * @default false
@@ -7853,20 +7839,6 @@ export interface components {
              */
             reminder_count: number;
             priority: components["schemas"]["Priority"];
-            /** Token Budget */
-            token_budget?: number | null;
-            /** Usd Budget */
-            usd_budget?: number | null;
-            /**
-             * Token Used
-             * @default 0
-             */
-            token_used: number;
-            /**
-             * Usd Used
-             * @default 0
-             */
-            usd_used: number;
             /**
              * Ghost
              * @default false

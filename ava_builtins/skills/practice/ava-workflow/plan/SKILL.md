@@ -5,7 +5,7 @@ description: "Turns aligned intent into an executable task graph with dependenci
 
 # Plan — Turn Aligned Intent into an Executable Specification
 
-Input: an alignment document (or a clear user requirement). Output: an executable plan. The granularity is "one step can be completed by one agent in one continuous session." If you're working alone, the plan is your task list; if fleet collaboration is needed, the plan is the blueprint for spawn/fork.
+Input: an alignment document (or a clear user requirement). Output: an executable plan. The granularity is "one step can be completed by one agent in one continuous session." If you're working alone, the plan is your task list; if collaboration helps, the plan describes responsibilities, dependencies, and how peers exchange results.
 
 For AI-dependent feasibility, scheduling, or pace assumptions, use
 [capability-timescale](../capability-timescale/SKILL.md) and carry verified

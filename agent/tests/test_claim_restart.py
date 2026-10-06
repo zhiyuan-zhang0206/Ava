@@ -94,7 +94,6 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     assert note.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("ava_note_tag") == "task"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("ava_task_id") == 1  # pyright: ignore[reportUnknownMemberType]
-    assert cmd.update["active_task_id"] == 1  # pyright: ignore[reportOptionalSubscript]
     # The inbound row is consumed (done at claim, like other lifecycle kinds).
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (inbound_id,))
@@ -102,10 +101,10 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
         assert status is not None and status[0] == "done"
 
 
-async def test_claim_co_batched_task_notes_leave_usage_untagged(
+async def test_claim_co_batched_task_notes_preserve_task_links(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):
-    """One LLM turn cannot be attributed to two distinct task notes."""
+    """Co-batched task notes retain their independent timeline links."""
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.executemany(
@@ -127,7 +126,9 @@ async def test_claim_co_batched_task_notes_leave_usage_untagged(
     )
 
     assert cmd.goto == "before_llm"
-    assert cmd.update["active_task_id"] is None  # type: ignore[index]
+    assert cmd.update is not None
+    notes = cast(list[AnyMessage], cmd.update["messages"])
+    assert [note.additional_kwargs.get("ava_task_id") for note in notes] == [1, 2]
 
 
 async def test_claim_system_note_unknown_tag_fails_loud(
