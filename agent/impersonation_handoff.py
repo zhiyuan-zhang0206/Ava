@@ -13,6 +13,38 @@ from base.db import Database, publish_inbound_wake
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
+_IMPERSONATION_EXPLANATION = (
+    "Impersonation means a trusted external executor temporarily continues your work "
+    "under your Ava agent identity. Your native execution pauses at a durable "
+    "checkpoint; you and the external executor do not run concurrently. While "
+    "the lease is active, inbound messages are delivered to that executor, which "
+    "can reply and use the Ava SDK under your identity. Those replies appear as "
+    "your own on the Ava timeline; the session record retains the external activity. "
+    "When the lease ends, your native execution resumes with a closing note, "
+    "the external summary when supplied, and a path to the complete session record. "
+    "Review that handoff and continue unfinished work. An ACK confirms message "
+    "receipt, not task completion; acknowledged requests may still need work. "
+    "This explanation describes the mechanism, not an active lease: the separate "
+    "start and closing notes identify each takeover."
+)
+
+
+def introduction_note() -> HumanMessage:
+    """Standing native context, introduced only once a takeover is encountered."""
+    note = system_note_message(
+        content=_IMPERSONATION_EXPLANATION,
+        tag=NoteTag.IMPERSONATION,
+        created_at=datetime.now(UTC),
+    )
+    note.id = "impersonation-introduction"
+    return note
+
+
+def start_update(session: dict[str, Any], *, introduced: bool) -> dict[str, Any]:
+    """Commit the introduction receipt and the takeover anchor together."""
+    notes = [] if introduced else [introduction_note()]
+    return {"messages": [*notes, start_marker(session)], "impersonation_introduced": True}
+
 
 def start_marker(session: dict[str, Any]) -> HumanMessage:
     """Anchor the session's separately retained messages in checkpoint order."""
@@ -35,9 +67,13 @@ async def ensure_start_marker(graph: Any, session: dict[str, Any]) -> None:
 
     config = {"configurable": {"thread_id": str(session["agent_id"])}}
     snapshot = await graph.aget_state(config)
-    marker = start_marker(session)
-    if not any(message.id == marker.id for message in snapshot.values.get("messages", [])):
-        await graph.aupdate_state(config, {"messages": [marker]})
+    update = start_update(
+        session, introduced=snapshot.values.get("impersonation_introduced", False)
+    )
+    existing = {message.id for message in snapshot.values.get("messages", [])}
+    update["messages"] = [note for note in update["messages"] if note.id not in existing]
+    if update["messages"] or not snapshot.values.get("impersonation_introduced", False):
+        await graph.aupdate_state(config, update)
     await flush_checkpoint(graph.checkpointer, session["agent_id"])
 
 

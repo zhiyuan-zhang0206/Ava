@@ -160,6 +160,8 @@ class BaseAgentState(BaseModel):
     the idle-restart gate — a stale True is cleared by the system:update
     restart_completed marker (2026-08-08 audit, P3-6: comment said the field
     was dead, it is not)."""
+    impersonation_introduced: bool = False
+    """Native conversation has encountered impersonation; survives compaction."""
     impersonation_handoff_id: str | None = None
     impersonation_request_id: str | None = None
     """Last presented takeover request; survives history compaction."""
