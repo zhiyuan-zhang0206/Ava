@@ -44,7 +44,7 @@ def test_progressed_start_must_use_ordinary_drain(partial_home: Path, phase: str
     assert stop._require_unstarted_initialization() is False
 
 
-@pytest.mark.parametrize("evidence", ["serving", "manifest", "custody", "locked-root"])
+@pytest.mark.parametrize("evidence", ["serving", "manifest", "locked-root"])
 def test_any_application_evidence_refuses_partial_shortcut(
     partial_home: Path, evidence: str
 ) -> None:
@@ -57,10 +57,6 @@ def test_any_application_evidence_refuses_partial_shortcut(
         path = paths.root_manifests_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{}")
-    elif evidence == "custody":
-        path = paths.root_run_dir() / "custody"
-        path.mkdir(parents=True)
-        (path / "pending.json").write_text("{}")
     else:
         fd = acquire_instance_lock(paths.root_run_dir())
     try:

@@ -281,7 +281,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `ava-ops-hosted-boot-recovery-deferred` | `hosted_boot_recovery_deferred` >2 in 24h | 0s | warning | the consecutive-boot streak ledger |
 | `ava-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `ava-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
-| `ava-ops-root-unit-restart-failed` / `-breaker-open` / `-custody-held` | `root_unit_failure_state` per `attributes_kind` | 0m | error / critical / warning | the root unit episode store and its posts |
+| `ava-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind` | 0m | error / critical | the root unit episode store and its posts |
 | `ava-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
 | `ava-ops-root-diagnostic-venv` / `-brew-pin` / `-browser-reach` | `root_diagnostic` non-alive, >1 / >1 / >2 samples | 0m | warning | the per-probe consecutive-failure thresholds |
 
