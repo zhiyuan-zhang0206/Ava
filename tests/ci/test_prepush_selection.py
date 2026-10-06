@@ -616,6 +616,40 @@ def test_new_branch_runs_own_source_and_disk_consumer(repo: Path) -> None:
     ]
 
 
+@pytest.mark.parametrize("generated", ["ui/web/openapi.json", "ui/web/src/lib/types-generated.ts"])
+def test_schema_type_artifacts_keep_contract_checks_without_related_run(
+    repo: Path, generated: str
+) -> None:
+    assert re.search(_hooks()["types-codegen-fresh"]["files"], generated)
+    commit(repo, generated, "{}" if generated.endswith(".json") else "export interface Example {}")
+    result = select(repo, "tsc")
+    assert result.returncode == 0, result.stderr
+    assert calls(repo)[-1] == ["--no-install", "tsc", "--noEmit"]
+    (repo / "calls.jsonl").unlink()
+    result = select(repo, "vitest")
+    assert result.returncode == 0, result.stderr
+    assert all("related" not in command for command in calls(repo))
+    if generated.endswith(".ts"):
+        assert calls(repo)[0][-1] == "src/lib/localstorage-policy.test.ts"
+    else:
+        assert "require tsc and codegen freshness" in result.stdout
+
+
+def test_type_artifact_does_not_hide_changed_runtime_source(repo: Path) -> None:
+    commit(repo, "ui/web/src/lib/types-generated.ts", "export interface Example {}")
+    commit(repo, "ui/web/scripts/runtime.mjs", "export const x = 1")
+    result = select(repo, "vitest")
+    assert result.returncode == 0, result.stderr
+    assert calls(repo)[-1] == [
+        "--no-install",
+        "vitest",
+        "related",
+        "--run",
+        "--passWithNoTests=false",
+        "scripts/runtime.mjs",
+    ]
+
+
 def test_deleted_and_renamed_inputs_remain_visible(repo: Path) -> None:
     commit(repo, "ui/web/src/old name.ts", "export const x = 1")
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")

@@ -1007,7 +1007,7 @@ changes inherited by rebase invoke no frontend tool.
 changes. `frontend-eslint-full` keeps its ID for CI compatibility but now checks
 only surviving branch code paths through the existing warning gate. CI checks
 whole-project lint effects. `frontend-vitest` runs changed tests and dependency-
-related source paths, plus known filesystem consumers (source-policy scan,
+related runtime source paths, plus known filesystem consumers (source-policy scan,
 CSS/layout, messages, package binding, backend login HTML, event fixtures, plugin
 vocabularies and app-UI locales). This is useful affected verification, not a
 claim that an import graph proves dynamic or filesystem closure. Deleted inputs

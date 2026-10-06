@@ -14,6 +14,9 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parents[1]
 _WEB = "ui/web/"
 _CODE = (".ts", ".tsx", ".js", ".mjs", ".mts")
+# Canonical HTTP schema/type artifacts have no runtime imports. Their consumers
+# are checked by project tsc and the existing codegen-freshness hook.
+_TYPE_INPUTS = {"ui/web/openapi.json", "ui/web/src/lib/types-generated.ts"}
 _GLOBAL = {
     "ui/web/package.json",
     "ui/web/package-lock.json",
@@ -119,6 +122,11 @@ def _tests(web: list[str], existing: list[str], disk: list[str]) -> int:
     if sources:
         return _vitest(sources, related=True)
     if not direct:
+        if existing and all(p in _TYPE_INPUTS for p in existing):
+            print(
+                "pre-push: schema/type artifacts require tsc and codegen freshness; no runtime Vitest input"
+            )
+            return 0
         print(
             "WARNING: PRE-PUSH UNVERIFIED [vitest]: no locally selectable consumer; affected verification requires CI",
             file=sys.stderr,
@@ -137,6 +145,7 @@ def _related_sources(existing: list[str], direct: list[str]) -> list[str]:
         p.removeprefix(_WEB)
         for p in existing
         if p not in _GLOBAL
+        and p not in _TYPE_INPUTS
         and (p.endswith(_CODE) or p.endswith(".json"))
         and p.removeprefix(_WEB) not in direct
     ]
