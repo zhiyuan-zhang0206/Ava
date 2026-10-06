@@ -108,6 +108,36 @@ def test_unknown_source_value_is_flagged():
     assert len(_violations(src)) == 1
 
 
+@pytest.mark.parametrize("source", ["None", "'crashed'", "42"])
+@pytest.mark.parametrize("status", ["AgentStatus.TERMINATED", "'terminated'"])
+def test_invalid_literal_bind_source_is_flagged(source: str, status: str) -> None:
+    sql = "SELECT %s; UPDATE agents_meta SET status=%s, termination_source=%s WHERE id=%s"
+    src = f"cur.execute({sql!r}, (unrelated, {status}, {source}, agent_id))"
+    findings = _violations(src)
+    assert len(findings) == 1
+    assert "binds termination_source" in findings[0][1]
+
+
+@pytest.mark.parametrize("source", ["'user'", "TerminationSource.USER", "validated_source"])
+def test_valid_or_boundary_owned_bind_source_is_clean(source: str) -> None:
+    sql = "UPDATE agents_meta SET status=%s, termination_source=%s WHERE id=%s"
+    src = f"cur.execute({sql!r}, [AgentStatus.TERMINATED, {source}, agent_id])"
+    assert _violations(src) == []
+
+
+def test_literal_terminal_bind_without_source_is_flagged() -> None:
+    src = 'cur.execute("UPDATE agents_meta SET status=%s WHERE id=%s", ("terminated", i))'
+    assert len(_violations(src)) == 1
+
+
+def test_nonterminal_literal_bind_can_clear_source() -> None:
+    src = (
+        'cur.execute("UPDATE agents_meta SET status=%s, termination_source=%s '
+        'WHERE id=%s AND status=%s", ("idling", None, i, "terminated"))'
+    )
+    assert _violations(src) == []
+
+
 def test_multirow_reaper_claim_with_source_is_clean():
     # The reapers' set-based claim: a subquery + RETURNING, still one statement that
     # stamps status and source together.
