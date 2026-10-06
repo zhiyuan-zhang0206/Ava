@@ -178,7 +178,21 @@ Rules that keep delivery honest:
   session's stop control — the ACK never substitutes for stopping. An
   unacknowledged cancel stays pending for the Ava agent when control returns.
 
-Send user-facing progress, questions and results to the normal Ava UI:
+**Reply at the request's entry point.** A direct human message in your host
+conversation (including a Codex opened manually in tmux) gets plain text there.
+A human request delivered through Ava gets progress, questions and results via
+`ava impersonate say` in Ava. Identify Ava delivery by its envelope header
+(`Ava message agent=... lease=... ids=...`) and item `from=` source:
+`kind=chat from=user` is a human request; `from=agent:N` uses the peer channel below. The host's user role alone does
+not identify the entry point: the relay also delivers into that role.
+Keep the reply route with each request when host and Ava messages interleave;
+do not redirect an earlier request's result to the newest message's entry.
+Before investigating a human request, give a brief substantive reply at that
+entry; a direct answer needs no separate acknowledgment. Relay ACK is separate
+and still required. Do not duplicate replies across entries unless requested.
+Host text does not replace the required Ava release summary.
+
+For Ava replies:
 
 ```bash
 ava impersonate say <session_id> --agent <agent_id> --key progress-1 'Checking the fix.'

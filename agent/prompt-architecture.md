@@ -110,6 +110,10 @@ Capabilities rather than standing as its own section.
   can explicitly disable only that latter instruction for rollback. The
   delegation check still makes consultation mandatory as its first step and
   drops that step when this section renders nothing.
+- **Initial human response** — `agent/graph/prompt/conversation.py:user_reply_section`,
+  always present: answer directly, or give a substantive reply in the same dialog
+  before investigating or calling tools. `off` and `silent` do not suppress it.
+  Automated wakes and peer messages do not require courtesy replies.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:_communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `AVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
@@ -264,6 +268,12 @@ Review every section with these questions:
 
 ## Communication style (implemented, config-selected)
 
+An unconditional initial-response rule lives in `conversation.user_reply_section`: a
+human request gets a direct answer or a short reply before investigation/tools.
+It applies with every communication style. Automated wakes and peer messages
+do not require courtesy replies. The optional style text is owned by the same
+`agent/graph/prompt/conversation.py` module.
+
 A lightweight conversation section lives in the **Ava core** prompt
 (`_communication_style_section`) — it is general-agent behavior, not
 coding-specific. It is selected by an enum, `settings.agent.agent_communication_style`,
@@ -281,7 +291,7 @@ encourages that — state the first step before a long exploration, surface
 findings and direction changes as they happen, flag blockers. The other two
 styles exist because that is a preference, not a universal: `concise` limits
 speech to milestones (start / direction change / blocker / done), and `silent`
-asks for no narration at all and one complete standalone report at the end
+asks for no narration after the initial human response and one complete standalone report at the end
 (blockers and user-only questions still interrupt immediately). Bench runs
 `silent`; a supervised fleet agent runs `oriented`.
 
