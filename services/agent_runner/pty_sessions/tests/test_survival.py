@@ -3,7 +3,7 @@
 The one property the service exists to keep: a session outlives the processes that
 use it, an agent host included. The service itself is an ordinary roster process: its
 stop closes its sessions, and a crash leaves only what the master's hangup could not
-reach, which the ledger lets the next start sweep.
+reach. The next start sweeps only the known birth-identified ledger targets.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 import psutil
@@ -89,13 +90,15 @@ def test_a_session_outlives_the_process_that_created_it(unit_home: Path) -> None
     assert wait_for(lambda: int(counter.read_text()) > before + 3), "its job stopped running"
     type_line(name, "echo reached-by-the-next-client")
     output_until(name, "reached-by-the-next-client")
-    assert client.kill(name, graceful=False).interrupted is True
+    assert wait_for(lambda: support.screen(name).rstrip().endswith(("$", "#")))
+    assert client.kill(name, graceful=False).interrupted is False
 
 
 # The same stand-in, through the backend every SDK call goes through.
 _BACKEND_HOST = """
 import sys, time
 from pathlib import Path
+from collections.abc import Iterable
 from base.sessions.backend import get_shell_backend
 assert get_shell_backend().new_session(sys.argv[1], "", Path(sys.argv[2]), env={})
 print("created", flush=True)
@@ -177,47 +180,27 @@ def test_stopping_the_service_closes_its_sessions_and_removes_the_socket(
     assert client.list_sessions() == []
 
 
-def test_a_crashed_service_leaves_nothing_the_next_start_cannot_sweep(
+def test_a_crashed_service_sweeps_known_shells_without_discovering_jobs(
     pty_service: PtyServiceProcess, unit_home: Path
 ) -> None:
-    """SIGKILL the service. The kernel hangs up every shell, which ends the ones that honour
-    it; what survives is a job that ignores the hangup under a dead shell, and a shell that
-    ignores it too. The ledger names both, so the next start closes them before it serves."""
-    jobs_shell = jobs.start("ava-agent-987-shell-4-orphan", unit_home, jobs.STUBBORN)
-    output_until("ava-agent-987-shell-4-orphan", "stubborn-ready")
-    (orphan_job,) = jobs.live_children(jobs_shell)
-    script = unit_home / "deaf.job.py"
-    script.write_text(jobs.STUBBORN, encoding="utf-8")
-    new("ava-agent-987-shell-5-deaf", unit_home, cmd=f"trap '' HUP; python3 -u {script}")
-    deaf_shell = support.shell_process("ava-agent-987-shell-5-deaf")
-    output_until("ava-agent-987-shell-5-deaf", "stubborn-ready")
-    (deaf_job,) = jobs.live_children(deaf_shell)
-
-    def ledger_knows_both_jobs() -> bool:
-        sessions = json.loads(ledger_path().read_text())["sessions"]
-        return all(
-            sessions.get(name, {}).get("members")
-            for name in ("ava-agent-987-shell-4-orphan", "ava-agent-987-shell-5-deaf")
-        )
-
-    assert wait_for(ledger_knows_both_jobs, timeout=ledger.SNAPSHOT_INTERVAL_S * 3)
-
-    pty_service.signal(signal.SIGKILL)
-    pty_service.wait()
-    assert wait_for(lambda: jobs.wait_exit(jobs_shell.pid, 0.1)), (
-        "the hangup must end an honest shell"
-    )
-    assert psutil.pid_exists(orphan_job.pid), "precondition: a job that ignores the hangup survives"
-    assert psutil.pid_exists(deaf_job.pid), "precondition: so does a shell that ignores it"
-
-    pty_service.start()  # the start sweeps before it answers its first ping
-
-    assert jobs.wait_exit(orphan_job.pid, timeout=10), "the orphaned job outlived the sweep"
-    assert jobs.wait_exit(deaf_job.pid, timeout=10)
-    assert jobs.wait_exit(deaf_shell.pid, timeout=10)
-    assert client.list_sessions() == []
-    assert "pty sweep: closing 2 session(s)" in pty_service.output()
-    assert json.loads(ledger_path().read_text())["sessions"] == {}, "the sweep clears the ledger"
+    """A shell-only ledger does not promise recovery of an unrecorded job."""
+    name = "ava-agent-987-shell-4-orphan"
+    shell = jobs.start(name, unit_home, jobs.STUBBORN)
+    output_until(name, "stubborn-ready")
+    (job,) = jobs.live_children(shell)
+    recorded = json.loads(ledger_path().read_text())["sessions"]
+    assert recorded[name]["members"] == [], "ordinary persistence does not scan membership"
+    try:
+        pty_service.signal(signal.SIGKILL)
+        pty_service.wait()
+        assert jobs.wait_exit(shell.pid, timeout=10), "the master hangup ends the shell"
+        assert psutil.pid_exists(job.pid), "the job ignores hangup"
+        pty_service.start()
+        assert client.list_sessions() == []
+        assert psutil.pid_exists(job.pid), "the sweep must not discover unrecorded jobs"
+        assert json.loads(ledger_path().read_text())["sessions"] == {}
+    finally:
+        jobs.kill_quietly(job.pid)
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -238,8 +221,8 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
     tmp_path: Path,
 ) -> None:
     """The ledger sweep in isolation: a session leader killed with a job behind it that
-    ignores the hangup. The recorded job proves the session id, so it is closed with its
-    whole tree, and the outcome names the busy session for its owner."""
+    ignores the hangup. Its recorded birth supplies a known group target, and
+    the outcome names that interrupted session for its owner."""
     path = tmp_path / "ledger.json"
     leader = subprocess.Popen(
         [
@@ -264,6 +247,7 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
     leader.kill()
     leader.wait(timeout=10)
     assert psutil.pid_exists(job_pid), "precondition: the job outlives its session leader"
+    assert ledger.leftovers(path) == [], "a known job alone is not a live terminal"
 
     started = time.monotonic()
     outcome = ledger.sweep(path)
@@ -273,6 +257,69 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
     assert [closed.name for closed in outcome.closed] == ["ava-agent-1-shell-1-swept"]
     assert outcome.survivors == ()
     assert ledger.read(path) == [], "the ledger is cleared once swept"
+
+
+def test_a_surviving_shell_remains_recorded_for_the_next_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failed known-shell cleanup keeps the same birth identity available for retry."""
+    child = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    path = tmp_path / "ledger.json"
+    identity = OwnedProcess.capture(psutil.Process(child.pid))
+    target = closure.Target("ava-agent-1-shell-retry", identity)
+    attempts: list[tuple[tuple[OwnedProcess, ...], int]] = []
+
+    def record_without_signalling(identities: Iterable[OwnedProcess], sig: int) -> None:
+        attempts.append((tuple(identities), sig))
+
+    try:
+        ledger.write(path, [target])
+        with monkeypatch.context() as blocked:
+            blocked.setattr(closure.process_groups, "signal", record_without_signalling)
+            first = ledger.sweep(path)
+        assert child.poll() is None
+        assert first.survivors == (closure.Survivor(target.name, identity, "terminal"),)
+        assert ((identity,), signal.SIGKILL) in attempts
+        assert ledger.leftovers(path) == [target.name]
+        assert ledger.read(path) == [target], "a failed shell cleanup must retain its retry target"
+
+        second = ledger.sweep(path)
+
+        child.wait(timeout=10)
+        assert second.survivors == ()
+        assert ledger.leftovers(path) == []
+        assert ledger.read(path) == []
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=10)
+
+
+def test_a_known_job_only_survivor_does_not_retain_a_terminal_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Known job survivors remain in the outcome, without a shell-presence retry gate."""
+    child = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    path = tmp_path / "ledger.json"
+    job = OwnedProcess.capture(psutil.Process(child.pid))
+    shell = _exited_process()
+    target = closure.Target("ava-agent-1-shell-job-only", shell, (job,))
+
+    def leave_known_targets_alive(identities: Iterable[OwnedProcess], sig: int) -> None:
+        tuple(identities)
+
+    try:
+        ledger.write(path, [target])
+        with monkeypatch.context() as blocked:
+            blocked.setattr(closure.process_groups, "signal", leave_known_targets_alive)
+            outcome = ledger.sweep(path)
+        assert child.poll() is None
+        assert outcome.survivors == (closure.Survivor(target.name, job, "job"),)
+        assert ledger.leftovers(path) == []
+        assert ledger.read(path) == []
+    finally:
+        child.kill()
+        child.wait(timeout=10)
 
 
 def test_the_sweep_never_signals_a_pid_that_is_no_longer_the_recorded_process(
@@ -378,10 +425,12 @@ def test_a_crashed_service_tells_the_owner_of_a_busy_session_at_the_next_start(
     shell = jobs.start(name, unit_home, jobs.TERM_OK)
     output_until(name, "job-ready")
 
-    def ledger_knows_the_job() -> bool:
-        return bool(json.loads(ledger_path().read_text())["sessions"].get(name, {}).get("members"))
-
-    assert wait_for(ledger_knows_the_job, timeout=ledger.SNAPSHOT_INTERVAL_S * 3)
+    (job,) = jobs.live_children(shell)
+    # Explicit known-target fixture, also readable from the legacy ledger shape.
+    ledger.write(
+        ledger_path(),
+        [closure.Target(name, OwnedProcess.capture(shell), (OwnedProcess.capture(job),))],
+    )
     pty_service.signal(signal.SIGKILL)
     pty_service.wait()
     assert jobs.wait_exit(shell.pid, timeout=10), "precondition: the hangup ends the shell"
@@ -414,11 +463,11 @@ def test_an_unreachable_database_costs_the_start_a_log_line_and_nothing_else(
     name = "ava-agent-987-shell-8-lost"
     jobs.start(name, unit_home, jobs.TERM_OK)
     output_until(name, "job-ready")
-    assert wait_for(
-        lambda: bool(
-            json.loads(ledger_path().read_text())["sessions"].get(name, {}).get("members")
-        ),
-        timeout=ledger.SNAPSHOT_INTERVAL_S * 3,
+    shell = support.shell_process(name)
+    (job,) = jobs.live_children(shell)
+    ledger.write(
+        ledger_path(),
+        [closure.Target(name, OwnedProcess.capture(shell), (OwnedProcess.capture(job),))],
     )
     pty_service.signal(signal.SIGKILL)
     pty_service.wait()

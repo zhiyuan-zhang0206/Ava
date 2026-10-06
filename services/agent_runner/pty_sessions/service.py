@@ -36,8 +36,8 @@ import psutil
 
 from base.log import logger
 from base.native_process import child_env, pid_starttime_ticks
-from base.native_process.ownership import OwnedProcess, stable_create_time
-from base.sessions.pty import closure, protocol, session_tree
+from base.native_process.ownership import stable_create_time
+from base.sessions.pty import closure, process_groups, protocol
 from base.sessions.pty.allocation_freeze import locked_freeze_state, state_path
 from base.sessions.pty.paths import (
     CAPTURE_MAX_LINES,
@@ -70,13 +70,6 @@ _EXIT_CHECK_S = 0.5
 _OP_THREADS = 256
 
 _LISTEN_BACKLOG = 128
-
-
-def _still(identity: OwnedProcess) -> bool:
-    try:
-        return identity.live()
-    except RuntimeError:
-        return True  # unverifiable: keep it on the ledger, never certify it gone
 
 
 class RequestError(Exception):
@@ -182,29 +175,12 @@ class PtyService:
     def _persist(self) -> None:
         """Rewrite the ledger from the table; caller holds the table lock."""
         targets = [
-            closure.Target(name, s.shell, tuple(m for m in s.capture.members if m != s.shell))
-            for name, s in self._sessions.items()
+            closure.Target(name, s.shell, s.known_groups) for name, s in self._sessions.items()
         ]
         try:
             ledger.write(ledger_path(), targets)
         except OSError as exc:
             logger.warning("pty ledger write failed: {exc}", exc=exc)
-
-    def snapshot_members(self) -> None:
-        """Fold every session's current membership into the ledger.
-
-        One process-table scan serves every session (`session_tree.refresh`);
-        members that exited are dropped so a long-lived shell's capture does not
-        grow with every command it ever ran.
-        """
-        with self._lock:
-            live = list(self._sessions.values())
-        captures = [s.capture for s in live]
-        session_tree.refresh(captures)
-        for s in live:
-            s.capture.members = [m for m in s.capture.members if m == s.shell or _still(m)]
-        with self._lock:
-            self._persist()
 
     def _ended(self, ended: session.PtySession) -> None:
         with self._lock:
@@ -363,7 +339,12 @@ class PtyService:
         if found is None:
             return {"mode": "noop", "interrupted": False}  # idempotent, like posixproc
         try:
-            return session.kill_session(found, graceful=bool(req.get("graceful", False)))
+            interrupted = found.capture_foreground()
+            with self._lock:
+                self._persist()
+            return session.kill_session(
+                found, graceful=bool(req.get("graceful", False)), interrupted=interrupted
+            )
         except RuntimeError as exc:
             raise RequestError(protocol.ERROR, str(exc)) from exc
 
@@ -381,15 +362,27 @@ class PtyService:
         """
         with self._lock:
             self._closing = True
-            targets = [closure.Target(n, s.shell) for n, s in sorted(self._sessions.items())]
         try:
+            with self._lock:
+                closing = list(self._sessions.values())
+                for s in closing:
+                    s.capture_foreground()
+                targets = [
+                    closure.Target(n, s.shell, s.known_groups)
+                    for n, s in sorted(self._sessions.items())
+                ]
+                self._persist()
             outcome = closure.close_sessions(targets, grace_s=grace_s, kill_s=kill_s)
+            assert self._loop is not None  # noqa: S101
+            for s in closing:
+                if not process_groups.live(s.shell):
+                    self._loop.call_soon_threadsafe(self._end, s)
             deadline = time.monotonic() + _DRAIN_WAIT_S
-            while time.monotonic() < deadline:
-                with self._lock:
-                    if not self._sessions:
-                        break
-                time.sleep(0.02)
+            for s in closing:
+                if process_groups.live(s.shell):
+                    continue  # Outcome reports the known terminal survivor.
+                if not s.wait_dead(max(0.0, deadline - time.monotonic())):
+                    raise RuntimeError(f"session {s.name}: PTY teardown did not finish")
         finally:
             with self._lock:
                 self._closing = False
@@ -463,18 +456,6 @@ class PtyService:
                 if reaped:
                     self._end(watching)
 
-    async def _snapshot_loop(self) -> None:
-        """Snapshot every session's membership into the ledger every `ledger.SNAPSHOT_INTERVAL_S`."""
-        assert self._stop is not None  # noqa: S101
-        while not self._stop.is_set():
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._stop.wait(), ledger.SNAPSHOT_INTERVAL_S)
-                return
-            try:
-                await asyncio.to_thread(self.snapshot_members)
-            except Exception:  # a failed snapshot only ages the ledger
-                logger.exception("pty membership snapshot failed")
-
     def handle(self, req: dict[str, Any]) -> dict[str, Any]:
         """Answer one request object; never raises."""
         req_id = req.get("id")
@@ -540,7 +521,6 @@ class PtyService:
         async with asyncio.TaskGroup() as tasks:
             self._tasks = tasks
             tasks.create_task(self._watch_exits())
-            tasks.create_task(self._snapshot_loop())
             notices = tasks.create_task(crash_notices.send(self.swept))
             await self._stop.wait()
             notices.cancel()

@@ -1,9 +1,8 @@
 """What a terminal closure leaves: survivors keep their native identity and diagnostics.
 
-A normal stop SIGKILLs what outlives its grace, so a survivor here is a process the
-closure may not signal (another user's); `stub_closure` stands in for the service's
-closure reporting one. The stop turns the survivors of an outcome into the failure
-report and the journal's structured inventory.
+A surviving known shell retains the failure inventory. Known job leftovers are
+reported without blocking best-effort terminal closure; stubbed outcomes lock
+the consumer distinction without claiming complete descendant ownership.
 """
 
 from __future__ import annotations
@@ -81,11 +80,14 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     assert f"pid={identity.pid}" in capsys.readouterr().err
 
 
-def test_report_keeps_owned_job_of_a_closed_session(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+def test_report_keeps_known_job_diagnostic_of_a_closed_session(
+    home: Path,
+    launch: Launcher,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The session's shell is gone but a job outlived the SIGKILL: the report names the
-    job, its role and its session."""
+    known job and its session without failing stop."""
     armed = home / "job-armed"
     child_code = (
         "import signal,time,pathlib; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
@@ -110,14 +112,12 @@ def test_report_keeps_owned_job_of_a_closed_session(
             survivors=(closure.Survivor("private-terminal", child, "job"),),
         ),
     )
-    with pytest.raises(report.StopIncompleteError) as caught:
-        stop.close_terminals(time.monotonic() + 0.35, "private-stop", WHEN, direct_db=False)
+    stop.close_terminals(time.monotonic() + 0.35, "private-stop", WHEN, direct_db=False)
     assert child.live()
-    assert len(caught.value.survivors) == 1
-    survivor = caught.value.survivors[0]
-    assert survivor["pid"] == child.pid
-    assert survivor["role"] == "job" and survivor["service"] == "private-terminal"
-    assert str(armed) in str(survivor["cmdline"])
+    diagnostic = capsys.readouterr().err
+    assert f"pid={child.pid}" in diagnostic
+    assert "private-terminal" in diagnostic
+    assert "inspect the process" in diagnostic
 
 
 def test_report_reuses_the_native_birth_rule(monkeypatch: pytest.MonkeyPatch) -> None:

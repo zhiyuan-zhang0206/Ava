@@ -10,7 +10,7 @@ start the gateway and verify its dependencies before starting runners.
 
 | Command | Native agent execution | Persistent shells and schedules | Local infrastructure and extras |
 | --- | --- | --- | --- |
-| `ava stop -y` | Same normal drain | Close terminal jobs and shells (HUP/TERM, SIGKILL after a bounded grace) | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
+| `ava stop -y` | Same normal drain | Close shells/terminals with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
 | `ava stop -y --keep-infra` | Same normal drain | Close | Keep the private data plane |
 | `ava stop -y --keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
 | `ava restart` | Same normal drain, then `ava start` | Retained | Replace the native services; keep PostgreSQL, Redis, PgBouncer, browser, Gate, helper and native LGTM |
@@ -25,11 +25,12 @@ shutdown that has not finished by the end of its share of the budget (a hung
 archive command) is ended by an immediate shutdown and the leftover descendants
 are SIGKILLed, loudly and without failing the stop
 ([decision](../decisions/2026-10-02-pg-stop-escalates-to-immediate.md)); for terminals, `stop` hangs up each shell's
-whole session (its descendants and double-forked orphans included), and
-SIGKILLs what is still alive after a grace of at most 10 seconds; a busy
+known shell and signals known shell/foreground groups, escalating after a
+grace of at most 10 seconds. Shell survival fails closure; known job leftovers
+are diagnostic, and detached/background process disappearance is not certified. A busy
 session still leaves its owner the closure notice, written to the database
 in the `terminals` phase, before the data plane stops
-([decision](../decisions/2026-09-28-stop-escalates-to-sigkill.md),
+([decision](../decisions/2026-10-07-pty-best-effort-closure.md),
 [notice write](../decisions/2026-10-02-close-notices-written-at-terminals.md)). `--force`
 explicitly selects force behavior when normal exit cannot complete. Force stops
 the selected service processes without fabricating a restart receipt. Later
@@ -121,8 +122,10 @@ the external effect but before its result becomes durable.
 starts them again (the runbook's "Updating a networked cluster in source mode").
 A running schedule or PTY can retain old code and DB access outside application
 root, so root exit alone is not a writer barrier: the stop gives persistent
-terminals a bounded completed-work wait, then closes every one (SIGKILL only over
-captured births), and each busy owner receives the same closure notice as
+terminals a bounded completed-work wait, then closes known shells/terminals
+best effort. This does not prove detached/background writers disappeared;
+inspect residual writers before treating it as an external-work barrier. Each
+busy owner receives the same closure notice as
 `ava stop`. Terminal state does not survive an update; schedules are re-armed
 after start.
 

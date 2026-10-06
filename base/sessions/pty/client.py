@@ -82,7 +82,7 @@ class SessionInfo:
 
 @dataclass(frozen=True)
 class KillVerdict:
-    """A finished kill: how it ended and whether it cut live work short."""
+    """A terminal kill verdict; survivors name only known observed leftovers."""
 
     mode: str
     interrupted: bool
@@ -217,7 +217,7 @@ def kill(name: str, *, graceful: bool) -> KillVerdict:
 
 
 def close_all(*, grace_s: float, kill_s: float) -> Outcome:
-    """Close every session through the service's one terminal closure."""
+    """Close known shells/terminals best effort; no descendant-absence proof."""
     data = request(
         "close_all",
         timeout=grace_s + 4 * kill_s + REQUEST_TIMEOUT_S,

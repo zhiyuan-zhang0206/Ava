@@ -1,25 +1,14 @@
-"""Closing persistent shells for good: hang up, a bounded grace, SIGKILL, evidence.
+"""Bounded best-effort terminal closure using explicitly known process groups.
 
-The one terminal closure. A stop, the service's own shutdown and the sweep of a
-crashed service's leftovers all end sessions through `close_sessions`; the
-pty-sessions service runs it for the `close_all` request because it holds the
-masters, and the caller (`ava stop`) turns its `Outcome` into owner notices.
-
-Each shell's whole session is captured as `session_tree` defines it (the shell,
-its descendants and every process of its POSIX session, each pinned by birth)
-before the first signal. Shells get SIGHUP first, so a restart loop cannot keep
-producing jobs; every other member gets SIGTERM; whatever is still alive when
-the grace ends is SIGKILLed with its session whole
-(docs/decisions/2026-09-28-stop-escalates-to-sigkill.md). A session with anything
-beyond its shell at capture is busy; a busy session whose shell the closure
-verified gone is `ClosedSession` (with the processes of it that outlived the
-SIGKILL), and every process that outlived the SIGKILL is a `Survivor`.
+Closing a terminal attempts HUP, TERM and KILL, then reports known shell/job
+identities still alive. It never discovers descendants, scans the host process
+table or certifies that every process originally launched from the terminal is
+gone. Residual host processes belong to operational investigation.
 """
 
 from __future__ import annotations
 
 import signal
-import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -27,17 +16,15 @@ from typing import Any
 import psutil
 
 from base.native_process.ownership import OwnedProcess
-from base.sessions.pty import session_tree
+from base.sessions.pty import process_groups
 
 
 @dataclass(frozen=True)
 class Target:
     """One shell to close: its session name and the identity recorded at birth.
 
-    `members` are processes of the session recorded earlier. They matter only
-    when the shell itself is already gone (a crashed service's leftovers): a
-    recorded member that is still alive proves the session id and is taken with
-    its whole tree.
+    `members` are explicitly recorded job identities. They are cleanup targets,
+    not a complete inventory of the session or its descendants.
     """
 
     name: str
@@ -60,7 +47,7 @@ class ClosedSession:
 
 @dataclass(frozen=True)
 class Survivor:
-    """A captured process that outlived its SIGKILL, with the session it belongs to."""
+    """A known cleanup target still alive after the bounded signaling attempt."""
 
     session: str
     process: OwnedProcess
@@ -69,7 +56,7 @@ class Survivor:
 
 @dataclass(frozen=True)
 class Outcome:
-    """What a closure did: the busy sessions it closed and what outlived it."""
+    """Closed busy terminals and known survivors; no descendant-clearance proof."""
 
     closed: tuple[ClosedSession, ...] = ()
     survivors: tuple[Survivor, ...] = ()
@@ -123,171 +110,53 @@ def identity_from_wire(item: dict[str, Any]) -> OwnedProcess:
     )
 
 
-@dataclass
-class _Entry:
-    """One session the closure takes, captured before any signal."""
-
-    name: str
-    capture: session_tree.SessionCapture
-    busy: bool
-
-    @property
-    def shell(self) -> OwnedProcess:
-        return self.capture.leader
-
-    def role(self, identity: OwnedProcess) -> str:
-        return "terminal" if identity == self.shell else "job"
+def _known(target: Target) -> tuple[OwnedProcess, ...]:
+    return tuple(dict.fromkeys((target.shell, *target.members)))
 
 
 def _present(identities: Iterable[OwnedProcess]) -> list[OwnedProcess]:
-    """The identities still present, in pid order.
+    return [identity for identity in identities if process_groups.live(identity)]
 
-    One that cannot be verified counts as present (it is reported, never
-    certified gone); a confirmed birth mismatch counts as gone.
-    """
-    present: list[OwnedProcess] = []
+
+def _named(identities: Iterable[OwnedProcess]) -> tuple[tuple[int, str], ...]:
+    names: list[tuple[int, str]] = []
     for identity in identities:
-        try:
-            alive = identity.live()
-        except (
-            RuntimeError,
-            psutil.Error,
-            OSError,
-        ):  # unverifiable identity: reported, not certified gone
-            alive = True
-        if alive:
-            present.append(identity)
-    return sorted(present, key=lambda identity: identity.pid)
-
-
-def _capture(targets: Iterable[Target]) -> list[_Entry]:
-    entries: list[_Entry] = []
-    for target in targets:
-        capture = session_tree.capture_session(target.shell)
-        if not capture.members and target.members:
-            # The shell is gone; recorded members that still live keep the session open.
-            capture = session_tree.SessionCapture(
-                target.shell, [target.shell, *target.members], None
-            )
-            session_tree.refresh([capture])
-        if not _present(capture.members):
-            continue  # nothing of the session is left to close
-        busy = bool(_present(member for member in capture.members if member != target.shell))
-        entries.append(_Entry(target.name, capture, busy))
-    return entries
-
-
-def _hang_up(entries: list[_Entry]) -> None:
-    """SIGHUP every shell, then SIGTERM every other captured member.
-
-    The shells go first: an interactive shell's own SIGHUP makes bash exit
-    (re-sending HUP to its jobs), so a loop that restarts its job cannot keep
-    producing new descendants during the grace (#2045).
-    """
-    session_tree.terminate([entry.shell for entry in entries], signal.SIGHUP)
-    for entry in entries:
-        session_tree.terminate(set(entry.capture.members) - {entry.shell})
-
-
-def _await_members(entries: list[_Entry], until: float) -> bool:
-    """Wait for every captured member to exit; False when `until` passes first.
-
-    Each poll folds each session's newcomers into its capture
-    (`session_tree.refresh`). A member can fork while the poll that finds it
-    gone is still scanning, so a quiet poll only counts once a second one,
-    whose scan began after every member was gone, is quiet too.
-    """
-    captures = [entry.capture for entry in entries]
-    quiet = False
-    while True:
-        if not session_tree.refresh(captures):
-            if quiet:
-                return True
-            quiet = True
+        if not process_groups.live(identity):
             continue
-        quiet = False
-        left = until - time.monotonic()
-        if left <= 0:
-            return False
-        time.sleep(min(0.05, left))
-
-
-def _kill_leftovers(entries: list[_Entry], wait_s: float) -> list[tuple[_Entry, OwnedProcess]]:
-    """SIGKILL each session's remaining membership; return what outlived it.
-
-    Every session dies through `session_tree.kill_session_tree`: frozen, killed
-    children first with the shell last, rooted at the shell and at every member
-    captured, so a job whose shell already exited is still taken with its
-    descendants. One last refresh first, so every kill starts from its
-    session's newest capture and proof; a session that can yield nothing more
-    is skipped.
-    """
-    session_tree.refresh(entry.capture for entry in entries)
-    survivors: list[tuple[_Entry, OwnedProcess]] = []
-    for entry in entries:
-        capture = entry.capture
-        if not capture.active:
-            continue
-        result = session_tree.kill_session_tree(
-            capture.leader, also=capture.members, wait_s=wait_s, proven_at=capture.proven_at
-        )
-        survivors += [(entry, identity) for identity in result.survivors]
-    return survivors
-
-
-def _named(identities: list[OwnedProcess]) -> tuple[tuple[int, str], ...]:
-    """(pid, command name) of each process still running as its captured identity."""
-    named: list[tuple[int, str]] = []
-    for identity in sorted(identities, key=lambda identity: identity.pid):
         try:
             name = psutil.Process(identity.pid).name()
         except psutil.NoSuchProcess:
             continue
-        except psutil.Error:
-            name = "<unreadable>"
-        if _present([identity]):  # the name was read from that process
-            named.append((identity.pid, name))
-    return tuple(named)
-
-
-def _closed(
-    entries: list[_Entry], killed: list[tuple[_Entry, OwnedProcess]]
-) -> tuple[ClosedSession, ...]:
-    """Every busy session whose shell is verified gone, with what of it outlived the SIGKILL.
-
-    The shell is the session as its owner uses it: once it is gone the session
-    cannot be used again, so it counts as closed even when a process of it
-    outlived the SIGKILL (the notice names it) and when another session keeps
-    the closure incomplete (issue #2044's "notify only what actually closed",
-    judged by the shell). A session whose shell still lives is not closed; a
-    retry sees it again.
-    """
-    stuck = set(_present(identity for _entry, identity in killed))
-    left: dict[str, list[OwnedProcess]] = {}
-    for entry, identity in killed:
-        if identity in stuck:
-            left.setdefault(entry.name, []).append(identity)
-    return tuple(
-        ClosedSession(entry.name, entry.shell, _named(left.get(entry.name, [])))
-        for entry in entries
-        if entry.busy and not _present([entry.shell])
-    )
+        if process_groups.live(identity):
+            names.append((identity.pid, name))
+    return tuple(names)
 
 
 def close_sessions(targets: Iterable[Target], *, grace_s: float, kill_s: float) -> Outcome:
-    """Close every target: hang up, wait up to `grace_s`, SIGKILL what is left.
+    """Attempt closure of known groups within shared grace and kill budgets.
 
-    The SIGKILL leg runs even when `grace_s` is zero, each of its waits bounded
-    by `kill_s`. Nothing is signalled before every session is captured. A
-    target whose shell is no longer the live recorded process is skipped.
+    A gone/recycled identity is skipped. Concrete signaling/identity errors
+    propagate. A known survivor is diagnostic evidence, not a host-wide scan.
     """
-    entries = _capture(targets)
-    _hang_up(entries)
-    graceful = _await_members(entries, time.monotonic() + grace_s)
-    killed = [] if graceful else _kill_leftovers(entries, kill_s)
-    survivors = tuple(
-        Survivor(entry.name, identity, entry.role(identity))
-        for entry, identity in killed
-        if _present([identity])
+    entries = list(targets)
+    known = tuple(dict.fromkeys(identity for target in entries for identity in _known(target)))
+    process_groups.signal((target.shell for target in entries), signal.SIGHUP)
+    process_groups.signal(
+        (member for target in entries for member in target.members if member != target.shell),
+        signal.SIGTERM,
     )
-    return Outcome(_closed(entries, killed), survivors)
+    remaining = process_groups.wait(known, grace_s)
+    if remaining:
+        process_groups.signal(remaining, signal.SIGKILL)
+        process_groups.wait(remaining, kill_s)
+    survivors: list[Survivor] = []
+    closed: list[ClosedSession] = []
+    for target in entries:
+        left = _present(_known(target))
+        survivors.extend(
+            Survivor(target.name, identity, "terminal" if identity == target.shell else "job")
+            for identity in left
+        )
+        if target.members and not process_groups.live(target.shell):
+            closed.append(ClosedSession(target.name, target.shell, _named(left)))
+    return Outcome(tuple(closed), tuple(survivors))

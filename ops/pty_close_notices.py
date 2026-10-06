@@ -4,8 +4,7 @@
 after the services are down and before the data plane stops. Each session it
 VERIFIED closed (its shell's exact identity gone — also when another session
 leaves the stop incomplete) gets one system inbound message for its owner
-agent, naming why it closed and any process of the session that outlived its
-SIGKILL. The stop writes them itself over one short connection
+agent, naming why it closed and known processes observed still running. The stop writes them itself over one short connection
 (`write_notices`) opened and closed inside that phase: the database is still
 up, and no pool or background task holds a client connection into the data
 plane's shutdown. A notice for a terminated owner is dropped without delivery
@@ -85,9 +84,9 @@ CRASH_REASON = "the pty-sessions service ending uncleanly (a crash, a forced sto
 class ClosureNotice:
     """One closed busy session and the stop that closed it.
 
-    `survivors` are the session's processes that outlived the closure's SIGKILL
-    (typically another user's, which neither the closure nor the agent may
-    signal), as (pid, command name); empty when every process is gone. They are
+    `survivors` are known processes observed alive after best-effort closure,
+    as (pid, command name). An empty list does not prove all descendants gone.
+    They are
     not part of the dedup key: the notice is about the shell.
     """
 
@@ -167,7 +166,7 @@ def closure_notice(
 
     The caller guarantees the session was busy and that it closes it for
     `reason`; `survivors` names, as (pid, command name), the session's
-    processes that outlived the SIGKILL once its shell is verified gone.
+    known processes observed alive once its shell is verified gone.
     `operation` and `acquired_at` name the stop's maintenance hold; a sweep
     after a crash has none.
     Returns None when the session name is not an agent-owned shell (the
@@ -303,7 +302,7 @@ def _content(notice: ClosureNotice) -> str:
     text = (
         f"Shell session {notice.name!r} (id {notice.session_id}, agent {notice.agent_id}) "
         f"was closed by {notice.reason} on {notice.machine}, "
-        # A stop saw the job; a sweep only knows the ledger last did, up to a snapshot ago.
+        # A stop observed work; a sweep only has the recorded identities.
         + (
             "interrupting a running task. "
             if notice.operation
@@ -315,9 +314,9 @@ def _content(notice: ClosureNotice) -> str:
     if notice.survivors:
         left = ", ".join(f"pid {pid} ({shown_name(name)})" for pid, name in notice.survivors)
         text += (
-            f" Processes of the session the closure could not end are still running: {left}. "
-            "Such a process usually belongs to another user (a root sudo), which you may "
-            "not signal either."
+            f" Known processes observed after terminal closure are still running: {left}. "
+            "Inspect their ownership and current work before taking action; terminal "
+            "closure does not prove that all background or detached processes ended."
         )
     return text
 

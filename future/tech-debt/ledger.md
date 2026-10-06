@@ -33,6 +33,16 @@ human-readable `<class>:<slug>` for `boundary` (spans files, no single symbol).
 Mechanisms may add structured bullet fields beyond this base set (for example,
 cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unknown fields.
 
+## Retired guarantees
+
+The PTY whole-tree disappearance/proof requirement is retired by the user
+[decision of 2026-10-07](../../docs/decisions/2026-10-07-pty-best-effort-closure.md).
+Do not reopen it as an implementation defect or infer it was fixed by passing
+reruns. Historical Bash/TERM and OS-stall observations remain evidence for
+operational investigation; this decision does not establish their root causes.
+The job-readiness and interactive-write entries below retain their narrower
+fixture/incident scope.
+
 ## Open
 
 ### boundary:supervisor-intent-fixture-stop-window
