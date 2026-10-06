@@ -15,7 +15,7 @@ One module per domain:
 - ``cluster`` — the whole-cluster verbs
 - ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
 - ``cli.commands.agents.impersonation_parsers`` — external sessions and relays
-- ``backup`` — scheduled backup operation custody
+- ``backup`` — WAL-G physical backups
 - ``cli.commands.extensions.parsers`` — plugins, skill, MCP, memory and packages
 - ``management`` — config + presets + schedules
 """

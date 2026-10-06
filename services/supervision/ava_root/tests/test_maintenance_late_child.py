@@ -1,12 +1,4 @@
-"""A normal stop cannot certify an empty unit after its leader leaves a late child.
-
-`ava stop` asks ava-root to stop its units. Each unit runs in its own process
-group, and "stopped" is certified only by the kernel reporting that group empty
-after the leader was reaped. A child forked while the leader handles SIGTERM is
-still a member, so it is closed with the unit or keeps the stop from succeeding;
-the graceful refusal never becomes a kill. A unit that calls setsid() leaves its
-group by construction and is out of scope.
-"""
+"""A direct child stop does not certify disappearance of children forked during TERM."""
 
 from __future__ import annotations
 
@@ -24,19 +16,7 @@ from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfi
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group contract")
 
-# The late child is created by the SIGTERM handler, right before the leader exits.
-_POPEN_CHILD = """
-import os, pathlib, signal, subprocess, sys, time
-def finish(*_):
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-    pathlib.Path({child_file!r}).write_text(str(child.pid))
-    os._exit(0)
-signal.signal(signal.SIGTERM, finish)
-pathlib.Path({ready!r}).touch()
-time.sleep(60)
-"""
-
-# A native fork (no exec) whose child ignores SIGTERM: only force may close it.
+# A native fork after TERM may outlive the known leader.
 _FORKED_CHILD = """
 import os, pathlib, signal, time
 def finish(*_):
@@ -85,32 +65,7 @@ def _gone(process: psutil.Process | None) -> bool:
         return True
 
 
-async def test_late_child_created_during_signal_is_closed_with_its_unit(tmp_path: Path) -> None:
-    ready, child_file = tmp_path / "ready", tmp_path / "late-child.pid"
-    owner = _supervisor(
-        tmp_path / "root", _POPEN_CHILD.format(child_file=str(child_file), ready=str(ready))
-    )
-    await owner.start()
-    await _wait_for(ready)
-    child: psutil.Process | None = None
-    try:
-        units = cast("list[dict[str, Any]]", (await owner.status())["units"])
-        unit_pid = cast("int", units[0]["pid"])
-        assert os.getpgid(unit_pid) == unit_pid  # its own group ...
-        assert os.getsid(unit_pid) == os.getsid(0)  # ... in root's session
-        await owner.down("svc")
-        child = _late_child(child_file)
-        assert _gone(child), "stop reported success while a group member survived"
-        assert not list((tmp_path / "root" / "custody").iterdir())
-    finally:
-        if child is None and child_file.exists():
-            child = _late_child(child_file)
-        if child is not None and not _gone(child):
-            child.kill()  # exact private fixture cleanup after a failed assertion
-        await owner.shutdown()
-
-
-async def test_late_child_ignoring_term_retains_ownership_until_force(tmp_path: Path) -> None:
+async def test_late_child_is_not_a_service_replacement_gate(tmp_path: Path) -> None:
     ready, child_file = tmp_path / "ready", tmp_path / "late-child.pid"
     owner = _supervisor(
         tmp_path / "root", _FORKED_CHILD.format(child_file=str(child_file), ready=str(ready))
@@ -119,16 +74,17 @@ async def test_late_child_ignoring_term_retains_ownership_until_force(tmp_path: 
     await _wait_for(ready)
     child: psutil.Process | None = None
     try:
-        with pytest.raises(RuntimeError, match="ownership retained") as refused:
-            await owner.down("svc")
+        units = cast("list[dict[str, Any]]", (await owner.status())["units"])
+        leader = cast(int, units[0]["pid"])
+        assert os.getpgid(leader) == leader
+        assert os.getsid(leader) == os.getsid(0)
+        await owner.down("svc")
+        await _wait_for(child_file)
         child = _late_child(child_file)
-        assert child is not None and not _gone(child)  # refusal never became a kill
-        assert str(child.pid) in str(refused.value)
-        assert (tmp_path / "root" / "custody" / "svc.json").exists()
-        await owner.down("svc", force=True)
-        assert _gone(child)
-        assert not list((tmp_path / "root" / "custody").iterdir())
+        assert child is not None and not _gone(child)
+        assert owner._units["svc"].generation is None
+        assert not (tmp_path / "root" / "custody").exists()
     finally:
         if child is not None and not _gone(child):
-            child.kill()  # exact private fixture cleanup after a failed assertion
+            child.kill()
         await owner.shutdown()

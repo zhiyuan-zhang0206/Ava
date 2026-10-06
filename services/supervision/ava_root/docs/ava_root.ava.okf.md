@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Ava Root — one application service owner
-description: Native process custody, immutable launch generations, and explicit platform lifetime adapters.
+description: Direct service children, explicit operator intent, and platform lifetime adapters.
 tags: [services, lifecycle]
 ---
 
@@ -20,7 +20,7 @@ skips those preparation writes and only reconciles its existing units and readin
 The manifest freezes command arguments and service environment. Service specs
 declare external `config_inputs`; the manifest seals their paths and contents.
 Root checks these seals before every native birth, including recovery. Changed
-or missing inputs refuse that birth before acquiring process custody. Collector
+or missing inputs refuse that birth before spawning the process. Collector
 YAML and the complete native LGTM configuration directory use this contract;
 adding a rule file is a configuration change, while backend data writes are not.
 This is validation of mutable paths, not atomic exclusion of concurrent writers.
@@ -61,7 +61,7 @@ an immutable running release or seal ignored dependency directories.
 ## Unit intent and recorded failures
 
 The up-half/episode tests arrange child closure through a captured disposable
-birth and await its real watcher before restart releases custody. They retain
+birth and await its real watcher before testing replacement. They retain
 input-seal validation, durable intent, failure episodes and fresh generation
 assertions without coupling them to a live TERM deadline. Native down-refusal
 in `tests/test_ava_root_intent.py` and `tests/test_ava_root_stop_window.py` retain
@@ -88,7 +88,7 @@ full stop/start leaves no mixed state.
 
 The health monitor derives one condition per unit each round: the unit's intent
 is running and it sits in an explicit failure state — a recorded replacement
-failure, an open restart breaker, or retained native custody
+failure or an open restart breaker
 (`services/supervision/ava_root/failure_state.py`). The condition is a state, so every
 round that finds it holding emits `root_unit_failure_state` (unit, kind,
 detail); the observability stack's rules own the debounce and the notification,
@@ -105,8 +105,7 @@ This package owns the application service tree. The wire protocol and client sit
 
 ## Closure and uncertainty
 
-Stop certification, retained custody, and release of a leader that exited
-before any stop: [[services/supervision/ava_root/docs/closure.ava.okf.md]].
+Bounded best-effort group signals and direct-child exit: [[services/supervision/ava_root/docs/closure.ava.okf.md]].
 
 
 ## Exact serving generation

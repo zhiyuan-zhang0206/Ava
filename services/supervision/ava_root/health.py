@@ -2,8 +2,7 @@
 
 Only observed DOWN results can request replacement through the supervisor.
 Unknown identity, inspection errors, timeouts, and foreign listeners are terminal
-observations until fresh evidence resolves them. The supervisor retains native
-custody across failed stops; health is the sole service retry scheduler.
+observations until fresh evidence resolves them. Health is the service retry scheduler.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from typing import Protocol
 
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
-from services.supervision.ava_root.custody import ReconcileOutcome
 from services.supervision.ava_root.failure_state import (
     UnitFailureFacts,
     UnitFailureView,
@@ -43,7 +41,7 @@ class RevivalHost(Protocol):
     """The supervisor slice the health runner needs (duck-typed for stubs)."""
 
     async def restart(self, unit_id: str) -> dict[str, object]:
-        """Replace a generation only after the supervisor settles native custody."""
+        """Replace a generation through the supervisor's bounded child lifecycle."""
         ...
 
     def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
@@ -56,10 +54,6 @@ class RevivalHost(Protocol):
 
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         """The failure-state facts of one unit; unknown units raise UnknownUnitError."""
-        ...
-
-    async def reconcile_custody(self) -> list[ReconcileOutcome]:
-        """One custody reconcile pass: release proven-gone records, report each."""
         ...
 
 
@@ -242,13 +236,7 @@ class HealthMonitor:
         self._task: asyncio.Task[None] | None = None
 
     async def run_round(self) -> None:
-        """Reconcile custody, then probe every unit once, in registration order."""
-        try:
-            await self._supervisor.reconcile_custody()
-        except Exception:
-            # A defective pass must not cost the round its probes: log loudly
-            # and keep observing. The next round retries the reconcile.
-            _log.exception("[health] unit custody reconcile pass raised; continuing")
+        """Probe every unit once, in registration order."""
         for unit_id in self._registry.unit_ids():
             try:
                 await self._check_unit(unit_id)

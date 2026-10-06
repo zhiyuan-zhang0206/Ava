@@ -1,4 +1,4 @@
-"""Gate protocol readiness; the roster binds the listener to root custody."""
+"""Gate protocol readiness; recovery belongs to the lifecycle owner."""
 
 import json
 import urllib.error

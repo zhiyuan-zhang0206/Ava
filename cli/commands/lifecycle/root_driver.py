@@ -1,4 +1,4 @@
-"""One application root for start, stop and recovery, with native platform custody."""
+"""One application root for start, stop and recovery."""
 
 from __future__ import annotations
 
@@ -424,12 +424,19 @@ def _reconcile_units(
     and `state` its observed process state (task #4872).
     """
     units = _root_units(status)
+    from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
+
     for spec in roster:
         unit = units[spec.session]
         if unit.get("state") != "running" or unit.get("intent") != "running":
             reason = unit.get("last_error") or unit.get("last_exit") or unit.get("state")
             print(f"  ↑ ava-root unit {session_name(spec.session)} ({reason}) — bringing it up")
-            _call_ok(client.up(spec.session), f"up {spec.session}")
+            try:
+                _call_ok(client.up(spec.session), f"up {spec.session}")
+            except _RootDriverError as exc:
+                if spec.session in CRITICAL_SERVICE_SESSIONS:
+                    raise
+                print(f"  ✗ optional service {spec.session}: {exc}", file=sys.stderr)
     refreshed = _root_status(client)
     return refreshed if refreshed is not None else status
 
@@ -574,7 +581,7 @@ def wait_for_service_tree(
 def _health_verdicts(
     specs: tuple[ServiceSpec, ...], status: dict[str, Any] | None
 ) -> dict[str, str]:
-    """Probe now; a cached root health round cannot certify a new generation.
+    """Probe now instead of trusting a cached health result.
 
     A probe that raises is logged and reads as "unavailable"."""
     if status is None:
@@ -594,7 +601,7 @@ def _health_verdicts(
 
 
 def _unit_ready(unit: dict[str, Any] | None, verdict: str | None) -> bool:
-    """Require a live generation and fresh positive protocol evidence."""
+    """Require a running unit and a positive protocol response."""
     if unit is None:
         return False
     if unit.get("state") != "running":
@@ -610,24 +617,11 @@ def _unit_gone(unit: dict[str, Any] | None) -> bool:
 def _fresh_readiness_round(
     client: Any, specs: tuple[ServiceSpec, ...]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    """Bind this round's protocol evidence to unchanged native generations."""
+    """Observe the service table and ask the current protocol probes."""
     status = _root_status(client)
     units = _root_units(status) if status is not None else {}
     verdicts = _health_verdicts(specs, status)
-    after = _root_status(client)
-    after_units = _root_units(after) if after is not None else {}
-    for name in tuple(verdicts):
-        unit = units.get(name)
-        current = after_units.get(name)
-        if (
-            unit is None
-            or current is None
-            or unit.get("state") != "running"
-            or current.get("state") != "running"
-            or any(unit.get(key) != current.get(key) for key in ("pid", "create_time", "starttime"))
-        ):
-            verdicts.pop(name, None)
-    return after_units, verdicts
+    return units, verdicts
 
 
 def _unready_services(
@@ -642,52 +636,24 @@ def _unready_services(
     )
 
 
-def _confirmed_gone(specs: tuple[ServiceSpec, ...], streak: dict[str, int]) -> bool:
-    from cli.commands._probe import _SESSION_GONE_CONFIRMATIONS
-
-    return bool(specs) and all(
-        streak[spec.session] >= _SESSION_GONE_CONFIRMATIONS for spec in specs
-    )
-
-
-def _next_gone_streak(
-    specs: tuple[ServiceSpec, ...], units: dict[str, dict[str, Any]], previous: dict[str, int]
-) -> dict[str, int]:
-    return {
-        spec.session: previous.get(spec.session, 0) + 1
-        if _unit_gone(units.get(spec.session))
-        else 0
-        for spec in specs
-    }
-
-
 def _wait_for_root_services_ready(
     specs: tuple[ServiceSpec, ...], timeout_s: float
 ) -> ReadinessWait:
-    """Every success uses one fresh whole-roster observation, never sticky ALIVE."""
-    from base.deploy.progress_timeout import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
+    """Wait for core services; optional availability is a diagnostic snapshot."""
     from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
 
     client = root_client()
     started_at = time.monotonic()
     deadline = started_at + timeout_s
-    non_critical_deadline = started_at + NON_CRITICAL_SERVICE_READY_TIMEOUT_S
     critical = tuple(s for s in specs if s.session in CRITICAL_SERVICE_SESSIONS)
     non_critical = tuple(s for s in specs if s.session not in CRITICAL_SERVICE_SESSIONS)
-    gone_streak: dict[str, int] = {}
     while True:
         units, verdicts = _fresh_readiness_round(client, specs)
-        gone_streak = _next_gone_streak(specs, units, gone_streak)
         unready = _unready_services(critical, units, verdicts)
         non_critical_unready = _unready_services(non_critical, units, verdicts)
         now = time.monotonic()
-        gone_all = _confirmed_gone(unready, gone_streak)
-        non_critical_settled = (
-            not non_critical_unready
-            or now >= non_critical_deadline
-            or _confirmed_gone(non_critical_unready, gone_streak)
-        )
-        if (not unready and non_critical_settled) or gone_all or now >= deadline:
+        gone_all = bool(unready) and all(_unit_gone(units.get(s.session)) for s in unready)
+        if not unready or gone_all or now >= deadline:
             return ReadinessWait(
                 unready,
                 now - started_at,
@@ -699,11 +665,9 @@ def _wait_for_root_services_ready(
 
 def require_root_absent() -> None:
     from base.paths import root_run_dir
-    from services.supervision.ava_root.custody import require_clear
     from services.supervision.ava_root.singleton import acquire_instance_lock, release_instance_lock
 
     run_dir = root_run_dir()
-    require_clear(run_dir)
     fd = acquire_instance_lock(run_dir)
     release_instance_lock(fd)
 

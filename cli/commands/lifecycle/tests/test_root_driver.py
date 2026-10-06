@@ -79,7 +79,7 @@ def test_raising_identity_probe_reads_unavailable_and_warns() -> None:
     assert "ValueError: probe bug" in records[0]
 
 
-def test_fresh_readiness_rejects_generation_change(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readiness_uses_one_status_observation(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshots = iter([status(pid=100), status(pid=101)])
     monkeypatch.setattr(driver, "root_client", object)
 
@@ -88,7 +88,8 @@ def test_fresh_readiness_rejects_generation_change(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(driver, "_root_status", read_status)
     result = driver._wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
-    assert result.unready
+    assert not result.unready
+    assert next(snapshots)["units"][0]["pid"] == 101
 
 
 def test_fresh_ready_generation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,53 +103,30 @@ def test_fresh_ready_generation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not result.unready
 
 
-@pytest.mark.parametrize("later", ["stopped", "new-generation"])
-def test_noncritical_readiness_must_still_hold_when_critical_becomes_ready(
-    monkeypatch: pytest.MonkeyPatch, later: str
-) -> None:
-    round_number = 0
-
-    def snapshot(_client: object) -> dict[str, Any]:
-        nonlocal round_number
-        round_number += 1
-        row = status()
-        row["units"].append(
-            {
-                "id": "browser-mcp",
-                "state": "running",
-                "pid": 110,
-                "create_time": 13.0,
-                "starttime": None,
-            }
-        )
-        if round_number >= 3:
-            child = row["units"][1]
-            if later == "stopped":
-                child["state"] = "stopped"
-            elif round_number % 2 == 0:
-                child["pid"] = 111
-        return row
-
-    def gateway() -> DaemonProbe:
-        return DaemonProbe.up("ready") if round_number >= 3 else DaemonProbe.down("starting")
-
+def test_optional_failure_does_not_delay_a_ready_core(monkeypatch: pytest.MonkeyPatch) -> None:
+    snapshot = status()
+    snapshot["units"].append({"id": "browser-mcp", "state": "stopped"})
     background = ServiceSpec(
         session="browser-mcp",
         cmd="unused",
         capabilities=frozenset({"gateway"}),
         requires_db=False,
-        identity_probe=lambda: DaemonProbe.up("sampled ready"),
+        identity_probe=lambda: DaemonProbe.down("unavailable"),
     )
-    times = iter((0.0, 1.0, 50.0))
 
-    def sleep(_seconds: float) -> None:
-        pass
+    def read_status(_client: object) -> dict[str, Any]:
+        return snapshot
+
+    def no_optional_wait(_seconds: float) -> None:
+        raise AssertionError("optional services must not delay a ready core")
 
     monkeypatch.setattr(driver, "root_client", object)
-    monkeypatch.setattr(driver, "_root_status", snapshot)
-    monkeypatch.setattr(driver, "_poll_sleep", sleep)
-    monkeypatch.setattr(driver.time, "monotonic", lambda: next(times))
-    result = driver._wait_for_root_services_ready((spec(probe=gateway), background), 100)
+    monkeypatch.setattr(driver, "_root_status", read_status)
+    monkeypatch.setattr(driver, "_poll_sleep", no_optional_wait)
+    result = driver._wait_for_root_services_ready(
+        (spec(probe=lambda: DaemonProbe.up("ready")), background),
+        100,
+    )
     assert not result.unready
     assert result.non_critical_unready == (background,)
 
@@ -200,25 +178,14 @@ def test_windows_adapter_gap_is_explicit(monkeypatch: pytest.MonkeyPatch, tmp_pa
         driver._bring_up_root(tmp_path, tmp_path, tmp_path / "manifest", object(), {})
 
 
-def test_unresponsive_root_with_custody_is_not_an_absent_tree(
+def test_obsolete_custody_records_do_not_block_an_absent_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     directory = tmp_path / "custody"
     directory.mkdir()
     (directory / "gateway.json").write_text("unknown")
     monkeypatch.setattr("base.paths.root_run_dir", lambda: tmp_path)
-
-    def make_client(**_kwargs: object) -> object:
-        return object()
-
-    monkeypatch.setattr(driver, "root_client", make_client)
-
-    def read_status(_client: object) -> None:
-        return None
-
-    monkeypatch.setattr(driver, "_root_status", read_status)
-    with pytest.raises(RuntimeError, match="custody"):
-        driver.stop_root_service_tree(preserve=frozenset())
+    driver.require_root_absent()
 
 
 def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None:
@@ -259,16 +226,17 @@ def test_missing_root_ipc_is_unknown_not_positive_exit(monkeypatch: pytest.Monke
     assert outcome.unready and not outcome.sessions_gone
 
 
-def test_service_stopping_during_probe_invalidates_alive(monkeypatch: pytest.MonkeyPatch) -> None:
-    snapshots = iter([status(), status(state="stopped")])
+def test_a_stopped_core_unit_is_not_ready_even_if_its_endpoint_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(driver, "root_client", object)
 
     def read_status(_client: object) -> dict[str, Any]:
-        return next(snapshots)
+        return status(state="stopped")
 
     monkeypatch.setattr(driver, "_root_status", read_status)
     result = driver._wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
-    assert result.unready
+    assert result.unready and result.sessions_gone
 
 
 def test_helper_seed_is_durable_before_wire_start(
@@ -570,14 +538,12 @@ def _mock_pidfd_delivery(monkeypatch: pytest.MonkeyPatch, signals: list[str]) ->
     monkeypatch.setattr(proc_tree.pidfd, "send_signal", deliver)
 
 
-@pytest.mark.parametrize("target", ["root", "service", "force-service"])
 def test_signals_reject_reuse_inside_legacy_birth_tolerance(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import psutil
 
     from base.native_process.ownership import OwnedProcess
-    from services.supervision.ava_root.supervisor import Supervisor
 
     old = OwnedProcess(12345, 10.0, 100)
     replacement = OwnedProcess(12345, 10.01, 101)
@@ -618,24 +584,17 @@ def test_signals_reject_reuse_inside_legacy_birth_tolerance(
     monkeypatch.setattr(driver, "_require_root_owner", owned)
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: False)
     with pytest.raises(RuntimeError, match="identity changed"):
-        if target == "root":
-            snapshot = {
-                "root": {"pid": old.pid, "create_time": old.birth, "starttime": old.starttime}
-            }
-            driver._stop_root_process(tmp_path, object(), snapshot, timeout_s=0)
-        else:
-            Supervisor._signal_owned(old, force=target == "force-service")
+        snapshot = {"root": {"pid": old.pid, "create_time": old.birth, "starttime": old.starttime}}
+        driver._stop_root_process(tmp_path, object(), snapshot, timeout_s=0)
     assert signals == []
 
 
-@pytest.mark.parametrize("target", ["root", "service", "force-service"])
-def test_signals_keep_linux_custody_when_wall_birth_moves(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: str
+def test_root_signals_use_start_ticks_when_wall_birth_moves(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import psutil
 
     from base.native_process.ownership import OwnedProcess
-    from services.supervision.ava_root.supervisor import Supervisor
 
     captured = OwnedProcess(12345, 10.0, 100)
     observed = OwnedProcess(12345, 3610.0, 100)
@@ -670,12 +629,9 @@ def test_signals_keep_linux_custody_when_wall_birth_moves(
     monkeypatch.setattr(driver, "_require_root_owner", ignore)
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: False)
     monkeypatch.setattr(driver, "_root_status", ignore)
-    if target == "root":
-        snapshot = {"root": {"pid": captured.pid, "create_time": captured.birth, "starttime": 100}}
-        driver._stop_root_process(tmp_path, object(), snapshot, timeout_s=1)
-    else:
-        Supervisor._signal_owned(captured, force=target == "force-service")
-    assert signals == ["kill" if target == "force-service" else "term"]
+    snapshot = {"root": {"pid": captured.pid, "create_time": captured.birth, "starttime": 100}}
+    driver._stop_root_process(tmp_path, object(), snapshot, timeout_s=1)
+    assert signals == ["term"]
 
 
 def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(

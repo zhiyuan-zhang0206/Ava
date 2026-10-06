@@ -88,10 +88,8 @@ _EXPECTED_UIDS = {
     # memory-search growth layer (task #2088/#2090) — OTLP gauge mirror
     "ava-ops-memory-search-rows-warning",
     "ava-ops-memory-search-rows-critical",
-    # recovery posture — scheduled-proof failure and backup operation custody
+    # recovery posture — scheduled restore-drill failure
     "ava-ops-recovery-drill-failed",
-    "ava-ops-backup-operation-blocked",
-    "ava-ops-backup-operation-quarantined",
     # alerting stack health — remote Tempo scrape target (task #3330)
     "ava-ops-tempo-backend-down",
 }

@@ -25,7 +25,6 @@ from cli import main as _main
 from cli.commands.agents import parsers as _agents
 from cli.commands.extensions.parsers import mcp as _mcp
 from cli.commands.extensions.parsers import plugins as _plugins
-from cli.parsers import backup as _backup
 from cli.parsers import build_parser
 from cli.parsers import cluster as _cluster
 from cli.parsers import host as _host
@@ -322,14 +321,10 @@ def test_logs_retention_help_explains_defaults_and_dry_run(
     assert "without\n                        deleting" in help_text
 
 
-def test_backup_operations_parser_binds_status_and_retire() -> None:
-    parser = _main._build_parser()
-    status = parser.parse_args(["backup", "operations", "status"])
-    retire = parser.parse_args(["backup", "operations", "retire"])
-    confirmed = parser.parse_args(["backup", "operations", "retire", "--confirm"])
-    assert status.func is _backup._h_backup_operations_status
-    assert retire.func is _backup._h_backup_operations_retire
-    assert (retire.confirm, confirmed.confirm) == (False, True)
+@pytest.mark.parametrize("verb", ["status", "retire"])
+def test_removed_backup_operation_custody_verbs_are_rejected(verb: str) -> None:
+    with pytest.raises(SystemExit):
+        _main._build_parser().parse_args(["backup", "operations", verb])
 
 
 @pytest.mark.parametrize(
@@ -343,7 +338,7 @@ def test_backup_operations_parser_binds_status_and_retire() -> None:
     ],
 )
 def test_the_removed_wal_verbs_no_longer_parse(argv: list[str]) -> None:
-    """The self-written PITR stack is gone; operation custody is `ava backup operations`."""
+    """The self-written PITR stack remains removed."""
     with pytest.raises(SystemExit) as exited:
         _main._build_parser().parse_args(argv)
 

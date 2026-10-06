@@ -30,11 +30,11 @@ a recovery proof.
 
 A failed drill emits the typed `recovery_drill_failed` telemetry event with the
 drill name. Grafana alerts immediately on that event's one-hour window. Every
-backup operation also reports custody through `backup_operation_custody`: a
-failed or cancelled operation with proven group closure is quarantined without
-plaintext and warns while the next run proceeds; unproven closure blocks that
-operation kind and alerts as an error until `ava backup operations retire`
-re-proves closure (`docs/conventions/runbook.md`).
+scheduled backup worker uses private staging and bounded stop, without durable
+custody or blocked-kind retirement. Failures remain failures in scheduler
+health/logs and never advance backup/drill success markers. If cleanup fails,
+inspect the reported private scratch path; no process-family census claims all
+orphans disappeared (`docs/conventions/runbook.md`).
 
 ## Restore procedure
 

@@ -39,7 +39,8 @@ one code path with two callers.
   the target.
 - **Scratch space**: `select_throwaway_base(required)`, where `required` is the backup's
   uncompressed size plus the WAL since it started plus `max_wal_size`: no multiplier. The copy
-  and the process family are removed in every outcome.
+  is removed after native scratch-Postgres shutdown; a failed stop preserves
+  its data directory and reports the error. No process-family disappearance proof is made.
 - **Schedule and record** (`drill.py`, `tick.py`, `state.py`): due when a backup exists and
   none succeeded for a week minus one tick period (the drill can only run at a tick, so a
   full-week test would slip to eight days). The record (`finished_at`, `ok`, `backup`,
@@ -52,7 +53,7 @@ one code path with two callers.
 ## Key Dependencies
 - [[walg.ava.okf.md|WAL-G]] — the runner, `postgres_command` (the shared archive/restore command builder), the probe
 - [[walg-tick.ava.okf.md|WAL-G daily tick]] — runs the weekly drill and owns the state file and lock
-- `base/cluster/dataplane/pg_foreground.py`, `pg_throwaway_base.py` — the scratch postmaster's family custody and base selection
+- `base/cluster/dataplane/pg_foreground.py`, `pg_throwaway_base.py` — native scratch-postmaster shutdown and base selection
 - `scripts/data_plane_ops/restore_drill.py` — `verify_restored_database`, shared with the logical drill
 
 ## Entry Points

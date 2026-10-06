@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import UnitState
-from services.supervision.ava_root.custody import ServiceCustody
 from services.supervision.ava_root.intent_store import IntentSource, RestartFailure, UnitIntent
 from services.supervision.ava_root.manifest import UnitManifest
 
@@ -31,15 +30,8 @@ class _Generation:
     identity: OwnedProcess | None = None
     """The leader's native birth; None when the leader exited before root read it.
 
-    Root, its only reaper, reaped it or will; its group is still `proc.pid`."""
-    custody: ServiceCustody | None = None
-    tracked: set[OwnedProcess] = field(default_factory=set[OwnedProcess])
+    Root, its only reaper, reaped it or will. No old group number is signalled."""
     closing: bool = False
-    scope_closed_at_exit: bool = False
-    """The leader's group was empty when the watch read it after the reap.
-
-    Nothing of the unit remained. Otherwise the watch retained the group's
-    members in `tracked` at that read."""
     exited: asyncio.Event = field(default_factory=asyncio.Event)
 
 

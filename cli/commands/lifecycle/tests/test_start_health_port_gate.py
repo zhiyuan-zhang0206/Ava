@@ -215,19 +215,21 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
 
 
 def test_start_refuses_and_launches_nothing(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _hermetic_start
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _hermetic_start: None
 ) -> None:
-    launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
-    _verdicts(monkeypatch, {"ops": DaemonProbe.port_taken(_FOREIGN)})
+    launched = _roster(monkeypatch, (_healthz_spec("agent-host", 8113),))
+    _verdicts(monkeypatch, {"agent-host": DaemonProbe.port_taken(_FOREIGN)})
     assert _start_commands.cmd_start() == 1
     assert launched == []
     message = "".join(capsys.readouterr())
     assert "/home/ava/.ava" in message
     assert "Stop the listed daemon" in message
-    assert "--disable-service ops" in message
+    assert "--disable-service agent-host" in message
 
 
-def test_a_clear_roster_starts_normally(monkeypatch: pytest.MonkeyPatch, _hermetic_start) -> None:
+def test_a_clear_roster_starts_normally(
+    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
+) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
     _verdicts(monkeypatch, {"ops": DaemonProbe.down("cold")})
     assert _start_commands.cmd_start() == 0
@@ -235,7 +237,7 @@ def test_a_clear_roster_starts_normally(monkeypatch: pytest.MonkeyPatch, _hermet
 
 
 def test_a_disabled_service_cannot_block_start(
-    monkeypatch: pytest.MonkeyPatch, _hermetic_start
+    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8113)))
     _verdicts(
@@ -243,3 +245,12 @@ def test_a_disabled_service_cannot_block_start(
     )
     assert _start_commands.cmd_start(disabled_services=("labeler",)) == 0
     assert launched == ["ops"]
+
+
+def test_optional_port_conflict_does_not_block_core_start(
+    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
+) -> None:
+    launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103),))
+    _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
+    assert _start_commands.cmd_start() == 0
+    assert launched == ["labeler"]

@@ -1,8 +1,8 @@
 """Browser network canary and host contrast, scheduled by root diagnostics.
 
 The canary opens one temporary target and closes it in finally. It never stops,
-restarts, or repairs the shared browser. Root diagnostics verifies native
-listener ancestry before and after invoking these protocol helpers.
+restarts, or repairs the shared browser. Root diagnostics observes
+the configured endpoints without native listener inspection.
 """
 
 from __future__ import annotations
