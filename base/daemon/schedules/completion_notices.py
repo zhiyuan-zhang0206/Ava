@@ -6,10 +6,25 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, cast
+from enum import StrEnum
+from typing import Any, cast
 
-CompletionNoticePolicy = Literal["all", "failures", "hourly"]
-CompletionNoticeOutcome = Literal["exit", "missed"]
+
+class CompletionNoticePolicy(StrEnum):
+    """How admitted platform completions reach an agent."""
+
+    ALL = "all"
+    FAILURES = "failures"
+    HOURLY = "hourly"
+
+
+class CompletionNoticeOutcome(StrEnum):
+    """What happened to the process or watcher represented by a notice."""
+
+    EXIT = "exit"
+    MISSED = "missed"
+
+
 CompletionNoticePayload = dict[str, object]
 
 _MAX_DIGEST_LOGS = 20
@@ -25,10 +40,14 @@ class CompletionNotice:
     outcome: CompletionNoticeOutcome
     exit_code: int | None = None
 
+    def __post_init__(self) -> None:
+        """Validate the outcome even for direct or restored construction."""
+        object.__setattr__(self, "outcome", CompletionNoticeOutcome(self.outcome))
+
     @property
     def failed(self) -> bool:
         """Whether this notice represents a failed or missed completion."""
-        return self.outcome == "missed" or self.exit_code not in (None, 0)
+        return self.outcome is CompletionNoticeOutcome.MISSED or self.exit_code not in (None, 0)
 
     @property
     def summary(self) -> str:
@@ -51,13 +70,14 @@ def completion_notice_from_metadata(
         return None
     if not isinstance(content, str):
         raise CompletionNoticePayloadError("completion_notice_content")
-    outcome = metadata.get("outcome")
+    try:
+        outcome = CompletionNoticeOutcome(metadata.get("outcome"))
+    except (ValueError, TypeError) as exc:
+        raise CompletionNoticePayloadError("completion_notice_payload") from exc
     exit_code = metadata.get("exit_code")
-    if outcome not in ("exit", "missed") or (
-        exit_code is not None and not isinstance(exit_code, int)
-    ):
+    if exit_code is not None and not isinstance(exit_code, int):
         raise CompletionNoticePayloadError("completion_notice_payload")
-    if (outcome == "exit") != (exit_code is not None):
+    if (outcome is CompletionNoticeOutcome.EXIT) != (exit_code is not None):
         raise CompletionNoticePayloadError("completion_notice_payload")
     return CompletionNotice(
         source=source,
@@ -79,11 +99,13 @@ class CompletionDigest:
 
 def validate_completion_notice_policy(value: str) -> CompletionNoticePolicy:
     """Return a supported policy or fail loudly on a stored invalid value."""
-    if value not in ("all", "failures", "hourly"):
+    try:
+        return CompletionNoticePolicy(value)
+    except ValueError as exc:
         raise ValueError(
-            f"completion_notice_policy must be one of ['all', 'failures', 'hourly'], got {value!r}"
-        )
-    return value
+            f"completion_notice_policy must be one of "
+            f"{[policy.value for policy in CompletionNoticePolicy]!r}, got {value!r}"
+        ) from exc
 
 
 def current_default_completion_notice_policy() -> CompletionNoticePolicy:
@@ -108,7 +130,7 @@ def effective_completion_notice_policy(
 
 def immediate_delivery_required(policy: CompletionNoticePolicy, notice: CompletionNotice) -> bool:
     """Whether one completion notice must enter the agent inbox immediately."""
-    if policy == "all":
+    if policy is CompletionNoticePolicy.ALL:
         return True
     return notice.failed
 
@@ -149,7 +171,7 @@ def delivery_required_for_agent(
     if not notice.failed and hourly_notice_recorded(conn, agent_id, notice):
         return False
     policy = policy_for_agent(conn, agent_id, default)
-    if policy == "hourly":
+    if policy is CompletionNoticePolicy.HOURLY:
         record_hourly_notice(conn, agent_id, notice)
     return immediate_delivery_required(policy, notice)
 
@@ -217,9 +239,10 @@ def pending_digests(conn: Any, now: datetime) -> list[CompletionDigest]:
         rows = cursor.fetchall()
     grouped: dict[tuple[int, datetime], list[tuple[int, CompletionNotice]]] = defaultdict(list)
     for event_id, agent_id, source, content, outcome, exit_code, window_start in rows:
-        validated_outcome = outcome
-        if validated_outcome not in ("exit", "missed"):
-            raise ValueError(f"unknown completion notice outcome in database: {outcome!r}")
+        try:
+            validated_outcome = CompletionNoticeOutcome(outcome)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"unknown completion notice outcome in database: {outcome!r}") from exc
         grouped[(int(agent_id), cast(datetime, window_start))].append(
             (
                 int(event_id),
