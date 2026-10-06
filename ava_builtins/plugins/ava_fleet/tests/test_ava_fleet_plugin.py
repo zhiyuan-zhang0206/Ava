@@ -146,7 +146,8 @@ def test_peer_communication_survives_human_guidance_toggle(
     prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
     assert prompt.count("## Agent-to-agent communication") == 1
     assert "## Reduce context switch for the human" not in prompt
-    assert "protocol receipt ACKs still apply" in prompt
+    assert "explicit reporting agreements still apply" in prompt
+    assert "protocol receipt ACKs" not in prompt
     assert "Periodic checking does not imply periodic broadcasting" in prompt
     assert "without courtesy ACKs" in prompt
 

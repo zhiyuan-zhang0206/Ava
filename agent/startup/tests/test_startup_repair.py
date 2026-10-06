@@ -127,11 +127,16 @@ def test_duplicate_results_drop_all_but_tail_real() -> None:
     assert _redundant_tool_results(merged) == []
 
 
-def test_duplicate_results_drop_a_synthetic_after_a_real() -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+def test_duplicate_results_drop_a_synthetic_after_a_real(legacy: bool) -> None:
     """Synthetic content loses to a real result even when it is positioned later."""
     use = _ai_tool_use("c1")
     real = ToolMessage(content="real output", tool_call_id="c1", id="t-real")
-    synthetic = _interrupted_tool_result("c1", "t-synthetic")
+    synthetic = (
+        _interrupted_tool_result("c1", "t-synthetic")
+        if legacy
+        else _full_rebuild(dangling_tool_pairing_repairs([use]))[-1]
+    )
 
     repairs = dangling_tool_pairing_repairs([use, real, synthetic])
 

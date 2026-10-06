@@ -57,18 +57,11 @@ def help(
     compact_classes: bool = False,
     hidden_members: frozenset[str] | None = None,
 ) -> None:
-    """Print docs for SDK targets, e.g. `ava.help(ava.shell)`.
+    """Print documentation for one or more SDK targets, e.g. `ava.help(ava.shell)`.
 
-    Render parameters are arguments, never ambient state: `compact_classes` and
-    `hidden_members` are passed down this call's render. When `hidden_members` is
-    omitted, a process bound to a context (the exec child, a script an agent
-    launched, an external attachment) uses its own media gating
-    (`attachment_transport.own_media_gated_members()`, computed on the spot) —
-    interactive `help()` in a text-only agent's child omits e.g. `ava.self.attach`
-    (user ruling 2026-08-28). With no context bound the default is no filtering,
-    and a framework caller with its own filter (the system prompt builders) passes
-    it explicitly.
-    """
+    With no targets, show the SDK overview. `compact_classes` shows class fields
+    without methods. `hidden_members` omits the named dotted SDK members; when
+    omitted, members unavailable to your model are hidden automatically."""
     import ava as _ava
     from ava.sdk_surface import process_context
 

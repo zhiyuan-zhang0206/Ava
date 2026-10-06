@@ -91,7 +91,7 @@ def memory_index_note(slices: AgentSlices) -> HumanMessage | None:
 _PER_AGENT_FRAMING = (
     "Your personal memory index. Where a compact summary records what happened "
     "in one conversation round, this persists across compactions and sessions.\n\n"
-    "Below is `memory/MEMORY.md` in your workspace — the only part injected. "
+    "Below is `memory/MEMORY.md` in your workspace, your index of entry files. "
     "Each memory is one file beside it holding one fact "
     "(`memory/<short-kebab-slug>.md`), with frontmatter:\n\n"
     "---\n"
@@ -104,8 +104,7 @@ _PER_AGENT_FRAMING = (
     "store='personal')`; it writes the entry and maintains the index. Keep the index one line per "
     "memory; never put entry content in it. Content your descendants should "
     "inherit: fence it inside an entry with `<!-- ava:inheritable -->` and "
-    "`<!-- /ava:inheritable -->` on their own lines — children read those "
-    "blocks when their context is established (depth: memory_inherit_depth). "
+    "`<!-- /ava:inheritable -->` on their own lines. "
     "Detailed task notes, logs, and "
     "artifacts stay in workspace files; facts other agents need go to the "
     "shared pool (ava.memory)."

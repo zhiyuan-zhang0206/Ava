@@ -188,21 +188,21 @@ def crashed_no_output_body(exc: BaseException, *, code_reached: bool | None) -> 
     read as "ran, produced no output").
 
     `code_reached` is the child's own flag: False = boot-phase crash (the code
-    was NOT executed), True = the code ran and printed nothing before the
-    crash, None = unknown (older child / parent-side construction failure).
+    was NOT executed), True = the user-code phase was entered (completion is not implied), None = unknown (older child / parent-side construction failure).
     The type and message name the failure so the agent can stop retrying
     something a retry cannot fix (e.g. a bootstrap fetch failure).
     """
     exc_type = getattr(exc, "exc_type", None) or type(exc).__name__
     exc_msg = getattr(exc, "exc_msg", None) or str(exc)
     if code_reached is False:
-        verdict = "the exec child crashed before running your code — the code was NOT executed"
+        verdict = "execution failed before running your code — the code was NOT executed"
     elif code_reached is True:
-        verdict = (
-            "your code executed and produced no output, then the exec crashed reporting the result"
-        )
+        verdict = "your code may have had effects, but no output was recovered; inspect state before retrying"
     else:
-        verdict = "the exec child crashed before producing any output — whether the code executed is unknown"
+        verdict = (
+            "no output was recovered — whether the code executed is unknown; "
+            "inspect the current state before retrying"
+        )
     return f"[exec crashed: {verdict}]\n{exc_type}: {exc_msg}".rstrip() + "\n"
 
 

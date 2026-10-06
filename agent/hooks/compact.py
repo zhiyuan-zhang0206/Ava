@@ -110,10 +110,11 @@ COMPACT_MAX_ATTEMPTS = 3
 # note rides the tail) and where the agent's durable state lives.
 _EMERGENCY_COMPACT_MARKER = (
     "[system] Emergency context trim: the conversation was removed because the "
-    "context window overflowed and the provider also rejected the compaction "
-    "call itself (the request no longer fits). Your personal memory "
-    "(memory/ + MEMORY.md) and workspace files are intact — read them to "
-    "reconstruct where you were. If a summary was preserved from an earlier "
+    "context window overflowed and no new summary could be created. "
+    "Your personal memory (memory/ + MEMORY.md) and workspace files are "
+    "intact — read them to reconstruct where you were. Use an archived-history "
+    "note, when provided, to recover conversation details. If a summary was "
+    "preserved from an earlier "
     "compaction it follows below."
 )
 

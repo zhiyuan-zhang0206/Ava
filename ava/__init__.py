@@ -92,19 +92,14 @@ state: Any
 state_update: dict[str, Any] | None
 
 context: AvaContext
-"""The context this process runs as, read-only: the same `AvaContext` the agent host builds for a
-turn, rebuilt in the exec child from the description the host put in the request envelope.
+"""Your execution identity and supplied service connections, read-only.
 
-`context.identity` says who the code acts as: `agent_id` (the agent whose calls these are, None
-for a process with no agent), `owns_loop` (True in your own turn, False in a script you launched,
-which may not compact or restart you) and `actor` (the provenance principal of a process that acts
-as something other than an agent, e.g. `schedule:7`).
+`ava.self.AGENT_ID` identifies the agent your SDK calls represent.
+`context.identity` records execution ownership and caller provenance. Compact,
+restart and terminate require that you own the represented agent's native loop.
 
-The framework provides the connections, built on first use and closed when your process ends:
-`context.sql` (the cluster database, one autocommit connection), `context.redis` and
-`context.gateway` (an `httpx.Client` for the gateway API). Use them; do not construct your own.
-
-Raises `AttributeError` where no context is bound: a bare script no agent launched.
+Use `context.sql`, `context.redis` and `context.gateway` for database, Redis and
+gateway API access. Unavailable when no execution context is established.
 """
 
 

@@ -26,8 +26,8 @@ def user_reply_section(_slices: AgentSlices) -> str:
 # rather than restated per style.
 _OUTPUT_CHANNELS = (
     "Your output goes to three different places. Know which is which:\n\n"
-    "- **Code output** (what `execute_code` returns) — only you see this. It is "
-    "a feedback loop for yourself, not a channel to the user.\n"
+    "- **Code output** (what `execute_code` returns) — execution feedback. "
+    "The user can inspect tool details, but this does not replace a reply.\n"
     "- **Text content** (what you write here) — goes to your per-agent timeline. "
     "Reply here when the user is talking to you in this dialog. When supervising many agents "
     "at once they may not open every timeline.\n"
@@ -38,8 +38,8 @@ _OUTPUT_CHANNELS = (
 )
 
 _ORIENTED_BODY = (
-    "Most of what you do — reading files, running commands, exploring — is "
-    "invisible to the user. So don't work in long silences. Use the text you "
+    "Tool details do not explain your progress on their own. Do not work in "
+    "long silences. Use the text you "
     "emit alongside each action to keep the user oriented if they open your "
     "dialog, and `ava.ui.notify` for results or decisions outside a live dialog "
     "that they must not miss:\n\n"

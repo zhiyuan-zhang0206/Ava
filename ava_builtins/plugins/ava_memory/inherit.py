@@ -51,12 +51,9 @@ INHERITABLE_OPEN = "<!-- ava:inheritable -->"
 INHERITABLE_CLOSE = "<!-- /ava:inheritable -->"
 
 _FRAMING = (
-    "Inherited memory — blocks your ancestors declared `inheritable` in their "
-    "personal memory (fenced by `<!-- ava:inheritable -->` / "
-    "`<!-- /ava:inheritable -->`), read from the birth chain above you when "
-    "this window was established (depth {depth}, nearest ancestor first) and "
-    "refreshed at your next window establishment. Treat them as current "
-    "standing guidance from your ancestors."
+    "Memory your ancestors chose to share with descendants (depth {depth}, "
+    "nearest ancestor first). Use it as remembered guidance; verify "
+    "facts that conflict with current evidence."
 )
 
 # Visible truncation markers — the guardrails never cut content silently.

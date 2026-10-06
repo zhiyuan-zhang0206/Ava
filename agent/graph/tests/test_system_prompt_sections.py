@@ -215,9 +215,8 @@ def test_codeact_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect
 
 def test_codeact_section_urges_batching(monkeypatch: pytest.MonkeyPatch):
     """When it renders, the section pushes the batching behavior by name:
-    several operations per call, batch file reads, branches folded into one
-    script, and the cost model (one call = one API round-trip) that justifies
-    it."""
+    known operations together, branches folded into one script, and the
+    intermediate review, approval and evidence boundaries that require a split."""
     monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", True)
 
     from agent.graph.prompt._codeact import _codeact_section
@@ -225,10 +224,11 @@ def test_codeact_section_urges_batching(monkeypatch: pytest.MonkeyPatch):
     rendered = _codeact_section(AgentSlices.resolve())
 
     assert "execute_code" in rendered
-    assert "one LLM API round-trip" in rendered
-    assert "several files in one call" in rendered
+    assert "Read independent files together" in rendered
+    assert "inspect an intermediate result" in rendered
     assert "if-else" in rendered
-    assert "round-trips" in rendered
+    assert "need approval" in rendered
+    assert "partial effects" in rendered
 
 
 def test_codeact_section_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch):
@@ -332,7 +332,7 @@ def test_oriented_style_keeps_the_user_oriented(monkeypatch: pytest.MonkeyPatch)
     rendered = _communication_style_section(AgentSlices.resolve())
 
     assert rendered.startswith("# Keeping the user oriented")
-    assert "don't work in long silences" in rendered
+    assert "Do not work in long silences" in rendered
 
 
 def test_silent_style_asks_for_no_narration_and_a_closing_report(

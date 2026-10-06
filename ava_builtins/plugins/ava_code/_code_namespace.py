@@ -21,8 +21,8 @@ def get() -> Path:
 def set(path: str | Path) -> None:
     """Persistent across turns and restarts.
 
-    AvaCode SDK wrappers resolve relative paths against this value. The
-    Python process working directory is unchanged.
+    Relative paths in Ava file and shell operations resolve against this
+    directory. Python's process working directory is unchanged.
 
     Args:
         path: relative paths resolve against the current logical directory;
