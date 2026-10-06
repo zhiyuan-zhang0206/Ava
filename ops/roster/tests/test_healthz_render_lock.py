@@ -27,7 +27,6 @@ from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from ops import roster
-from ops.roster import _bind_owned_probe
 from ops.roster.healthz import healthz_url
 from ops.roster.service_spec import DbAccess, ServiceSpec, api_access, db_access, profile_marker
 from services.supervision.ava_root_glue import manifests as gen
@@ -152,8 +151,8 @@ def test_the_migrated_sessions_are_exactly_the_standard_daemons() -> None:
 @pytest.mark.parametrize("row", _LEGACY, ids=lambda r: r.session)
 def test_the_rendered_unit_is_unchanged(row: _Legacy) -> None:
     live = _live()[row.session]
-    # The legacy side goes through the same root-ownership binding the roster applies.
-    old = _bind_owned_probe(_legacy_spec(row))
+    # Both sides use their declared protocol probe without an ownership wrapper.
+    old = _legacy_spec(row)
     old_units = gen.build_units([old], capabilities=row.capabilities, repo_root=_REPO)
     new_units = gen.build_units([live], capabilities=row.capabilities, repo_root=_REPO)
 
@@ -163,7 +162,7 @@ def test_the_rendered_unit_is_unchanged(row: _Legacy) -> None:
 @pytest.mark.parametrize("row", _LEGACY, ids=lambda r: r.session)
 def test_everything_the_launcher_derives_is_unchanged(row: _Legacy) -> None:
     live = _live()[row.session]
-    old = _bind_owned_probe(_legacy_spec(row))
+    old = _legacy_spec(row)
 
     assert (live.session, live.cmd, live.capabilities, live.requires_db) == (
         old.session,
