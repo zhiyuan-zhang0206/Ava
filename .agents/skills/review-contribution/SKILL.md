@@ -13,6 +13,10 @@ Use [docs/contributing.md](../../../docs/contributing.md) for the contribution p
    Trace changed values, state transitions and boundary contracts through their
    real consumers with `scripts/audit/where_used.py`. Check behavior against the
    domain owner, including unknown, missing and failure-path inputs.
+   For statuses, outcomes, policies or modes, follow
+   [finite-domain vocabulary](../../../docs/conventions/python-conventions.md#finite-domain-vocabulary):
+   inspect canonical members, raw-input conversion, consumer coverage and stored
+   or wire compatibility. Check the relevant domain decisions for its rationale.
 2. Consult [Python conventions](../../../docs/conventions/python-conventions.md)
    and [import layering](../../../docs/conventions/import-layering.md) for the
    changed code's layer, ownership and structure. Do not invent a parallel set of
