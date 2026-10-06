@@ -39,12 +39,10 @@ class AgentPromptSettings(EnvSettings):
     )
 
     sdk_expand_in_system_prompt: Annotated[list[str], NoDecode] = Field(
-        # `*` expands every top-level public namespace, discovered from the live
-        # `help(ava)` surface and sorted — so a newly added namespace is covered
-        # without editing this default. A plugin namespace (e.g. ava_code's cwd)
-        # still promotes its own paths via a declared `SdkNamespace(expand=True)` / `sdk_expansions`, which
-        # render ahead of this list (issue #1011).
-        default_factory=lambda: ["*"],
+        # Stable P95 module set from recorded production SDK calls. Rare APIs
+        # remain discoverable through ava.help; explicit `*` still expands all.
+        # Plugin-declared expansions (such as ava_code's cwd) are merged first.
+        default_factory=lambda: ["shell", "files", "agents", "tasks"],
         alias="AVA_SDK_EXPAND",
         description=(
             "Comma-separated SDK paths whose full contract (signatures + "
@@ -57,7 +55,9 @@ class AgentPromptSettings(EnvSettings):
             "and expanding them here would render a second full index; name one "
             "explicitly (`*,skills`) to override. Names in AVA_SDK_DISABLE are "
             "excluded; unresolved entries are skipped with a warning. Empty "
-            "expands nothing."
+            "expands nothing. Default shell,files,agents,tasks is the production "
+            "P95 module set; other contracts load on demand through ava.help. "
+            "Plugin-declared expansions still apply."
         ),
         json_schema_extra={
             "restart_required": "agent",
