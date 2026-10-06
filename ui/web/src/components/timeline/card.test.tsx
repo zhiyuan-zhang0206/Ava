@@ -584,7 +584,7 @@ describe("CardHeader", () => {
     expect(container.textContent).toContain("2 lines");
   });
 
-  it("code_output with error → shows error prefix", () => {
+  it("code_output with error text → same chip as any other output", () => {
     const oItem = item("code_output", {
       payload: "ValueError: something went wrong",
     });
@@ -592,7 +592,9 @@ describe("CardHeader", () => {
     const { container } = renderWithQuery(
       <CardHeader item={oItem} config={cfg} expanded={false} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("Error");
+    expect(container.textContent).not.toContain("Error");
+    expect(container.querySelector(".text-destructive")).toBeNull();
+    expect(container.textContent).toContain("1 line");
   });
 
   it("code_output live execution (execStartedAt, no exec_ms)", () => {
