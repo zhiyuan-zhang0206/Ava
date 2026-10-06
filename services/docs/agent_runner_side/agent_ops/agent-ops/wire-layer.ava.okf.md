@@ -32,3 +32,10 @@ The shared envelope lives in `base/api_contracts/op_envelope.py`; per-operation
 models live below gateway in `ops`. Supported non-idempotent deliveries retain
 one bounded database dedupe outcome per key; removed updater operations have no
 special duration or concurrency policy.
+
+`OpStatus` in `ops/rpc_schemas/__init__.py` owns `completed` / `failed`,
+independent of each operation's business result. Dispatch and closure-notice
+receipts store those same strings; an idempotency replay converts its recorded
+status before returning it. NULL still means the original owner has not
+completed; an unknown stored terminal status is an error, never replayed as
+success. The RPC client validates the response envelope before interpreting it.

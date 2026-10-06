@@ -19,11 +19,16 @@ forwarding helpers. The billing batch-recovery entry is `POST /api/agents/resurr
 (a read-only preview unless the body sets `execute`; orchestration in
 `ops/lifecycle/billing_recovery.py`, per-agent dispatch via the versioned
 `resurrect-billing-v1` home action). `ops/rpc_schemas/billing_recovery.py` owns
-the distinct `BillingRecoveryHomeResult` and `BillingRecoveryOutcome` enums;
+the distinct `BillingRecoveryHomeResult` and per-agent `BillingRecoveryOutcome` enums,
+plus run-level `BillingRecoveryMode` (`dry_run` / `execute`) and
+`BillingRecoveryRunOutcome` (`preview` / `executed` / `refused`);
 lifecycle dispatch translates home verdicts into batch outcomes. Raw RPC values
 are validated by the response models, and JSON wire strings stay unchanged.
 
-`/api/cancel` cancels a running turn. `/api/models` exposes available models,
+`/api/cancel` cancels a running turn. Its acceptance response uses the distinct
+`CancelResult` in `base/agents/contract.py`; cancellation is not process
+termination. The CLI validates raw cancel and billing run values before
+reporting results or choosing a successful exit. `/api/models` exposes available models,
 and `/api/agents/{id}/exited` finalizes an agent exit.
 
 ## Spawn boundary: presets and the fork config rule

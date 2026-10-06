@@ -74,6 +74,7 @@ from ops.rpc_schemas import (
     LaunchAgentRequest,
     LifecyclePayload,
     OpEnvelope,
+    OpStatus,
     is_op_kind,
 )
 from services.agent_runner.agent_ops import health, outbox_flusher
@@ -187,7 +188,7 @@ def _op_thread_pool() -> ThreadPoolExecutor:
     return _op_executor
 
 
-async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
+async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[str, object]]:
     """`_dispatch_sync` on this daemon's own pool (see `_op_executor`).
 
     An arm must not read contextvars: `run_in_executor` does not propagate context,
@@ -208,7 +209,7 @@ async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
             _active_ops.pop(kind)
 
 
-def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
+def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[str, object]]:
     """The blocking op arms, bound to this daemon's shared pool.
 
     The arms live in `services.agent_runner.agent_ops.dispatch_sync` (split at the file-size
@@ -218,7 +219,7 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
     return dispatch_sync(kind, payload, pool=_db_pool, db=_ops_handles()[0])
 
 
-async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
+async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
     `kind` ranges over `ops.rpc_schemas.OpKind` (the canonical op vocabulary);
@@ -244,10 +245,12 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
     plain 'failed' result.
     """
     if not is_op_kind(kind):
-        return "failed", {"error": f"unknown kind: {kind!r}"}
+        return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
     pool = _db_pool
     if pool is None:
-        return "failed", {"error": "_db_pool not initialized; _main must run before _dispatch"}
+        return OpStatus.FAILED, {
+            "error": "_db_pool not initialized; _main must run before _dispatch"
+        }
 
     try:
         match kind:
@@ -259,7 +262,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
                 # `exclude_none`: the settlement receipt is present only when a
                 # withdrawn model was rewritten (task #4306) — the common wire
                 # shape stays {"id": ...}.
-                return "completed", spawned.model_dump(mode="json", exclude_none=True)
+                return OpStatus.COMPLETED, spawned.model_dump(mode="json", exclude_none=True)
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
                 db, bus = _ops_handles()
@@ -272,14 +275,14 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
                     trigger_inbound_id=lc.trigger_inbound_id,
                     trigger_inbound_kind=lc.trigger_inbound_kind,
                 )
-                return "completed", resp.model_dump(mode="json")
+                return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
                 return await _run_arm(kind, payload)
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
         # gateway's `_raise_proxied_wire_error_from_payload` can
         # reconstruct the same AvaAgentError subclass (`EXCEPTION_BY_REASON[reason]`).
-        return "failed", {
+        return OpStatus.FAILED, {
             "error": f"{type(exc).__name__}: {exc}",
             "detail": str(exc),
             "reason": exc.reason.value,
@@ -287,19 +290,19 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
     except (ValidationError, ValueError) as exc:
         # ValidationError: a payload that failed its per-kind model_validate.
         # ValueError: lifecycle.lifecycle_op raises it for an unparseable path.
-        return "failed", {"error": f"{type(exc).__name__}: {exc}"}
+        return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
     except (ShellNotFoundError, ResurrectRefused) as exc:
         # A capture for a shell session that no longer exists (capture_shell's
         # business miss) is a normal 'failed' result the gateway turns into its
         # 404; a resurrection refusal is a durable row verdict the caller
         # reports by reason. Neither is a dispatch crash for _ops_route's
         # catch-all to log.
-        return "failed", {"error": f"{type(exc).__name__}: {exc}"}
+        return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
 
 
 async def _dispatch_idempotent(
     kind: str, payload: dict[str, Any], key: str, pool: ConnectionPool | None
-) -> tuple[str, dict[str, object]]:
+) -> tuple[OpStatus, dict[str, object]]:
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
 
@@ -311,9 +314,9 @@ async def _dispatch_idempotent(
     Any other exception propagates unchanged.
     """
     if not is_op_kind(kind):
-        return "failed", {"error": f"unknown kind: {kind!r}"}
+        return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
     if pool is None:
-        return "failed", {
+        return OpStatus.FAILED, {
             "error": "_db_pool not initialized; _main must run before _dispatch_idempotent"
         }
     for attempt in range(_DISPATCH_RETRY_ATTEMPTS):
@@ -333,7 +336,7 @@ async def _dispatch_idempotent(
 
 async def _dispatch_idempotent_pass(
     kind: str, payload: dict[str, Any], key: str, pool: ConnectionPool
-) -> tuple[str, dict[str, object]]:
+) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op, deduplicated by `key` — the retry-safe path for
     non-idempotent ops (spawn / lifecycle).
 
@@ -371,6 +374,7 @@ async def _dispatch_idempotent_pass(
     if owned:
         try:
             status, result = await _dispatch(kind, payload)
+            status = OpStatus(status)
         except Exception:
             # No outcome was stored — a future same-key dispatch must be able to
             # re-execute rather than replay a half-done op or wait forever.
@@ -395,9 +399,9 @@ async def _dispatch_idempotent_pass(
             row = cur.fetchone()
         if row is not None and row[0] is not None:
             result: dict[str, object] = row[1] or {}
-            return row[0], result
+            return OpStatus(row[0]), result
         await _sleep(_DEDUP_WAIT_STEP_S)
-    return "failed", {
+    return OpStatus.FAILED, {
         "error": f"idempotency key {key!r} is owned by another dispatch that never "
         "completed (concurrent duplicate dispatch of one logical op?)"
     }
@@ -430,7 +434,7 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
         return (
             200,
             json.dumps(
-                {"status": "failed", "result": {"error": f"unknown kind: {envelope.kind!r}"}}
+                {"status": OpStatus.FAILED, "result": {"error": f"unknown kind: {envelope.kind!r}"}}
             ).encode(),
             "application/json",
         )
@@ -449,7 +453,8 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
                     status, result = await _dispatch(envelope.kind, envelope.payload)
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
-            status, result = "failed", {"error": f"{type(exc).__name__}: {exc}"}
+            status, result = OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
+    status = OpStatus(status)
     # default=str is a last-resort fallback: op results should already be
     # JSON-native (Pydantic returns go through model_dump(mode="json")), but a
     # stray non-JSON value (datetime, Path, ...) in a hand-built dict must
