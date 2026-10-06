@@ -1,33 +1,60 @@
 ---
 name: ava-goal
-description: Supervises another agent across turns until a terminal goal is achieved. Use when driving a worker to completion, evaluating each idle point, or babysitting a finite task; do not use for perpetual trigger-driven roles.
+description: Sustains pursuit of a terminal goal across turns with evidence-based completion checks. Use when work must continue beyond a first attempt or turn, whether executing directly, collaborating with peers, or supervising delegated work; not for perpetual trigger-driven roles.
 ---
 
 # Goal Mode
 
-Pursue a goal that spans many turns of another agent. You are the watcher: you
-launch a background watcher on a target agent, and each time the target finishes
-a turn and goes idle you wake up, judge its latest work against the goal, and
-either tell it it is done or tell it exactly what is still missing.
+Pursue a terminal outcome across turns. A finished turn, a plausible artifact,
+or a peer's completion report does not establish that the goal is met. Keep
+working while continuation is authorized, until acceptance evidence supports
+completion or you deliberately pause with a handoff.
 
-This is a procedure you follow, not a function you call. It is built entirely
-from existing capabilities -- `ava.agents.spawn` / `ava.agents.send_message` and
-`ava.watcher.launch`. There is no special framework support and nothing to
-install.
+Reading this skill does not assign you a watcher or worker role. Choose the
+arrangement that serves the goal: execute directly, delegate to peers, review
+another peer's work, or combine implementation and supervision. Change that
+arrangement when useful. Watcher and worker describe responsibilities in one
+arrangement; they are ordinary peers, not special agent types.
 
-Goal mode is for terminal work — tasks that finish. Idle prompts a review; it
-does not itself authorize more work. Continue only while the work remains
-authorized and the worker has not deliberately paused. Do **not** put a perpetual,
-trigger-driven agent in goal mode (an inbox poller, a daily disk check): its idle
-means "finished this round correctly, waiting for the next trigger," so nudging it
-is pure harassment. Persistent recurring work belongs in `ava-guide.schedules`;
-temporary waits use `ava.watcher`. To quality-check one such round, spawn a separate quality-check supervisor that judges *this round's* output
-— not a completion driver that says "keep going."
+The watcher/worker loop below is **one available way** to sustain progress. Use
+it when supervising another peer is useful; do not spawn a worker or launch an
+idle watcher merely because you read this skill. If you execute directly,
+apply the same acceptance and continuity disciplines to your own work. A peer
+can independently review your results without owning all implementation.
 
-## Procedure
+This is a working method, not a special function or framework. The optional
+supervision example composes existing messaging and background-wait capabilities.
 
-1. **Get a goal and a target agent.** The user usually gives you both. If there
-   is no target yet, spawn a worker to pursue the goal:
+## Completion and continuity
+
+- Keep a definition-of-done checklist derived from the goal. Verify artifacts
+  through appropriate checks, code inspection, or UI use. Reports guide what to
+  inspect; they are not acceptance evidence. Name remaining defects with a
+  concrete reproduction or other actionable evidence. Claim completion only
+  when every required item verifiably passes.
+- Keep progress and evidence in durable notes. Re-read the goal, latest progress,
+  and handoff after context loss or restart; preserve completed work and peer IDs.
+- A budget reminder calls for reassessment, not automatic termination. If you
+  pause, save artifacts and record the incomplete goal, verified checks, remaining
+  work, relevant peer and watcher session IDs, and the condition for resuming.
+  Tell collaborating peers where to read the handoff. Do not continue or re-arm
+  supervision while deliberately paused; late notices do not authorize resuming.
+
+Use this method for work that can finish. Idle is a review point, not proof of
+failure or permission to keep pushing. Respect deliberate pauses. Perpetual,
+trigger-driven roles (such as inbox polling or daily checks) belong in
+`ava-guide.schedules`; temporary waits use `ava.watcher`. Review one round of
+recurring work against that round's outcome without turning it into a perpetual
+completion loop.
+
+## Optional pattern: supervise a peer
+
+In this example, you take the supervising role and another peer executes the
+work. Reverse, share, or combine those responsibilities as needed. The steps
+below apply only when you choose this pattern.
+
+1. **Choose a target peer for the goal.** Use an existing peer when appropriate.
+   If delegation is useful and no suitable target exists, spawn a peer:
 
    ```python
    target_id = ava.agents.spawn(prompt="<the goal, stated as a concrete task>")
@@ -50,8 +77,9 @@ temporary waits use `ava.watcher`. To quality-check one such round, spawn a sepa
    a safety bound: if the target somehow never idles within it, the watcher stops
    and pings you anyway, so you are never left waiting forever — re-arm if needed.
 
-3. **Idle and wait.** Do not return a tool call this turn. The watcher's
-   reminder will wake you when the target idles.
+3. **Wait or pursue other useful work.** The watcher's reminder will wake you
+   when the target idles. If there is nothing else to do, return idle; supervising
+   a peer does not prevent you from contributing implementation or other checks.
 
 4. **On the reminder, check authority and the latest handoff before evaluating.**
    A budget reminder is a reason to reassess, not a termination command. If you
@@ -78,12 +106,12 @@ temporary waits use `ava.watcher`. To quality-check one such round, spawn a sepa
      ava.agents.send_message(
          target_id,
          "Goal complete: <what was verified, one line each>. "
-         "Deliver and end your own process.",
+         "Deliver the result and record completion.",
      )
      ```
-     The target's last step is its own: it delivers, then terminates itself.
-     If it lingers idle afterwards, `ava.agents.terminate(target_id)` is your
-     fallback — but the normal path is the target ending itself.
+     Completion ends this goal loop. The peer decides its next lifecycle step
+     under the applicable instructions; meeting a goal does not require killing
+     a persistent peer or preventing it from serving other work.
    - **Not yet** -> send a numbered defect list, each tagged with a category
      and its evidence, then re-arm a fresh watcher (the previous one already
      exited) to wait for the next idle:
@@ -115,14 +143,15 @@ temporary waits use `ava.watcher`. To quality-check one such round, spawn a sepa
 
 ## Long tasks
 
-Goals that span many hours need two extra disciplines, both cheap:
+Keep durable progress whether you work directly or delegate. For the supervision
+pattern, these responsibilities are useful:
 
 - **Worker keeps a progress file** in its OWN workspace (never the artifact
   repo), updated at the end of every round: `DONE` (files/features finished),
   `MISSING` (numbered against the goal), `CHECKS` (latest command results),
   and any pause decision with its resume condition. A
   compacted worker re-reads this file and its goal message to re-anchor — the
-  run survives context loss. Require it in the goal's process rules.
+  run survives context loss. When executing directly, keep the same notes yourself.
 - **Supervisor re-anchors on regression**: if the worker repeats finished work,
   asks for context, or reports items as done that its progress file lists as
   done already, its context was likely compacted — re-send the goal message and
@@ -145,8 +174,8 @@ when the watcher starts.
 
 ## Topology
 
-Supervision is per (watcher, target), so the shapes compose with no extra
-machinery: launch one watcher per target to watch many at once, or have several
-watcher agents each watch the same target (e.g. specialist reviewers, each
-judging a different aspect). Most goals need just one watcher on one target --
-do not over-build.
+When using supervision, each idle watcher observes one target, so the shapes
+compose with no extra machinery: launch one watcher per target to watch many
+at once, or have several peers each watch the same target (e.g. specialist
+reviewers, each judging a different aspect). Choose only the coordination the goal needs;
+one agent working directly may be sufficient. No topology is required.

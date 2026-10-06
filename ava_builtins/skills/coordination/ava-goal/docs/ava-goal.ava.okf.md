@@ -1,21 +1,36 @@
 ---
 type: doc
-title: ava-goal skill — Supervise another agent to achieve a goal
-description: Supervise another agent across multiple rounds to achieve a goal — you are the watcher; each time the target becomes idle, you wake up, judge its latest work against the goal, and either tell it "done" or tell it "what's still missing". It is a process, not a function; built purely with existing capabilities. Only for final-state tasks that end; do not use for persistent trigger-based agents.
+title: ava-goal skill — Sustain pursuit of a terminal goal
+description: Evidence-based completion and continuity across turns, with freely chosen peer coordination. Direct execution, delegation, and mixed collaboration are available; watcher/worker supervision is an optional pattern, not an assigned topology.
 tags:
 - extensions
 - agent-instruction
 ---
 
-# ava-goal skill — Supervise another agent to achieve a goal
+# ava-goal skill — Sustain pursuit of a terminal goal
 
 ## What it is
-Track a goal across many rounds of another agent (`$AVA_HOME/skills/ava-goal/`). You are the watcher: launch a background watcher on a target agent; each time the target finishes a round and becomes idle, you wake up, judge its latest work against the goal, and either tell it done or tell it precisely what is still missing. When the goal is met, the target delivers and ends its own process — its last step is its own; terminating it is the watcher's fallback if it lingers idle. **It is a process you follow, not a function you call** — built entirely with existing capabilities (`ava.agents.spawn`/`send_message` + `ava.watcher.launch`), no special framework support, nothing to install.
+The `ava-goal` skill guides sustained work toward a terminal outcome. Reading it
+does not assign the agent a watcher or worker role. An agent can execute directly,
+delegate, review peers, or combine these responsibilities using existing
+capabilities; no special framework support is required.
 
-## Boundaries (key design trade-offs)
-Goal mode is only for **final-state tasks** (tasks that end) — here, idle means "stopped too early", so the strategy is to push it to continue. **Do not** put persistent trigger-based agents (inbox poller, daily disk check) into goal mode: their idle means "this round is done, waiting for the next trigger", pushing them is pure harassment. Persistent work is the watcher's responsibility. To quality-check one round, spawn a separate quality-check supervisor to judge **that round's** output, not a "keep going" completion driver.
+The skill owns the working procedure: acceptance evidence determines completion,
+progress notes preserve continuity, and deliberate pauses carry a handoff and a
+resume condition. Its optional supervision example uses messaging and a one-shot
+idle watcher to review another peer's progress. The bundled `scripts/watch_idle.py`
+implements that temporary wait; it is not required for direct execution.
+
+## Boundaries
+Use this method for work that can finish. Idle requests a review; it does not
+prove failure or authorize continuation after a deliberate pause. Budget reminders
+call for reassessment and preservation of results, not automatic termination.
+Completion of a goal does not require termination of a persistent peer.
+
+Perpetual trigger-driven roles belong in Ava Guide schedules. Review a single
+round against that round's outcome without repeatedly pushing a correctly idle
+recurring agent to continue.
 
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava/docs/watcher.ava.okf.md|ava.watcher]] — primitive to subscribe to target lifecycle and wake you up on idle
-- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — temporary event waits; durable recurring tasks use Ava Guide schedules
+- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — temporary waits used by the optional supervision pattern
