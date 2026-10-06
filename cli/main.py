@@ -4,19 +4,16 @@ Registered in `pyproject.toml [project.scripts] ava = "cli.main:main"`; after
 `uv sync`, `.venv/bin/ava` is callable. Ops layer only, decoupled from the
 `ava.*` SDK — agent should not see cron / infra plumbing.
 
-The argparse tree is built by `cli.parsers.build_parser` — one module per
-command domain in `cli/parsers/` holding that domain's subcommand builders and
-their `_h_*` handlers. A builder binds its own module's handler directly
-(`set_defaults(func=_h_x)`, referring to the function defined earlier in that
-same module) — no registry, no re-export. Dispatch is a single
-`args.func(args)` call. A test that fakes a handler patches the parser module
-that defines it (`monkeypatch.setattr(cli.parsers.<domain>, "_h_x", ...)`)
-*before* `build_parser()` runs: the builder reads the module global by name at
-build time, so a patch applied after the tree is built never takes effect.
-Importing `cli.commands` is deferred to the handler bodies — that import
-triggers `Settings()` instantiation, which can ValidationError on a fresh host
-with no ~/.ava/.env. main() catches that and prints a copy-paste env template
-instead of a raw traceback.
+The argparse tree is composed by `cli.parsers.build_parser`. Settings-free
+parser modules own both builders and `_h_*` adapters: agents/notices live
+beside their implementations in `cli.commands.agents.parsers`, while the
+other domains remain under `cli.parsers`. Each builder binds its own handler
+with `set_defaults(func=_h_x)`; dispatch is one `args.func(args)` call. Tests
+patch the owning parser module before building the tree, so its binding reads
+the patched module global. No command registry or re-export is involved.
+Runtime command modules are imported only inside handler bodies. Their
+Settings construction can fail on an unconfigured home; main() reports that
+failure with an environment template instead of a raw traceback.
 """
 
 from __future__ import annotations
@@ -35,10 +32,8 @@ from base.native_process.os_platform import (
     ensure_line_buffered_stdio,
 )
 
-# The parser tree and every `_h_*` handler live in cli/parsers/ (settings-free — they
-# import cli.commands only inside handler bodies). Only the builder entry point is
-# imported here; dispatch after parsing is `args.func(args)`, resolved by the
-# `set_defaults(func=...)` bindings the builders made against their own module globals.
+# Only the settings-free parser composition entry is imported here. Domain
+# adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli.parsers import build_parser as _build_parser
 
 # The verbs that bring this unit up (every in-process `cmd_start`) open the

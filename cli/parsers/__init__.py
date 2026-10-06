@@ -1,7 +1,7 @@
 """`ava` CLI argparse surface — per-domain parser builders + their `_h_*` handlers.
 
 `cli.main` imports this package at module level (settings-free: nothing here
-imports ``cli.commands`` / ``base.config``, so ``ava --help`` builds the tree
+imports runtime command modules / ``base.config``, so ``ava --help`` builds the tree
 on a host with no .env) and calls :func:`build_parser` from ``main()``. Each
 builder binds its own module's handler directly (``set_defaults(func=_h_x)``);
 a test that fakes a handler patches the parser module that defines it, before
@@ -13,7 +13,7 @@ One module per domain:
 
 - ``host`` — init/start/stop/restart/status/converge/firewall/trace
 - ``cluster`` — the whole-cluster verbs
-- ``agents`` — agents + notices
+- ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
 - ``backup`` — scheduled backup operation custody
 - ``plugins`` — plugins + skill
 - ``mcp`` — mcp + memory initialization, refresh, and search
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import argparse
 
-from cli.parsers.agents import _add_agents_parser
+from cli.commands.agents.parsers import add_agents_parser
 from cli.parsers.backup import _add_backup_parser
 from cli.parsers.cluster import _add_cluster_parser
 from cli.parsers.computer import _add_computer_parser
@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_trace_parser(sub)
     _add_logs_parser(sub)
     _add_backup_parser(sub)
-    _add_agents_parser(sub)
+    add_agents_parser(sub)
     _add_impersonation_parser(sub)
     _add_config_parser(sub)
     _add_presets_parser(sub)

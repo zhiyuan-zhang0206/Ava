@@ -82,8 +82,8 @@ dependencies = [
 
 [project.scripts]
 # `uv sync` installs `.venv/bin/ava` — cluster ops CLI (start/stop/status/update/...).
-# Implementation in `cli/main.py` (argparse entry) + `cli/parsers/` (per-domain builders
-# + handlers) + `cli/commands/` (cmd_* implementations). Decoupled from the `ava/`
+# Implementation in `cli/main.py` (argparse entry), settings-free domain builders
+# and adapters, and `cli/commands/` (cmd_* implementations). Decoupled from the `ava/`
 # SDK — the agent is unaware of docker / cron.
 ava = "cli.main:main"
 
