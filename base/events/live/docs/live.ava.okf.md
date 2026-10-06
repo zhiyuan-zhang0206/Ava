@@ -95,3 +95,13 @@ segments stay globally distinct.
 
 - [[agents-contract.ava.okf.md]] — the sibling agent ↔ gateway contract; lifecycle hints carry only `agent_id` and `role`, while authoritative state comes from roster/directory/detail reads.
 - [[gateway/events/docs/sse.ava.okf.md]] — the gateway leg that fans this channel out to browsers over SSE
+
+## Compaction vocabulary
+
+`CompactionMode` (`auto`, `request`) and `CompactionStatus` (`success`,
+`failure`, `replaced`) live beside the `CompactStarted`/`CompactFinished`
+projection models. Producer helpers and automatic/request claim paths use
+these separate owners. The event adapter converts existing wire strings to
+members and rejects unknown values; role discriminators and JSON spellings
+remain unchanged. These statuses describe a live run, not persisted agent
+lifecycle state.
