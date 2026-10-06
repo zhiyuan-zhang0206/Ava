@@ -16,6 +16,7 @@ import importlib
 import inspect
 from collections.abc import Iterator
 from datetime import UTC
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -94,11 +95,32 @@ def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     """The rendered prompt carries the reporting contract with the plugin."""
     prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
 
-    assert prompt.count("One reporter per milestone") == 1
-    assert "single reporter and action owner" in prompt
-    assert "do not ask another agent to relay the same result" in prompt
-    assert "new evidence, a blocker, or a changed result" in prompt
-    assert "that write can notify the task owner too" in prompt
+    assert prompt.count("one reporter per milestone") == 1
+    assert "directly to whoever must act" in prompt
+    assert "do not relay unchanged results" in prompt
+    assert "actionable updates" in prompt
+    assert "duplicate task-log writes" in prompt
+
+
+def test_enabled_fleet_preserves_workflow_choice(_load_activity_plugin: None):
+    """Installing Fleet exposes capabilities without imposing a work strategy."""
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    assert "Workflow selection belongs to `ava-workflow`" in prompt
+    assert (
+        "enabling Fleet does not require delegation, a registry task, or a management tree"
+        in prompt
+    )
+    assert "Before using Fleet coordination or task tracking" in prompt
+    assert "accepted assignments determine reporting" in prompt
+    assert "With no delegator, deliver directly" in prompt
+    for instruction in (
+        "Doing everything yourself is the fallback",
+        "spawn one agent per part",
+        "delegation is the expected pattern",
+        "When the task registry is available and a noticed signal",
+        "Progress and conclusions go to your manager",
+    ):
+        assert instruction not in prompt
 
 
 def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
@@ -109,7 +131,8 @@ def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
     prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
     assert "# Efficient long-running operation" not in section
     assert prompt.count("# Efficient long-running operation") == 1
-    assert "do not plan to terminate it yourself" in section
+    assert "do not plan to terminate it yourself" not in section
+    assert "operating contract" in section
 
 
 def test_peer_communication_survives_human_guidance_toggle(
@@ -123,9 +146,9 @@ def test_peer_communication_survives_human_guidance_toggle(
     prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
     assert prompt.count("## Agent-to-agent communication") == 1
     assert "## Reduce context switch for the human" not in prompt
-    assert "Protocol receipt ACKs remain required" in prompt
-    assert "periodic checking does not imply periodic broadcasting" in prompt
-    assert "Receiving a message does not require a conversational reply" in prompt
+    assert "protocol receipt ACKs still apply" in prompt
+    assert "Periodic checking does not imply periodic broadcasting" in prompt
+    assert "without courtesy ACKs" in prompt
 
 
 def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin: None):
@@ -135,28 +158,21 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin:
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section(AgentSlices.resolve())
-    assert "dismiss that notice yourself" in section
-    assert "already replied in the dialog" in section
+    assert "Dismiss a pending notice" in section
+    assert "when the dialog resolves it" in section
     assert "dismiss_notice" not in section
 
 
 def test_prompt_section_queue_delivery_mandate(_load_activity_plugin: None):
-    """The Fleet section must make queue delivery mandatory: what the user
-    must decide (or should know) is delivered through the queue — never left
-    in chat for the user to discover later — and it is queued even when the
-    user cannot be reached (offline, or not in this dialog); pending decision
-    points merge into one numbered notice so a single reply settles them;
-    posting is delivery, no staging for a later moment. Phrased semantically
-    and self-contained — no skill names, no call names beyond the channel the
-    section already names."""
+    """Keep asynchronous delivery and resolved-notice semantics resident."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section(AgentSlices.resolve())
-    assert "Queue delivery is mandatory" in section
-    assert "never left in the chat" in section
+    assert "queue necessary decisions and results" in section
+    assert "even while they are offline" in section
     assert "offline" in section
-    assert "numbered notice" in section
-    assert "Posting IS delivery" in section
+    assert "numbered notice" not in section
+    assert "Posting is delivery" in section
     assert "reduce-context-switch" not in section
 
 
@@ -181,10 +197,7 @@ def test_prompt_section_reduce_context_switch_gating(
 def test_prompt_section_reduce_context_switch_content(
     _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
-    """The section carries the reduction discipline semantically: queue-never-push
-    with the emergency-only push exception, one notice per manager updated in
-    place, milestone cadence, and the decision/progress bisection (user ruling
-    2026-09-20)."""
+    """Keep interruption limits resident and route procedures to the skill."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         _reduce_context_switch_section,
     )
@@ -195,13 +208,13 @@ def test_prompt_section_reduce_context_switch_content(
 
     assert "Queue, never push" in section
     assert "irreversible risk in motion" in section
-    assert "everything else queues" in section
-    assert "One notice per manager, updated in place" in section
-    assert "never accumulates a manager's history" in section
-    assert "Milestones, not motion" in section
-    assert "never routine progress" in section
-    assert "A decision only the human can make" in section
-    assert "With no manager, deliver directly" in section
+    assert "lack of acknowledgment does not justify escalation" in section
+    assert "One notice per agent, updated in place" in section
+    assert "reporting cadence, aggregation" in section
+    assert "Milestones, not motion" not in section
+    assert "reduce-context-switch-for-human" in section
+    assert "explicit request to be woken" in section
+    assert "With no delegator, deliver directly" not in section
 
 
 def test_reduce_context_switch_reaches_the_prompt(
@@ -219,51 +232,48 @@ def test_reduce_context_switch_reaches_the_prompt(
     assert section not in build_system_prompt(fleet_registry(), slices)
 
 
-def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
-    """The fleet section turns a future signal into an owned, deduplicated
-    task without inventing registry routing behavior."""
-    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
+def test_fleet_operating_contract_is_loaded_on_demand(_load_activity_plugin: None):
+    """The prompt routes chosen capabilities to complete, preserved procedures."""
+    from ava_builtins.plugins.ava_fleet import agent_runtime
 
-    section = _fleet_self_section(AgentSlices.resolve())
-    assert "## Fleet task interaction" in section
-    assert "create directly with `ava.tasks.create`" in section
-    assert "do not add an ask-someone-first round" in section
-    assert "parent's active children" in section
-    assert "one business delivery to the current delegator" in section
-    assert "`created_by` is an audit trail, not a routing field" in section
-    assert "no automatic notification to the creator" in section
-    assert "reserve `ava.tasks.create_and_assign` for when the owner must be spawned" in section
-
-
-def test_prompt_section_task_conversion_is_domain_instance_only(
-    _load_activity_plugin: None,
-):
-    """The fleet section names task mechanics without repeating the framework's
-    cross-domain future-signal rule or platform-specific policy."""
-    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
-
-    section = _fleet_self_section(AgentSlices.resolve())
-    for phrase in (
-        "when in doubt, record it",
-        "act on it this turn",
-        "Choose the smallest action",
-        "costs every later agent",
+    section = agent_runtime._fleet_self_section(AgentSlices.resolve())
+    skill_directory = Path(agent_runtime.__file__).parent / "skills" / "ava-fleet"
+    skill = (skill_directory / "SKILL.md").read_text()
+    contract = (skill_directory / "reference" / "operating-contract.md").read_text()
+    assert "load `ava-fleet` and its applicable operating contract" in section
+    assert "reference/operating-contract.md" in skill
+    for obligation in (
+        "If you choose Fleet task tracking",
+        "parent's active children",
+        "one business delivery to the current delegator",
+        "`created_by` is an audit trail, not a routing field",
+        "no automatic notification to the creator",
+        "reserve `ava.tasks.create_and_assign` for when the owner must be spawned",
+        "do not plan to terminate it yourself",
+        "When you accept delegated work",
+        "One reporter per milestone",
+        "When the user approves your plan or tells you to start",
     ):
-        assert phrase not in section
-    assert not any(character.isdigit() for character in section)
-    assert "CI" not in section
-    assert "flake" not in section
+        assert obligation in contract
+        assert obligation not in section
+    assert "## Fleet task interaction" not in section
+    assert "ava.tasks.create" not in section
 
 
-def test_prompt_section_numeric_identifier_prefixes(_load_activity_plugin: None):
-    """Fleet references identify agents, tasks, and pull requests by kind."""
-    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
+def test_fleet_contract_preserves_numeric_identifier_prefixes():
+    """Identifier formatting belongs to the opt-in operating contract."""
+    from ava_builtins.plugins.ava_fleet import agent_runtime
 
-    section = _fleet_self_section(AgentSlices.resolve())
-
+    contract = (
+        Path(agent_runtime.__file__).parent
+        / "skills"
+        / "ava-fleet"
+        / "reference"
+        / "operating-contract.md"
+    ).read_text()
     for identifier in ("Ava #<id>", "task #<id>", "PR #<id>"):
-        assert identifier in section
-    assert "A bare number is ambiguous" in section
+        assert identifier in contract
+    assert "A bare number is ambiguous" in contract
 
 
 def test_task_conversion_absent_when_plugin_disabled():

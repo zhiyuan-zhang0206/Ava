@@ -8,15 +8,20 @@ description: Rolls delegated progress up the manager tree and reserves user inte
 Every push costs the human a context switch. When their attention is elsewhere, the default is silence: work lands in queues they drain on their own schedule.
 
 Since 2026-09-20 this discipline is a platform default: every agent's system
-prompt carries its core rules directly, gated by
+prompt carries its interruption boundary and notice replacement semantics, gated by
 `settings.agent.reduce_context_switch` (env `AVA_REDUCE_CONTEXT_SWITCH`,
-default on). Read this skill as the full playbook behind those rules.
+default on). Reporting cadence, aggregation, and delivery procedures live here
+and load on demand. Read this skill as the full playbook behind those rules.
 
 ## Default: queue, never push
 
 The human-facing channel is `ava.ui.notify` — a queue the user reads when they choose. It carries only what survives the roll-up below: a manager's aggregated results, or deliveries from an agent with no manager; a delegated agent's progress goes to its manager via `send_message`, not to the queue. Delivering to the queue IS delivering; do not escalate just because nothing was acknowledged.
 
 ## Cadence is a delegation contract
+
+These routing conventions apply to accepted delegated work. They do not require
+creating a manager role or a delegation tree; without a delegator, deliver to the
+user directly.
 
 One notice per manager — its single rolled-up view of the subtree, updated in place: a new `ava.ui.notify` supersedes the old one, so the queue never accumulates a manager's history.
 
