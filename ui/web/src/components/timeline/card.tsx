@@ -484,6 +484,7 @@ export const CardHeader = memo(function CardHeader({
       onFocus={preloadPythonCodeHighlighter}
       className={cn(
         HEADER_CLS,
+        "flex-wrap",
         sticky && stickyCls,
         sticky && (isStuck ? STUCK_HEADER_CLS : UNSTUCK_HEADER_CLS),
       )}
@@ -509,7 +510,7 @@ export const CardHeader = memo(function CardHeader({
           external takeover executor (user ruling 2026-09-16, task #3660). The
           item keeps its impersonation metadata for envelope semantics. */}
       {config.headerTs ? (
-        <span className="hidden sm:block shrink-0 pl-2">
+        <span className="max-w-full pl-2">
           <ItemTimestamp iso={item.created_at ?? ""} showWeekday={showWeekday} />
         </span>
       ) : null}

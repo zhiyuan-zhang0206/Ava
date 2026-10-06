@@ -24,6 +24,7 @@ vi.mock("@/components/python-code", () => ({ preloadPythonCodeHighlighter }));
 
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
 import { resolveTimelineColors } from "@/lib/timeline-colors";
+import { formatItemTime } from "./timestamp";
 import type { BackendTimelineItem } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -294,6 +295,35 @@ describe("MessageCard", () => {
 // ---------------------------------------------------------------------------
 
 describe("CardHeader", () => {
+  it("keeps an event timestamp available in narrow headers", () => {
+    const event = item("system_marker", {
+      source: "impersonation",
+      created_at: "2026-10-06T13:39:25+00:00",
+    });
+    const { getByText, getByTestId } = renderWithQuery(
+      <CardHeader item={event} config={messageCardConfig(event)!} expanded={false} onToggle={noop} />,
+    );
+    const timestamp = getByText(formatItemTime(event.created_at!, true));
+    // happy-dom does not evaluate responsive Tailwind CSS. Guard the hiding
+    // class responsible for the real narrow-panel regression explicitly.
+    expect(timestamp.parentElement?.classList.contains("hidden")).toBe(false);
+    expect(timestamp.parentElement?.classList.contains("sm:block")).toBe(false);
+    expect(getByTestId("card-toggle").classList.contains("flex-wrap")).toBe(true);
+  });
+
+  it("does not add timestamps to standing notes or undated historical notes", () => {
+    const standing = item("system_marker", { source: "agent_id", show_timestamp: false });
+    const undated = item("system_marker", { source: "impersonation", created_at: null });
+    const { container } = renderWithQuery(
+      <>
+        <CardHeader item={standing} config={messageCardConfig(standing)!} expanded={false} onToggle={noop} />
+        <CardHeader item={undated} config={messageCardConfig(undated)!} expanded={false} onToggle={noop} />
+      </>,
+    );
+    expect(container.textContent).not.toContain(formatItemTime(standing.created_at!, true));
+    expect(container.querySelectorAll(".tabular-nums")).toHaveLength(0);
+  });
+
   const baseItem = item("agent_chat", { payload: "test" });
 
   it("renders title and chevron for a non-rich config", () => {
