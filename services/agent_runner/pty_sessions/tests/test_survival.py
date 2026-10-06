@@ -163,6 +163,7 @@ def test_stopping_the_service_closes_its_sessions_and_removes_the_socket(
     """SIGTERM is the roster stop: the service closes what is still alive (a job that
     ignores HUP and TERM is SIGKILLed) and exits clean, leaving no socket."""
     shell = jobs.start("ava-agent-987-shell-3-stop", unit_home, jobs.STUBBORN)
+    output_until("ava-agent-987-shell-3-stop", "stubborn-ready")
     (job,) = jobs.live_children(shell)
 
     pty_service.signal(signal.SIGTERM)
@@ -183,12 +184,13 @@ def test_a_crashed_service_leaves_nothing_the_next_start_cannot_sweep(
     it; what survives is a job that ignores the hangup under a dead shell, and a shell that
     ignores it too. The ledger names both, so the next start closes them before it serves."""
     jobs_shell = jobs.start("ava-agent-987-shell-4-orphan", unit_home, jobs.STUBBORN)
+    output_until("ava-agent-987-shell-4-orphan", "stubborn-ready")
     (orphan_job,) = jobs.live_children(jobs_shell)
     script = unit_home / "deaf.job.py"
     script.write_text(jobs.STUBBORN, encoding="utf-8")
     new("ava-agent-987-shell-5-deaf", unit_home, cmd=f"trap '' HUP; python3 -u {script}")
     deaf_shell = support.shell_process("ava-agent-987-shell-5-deaf")
-    assert wait_for(lambda: bool(jobs.live_children(deaf_shell)))
+    output_until("ava-agent-987-shell-5-deaf", "stubborn-ready")
     (deaf_job,) = jobs.live_children(deaf_shell)
 
     def ledger_knows_both_jobs() -> bool:
@@ -374,6 +376,7 @@ def test_a_crashed_service_tells_the_owner_of_a_busy_session_at_the_next_start(
     )
     name = f"ava-agent-{owner}-shell-7-crashed"
     shell = jobs.start(name, unit_home, jobs.TERM_OK)
+    output_until(name, "job-ready")
 
     def ledger_knows_the_job() -> bool:
         return bool(json.loads(ledger_path().read_text())["sessions"].get(name, {}).get("members"))
@@ -410,6 +413,7 @@ def test_an_unreachable_database_costs_the_start_a_log_line_and_nothing_else(
     )
     name = "ava-agent-987-shell-8-lost"
     jobs.start(name, unit_home, jobs.TERM_OK)
+    output_until(name, "job-ready")
     assert wait_for(
         lambda: bool(
             json.loads(ledger_path().read_text())["sessions"].get(name, {}).get("members")
