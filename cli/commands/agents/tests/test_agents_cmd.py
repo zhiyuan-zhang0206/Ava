@@ -170,10 +170,10 @@ def test_agents_ls_passes_page_arguments_and_prints_cursor(
 def test_agents_ls_parser_passes_page_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     import argparse
 
-    from cli.parsers.agents import _add_agents_parser
+    from cli.commands.agents.parsers import add_agents_parser
 
     parser = argparse.ArgumentParser()
-    _add_agents_parser(parser.add_subparsers())
+    add_agents_parser(parser.add_subparsers())
     args = parser.parse_args(
         [
             "agents",
@@ -563,10 +563,10 @@ def test_agents_compact_posts_to_the_compact_route(
 def test_agents_compact_parser_dispatches() -> None:
     import argparse
 
-    from cli.parsers.agents import _add_agents_parser
+    from cli.commands.agents.parsers import add_agents_parser
 
     parser = argparse.ArgumentParser()
-    _add_agents_parser(parser.add_subparsers())
+    add_agents_parser(parser.add_subparsers())
     args = parser.parse_args(["agents", "compact", "7"])
     assert args.agent_id == 7
     assert args.func.__name__ == "_h_agents_compact"

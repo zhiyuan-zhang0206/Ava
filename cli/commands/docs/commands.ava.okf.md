@@ -11,15 +11,16 @@ tags:
 
 ## What it is
 
-`cli/commands/` holds the `ava` command domains. The argparse tree lives
-in `cli/parsers/` (one module per command domain, each holding that domain's
-subcommand builders and `_h_*` handlers); `cli/main.py` composes it and
-dispatches via `set_defaults(func=)` to the module's `cmd_*` handler — there is
-no registry or plugin mechanism, the wiring is the parser.
+`cli/commands/` holds the `ava` command domains. `cli.parsers.build_parser`
+composes settings-free domain builders. Agents/notices are owned by
+`agents/parsers.py` beside `control.py`, `notices.py` and `timeline.py`; other
+builders remain in `cli/parsers/`. Each builder binds its own `_h_*` adapter,
+which lazy-imports the runtime `cmd_*` implementation at dispatch. There is
+no registry or plugin mechanism; the wiring is the parser.
 
 `cli/commands/__init__.py` is an empty package door: no import work and no
 re-exports, so `import cli.commands` loads nothing else, Settings included.
-Each command module is its own door; `cli.parsers` handlers lazy-import
+Each command module is its own door; parser adapters lazy-import
 `cmd_*` from the module that defines it, and test seams patch there. Eight
 subpackages hold the domains, each an independent package door:
 

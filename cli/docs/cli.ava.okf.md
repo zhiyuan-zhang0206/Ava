@@ -10,7 +10,7 @@ tags:
 
 # CLI
 
-The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds the argparse tree via `cli/parsers/` (one module per command domain, each holding its subcommand builders + `_h_*` handlers) and dispatches directly to the `cmd_*` definitions under `cli/commands/` (the package marker exports no commands); registered in `pyproject.toml [project.scripts]`, available as `.venv/bin/ava` after `uv sync`.
+The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` composes settings-free domain builders via `cli.parsers.build_parser`: agents/notices are owned by `cli.commands.agents.parsers` beside their implementations; other parsers remain under `cli/parsers/`. Builders bind their own `_h_*` adapters, which lazy-import `cmd_*` implementations only at dispatch. Package markers export no commands. Registered in `pyproject.toml [project.scripts]`, available as `.venv/bin/ava` after `uv sync`.
 
 ## Top-Level Commands
 
@@ -81,7 +81,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 
 ## Entry Points
 
-- `cli/main.py:main()` — argparse entrypoint; `cli/parsers/` — the settings-free command tree.
+- `cli/main.py:main()` — argparse entrypoint; `cli.parsers.build_parser` — the settings-free command-tree composition.
 - `cli/init_intent.py:run_init()` — the first-start inputs; `cli/start_intent.py:run_start()` — start admission and the full home lifecycle lock; `cli/start_identity.py` — durable initialization journal and the start gate (`require_initialized`); `cli/unit_join.py` — a runner's gateway join.
 - `cli/commands/cluster/home.py` — `destroy` (confirmed at a terminal), exact cleanup before marking the home detached; `start.py` / `status.py` / `data_plane/cluster_instance.py` — runtime operations.
 

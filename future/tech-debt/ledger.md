@@ -59,12 +59,12 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **last-verified**: 2026-10-06
 
 
-### locality:cli/commands/agents/control.py:cli/parsers/agents.py
+### locality:cli/commands/agents/impersonation.py:cli/parsers/impersonation.py
 - **class**: locality
 - **status**: open
-- **evidence**: `cochange.py`: c=11, confidence 79%; same shape for `cli/commands/agents/impersonation.py` (c=11, 79%) and `impersonation_relay.py` (c=10, 71%) against `cli/parsers/impersonation.py`. Leaked decision: each command's argument surface lives twice — argparse flags in `cli/parsers/`, the parameters they feed in the `cmd_*` implementation: `2095b997a` (`ava impersonate send`) and `5b9f770b9` (caller attestation) edited both. Fix direction: each command domain owns its settings-free parser next to its commands (the `cli.commands` package door is already empty); waits for #3479, which rewrites `cli/main.py` and `cli/parsers/__init__.py`.
+- **evidence**: The 2026-09-28 `cochange.py` audit found `cli/commands/agents/impersonation.py` (c=11, confidence 79%) and `impersonation_relay.py` (c=10, 71%) changing with `cli/parsers/impersonation.py`: argparse flags and their command parameters remain in separate package trees. The agents/notices parser and its tests now live beside their implementations under `cli/commands/agents/`; the central `cli.parsers.build_parser` composes its settings-free public builder and dispatch still lazy-loads runtime modules. Impersonation remains the next locality slice; trace its consumers and preserve Settings-free help, argument/alias compatibility and lazy dispatch before relocating it. No command-schema registry is needed.
 - **first-seen**: 2026-09-28 (locality class first run)
-- **last-verified**: 2026-09-28
+- **last-verified**: 2026-10-06
 
 ### boundary:checkpoint-postgres-historical-walk-patch
 - **class**: boundary
