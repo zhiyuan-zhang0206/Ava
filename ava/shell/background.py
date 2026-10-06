@@ -3,12 +3,13 @@
 `ava.shell.run_background` and `ava.watcher._spawn` share one shape: run a
 command inside a persistent session with its output teed to a per-agent log
 file and the session capture, then deliver a completion notice through the
-`ava agents send` CLI (exit code + log path + output tail) when its notification
+`ava agents send` CLI (log path + output tail) when its notification
 policy allows it. This module builds that command line and allocates the log
 files; the session mechanics stay in `sessions.py`.
 
 The session shell is Bash, so the generated pipeline captures the command's
-exit status from `PIPESTATUS[0]` immediately after `tee`. `pipefail` would
+exit status from `PIPESTATUS[0]` immediately after `tee` (only to propagate it
+as the session's own exit status; it never reaches the notice). `pipefail` would
 both let a failed `tee` replace the command status and mutate a kept
 interactive shell's state.
 
@@ -44,7 +45,7 @@ _OUTPUT_KEEP = 20
 
 # Characters that stay shell-active inside a double-quoted string.
 _DQUOTE_UNSAFE = re.compile(r'[$`"\\]')
-_NOTIFY_POLICIES = ("always", "failure")
+_NOTIFY_POLICIES = ("always",)
 
 
 def output_dir() -> Path:
@@ -136,10 +137,9 @@ def notified_line(
     `${PIPESTATUS[0]}` captures the subshell's exit code immediately before any
     other command can reset it. `pipefail` is unsuitable because a failed
     `tee` could replace that exit code and it would mutate a kept interactive
-    shell's state. `notify="failure"` guards that same shell-level notice with
-    the captured exit code, so every non-zero exit path still sends. Omitting
-    `notify` marks the send as a platform completion; the gateway then applies
-    the agent's policy. `label`
+    shell's state. Omitting `notify` marks the send as a platform completion; the
+    gateway then applies the agent's policy (`notify="always"` bypasses it).
+    The notice carries no exit status: the agent reads the log tail it carries. `label`
     and `source` are caller-controlled literals (no user text), and the
     double-quoted notice only expands `${_ec}`.
     """
@@ -157,18 +157,13 @@ def notified_line(
         if _DQUOTE_UNSAFE.search(part):
             raise ValueError(f"{what} contains shell-active characters: {part!r}")
     q_path = shlex.quote(str(output_path))
-    notice = f"{label} exited with code ${{_ec}}. Full output at {output_path}."
+    notice = f"{label} finished. Full output at {output_path}."
     send_notice = (
         f'{shlex.quote(str(cli_path()))} agents send {agent_id} "{notice}" '
         f"--source {source} --tail-file {q_path}"
     )
     line = f"( {cmd} ) 2>&1 | tee {q_path}; _ec=${{PIPESTATUS[0]}}; "
-    if notify == "failure":
-        line += f'if [ "$_ec" -ne 0 ]; then {send_notice}; fi'
-    elif notify == "always":
-        line += send_notice
-    else:
-        line += f"{send_notice} --completion-exit-code ${{_ec}}"
+    line += send_notice if notify == "always" else f"{send_notice} --completion"
     if not keep:
         line += "; exit $_ec"
     return line

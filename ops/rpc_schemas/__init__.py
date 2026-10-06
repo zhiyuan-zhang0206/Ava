@@ -49,7 +49,6 @@ from ops.rpc_schemas.billing_recovery import (
 )
 from ops.rpc_schemas.billing_recovery import BillingResurrectRequest as BillingResurrectRequest
 from ops.rpc_schemas.billing_recovery import BillingResurrectResponse as BillingResurrectResponse
-from ops.rpc_schemas.completion import CompletionNoticeIn as CompletionNoticeIn
 from ops.rpc_schemas.content import UserContent
 from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
 from ops.rpc_schemas.messages import ContentBlock as ContentBlock

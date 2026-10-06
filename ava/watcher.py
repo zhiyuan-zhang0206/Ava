@@ -177,7 +177,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     runpy is wrapped in try/finally — no except anywhere: an exception still
     propagates, Python prints the traceback to stderr (teed to the watcher's
     log file and session capture) and exits non-zero, and the shell-level
-    completion notice reports that exit code and carries the tail of the log. A
+    completion notice carries the tail of the log. A
     ``SystemExit(n)`` likewise becomes exit code n. The finally block deletes
     the generated script + bootstrap files: a watcher reads them exactly once
     at launch, so removing them on exit keeps the watchers dir empty instead
@@ -327,7 +327,7 @@ def _spawn(
     the session stays short and readable. Identity is inlined because the
     session env allowlist does not forward ``AVA_AGENT_ID`` (Task #856 /
     #964; see ``_build_boot``). Output is teed to a per-agent log file and
-    session capture, and a completion notice (exit code + log path + output
+    session capture, and a completion notice (log path + output
     tail) is delivered from the shell level when the child exits, on every
     exit path — a crashed or hard-killed child cannot skip it. The session
     closes itself after the notice is delivered (the log file preserves the
@@ -442,7 +442,7 @@ def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str | None 
     Args:
         timeout: seconds, a `timedelta`, or `"<n>{s,m,h,d}"` (e.g. `"30m"`).
         name: a lowercase slug like `"ci-monitor"`.
-        notify: omit to use the agent policy; `"always"` / `"failure"` override it.
+        notify: omit to use the agent policy; `"always"` delivers every completion immediately.
     Returns:
         The watcher's session id — it is one of your shell sessions while running.
     """
@@ -482,7 +482,7 @@ def cron(
         timezone: IANA name; defaults to your configured timezone.
         end_time: same accepted types as `at()`'s `when`; must be in the future.
         name: a lowercase slug like `"daily-check-in"`.
-        notify: omit to use the agent policy; `"always"` / `"failure"` to override.
+        notify: omit to use the agent policy; `"always"` delivers every completion immediately.
     Returns:
         The watcher's session id; kill it to stop the schedule.
     """
@@ -557,7 +557,7 @@ def at(
         when: a TZ-aware datetime, a timedelta from now (UTC), or an ISO-8601
             string with timezone. Must be in the future.
         name: a lowercase slug like `"stand-up-reminder"`.
-        notify: omit to use the agent policy; `"always"` or `"failure"` overrides it.
+        notify: omit to use the agent policy; `"always"` delivers every completion immediately.
 
     Returns:
         The watcher's session id; kill that session to cancel.

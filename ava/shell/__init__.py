@@ -141,10 +141,10 @@ def run_background(
     lowercase slug like `"build"` (`page-*` is reserved for `ava.ui.serve`); `cwd` defaults to
     your workspace. It runs in a fresh persistent session; output streams to `output_path`
     (`.shell_logs/<session_id>_<name>.log` in your workspace) and the capture. The completion
-    message carries the exit code, log path and output tail, then the session closes unless
+    message carries the log path and the last 3 output lines, then the session closes unless
     `keep=True`. `ttl` is a required hard lifetime in seconds (max 86400 per call, no idle
-    renewal, not extended by `keep`); extend it with `sessions.renew()`. `notify="always"` /
-    `"failure"` overrides your completion-notice policy. Interactive programs: `sessions.new`.
+    renewal, not extended by `keep`); extend it with `sessions.renew()`. `notify="always"`
+    overrides your completion-notice policy. Interactive programs: `sessions.new`.
     """
     cmd = coerce_str(cmd, "cmd")
     name = coerce_str(name, "name")

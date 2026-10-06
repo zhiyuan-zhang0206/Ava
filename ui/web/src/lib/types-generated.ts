@@ -3837,7 +3837,11 @@ export interface components {
             content: string | (components["schemas"]["TextContentBlock"] | components["schemas"]["ImageUrlContentBlock"])[];
             /** Source */
             source: string;
-            completion_notice?: components["schemas"]["CompletionNoticeIn"] | null;
+            /**
+             * Completion Notice
+             * @default false
+             */
+            completion_notice: boolean;
         };
         /**
          * AgentMessagesResponse
@@ -4608,21 +4612,6 @@ export interface components {
              */
             status: "enqueued";
         };
-        /**
-         * CompletionNoticeIn
-         * @description Platform-only completion metadata carried with a shell or watcher chat.
-         */
-        CompletionNoticeIn: {
-            outcome: components["schemas"]["CompletionNoticeOutcome"];
-            /** Exit Code */
-            exit_code?: number | null;
-        };
-        /**
-         * CompletionNoticeOutcome
-         * @description What happened to the process or watcher represented by a notice.
-         * @enum {string}
-         */
-        CompletionNoticeOutcome: "exit" | "missed";
         /**
          * ConfigAuditView
          * @description GET /api/config/audit response — merged `.env`-write audit records, newest first.

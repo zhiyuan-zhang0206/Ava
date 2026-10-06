@@ -82,7 +82,7 @@ def _restarted_server(label: str, *, pass_gateway_fd: bool = False) -> Generator
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_background")
-def test_background_exit_wakes_agent_with_code_log_and_tail(
+def test_background_exit_wakes_agent_with_log_and_tail(
     spawned_agent: int, clean_shell_world: None
 ) -> None:
     chat_and_wait(spawned_agent, "start background job")
@@ -98,7 +98,7 @@ def test_background_exit_wakes_agent_with_code_log_and_tail(
     poll_until(completed, timeout=60.0, interval=0.3, what="background completion delivered")
     source, content, _ = _inbounds(spawned_agent, f"shell:{sid}")[0]
     assert source == f"shell:{sid}"
-    assert "exited with code 7" in content
+    assert "finished" in content and "exited with code" not in content
     assert path in content and "BG-TAIL-MARK" in content
     assert "BG-TAIL-MARK" in Path(path).read_text()
     poll_until(
@@ -110,37 +110,33 @@ def test_background_exit_wakes_agent_with_code_log_and_tail(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_background_policy")
-def test_background_completion_respects_the_failures_policy(
+def test_background_completion_respects_the_hourly_policy(
     spawned_agent: int, clean_shell_world: None
 ) -> None:
     agent = spawned_agent
     response = httpx.post(
         f"{GATEWAY_URL}/api/agents/{agent}/restart",
-        json={"config_overlay": {"completion_notice_policy": "failures"}},
+        json={"config_overlay": {"completion_notice_policy": "hourly"}},
         timeout=30.0,
     )
     response.raise_for_status()
-    chat_and_wait(agent, "start success and failure jobs")
-    success_id, success_path, failure_id, failure_path = (
+    chat_and_wait(agent, "start two jobs")
+    first_id, first_path, second_id, second_path = (
         (world.sandbox() / "policy-handles").read_text().splitlines()
     )
 
-    def settled() -> tuple[bool, object]:
-        failure_rows = _inbounds(agent, f"shell:{failure_id}")
-        return bool(failure_rows and failure_rows[0][2] == "done"), failure_rows
+    def buffered() -> tuple[bool, object]:
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            count = conn.execute(
+                "SELECT count(*) FROM completion_notice_events WHERE agent_id = %s", (agent,)
+            ).fetchone()
+        return bool(count and count[0] == 2), count
 
-    poll_until(settled, timeout=60.0, interval=0.3, what="failed background job notice")
-    assert "POLICY-SUCCESS" in Path(success_path).read_text()
-    assert "POLICY-FAILURE" in Path(failure_path).read_text()
-    assert _inbounds(agent, f"shell:{success_id}") == []
-    failure_rows = _inbounds(agent, f"shell:{failure_id}")
-    assert "exited with code 9" in failure_rows[0][1]
-    poll_until(
-        lambda: _human_witness(agent, "POLICY-FAILURE"),
-        timeout=60.0,
-        interval=0.3,
-        what="failed background job in model input",
-    )
+    poll_until(buffered, timeout=60.0, interval=0.3, what="both completions buffered")
+    assert "POLICY-SUCCESS" in Path(first_path).read_text()
+    assert "POLICY-FAILURE" in Path(second_path).read_text()
+    assert _inbounds(agent, f"shell:{first_id}") == []
+    assert _inbounds(agent, f"shell:{second_id}") == []
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_session_verbs")
@@ -267,7 +263,7 @@ def test_launch_at_and_cron_watchers_wake_owner_with_their_sources(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_timeout")
-def test_watcher_timeout_reports_exit_124_to_the_agent(
+def test_watcher_timeout_notice_carries_the_log_tail(
     spawned_agent: int, clean_shell_world: None
 ) -> None:
     chat_and_wait(spawned_agent, "start bounded watcher")
@@ -279,9 +275,9 @@ def test_watcher_timeout_reports_exit_124_to_the_agent(
 
     poll_until(timed_out, timeout=60.0, interval=0.3, what="watcher timeout notice")
     _, content, _ = _inbounds(spawned_agent, f"watcher:{wid}")[0]
-    assert "exited with code 124" in content
+    assert "exited with code" not in content and "[watcher timed out]" in content
     poll_until(
-        lambda: _human_witness(spawned_agent, "exited with code 124"),
+        lambda: _human_witness(spawned_agent, "[watcher timed out]"),
         timeout=60.0,
         interval=0.3,
         what="watcher timeout in model input",

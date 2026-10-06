@@ -14,7 +14,6 @@ from pydantic import (
 )
 
 from base.agents.messages.envelope import validate_source
-from ops.rpc_schemas.completion import CompletionNoticeIn
 
 
 class TextContentBlock(BaseModel):
@@ -82,7 +81,7 @@ class AgentMessageIn(BaseModel):
 
     content: _MessageContent
     source: str = Field(min_length=1, max_length=64)
-    completion_notice: CompletionNoticeIn | None = None
+    completion_notice: bool = False
 
     @field_validator("source")
     @classmethod
@@ -101,7 +100,7 @@ class AgentMessageIn(BaseModel):
             )
             if not has_image and not has_text:
                 raise ValueError("content blocks must include an image or non-empty text")
-        if self.completion_notice is not None:
+        if self.completion_notice:
             if not isinstance(self.content, str):
                 raise ValueError("completion notices require string content")
             if not (self.source.startswith("shell:") or self.source.startswith("watcher:")):

@@ -203,7 +203,7 @@ def send_message(
     *,
     content: str | list[dict[str, object]],
     source: str,
-    completion_notice: dict[str, object] | None = None,
+    completion_notice: bool = False,
 ) -> None:
     """POST /api/agents/{id}/messages — deliver a chat inbound.
 
