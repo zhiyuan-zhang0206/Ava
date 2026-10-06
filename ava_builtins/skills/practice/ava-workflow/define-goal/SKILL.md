@@ -7,7 +7,7 @@ description: "Clarifies an unclear outcome, acceptance evidence, scope, and stop
 
 Turn intent into an outcome a normal peer can pursue and verify. Use this method
 only for missing goal definition; a clear user requirement can go directly to
-execution or [goal supervision](../../../coordination/ava-goal/SKILL.md).
+execution or [goal pursuit](../../../coordination/ava-goal/SKILL.md).
 
 ## Check the Goal
 

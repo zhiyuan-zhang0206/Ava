@@ -216,6 +216,6 @@ a confirmation label does not grant authority for unrelated actions.
 - [Define Goal](define-goal/SKILL.md) — sharpen an unclear outcome and its evidence.
 - [Plan](plan/SKILL.md) — record dependencies and checkpoints when useful.
 - [Work & Evaluate](work-eval/SKILL.md) — execute and verify against the chosen criteria.
-- [Goal supervision](../../coordination/ava-goal/SKILL.md) — sustain a peer's work toward a terminal outcome.
+- [Goal pursuit](../../coordination/ava-goal/SKILL.md) — sustain a terminal outcome with freely chosen execution and peer coordination.
 - [Dynamic Workflow](../../coordination/ava-dynamic-workflow/SKILL.md) — generate a Python script to coordinate peers and aggregate results.
 - [Long-running work](../../coordination/ava-being-a-long-running-agent/SKILL.md) — arrange event delivery, bounded waits, and recovery without repeated model turns.
