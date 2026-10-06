@@ -40,7 +40,7 @@ tags:
 - `AgentStatus`: RUNNING / IDLING / TERMINATED — three states, no ops-only states to project away.
 - `Neighbor`: agent_id, label, status, depth (hops from the queried agent — out for neighbors, up for ancestors), score (connection strength)
 - `Machine`: name, description, live (detected at call time, not cached)
-- `TerminateOutcome`: reads as the status string (`enqueued` / `already_terminated`); `status` is the enum, `open_tasks` the still-open task hint (or None).
+- `TerminateOutcome`: reads as the status string (`enqueued` / `already_terminated`); `status` is the enum, `open_tasks` the still-open task hint (or None). Its optional `shell_sessions` report uses `ShellSessionKillTiming` from `base/agents/contract.py`: `now` means cleanup already ran, `at_exit` means cleanup is scheduled before exit. The SDK validates the response timing and rejects unknown values; JSON spellings are unchanged.
 - `OpenTasksHint`: count of open tasks, up to five `tasks` newest first (id, title, status, updated_at), and `more` — how many beyond those five remain.
 
 ## Key Dependencies

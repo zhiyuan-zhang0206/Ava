@@ -15,7 +15,13 @@ from base.agents import AgentLaunchFailed as AgentLaunchFailed
 # a traceback names them clearly on the rare occasion one fires. The aliases keep
 # pyright from flagging them unused.
 from base.agents import AgentNotFound as AgentNotFound
-from base.agents import AgentStatus, RestartResult, ResurrectResult, TerminateResult
+from base.agents import (
+    AgentStatus,
+    RestartResult,
+    ResurrectResult,
+    ShellSessionKillTiming,
+    TerminateResult,
+)
 from base.agents import CrossMachineGatewayUnavailable as CrossMachineGatewayUnavailable
 from base.agents import ForkCheckpointNotFound as ForkCheckpointNotFound
 from base.agents import ForkConfigChangeNotAllowed as ForkConfigChangeNotAllowed
@@ -42,6 +48,7 @@ __all_for_ava__ = [
     "OpenTasksHint",
     "RestartResult",
     "ResurrectResult",
+    "ShellSessionKillTiming",
     "ShellSessionsKill",
     "TerminateOutcome",
     "TerminateResult",
@@ -200,8 +207,11 @@ class ShellSessionsKill:
     had none — or "at_exit" when they are killed right before the agent stops,
     after its last step (`killed` stays empty)."""
 
-    when: Literal["now", "at_exit"]
+    when: ShellSessionKillTiming
     killed: list[int]
+
+    def __post_init__(self) -> None:
+        self.when = ShellSessionKillTiming(self.when)
 
 
 class TerminateOutcome(str):
@@ -488,7 +498,9 @@ def terminate(
         _open_tasks_from_dict(data["open_tasks"]),
         shell_sessions=None
         if shell is None
-        else ShellSessionsKill(when=shell["when"], killed=list(shell["killed"])),
+        else ShellSessionsKill(
+            when=ShellSessionKillTiming(shell["when"]), killed=list(shell["killed"])
+        ),
     )
 
 

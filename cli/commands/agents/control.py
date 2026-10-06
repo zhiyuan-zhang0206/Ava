@@ -33,6 +33,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from base.agents import ShellSessionKillTiming
+
 _TIMEOUT_S = 15.0
 
 # The billing batch performs N launch-and-confirm cycles across home machines;
@@ -491,7 +493,8 @@ def _shell_sessions_suffix(shell: dict[str, Any] | None, *, requested: bool) -> 
     not know the option: nothing was killed, and the output says so."""
     if shell is None:
         return " — shell sessions NOT killed (its runner predates the option)" if requested else ""
-    if shell["when"] == "at_exit":
+    when = ShellSessionKillTiming(shell["when"])
+    if when is ShellSessionKillTiming.AT_EXIT:
         return " — its shell sessions are killed when it exits"
     killed: list[int] = shell["killed"]
     if not killed:

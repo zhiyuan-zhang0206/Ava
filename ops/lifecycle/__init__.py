@@ -36,6 +36,7 @@ from base.agents import (
     RestartResult,
     ResurrectAlreadyAlive,
     ResurrectResult,
+    ShellSessionKillTiming,
     TerminateResult,
 )
 from base.agents.messages.inbound import WakeTriggerKind
@@ -223,7 +224,9 @@ async def terminate_agent_op(
     await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
         status=TerminateResult.ENQUEUED,
-        shell_sessions=ShellSessionsKill(when="at_exit") if body.kill_all_shell_sessions else None,
+        shell_sessions=ShellSessionsKill(when=ShellSessionKillTiming.AT_EXIT)
+        if body.kill_all_shell_sessions
+        else None,
     )
 
 
@@ -242,7 +245,7 @@ async def _kill_shell_sessions_now(agent_id: int, *, kill: bool) -> ShellSession
         len(killed),
         killed,
     )
-    return ShellSessionsKill(when="now", killed=killed)
+    return ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=killed)
 
 
 async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> None:
