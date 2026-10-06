@@ -14,18 +14,13 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _IMPERSONATION_EXPLANATION = (
-    "Impersonation means a trusted external executor temporarily continues your work "
-    "under your Ava agent identity. Your native execution pauses at a durable "
-    "checkpoint; you and the external executor do not run concurrently. While "
-    "the lease is active, inbound messages are delivered to that executor, which "
-    "can reply and use the Ava SDK under your identity. Those replies appear as "
-    "your own on the Ava timeline; the session record retains the external activity. "
-    "When the lease ends, your native execution resumes with a closing note, "
-    "the external summary when supplied, and a path to the complete session record. "
-    "Review that handoff and continue unfinished work. An ACK confirms message "
-    "receipt, not task completion; acknowledged requests may still need work. "
-    "This explanation describes the mechanism, not an active lease: the separate "
-    "start and closing notes identify each takeover."
+    "Impersonation means a trusted external executor temporarily takes over your "
+    "work. You are paused while it acts under your Ava agent identity. It receives "
+    "incoming messages, can use your tools, and can send replies to the user as "
+    "you; those replies appear to the user as coming from you, an Ava agent. "
+    "When the takeover ends, you resume with a summary of its work when supplied "
+    "and a path to the session record. Review the handoff and continue any "
+    "unfinished requests."
 )
 
 
@@ -50,9 +45,8 @@ def start_marker(session: dict[str, Any]) -> HumanMessage:
     """Anchor the session's separately retained messages in checkpoint order."""
     note = system_note_message(
         content=f"Impersonation session {session['session_id']} has started. "
-        f'The takeover identifies itself as "{session["name"]}". '
-        "Your execution pauses at the checkpoint saved with this note; "
-        "the session's end delivers a closing note that resumes your execution.",
+        f'An external executor named "{session["name"]}" is taking over your work. '
+        "You are paused until it returns control.",
         tag=NoteTag.IMPERSONATION,
         created_at=datetime.now(UTC),
     )
@@ -177,19 +171,13 @@ async def deliver_handoff(
         stopped = f" This session was stopped early: {reason}." if reason else ""
         note = system_note_message(
             content=f"Impersonation session {session['session_id']} has ended.{stopped} "
-            f'The takeover identified itself as "{session["name"]}".\n\nExternal summary:\n{summary}\n\n'
-            f"If you need more detail than the summary, the complete structured "
-            f"record of this session is available at: {path}\n"
-            "It retains all messages, including ACKed messages, and the consumed API/SDK events. "
-            "Read event_delivery before interpreting counts: while its state is pending, "
-            "consumed_event_count is not final and zero means no events have been consumed yet, "
-            "not that no SDK calls occurred. event_delivery.state=complete certifies only "
-            "the record of emitted SDK/API events; SDK sampling policy is unknown, "
-            "so an SDK consumed_event_count of zero never proves no SDK calls. "
-            "Incoming messages marked unacknowledged still need your attention. "
-            "An ACK records receipt, not completion: check acknowledged messages for "
-            "work the summary does not show as finished, and continue it. "
-            "Your execution resumes with this note.",
+            f'You have resumed execution after the takeover by external executor "{session["name"]}".\n\n'
+            f"External summary:\n{summary}\n\n"
+            f"The session record is available at: {path}\n"
+            "Review the summary and incoming requests in the record. Continue any "
+            "requests whose completion is not established by the summary or record. "
+            "The activity log may be incomplete; missing entries do not establish "
+            "that an action never happened.",
             tag=NoteTag.IMPERSONATION,
             created_at=datetime.now(UTC),
         )

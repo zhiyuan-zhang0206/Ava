@@ -9,9 +9,10 @@ tags: []
 
 ## What It Is
 
-The part of an agent's context window that is not conversation: the SystemMessage
-and the ordered context notes behind it. It is established twice in an agent's
-life — first wake, and the turn after any compaction — and by one owner.
+Standing context consists of the system prompt and ordered context notes.
+`init_context` establishes it on first wake and after compaction.
+
+Notes tell the agent what changed and what to do, in its own terms.
 
 ## Core Mechanisms
 

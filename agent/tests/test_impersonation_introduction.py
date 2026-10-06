@@ -47,10 +47,10 @@ async def test_first_takeover_explains_borrowed_identity_and_later_leases_do_not
     assert first.values["impersonation_introduced"] is True
     explanation = first.values["messages"][-2]
     assert explanation.id == "impersonation-introduction"
-    assert "native execution pauses" in explanation.content
-    assert "inbound messages are delivered to that executor" in explanation.content
-    assert "SDK under your identity" in explanation.content
-    assert "ACK confirms message receipt, not task completion" in explanation.content
+    assert "You are paused" in explanation.content
+    assert "receives incoming messages" in explanation.content
+    assert "coming from you, an Ava agent" in explanation.content
+    assert "continue any unfinished requests" in explanation.content
     assert first.values["messages"][-1].id == "impersonation-start:42:0"
 
     await graph.aupdate_state(

@@ -265,11 +265,9 @@ def index_drift(known: set[str], prompt: Prompt) -> IndexDrift:
 # they are relative to — the standing `# Capabilities` section, which the agent
 # has already read and which does not mention these.
 _NEW_SKILLS_FRAMING = (
-    "Skills installed since your `# Capabilities` index was built. That index is "
-    "a snapshot taken at the start of this context window; these are additions "
-    "to it. Same contract as the lines there — a one-line summary each, never "
-    "enough to act on: load the full body with `ava.help(ava.skills.<path>)` "
-    "before using one."
+    "Additional skills are now available beyond those listed in `# Capabilities`. "
+    "The descriptions below are summaries; load a skill's full instructions "
+    "with `ava.help(ava.skills.<path>)` before using it."
 )
 
 
