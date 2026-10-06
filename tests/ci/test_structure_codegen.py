@@ -429,7 +429,6 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "base/agents/observation/evidence.py",
         "base/agents/history/timeline_item.py",
         "ops/rpc_schemas/messages.py",
-        "ops/rpc_schemas/completion.py",
         "ops/rpc_schemas/billing_recovery.py",
         "ops/cluster_status/__init__.py",
         "base/agents/impersonation/history.py",
