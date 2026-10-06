@@ -505,7 +505,7 @@ async def test_compacted_takeover_context_restores_explanation_before_summary(
     messages = cast(list[Any], cmd.update["messages"])  # type: ignore[index]
     assert isinstance(messages[0], SystemMessage)
     assert messages[1].id == "impersonation-introduction"
-    assert "not an active lease" in messages[1].content
+    assert "Impersonation means" in messages[1].content
     assert "Finished the fix" in messages[2].content
     restored = compacted.model_copy(update=cmd.update)
     assert restored.impersonation_introduced is True
