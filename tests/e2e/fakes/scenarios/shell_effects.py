@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from langchain_core.messages import AIMessage, BaseMessage
+from pydantic import PrivateAttr
+
 from tests.e2e.fakes._recording import RecordingModel, exec_call, say, scratch_root
 
 
@@ -125,10 +128,36 @@ print("timeout-watcher", wid)
     )
 
 
+class WatcherResurrectionModel(RecordingModel):
+    """Consume the real wake and completion notices, separately or in one batch."""
+
+    _wake_seen: bool = PrivateAttr(default=False)
+    _completion_seen: bool = PrivateAttr(default=False)
+    _response: AIMessage | None = PrivateAttr(default=None)
+
+    def _record(self, messages: list[BaseMessage]) -> None:
+        super()._record(messages)
+        human = "\n".join(str(message.content) for message in messages if message.type == "human")
+        wake = "RESURRECT-WAKE-MARK" in human and not self._wake_seen
+        completion = "Watcher 'e2e-resurrect' finished." in human and not self._completion_seen
+        if not wake and not completion:
+            raise RuntimeError("watcher resurrection model received no new watcher notice")
+        self._wake_seen |= wake
+        self._completion_seen |= completion
+        notices = [label for seen, label in ((wake, "wake"), (completion, "completion")) if seen]
+        self._response = say("processed watcher " + " and ".join(notices))
+
+    def _next_message(self) -> AIMessage:
+        if self._response is None:
+            raise RuntimeError("watcher resurrection model has no recorded notice to process")
+        response, self._response = self._response, None
+        return response
+
+
 def build_watcher_resurrection(model: str) -> RecordingModel:
     root = sandbox()
     if (root / "resurrection-id").exists():
-        return RecordingModel(script=(say("revived by watcher"),))
+        return WatcherResurrectionModel(script=())
     code = f"""
 import ava
 import datetime
