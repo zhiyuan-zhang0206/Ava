@@ -22,8 +22,5 @@
   "composerPlaceholderResurrect": "发送消息以复活此 agent",
   "failed": "失败",
   "filesUploadingHint": "文件上传中——回车将只发送文字，文件上传完成后送达。",
-  "deliveryUnconfirmedStatus": "消息是否送达尚未确认。请先核对这条消息，再发送下一条。",
-  "deliveryUnconfirmedToast": "消息是否送达尚未确认。请重试同一条消息进行核对，或明确选择发送另一条。",
-  "retrySameMessage": "重试同一条消息",
-  "sendAnotherAnyway": "仍然发送另一条"
+  "deliveryUnconfirmedToast": "暂时无法确认消息是否已收到，草稿已保留。"
 }

@@ -17,7 +17,7 @@ export class MessageDeliveryUnknownError extends Error {
   constructor(clientMessageId: string) {
     super(
       `Message delivery is still unconfirmed (id ${clientMessageId}); ` +
-        "retry the same message to reconcile it, or explicitly send another.",
+        "the draft has been kept.",
     );
     this.name = "MessageDeliveryUnknownError";
     this.clientMessageId = clientMessageId;

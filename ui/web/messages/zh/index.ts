@@ -1,7 +1,6 @@
 // The catalog is one JSON file per namespace; a new namespace is a new file plus its line here.
 // `messages-layout.test.ts` pins that every file in this directory is listed, in both locales.
 
-import agentAvailability from "./agentAvailability.json";
 import agentRow from "./agentRow.json";
 import alerts from "./alerts.json";
 import common from "./common.json";
@@ -33,7 +32,6 @@ import spawn from "./spawn.json";
 import timeline from "./timeline.json";
 
 const messages = {
-  agentAvailability,
   agentRow,
   alerts,
   common,

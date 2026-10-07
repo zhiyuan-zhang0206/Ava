@@ -428,7 +428,7 @@ describe("Composer input lifecycle", () => {
     expect(retryId).toBe(firstId);
   });
 
-  it("shows an explicit unknown state and retries the same logical message", async () => {
+  it("keeps an unknown draft editable and normal Send reuses its identity", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
@@ -440,21 +440,21 @@ describe("Composer input lifecycle", () => {
     fireEvent.change(ta, { target: { value: "uncertain delivery" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await screen.findByText(/Delivery unconfirmed/);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     expect(clearMessageSent).not.toHaveBeenCalled();
-    expect(ta.readOnly).toBe(true);
+    expect(ta.readOnly).toBe(false);
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled,
-    ).toBe(true);
+    ).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][2]).toBe(onSend.mock.calls[0][2]);
     await waitFor(() => expect(ta.value).toBe(""));
     expect(screen.queryByText(/Delivery unconfirmed/)).toBeNull();
   });
 
-  it("keeps an unknown attempt locked when a retry returns false", async () => {
+  it("keeps the same identity across an ambiguous send and a failed normal retry", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
@@ -466,22 +466,22 @@ describe("Composer input lifecycle", () => {
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "still ambiguous" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await screen.findByText(/Delivery unconfirmed/);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     const clientMessageId = onSend.mock.calls[0][2];
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][2]).toBe(clientMessageId);
-    expect(await screen.findByText(/Delivery unconfirmed/)).toBeTruthy();
-    expect(ta.readOnly).toBe(true);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
+    expect(ta.readOnly).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(3));
     expect(onSend.mock.calls[2][2]).toBe(clientMessageId);
     await waitFor(() => expect(screen.queryByText(/Delivery unconfirmed/)).toBeNull());
   });
 
-  it("requires explicit abandon before changed text gets a new id", async () => {
+  it("gives edited text a new identity after an ambiguous send", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
@@ -492,10 +492,8 @@ describe("Composer input lifecycle", () => {
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "old uncertain" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await screen.findByText(/Delivery unconfirmed/);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
 
-    fireEvent.click(screen.getByRole("button", { name: "Send another anyway" }));
-    expect(clearMessageSent).toHaveBeenCalledWith(7);
     expect(ta.readOnly).toBe(false);
     fireEvent.change(ta, { target: { value: "new explicit message" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -536,7 +534,7 @@ describe("Composer input lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    await screen.findByText(/Delivery unconfirmed/);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     const firstId = onSend.mock.calls[0][2];
     expect(firstId).not.toBe("stale-client-id");
     expect(setItem).toHaveBeenCalled();
@@ -544,8 +542,8 @@ describe("Composer input lifecycle", () => {
     first.unmount();
 
     render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
-    await screen.findByText(/Delivery unconfirmed/);
-    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][2]).toBe(firstId);
     const restored = screen.getByTestId<HTMLTextAreaElement>("composer-input");
@@ -553,37 +551,30 @@ describe("Composer input lifecycle", () => {
     expect(screen.queryByRole("button", { name: "Sending" })).toBeNull();
   });
 
-  it("remove failure keeps an authoritative tombstone across remount", async () => {
+  it("successful send keeps an authoritative tombstone when storage removal fails", async () => {
     const agentId = 7072;
-    const onSend = vi
-      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
-      .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
-        Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
-      );
-    const first = render(
-      <Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />,
-    );
-    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
-    fireEvent.change(ta, { target: { value: "abandon this unknown" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await screen.findByText(/Delivery unconfirmed/);
-
-    const attemptKey = `composer-send-attempt-${agentId}`;
-    const persistedAttempt = sessionStorage.getItem(attemptKey);
-    expect(persistedAttempt).toContain("uncertain");
     const persistentStorage = sessionStorage;
     const removeItem = vi.fn((_key: string) => {
       throw new DOMException("blocked", "SecurityError");
     });
     vi.stubGlobal("sessionStorage", storageWith(persistentStorage, { removeItem }));
-    fireEvent.click(screen.getByRole("button", { name: "Send another anyway" }));
-    expect(removeItem).toHaveBeenCalledWith(attemptKey);
-    expect(sessionStorage.getItem(attemptKey)).toBe(persistedAttempt);
+    const onSend = vi.fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>(() => Promise.resolve(true));
+    const first = render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "sent message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(ta.value).toBe(""));
+    expect(removeItem).toHaveBeenCalledWith(`composer-send-attempt-${agentId}`);
+    expect(persistentStorage.getItem(`composer-send-attempt-${agentId}`)).toBeTruthy();
+    const firstId = onSend.mock.calls[0][2];
     first.unmount();
-
     render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
-    expect(screen.queryByText(/Delivery unconfirmed/)).toBeNull();
-    expect(screen.getByTestId<HTMLTextAreaElement>("composer-input").readOnly).toBe(false);
+    const restored = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    expect(restored.value).toBe("");
+    fireEvent.change(restored, { target: { value: "sent message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1][2]).not.toBe(firstId);
   });
 
   it("an A send completing after switch to B does not clear B's draft", async () => {
@@ -1361,7 +1352,7 @@ describe("Composer image attachments", () => {
     );
   });
 
-  it("locks an unknown image snapshot against drop and removal before retry", async () => {
+  it("normal Send preserves an unchanged image snapshot identity after ambiguity", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
@@ -1382,21 +1373,12 @@ describe("Composer image attachments", () => {
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
     await waitFor(() => expect(onAttachImage).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await screen.findByText(/Delivery unconfirmed/);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
 
-    const remove = screen.getByRole<HTMLButtonElement>("button", { name: "Remove shot.png" });
-    expect(remove.disabled).toBe(true);
-    fireEvent.click(remove);
-    fireEvent.drop(screen.getByTestId("composer"), {
-      dataTransfer: {
-        files: [new File(["new"], "new.png", { type: "image/png" })],
-        types: ["Files"],
-      },
-    });
-    expect(onAttachImage).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("img", { name: "shot.png" })).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Remove shot.png" }).disabled).toBe(false);
+    expect(ta.readOnly).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][1]).toEqual(["/api/agents/7/uploads/shot.png"]);
     expect(onSend.mock.calls[1][2]).toBe(onSend.mock.calls[0][2]);

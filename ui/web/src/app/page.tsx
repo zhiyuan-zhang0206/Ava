@@ -34,7 +34,6 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
-import { AgentAvailability } from "@/components/agent-availability";
 import { AlertsBadge } from "@/components/alerts-badge";
 import { CodeHighlighterPreloader } from "@/components/code-highlighter-preloader";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -452,7 +451,6 @@ function HomeContent({
               up instead of overlapping it. The composer's own top divider
               separates it from the timeline content. */}
           <div className="relative z-20 bg-background">
-            {activeAgent && <AgentAvailability agent={activeAgent} />}
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />
             <Composer
               maxWidthCss={composerMaxWidth}
