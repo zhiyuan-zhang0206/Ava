@@ -58,10 +58,21 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("INSERT, UPDATE, DELETE", ("api_idempotency",)),
     # SDK surfaces the runner writes directly: ava.tasks and impersonation.
     ("INSERT, UPDATE", ("agent_tasks", "agent_impersonation_messages")),
-    # Understanding-tree regeneration reconciles superseded cuts (task #3704).
+    # The understanding tree: chunk and group writers (and their pruning of superseded rows).
     ("SELECT, INSERT, UPDATE, DELETE", ("understanding_nodes",)),
-    # Compact-boundary tree-build enqueue (task #4674).
+    # The retired hierarchy worker's queue: nothing writes it any more, but the table stays until
+    # a later migration drops it and the migration that granted this (20260924T071500) still runs
+    # on every cluster, so the matrix keeps the entry or birth and migration would disagree.
+    # Removed together with the table.
     ("INSERT", ("hierarchy_jobs",)),
+    # Chunk-triggered understanding queue: enqueued by the llm node and compact
+    # paths, claimed and finished by the agent-host loop.
+    ("SELECT, INSERT, UPDATE", ("understanding_chunk_jobs",)),
+    # Raw record of each provider call the same loop makes.
+    ("INSERT", ("understanding_chunk_calls",)),
+    # Upper-level grouping: the per-level check cursor (with its lease) and the raw record of its calls.
+    ("SELECT, INSERT, UPDATE", ("understanding_group_state",)),
+    ("INSERT", ("understanding_group_calls",)),
     # Page close at exit.
     ("UPDATE", ("agent_pages",)),
     # Shell TTL deadlines and their append-only renewal trail.

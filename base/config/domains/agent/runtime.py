@@ -134,3 +134,91 @@ class AgentRuntimeSettings(EnvSettings):
             "lifecycle": "live",
         },
     )
+
+    understanding_enabled: bool = Field(
+        default=False,
+        alias="AVA_UNDERSTANDING_ENABLED",
+        description="Master switch for chunk-triggered understanding. On: the llm node and the compact paths enqueue context chunks into `understanding_chunk_jobs`, and the agent host's consumer loop describes them into depth-1 `understanding_nodes` rows. Off ships the mechanism dark: nothing is enqueued and the loop idles.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understanding_chunk_tokens: int = Field(
+        default=60000,
+        alias="AVA_UNDERSTANDING_CHUNK_TOKENS",
+        description="Understanding chunk size: a chunk is enqueued when a request's provider-reported input tokens exceed those at the previous cut of the same compaction segment by at least this many. A segment's closing remainder is enqueued at compaction regardless of size.",
+        gt=0,
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understanding_group_model: str = Field(
+        default="",
+        alias="AVA_UNDERSTANDING_GROUP_MODEL",
+        description="Model for the upper-level understanding groupings (level 2 and above). Empty = the agent's own model (`agent_model_target`). Unlike the leaf chunks, a grouping request has no agent prefix, so it is not tied to the agent's model for cache parity.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understanding_group_reasoning: str = Field(
+        default="",
+        alias="AVA_UNDERSTANDING_GROUP_REASONING",
+        description="Reasoning strength of the understanding grouping calls above level 1 (`group.py`; the level-1 groups are written by the chunk calls, on the agent's own model). Empty (default) = the model's own default tier, untouched. `off` = thinking disabled where the provider allows it; any other value is passed as the reasoning effort of providers that take one (deepseek `high` / `max`). Set only to override the vendor default.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understanding_group_check_open: int = Field(
+        default=60,
+        alias="AVA_UNDERSTANDING_GROUP_CHECK_OPEN",
+        description="Upper-level grouping cadence: a level (level 1 and above) is offered to one grouping call each time its open nodes, those without a parent, number this many more than at its previous check, so the call can close several groups at once (any group size; the newest node stays open). Lower = more frequent, smaller calls.",
+        ge=3,
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understanding_group_check_decay: int = Field(
+        default=3,
+        alias="AVA_UNDERSTANDING_GROUP_CHECK_DECAY",
+        description="How much the grouping cadence tightens per level: level k (1 = grouping the leaves) is checked each time its open nodes number max(6, `AVA_UNDERSTANDING_GROUP_CHECK_OPEN` / decay^(k-1)) more than at its previous check (60, 20, 7, 6, ... by default), and its `must_close` brake is three times that. A higher level fills far more slowly, so with one threshold for all levels the top trails the history by days. 1 = the same threshold at every level.",
+        ge=1,
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understanding_group_corrections: int = Field(
+        default=2,
+        alias="AVA_UNDERSTANDING_GROUP_CORRECTIONS",
+        description="Correction rounds of one grouping reply: a chunk call whose group start numbers are not in its catalog or out of order, or an upper-level check whose ids or group sizes do not fit, is sent back in the same conversation for the model to fix. Past this many corrections a chunk job fails (and is retried) or an upper-level check fails (its raw calls stay recorded; the level is checked again after `AVA_UNDERSTANDING_GROUP_CHECK_OPEN` more open nodes).",
+        ge=0,
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

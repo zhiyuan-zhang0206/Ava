@@ -265,6 +265,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/restart"): RouteContract(
         note="enqueue restart — repeats are harmless"
     ),
+    # ── gateway/agents/understanding.py ────────────────────────────────────
+    ("POST", "/api/agents/{agent_id}/understanding/close"): RouteContract(
+        note="plans one closing job from stored state; a repeat finds the active job or an empty stretch"
+    ),
     # ── gateway/mcp_server/router.py ─────────────────────────────
     ("GET", "/api/mcp/clients"): RouteContract(),
     ("POST", "/api/mcp/clients"): RouteContract(
@@ -403,13 +407,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(note="task update — repeats are harmless"),
     # ── gateway/agents/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
-    # ── gateway/run_timeline/router.py ───────────────────────────────
+    # ── gateway/run_timeline/router.py, messages.py ──────────────────
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
-        note="read-only event-driven run waterfall (Loki-backed)",
+        note="read-only: the understanding tree and the layer-0 message units in a window",
     ),
-    # ── gateway/run_timeline/strip.py ─────────────────────────
-    ("GET", "/api/agents/{agent_id}/run-timeline/message"): RouteContract(
-        note="one raw-context message's part texts — long parts clip with content_truncated; full=true returns the whole body",
+    ("GET", "/api/agents/{agent_id}/run-timeline/messages"): RouteContract(
+        note="read-only raw messages of a stitched-index range — long parts clip with text_truncated; full=true returns the whole body",
     ),
     # ── gateway/extensions/ui_contributions.py ───────────────────────────────────
     ("GET", "/api/ui/contributions"): RouteContract(),

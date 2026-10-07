@@ -520,7 +520,7 @@ def _exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int
 
 
 def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int) -> None:
-    """The understanding-node surface the hierarchy build writes from the
+    """The understanding-node surface the understanding loops write from the
     runner side (manual first-run / ad-hoc regeneration, task #3704): INSERT a
     node (the BIGSERIAL id draws from the owning sequence), UPDATE it in
     place, SELECT it back, and DELETE it — the reconciliation removes rows of
@@ -559,19 +559,25 @@ def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int)
     )
 
 
-def _exercise_hierarchy_job_grants(conn: psycopg.Connection, agent_id: int) -> None:
-    """The compact-boundary enqueue INSERT the agent-side twin writes from the
-    runner process (task #4674): one pending build job — BIGSERIAL id from the
-    owning sequence, idempotent via the live partial index — SELECTed back."""
+def _exercise_understanding_queue_grants(conn: psycopg.Connection, agent_id: int) -> None:
+    """The chunk-triggered understanding queue the runner process writes: INSERT a
+    pending job (BIGSERIAL id from the owning sequence), claim it with an UPDATE and
+    SELECT it back."""
     conn.execute(
-        "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail)"
-        " VALUES (%s, 'compact', 'b1', 'pending', false)",
+        "INSERT INTO understanding_chunk_jobs"
+        " (agent_id, compact_version, start_index, end_index, end_msg_id)"
+        " VALUES (%s, 0, 8, 20, 'm20')",
+        (agent_id,),
+    )
+    conn.execute(
+        "UPDATE understanding_chunk_jobs SET status = 'running', attempts = attempts + 1"
+        " WHERE agent_id = %s",
         (agent_id,),
     )
     row = conn.execute(
-        "SELECT status FROM hierarchy_jobs WHERE agent_id = %s", (agent_id,)
+        "SELECT status FROM understanding_chunk_jobs WHERE agent_id = %s", (agent_id,)
     ).fetchone()
-    assert row == ("pending",)
+    assert row == ("running",)
 
 
 def _assert_alert_writes_denied(conn: psycopg.Connection) -> None:

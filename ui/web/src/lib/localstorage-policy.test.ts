@@ -29,6 +29,7 @@ const AUTOSAVE_ALLOWLIST = new Set<string>([
   "components/fleet/fleet-view.tsx", // ava.fleet.split
   "components/home-layout.tsx", // home Agent Tree + Inspector panel split ratios (task #2556)
   "app/memory/graph/page.tsx", // ava.memory.graph.split (memory graph side panel, task #2145)
+  "components/run-timeline/run-timeline-workspace.tsx", // ava.run-timeline.split (run-timeline details panel width)
 ]);
 
 // The complete set of ava-namespaced storage keys allowed to remain in source
@@ -38,6 +39,7 @@ const ALLOWED_KEYS = new Set<string>([
   "ava.active.agent_id",
   "ava.fleet.split",
   "ava.memory.graph.split",
+  "ava.run-timeline.split",
   "ava.home.columns.desktop",
   "ava.home.columns.mobile",
   "ava.home.inspector.desktop",

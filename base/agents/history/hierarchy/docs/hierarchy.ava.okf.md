@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Hierarchical Understanding
-description: The understanding engine — level-0 block fold, append-only seal cascade, deterministic rendering, budgeted node-text generation, and the assembly pipeline (task #3704).
+description: The understanding tree of an agent's history — layer-0 message units, chunk calls that group and summarize them, upper-level grouping, and the reads that serve the run-timeline.
 tags:
 - hierarchy
 - understanding
@@ -12,80 +12,41 @@ tags:
 
 ## What it is
 
-`base/agents/history/hierarchy/` turns one agent's message history into a level tree of
-summaries. The design contract (user-confirmed 2026-09-14, task #3243): a node
-is **one text** read by humans and agents alike; units fold in batches of
-kappa = [5,15]; sealing is append-only. Storage and the run-timeline serving
-merge are the layers built on top.
+`base/agents/history/hierarchy/` turns one agent's message history into a tree of summaries for
+audit: what happened, drillable level by level down to the raw messages. A node is one text; the
+tree is stored in `understanding_nodes`, keyed by the message span `(agent_id, depth, span_start,
+span_end)`. Compaction serves the agent going on working and may forget; this tree serves
+auditing and aims to be faithful, so the two do not shape each other.
 
-- `blocks.py` — `fold_blocks(items)` folds the console item stream
-  (`base.agents.history.timeline.build_timeline_items`) into level-0 blocks: one AI message
-  plus the tool results it answers, or one inbound message. Markers are
-  transparent; compact items close the open block (trigger points). The fold
-  reproduces the pilot `blocks_and_triggers` partition exactly — pinned by the
-  Q7 equivalence evidence (task #3704).
-- `seal.py` — `split_units` / `seal_cascade` cut the unit stream into sealable
-  groups at trigger points (compact completion; day-boundary backstop), level
-  by level. A sub-kappa tail carries to the next trigger; a group of one
-  aliases without generating a summary; a per-group source guard re-splits
-  oversized groups. `narrative_budget_tok()` fixes each node's budget
-  (source/10, hard-capped).
-- `tokens.py` — the one token caliber (o200k) every budget and ratio uses;
-  deliberately not a per-model context measure.
-- `render.py` — messages to text: deterministic projection per message
-  (thinking / text / tool calls / exit codes / inbound texts; ambient context
-  skipped) assembled per block, with head+tail truncation for oversized bodies.
-- `generate.py` — node-text generation: prompt with the node's character ask,
-  bounded parallel fan-out with per-node isolation, over-budget compression,
-  `input_hash`/`text_hash` identity helpers. With a caller-supplied prefix and
-  tool schema the request is **agent-shaped** (task #4674): the agent's own
-  leading messages (byte-identical, provider-side prefix-cache hits) plus a
-  trailing material + prompt + text-only message, tools bound for schema
-  parity; a tool-call response is refused with a `ToolMessage` error and
-  re-invoked up to `GenParams.tool_rounds` rounds. The model is built exactly
-  as the agent builds its own (no effort override), so the reasoning
-  parameters the provider matches its cache against are the agent's.
-- `prefix.py` — `PrefixPlanner` picks each node's request prefix from the
-  segment layout of the stitched history (`checkpoint.FullHistory`): the node's
-  own compaction segment's SystemMessage plus that segment's messages up to the
-  node — the head the agent really sent, never the stitched history of every
-  earlier segment. A prefix that with its material would exceed
-  `GenParams.prefix_window_fraction` of the model's window (or a segment with
-  no head SystemMessage) falls back to the material-only request.
-- `pipeline.py` — assembly: items to blocks to units to trigger batches to the
-  seal cascade, then `materialize` walks levels bottom-up (leaves render
-  blocks, upper nodes reduce children texts, aliases copy their child) using
-  the `known_texts` reuse cache so a rerun over unchanged history costs zero
-  calls.
-- `store.py` — persistence on the `understanding_nodes` table (one row per
-  `(agent_id, depth, span)` identity): `write_tree` upserts and links parents
-  from children spans, `load_known_texts` is the reuse cache read side,
-  `load_window_nodes` feeds the run-timeline serving merge.
+- **Layer 0** (`units.py`): the deterministic message units — a work unit is reasoning + tool
+  call + its results, agent text and each inbound message are units of their own, framework notes
+  are units. No LLM. `read_times` gives each message the time the model read it (running maximum of
+  the message read times, identity for data that records the pickup); `display_blocks` splits a
+  work unit into thinking / call / output blocks for the run-timeline only, on those times.
+- **Level 1** ([[base/agents/history/hierarchy/docs/chunks.ava.okf.md|chunk calls]]): the agent's
+  own request prefix plus one instruction, so the provider serves the prefix from cache; the model
+  groups the numbered catalog of units and summarizes each group. `chunks.py` (queue, trigger,
+  nodes), `chunk_consumer.py` (the agent-host loop), `chunk_generate.py` (instruction, catalog,
+  reply), `leaf_groups.py` (reply parsing).
+- **Levels above** ([[base/agents/history/hierarchy/docs/groups.ava.okf.md|upper-level grouping]]):
+  a level's open nodes are grouped by a plain-text call with no agent prefix; `group.py` (prompt,
+  reply checks), `group_consumer.py` (when a level is due), `group_store.py` (writes).
+- **Reads** (`store.py`, `serve.py`, `usage.py`): the nodes with their deterministic costs for
+  the run-timeline ([[gateway/run_timeline/docs/run_timeline.ava.okf.md|run timeline]]).
+- **Provider calls** (`generate.py`): the model built the way the agent builds its own, the
+  agent-shaped request with its bounded refusal of tool calls, and the raw record of each call.
+
+How much runs at once, and how rate limits are met:
+[[base/agents/history/hierarchy/docs/concurrency.ava.okf.md|consumer concurrency]].
 
 ## Invariants
 
-- **Deterministic**: tree = f(unit stream, trigger positions, params) — the
-  same input yields an identical tree (structure, ids, spans); rendering is
-  pure, so identical input always produces identical generation requests.
-- **Append-only**: compact-sealed cells never change across rebuilds — a
-  rebuild reproduces them byte-identically and never deletes them. The
-  provisional tail re-cuts as history grows; its superseded rows are
-  reconciled away (`store.write_tree`) so storage always mirrors the
-  latest partition, while rows a compact-driven pass left pending stay.
-- **Budget**: a node's text must fit its budget; over-budget responses get
-  bounded compression and a still-over node fails instead of being written.
-- **Reuse by content**: `input_hash` covers the engine and prompt versions, so
-  a template bump invalidates every cached text rather than silently reusing.
-- **Stable spans**: compaction boundaries are never trimmed (#1125), so the
-  stitched full history is append-only and the span identity never shifts.
-- **Continuable**: a run cut by its deadline reports `skipped` and a
-  continuation resumes from the reuse cache — no node is ever redone — and
-  the scan cursor (`hierarchy_worker_state.last_processed_boundary`) moves
-  only after a run that skipped nothing.
-
-## The worker (task #3704 P2b)
-
-The compact-boundary-triggered builder — its event trigger and reconcile
-scan, claim/drain mechanics, failure handling, regeneration guardrails,
-cost observability, and knobs — is its own node:
-[[base/agents/history/hierarchy/docs/worker.ava.okf.md|The Hierarchy Worker]].
+- **Deterministic structure**: layer 0 and every cost figure are code; only "what happened" is
+  an LLM text.
+- **Audited**: every provider call is persisted whole (`understanding_chunk_calls`,
+  `understanding_group_calls`), failures included.
+- **Stable spans**: compaction boundaries are never trimmed (#1125), so the stitched full
+  history is append-only and a span's identity never shifts; a span outside the history is an
+  explicit error.
+- **No gap hidden**: a chunk that fails for good stays undescribed and emits
+  `understanding_chunk_failed`; the timeline shows the raw messages there.

@@ -152,7 +152,7 @@ async def _compact_outcome(
     emit_compact_finished(
         ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS
     )
-    await stamp_compact_boundary(ctx.ops_pool, agent_id)
+    await stamp_compact_boundary(ctx.ops_pool, agent_id, state)
     # Defer any chats co-batched with the compact: they arrived while the
     # turn was in flight and were never part of the summarized history, so
     # they must survive — but as pending inbounds delivered in the fresh
@@ -208,7 +208,7 @@ async def _compact_outcome(
                 "context_reset": transition["context_reset"],
                 "halted": halted,
                 "update_initiated": st.update_initiated,
-                "compact": state.compact.model_copy(update={"version": state.compact.version + 1}),
+                "compact": state.compact.next_segment(),
             },
             goto=INIT_CONTEXT,
         )

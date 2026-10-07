@@ -51,6 +51,7 @@ from agent.graph.prompt.compaction import compact_contract
 from agent.hooks import Hook
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
+from agent.hooks.understanding_chunks import await_snapshot, enqueue_closing_chunk
 from agent.llm.cache import ainvoke_with_cache_retry
 from agent.messages import (
     COMPACT_SUMMARY_HEADER,
@@ -138,7 +139,9 @@ class CompactionFailedError(RuntimeError):
 # longer carries a trim exemption: nothing is trimmed).
 
 
-async def stamp_compact_boundary(pool: AsyncConnectionPool | None, agent_id: int) -> None:
+async def stamp_compact_boundary(
+    pool: AsyncConnectionPool | None, agent_id: int, state: AgentState | None = None
+) -> None:
     """Best-effort: stamp the newest pre-compact checkpoint as the segment anchor.
 
     The stamped checkpoint is the full-snapshot record of this compaction
@@ -148,17 +151,26 @@ async def stamp_compact_boundary(pool: AsyncConnectionPool | None, agent_id: int
     automatic LLM compaction operation here and the agent-/user-triggered compact paths in the
     claim node. Nothing is trimmed here since the never-delete ruling
     (2026-09-12, task #3180).
+
+    With `state` (the pre-compact state), the segment's closing understanding
+    chunk is enqueued against the stamped checkpoint — `enqueue_closing_chunk`.
     """
     if pool is None:
         return
+    boundary: str | None = None
+    await await_snapshot(pool, state, agent_id)
     try:
-        await mark_compact_boundary(pool, str(agent_id))
+        boundary = await mark_compact_boundary(pool, str(agent_id))
     except Exception as exc:
         logger.warning(
             "[{label}] {body}",
             label="compact-boundary",
             event="compact_boundary_stamp",
             body=f"compact boundary stamp failed for agent {agent_id}: {exc!r}",
+        )
+    if state is not None:
+        await enqueue_closing_chunk(
+            state.compact, list(state.messages), pool=pool, agent_id=agent_id, boundary=boundary
         )
 
 
@@ -643,8 +655,8 @@ async def auto_compact_for_llm(
         extra_msgs=([history_dump_note(dump_path)] if dump_path is not None else None),
         summary_kwargs=summary_kwargs,
     )
-    await stamp_compact_boundary(runtime.context.ops_pool, agent_id)
-    transition["compact"] = state.compact.model_copy(update={"version": state.compact.version + 1})
+    await stamp_compact_boundary(runtime.context.ops_pool, agent_id, state)
+    transition["compact"] = state.compact.next_segment()
     emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS)
     return transition
 

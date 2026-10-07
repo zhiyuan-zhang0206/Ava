@@ -352,7 +352,7 @@ class FullHistory(NamedTuple):
     at that time (its SystemMessage, then the conversation). The stitched
     `messages` list drops the repeated SystemMessage at every join, so a
     consumer that needs the request the agent really sent at some position
-    (the hierarchy worker's cache-parity prefix) re-attaches the segment's own
+    (the understanding chunk's cache-parity prefix) re-attaches the segment's own
     head to the segment's body.
 
     `segment_heads[k]` is segment k's leading SystemMessage (None when the

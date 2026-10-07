@@ -1,121 +1,136 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ContextBreakdownResponse,
+  RunTimelineMessages,
   RunTimelineResponse,
   UserSettingListResponse,
 } from "@/lib/types";
 
-const { getRunTimeline, getSettings, getContextBreakdown, useMediaQuery } = vi.hoisted(() => ({
-  getRunTimeline: vi.fn<
-    (
-      agentId: number,
-      options?: {
-        from?: string;
-        to?: string;
-        level?: "turn" | "bucket";
-        bucket?: string;
-        session?: "compact" | "current";
-      },
-    ) => Promise<RunTimelineResponse>
-  >(),
-  useMediaQuery: vi.fn(() => false),
-  getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
-  getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
-}));
+const { getRunTimeline, getRunTimelineMessages, getSettings, getContextBreakdown, useMediaQuery } =
+  vi.hoisted(() => ({
+    getRunTimeline:
+      vi.fn<
+        (agentId: number, options?: { from?: string; to?: string }) => Promise<RunTimelineResponse>
+      >(),
+    getRunTimelineMessages:
+      vi.fn<
+        (
+          agentId: number,
+          range: { start: number; end: number; limit?: number; full?: boolean },
+        ) => Promise<RunTimelineMessages>
+      >(),
+    useMediaQuery: vi.fn(() => false),
+    getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
+    getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
+  }));
 
 vi.mock("@/lib/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/api", () => ({
-  api: { getRunTimeline, getSettings, getContextBreakdown },
+  api: { getRunTimeline, getRunTimelineMessages, getSettings, getContextBreakdown },
 }));
 
 import RunTimelinePage from "./page";
 import Loading from "./loading";
 
-const NOW = new Date("2026-09-05T14:26:00.000Z");
+const LIFETIME = { from: "2026-10-04T12:00:00.000000Z", to: "2026-10-04T16:00:00.000000Z" };
+const LEAF_A = { from: "2026-10-04T12:00:00.123456Z", to: "2026-10-04T13:00:00.654321Z" };
 
-// P4-1 trail scope (#4023): a pending stretch gives the chart a focusable
-// block, so a double click can push a crumb before an identity switch.
-const pendingResponse: RunTimelineResponse = {
+const usage = { calls: 3, input: 3000, cache_read: 2400, output: 120 };
+
+const lifetimeResponse: RunTimelineResponse = {
   agent_id: 42,
-  window: { from: "2026-09-05T14:00:00.000Z", to: "2026-09-05T14:26:00.000Z" },
-  meta: {
-    n_turns: 1,
-    wall_span_s: 1560,
-    active_s: 4,
-    tokens_in: 120,
-    tokens_out: 12,
-    cost_usd: 0.02,
-    n_exec_failed: 0,
-    n_compact: 1,
-    n_restart: 0,
-    fallback_turns: 0,
-    unmatched_turns: 0,
-  },
-  rows: [
+  window: LIFETIME,
+  lifetime: LIFETIME,
+  nodes: [
     {
-      turn: 1,
-      n_turns: 1,
-      start: "2026-09-05T14:00:00.000Z",
-      end: "2026-09-05T14:00:04.000Z",
-      active_s: 4,
-      trace_id: null,
-      checkpoint_id: null,
-      ok: true,
-      llm: {
-        calls: 1,
-        in_total: 120,
-        cache_read: 0,
-        out_total: 12,
-        reasoning: 0,
-        latency_ms: 1500,
-        cost_usd: 0.02,
-        model: "deepseek-flash",
-      },
-      execs: [],
-      anomalies: [],
-      tags: [],
+      id: "1",
+      level: 1,
+      parent: "3",
+      start: LEAF_A.from,
+      end: LEAF_A.to,
+      span_start: 1,
+      span_end: 5,
+      summary: "The agent read the repo\nand planned the change.",
+      usage,
+      generation: { calls: 2, input: 9000, cache_read: 8800, output: 400, seconds: 31.5 },
+    },
+    {
+      id: "2",
+      level: 1,
+      parent: "3",
+      start: "2026-10-04T13:00:01.000000Z",
+      end: "2026-10-04T16:00:00.000000Z",
+      span_start: 6,
+      span_end: 9,
+      summary: "It implemented and tested it.",
+      usage: { calls: 1, input: 100, cache_read: 0, output: 10 },
+      generation: null,
+    },
+    {
+      id: "3",
+      level: 2,
+      parent: null,
+      start: LEAF_A.from,
+      end: "2026-10-04T16:00:00.000000Z",
+      span_start: 1,
+      span_end: 9,
+      summary: "A whole task, start to finish.",
+      usage: { calls: 4, input: 3100, cache_read: 2400, output: 130 },
+      generation: null,
     },
   ],
-  events: [],
-  boundaries: {
-    initialize_turn: 1,
-    last_before_compact_turn: 1,
-    post_window_turns: 0,
-    has_activity_after_window: false,
-  },
-  pending: [{ start: "2026-09-05T14:05:00.000Z", end: "2026-09-05T14:20:00.000Z" }],
+  units: [
+    {
+      kind: "inbound",
+      i0: 1,
+      i1: 1,
+      start: "2026-10-04T12:00:00.123456Z",
+      end: "2026-10-04T12:00:00.123456Z",
+      source: "user",
+      preview: "please fix the bug",
+    },
+    {
+      kind: "output",
+      i0: 2,
+      i1: 3,
+      start: "2026-10-04T12:05:00.000000Z",
+      end: "2026-10-04T12:06:00.000000Z",
+      source: null,
+      preview: "look at the failing test",
+    },
+    {
+      kind: "text",
+      i0: 2,
+      i1: 2,
+      start: "2026-10-04T12:05:00.000000Z",
+      end: "2026-10-04T12:05:00.000000Z",
+      source: null,
+      preview: "on it",
+    },
+  ],
+  events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
 };
 
-// P4-2b (#4023): the same shape with raw-context messages (chars sum 1000),
-// so the character axis is available.
-const messagesResponse: RunTimelineResponse = {
-  ...pendingResponse,
+const messagesResponse: RunTimelineMessages = {
   messages: [
-    { key: "c.0", idx: 0, ts: null, kind: "prompt", source: null, chars: 400, parts: [{ kind: "prompt", chars: 400 }] },
     {
-      key: "c.1",
-      idx: 1,
-      ts: "2026-09-05T14:05:00.000Z",
-      kind: "ai",
+      idx: 2,
+      ts: "2026-10-04T12:05:00.000000Z",
       source: null,
-      chars: 300,
       parts: [
-        { kind: "think", chars: 100 },
-        { kind: "text", chars: 200 },
+        { kind: "think", chars: 11, text: "need a plan", text_truncated: false },
+        { kind: "text", chars: 5, text: "on it", text_truncated: false },
+        { kind: "call", chars: 2, text: "ls", text_truncated: false },
       ],
     },
-    { key: "c.2", idx: 2, ts: "2026-09-05T14:10:00.000Z", kind: "inbound", source: "user", chars: 100, parts: [{ kind: "inbound", chars: 100 }] },
-    { key: "c.3", idx: 3, ts: "2026-09-05T14:20:00.000Z", kind: "exec", source: null, chars: 200, parts: [{ kind: "out", chars: 200 }] },
   ],
-  messages_truncated: false,
+  next_start: null,
 };
 
-// P4-3 (#4023): the context-breakdown card's fixture — thresholds mirror the
-// gateway's resolved window for this agent's model.
 const cbdFixture: ContextBreakdownResponse = {
   total_input_tokens: 1000,
   estimated_total: 250,
@@ -123,22 +138,11 @@ const cbdFixture: ContextBreakdownResponse = {
   soft_compact_tokens: 374_000,
   hard_compact_tokens: 512_000,
   sections: [{ name: "(preamble)", tokens: 100 }],
-  categories: [
-    { kind: "system_prompt", tokens: 400 },
-    { kind: "output", tokens: 300 },
-    { kind: "context_note", tokens: 30 },
-    { kind: "automation", tokens: 50 },
-  ],
+  categories: [{ kind: "system_prompt", tokens: 400 }],
 };
 
-function tickTexts(container: HTMLElement): (string | null)[] {
-  return Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
-}
-
 function render() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return rtlRender(
     <QueryClientProvider client={queryClient}>
       <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
@@ -147,11 +151,11 @@ function render() {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(NOW);
   useMediaQuery.mockReturnValue(false);
   getRunTimeline.mockReset();
-  getRunTimeline.mockReturnValue(new Promise(() => undefined));
+  getRunTimeline.mockResolvedValue(lifetimeResponse);
+  getRunTimelineMessages.mockReset();
+  getRunTimelineMessages.mockResolvedValue(messagesResponse);
   getSettings.mockReset();
   getSettings.mockResolvedValue({ settings: [] });
   getContextBreakdown.mockReset();
@@ -162,458 +166,329 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("RunTimelinePage initial window", () => {
-  it("does not request the timeline while settings are pending", async () => {
-    getSettings.mockReturnValue(new Promise(() => undefined));
-
-    const { getByRole } = render();
-
-    await waitFor(
-      () => {
-        expect(getSettings).toHaveBeenCalledTimes(1);
-        expect(
-          getByRole("heading", { name: "Run timeline — agent 42" }),
-        ).toBeTruthy();
-      },
-      { timeout: 500 },
-    );
-    vi.advanceTimersByTime(60_000);
-
-    expect(getRunTimeline).not.toHaveBeenCalled();
-  });
-
-  it("requests the most recent thirty minutes by default", async () => {
+describe("the default window", () => {
+  it("asks for the agent's whole lifetime: no from/to", async () => {
     render();
-
-    await waitFor(() =>
-      expect(getRunTimeline).toHaveBeenCalledWith(42, {
-        from: "2026-09-05T13:56:00.000Z",
-        to: "2026-09-05T14:26:00.000Z",
-        session: "compact",
-      }),
-    );
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(42, {}));
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
-  it("requests the full session after the user resets the window", async () => {
-    const { getByRole } = render();
-
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(1));
-
-    fireEvent.click(getByRole("button", { name: "Reset window" }));
-
-    await waitFor(() =>
-      expect(getRunTimeline).toHaveBeenNthCalledWith(2, 42, { session: "compact" }),
-    );
-    expect(getRunTimeline).toHaveBeenCalledTimes(2);
-    const resetOptions = getRunTimeline.mock.calls[1]?.[1];
-    expect(resetOptions).not.toHaveProperty("from");
-    expect(resetOptions).not.toHaveProperty("to");
+  it("draws every tree level, topmost first, with the message units below", async () => {
+    render();
+    await screen.findByTestId("run-timeline-chart");
+    const rows = screen
+      .getAllByTestId(/^run-timeline-row-/)
+      .map((row) => row.getAttribute("data-testid"));
+    expect(rows).toEqual([
+      "run-timeline-row-lifecycle",
+      "run-timeline-row-level-2",
+      "run-timeline-row-level-1",
+      "run-timeline-row-units",
+    ]);
+    expect(screen.getAllByTestId("run-timeline-node")).toHaveLength(3);
+    expect(screen.getAllByTestId("run-timeline-unit")).toHaveLength(3);
+    expect(screen.getAllByTestId("run-timeline-event")).toHaveLength(1);
+    expect(screen.getByTestId("run-timeline-window").textContent).toContain("3 summary nodes");
   });
 
-  it("uses the configured positive window duration", async () => {
-    getSettings.mockResolvedValue({
-      settings: [
-        {
-          key: "display.run_timeline_window_hours",
-          value: 4,
-          updated_at: "2026-09-05T14:00:00.000Z",
-        },
-      ],
-    });
-
+  it("has no compare entry and no session switch", async () => {
     render();
-
-    await waitFor(() =>
-      expect(getRunTimeline).toHaveBeenCalledWith(42, {
-        from: "2026-09-05T10:26:00.000Z",
-        to: "2026-09-05T14:26:00.000Z",
-        session: "compact",
-      }),
-    );
-    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+    await screen.findByTestId("run-timeline-chart");
+    expect(screen.queryByRole("link", { name: "Compare agents" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Compact session" })).toBeNull();
   });
 
-  it.each([0, -1, Number.NaN, "4"])("falls back to thirty minutes for invalid value %s", async (value) => {
-    getSettings.mockResolvedValue({
-      settings: [
-        {
-          key: "display.run_timeline_window_hours",
-          value,
-          updated_at: "2026-09-05T14:00:00.000Z",
-        },
-      ],
-    });
-
+  it("keeps the context breakdown card", async () => {
     render();
-
-    await waitFor(() =>
-      expect(getRunTimeline).toHaveBeenCalledWith(42, {
-        from: "2026-09-05T13:56:00.000Z",
-        to: "2026-09-05T14:26:00.000Z",
-        session: "compact",
-      }),
-    );
-    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(getContextBreakdown).toHaveBeenCalledWith(42));
   });
 });
 
-describe("compare entry", () => {
-  it("preselects this agent for the compare view", async () => {
-    const { getByRole } = render();
+describe("selecting", () => {
+  it("shows a node's summary, span and both costs in the side panel", async () => {
+    render();
+    const node = (await screen.findAllByTestId("run-timeline-node")).find(
+      (candidate) => candidate.getAttribute("data-node-id") === "1",
+    )!;
+    fireEvent.click(node);
 
-    await waitFor(() =>
-      expect(getByRole("link", { name: "Compare agents" }).getAttribute("href")).toBe(
-        "/insights/compare?agents=42",
-      ),
+    const detail = await screen.findByTestId("run-timeline-node-detail");
+    expect(within(detail).getByTestId("run-timeline-summary").textContent).toBe(
+      "The agent read the repo\nand planned the change.",
     );
+    expect(detail.textContent).toContain("#1–#5 (5)");
+    expect(detail.textContent).toContain("Agent cost over this span");
+    expect(detail.textContent).toContain("Cost of generating this summary");
+    expect(detail.textContent).toContain("31.5s");
+    // the agent's own cost: 3 calls, 3.0k input, 2.4k cache read
+    expect(within(detail).getAllByText("3.0k").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("2.4k").length).toBeGreaterThan(0);
+  });
+
+  it("says so when a node has no understanding-call record", async () => {
+    render();
+    const node = (await screen.findAllByTestId("run-timeline-node")).find(
+      (candidate) => candidate.getAttribute("data-node-id") === "2",
+    )!;
+    fireEvent.click(node);
+    expect((await screen.findByTestId("run-timeline-node-detail")).textContent).toContain(
+      "No understanding-call record for this node.",
+    );
+  });
+
+  it("reads a unit's own raw parts: a text unit shows the text, not the thinking or the call", async () => {
+    render();
+    const unit = (await screen.findAllByTestId("run-timeline-unit")).find(
+      (candidate) => candidate.getAttribute("data-unit-kind") === "text",
+    )!;
+    fireEvent.click(unit);
+
+    const detail = await screen.findByTestId("run-timeline-unit-detail");
+    expect(within(detail).queryByRole("button", { name: /raw messages/i })).toBeNull();
+    await waitFor(() =>
+      expect(getRunTimelineMessages).toHaveBeenCalledWith(42, {
+        start: 2,
+        end: 2,
+        limit: 50,
+        full: false,
+      }),
+    );
+    const raw = await within(detail).findByText("on it", { selector: "pre" });
+    expect(raw).toBeTruthy();
+    expect(within(detail).queryByText("need a plan")).toBeNull();
+    expect(within(detail).queryByText("ls")).toBeNull();
   });
 });
 
-describe("trail scope (P4-1)", () => {
-  it("clears the focus trail when the session changes", async () => {
-    getRunTimeline.mockResolvedValue(pendingResponse);
-    const { getByRole, queryByTestId } = render();
+function wheel(target: Element, init: WheelEventInit, count = 1) {
+  act(() => {
+   for (let i = 0; i < count; i++) {
+    // jsdom's WheelEvent drops the pointer coordinates; a MouseEvent carries them.
+    const event = new MouseEvent("wheel", { bubbles: true, cancelable: true, clientX: init.clientX });
+    Object.defineProperties(event, {
+      deltaX: { value: init.deltaX ?? 0 },
+      deltaY: { value: init.deltaY ?? 0 },
+    });
+    target.dispatchEvent(event);
+   }
+  });
+}
 
-    fireEvent.doubleClick(
-      await screen.findByRole("button", { name: "Pending layer segment" }),
-    );
-    expect(await screen.findByTestId("timeline-crumbs")).toBeTruthy();
+const summaryText = () => screen.getByTestId("run-timeline-window").textContent;
 
-    fireEvent.click(getByRole("button", { name: "Current session" }));
+describe("drilling", () => {
+  async function node(id: string) {
+    return (await screen.findAllByTestId("run-timeline-node")).find(
+      (candidate) => candidate.getAttribute("data-node-id") === id,
+    )!;
+  }
+  async function doubleClickNode(id: string) {
+    fireEvent.doubleClick(await node(id));
+  }
 
-    await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
+  it("zooms to the node's span and adds a crumb, without another read", async () => {
+    render();
+    const before = await screen.findByTestId("run-timeline-window");
+    const whole = before.textContent;
+    await doubleClickNode("1");
+    const crumbs = await screen.findByTestId("run-timeline-crumbs");
+    expect(crumbs.textContent).toContain("Level 1 · The agent read the repo");
+    expect(summaryText()).not.toBe(whole);
+    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+    // node 2 starts after node 1 ends: it is outside the zoomed view
+    expect(screen.getAllByTestId("run-timeline-node").map((n) => n.getAttribute("data-node-id"))).not.toContain("2");
+    // the double-click also selected the node
+    expect(await screen.findByTestId("run-timeline-node-detail")).toBeTruthy();
   });
 
-  it("clears the focus trail when the resolved agentId changes in place", async () => {
-    getRunTimeline.mockResolvedValue(pendingResponse);
+  it("drills through the Drill button of the side panel too", async () => {
+    render();
+    fireEvent.click(await node("3"));
+    fireEvent.click(await screen.findByRole("button", { name: "Drill in" }));
+    expect(screen.getByTestId("run-timeline-crumbs").textContent).toContain("Level 2");
+  });
+
+  it("a single click selects and does not drill", async () => {
+    render();
+    fireEvent.click(await node("1"));
+    await screen.findByTestId("run-timeline-node-detail");
+    expect(screen.getByTestId("run-timeline-crumbs").textContent).not.toContain("Level 1");
+  });
+
+  it("steps back one level at a time, and to the whole lifetime from the root", async () => {
+    render();
+    const whole = (await screen.findByTestId("run-timeline-window")).textContent;
+    await doubleClickNode("3");
+    const level2 = summaryText();
+    await doubleClickNode("1");
+    expect(summaryText()).not.toBe(level2);
+
+    const crumbs = screen.getByTestId("run-timeline-crumbs");
+    fireEvent.click(within(crumbs).getByRole("button", { name: /Level 2/ }));
+    expect(summaryText()).toBe(level2);
+    expect(within(screen.getByTestId("run-timeline-crumbs")).queryByText(/Level 1/)).toBeNull();
+
+    fireEvent.click(within(screen.getByTestId("run-timeline-crumbs")).getByRole("button", { name: "Whole lifetime" }));
+    expect(summaryText()).toBe(whole);
+    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the drill path when the resolved agentId changes in place", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { rerender, queryByTestId } = rtlRender(
+    const { rerender } = rtlRender(
       <QueryClientProvider client={queryClient}>
         <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
       </QueryClientProvider>,
     );
-
-    fireEvent.doubleClick(
-      await screen.findByRole("button", { name: "Pending layer segment" }),
+    await doubleClickNode("1");
+    await waitFor(() =>
+      expect(screen.getByTestId("run-timeline-crumbs").textContent).toContain("Level 1"),
     );
-    expect(await screen.findByTestId("timeline-crumbs")).toBeTruthy();
 
     rerender(
       <QueryClientProvider client={queryClient}>
         <RunTimelinePage params={Promise.resolve({ agentId: "43" })} />
       </QueryClientProvider>,
     );
-
-    await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
+    await waitFor(() =>
+      expect(screen.getByTestId("run-timeline-crumbs").textContent).not.toContain("Level 1"),
+    );
   });
 });
 
-describe("context axis (P4-2b)", () => {
-  it("disables the characters axis without message data", async () => {
-    getRunTimeline.mockResolvedValue(pendingResponse);
-    const { getByRole } = render();
-
-    await screen.findByLabelText("Run timeline chart");
-    const contextButton = getByRole("button", { name: "Characters" }) as HTMLButtonElement;
-    expect(contextButton.disabled).toBe(true);
-    expect(contextButton.title).toBe("No message data in this window");
+describe("zoom and pan", () => {
+  beforeEach(() => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const wide = this.hasAttribute("data-track");
+      return { left: 100, top: 0, width: wide ? 1000 : 0, height: 0, right: 1100, bottom: 0, x: 100, y: 0, toJSON: () => ({}) };
+    });
   });
+  afterEach(() => vi.restoreAllMocks());
 
-  it("switches to the character axis and drives its viewport with zero refetches", async () => {
-    getRunTimeline.mockResolvedValue(messagesResponse);
-    const { container, getByRole } = render();
-
-    await waitFor(() =>
-      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
-    );
-    fireEvent.click(getByRole("button", { name: "Characters" }));
-    expect(getByRole("button", { name: "Characters" }).getAttribute("aria-pressed")).toBe("true");
-    // Switching the projection is a pure view change: no request.
-    expect(getRunTimeline).toHaveBeenCalledTimes(1);
-    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
-
-    // +/- drive the local char viewport on the context axis: still no request.
-    fireEvent.click(getByRole("button", { name: "Zoom in" }));
-    expect(tickTexts(container)).toEqual(["200", "300", "400", "500", "600", "700", "800"]);
+  it("the wheel zooms around the cursor and the loaded data is not read again", async () => {
+    render();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    const whole = summaryText();
+    wheel(chart, { deltaY: -400, clientX: 100 });
+    const zoomed = summaryText();
+    expect(zoomed).not.toBe(whole);
+    // cursor at the left edge: the start stays, so the view starts where the lifetime did
+    expect(zoomed.split(" – ")[0]).toBe(whole.split(" – ")[0]);
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
-  it("pushes a character-range crumb on strip double-click and clears it on reset", async () => {
-    getRunTimeline.mockResolvedValue(messagesResponse);
-    const { container, getByRole, queryByTestId } = render();
-
-    await waitFor(() =>
-      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
-    );
-    fireEvent.click(getByRole("button", { name: "Characters" }));
-
-    // Message c.1 spans chars 400-700; the focus pads by half its width.
-    fireEvent.doubleClick(screen.getAllByTestId("strip-message-button")[1]);
-    const crumbs = await screen.findByTestId("timeline-crumbs");
-    expect(crumbs.textContent).toContain("Message 1");
-    expect(crumbs.textContent).toContain("250\u2013850 chars");
-    expect(tickTexts(container)).toEqual(["300", "400", "500", "600", "700", "800"]);
-
-    // "Back to the full axis" is a pure viewport reset on the context axis.
-    fireEvent.click(getByRole("button", { name: "Reset axis" }));
-    await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
-    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
-    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  it("wheel events that arrive before React renders compose instead of repeating the old view", async () => {
+    render();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    wheel(chart, { deltaY: -300, clientX: 600 });
+    wheel(chart, { deltaY: -300, clientX: 600 });
+    const sequential = summaryText();
+    fireEvent.click(screen.getByRole("button", { name: "Reset zoom" }));
+    wheel(chart, { deltaY: -300, clientX: 600 }, 2);
+    expect(summaryText()).toBe(sequential);
   });
 
-  it("clamps the character viewport when the message total shrinks in a same-window refresh", async () => {
-    getRunTimeline.mockResolvedValue(messagesResponse);
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { container, getByRole } = rtlRender(
-      <QueryClientProvider client={queryClient}>
-        <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() =>
-      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
-    );
-    fireEvent.click(getByRole("button", { name: "Characters" }));
-    fireEvent.doubleClick(screen.getAllByTestId("strip-message-button")[1]);
-    await screen.findByTestId("timeline-crumbs");
-    expect(tickTexts(container)).toEqual(["300", "400", "500", "600", "700", "800"]);
-
-    // The refresh keeps the window but drops the last two messages (chars sum
-    // 1000 to 700): the viewport clamps and the char-range crumb stays.
-    const firstCall = getRunTimeline.mock.calls[0] as
-      | [number, { from?: string; to?: string }]
-      | undefined;
-    const options = firstCall?.[1] ?? {};
-    queryClient.setQueryData(
-      ["run-timeline", 42, options.from ?? null, options.to ?? null, "compact", "turn"],
-      { ...messagesResponse, messages: messagesResponse.messages?.slice(0, 2) },
-    );
-
-    await waitFor(() =>
-      expect(tickTexts(container)).toEqual(["100", "200", "300", "400", "500", "600", "700"]),
-    );
-    expect(screen.getByTestId("timeline-crumbs").textContent).toContain("Message 1");
-    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  it("a horizontal scroll pans a zoomed view", async () => {
+    render();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    wheel(chart, { deltaY: -600, clientX: 100 });
+    const zoomed = summaryText();
+    wheel(chart, { deltaX: 300, deltaY: 0, clientX: 600 });
+    expect(summaryText()).not.toBe(zoomed);
   });
 
-  // The bucket-mode premise this test originally encoded ("a bucket request
-  // carries no messages") was disproved in P4-4 (#4023): the strip read is
-  // not gated on the level, so a response without message data means a
-  // degraded read — the input stands, its cause is read failure, not
-  // aggregation.
-  it("keeps the characters axis disabled when the response has no message data", async () => {
-    getSettings.mockResolvedValue({
-      settings: [
+  it("a drag pans and its release does not select the block under the pointer", async () => {
+    render();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    wheel(chart, { deltaY: -600, clientX: 100 });
+    const zoomed = summaryText();
+    const unit = screen.getAllByTestId("run-timeline-unit")[0];
+    fireEvent.pointerDown(unit, { clientX: 400, button: 0, pointerId: 1 });
+    fireEvent.pointerMove(unit, { clientX: 200, pointerId: 1 });
+    fireEvent.pointerUp(unit, { clientX: 200, pointerId: 1 });
+    fireEvent.click(unit);
+    expect(summaryText()).not.toBe(zoomed);
+    expect(screen.queryByTestId("run-timeline-unit-detail")).toBeNull();
+  });
+
+  it("a press that barely moves is still a click", async () => {
+    render();
+    const unit = (await screen.findAllByTestId("run-timeline-unit"))[0];
+    fireEvent.pointerDown(unit, { clientX: 400, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(unit, { clientX: 401, pointerId: 1 });
+    fireEvent.click(unit);
+    expect(await screen.findByTestId("run-timeline-unit-detail")).toBeTruthy();
+  });
+
+  it("the buttons zoom and the fit button restores the whole lifetime", async () => {
+    render();
+    await screen.findByTestId("run-timeline-chart");
+    const whole = summaryText();
+    expect(screen.getByRole("button", { name: "Reset zoom" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(summaryText()).not.toBe(whole);
+    fireEvent.click(screen.getByRole("button", { name: "Reset zoom" }));
+    expect(summaryText()).toBe(whole);
+  });
+});
+
+describe("failure and loading", () => {
+  it("offers a retry when the read fails", async () => {
+    getRunTimeline.mockRejectedValueOnce(new Error("boom"));
+    render();
+    expect(await screen.findByText("Could not load the run timeline.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("run-timeline-chart");
+  });
+
+  it("the route loading shell renders", () => {
+    const { container } = rtlRender(<Loading />);
+    expect(container.querySelector("main")).not.toBeNull();
+  });
+
+  it("clicking a thinking block reads only the thinking, a tool call block only the call", async () => {
+    getRunTimeline.mockResolvedValue({
+      ...lifetimeResponse,
+      units: [
         {
-          key: "display.run_timeline_window_hours",
-          value: 24,
-          updated_at: "2026-09-05T14:00:00.000Z",
+          kind: "thinking",
+          i0: 2,
+          i1: 2,
+          start: "2026-10-04T12:04:00.000000Z",
+          end: "2026-10-04T12:05:00.000000Z",
+          source: null,
+          preview: "need a plan",
+        },
+        {
+          kind: "call",
+          i0: 2,
+          i1: 2,
+          start: "2026-10-04T12:05:00.000000Z",
+          end: "2026-10-04T12:05:00.000000Z",
+          source: null,
+          preview: "ls",
         },
       ],
     });
-    getRunTimeline.mockResolvedValue({
-      ...pendingResponse,
-      rows: [{ ...pendingResponse.rows[0], turn: null, n_turns: 12 }],
-    });
-    const { getByRole } = render();
-
-    await waitFor(() =>
-      expect(getRunTimeline).toHaveBeenCalledWith(42, expect.objectContaining({ level: "bucket" })),
-    );
-    await screen.findByLabelText("Run timeline chart");
-    const contextButton = getByRole("button", { name: "Characters" }) as HTMLButtonElement;
-    expect(contextButton.disabled).toBe(true);
-  });
-
-  it("resets the character viewport and trail when the data window changes", async () => {
-    getRunTimeline.mockResolvedValueOnce(messagesResponse).mockResolvedValueOnce({
-      ...messagesResponse,
-      window: { from: "2026-09-05T13:26:00.000Z", to: "2026-09-05T14:26:00.000Z" },
-    });
-    const { container, getByRole, queryByTestId } = render();
-
-    await waitFor(() =>
-      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
-    );
-    fireEvent.click(getByRole("button", { name: "Characters" }));
-    fireEvent.doubleClick(screen.getAllByTestId("strip-message-button")[1]);
-    await screen.findByTestId("timeline-crumbs");
-    expect(tickTexts(container)).toEqual(["300", "400", "500", "600", "700", "800"]);
-
-    // A window preset is a data control: it refetches, and the new data
-    // resets the view to the full axis and clears the char-range trail.
-    fireEvent.click(getByRole("button", { name: "1h" }));
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(2));
-    // The trail clears at click time (setZoomWindow), but the viewport reset
-    // rides on the second response's data (the window-key effect) — wait for
-    // the target condition itself, not for signals that hold before it lands
-    // (flake #4074: CI read the pre-reset ticks here).
-    await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
-    await waitFor(() =>
-      expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]),
-    );
-  });
-
-  it("falls back to the time axis when the message projection drops out", async () => {
-    getRunTimeline.mockResolvedValue(messagesResponse);
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { container, getByRole } = rtlRender(
-      <QueryClientProvider client={queryClient}>
-        <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() =>
-      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
-    );
-    fireEvent.click(getByRole("button", { name: "Characters" }));
-    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
-
-    // A degraded refresh without the message projection must not park the
-    // chart on a blank context view: the page falls back to the time axis.
-    const firstCall = getRunTimeline.mock.calls[0] as
-      | [number, { from?: string; to?: string }]
-      | undefined;
-    const options = firstCall?.[1] ?? {};
-    queryClient.setQueryData(
-      ["run-timeline", 42, options.from ?? null, options.to ?? null, "compact", "turn"],
-      { ...messagesResponse, messages: null },
-    );
-
-    await waitFor(() =>
-      expect(getByRole("button", { name: "Time" }).getAttribute("aria-pressed")).toBe("true"),
-    );
-    expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(tickTexts(container).some((tick) => tick?.includes(":"))).toBe(true);
-  });
-});
-
-describe("context breakdown card (P4-3)", () => {
-  it("renders the card for the page's agent once the timeline loads", async () => {
-    getRunTimeline.mockResolvedValue(pendingResponse);
     render();
+    const blocks = await screen.findAllByTestId("run-timeline-unit");
+    fireEvent.click(blocks.find((b) => b.getAttribute("data-unit-kind") === "thinking")!);
+    let detail = await screen.findByTestId("run-timeline-unit-detail");
+    expect(await within(detail).findByText("need a plan", { selector: "pre" })).toBeTruthy();
+    expect(within(detail).queryByText("ls")).toBeNull();
+    expect(within(detail).queryByText("on it")).toBeNull();
 
-    const card = await screen.findByTestId("context-breakdown-card");
-    expect(card.querySelector("h2")?.textContent).toBe("Context breakdown");
-    await waitFor(() => expect(getContextBreakdown).toHaveBeenCalledWith(42));
-    expect(getContextBreakdown).toHaveBeenCalledTimes(1);
-    // The merged legend row proves the shared body rendered inside the card.
-    expect(screen.getByText("System notes")).toBeTruthy();
+    fireEvent.click(blocks.find((b) => b.getAttribute("data-unit-kind") === "call")!);
+    detail = await screen.findByTestId("run-timeline-unit-detail");
+    expect(await within(detail).findByText("ls", { selector: "pre" })).toBeTruthy();
+    expect(within(detail).queryByText("need a plan")).toBeNull();
   });
 
-  it("does not fetch or render the card while the timeline is pending", async () => {
-    render(); // getRunTimeline stays pending (beforeEach default)
-    await screen.findByRole("heading", { name: "Run timeline — agent 42" });
-    expect(screen.queryByTestId("context-breakdown-card")).toBeNull();
-    expect(getContextBreakdown).not.toHaveBeenCalled();
-  });
-
-  it("keeps the card data separate from timeline refetches (window change)", async () => {
-    getRunTimeline.mockResolvedValue(messagesResponse);
-    const { getByRole, getByTestId } = render();
-    await screen.findByTestId("context-breakdown-card");
-    await waitFor(() => expect(getContextBreakdown).toHaveBeenCalledTimes(1));
-
-    // A window preset is a timeline data control: the timeline refetches while
-    // the card — agent-scoped, not window-scoped — does not.
-    fireEvent.click(getByRole("button", { name: "1h" }));
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(2));
-    expect(getContextBreakdown).toHaveBeenCalledTimes(1);
-    expect(getByTestId("context-breakdown-card")).toBeTruthy();
-  });
-
-  it("labels the reset control by axis (P4-3 micro item)", async () => {
-    getRunTimeline.mockResolvedValue(messagesResponse);
-    const { getByRole } = render();
-    await waitFor(() =>
-      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
-    );
-    expect(getByRole("button", { name: "Reset window" })).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: "Characters" }));
-    expect(getByRole("button", { name: "Reset axis" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Reset window" })).toBeNull();
-  });
-});
-
-
-describe("timeline landing layout", () => {
-  it("puts the chart before metrics and context details while keeping warnings visible", async () => {
-    getRunTimeline.mockResolvedValue({
-      ...pendingResponse,
-      meta: { ...pendingResponse.meta, unmatched_turns: 2 },
-      boundaries: { ...pendingResponse.boundaries, has_activity_after_window: true, post_window_turns: 3 },
-    });
+  it("draws every block on one lane and lists the block colors in a legend", async () => {
     render();
-    const visualization = await screen.findByTestId("run-timeline-visualization");
-    const metrics = screen.getByText("Turns").closest("section")!;
-    const context = screen.getByTestId("context-breakdown-card");
-    expect(visualization.compareDocumentPosition(metrics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(metrics.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(visualization.style.minHeight).toBe("50vh");
-    const session = screen.getByTestId("run-timeline-session");
-    expect(session.querySelector('[role="alert"]')?.closest("details")).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("2 turns");
-    expect(screen.getByRole("button", { name: "View current session" }).closest("details")).toBeNull();
-    expect(session.querySelector("details")?.open).toBe(false);
-    expect(screen.getByLabelText("Start").closest("details")).toBe(session.querySelector("details"));
-  });
-
-  it("applies custom dates after opening the disclosure", async () => {
-    getRunTimeline.mockResolvedValue(pendingResponse);
-    render();
-    await screen.findByTestId("run-timeline-visualization");
-    const disclosure = screen.getByText("Custom window").closest("details")!;
-    disclosure.open = true;
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "2026-09-05T12:00" } });
-    fireEvent.change(screen.getByLabelText("End"), { target: { value: "2026-09-05T13:00" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    await waitFor(() => expect(getRunTimeline).toHaveBeenLastCalledWith(42, {
-      from: new Date("2026-09-05T12:00").toISOString(),
-      to: new Date("2026-09-05T13:00").toISOString(),
-      session: "compact",
-    }));
-  });
-
-  it("shows a timeline skeleton while the client data is pending", async () => {
-    render();
-    expect(screen.getByRole("status", { name: "Loading run timeline…" })).toBeTruthy();
-    await screen.findByRole("heading", { name: "Run timeline — agent 42" });
-  });
-
-  it("gives the route loading boundary the same timeline skeleton", () => {
-    rtlRender(<Loading />);
-    expect(screen.getByRole("main").id).toBe("main-content");
-    expect(screen.getByRole("status", { name: "Loading run timeline…" })).toBeTruthy();
-  });
-});
-
-
-describe("persistent timeline reader", () => {
-  it("shows the reader hint while data is pending and after an empty result", async () => {
-    useMediaQuery.mockReturnValue(true);
-    let finish!: (value: RunTimelineResponse) => void;
-    getRunTimeline.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-    render();
-    const reader = screen.getByRole("complementary", { name: "Timeline reader" });
-    expect(within(reader).getByText("Click any block to read its full text here.")).toBeTruthy();
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalled());
-    finish({ ...pendingResponse, rows: [] });
-    await screen.findByText("No activity in this window.");
-    expect(within(reader).getByText("Click any block to read its full text here.")).toBeTruthy();
-  });
-
-  it.each([true, false])("places turn details in the correct reader when wide=%s", async (wide) => {
-    useMediaQuery.mockReturnValue(wide);
-    getRunTimeline.mockResolvedValue(pendingResponse);
-    render();
-    fireEvent.click(await screen.findByRole("button", { name: "Turn 1" }));
-    const panel = screen.getByRole("region", { name: "Turn details" });
-    const reader = screen.getByTestId("run-timeline-reader");
-    expect(reader.contains(panel)).toBe(wide);
-    expect(screen.getByTestId("run-timeline-main").contains(panel)).toBe(!wide);
-    fireEvent.click(within(panel).getByRole("button", { name: "Close details" }));
-    expect(screen.queryByRole("region", { name: "Turn details" })).toBeNull();
-    if (wide) expect(within(reader).getByText("Click any block to read its full text here.")).toBeTruthy();
+    const blocks = await screen.findAllByTestId("run-timeline-unit");
+    expect(blocks.every((block) => block.style.top === "")).toBe(true);
+    const legend = screen.getByTestId("run-timeline-legend");
+    expect(within(legend).getAllByRole("listitem")).toHaveLength(7);
   });
 });

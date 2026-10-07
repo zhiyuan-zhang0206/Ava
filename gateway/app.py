@@ -80,6 +80,7 @@ from gateway.agents import notices as notices_router
 from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
 from gateway.agents import timeline as timeline_router
+from gateway.agents import understanding as agents_understanding_router
 from gateway.alerts import router as alerts_router
 from gateway.auth import rejection_log
 from gateway.auth import router as auth_router
@@ -162,8 +163,8 @@ from gateway.routers import (
 from gateway.routers import (
     uploads as uploads_router,
 )
+from gateway.run_timeline import history as run_timeline_history
 from gateway.run_timeline import router as run_timeline_router
-from gateway.run_timeline.strip import SegmentReadCache
 from gateway.schedules import router as schedules_router
 
 _log = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ def _build_request_resources(app: FastAPI) -> None:
     app.state.memory_search_gate = memory_router.build_search_gate()
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.auth401_log = rejection_log.AuthRejectionLog()
-    app.state.strip_cache = SegmentReadCache()
+    app.state.run_timeline_views = run_timeline_history.HistoryViewCache()
     app.state.fleet_graph_stale_emitter = fleet_graph_router.FleetGraphStaleEmitter()
 
 
@@ -552,6 +553,7 @@ app.include_router(auth_router.router)
 app.include_router(bootstrap_router.router)
 app.include_router(agents_router.router)
 app.include_router(agents_lifecycle_router.router)
+app.include_router(agents_understanding_router.router)
 app.include_router(agents_state_router.router)
 app.include_router(agent_events_router.router)
 app.include_router(computer_traces_router.router)

@@ -36,3 +36,5 @@ shipped (dark) worker made that unsafe to switch on:
    resume as the window rolls), and the anomaly breaker no longer counts them. Rejected: one
    shared budget that trips — the one-time wave is expected load, not an anomaly, and a trip
    needs a manual reset.
+
+Superseded 2026-10-07: the worker is replaced by chunk-triggered calls — see [2026-10-07-understanding-tree-chunk-grouping.md](2026-10-07-understanding-tree-chunk-grouping.md).

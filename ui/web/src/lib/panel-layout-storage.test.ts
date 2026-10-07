@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { panelLayoutStorage } from "./panel-layout-storage";
 
@@ -34,5 +34,20 @@ describe("panelLayoutStorage", () => {
     localStorage.setItem(KEY, legacy);
 
     expect(panelLayoutStorage().getItem(KEY)).toBe(legacy);
+  });
+
+  it("survives a storage that throws on read or write", () => {
+    const boom = () => {
+      throw new Error("storage unavailable");
+    };
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(boom);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(boom);
+    try {
+      const storage = panelLayoutStorage();
+      expect(storage.getItem(KEY)).toBeNull();
+      expect(() => storage.setItem(KEY, "{}")).not.toThrow();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

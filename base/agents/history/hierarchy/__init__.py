@@ -1,23 +1,9 @@
-"""Hierarchical understanding engine — blocks, seal cascade, generation.
+"""The understanding tree: how an agent's history becomes a tree of summaries.
 
-The engine turns one agent's message stream into a level tree of summaries:
-`blocks.py` folds the console item stream into "think -> act -> observe" units,
-`seal.py` cuts the unit stream into sealable groups at trigger points and fixes
-every node's narrative budget, `generate.py` materializes the node texts via
-one bounded model call each, `tokens.py` is the token caliber all budgets use.
-
-`ENGINE_VERSION` names the semantics of that pipeline as a whole; stored node
-rows record it (with `PROMPT_VERSION` and the storage schema version) so a
-generation can always be traced to the rules that produced it. `nodes.py` is
-the storage-facing node shape, kept a leaf so the serving side never pulls the
-generation stack.
-
-`PROMPT_VERSION` bumps when the prompt templates change: stored rows record
-the version they were generated with, so a text-quality question can be traced
-to a template.
+`units.py` divides messages into layer-0 units (and the blocks the run-timeline draws), `chunks.py`
+and `chunk_consumer.py` describe a stretch of the agent's own context in one cached call (groups of
+units and a summary each, `chunk_generate.py`, `leaf_groups.py`), `group.py`, `group_consumer.py`
+and `group_store.py` group the levels above, `store.py` / `serve.py` / `usage.py` read the tree and
+its costs for the run-timeline, and `generate.py` is the provider-call layer. Each page of the
+package's `docs/` says one part.
 """
-
-from __future__ import annotations
-
-ENGINE_VERSION = "0.3"
-PROMPT_VERSION = "0.3"

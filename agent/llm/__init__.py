@@ -18,7 +18,7 @@ the llm graph node (`agent/graph/llm/`) that drives them:
     canonical emitter in `base/lm/usage.py`
 
 This door imports neither: it stays a dependency-free schema leaf (langchain
-only), which is what lets the hierarchy worker bind the same schema without
+only), which is what lets the understanding consumer bind the same schema without
 the rest of the kernel.
 """
 

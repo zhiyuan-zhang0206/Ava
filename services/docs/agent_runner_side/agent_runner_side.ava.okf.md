@@ -21,7 +21,7 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 | browser | headed Chrome reuse + shared MCP upstream | [[services/docs/agent_runner_side/browser/browser/browser.ava.okf.md]] |
 | permissions-helper | macOS permission ancestor and desktop automation | [[permissions-helper/permissions-helper.ava.okf.md]] |
 | computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.ava.okf.md]] |
-| agent-host | Executes local agents as isolated asyncio turns in one daemon | `services/agent_runner/agent_host/` |
+| agent-host | Executes local agents as isolated asyncio turns in one daemon; its background loops include the understanding-chunk consumer ([[base/agents/history/hierarchy/docs/chunks.ava.okf.md]]) | `services/agent_runner/agent_host/` |
 
 ## Also Under agent-runner Capability
 - **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[services/docs/agent_runner_side/browser/browser/browser.ava.okf.md]]

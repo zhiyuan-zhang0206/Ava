@@ -151,7 +151,7 @@ peripheral or needs external credentials or hardware.
 | G8 | Alerts API: `POST/GET /api/alerts`, alert list in the UI | `gateway/alerts/router.py` | none | P1 | `tests/e2e/visual/test_alerts_no_horizontal_overflow.py` stubs `GET /api/alerts` (layout only). Unit: `tests/gateway/test_alerts_api.py` |
 | G9 | Cluster endpoints: `/api/cluster/status|roster|machines`, machine pause/resume, `/api/bootstrap`, 503 pause policy during maintenance | `gateway/cluster/router.py`, `gateway/cluster/machine_pause.py`, `gateway/middleware/pause_policy.py` | none | P1 | Single-machine e2e stack. Unit: `tests/gateway/test_cluster_endpoints.py`, `gateway/tests/test_status_cluster.py` |
 | G10 | Observation APIs: inspector (`/inspect/live|statistics|metrics|widgets`), `token-usage`, `context-breakdown`, `/api/metrics`, memory pool API (`/api/memory/*`), plugin UI contributions | `gateway/inspect/router.py`, `gateway/events/metrics.py`, `gateway/routers/memory.py`, `gateway/extensions/ui_contributions.py` | none | P2 | Unit: `gateway/tests/test_agent_inspect.py`, `gateway/tests/test_token_usage.py`, `gateway/routers/tests/test_memory_search.py` |
-| G11 | Browser layout, accessibility and visual regression (home, fleet, mobile, compare view, keyboard) | `ui/web/src/`, `tests/e2e/visual/` | `tests/e2e/visual/*` (render checks; most stub the API or fake EventSource) | P2 | Counts as UI regression, not feature e2e |
+| G11 | Browser layout, accessibility and visual regression (home, fleet, mobile, keyboard) | `ui/web/src/`, `tests/e2e/visual/` | `tests/e2e/visual/*` (render checks; most stub the API or fake EventSource) | P2 | Counts as UI regression, not feature e2e |
 
 ## 10. Other
 

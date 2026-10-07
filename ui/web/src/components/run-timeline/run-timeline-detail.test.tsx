@@ -1,0 +1,53 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { RunTimelineNode } from "@/lib/types";
+
+vi.mock("@/lib/api", () => ({
+  api: { getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)) },
+}));
+
+import { NodeDetail } from "./run-timeline-detail";
+
+afterEach(cleanup);
+
+const node = (summary: string): RunTimelineNode => ({
+  id: "n1",
+  level: 1,
+  parent: null,
+  start: "2026-10-01T00:00:00Z",
+  end: "2026-10-01T01:00:00Z",
+  span_start: 0,
+  span_end: 3,
+  summary,
+  usage: { calls: 1, input: 10, cache_read: 0, output: 5 },
+  generation: null,
+});
+
+function renderNode(summary: string) {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NodeDetail agentId={1} node={node(summary)} onDrill={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  return screen.getByTestId("run-timeline-summary");
+}
+
+describe("NodeDetail summary", () => {
+  it("renders Markdown structure", () => {
+    const el = renderNode("## Title\n\n- one\n- two\n\n**bold** and `code`");
+    expect(el.querySelector("h2")?.textContent).toBe("Title");
+    expect(el.querySelectorAll("li")).toHaveLength(2);
+    expect(el.querySelector("strong")?.textContent).toBe("bold");
+    expect(el.querySelector("code")?.textContent).toBe("code");
+  });
+
+  it("does not render raw HTML and opens links in a new tab", () => {
+    const el = renderNode("<script>x</script>\n\n[ava](https://example.com)");
+    expect(el.querySelector("script")).toBeNull();
+    const a = el.querySelector("a");
+    expect(a?.getAttribute("target")).toBe("_blank");
+    expect(a?.getAttribute("rel")).toContain("noopener");
+  });
+});

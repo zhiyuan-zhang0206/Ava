@@ -1950,11 +1950,12 @@ BEGIN
 END $$;
 
 -- ─────────────── understanding_nodes ───────────────
--- Materialized hierarchical understanding nodes (task #3704): the level tree
--- behind the run-timeline narrative layers. One row per sealed node, keyed by
--- the deterministic message span; the node's single text plus the hashes that
--- make writes idempotent (text_hash) and reruns free (input_hash). Boundaries
--- are never trimmed (#1125), so the span identity is stable across runs.
+-- The understanding tree behind the run-timeline narrative layers. One row per
+-- node, keyed by the deterministic message span: depth 1 is written by a chunk
+-- call (a group of message units and its summary), each level above by an
+-- upper-level grouping check. The node's single text plus the hashes that make
+-- writes idempotent (text_hash). Boundaries are never trimmed (#1125), so the
+-- span identity is stable across runs.
 CREATE TABLE understanding_nodes (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT NOT NULL,
@@ -1969,6 +1970,11 @@ CREATE TABLE understanding_nodes (
     input_hash TEXT NOT NULL,
     children_count INTEGER NOT NULL,
     parent_id BIGINT REFERENCES understanding_nodes(id) ON DELETE SET NULL,
+    -- What produced the node, so its generation cost joins by id: a level-1 node names its chunk
+    -- job (understanding_chunk_jobs.id), a node above names its grouping check
+    -- (understanding_group_calls.check_key). NULL on rows written before the link existed.
+    job_id BIGINT,
+    check_key TEXT,
     model TEXT NOT NULL,
     engine_version TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
@@ -1989,7 +1995,7 @@ CREATE INDEX understanding_nodes_reuse
     ON understanding_nodes (agent_id, input_hash);
 
 COMMENT ON TABLE understanding_nodes IS
-    'Materialized hierarchical understanding nodes (task #3704): one text per sealed (agent_id, depth, message span); append-only identity, hashes for idempotent writes and zero-cost reruns.';
+    'The understanding tree: one text per (agent_id, depth, message span) — depth 1 written by a chunk call, each level above by an upper-level grouping check; hashes make rewrites idempotent.';
 
 -- ava_runner surface: the generation pass ships as a gateway-side worker, but
 -- the operational first-run / ad-hoc regeneration path executes from the
@@ -2061,6 +2067,139 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
         GRANT INSERT ON hierarchy_jobs TO ava_runner;
+    END IF;
+END $$;
+
+-- ─────────────── understanding_chunk_jobs ───────────────
+-- Chunk-triggered understanding queue (see migrations/20261007T045501_understanding-chunk-tree.sql):
+-- one row per context stretch the understanding layer must describe; claimed
+-- with SKIP LOCKED by the agent-host loop. Gated grant: fresh bootstrap applies
+-- this baseline before install birth creates ava_runner.
+CREATE TABLE IF NOT EXISTS understanding_chunk_jobs (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    compact_version INTEGER NOT NULL,
+    start_index INTEGER NOT NULL,
+    end_index INTEGER NOT NULL,
+    end_msg_id TEXT NOT NULL,
+    boundary_checkpoint_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'running', 'done', 'failed', 'skipped')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    claimed_at TIMESTAMPTZ,
+    -- When the job first waited for something outside it (a checkpoint that has not caught up, a
+    -- database blink); the give-up clock. NULL while it has never waited, so a job queued while
+    -- the feature is off is not timed.
+    waiting_since TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    error TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS understanding_chunk_jobs_identity
+    ON understanding_chunk_jobs (agent_id, compact_version, start_index, end_index);
+CREATE INDEX IF NOT EXISTS understanding_chunk_jobs_live
+    ON understanding_chunk_jobs (id) WHERE status IN ('pending', 'running');
+
+COMMENT ON TABLE understanding_chunk_jobs IS
+    'Chunk-triggered understanding queue: one row per context stretch to describe; claimed with SKIP LOCKED by the agent-host loop, result lands as a depth-1 understanding_nodes row.';
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON understanding_chunk_jobs TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_jobs_id_seq TO ava_runner;
+    END IF;
+END $$;
+
+-- ─────────────── understanding_chunk_calls ───────────────
+-- Raw record of each provider call of chunk-triggered understanding (see
+-- migrations/20261007T045501_understanding-chunk-tree.sql): the instruction, the reply as
+-- returned, usage, timing; failed calls included. Gated grant, like the queue.
+CREATE TABLE IF NOT EXISTS understanding_chunk_calls (
+    id BIGSERIAL PRIMARY KEY,
+    job_id BIGINT NOT NULL,
+    agent_id BIGINT NOT NULL,
+    attempt INTEGER NOT NULL,
+    round INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    instruction TEXT NOT NULL,
+    prefix_len INTEGER NOT NULL,
+    start_offset INTEGER NOT NULL,
+    content JSONB,
+    tool_calls JSONB,
+    additional_kwargs JSONB,
+    usage_metadata JSONB,
+    response_metadata JSONB,
+    duration_ms DOUBLE PRECISION NOT NULL,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    kind TEXT NOT NULL DEFAULT 'leaf',
+    problem TEXT
+);
+CREATE INDEX IF NOT EXISTS understanding_chunk_calls_job
+    ON understanding_chunk_calls (job_id, attempt, round);
+CREATE INDEX IF NOT EXISTS understanding_chunk_calls_agent
+    ON understanding_chunk_calls (agent_id, created_at);
+
+COMMENT ON TABLE understanding_chunk_calls IS
+    'Raw record of each provider call of chunk-triggered understanding (instruction, reply as returned, usage, timing, error); failed calls included.';
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT INSERT ON understanding_chunk_calls TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_calls_id_seq TO ava_runner;
+    END IF;
+END $$;
+
+-- ─────────────── understanding_group_state / understanding_group_calls ───────────────
+-- Upper-level grouping of the understanding tree (see migrations/20261007T045501_understanding-chunk-tree.sql):
+-- the per-(agent, level) check cursor with its lease, and the raw record of each grouping provider call.
+CREATE TABLE IF NOT EXISTS understanding_group_state (
+    agent_id BIGINT NOT NULL,
+    level INTEGER NOT NULL,
+    last_checked_open INTEGER NOT NULL DEFAULT 0,
+    claimed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (agent_id, level)
+);
+
+COMMENT ON TABLE understanding_group_state IS
+    'Upper-level grouping cursor per (agent, level): open-node count at the last check, and the lease of the runner checking it.';
+
+CREATE TABLE IF NOT EXISTS understanding_group_calls (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    level INTEGER NOT NULL,
+    check_key TEXT NOT NULL,
+    round INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    mode TEXT,
+    open_ids BIGINT[] NOT NULL,
+    request TEXT NOT NULL,
+    content JSONB,
+    additional_kwargs JSONB,
+    usage_metadata JSONB,
+    response_metadata JSONB,
+    duration_ms DOUBLE PRECISION NOT NULL,
+    problem TEXT,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS understanding_group_calls_check
+    ON understanding_group_calls (check_key, round);
+CREATE INDEX IF NOT EXISTS understanding_group_calls_agent
+    ON understanding_group_calls (agent_id, created_at);
+
+COMMENT ON TABLE understanding_group_calls IS
+    'Raw record of each provider call of an upper-level grouping check (request, reply as returned, usage, timing, refusal reason, error); failed calls included.';
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON understanding_group_state TO ava_runner;
+        GRANT INSERT ON understanding_group_calls TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_group_calls_id_seq TO ava_runner;
     END IF;
 END $$;
 

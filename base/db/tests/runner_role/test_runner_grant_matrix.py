@@ -8,10 +8,10 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from tests.base.test_runner_role import (
     _assert_alert_writes_denied,
-    _exercise_hierarchy_job_grants,
     _exercise_impersonation_entry_grants,
     _exercise_pause_grants,
     _exercise_understanding_node_grants,
+    _exercise_understanding_queue_grants,
     _grant_runner,
     _identity_url,
     _runner_url,
@@ -106,8 +106,8 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # first-run / ad-hoc regeneration path runs from the runner side —
         # task #3704)
         _exercise_understanding_node_grants(conn, agent_id)
-        # the compact-boundary build enqueue (INSERT; task #4674)
-        _exercise_hierarchy_job_grants(conn, agent_id)
+        # the chunk-triggered understanding queue (INSERT + UPDATE + SELECT)
+        _exercise_understanding_queue_grants(conn, agent_id)
         # alerts is gateway-written only: the runner reads it but cannot write it
         _assert_alert_writes_denied(conn)
         # machine_units register_self (INSERT + UPDATE + SELECT)
@@ -355,24 +355,22 @@ def test_refresh_revokes_the_alert_writes_an_earlier_release_granted(runner_db: 
         _assert_alert_writes_denied(conn)
 
 
-def test_hierarchy_jobs_insert_grant_reaches_a_cluster_born_before_the_entry(
+def test_understanding_queue_insert_grant_reaches_a_cluster_born_before_the_entry(
     runner_db: str,
 ) -> None:
-    """Task #4674 regression: a cluster whose runner surface predates the
-    hierarchy_jobs INSERT entry — every enqueue failed with InsufficientPrivilege
-    and the trigger went dark until the start-path refresh re-ran the grant
-    layer."""
+    """A cluster whose runner surface predates the understanding queue's INSERT entry
+    would fail every enqueue with InsufficientPrivilege until the start-path refresh
+    re-runs the grant layer."""
     _grant_runner(runner_db)
-    # The role's surface as it was: blanket reads, no INSERT on hierarchy_jobs.
     with psycopg.connect(runner_db, autocommit=True) as conn:
-        conn.execute("REVOKE INSERT ON hierarchy_jobs FROM ava_runner")
+        conn.execute("REVOKE INSERT ON understanding_chunk_jobs FROM ava_runner")
 
     with (
         psycopg.connect(_runner_url(runner_db), autocommit=True) as conn,
         pytest.raises(psycopg.errors.InsufficientPrivilege),
     ):
-        _exercise_hierarchy_job_grants(conn, 880_040)
+        _exercise_understanding_queue_grants(conn, 880_040)
 
     _grant_runner(runner_db)
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
-        _exercise_hierarchy_job_grants(conn, 880_040)
+        _exercise_understanding_queue_grants(conn, 880_040)
