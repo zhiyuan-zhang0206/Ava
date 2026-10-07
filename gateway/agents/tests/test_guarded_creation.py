@@ -128,8 +128,8 @@ def test_older_routing_rejects_guarded_path_without_creating_an_agent(
     older = FastAPI(
         lifespan=app.router.lifespan_context,
         middleware=app.user_middleware,
-        exception_handlers=app.exception_handlers,
     )
+    older.exception_handlers = app.exception_handlers.copy()
     legacy_routes = APIRouter()
     legacy_routes.routes = [
         route for route in agent_router.router.routes if getattr(route, "path", None) != PATH
