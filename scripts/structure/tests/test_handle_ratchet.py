@@ -1,16 +1,15 @@
-"""The library-layer handle ratchet (scripts/structure/ambient_state/handle_ratchet.py): counts only fall."""
+"""Every detected library-built handle fails without a stored allowance."""
 
 from __future__ import annotations
 
 import ast
 import textwrap
+from pathlib import Path
+
+import pytest
 
 from scripts.structure.ambient_state import busrule, dbhandle
 from scripts.structure.ambient_state import handle_ratchet as ratchet
-
-
-def _sites(**where: list[str]) -> ratchet.Sites:
-    return {tuple(key.split("__", 1)): lines for key, lines in where.items()}  # type: ignore[misc]
 
 
 def test_a_dial_is_counted_whichever_package_it_is_in() -> None:
@@ -43,27 +42,72 @@ def test_package_is_the_first_two_components() -> None:
     assert ratchet.package_of("ops/x.py") == "ops"
 
 
-def test_a_package_above_its_frozen_count_fails_with_its_sites() -> None:
-    sites = _sites(**{"base/agents__shim": ["base/agents/a.py:3", "base/agents/b.py:9"]})
-    frozen = {"base/agents": {"shim": 1}}
-    problems = ratchet.errors(sites, frozen, None)
-    assert [p.split(":")[0] for p in problems] == ["base/agents/a.py", "base/agents/b.py"]
+def test_every_detected_handle_fails_with_its_site() -> None:
+    sites = {
+        ("base/example", ratchet.SHIM): ["base/example/a.py:3", "base/example/b.py:9"],
+        ("base/example", ratchet.SELF_BUILT): ["base/example/c.py:5"],
+        ("base/example", ratchet.BUS_BUILT): ["base/example/d.py:7"],
+    }
+    problems = ratchet.errors(sites)
+    assert {p.split(":")[0] for p in problems} == {
+        "base/example/a.py",
+        "base/example/b.py",
+        "base/example/c.py",
+        "base/example/d.py",
+    }
+    assert len(problems) == 4
+    assert all("composition root" in problem for problem in problems)
 
 
-def test_a_package_below_its_frozen_count_asks_for_the_baseline_to_be_lowered() -> None:
-    problems = ratchet.errors({}, {"base/agents": {"shim": 2}}, None)
-    assert len(problems) == 1
-    assert "lower the baseline" in problems[0]
+def test_zero_sites_passes() -> None:
+    assert ratchet.errors({}) == []
 
 
-def test_an_equal_count_passes() -> None:
-    sites = _sites(**{"base/agents__shim": ["base/agents/a.py:3"]})
-    assert ratchet.errors(sites, {"base/agents": {"shim": 1}}, {"base/agents": {"shim": 1}}) == []
+@pytest.mark.parametrize(
+    "args", [["--write"], ["--baseline", "permit.json"], ["--allow", "base/example"]]
+)
+def test_cli_rejects_write_modes_and_new_exemptions(
+    args: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert ratchet.main(args) == 1
+    assert "accepts no arguments" in capsys.readouterr().err
 
 
-def test_a_baseline_may_not_rise_above_the_base_revision() -> None:
-    sites = _sites(**{"base/agents__shim": ["base/agents/a.py:3", "base/agents/b.py:9"]})
-    frozen = {"base/agents": {"shim": 2}}
-    problems = ratchet.errors(sites, frozen, {"base/agents": {"shim": 1}})
-    assert len(problems) == 1
-    assert "only shrinks" in problems[0]
+def test_scan_rejects_sites_even_when_an_old_baseline_file_permits_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "base/example/handles.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "from base.db import Database, connect\n"
+        "from base.events.live.bus import EventBus\n"
+        "connect()\nDatabase.from_settings()\nEventBus.from_settings()\n"
+    )
+    old_baseline = tmp_path / "scripts/structure/ambient_state/handle_ratchet_baseline.json"
+    old_baseline.parent.mkdir(parents=True)
+    old_baseline.write_text('{"base/example": {"shim": 100, "self-built": 100, "bus-built": 100}}')
+    monkeypatch.setattr(ratchet, "_REPO_ROOT", tmp_path)
+
+    def tracked_files(_root: Path) -> list[str]:
+        return ["base/example/handles.py"]
+
+    monkeypatch.setattr(ratchet.lint_common, "tracked_files", tracked_files)
+    assert ratchet.main([]) == 1
+    errors = capsys.readouterr().err
+    assert "base/example/handles.py:3" in errors
+    assert "base/example/handles.py:4" in errors
+    assert "base/example/handles.py:5" in errors
+    assert old_baseline.read_text().startswith('{"base/example"')
+
+
+def test_cli_passes_empty_scan_without_a_baseline_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ratchet, "_REPO_ROOT", tmp_path)
+
+    def tracked_files(_root: Path) -> list[str]:
+        return []
+
+    monkeypatch.setattr(ratchet.lint_common, "tracked_files", tracked_files)
+    assert ratchet.main([]) == 0
+    assert list(tmp_path.iterdir()) == []
