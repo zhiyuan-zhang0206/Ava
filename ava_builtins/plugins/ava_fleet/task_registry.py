@@ -5,7 +5,7 @@ task; owners are reminded periodically, and a task may nest under a parent.
 from __future__ import annotations
 
 import builtins
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
 import ava
@@ -221,6 +221,7 @@ def create(
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
+    operation_key: str | None = None,
 ) -> Task:
     """Args:
     title: unique among in_progress tasks.
@@ -230,7 +231,15 @@ def create(
         (P0 30m / P1 1h / P2 2h / P3 4h), capped at 24h.
     owner: agent to assign to; None means you.
     priority: "P0" (highest) through "P3" (lowest).
+    operation_key: reuse the same key and inputs to return the original Task.
+        The returned snapshot may be outdated; use get(task.id) for current state.
     """
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    from ._task_creation_receipts import record_creation, replay_creation
+
+    if operation_key is not None:
+        operation_key = validate_idempotency_key(operation_key)
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
     parent = coerce_typed(parent, "parent", int)
@@ -239,10 +248,21 @@ def create(
     )
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     priority = coerce_str(priority, "priority")
-    remind_interval_seconds, priority = _resolve_create_args(remind_interval_seconds, priority)
     actor = ava.sdk_surface.agent_identity.require_agent_id()
     effective_owner = owner if owner is not None else actor
+    request: dict[str, object] = {
+        "title": title,
+        "description": description,
+        "parent": parent,
+        "owner": effective_owner,
+        "priority": priority,
+        "remind_interval_seconds": remind_interval_seconds,
+    }
     with ava.DB.transaction(), ava.DB.cursor() as cur:
+        snapshot = replay_creation(cur, actor, operation_key, request)
+        if snapshot is not None:
+            return Task(**snapshot)
+        remind_interval_seconds, priority = _resolve_create_args(remind_interval_seconds, priority)
         # parent is required: only the system root task (id 1) may parent the
         # deployment's top-level tasks; every other task must name an existing
         # task as its parent. Validate here for a friendly error instead of a
@@ -267,6 +287,7 @@ def create(
             actor,
             description=description,
         )
+        record_creation(cur, actor, operation_key, request, asdict(task))
     from base import telemetry  # deferred (task #3816)
 
     telemetry.emit_prepared(created_event)

@@ -93,7 +93,9 @@ def test_create_parent_is_required() -> None:
         "remind_interval_seconds",
         "owner",
         "priority",
+        "operation_key",
     ]
+    assert params["operation_key"].default is None
     assert params["description"].default is inspect.Parameter.empty
     assert params["parent"].default is inspect.Parameter.empty
     assert params["parent"].kind is inspect.Parameter.KEYWORD_ONLY
