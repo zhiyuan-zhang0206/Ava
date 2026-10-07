@@ -17,7 +17,3 @@ The `CompletionNoticePolicy` (`all`, `hourly`) in
 retain the exact policy member choices; stored strings and JSON values use the
 same spelling. A stored unknown policy (including the retired `failures`) is
 rejected loudly.
-
-`completion_notice_events.outcome` / `exit_code` and the old
-`(agent_id, source, outcome)` unique constraint are unread and unwritten; the
-columns remain until a contract migration drops them.
