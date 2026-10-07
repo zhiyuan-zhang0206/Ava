@@ -15,11 +15,11 @@ from __future__ import annotations
 import itertools
 import json
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import pytest
 from dotenv import dotenv_values
@@ -107,18 +107,6 @@ def test_a_born_homes_rotation_keeps_its_minted_passphrase(born: Path) -> None:
     assert minted not in (passphrase.derive(_OLD), passphrase.derive(_secret(born)))
 
 
-def _fake_pg_dump(real: Callable[..., Any]) -> Callable[..., Any]:
-    """Run the real encryption pipeline over a fake dump (no database needed)."""
-
-    def run(argv: list[str], **kwargs: Any) -> Any:
-        if Path(argv[0]).name == "pg_dump":
-            Path(argv[argv.index("--file") + 1]).write_bytes(b"PGDMP fake dump")
-            return subprocess.CompletedProcess(argv, 0, b"", b"")
-        return real(argv, **kwargs)
-
-    return run
-
-
 @pytest.fixture
 def backups(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
@@ -127,7 +115,21 @@ def backups(
     (real openssl encryption)."""
     directory = tmp_path / "backups-db"
     monkeypatch.setattr(backup, "backup_dir", lambda: directory)
-    monkeypatch.setattr(backup, "_run_with_progress", _fake_pg_dump(backup._run_with_progress))
+    fake_dump = tmp_path / "pg_dump"
+    fake_dump.write_text(
+        f"#!{sys.executable}\n"
+        "from pathlib import Path\n"
+        "import sys\n"
+        "Path(sys.argv[sys.argv.index('--file') + 1]).write_bytes(b'PGDMP fake dump')\n",
+        encoding="utf-8",
+    )
+    fake_dump.chmod(0o700)
+    real_pg_tool = backup.pg_tool
+
+    def pg_tool(name: str) -> Path:
+        return fake_dump if name == "pg_dump" else real_pg_tool(name)
+
+    monkeypatch.setattr(backup, "pg_tool", pg_tool)
     stamps = iter(range(1, 60))
 
     def take() -> Path:

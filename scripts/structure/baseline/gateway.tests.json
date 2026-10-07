@@ -1,7 +1,3 @@
 {
-  "patch_targets": {
-    "gateway/tests/test_agent_inspect.py::gateway.inspect._live": 1,
-    "gateway/tests/test_inspect_metrics.py::gateway.inspect._metrics": 1,
-    "gateway/tests/test_terminate_forward.py::gateway.agents.lifecycle._open_tasks_hint_blocking": 1
-  }
+  "patch_targets": {}
 }

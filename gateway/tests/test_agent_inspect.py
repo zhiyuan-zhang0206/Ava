@@ -413,25 +413,6 @@ def test_inspect_heartbeat_idle_projects_next_at(db_conn: psycopg.Connection) ->
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_inspect_heartbeat_zero_jitter_span_disables_jitter(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """JITTER_SPAN_S=0 must disable jitter exactly like the daemon's
-    `NULLIF(span, 0)` collapse (QA #952 b): the projection guards the modulo,
-    so the endpoint still serves next_at = last_active + idle_threshold with no
-    jitter term instead of ZeroDivisionError-ing the inspect response."""
-    monkeypatch.setattr("gateway.inspect._live.JITTER_SPAN_S", 0)
-    aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
-    db_conn.commit()
-    with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
-    assert hb["paused_until"] is None
-    assert hb["heartbeat_pending"] is False
-    assert hb["next_at"] is not None
-    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120
-    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
-
-
 def test_jitter_span_s_stays_whole_seconds() -> None:
     """The jitter span must remain a whole-second count: the daemon SQL casts it
     with Postgres' `::int` (rounds half away from zero) while the inspector

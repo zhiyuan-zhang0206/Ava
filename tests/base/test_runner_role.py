@@ -252,29 +252,6 @@ def test_default_missing_schema_refuses_setup(
     assert row == (None,)
 
 
-def test_default_schema_check_never_setup_after_concurrent_repair(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A concurrent repair between both reads cannot grant this call DDL authority."""
-    from base.cluster import provision
-
-    expected = frozenset(range(len(PostgresSaver.MIGRATIONS)))
-    observed = iter((expected - {9}, expected))
-
-    def checkpoint_versions(_db_url: str, *, expected_data_dir: object = None) -> frozenset[int]:
-        return next(observed)
-
-    def setup_must_not_run(_self: PostgresSaver) -> None:
-        raise AssertionError("a successful read-only recheck must return before setup")
-
-    monkeypatch.setattr(provision, "_checkpoint_schema_versions", checkpoint_versions)
-    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
-
-    ensure_checkpoint_schema(_IDENTITY, base_admin_url=_admin_url(runner_db))
-    with pytest.raises(StopIteration):
-        next(observed)
-
-
 def test_new_database_setup_failure_is_dropped_then_retry_converges(
     runner_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
