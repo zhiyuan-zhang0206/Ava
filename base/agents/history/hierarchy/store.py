@@ -63,7 +63,9 @@ def _read_connection(db: Database) -> Generator[Connection[Any]]:
 
 
 def load_nodes(db: Database, agent_id: int) -> list[StoredNode]:
-    """Every node of one agent, ordered by depth then message position."""
+    """Every node of this pipeline of one agent (`chunk-*` / `group-*` engine versions: a node an
+    older release's worker wrote in a mixed-version window is not part of this tree), ordered by
+    depth then message position."""
     with _read_connection(db) as conn:
         rows = conn.execute(
             """
@@ -71,6 +73,7 @@ def load_nodes(db: Database, agent_id: int) -> list[StoredNode]:
                    engine_version, prompt_version, job_id, check_key
             FROM understanding_nodes
             WHERE agent_id = %s
+              AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')
             ORDER BY depth, span_start
             """,
             (agent_id,),

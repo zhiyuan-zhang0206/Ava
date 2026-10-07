@@ -59,16 +59,17 @@ from base.agents.history.hierarchy.chunks import (
     ChunkEmptyError,
     ChunkJob,
     ChunkNotReadyError,
-    ChunkTruncatedError,
     GroupNode,
     LocatedChunk,
     backlog,
     claim_job,
-    covered_end,
+    covered_spans,
     finish_job,
     locate_chunk,
     message_time,
     release_job,
+    slice_chunk,
+    uncovered,
     write_chunk_calls,
     write_group_nodes,
 )
@@ -190,6 +191,22 @@ def _plan_nodes(result: ChunkResult, located: LocatedChunk) -> list[GroupNode]:
     return nodes
 
 
+def _report_gaps(job: ChunkJob, located: LocatedChunk, left_over: list[tuple[int, int]]) -> None:
+    """The event for what this job will not describe: uncovered runs it left for another job
+    (the part of a chunk that overlapped existing nodes in the middle) and the turns a closing
+    chunk's boundary snapshot lacks."""
+    if not left_over and located.missing is None:
+        return
+    gaps = [f"{a}-{b}" for a, b in left_over]
+    if located.missing is not None:
+        gaps.append(f"request {located.missing[0]}-{located.missing[1]} (not in the snapshot)")
+    telemetry.emit(
+        "telemetry",
+        "understanding_chunk_gap",
+        attributes={"agent_id": job.agent_id, "job_id": job.id, "gaps": ", ".join(gaps)},
+    )
+
+
 def _gave_up(job: ChunkJob) -> Outcome | None:
     """`failed` for a job claimed too often or waiting too long, else None."""
     if job.attempts > MAX_ATTEMPTS:
@@ -201,29 +218,20 @@ def _gave_up(job: ChunkJob) -> Outcome | None:
 
 
 async def _undescribed_part(
-    pool: AsyncConnectionPool,
-    job: ChunkJob,
-    history: FullHistory,
-    closing_segment: int | None,
-    located: LocatedChunk,
-) -> LocatedChunk | None:
-    """`located` shortened to what no level-1 node covers yet; None when nothing is left.
+    pool: AsyncConnectionPool, job: ChunkJob, located: LocatedChunk
+) -> tuple[LocatedChunk | None, list[tuple[int, int]]]:
+    """`located` cut to its first run that no level-1 node covers, and the runs after it.
 
-    Raises:
-        ChunkEmptyError: the part that is left is empty once the segment head is excluded.
+    None for the chunk when nothing is left. A chunk with several uncovered runs describes the
+    first; the rest are returned for the caller to report (never dropped silently).
     """
-    covered = await covered_end(pool, job.agent_id, located.span)
-    if covered is None:
-        return located
-    if covered >= located.span[1]:
-        return None
-    return locate_chunk(
-        history,
-        start_index=job.start_index + (covered + 1 - located.span[0]),
-        end_index=job.end_index,
-        end_msg_id=job.end_msg_id,
-        closing_segment=closing_segment,
-    )
+    covered = await covered_spans(pool, job.agent_id, located.span)
+    if not covered:
+        return located, []
+    gaps = uncovered(located.span, covered)
+    if not gaps:
+        return None, []
+    return slice_chunk(located, *gaps[0]), gaps[1:]
 
 
 async def _run_job(
@@ -260,15 +268,12 @@ async def _run_job(
         )
     except ChunkNotReadyError as exc:
         return Outcome("wait", str(exc))
-    except (ChunkDriftError, ChunkTruncatedError) as exc:
-        # Neither heals by waiting: indices drifted, or the snapshot will never hold the turns.
+    except ChunkDriftError as exc:
+        # Waiting does not heal it: the indices drifted.
         return Outcome("failed", str(exc))
     except ChunkEmptyError as exc:
         return Outcome("skipped", str(exc))
-    try:
-        located = await _undescribed_part(pool, job, history, closing_segment, located)
-    except ChunkEmptyError as exc:
-        return Outcome("skipped", str(exc))
+    located, left_over = await _undescribed_part(pool, job, located)
     if located is None:
         return Outcome("skipped", "the chunk is already described")
     if all(unit.kind == "note" for unit in divide_units(list(located.messages))):
@@ -293,6 +298,7 @@ async def _run_job(
     finally:
         await write_chunk_calls(pool, job, calls)
     await write_group_nodes(pool, job, _plan_nodes(result, located), model=model)
+    _report_gaps(job, located, left_over)
     return Outcome("done")
 
 
@@ -300,7 +306,11 @@ async def _settle(pool: AsyncConnectionPool, job: ChunkJob, outcome: Outcome) ->
     """Record a job's outcome on its row, with the event for the ones that end without a node."""
     if outcome.status in ("retry", "wait"):
         await release_job(
-            pool, job.id, error=outcome.error or "", count_attempt=outcome.status == "retry"
+            pool,
+            job.id,
+            error=outcome.error or "",
+            count_attempt=outcome.status == "retry",
+            waiting=outcome.status == "wait",
         )
         return
     await finish_job(pool, job.id, status=outcome.status, error=outcome.error)
@@ -392,12 +402,31 @@ class _Consumer:
             self.in_flight -= 1
             raise
 
+    async def _put_back(self, job: ChunkJob) -> None:
+        """Release a job this consumer holds, without spending an attempt; never raises."""
+        try:
+            await asyncio.shield(
+                release_job(
+                    self.pool, job.id, error="host stopping", count_attempt=False, waiting=None
+                )
+            )
+        except Exception:
+            logger.opt(exception=True).warning(
+                "understanding chunk {job} could not be put back; its lease will lapse",
+                job=job.id,
+            )
+
     async def _process(self, job: ChunkJob) -> None:
         """Run, settle and group-check one claimed job; never raises."""
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="understanding")
         try:
             try:
                 outcome = await _run_job(self.pool, self.db, job, self.tools, self.models, executor)
+            except asyncio.CancelledError:
+                # The host is stopping (a rollout): hand the job back at once instead of making
+                # the next host wait out the lease. A crash still relies on the lease.
+                await self._put_back(job)
+                raise
             except _TRANSIENT as exc:
                 # The database blinked (a restart during a roll): the job is not at fault.
                 logger.warning(

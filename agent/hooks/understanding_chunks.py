@@ -23,12 +23,16 @@ may fail the agent's turn.
 
 from __future__ import annotations
 
+import asyncio
+import time
+from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state_channels import CompactState
+from base import telemetry
 from base.agents.history.hierarchy.chunks import (
     enqueue_chunk,
     plan_chunk,
@@ -36,7 +40,9 @@ from base.agents.history.hierarchy.chunks import (
     segment_head_len,
     sendable_len,
 )
+from base.agents.messages.kwargs import read_ava_kwargs
 from base.config import settings
+from base.log import logger
 
 
 async def due_chunk_update(
@@ -126,4 +132,72 @@ async def enqueue_closing_chunk(
         chunk=chunk,
         end_msg_id=messages[chunk.end_index - 1].id,
         boundary_checkpoint_id=boundary,
+    )
+
+
+# How long a compaction waits for the checkpoint to hold the state's last message before it stamps
+# the boundary anyway: the graph persists a super-step's checkpoint asynchronously, so the newest
+# row can lag the state by one step.
+SNAPSHOT_WAIT_SECONDS = 5.0
+_SNAPSHOT_POLL_SECONDS = 0.5
+
+_NEWEST_CHECKPOINT_TS = (
+    "SELECT checkpoint->>'ts' FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = ''"
+    " ORDER BY checkpoint_id DESC LIMIT 1"
+)
+
+
+def _created_at(message: AnyMessage) -> datetime | None:
+    stamp: Any = read_ava_kwargs(message).get("ava_created_at")
+    return datetime.fromisoformat(stamp) if isinstance(stamp, str) and stamp else None
+
+
+async def _newest_checkpoint_ts(pool: AsyncConnectionPool, agent_id: int) -> datetime | None:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(_NEWEST_CHECKPOINT_TS, (str(agent_id),))
+        row = await cur.fetchone()
+    return None if row is None or not row[0] else datetime.fromisoformat(str(row[0]))
+
+
+async def await_snapshot(pool: AsyncConnectionPool | None, state: Any, agent_id: int) -> None:
+    """Wait (bounded) until the newest checkpoint of the agent is at least as new as the `state`'s
+    last message.
+
+    Called by the compact paths right before the boundary is stamped: the stamped checkpoint is
+    the full-snapshot record of the segment, and the segment's closing chunk is read from it, so a
+    checkpoint one super-step behind would lose the segment's last turns for good (from the
+    stitched history as well). A checkpoint is written after the messages of its step, so one whose
+    time is not before the last message's `ava_created_at` holds it. One cheap read per poll and a
+    bounded sleep; nothing about the turn, the state or the request prefix changes. On timeout the
+    boundary is stamped anyway and `understanding_snapshot_lag` is emitted. Best-effort, silent when
+    understanding is off or the last message has no time.
+    """
+    messages: list[AnyMessage] = [] if state is None else list(state.messages)
+    if pool is None or not messages or not settings.agent.understanding_enabled:
+        return
+    last = _created_at(messages[-1])
+    if last is None:
+        return
+    started = time.monotonic()
+    while True:
+        try:
+            newest = await _newest_checkpoint_ts(pool, agent_id)
+        except Exception:
+            logger.opt(exception=True).warning("snapshot check failed for agent {}", agent_id)
+            return
+        if newest is not None and newest >= last:
+            return
+        if time.monotonic() - started >= SNAPSHOT_WAIT_SECONDS:
+            break
+        await asyncio.sleep(_SNAPSHOT_POLL_SECONDS)
+    logger.warning(
+        "compaction of agent {agent} stamps its boundary before the checkpoint holds the last "
+        "message {message}",
+        agent=agent_id,
+        message=messages[-1].id,
+    )
+    telemetry.emit(
+        "telemetry",
+        "understanding_snapshot_lag",
+        attributes={"agent_id": agent_id, "waited_seconds": round(time.monotonic() - started, 1)},
     )

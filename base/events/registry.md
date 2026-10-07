@@ -303,6 +303,8 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `understanding_enqueue_failed` | a chunk-triggered understanding job could not be enqueued (best-effort; the next trigger covers the same stretch) | anomaly | agent_id, compact_version, error | — | events | — |
 | `understanding_chunk_failed` | a queued understanding chunk failed for good and stays undescribed | anomaly | agent_id, job_id, attempts, error | — | events | — |
 | `understanding_chunk_skipped` | a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk) | anomaly | agent_id, job_id, reason | — | events | — |
+| `understanding_chunk_gap` | a chunk was described only in part: the listed stretches (overlap leftovers, turns missing from a closing snapshot) have no node | anomaly | agent_id, job_id, gaps | — | events | — |
+| `understanding_snapshot_lag` | a compaction stamped its boundary before the checkpoint held the last message (the bounded wait timed out) | anomaly | agent_id, waited_seconds | — | events | — |
 | `understanding_group_failed` | an upper-level understanding grouping check failed; the level's open nodes stay ungrouped until its next check threshold of new nodes arrives | anomaly | agent_id, level, open_nodes, error | — | events | — |
 | `understanding_backlog` | one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age | observation | pending, running, oldest_pending_age_seconds | — | events | — |
 | `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events | — |

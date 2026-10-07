@@ -51,7 +51,9 @@ async def load_open_nodes(pool: AsyncConnectionPool, agent_id: int, level: int) 
         await cur.execute(
             "SELECT id, span_start, span_end, start_ts, end_ts, text FROM understanding_nodes"
             " WHERE agent_id = %s AND depth = %s AND parent_id IS NULL"
-            " AND start_ts IS NOT NULL AND end_ts IS NOT NULL ORDER BY span_start",
+            " AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')"
+            " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
+            " ORDER BY span_start",
             (agent_id, level),
         )
         rows = await cur.fetchall()
@@ -165,7 +167,8 @@ async def write_groups(
         # have landed while the call ran, and the baseline must include it.
         await cur.execute(
             "SELECT count(*) FROM understanding_nodes WHERE agent_id = %s AND depth = %s"
-            " AND parent_id IS NULL AND start_ts IS NOT NULL AND end_ts IS NOT NULL",
+            " AND parent_id IS NULL AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')"
+            " AND start_ts IS NOT NULL AND end_ts IS NOT NULL",
             (agent_id, level),
         )
         row = await cur.fetchone()

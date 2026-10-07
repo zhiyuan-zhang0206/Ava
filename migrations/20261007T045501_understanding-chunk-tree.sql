@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS understanding_chunk_jobs (
     attempts INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     claimed_at TIMESTAMPTZ,
+    waiting_since TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
     error TEXT
 );

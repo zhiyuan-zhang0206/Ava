@@ -197,6 +197,25 @@ class UnderstandingChunkFailed(TypedDict):
     error: str
 
 
+class UnderstandingChunkGap(TypedDict):
+    """`understanding_chunk_gap` payload — stretches of a chunk that no node will describe: the
+    runs after the first uncovered run of a chunk that overlapped existing nodes, and the turns a
+    closing chunk's boundary snapshot lacks. The rest of the chunk was described."""
+
+    agent_id: int
+    job_id: int
+    gaps: str
+
+
+class UnderstandingSnapshotLag(TypedDict):
+    """`understanding_snapshot_lag` payload — a compaction stamped its boundary before the
+    checkpoint held the state's last message (the wait for it timed out), so the segment's
+    closing chunk may find the snapshot short."""
+
+    agent_id: int
+    waited_seconds: float
+
+
 class UnderstandingChunkSkipped(TypedDict):
     """`understanding_chunk_skipped` payload — a queued chunk was closed
     without a node: an unsupported provider path (Gemini explicit cache) or a
@@ -324,6 +343,20 @@ EVENTS: dict[str, EventSpec] = {
         payload=UnderstandingChunkSkipped,
         tier="anomaly",
         site="base/agents/history/hierarchy/chunk_consumer.py:_settle",
+    ),
+    "understanding_chunk_gap": telemetry_event(
+        "understanding_chunk_gap",
+        "a chunk was described only in part: the listed stretches (overlap leftovers, turns missing from a closing snapshot) have no node",
+        payload=UnderstandingChunkGap,
+        tier="anomaly",
+        site="base/agents/history/hierarchy/chunk_consumer.py:_report_gaps",
+    ),
+    "understanding_snapshot_lag": telemetry_event(
+        "understanding_snapshot_lag",
+        "a compaction stamped its boundary before the checkpoint held the last message (the bounded wait timed out)",
+        payload=UnderstandingSnapshotLag,
+        tier="anomaly",
+        site="agent/hooks/understanding_chunks.py:await_snapshot",
     ),
     "understanding_group_failed": telemetry_event(
         "understanding_group_failed",
