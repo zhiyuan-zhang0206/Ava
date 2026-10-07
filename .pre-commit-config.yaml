@@ -341,14 +341,13 @@ repos:
         files: ^(.*\.py|scripts/structure/baseline/.*\.json)$
         require_serial: true
 
-      # Ratchet on library packages that still dial the database ambiently
-      # (shim calls, self-built `Database.from_settings()`): per-package counts
-      # frozen in scripts/structure/ambient_state/handle_ratchet_baseline.json, only ever lowered.
+      # Library components receive database and event-bus handles from composition roots.
+      # Every detected library-built handle fails; no baseline or write mode exists.
       - id: lint-handle-ratchet
-        name: lint library database-handle ratchet (counts only fall)
+        name: lint library-built database and event-bus handles
         entry: .venv/bin/python scripts/structure/ambient_state/handle_ratchet.py
         language: system
-        files: ^((agent|ava|ava_builtins|base|cli|gateway|ops|services|schedules)/.*\.py|scripts/structure/ambient_state/handle_ratchet(_baseline\.json|\.py))$
+        files: ^((agent|ava|ava_builtins|base|cli|gateway|ops|services|schedules)/.*\.py|scripts/structure/ambient_state/handle_ratchet\.py)$
         pass_filenames: false
         require_serial: true
 
