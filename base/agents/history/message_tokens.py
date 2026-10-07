@@ -8,8 +8,8 @@ for adjacent requests `j`, `j+1` of one segment:
 
 `output_j` is the AIMessage's `usage_metadata.output_tokens`; what remains is the
 true provider-tokenizer weight of the messages in between. One message in the
-interval takes it whole (`exact`); several share it in proportion to the chars/4
-estimate the context breakdown uses (`split`). Everything the usage cannot pin
+interval takes it whole (`exact`); several share it in proportion to the
+fitted token estimate of `base/agents/messages/text_chars.py` (`split`). Everything the usage cannot pin
 down falls back to that estimate (`estimated`):
 
 - the interval's difference is negative (crash repair rewrote history, a
@@ -27,18 +27,22 @@ generation and its context footprint are that number.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, cast
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
 from base.agents.history.checkpoint import FullHistory
-from base.agents.messages.text_chars import ai_message_chars, text_chars
+from base.agents.messages.text_chars import (
+    ai_message_texts,
+    estimate_message_tokens,
+    estimate_text_tokens,
+)
 
 TokenSource = Literal["exact", "split", "estimated"]
 _SOURCES: tuple[TokenSource, ...] = ("exact", "split", "estimated")
-_CHARS_PER_TOKEN = 4
+_WEIGHT_SCALE = 1000  # estimate -> integer weight for the exact apportionment
 
 
 @dataclass(frozen=True)
@@ -65,9 +69,45 @@ class SegmentTokens:
 
 
 @dataclass(frozen=True)
+class TokenTotal:
+    """An aggregate of token values (a segment, a Context Breakdown bucket).
+
+    `estimated` is True when ANY part is `split` or `estimated` (the frontend
+    appends "(estimated)" to the value); `exact_fraction` is the share of
+    `tokens` that came from `exact` parts (1.0 for an empty aggregate)."""
+
+    tokens: int
+    estimated: bool
+    exact_fraction: float
+
+
+def total_of(records: Sequence[MessageTokens]) -> TokenTotal:
+    """Aggregate `context_tokens` of `records` with the exactness rule above."""
+    tokens = sum(r.context_tokens for r in records)
+    exact = sum(r.context_tokens for r in records if r.source == "exact")
+    return TokenTotal(
+        tokens=tokens,
+        estimated=any(r.source != "exact" for r in records),
+        exact_fraction=exact / tokens if tokens else 1.0,
+    )
+
+
+@dataclass(frozen=True)
+class PartTokens:
+    """One part of a message (an AIMessage's reasoning / output / tool_call, a
+    system-prompt section). A part's share is always an estimate of how the
+    whole divides, so `source` is `split` -- or `estimated` when the whole is
+    itself only estimated. A lone part inherits the whole's source."""
+
+    tokens: int
+    source: TokenSource
+
+
+@dataclass(frozen=True)
 class SegmentSummary:
     """A segment's totals (head included in `context_tokens`) and how much of
-    them each `source` accounts for."""
+    them each `source` accounts for. `estimated` / `exact_fraction` follow
+    `TokenTotal`."""
 
     message_count: int
     head_tokens: int
@@ -76,14 +116,12 @@ class SegmentSummary:
     tokens_by_source: dict[TokenSource, int]
     messages_by_source: dict[TokenSource, int]
     last_input_tokens: int | None
+    estimated: bool
+    exact_fraction: float
 
 
 def _estimate(msg: BaseMessage) -> int:
-    if isinstance(msg, AIMessage):
-        chars = sum(ai_message_chars(msg).values())
-    else:
-        chars = text_chars(msg.content)  # pyright: ignore[reportUnknownMemberType]
-    return chars // _CHARS_PER_TOKEN
+    return round(estimate_message_tokens(msg))
 
 
 def _usage(msg: BaseMessage, key: str) -> int | None:
@@ -100,7 +138,7 @@ def _model_name(msg: AIMessage) -> str | None:
     return name if isinstance(name, str) and name else None
 
 
-def _apportion(weights: Sequence[int], total: int) -> list[int]:
+def apportion(weights: Sequence[int], total: int) -> list[int]:
     """Split `total` across `weights` proportionally, summing exactly (largest
     remainder); all-zero weights split evenly."""
     if not weights:
@@ -114,11 +152,33 @@ def _apportion(weights: Sequence[int], total: int) -> list[int]:
     return shares
 
 
+def split_parts(
+    texts: Mapping[str, str], total: int, total_source: TokenSource
+) -> dict[str, PartTokens]:
+    """Divide `total` tokens among named text parts by the fitted estimate,
+    summing exactly. Parts of one message are never measured individually, so
+    the result is `split` (or `estimated` when `total` is); one part keeps
+    `total_source`."""
+    if len(texts) == 1:
+        return {name: PartTokens(total, total_source) for name in texts}
+    source: TokenSource = "estimated" if total_source == "estimated" else "split"
+    weights = [round(estimate_text_tokens(t) * _WEIGHT_SCALE) for t in texts.values()]
+    return {
+        name: PartTokens(share, source)
+        for name, share in zip(texts, apportion(weights, total), strict=True)
+    }
+
+
+def ai_message_parts(msg: AIMessage, record: MessageTokens) -> dict[str, PartTokens]:
+    """An AIMessage's reasoning / output / tool_call split of its `record`."""
+    return split_parts(ai_message_texts(msg), record.context_tokens, record.source)
+
+
 def _allocate(msgs: Sequence[BaseMessage], total: int) -> list[MessageTokens]:
     """Give `total` real tokens to `msgs`: whole to a lone message, else by estimate."""
     if len(msgs) == 1:
         return [MessageTokens(total, None, "exact")]
-    shares = _apportion([_estimate(m) for m in msgs], total)
+    shares = apportion([round(estimate_message_tokens(m) * _WEIGHT_SCALE) for m in msgs], total)
     return [MessageTokens(share, None, "split") for share in shares]
 
 
@@ -219,6 +279,7 @@ def summarize_segment(segment: SegmentTokens) -> SegmentSummary:
     for r in records:
         tokens[r.source] += r.context_tokens
         counts[r.source] += 1
+    total = total_of(records)
     return SegmentSummary(
         message_count=len(segment.messages),
         head_tokens=segment.head.context_tokens if segment.head is not None else 0,
@@ -227,6 +288,8 @@ def summarize_segment(segment: SegmentTokens) -> SegmentSummary:
         tokens_by_source=tokens,
         messages_by_source=counts,
         last_input_tokens=segment.last_input_tokens,
+        estimated=total.estimated,
+        exact_fraction=total.exact_fraction,
     )
 
 
