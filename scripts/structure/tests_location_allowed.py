@@ -302,10 +302,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "checks the shipped plugin metrics against the deploy/lgtm dashboard queries",
     ),
-    "tests/schedules/test_c9_daily_report.py": (
-        "contract",
-        "tests schedules/c9-daily-report-schedule.py and schedules/manifest.json",
-    ),
     "tests/scripts/structure/test_lint_common_contract.py": (
         "contract",
         "the framework directory list of scripts/structure/lint_common.py equals the packages pyproject.toml declares",
