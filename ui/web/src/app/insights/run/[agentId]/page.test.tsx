@@ -92,6 +92,7 @@ const lifetimeResponse: RunTimelineResponse = {
       end: "2026-10-04T12:00:00.123456Z",
       source: "user",
       preview: "please fix the bug",
+      parent: "1",
     },
     {
       kind: "output",
@@ -101,6 +102,7 @@ const lifetimeResponse: RunTimelineResponse = {
       end: "2026-10-04T12:06:00.000000Z",
       source: null,
       preview: "look at the failing test",
+      parent: "1",
     },
     {
       kind: "text",
@@ -110,6 +112,7 @@ const lifetimeResponse: RunTimelineResponse = {
       end: "2026-10-04T12:05:00.000000Z",
       source: null,
       preview: "on it",
+      parent: "1",
     },
   ],
   events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
@@ -201,6 +204,53 @@ describe("the default window", () => {
   it("keeps the context breakdown card", async () => {
     render();
     await waitFor(() => expect(getContextBreakdown).toHaveBeenCalledWith(42));
+  });
+});
+
+describe("ancestors", () => {
+  const highlight = async (id: string) =>
+    (await screen.findAllByTestId("run-timeline-node"))
+      .find((candidate) => candidate.getAttribute("data-node-id") === id)!
+      .getAttribute("data-highlight");
+
+  it("lights a node and its ancestors, and steps the others back", async () => {
+    render();
+    fireEvent.click((await screen.findAllByTestId("run-timeline-node")).find(
+      (candidate) => candidate.getAttribute("data-node-id") === "1",
+    )!);
+    expect(await highlight("1")).toBe("self");
+    expect(await highlight("3")).toBe("ancestor");
+    expect(await highlight("2")).toBe("none");
+  });
+
+  it("lights a message block's covering leaf and every ancestor above it", async () => {
+    render();
+    const unit = (await screen.findAllByTestId("run-timeline-unit")).find(
+      (candidate) => candidate.getAttribute("data-unit-kind") === "text",
+    )!;
+    fireEvent.click(unit);
+    expect(unit.getAttribute("data-highlight")).toBe("self");
+    expect(await highlight("1")).toBe("ancestor");
+    expect(await highlight("3")).toBe("ancestor");
+    expect(await highlight("2")).toBe("none");
+  });
+
+  it("marks the stretch the level above has not summarized", async () => {
+    const [first, second, top] = lifetimeResponse.nodes;
+    getRunTimeline.mockResolvedValue({
+      ...lifetimeResponse,
+      nodes: [
+        { ...first, parent: "3" },
+        { ...second, parent: null },
+        { ...top, span_end: 5, end: LEAF_A.to },
+      ],
+    });
+    render();
+    const pending = await screen.findAllByTestId("run-timeline-pending");
+    expect(pending).toHaveLength(1);
+    expect(within(screen.getByTestId("run-timeline-row-level-2")).getByTestId("run-timeline-pending")).toBe(
+      pending[0],
+    );
   });
 });
 
@@ -458,6 +508,7 @@ describe("failure and loading", () => {
           end: "2026-10-04T12:05:00.000000Z",
           source: null,
           preview: "need a plan",
+          parent: "1",
         },
         {
           kind: "call",
@@ -467,6 +518,7 @@ describe("failure and loading", () => {
           end: "2026-10-04T12:05:00.000000Z",
           source: null,
           preview: "ls",
+          parent: "1",
         },
       ],
     });

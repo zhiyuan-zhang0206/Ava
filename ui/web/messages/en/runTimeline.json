@@ -16,6 +16,8 @@
   "empty": "Nothing in this window.",
   "lifecycleRow": "Lifecycle",
   "levelRow": "Level {level}",
+  "pending": "Not yet summarized",
+  "pendingTitle": "The level above has not summarized this stretch yet",
   "messagesRow": "Messages",
   "eventAria": "{kind} at {time}",
   "nodeAria": "Level {level} summary: {summary}",

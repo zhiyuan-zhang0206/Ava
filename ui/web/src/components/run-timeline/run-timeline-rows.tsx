@@ -21,11 +21,13 @@ import {
   BLOCK_CLASSES,
   axisTicks,
   blockClass,
+  chainIds,
   classColor,
   firstLine,
   isSelected,
   levelsTopFirst,
   panViewport,
+  pendingSpans,
   spanBox,
   unitColor,
   viewportWindow,
@@ -43,6 +45,10 @@ const DRAG_THRESHOLD_PX = 4;
 const WHEEL_ZOOM_RATE = 0.0015;
 const PINCH_ZOOM_RATE = 0.01;
 const BUTTON_ZOOM = 0.5;
+
+// The hatching of a stretch the level above has not summarized yet.
+const PENDING_HATCH =
+  "repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, currentColor 14%, transparent) 4px 5px)";
 
 function boxStyle(box: { left: number; width: number }) {
   return { left: `${box.left}%`, width: `max(${box.width}%, ${MIN_BLOCK_PX}px)` };
@@ -95,6 +101,9 @@ export function RunTimelineRows({
   const t = useTranslations("runTimeline");
   const levels = levelsTopFirst(data.nodes);
   const visible = viewportWindow(view);
+  // A selection lights itself and every ancestor; the rest steps back.
+  const chain = chainIds(selection, data.nodes, data.units);
+  const dim = selection !== null;
   const ticks = axisTicks(view);
   const chartRef = useRef<HTMLDivElement>(null);
   const live = useRef({ base, view, onView });
@@ -224,12 +233,31 @@ export function RunTimelineRows({
           height="h-8"
           testId={`run-timeline-row-level-${level}`}
         >
+          {pendingSpans(data.nodes, level).map((span) => {
+            const box = spanBox(span.from, span.to, visible);
+            if (box === null) return null;
+            return (
+              <div
+                key={`pending-${span.from}`}
+                data-testid="run-timeline-pending"
+                title={t("pendingTitle")}
+                className={cn(
+                  "absolute inset-y-0 truncate rounded border border-dashed border-border px-1",
+                  "text-[10px] leading-8 text-muted-foreground",
+                )}
+                style={{ ...boxStyle(box), backgroundImage: PENDING_HATCH }}
+              >
+                {t("pending")}
+              </div>
+            );
+          })}
           {data.nodes
             .filter((node) => node.level === level)
             .map((node) => {
               const box = spanBox(node.start, node.end, visible);
               if (box === null) return null;
               const picked = isSelected(selection, { kind: "node", id: node.id });
+              const ancestor = !picked && chain.has(node.id);
               const label = firstLine(node.summary, NODE_LABEL_CHARS);
               return (
                 <button
@@ -239,6 +267,7 @@ export function RunTimelineRows({
                   aria-pressed={picked}
                   data-testid="run-timeline-node"
                   data-node-id={node.id}
+                  data-highlight={picked ? "self" : ancestor ? "ancestor" : "none"}
                   onClick={() => onSelect({ kind: "node", id: node.id })}
                   onDoubleClick={() => onDrill({ kind: "node", id: node.id })}
                   className={cn(
@@ -246,6 +275,8 @@ export function RunTimelineRows({
                     "border-border bg-primary/20 text-foreground hover:bg-primary/30",
                     "outline-none focus-visible:ring-2 focus-visible:ring-foreground",
                     picked && "bg-primary/45 ring-2 ring-foreground",
+                    ancestor && "bg-primary/40 ring-2 ring-foreground/60",
+                    dim && !picked && !ancestor && "opacity-40",
                   )}
                   style={boxStyle(box)}
                 >
@@ -277,11 +308,13 @@ export function RunTimelineRows({
               data-testid="run-timeline-unit"
               data-unit-kind={unit.kind}
               data-block-class={blockClass(unit)}
+              data-highlight={picked ? "self" : "none"}
               onClick={() => onSelect(candidate)}
               onDoubleClick={() => onDrill(candidate)}
               className={cn(
                 "absolute inset-y-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-foreground",
                 picked && "ring-2 ring-foreground",
+                dim && !picked && "opacity-40",
               )}
               style={{ ...boxStyle(box), background: unitColor(unit) }}
             />
