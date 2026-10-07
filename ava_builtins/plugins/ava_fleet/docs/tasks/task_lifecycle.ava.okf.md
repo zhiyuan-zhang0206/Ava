@@ -58,7 +58,7 @@ Filter the task list, ordered by `created_at` ascending. All parameters are opti
 | `parent=some_id, recursive=True` | Entire subtree (recursive CTE) |
 | No parameters | All tasks |
 
-### `update(task_id, *, status=None, title=None, description=None, results=None, owner=<unchanged>, remind_interval_seconds=<unchanged>, priority=None, note=None) -> None`
+### `update(task_id, *, status=None, title=None, description=None, results=None, owner=<unchanged>, remind_interval_seconds=<unchanged>, priority=None, note=None, operation_key=None) -> None`
 
 Modify task fields, **pass only what you want to change**—omitted fields remain unchanged. `results` is replaced wholesale; to append progress, use `note=` or `log()`.
 
@@ -69,9 +69,10 @@ Modify task fields, **pass only what you want to change**—omitted fields remai
 - `priority`: `None` (default) means "unchanged"; passing `"P0"`..`"P3"` writes it, illegal value raises `ValueError` (#663).
 - `note`: appends a line `[YYYY-MM-DD HH:MM:SS] <note>` to `results`, can be used alongside any status change or alone as a substitute for `log()`. The stamp is built by `base.agents.tasks.notes.task_note_line` — the same agent-facing representation and the same timezone as every other timestamp an agent reads, shared with the gateway's drain writer so the two cannot drift.
 - Any write resets the reminder counter (`last_reminded_at` / `reminder_count` zeroed).
-- Each successful write publishes `task_updated` (SSE, board invalidates and refetches).
+- Each fresh committed write publishes `task_updated` (SSE, board invalidates and refetches).
+- `operation_key`: [[task_update_receipts.ava.okf.md|explicit agent/task-scoped replay]] skips repeated task effects; changed effective inputs with the same key raise `ValueError`.
 
-### `log(task_id, message) -> None`
+### `log(task_id, message, *, operation_key=None) -> None`
 
 Append a line `[YYYY-MM-DD HH:MM:SS] message` to `results`—**delegates to `update(task_id, note=message)`**, same timestamped append, same reminder counter reset.
 

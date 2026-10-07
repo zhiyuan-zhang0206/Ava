@@ -361,6 +361,7 @@ def update(
     priority: str | None = None,
     parent_id: int | None = _UNSET,  # type: ignore[assignment]
     note: str | None = None,
+    operation_key: str | None = None,
 ) -> None:
     """Any write resets the reminder clock. Owner changes notify both owners; other
     updates tell the owner who changed it; a parent-only reparent stays silent.
@@ -372,6 +373,9 @@ def update(
         owner: agent id to reassign to; a task always has an owner.
         remind_interval_seconds: None = unchanged; reminders cannot be disabled; capped at 24h.
         parent_id: reparent (explicit None = system root; int = set parent).
+        operation_key: optional stable key for this agent and task; reuse it to
+            replay a committed update without another note or notification.
+            Different effective fields with the same key raise ValueError.
     """
     task_id = coerce_typed(task_id, "task_id", int)
     status = coerce_str(status, "status", allow_none=True)
@@ -412,8 +416,25 @@ def update(
     sets.append("reminder_count = 0")
     sets.append("escalated_at = NULL")
 
-    actor = ava.sdk_surface.agent_identity.agent_id()
+    from ._task_receipts import record_update, replay_update, update_identity, update_request
+
+    actor, operation_key = update_identity(operation_key)
+    request_body = update_request(
+        {
+            "status": status,
+            "title": title,
+            "description": description,
+            "results": results,
+            "owner": owner,
+            "remind_interval_seconds": remind_interval_seconds,
+            "priority": priority,
+            "parent_id": parent_id,
+            "note": note,
+        }
+    )
     with ava.DB.transaction(), ava.DB.cursor() as cur:
+        if replay_update(cur, actor, task_id, operation_key, request_body):
+            return
         if parent_id is not _UNSET:
             sets.append("parent_id = %s")
             params.append(resolve_reparent(cur, task_id, parent_id))
@@ -444,6 +465,7 @@ def update(
             owner_changed=_owner_actually_changed(owner_changing, old_owner, new_owner),
             parent_only=parent_only,
         )
+        record_update(cur, actor, task_id, operation_key, request_body)
 
     from base import telemetry  # deferred (task #3816)
 
@@ -549,11 +571,14 @@ def _is_terminated(agent_id: int) -> bool:
     return meta is None or meta[0] == "terminated"
 
 
-def log(task_id: int, message: str) -> None:
-    """Append a timestamped line to a task's result log."""
+def log(task_id: int, message: str, *, operation_key: str | None = None) -> None:
+    """Append one timestamped line; reuse operation_key to replay without appending again."""
     task_id = coerce_typed(task_id, "task_id", int)
     message = coerce_str(message, "message")
-    update(task_id, note=message)
+    if operation_key is None:
+        update(task_id, note=message)
+    else:
+        update(task_id, note=message, operation_key=operation_key)
 
 
 def get(task_id: int) -> Task:
