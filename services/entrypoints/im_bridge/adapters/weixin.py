@@ -27,6 +27,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -280,6 +281,60 @@ def _outbound_message(
     return {"msg": message}
 
 
+def _uint64_message_id(provider_id: object) -> str | None:
+    """Canonical positive iLink uint64, without float or boolean coercion."""
+    if type(provider_id) is int:
+        value = provider_id
+    elif (
+        isinstance(provider_id, str)
+        and provider_id.isascii()
+        and provider_id.isdigit()
+        and len(provider_id) <= 20
+    ):
+        value = int(provider_id)
+    else:
+        return None
+    return str(value) if 0 < value < 2**64 else None
+
+
+def _provider_namespace(base_url: str) -> str | None:
+    """Qualify the configured HTTPS provider endpoint without credential components."""
+    try:
+        endpoint = urlsplit(base_url)
+        host, port = endpoint.hostname, endpoint.port
+        if (
+            endpoint.scheme != "https"
+            or not host
+            or endpoint.username is not None
+            or endpoint.password is not None
+        ):
+            return None
+        if endpoint.query or endpoint.fragment:
+            return None
+        host = f"[{host}]" if ":" in host else host
+        authority = host.lower() + (f":{port}" if port not in (None, 443) else "")
+        return f"https://{authority}{endpoint.path.rstrip('/')}"
+    except ValueError:
+        return None
+
+
+def _ordinary_chat_key(
+    *, base_url: str, account_id: object, sender_id: object, provider_id: object, text: str
+) -> str | None:
+    """Qualify one iLink event for ordinary chat; never infer identity from text."""
+    if text.strip().startswith(("/", "spawn:", "notice:")):
+        return None
+    if not isinstance(account_id, str) or not account_id.strip():
+        return None
+    if not isinstance(sender_id, str) or not sender_id.strip():
+        return None
+    message_id, namespace = _uint64_message_id(provider_id), _provider_namespace(base_url)
+    if message_id is None or namespace is None:
+        return None
+    material = json.dumps([namespace, account_id.strip(), sender_id.strip(), message_id])
+    return "weixin-chat-v1:" + hashlib.sha256(material.encode()).hexdigest()
+
+
 def _safe_id(value: str, keep: int = 8) -> str:
     """Truncate long account/peer ids for log lines."""
     return value if len(value) <= keep else f"{value[:keep]}…"
@@ -509,7 +564,13 @@ class WeixinAdapter(IMAdapter):
                     "weixin-spawn:"
                     + hashlib.sha256(json.dumps([sender_id, message_id]).encode()).hexdigest()
                     if message_id and text.strip().startswith("spawn:go")
-                    else None
+                    else _ordinary_chat_key(
+                        base_url=self._base_url,
+                        account_id=(self._account or {}).get("account_id"),
+                        sender_id=message.get("from_user_id"),
+                        provider_id=message.get("message_id"),
+                        text=text,
+                    )
                 ),
             )
         )
