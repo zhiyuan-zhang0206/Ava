@@ -142,3 +142,36 @@ class TestAgentsEntries:
         monkeypatch.setattr(gateway_client, "get_neighbors", lambda *_a, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match=match):
             call()
+
+
+def test_core_spawn_forwards_explicit_strong_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def capture(**kwargs: Any) -> int:
+        seen.update(kwargs)
+        return 42
+
+    monkeypatch.setattr(gateway_client, "spawn", capture)
+    monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "agent:1")
+    assert agents.spawn(prompt="goal", idempotency_key="intent", require_idempotency=True) == 42
+    assert seen["require_idempotency"] is True
+    assert seen["idempotency_key"] == "intent"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"require_idempotency": 1, "idempotency_key": "key"},
+        {"require_idempotency": True},
+        {"require_idempotency": True, "idempotency_key": "key", "fork_from": 1},
+    ],
+)
+def test_core_spawn_invalid_strong_admission_before_actor_or_http(
+    monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, Any]
+) -> None:
+    def unexpected() -> str:
+        raise AssertionError("invalid strong admission must precede actor lookup")
+
+    monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", unexpected)
+    with pytest.raises((TypeError, ValueError)):
+        agents.spawn(**kwargs)
