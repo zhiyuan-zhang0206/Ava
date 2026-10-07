@@ -57,7 +57,7 @@ import type { NoticesFeed,
   ResolvedConfigView,
   RestartAgentResponse,
   ResurrectAgentResponse,
-  RunTimelineMessageDetails,
+  RunTimelineMessages,
   RunTimelineResponse,
   ShellCapture,
   SpawnAgentRequest,
@@ -267,44 +267,34 @@ export const api = {
     return f(`/api/agents/${agentId}/context-breakdown`).then(ok<ContextBreakdownResponse>);
   },
 
+  // The understanding tree and the layer-0 message units in a window; no
+  // window means the agent's whole lifetime.
   getRunTimeline: (
     agentId: number,
-    options?: {
-      from?: string;
-      to?: string;
-      level?: "turn" | "bucket";
-      bucket?: string;
-      session?: "compact" | "current";
-      /** P4-4 (#4023): a reduced strip cap for this read (the compare view's
-       *  density budget); the server clamps it to its own ceiling. */
-      messagesMax?: number;
-    },
+    options?: { from?: string; to?: string },
   ): Promise<RunTimelineResponse> => {
     const params = new URLSearchParams();
     if (options?.from != null) params.set("from", options.from);
     if (options?.to != null) params.set("to", options.to);
-    if (options?.level != null) params.set("level", options.level);
-    if (options?.bucket != null) params.set("bucket", options.bucket);
-    if (options?.session != null) params.set("session", options.session);
-    if (options?.messagesMax != null) params.set("messages_max", String(options.messagesMax));
     const query = params.toString();
     return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
       ok<RunTimelineResponse>,
     );
   },
 
-  // One raw-context strip message's parts as text (P4-2, task #4023). Parts
-  // clipped by the per-read budget report `text_truncated`; `full` refetches
-  // the uncut text.
-  getRunTimelineMessage: (
+  // Raw messages `start..end` (inclusive stitched indices, the spans nodes and
+  // units carry), at most `limit` of them; `next_start` continues a cut range.
+  // Parts clipped by the per-read budget report `text_truncated`; `full`
+  // returns them uncut.
+  getRunTimelineMessages: (
     agentId: number,
-    key: string,
-    options?: { full?: boolean },
-  ): Promise<RunTimelineMessageDetails> => {
-    const params = new URLSearchParams({ key });
-    if (options?.full) params.set("full", "true");
-    return f(`/api/agents/${agentId}/run-timeline/message?${params.toString()}`).then(
-      ok<RunTimelineMessageDetails>,
+    range: { start: number; end: number; limit?: number; full?: boolean },
+  ): Promise<RunTimelineMessages> => {
+    const params = new URLSearchParams({ start: String(range.start), end: String(range.end) });
+    if (range.limit != null) params.set("limit", String(range.limit));
+    if (range.full) params.set("full", "true");
+    return f(`/api/agents/${agentId}/run-timeline/messages?${params.toString()}`).then(
+      ok<RunTimelineMessages>,
     );
   },
 

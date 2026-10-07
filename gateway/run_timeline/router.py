@@ -1,560 +1,83 @@
-"""Event-driven run timeline — ``GET /api/agents/{agent_id}/run-timeline``.
+"""The agent run timeline — ``GET /api/agents/{agent_id}/run-timeline``.
 
-The timeline deliberately consumes only the unified event stream (`telemetry_events` and
-`audit_events` in Postgres, both permanent).  It
-therefore works for both per-turn and session-root tracing shapes: a
-``turn_end`` row is the turn skeleton and its matching ``llm_usage.span_id``
-supplies the token/cost measurement.  Tempo remains an optional call-level
-drill-down source rather than a requirement for this run-level surface.
+The data is the two things the agent persists about its own run: its message
+history (the checkpoint) and the understanding tree (``understanding_nodes``).
+The response is a window over both: every level of the tree intersecting the
+window, and below them layer 0, the message units (`base.agents.history.hierarchy.units`).
+No window means the agent's whole lifetime — from the earliest message or node to
+the latest; drilling a node is asking for its span as the window.
+
+Audit events (spawn, restart, terminate) are laid over the window as lifecycle
+markers. They are not a data source: the window never looks at them, and a
+failed read of them leaves the markers out.
 """
 
 from __future__ import annotations
 
-import re
-from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context  # noqa: TID251 — propagate request context to the read worker
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from itertools import pairwise
-from typing import Annotated, Literal, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from base.config import settings
+from base.agents.history.hierarchy.serve import ServedNode, serve_nodes
+from base.agents.history.hierarchy.store import load_call_records, load_nodes
+from base.agents.history.hierarchy.usage import generation_by_span
 from base.db import Database
 from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.run_timeline import _events
-from gateway.run_timeline._buckets import bucket_rows
+from gateway.run_timeline import _lifecycle
+from gateway.run_timeline.history import HistoryView, HistoryViewCache
+from gateway.run_timeline.messages import router as messages_router
 from gateway.run_timeline.schemas import (
-    RunTimelineBoundaries,
     RunTimelineEvent,
-    RunTimelineExec,
-    RunTimelineInbound,
-    RunTimelineLayerNode,
-    RunTimelineLlm,
-    RunTimelineMeta,
-    RunTimelinePendingSpan,
+    RunTimelineGeneration,
+    RunTimelineNode,
     RunTimelineResponse,
-    RunTimelineRow,
-    RunTimelineSummary,
+    RunTimelineUnit,
+    RunTimelineUsage,
     RunTimelineWindow,
 )
-from gateway.run_timeline.strip import router as strip_router
-from gateway.run_timeline.strip import strip_for_window_or_none
 
 router = APIRouter()
-# The strip surface (P4-2) rides this router: app.py is at its line budget,
-# and the route family stays self-contained under the run-timeline path.
-router.include_router(strip_router)
+router.include_router(messages_router)
 
-# How far back the default window looks for the latest session start or compact. It bounds
-# one scan; the record itself has no retention.
-_LIFECYCLE_LOOKBACK = timedelta(days=365)
-_FALLBACK_WINDOW = timedelta(hours=24)
-_ASSOCIATION_TOLERANCE = timedelta(seconds=2)
-_BUCKET_PATTERN = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[smhd])$")
-
-_TURN_EVENTS = (
-    "llm_usage",
-    "turn_end",
-    "exec",
-    "exec_failed",
-    "exec(failed)",
-    "exec_timeout",
-    "exec(timeout)",
-    "exec_cancelled",
-    "exec(cancelled)",
-    "exec_node_timeout",
-    "exec_thread_stuck",
-    "compact",
-    "auto_compact",
-    "agent_spawned",
-    "spawn",
-    "agent_resurrected",
-    "resurrect",
-    "agent_terminated",
-    "terminate",
-    "restart",
-    "agent_restarted",
-    "restart_completed",
-    "idle_wake",
-    "heartbeat_paused",
-    "llm_provider_error",
-    "stream_stalled_retry",
-    "stream_stall_pair_terminated",
-    "stream_overloaded_retry",
-    "llm_turn_aborted",
-)
-_SESSION_START_EVENTS = frozenset(
-    {
-        "agent_spawned",
-        "spawn",
-        "agent_resurrected",
-        "resurrect",
-        "agent_restarted",
-        "restart_completed",
-    }
-)
-_COMPACT_EVENTS = frozenset({"compact", "auto_compact"})
-# The audit family gives one event per user-visible restart/resurrection.  The
-# matching telemetry events are deliberately not rail markers or meta counts.
-_RESTART_EVENTS = frozenset({"restart_completed", "resurrect"})
-_EXEC_EVENTS = frozenset(
-    {
-        "exec",
-        "exec_failed",
-        "exec(failed)",
-        "exec_timeout",
-        "exec(timeout)",
-        "exec_cancelled",
-        "exec(cancelled)",
-        "exec_node_timeout",
-        "exec_thread_stuck",
-    }
-)
-_ANOMALY_EVENTS = frozenset(
-    {
-        "exec_failed",
-        "exec(failed)",
-        "exec_timeout",
-        "exec(timeout)",
-        "exec_cancelled",
-        "exec(cancelled)",
-        "exec_node_timeout",
-        "exec_thread_stuck",
-        "llm_provider_error",
-        "stream_stalled_retry",
-        "stream_stall_pair_terminated",
-        "stream_overloaded_retry",
-        "llm_turn_aborted",
-    }
-)
-# Cross-turn structural events only. Ordinary executions belong to their turn
-# row (see RunTimelineRow.execs); anomaly events surface as row badges, and
-# halt markers (per-turn idle/compact/system stops) are noise — none of them
-# earns an independent rail marker.
-_RAIL_EVENTS = _COMPACT_EVENTS | _RESTART_EVENTS | {"agent_terminated", "terminate"}
+# What the window is when the agent has neither a message nor a node.
+_EMPTY_WINDOW = timedelta(hours=24)
 
 
-@dataclass(frozen=True)
-class TurnTimelineAggregate:
-    """The agent-independent portion of one timeline response."""
-
-    meta: RunTimelineMeta
-    rows: list[RunTimelineRow]
-    events: list[RunTimelineEvent]
-    boundaries: RunTimelineBoundaries
-
-
-@dataclass(frozen=True)
-class _TurnWindow:
-    """A completed turn's time window for associating unkeyed child events."""
-
-    turn: int
-    event: dict[str, object]
-    start: datetime
-    end: datetime
-
-
-def _number(value: object) -> float:
-    """Read a JSON number without letting malformed historical rows break a run."""
-    if isinstance(value, bool) or value is None:
-        return 0.0
-    if isinstance(value, int | float):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def _integer(value: object) -> int:
-    return int(_number(value))
-
-
-def _attrs(event: dict[str, object]) -> dict[str, object]:
-    attrs = event["attributes"]
-    return cast(dict[str, object], attrs) if isinstance(attrs, dict) else {}
-
-
-def _event_ts(event: dict[str, object]) -> datetime:
-    ts = event["ts"]
-    if not isinstance(ts, datetime):
-        raise TypeError(f"Event ts must be datetime, got {type(ts)!r}")
-    return ts
-
-
-def _event_name(event: dict[str, object]) -> str:
-    name = event["event_name"]
-    if not isinstance(name, str):
-        raise TypeError(f"Event event_name must be str, got {type(name)!r}")
-    return name
-
-
-def _event_string(event: dict[str, object], key: str) -> str | None:
-    value = event[key]
-    return value if isinstance(value, str) else None
-
-
-def _llm_usage(events: list[dict[str, object]]) -> RunTimelineLlm:
-    models = {
-        model
-        for event in events
-        if isinstance((model := _attrs(event).get("model")), str) and model
-    }
-    return RunTimelineLlm(
-        calls=len(events),
-        in_total=sum(_integer(_attrs(event).get("in_total")) for event in events),
-        cache_read=sum(_integer(_attrs(event).get("cache_read")) for event in events),
-        out_total=sum(_integer(_attrs(event).get("out_total")) for event in events),
-        reasoning=sum(_integer(_attrs(event).get("reasoning")) for event in events),
-        latency_ms=sum(_number(_attrs(event).get("latency_ms")) for event in events),
-        cost_usd=sum(_number(_attrs(event).get("cost_usd")) for event in events),
-        model=next(iter(models)) if len(models) == 1 else "multiple" if models else None,
-    )
-
-
-def _execution_events(events: list[dict[str, object]]) -> list[RunTimelineExec]:
-    executions: list[RunTimelineExec] = []
-    for event in events:
-        name = _event_name(event)
-        if name not in _EXEC_EVENTS:
-            continue
-        attrs = _attrs(event)
-        tool = attrs.get("tool")
-        executions.append(
-            RunTimelineExec(
-                tool=tool if isinstance(tool, str) and tool else "execute_code",
-                ok=name == "exec",
-            )
-        )
-    return executions
-
-
-def _turn_window(turn: int, turn_end: dict[str, object]) -> _TurnWindow:
-    attrs = _attrs(turn_end)
-    end = _event_ts(turn_end)
-    duration_s = max(0.0, _number(attrs.get("duration_seconds")))
-    return _TurnWindow(
-        turn=turn,
-        event=turn_end,
-        start=end - timedelta(seconds=duration_s),
-        end=end,
-    )
-
-
-def _assign_events_by_time(
-    turns: list[_TurnWindow], events: list[dict[str, object]]
-) -> list[list[dict[str, object]]]:
-    """Attach ordered events once, preferring their containing turn window.
-
-    A session-root trace id is shared by sibling turns, so it cannot join child
-    events to a turn.  The event stream is chronological: after an event falls
-    between turn windows, the next completed turn is the only stable fallback.
-    """
-    assignments: list[list[dict[str, object]]] = [[] for _ in turns]
-    turn_index = 0
-    for event in sorted(events, key=_event_ts):
-        event_ts = _event_ts(event)
-        while turn_index < len(turns) and turns[turn_index].end < event_ts:
-            turn_index += 1
-        if turn_index == len(turns):
-            if turns:
-                # The event belongs to an in-flight next turn whose turn_end is
-                # not visible yet. Keep it once on the final completed row so
-                # the selected window does not silently drop execution evidence.
-                assignments[-1].append(event)
-            continue
-
-        candidate = turns[turn_index]
-        if candidate.start - _ASSOCIATION_TOLERANCE <= event_ts <= candidate.end:
-            assignments[turn_index].append(event)
-            continue
-
-        # The event is in a gap (or predates the first visible turn).  Associate
-        # it with the smallest later turn_end rather than leaking it across rows.
-        assignments[turn_index].append(event)
-    return assignments
-
-
-def _associate_llm_usage(
-    turns: list[_TurnWindow], usages: list[dict[str, object]]
-) -> tuple[list[list[dict[str, object]]], list[bool]]:
-    """Prefer the exact span join, then recover span-less telemetry by time."""
-    assignments: list[list[dict[str, object]]] = [[] for _ in turns]
-    turns_by_span: dict[str, int] = {}
-    for index, turn in enumerate(turns):
-        span_id = _event_string(turn.event, "span_id")
-        if span_id is not None:
-            turns_by_span.setdefault(span_id, index)
-
-    unjoined: list[dict[str, object]] = []
-    for usage in sorted(usages, key=_event_ts):
-        span_id = _event_string(usage, "span_id")
-        turn_index = turns_by_span.get(span_id) if span_id is not None else None
-        if turn_index is None:
-            unjoined.append(usage)
-        else:
-            assignments[turn_index].append(usage)
-
-    fallback_usage_by_turn = _assign_events_by_time(turns, unjoined)
-    for turn_index, fallback_usages in enumerate(fallback_usage_by_turn):
-        assignments[turn_index].extend(fallback_usages)
-    return assignments, [bool(usages) for usages in fallback_usage_by_turn]
-
-
-def _row_for_turn(
-    turn: int,
-    turn_end: dict[str, object],
-    usages: list[dict[str, object]],
-    associated_events: list[dict[str, object]],
-) -> RunTimelineRow:
-    attrs = _attrs(turn_end)
-    end = _event_ts(turn_end)
-    duration_s = max(0.0, _number(attrs.get("duration_seconds")))
-    start = end - timedelta(seconds=duration_s)
-    if duration_s == 0 and usages:
-        start = min(_event_ts(event) for event in usages)
-
-    llm = _llm_usage(usages)
-    execs = _execution_events(associated_events)
-    active_s = min(duration_s, llm.latency_ms / 1000)
-    anomalies = [
-        _event_name(event) for event in associated_events if _event_name(event) in _ANOMALY_EVENTS
-    ]
-    ok = attrs.get("ok")
-    if ok is False:
-        anomalies.append("turn_end_failed")
-    checkpoint_id = attrs.get("checkpoint_id")
-    return RunTimelineRow(
-        turn=turn,
-        n_turns=1,
-        start=start,
-        end=end,
-        active_s=active_s,
-        trace_id=_event_string(turn_end, "trace_id"),
-        checkpoint_id=checkpoint_id if isinstance(checkpoint_id, str) else None,
-        ok=ok if isinstance(ok, bool) else None,
-        llm=llm,
-        execs=execs,
-        anomalies=sorted(set(anomalies)),
-        tags=[],
-    )
-
-
-def _assign_marker_tags(rows: list[RunTimelineRow], events: list[dict[str, object]]) -> None:
-    for event in events:
-        name = _event_name(event)
-        if name not in _COMPACT_EVENTS | {"idle_wake", "heartbeat_paused"}:
-            continue
-        event_ts = _event_ts(event)
-        candidates = [row for row in rows if row.end <= event_ts]
-        if name == "idle_wake":
-            candidates = [row for row in rows if row.start >= event_ts] or candidates
-        if not candidates:
-            continue
-        target = candidates[-1] if name in _COMPACT_EVENTS else candidates[0]
-        target.tags.append(f"{name}@{event_ts.isoformat()}")
-
-    for previous, current in pairwise(rows):
-        idle_s = (current.start - previous.end).total_seconds()
-        if idle_s > 0:
-            current.tags.append(f"idle_before_{round(idle_s)}s")
-
-
-def _rail_events(events: list[dict[str, object]]) -> list[RunTimelineEvent]:
-    rail: list[RunTimelineEvent] = []
-    for event in events:
-        name = _event_name(event)
-        if name not in _RAIL_EVENTS:
-            continue
-        attrs = _attrs(event)
-        label = attrs.get("exc_type") or attrs.get("reason") or attrs.get("body")
-        rail.append(
-            RunTimelineEvent(
-                ts=_event_ts(event),
-                kind=name,
-                trace_id=_event_string(event, "trace_id"),
-                label=label if isinstance(label, str) else None,
-            )
-        )
-    return rail
-
-
-def _timeline_meta(
-    turn_rows: list[RunTimelineRow],
-    ordered: list[dict[str, object]],
-    window_start: datetime,
-    window_end: datetime,
-    n_compact: int,
-    used_usage_fallback: list[bool],
-) -> RunTimelineMeta:
-    llm_rows = [row.llm for row in turn_rows]
-    return RunTimelineMeta(
-        n_turns=len(turn_rows),
-        wall_span_s=max(0.0, (window_end - window_start).total_seconds()),
-        active_s=sum(row.active_s for row in turn_rows),
-        tokens_in=sum(row.in_total for row in llm_rows),
-        tokens_out=sum(row.out_total for row in llm_rows),
-        cost_usd=sum(row.cost_usd for row in llm_rows),
-        n_exec_failed=sum(1 for event in ordered if _event_name(event) in _EXEC_EVENTS - {"exec"}),
-        n_compact=n_compact,
-        n_restart=sum(1 for event in ordered if _event_name(event) in _RESTART_EVENTS),
-        fallback_turns=sum(used_usage_fallback),
-        unmatched_turns=sum(1 for row in turn_rows if row.llm.calls == 0),
-    )
-
-
-def _turn_rows(ordered: list[dict[str, object]]) -> tuple[list[RunTimelineRow], list[bool]]:
-    """One row per turn with its LLM usage and events attached; and which turns used the fallback."""
-    turns = [
-        _turn_window(turn, turn_end)
-        for turn, turn_end in enumerate(
-            (event for event in ordered if _event_name(event) == "turn_end"), start=1
-        )
-    ]
-    usages_by_turn, used_usage_fallback = _associate_llm_usage(
-        turns, [event for event in ordered if _event_name(event) == "llm_usage"]
-    )
-    associated_events_by_turn = _assign_events_by_time(
-        turns,
-        [
-            event
-            for event in ordered
-            if _event_name(event) in _EXEC_EVENTS | (_ANOMALY_EVENTS - _EXEC_EVENTS)
-        ],
-    )
-
-    rows: list[RunTimelineRow] = []
-    for index, turn in enumerate(turns):
-        rows.append(
-            _row_for_turn(
-                turn.turn,
-                turn.event,
-                usages_by_turn[index],
-                associated_events_by_turn[index],
-            )
-        )
-    return rows, used_usage_fallback
-
-
-def _last_turn_before_compact(
-    rows: list[RunTimelineRow], compact_events: list[dict[str, object]]
-) -> int | None:
-    if not compact_events:
+def _lifetime(view: HistoryView, nodes: list[ServedNode]) -> tuple[datetime, datetime] | None:
+    """The earliest and latest of the agent's messages and understanding nodes (read times)."""
+    nodes_extent = (min(n.start for n in nodes), max(n.end for n in nodes)) if nodes else None
+    extents = [extent for extent in (view.extent, nodes_extent) if extent is not None]
+    if not extents:
         return None
-    last_ts = _event_ts(compact_events[-1])
-    return next((row.turn for row in reversed(rows) if row.end <= last_ts), None)
+    start = min(extent[0] for extent in extents)
+    end = max(extent[1] for extent in extents)
+    return start, end if end > start else start + timedelta(seconds=1)
 
 
-def aggregate_turn_timeline(
-    events: list[dict[str, object]],
-    window_start: datetime,
-    window_end: datetime,
-    *,
-    bucket_seconds: int | None = None,
-) -> TurnTimelineAggregate:
-    """Build ordered turn rows from an event slice, optionally time-bucketed."""
-    ordered = sorted(events, key=_event_ts)
-    rows, used_usage_fallback = _turn_rows(ordered)
-    _assign_marker_tags(rows, ordered)
-    compact_events = [event for event in ordered if _event_name(event) in _COMPACT_EVENTS]
-    last_before_compact = _last_turn_before_compact(rows, compact_events)
-    turn_rows = rows
-    rows = bucket_rows(rows, window_start, bucket_seconds) if bucket_seconds is not None else rows
-    meta = _timeline_meta(
-        turn_rows, ordered, window_start, window_end, len(compact_events), used_usage_fallback
-    )
-    return TurnTimelineAggregate(
-        meta=meta,
-        rows=rows,
-        events=_rail_events(ordered),
-        boundaries=RunTimelineBoundaries(
-            initialize_turn=turn_rows[0].turn if turn_rows else None,
-            last_before_compact_turn=last_before_compact,
-            post_window_turns=0,
-            has_activity_after_window=False,
-        ),
-    )
-
-
-def _query_all_events(
-    database: Database,
-    agent_id: int,
-    from_: datetime,
-    to: datetime,
-    *,
-    event_names: tuple[str, ...] = _TURN_EVENTS,
-) -> list[dict[str, object]]:
-    return _events.query_all_events(database, agent_id, from_, to, event_names=event_names)
-
-
-def _default_window(
-    database: Database, agent_id: int, now: datetime, *, session: Literal["compact", "current"]
-) -> tuple[datetime, datetime]:
-    """Choose the latest compact-ended or current observable session.
-
-    ``compact`` ends at the latest compact, while ``current`` runs from the latest
-    lifecycle start to ``now``. An agent with no lifecycle start inside the
-    lookback gets a bounded last-24-hours view instead of an unbounded scan.
-    """
-    lookback_start = now - _LIFECYCLE_LOOKBACK
-    names = tuple(_SESSION_START_EVENTS | _COMPACT_EVENTS)
-    lifecycle_events = _query_all_events(database, agent_id, lookback_start, now, event_names=names)
-    ordered = sorted(lifecycle_events, key=_event_ts)
-    starts = [_event_ts(event) for event in ordered if _event_name(event) in _SESSION_START_EVENTS]
-    if session == "current":
-        return (starts[-1], now) if starts else (now - _FALLBACK_WINDOW, now)
-
-    compacts = [event for event in ordered if _event_name(event) in _COMPACT_EVENTS]
-    if compacts:
-        end = _event_ts(compacts[-1])
-        starts = [
-            _event_ts(event)
-            for event in ordered
-            if _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) <= end
-        ]
-        return (starts[-1] if starts else max(lookback_start, end - _FALLBACK_WINDOW), end)
-
-    if starts:
-        return starts[-1], now
-    return now - _FALLBACK_WINDOW, now
-
-
-def _parse_bucket_seconds(bucket: str | None) -> int:
-    if bucket is None:
-        raise HTTPException(status_code=422, detail="bucket is required when level=bucket")
-    match = _BUCKET_PATTERN.fullmatch(bucket)
-    if match is None:
-        raise HTTPException(
-            status_code=422, detail="bucket must use a positive s, m, h, or d suffix"
-        )
-    multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}[match["unit"]]
-    return int(match["count"]) * multiplier
-
-
-def _effective_window(
-    database: Database,
-    agent_id: int,
+def _window(
+    lifetime: tuple[datetime, datetime] | None,
     from_: datetime | None,
     to: datetime | None,
     now: datetime,
-    *,
-    session: Literal["compact", "current"],
 ) -> tuple[datetime, datetime]:
     for name, value in (("from", from_), ("to", to)):
         if value is not None and value.tzinfo is None:
             raise HTTPException(status_code=422, detail=f"{name} must include a timezone offset")
-    if from_ is None and to is None:
-        return _default_window(database, agent_id, now, session=session)
-    end = to or now
-    start = from_ or end - _FALLBACK_WINDOW
+    default = lifetime or (now - _EMPTY_WINDOW, now)
+    start, end = from_ or default[0], to or default[1]
     if start >= end:
         raise HTTPException(status_code=422, detail="from must be earlier than to")
     return start, end
+
+
+def _events(db: Database, agent_id: int, start: datetime, end: datetime) -> list[RunTimelineEvent]:
+    try:
+        return _lifecycle.read(db, agent_id, start, end)
+    except Exception:
+        logger.exception("run-timeline lifecycle read failed for agent {}", agent_id)
+        return []
 
 
 @router.get(
@@ -566,209 +89,59 @@ def get_run_timeline(
     agent_id: int,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: Annotated[datetime | None, Query()] = None,
-    level: Annotated[Literal["turn", "bucket"], Query()] = "turn",
-    bucket: Annotated[str | None, Query()] = None,
-    session: Annotated[Literal["compact", "current"], Query()] = "compact",
-    messages_max: Annotated[int | None, Query(ge=1)] = None,
 ) -> RunTimelineResponse:
-    """Return an event-driven session waterfall with turn or bucket rows."""
-    now = datetime.now(UTC)
+    """The understanding tree and the message units in a window; no window means the agent's whole lifetime."""
     db: Database = request.app.state.db
-    window_start, window_end = _effective_window(db, agent_id, from_, to, now, session=session)
-    # Two independent read branches: the request thread owns events/narrative,
-    # one worker owns checkpoint strip reads. Join before returning or raising;
-    # request context follows the worker, and no executor survives the request.
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="run-timeline") as executor:
-        strip_read = executor.submit(
-            copy_context().run,
-            strip_for_window_or_none,
-            request.app.state.strip_cache,
-            db,
-            agent_id,
-            window_start,
-            window_end,
-            messages_max,
-        )
-        events = _query_all_events(db, agent_id, window_start, window_end)
-        post_window_events = (
-            _query_all_events(
-                db,
-                agent_id,
-                window_end,
-                now,
-                event_names=tuple(_SESSION_START_EVENTS | {"turn_end"}),
-            )
-            if session == "compact" and from_ is None and to is None and window_end < now
-            else []
-        )
-
-        aggregate = aggregate_turn_timeline(
-            events,
-            window_start,
-            window_end,
-            bucket_seconds=_parse_bucket_seconds(bucket) if level == "bucket" else None,
-        )
-        post_window_turns = sum(
-            1
-            for event in post_window_events
-            if _event_name(event) == "turn_end" and _event_ts(event) > window_end
-        )
-        has_activity_after_window = post_window_turns > 0 or any(
-            _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) > window_end
-            for event in post_window_events
-        )
-        layers, summary, pending = _narrative_for_window(
-            db,
-            agent_id,
-            window_start,
-            window_end,
-            # Wall spans of the window's completed turns: the "activity presence"
-            # the pending-placeholder subtraction reads.
-            activity=[(row.start, row.end) for row in aggregate.rows],
-        )
-        inbounds = _inbounds_for_window(db, agent_id, window_start, window_end)
-        messages, messages_truncated = strip_read.result()
+    views: HistoryViewCache = request.app.state.run_timeline_views
+    view = views.get(db, agent_id)
+    stored = load_nodes(db, agent_id)
+    if any(node.span_end >= len(view.history.messages) for node in stored):
+        # A node written after the cached view was built.
+        view = views.get(db, agent_id, fresh=True)
+    served = serve_nodes(
+        stored,
+        view.usage,
+        generation_by_span(view.history, load_call_records(db, agent_id)),
+        view.read,
+    )
+    lifetime = _lifetime(view, served)
+    start, end = _window(lifetime, from_, to, datetime.now(UTC))
+    nodes = [node for node in served if node.start <= end and node.end >= start]
     return RunTimelineResponse(
         agent_id=agent_id,
-        window=RunTimelineWindow(from_=window_start, to=window_end),
-        meta=aggregate.meta,
-        rows=aggregate.rows,
-        events=aggregate.events,
-        boundaries=RunTimelineBoundaries(
-            initialize_turn=aggregate.boundaries.initialize_turn,
-            last_before_compact_turn=aggregate.boundaries.last_before_compact_turn,
-            post_window_turns=post_window_turns,
-            has_activity_after_window=has_activity_after_window,
+        window=RunTimelineWindow(from_=start, to=end),
+        lifetime=(
+            RunTimelineWindow(from_=lifetime[0], to=lifetime[1]) if lifetime is not None else None
         ),
-        layers=layers,
-        summary=summary,
-        pending=pending,
-        inbounds=inbounds,
-        messages=messages,
-        messages_truncated=messages_truncated,
-    )
-
-
-def _narrative_for_window(
-    db: Database,
-    agent_id: int,
-    window_start: datetime,
-    window_end: datetime,
-    *,
-    activity: list[tuple[datetime, datetime]],
-) -> tuple[
-    list[RunTimelineLayerNode] | None,
-    RunTimelineSummary | None,
-    list[RunTimelinePendingSpan] | None,
-]:
-    """The narrative layers and raw-context fallback for one window.
-
-    The event timeline is the primary read; every failure here (store absent on
-    an old cluster, checkpoint read error) degrades to no narrative rather than
-    failing the endpoint. Response shapes follow the three coverage states:
-    no layers -> summary only; full coverage -> layers only; partial coverage ->
-    both (the fallback is the agent's latest compact summary -- an agent-level
-    text, not sliced to the window). ``pending`` marks window activity (clamped
-    to the window) that the sealed coverage does not explain -- the
-    placeholders the layer track draws.
-    """
-    from base.agents.history.hierarchy.serve import pending_spans, select_layers
-    from base.agents.history.hierarchy.store import load_coverage_extent, load_window_nodes
-
-    try:
-        nodes = load_window_nodes(db, agent_id, window_start, window_end)
-        extent = load_coverage_extent(db, agent_id)
-        selection = select_layers(
-            nodes,
-            window_start=window_start,
-            window_end=window_end,
-            max_nodes=settings.display.run_timeline_layers_max_nodes,
-        )
-    except Exception:
-        logger.exception("run-timeline narrative read failed for agent {}", agent_id)
-        return None, None, None
-    layers = (
-        [
-            RunTimelineLayerNode(
-                id=layer.id,
-                depth=layer.depth,
-                parent=layer.parent,
-                start=layer.start,
-                end=layer.end,
-                summary=layer.summary,
+        nodes=[
+            RunTimelineNode(
+                id=node.id,
+                level=node.level,
+                parent=node.parent,
+                start=node.start,
+                end=node.end,
+                span_start=node.span_start,
+                span_end=node.span_end,
+                summary=node.summary,
+                usage=RunTimelineUsage(**vars(node.usage)),
+                generation=(
+                    RunTimelineGeneration(**vars(node.generation)) if node.generation else None
+                ),
             )
-            for layer in selection.layers
-        ]
-        if selection.layers
-        else None
+            for node in nodes
+        ],
+        units=[
+            RunTimelineUnit(
+                kind=unit.kind,
+                i0=unit.i0,
+                i1=unit.i1,
+                start=unit.start,
+                end=unit.end,
+                source=unit.source,
+                preview=unit.preview,
+            )
+            for unit in view.units
+            if unit.start <= end and unit.end >= start
+        ],
+        events=_events(db, agent_id, start, end),
     )
-    summary = None
-    if selection.coverage != "full":
-        text = _latest_compact_summary(db, agent_id)
-        if text:
-            summary = RunTimelineSummary(text=text)
-    pending: list[RunTimelinePendingSpan] | None = None
-    if extent is not None:
-        # Clamp to the window: a turn straddling an edge must not promise a
-        # placeholder outside the displayed range.
-        window_activity = [
-            (max(span_start, window_start), min(span_stop, window_end))
-            for span_start, span_stop in activity
-        ]
-        spans = pending_spans(
-            window_activity,
-            [
-                (node.start_ts, node.end_ts)
-                for node in nodes
-                if node.start_ts is not None and node.end_ts is not None
-            ],
-            coverage_start=extent[0],
-        )
-        if spans:
-            pending = [RunTimelinePendingSpan(start=start, end=stop) for start, stop in spans]
-    return layers, summary, pending
-
-
-def _inbounds_for_window(
-    db: Database, agent_id: int, window_start: datetime, window_end: datetime
-) -> list[RunTimelineInbound] | None:
-    """Chat delivery facts in the window — the compare-view arrow source.
-
-    Delivery facts only (``inbound_messages``), never the checkpoint copy:
-    compaction rewrites context, but who was woken by whom and when is a fact
-    of delivery. One windowed index read; a read failure degrades to None
-    rather than failing the endpoint (the narrative-read posture).
-    """
-    from base.db import list_chat_inbound_facts
-
-    try:
-        facts = list_chat_inbound_facts(db, agent_id, window_start, window_end)
-    except Exception:
-        logger.exception("run-timeline inbound read failed for agent {}", agent_id)
-        return None
-    return [
-        RunTimelineInbound(ts=fact.created_at, source=fact.source, inbound_id=fact.id)
-        for fact in facts
-    ]
-
-
-def _latest_compact_summary(db: Database, agent_id: int) -> str | None:
-    """The agent's most recent compact summary — the raw-context fallback text.
-
-    One latest-snapshot checkpoint read (the same read the context panel does);
-    a read failure or an agent without a compaction degrades to None.
-    """
-    from base.agents.history.checkpoint import load_checkpoint_messages
-    from base.agents.messages.kwargs import AvaMsgType, message_content, read_ava_kwargs
-
-    try:
-        messages = load_checkpoint_messages(db, agent_id)
-    except Exception:
-        logger.exception("compact summary read failed for agent {}", agent_id)
-        return None
-    for message in reversed(messages):
-        if read_ava_kwargs(message).get("ava_msg_type") == AvaMsgType.COMPACT_SUMMARY:
-            content = message_content(message)
-            if isinstance(content, str) and content.strip():
-                return content
-    return None

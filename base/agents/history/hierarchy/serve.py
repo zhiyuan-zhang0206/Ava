@@ -1,188 +1,86 @@
-"""Serving merge for run-timeline layers — window -> layer node set.
+"""Serving the understanding tree to the run-timeline — stored nodes with their costs attached.
 
-Pure selection over stored nodes (`store.load_window_nodes`): pick the finest
-engine level whose intersecting node count fits `max_nodes`, keep every coarser
-level as context (the user's "attach each layer"), and convert engine levels to
-wire depths relative to the selected top (depth 0 = the top of what the window
-shows; the frontend renders one row per depth).
+Pure over stored nodes (`store.load_nodes`): every level of the tree is
+served, none dropped or capped; the page draws one row per level, layer 0 (the
+message units, `units.py`) below them. Drilling narrows the window; there is no
+other cursor.
 
-The coverage result drives the response's fallback shape (the three states):
-- no usable nodes -> `layers` is None and the raw-context summary carries the
-  window;
-- full coverage -> layers only;
-- partial coverage -> layers plus the raw-context fallback (the agent's
-  latest compact summary -- an agent-level text, not sliced to the window);
-  the single-summary-field reading of per-segment degradation.
+`level` is the engine level, stable across windows (1 = the finest, leaves; each
+level up groups the one below), so a row keeps its number however the window
+moves. Each node carries two figures, both computed by code:
 
-`pending_spans` carves the complement: window activity the sealed coverage
-does not explain -- the de-emphasized placeholders the client draws (the B
-placeholders, 2026-09-18) so uncovered stretches read as "not generated yet".
+- `usage` — the agent's own cost over the node's message span (`usage.MessageUsage`);
+- `generation` — the cost of the understanding calls that wrote the node, for the
+  nodes that have such a record (leaves written by the chunk consumer); None otherwise.
 
-`StoredNode.depth` is the ENGINE level (1 = the finest, leaves); the wire
-`depth` is its mirror (`top - level`), so the field name means opposite things
-in the two layers — hence the local `level` naming below. Storage guarantees
-at most one cell per same-level region (the write side reconciles re-cuts
-away), so the selection never has to de-duplicate.
+Storage guarantees at most one cell per same-level region (the write side
+reconciles re-cuts away), so nothing here de-duplicates. A node whose time is
+unknown (legacy messages) cannot be placed on the time axis and is skipped —
+it stays stored, just unserved.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
 from base.agents.history.hierarchy.store import StoredNode
+from base.agents.history.hierarchy.usage import GenerationUsage, MessageUsage, Usage
 
 
 @dataclass(frozen=True)
-class LayerNode:
-    """One wire layer node (storage-agnostic; the router maps it to the schema)."""
+class ServedNode:
+    """One node as the run-timeline serves it."""
 
     id: str
-    depth: int
+    level: int
     parent: str | None
     start: datetime
     end: datetime
+    span_start: int
+    span_end: int
     summary: str
+    usage: Usage
+    generation: GenerationUsage | None
 
 
-@dataclass(frozen=True)
-class LayerSelection:
-    """The merge outcome: the layer set (None when nothing is usable) and the
-    window coverage it provides."""
-
-    layers: tuple[LayerNode, ...] | None
-    coverage: str  # none | partial | full
-
-
-def select_layers(
+def serve_nodes(
     nodes: Sequence[StoredNode],
-    *,
-    window_start: datetime,
-    window_end: datetime,
-    max_nodes: int,
-) -> LayerSelection:
-    """Select the layer set for one window; see the module docstring.
+    usage: MessageUsage,
+    generation: Mapping[tuple[int, int], GenerationUsage],
+    read: Sequence[datetime | None],
+) -> list[ServedNode]:
+    """The timed nodes, finest level first then in message order, each with its two cost figures.
 
-    Nodes whose timestamps are unknown (legacy messages) cannot be placed on
-    the time axis and are skipped — they stay stored, just unserved.
+    A node's `start` / `end` are the read times (`units.read_times`) of the first and last
+    message of its span, so a level's nodes never overlap in time and a parent spans exactly its
+    children; the stored `start_ts` / `end_ts` are only used to tell a timed node from an untimed one.
+
+    Raises:
+        IndexError: a node's span lies outside the history `usage` was built over.
     """
-    usable = [node for node in nodes if node.start_ts is not None and node.end_ts is not None]
-    if not usable:
-        return LayerSelection(layers=None, coverage="none")
-    finest = _finest_level(usable, max_nodes)
-    selected = [node for node in usable if node.depth >= finest]
-    layers = _layer_nodes(selected)
-    covered = _covers(selected, window_start=window_start, window_end=window_end)
-    return LayerSelection(layers=tuple(layers), coverage="full" if covered else "partial")
-
-
-def _finest_level(usable: Sequence[StoredNode], max_nodes: int) -> int:
-    """The shallowest depth whose node count fits `max_nodes` (the deepest when none does)."""
-    counts: dict[int, int] = {}
-    for node in usable:
-        counts[node.depth] = counts.get(node.depth, 0) + 1
-    for level in sorted(counts):
-        if counts[level] <= max_nodes:
-            return level
-    return max(counts)  # every level above the cap (cannot happen with a root)
-
-
-def _layer_nodes(selected: Sequence[StoredNode]) -> list[LayerNode]:
-    """Time-placed nodes as layers, finest-to-coarsest depth re-based so the top layer is 0."""
-    top = max(node.depth for node in selected)
-    timed: list[tuple[datetime, datetime, StoredNode]] = [
-        (node.start_ts, node.end_ts, node)
-        for node in selected
-        if node.start_ts is not None and node.end_ts is not None
-    ]
-    return [
-        LayerNode(
-            id=str(node.id),
-            depth=top - node.depth,
-            parent=str(node.parent_id) if node.parent_id is not None else None,
-            start=start,
-            end=stop,
-            summary=node.text,
-        )
-        for start, stop, node in sorted(timed, key=lambda trio: (trio[2].depth, trio[0]))
-    ]
-
-
-def _merge_spans(
-    spans: Sequence[tuple[datetime, datetime]],
-) -> list[tuple[datetime, datetime]]:
-    """Sorted, merged, non-overlapping view of interval pairs (empty spans dropped)."""
-    merged: list[tuple[datetime, datetime]] = []
-    for start, stop in sorted(spans):
-        if stop <= start:
+    served: list[ServedNode] = []
+    for node in sorted(nodes, key=lambda node: (node.depth, node.span_start)):
+        if node.start_ts is None or node.end_ts is None:
             continue
-        if merged and start <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], stop))
-        else:
-            merged.append((start, stop))
-    return merged
-
-
-def pending_spans(
-    activity: Sequence[tuple[datetime, datetime]],
-    node_spans: Sequence[tuple[datetime, datetime]],
-    *,
-    coverage_start: datetime | None,
-) -> tuple[tuple[datetime, datetime], ...]:
-    """Activity stretches no sealed node covers -- the "pending" placeholders.
-
-    Semantics (B spec, 3187 2026-09-18): only coverage's right side is
-    promised -- activity left of `coverage_start` (the agent's GLOBAL first
-    sealed node; history is never backfilled) yields nothing, while internal
-    gaps and the right tail do. `coverage_start=None` (no sealed history)
-    returns an empty tuple: nothing to promise yet. Inputs need not be sorted
-    or merged; the result is sorted and non-overlapping.
-    """
-    if coverage_start is None:
-        return ()
-    covered = _merge_spans(node_spans)
-    pending: list[tuple[datetime, datetime]] = []
-    for start, stop in _merge_spans(activity):
-        cursor = start
-        for covered_start, covered_stop in covered:
-            if covered_stop <= cursor:
-                continue
-            if covered_start >= stop:
-                break
-            if covered_start > cursor:
-                pending.append((cursor, min(covered_start, stop)))
-            cursor = max(cursor, covered_stop)
-            if cursor >= stop:
-                break
-        if cursor < stop:
-            pending.append((cursor, stop))
-    return tuple(
-        (max(start, coverage_start), stop) for start, stop in pending if stop > coverage_start
-    )
-
-
-def _covers(nodes: Sequence[StoredNode], *, window_start: datetime, window_end: datetime) -> bool:
-    """Whether the selected nodes' intervals, at any level, cover the window.
-
-    Coverage is a property of the union, not of the coarsest level alone:
-    across segments whose trees have different depths, a shallower segment's
-    root sits below the selection's global top level, yet its stretch is fully
-    explained -- reading only the top level would report a false `partial`
-    (harmless in effect, but wrong).
-    """
-    if not nodes:
-        return False
-    intervals: list[tuple[datetime, datetime]] = []
-    for node in nodes:
-        if node.start_ts is not None and node.end_ts is not None:
-            intervals.append((node.start_ts, node.end_ts))
-    intervals.sort()
-    cursor = window_start
-    for start, stop in intervals:
-        if start > cursor:
-            break
-        cursor = max(cursor, stop)
-        if cursor >= window_end:
-            return True
-    return False
+        start, end = read[node.span_start], read[node.span_end]
+        if start is None or end is None:
+            continue
+        served.append(
+            ServedNode(
+                id=str(node.id),
+                level=node.depth,
+                parent=str(node.parent_id) if node.parent_id is not None else None,
+                start=start,
+                end=end,
+                span_start=node.span_start,
+                span_end=node.span_end,
+                summary=node.text,
+                usage=usage.span(node.span_start, node.span_end),
+                generation=(
+                    generation.get((node.span_start, node.span_end)) if node.depth == 1 else None
+                ),
+            )
+        )
+    return served

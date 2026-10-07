@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Frontend Components
-description: Component catalog — conversation view (sidebar/composer/inspector), settings & auth, plus pointers to the Fleet View and Timeline View nodes.
+description: Component catalog — conversation view (sidebar/composer/inspector), settings & auth, plus pointers to the Fleet View, Timeline View and Run Timeline nodes.
 tags:
 - frontend
 ---
@@ -48,21 +48,4 @@ The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) 
 - Control page routing see [[ui/web/src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md|Data Flow]] hooks (`useUserSettings`, etc.); `/control/display` goes through the server-side `user_settings` table; the Insights Metrics section is retired (2026-08-04) — `/insights/metrics` now redirects to the Grafana dashboard link.
 - **AuthGuard** (`components/auth/`) wraps all pages, showing a login page when unauthenticated; `auth-context` shared via React Context.
 
-The single-agent run page keeps session selection and tracing warnings above a viewport-height timeline; custom dates live in a closed disclosure. Route navigation and pending timeline reads display matching skeletons. Inline raw summaries on run and compare charts start with a capped three-line preview and an accessible expand/collapse control.
-
-## Run timeline reader
-
-The single-run page's `RunTimelineWorkspace` keeps a 440px reader beside its
-independently scrolling main column at viewport widths >=1280px, filling the
-space below the page header. `RunTimelineChart` owns selection and portals one
-existing turn/layer/message panel into that reader; closing returns to the
-localized hint. New selections reset reader scroll; full-text expansion survives
-placement changes. Below 1280px details remain below the chart. Hover previews,
-focus actions, chain chips and on-demand budgeted message queries stay with the
-chart. Compare lanes retain their existing detail layout and the shared
-`RawSummaryBand` three-line (48px text) collapsed cap.
-
-The route skeleton shares `RunTimelineControls` with the loaded page. The range
-label reserves space before data arrives; session notices have a fixed,
-scrollable viewport (62px mobile, 42px from 640px), so warning arrival does not
-move the chart. Long or simultaneous notices remain reachable by scrolling.
+The run timeline page (`/insights/run/{id}`) is its own node: [[ui/web/src/docs/frontend-components/run-timeline.ava.okf.md|Run Timeline]].

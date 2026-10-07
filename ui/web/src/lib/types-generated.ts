@@ -580,6 +580,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/understanding/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Understanding Close
+         * @description Describe the part of the agent's live compaction segment that no chunk has covered yet.
+         *
+         *     Enqueues one understanding job from the end of the last chunk job (or the first message
+         *     past the segment's head) to the last request the agent sent, like the closing chunk of a
+         *     compaction. Short-lived agents never reach a size cut, so this is how their tail gets a
+         *     node; nothing calls it automatically.
+         *
+         *     The job runs on the existing consumer of the agent's host: the request is the agent's own
+         *     conversation read from the stored checkpoint plus one instruction. Unlike the producers'
+         *     chunks, which are sent while the agent's own requests keep the provider cache warm, the
+         *     prefix of a manual close is usually cold, so the whole prefix is billed at the full input
+         *     price (at DeepSeek's standard rate about $0.06 for a 390K-token segment), plus the
+         *     model's reasoning output (about $0.008 per call).
+         *
+         *     The answer is a status; nothing is written unless it is `enqueued`. `empty`: nothing lies
+         *     past the last cut (or that stretch was already described). `active_job`: a
+         *     job of this agent is pending or running (its id is returned); the queue keeps an agent's
+         *     jobs in order, so wait for it and ask again. `compact_version`, `start_index` and `end_index`
+         *     name the stretch (request-list indices of the live segment, head at 0). 404 when the agent
+         *     does not exist; 503 when the stored history cannot be read. The job is described only where
+         *     `AVA_UNDERSTANDING_ENABLED` is on (the consumer idles otherwise, and the job waits).
+         */
+        post: operations["post_understanding_close_api_agents__agent_id__understanding_close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/messages": {
         parameters: {
             query?: never;
@@ -2634,7 +2674,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/run-timeline/message": {
+    "/api/agents/{agent_id}/run-timeline/messages": {
         parameters: {
             query?: never;
             header?: never;
@@ -2642,15 +2682,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Run Timeline Message
-         * @description One strip message's text — the on-demand read behind the panel.
-         *
-         *     ``key`` is the strip's stable message identity (``c.<idx>`` /
-         *     ``s<rank>.<boundary>.<idx>``). Parts longer than
-         *     ``display.run_timeline_message_text_max`` come back clipped with
-         *     ``content_truncated``; refetch with ``full=true`` for the uncut text.
+         * Get Run Timeline Messages
+         * @description Messages ``start..end`` of the agent's stitched history, at most ``limit`` of them.
          */
-        get: operations["get_run_timeline_message_api_agents__agent_id__run_timeline_message_get"];
+        get: operations["get_run_timeline_messages_api_agents__agent_id__run_timeline_messages_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2668,7 +2703,7 @@ export interface paths {
         };
         /**
          * Get Run Timeline
-         * @description Return an event-driven session waterfall with turn or bucket rows.
+         * @description The understanding tree and the message units in a window; no window means the agent's whole lifetime.
          */
         get: operations["get_run_timeline_api_agents__agent_id__run_timeline_get"];
         put?: never;
@@ -6843,22 +6878,8 @@ export interface components {
          */
         ResurrectResult: "spawned" | "already_alive";
         /**
-         * RunTimelineBoundaries
-         * @description Turn rows that anchor the initialized-context-to-compact session.
-         */
-        RunTimelineBoundaries: {
-            /** Initialize Turn */
-            initialize_turn: number | null;
-            /** Last Before Compact Turn */
-            last_before_compact_turn: number | null;
-            /** Post Window Turns */
-            post_window_turns: number;
-            /** Has Activity After Window */
-            has_activity_after_window: boolean;
-        };
-        /**
          * RunTimelineEvent
-         * @description An event-rail marker relevant to the selected session window.
+         * @description A lifecycle marker from the audit record (spawn, restart, terminate).
          */
         RunTimelineEvent: {
             /**
@@ -6868,54 +6889,83 @@ export interface components {
             ts: string;
             /** Kind */
             kind: string;
-            /** Trace Id */
-            trace_id: string | null;
             /** Label */
             label: string | null;
         };
         /**
-         * RunTimelineExec
-         * @description Tool and outcome of one execution event; exec events have no duration.
+         * RunTimelineGeneration
+         * @description What generating a node cost: the usage and wall time of its understanding calls.
          */
-        RunTimelineExec: {
-            /** Tool */
-            tool: string;
-            /** Ok */
-            ok: boolean;
+        RunTimelineGeneration: {
+            /** Calls */
+            calls: number;
+            /** Input */
+            input: number;
+            /** Cache Read */
+            cache_read: number;
+            /** Output */
+            output: number;
+            /** Seconds */
+            seconds: number;
         };
         /**
-         * RunTimelineInbound
-         * @description One chat delivery fact (inbound_messages row) inside the window.
-         *
-         *     The arrow source for multi-agent compare views: ``source`` carries the
-         *     envelope contract (``agent:<id>`` / ``user`` / ...); ``inbound_id`` is
-         *     ava_inbound_id, the identity the console item stream already exposes.
+         * RunTimelineMessage
+         * @description One raw message of the stitched history, split into its parts.
          */
-        RunTimelineInbound: {
-            /**
-             * Ts
-             * Format: date-time
-             */
-            ts: string;
+        RunTimelineMessage: {
+            /** Idx */
+            idx: number;
+            /** Ts */
+            ts: string | null;
             /** Source */
-            source: string;
-            /** Inbound Id */
-            inbound_id: number;
+            source: string | null;
+            /** Parts */
+            parts: components["schemas"]["RunTimelineMessagePart"][];
         };
         /**
-         * RunTimelineLayerNode
-         * @description One narrative-layer node (depth 0 = overview, 1 = stage, 2 = block).
-         *
-         *     Nodes form a tree via ``parent``; ``summary`` is the node's single text
-         *     (the hierarchy-understanding rule: humans and agents read the same text).
-         *     Present only when hierarchical summaries exist for the window; turn/call
-         *     detail stays on ``rows`` (depth 3/4 of the same naming).
+         * RunTimelineMessagePart
+         * @description One part of a raw message: its text, clipped to the per-part budget unless `full` was asked.
          */
-        RunTimelineLayerNode: {
+        RunTimelineMessagePart: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "think" | "text" | "call" | "out" | "note" | "compact" | "inbound" | "attach" | "prompt";
+            /** Chars */
+            chars: number;
+            /** Text */
+            text: string;
+            /** Text Truncated */
+            text_truncated: boolean;
+        };
+        /**
+         * RunTimelineMessages
+         * @description GET /api/agents/{agent_id}/run-timeline/messages response.
+         *
+         *     `next_start` is the index to ask for next when the range was cut at `limit`
+         *     messages, else None.
+         */
+        RunTimelineMessages: {
+            /** Messages */
+            messages: components["schemas"]["RunTimelineMessage"][];
+            /** Next Start */
+            next_start: number | null;
+        };
+        /**
+         * RunTimelineNode
+         * @description One understanding-tree node.
+         *
+         *     `level` is the engine level, stable across windows: 1 is the finest (leaves),
+         *     each level up groups the one below. `span_start`..`span_end` is the inclusive
+         *     message-index span in the stitched history, the indices the raw-message route
+         *     reads. `generation` is None for a node with no understanding-call record.
+         */
+        RunTimelineNode: {
             /** Id */
             id: string;
-            /** Depth */
-            depth: number;
+            /** Level */
+            level: number;
             /** Parent */
             parent: string | null;
             /**
@@ -6928,202 +6978,56 @@ export interface components {
              * Format: date-time
              */
             end: string;
+            /** Span Start */
+            span_start: number;
+            /** Span End */
+            span_end: number;
             /** Summary */
             summary: string;
-        };
-        /**
-         * RunTimelineLlm
-         * @description Absolute LLM usage for a turn or an aggregated time bucket.
-         */
-        RunTimelineLlm: {
-            /** Calls */
-            calls: number;
-            /** In Total */
-            in_total: number;
-            /** Cache Read */
-            cache_read: number;
-            /** Out Total */
-            out_total: number;
-            /** Reasoning */
-            reasoning: number;
-            /** Latency Ms */
-            latency_ms: number;
-            /** Cost Usd */
-            cost_usd: number;
-            /** Model */
-            model: string | null;
-        };
-        /**
-         * RunTimelineMessage
-         * @description One context message in the window — the raw strip's geometry source.
-         *
-         *     ``key`` is the stable read identity the message-details route resolves
-         *     (current segment ``c.<msg_idx>``; compact history
-         *     ``s<rank>.<boundary>.<msg_idx>``). Message text deliberately stays out of
-         *     this response; the details route serves it on demand.
-         */
-        RunTimelineMessage: {
-            /** Key */
-            key: string;
-            /** Idx */
-            idx: number;
-            /** Ts */
-            ts: string | null;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "prompt" | "note" | "compact" | "inbound" | "attach" | "ai" | "exec";
-            /** Source */
-            source: string | null;
-            /** Chars */
-            chars: number;
-            /** Parts */
-            parts: components["schemas"]["RunTimelineMessagePart"][];
-        };
-        /**
-         * RunTimelineMessageDetailPart
-         * @description One part's text as the panel reads it.
-         */
-        RunTimelineMessageDetailPart: {
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "think" | "text" | "call" | "out" | "note" | "compact" | "inbound" | "attach" | "prompt";
-            /** Chars */
-            chars: number;
-            /** Text */
-            text: string;
-            /**
-             * Text Truncated
-             * @default false
-             */
-            text_truncated: boolean;
-        };
-        /**
-         * RunTimelineMessageDetails
-         * @description GET /api/agents/{agent_id}/run-timeline/message response.
-         */
-        RunTimelineMessageDetails: {
-            /** Key */
-            key: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "prompt" | "note" | "compact" | "inbound" | "attach" | "ai" | "exec";
-            /** Ts */
-            ts: string | null;
-            /** Source */
-            source: string | null;
-            /** Chars */
-            chars: number;
-            /** Parts */
-            parts: components["schemas"]["RunTimelineMessageDetailPart"][];
-            /** Content Truncated */
-            content_truncated: boolean;
-        };
-        /**
-         * RunTimelineMessagePart
-         * @description One colored part of a strip message; adjacent same-kind parts merge.
-         *
-         *     ``chars`` is the part's exact content length — characters as measured
-         *     (the approved width/readout unit), not an estimate.
-         */
-        RunTimelineMessagePart: {
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "think" | "text" | "call" | "out" | "note" | "compact" | "inbound" | "attach" | "prompt";
-            /** Chars */
-            chars: number;
-        };
-        /**
-         * RunTimelineMeta
-         * @description Run-level totals derived from the rows in a timeline window.
-         */
-        RunTimelineMeta: {
-            /** N Turns */
-            n_turns: number;
-            /** Wall Span S */
-            wall_span_s: number;
-            /** Active S */
-            active_s: number;
-            /** Tokens In */
-            tokens_in: number;
-            /** Tokens Out */
-            tokens_out: number;
-            /** Cost Usd */
-            cost_usd: number;
-            /** N Exec Failed */
-            n_exec_failed: number;
-            /** N Compact */
-            n_compact: number;
-            /** N Restart */
-            n_restart: number;
-            /** Fallback Turns */
-            fallback_turns: number;
-            /** Unmatched Turns */
-            unmatched_turns: number;
-        };
-        /**
-         * RunTimelinePendingSpan
-         * @description One pending stretch -- window activity no sealed understanding layer covers.
-         *
-         *     The layer-track placeholder source (B, 2026-09-18): rendered de-emphasized
-         *     so an uncovered stretch reads as "not generated yet", not as a missing
-         *     feature. Only stretches right of the agent's sealed coverage are reported;
-         *     never-sealed history is omitted (nothing is promised for it).
-         */
-        RunTimelinePendingSpan: {
-            /**
-             * Start
-             * Format: date-time
-             */
-            start: string;
-            /**
-             * End
-             * Format: date-time
-             */
-            end: string;
+            usage: components["schemas"]["RunTimelineUsage"];
+            generation: components["schemas"]["RunTimelineGeneration"] | null;
         };
         /**
          * RunTimelineResponse
          * @description GET /api/agents/{agent_id}/run-timeline response.
+         *
+         *     `lifetime` is the agent's whole extent — the earliest and latest of its
+         *     messages and understanding nodes — and the default window; None when it has
+         *     neither. `nodes` are the tree's nodes intersecting the window, every level;
+         *     `units` are layer 0 intersecting it. `events` are optional lifecycle markers
+         *     in the window; they play no part in the extent.
          */
         RunTimelineResponse: {
             /** Agent Id */
             agent_id: number;
             window: components["schemas"]["RunTimelineWindow"];
-            meta: components["schemas"]["RunTimelineMeta"];
-            /** Rows */
-            rows: components["schemas"]["RunTimelineRow"][];
+            lifetime: components["schemas"]["RunTimelineWindow"] | null;
+            /** Nodes */
+            nodes: components["schemas"]["RunTimelineNode"][];
+            /** Units */
+            units: components["schemas"]["RunTimelineUnit"][];
             /** Events */
             events: components["schemas"]["RunTimelineEvent"][];
-            boundaries: components["schemas"]["RunTimelineBoundaries"];
-            /** Layers */
-            layers?: components["schemas"]["RunTimelineLayerNode"][] | null;
-            summary?: components["schemas"]["RunTimelineSummary"] | null;
-            /** Pending */
-            pending?: components["schemas"]["RunTimelinePendingSpan"][] | null;
-            /** Inbounds */
-            inbounds?: components["schemas"]["RunTimelineInbound"][] | null;
-            /** Messages */
-            messages?: components["schemas"]["RunTimelineMessage"][] | null;
-            /** Messages Truncated */
-            messages_truncated?: boolean | null;
         };
         /**
-         * RunTimelineRow
-         * @description A completed turn, or a bucket made from contiguous completed turns.
+         * RunTimelineUnit
+         * @description One layer-0 block (see `base.agents.history.hierarchy.units`).
+         *
+         *     A message unit, except that a work unit is served as its parts: `thinking` (the model's
+         *     generation for the turn), `call` (an instant at the end of the stream) and `output` (the
+         *     execution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the
+         *     inclusive message-index span of the block's unit. Blocks without a time are not served.
          */
-        RunTimelineRow: {
-            /** Turn */
-            turn: number | null;
-            /** N Turns */
-            n_turns: number;
+        RunTimelineUnit: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "inbound" | "text" | "note" | "thinking" | "call" | "output";
+            /** I0 */
+            i0: number;
+            /** I1 */
+            i1: number;
             /**
              * Start
              * Format: date-time
@@ -7134,33 +7038,30 @@ export interface components {
              * Format: date-time
              */
             end: string;
-            /** Active S */
-            active_s: number;
-            /** Trace Id */
-            trace_id: string | null;
-            /** Checkpoint Id */
-            checkpoint_id: string | null;
-            /** Ok */
-            ok: boolean | null;
-            llm: components["schemas"]["RunTimelineLlm"];
-            /** Execs */
-            execs: components["schemas"]["RunTimelineExec"][];
-            /** Anomalies */
-            anomalies: string[];
-            /** Tags */
-            tags: string[];
+            /** Source */
+            source: string | null;
+            /** Preview */
+            preview: string;
         };
         /**
-         * RunTimelineSummary
-         * @description The raw-context summary — shown when a run has no hierarchical layers.
+         * RunTimelineUsage
+         * @description The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.
+         *
+         *     `input` is the provider's total input tokens (cache reads included).
          */
-        RunTimelineSummary: {
-            /** Text */
-            text: string;
+        RunTimelineUsage: {
+            /** Calls */
+            calls: number;
+            /** Input */
+            input: number;
+            /** Cache Read */
+            cache_read: number;
+            /** Output */
+            output: number;
         };
         /**
          * RunTimelineWindow
-         * @description The inclusive window used to derive one timeline.
+         * @description The inclusive time window one response covers.
          */
         RunTimelineWindow: {
             /**
@@ -8208,6 +8109,26 @@ export interface components {
                 [key: string]: string;
             } | null;
         };
+        /** UnderstandingCloseResponse */
+        UnderstandingCloseResponse: {
+            /** Agent Id */
+            agent_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "enqueued" | "empty" | "active_job";
+            /** Job Id */
+            job_id: number | null;
+            /** Compact Version */
+            compact_version: number | null;
+            /** Start Index */
+            start_index: number | null;
+            /** End Index */
+            end_index: number | null;
+            /** Detail */
+            detail: string;
+        };
         /**
          * UploadedBatch
          * @description Result of one upload request — the files saved in a single batch.
@@ -8903,6 +8824,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestartAgentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_understanding_close_api_agents__agent_id__understanding_close_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnderstandingCloseResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11423,10 +11375,12 @@ export interface operations {
             };
         };
     };
-    get_run_timeline_message_api_agents__agent_id__run_timeline_message_get: {
+    get_run_timeline_messages_api_agents__agent_id__run_timeline_messages_get: {
         parameters: {
             query: {
-                key: string;
+                start: number;
+                end: number;
+                limit?: number;
                 full?: boolean;
             };
             header?: never;
@@ -11443,7 +11397,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunTimelineMessageDetails"];
+                    "application/json": components["schemas"]["RunTimelineMessages"];
                 };
             };
             /** @description Validation Error */
@@ -11462,10 +11416,6 @@ export interface operations {
             query?: {
                 from?: string | null;
                 to?: string | null;
-                level?: "turn" | "bucket";
-                bucket?: string | null;
-                session?: "compact" | "current";
-                messages_max?: number | null;
             };
             header?: never;
             path: {

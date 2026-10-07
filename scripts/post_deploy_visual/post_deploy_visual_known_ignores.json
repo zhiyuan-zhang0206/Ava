@@ -18,7 +18,7 @@
       {"selector": "[data-runtime-value]", "reason": "runtime inventory values"}
     ],
     "run-timeline": [
-      {"selector": "[data-testid='run-timeline-geometry']", "reason": "run fixture values"}
+      {"selector": "[data-testid='run-timeline-chart']", "reason": "run fixture values"}
     ]
   }
 }

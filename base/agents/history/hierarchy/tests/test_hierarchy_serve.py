@@ -1,152 +1,105 @@
-"""`base.agents.history.hierarchy.serve` — the run-timeline layer selection contract.
-
-Pure over stored-node shapes: the finest level that fits wins, coarser levels
-ride along as context, wire depths are relative to the selected top, and the
-coverage result distinguishes none / partial / full for the endpoint's
-fallback shape.
-"""
+"""`base.agents.history.hierarchy.serve` — stored nodes served with their two cost figures."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from base.agents.history.hierarchy.serve import pending_spans, select_layers
-from base.agents.history.hierarchy.store import StoredNode
+import pytest
+from langchain_core.messages import AIMessage, BaseMessage
 
-W0 = datetime(2026, 9, 12, 4, 0, tzinfo=UTC)
-W1 = datetime(2026, 9, 12, 8, 0, tzinfo=UTC)
+from base.agents.history.hierarchy.serve import serve_nodes
+from base.agents.history.hierarchy.store import StoredNode
+from base.agents.history.hierarchy.usage import GenerationUsage, MessageUsage
+
+T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
+T1 = datetime(2026, 10, 4, 13, 0, tzinfo=UTC)
+
+READ = [T0 + timedelta(minutes=n) for n in range(6)]
+
+MESSAGES: list[BaseMessage] = [
+    AIMessage(
+        content="x",
+        usage_metadata={"input_tokens": 10 * n, "output_tokens": n, "total_tokens": 11 * n},
+    )
+    for n in range(1, 7)
+]
 
 
 def node(
     node_id: int,
     *,
     level: int,
-    start: datetime | None,
-    end: datetime | None,
-    text: str = "t",
+    span: tuple[int, int],
+    start: datetime | None = T0,
+    end: datetime | None = T1,
     parent_id: int | None = None,
 ) -> StoredNode:
     return StoredNode(
         id=node_id,
         depth=level,  # StoredNode.depth is the ENGINE level (1 = finest)
-        span_start=0,
-        span_end=1,
+        span_start=span[0],
+        span_end=span[1],
         start_ts=start,
         end_ts=end,
-        text=text,
+        text=f"node {node_id}",
         parent_id=parent_id,
         engine_version="0.3",
         prompt_version="0.3",
     )
 
 
-def test_no_usable_nodes_is_none() -> None:
-    assert select_layers([], window_start=W0, window_end=W1, max_nodes=10).coverage == "none"
-    assert (
-        select_layers(
-            [node(1, level=1, start=None, end=None)],
-            window_start=W0,
-            window_end=W1,
-            max_nodes=10,
-        ).layers
-        is None
-    )
-
-
-def test_single_level_full_coverage() -> None:
-    selection = select_layers(
-        [node(7, level=1, start=W0, end=W1, text="blocks")],
-        window_start=W0,
-        window_end=W1,
-        max_nodes=10,
-    )
-    assert selection.coverage == "full"
-    assert selection.layers is not None
-    (layer,) = selection.layers
-    assert (layer.id, layer.depth, layer.parent, layer.summary) == ("7", 0, None, "blocks")
-
-
-def test_cap_drops_to_the_next_coarser_level() -> None:
-    leaves = [node(100 + i, level=1, start=W0, end=W0 + timedelta(minutes=30)) for i in range(4)]
-    stage = node(50, level=2, start=W0, end=W1, text="stage", parent_id=None)
-    selection = select_layers([*leaves, stage], window_start=W0, window_end=W1, max_nodes=3)
-    assert selection.coverage == "full"
-    assert selection.layers is not None
-    assert [layer.id for layer in selection.layers] == ["50"]  # leaf level dropped
-
-
-def test_finer_level_fits_and_coarser_rides_along() -> None:
-    leaf_a = node(11, level=1, start=W0, end=W0 + timedelta(hours=2), text="a", parent_id=2)
-    leaf_b = node(12, level=1, start=W0 + timedelta(hours=2), end=W1, text="b", parent_id=2)
-    root = node(2, level=2, start=W0, end=W1, text="root")
-    selection = select_layers([leaf_a, leaf_b, root], window_start=W0, window_end=W1, max_nodes=10)
-    assert selection.coverage == "full"
-    assert selection.layers is not None
-    assert [(layer.id, layer.depth, layer.parent) for layer in selection.layers] == [
-        ("11", 1, "2"),
-        ("12", 1, "2"),
-        ("2", 0, None),
+def test_every_level_is_served_finest_first_with_stable_levels() -> None:
+    nodes = [
+        node(3, level=2, span=(0, 5)),
+        node(2, level=1, span=(3, 5), parent_id=3),
+        node(1, level=1, span=(0, 2), parent_id=3),
+    ]
+    served = serve_nodes(nodes, MessageUsage(MESSAGES), {}, READ)
+    assert [(n.id, n.level, n.parent) for n in served] == [
+        ("1", 1, "3"),
+        ("2", 1, "3"),
+        ("3", 2, None),
     ]
 
 
-def test_partial_coverage() -> None:
-    selection = select_layers(
-        [node(1, level=1, start=W0, end=W0 + timedelta(hours=1))],
-        window_start=W0,
-        window_end=W1,
-        max_nodes=10,
+def test_a_node_carries_the_agent_cost_over_its_span() -> None:
+    (served,) = serve_nodes([node(1, level=1, span=(1, 2))], MessageUsage(MESSAGES), {}, READ)
+    assert (served.usage.calls, served.usage.input, served.usage.output) == (2, 50, 5)
+
+
+def test_only_a_leaf_with_a_call_record_carries_generation_cost() -> None:
+    gen = GenerationUsage(calls=2, input=300, cache_read=250, output=40, seconds=12.5)
+    nodes = [node(1, level=1, span=(0, 2)), node(2, level=2, span=(0, 2))]
+    leaf, parent = serve_nodes(nodes, MessageUsage(MESSAGES), {(0, 2): gen}, READ)
+    assert leaf.generation == gen
+    assert parent.generation is None
+
+
+def test_a_node_with_unknown_time_is_not_served() -> None:
+    nodes = [node(1, level=1, span=(0, 1), start=None, end=None)]
+    assert serve_nodes(nodes, MessageUsage(MESSAGES), {}, READ) == []
+
+
+def test_a_span_beyond_the_history_is_an_error() -> None:
+    with pytest.raises(IndexError):
+        serve_nodes([node(1, level=1, span=(4, 9))], MessageUsage(MESSAGES), {}, READ)
+
+
+def test_a_node_is_placed_on_the_read_times_of_its_first_and_last_message() -> None:
+    read = [T0, T0 + timedelta(minutes=5), T0 + timedelta(minutes=5), T0 + timedelta(minutes=9)] + [
+        T0 + timedelta(minutes=9)
+    ] * 2
+    first, second, parent = serve_nodes(
+        [
+            node(1, level=1, span=(0, 1), start=T0, end=T0 + timedelta(minutes=1)),
+            node(2, level=1, span=(2, 3), start=T0 + timedelta(minutes=2), end=T0),
+            node(3, level=2, span=(0, 3)),
+        ],
+        MessageUsage(MESSAGES),
+        {},
+        read,
     )
-    assert selection.coverage == "partial"
-    assert selection.layers is not None
-
-
-def test_coverage_reads_the_union_across_levels() -> None:
-    """Mixed-depth segments: a shallower tree's root sits below the selection's
-    top and still covers its stretch -- coverage must read the union, not the
-    top level alone."""
-    deep = node(2, level=3, start=W0, end=W0 + timedelta(hours=2), text="segA")
-    shallow = node(5, level=2, start=W0 + timedelta(hours=2), end=W1, text="segB")
-    selection = select_layers([deep, shallow], window_start=W0, window_end=W1, max_nodes=10)
-    assert selection.coverage == "full"
-
-
-# --- pending placeholders (B spec, 2026-09-18) ---
-
-P0 = datetime(2026, 9, 18, 9, 0, tzinfo=UTC)
-
-
-def span(start_min: int, end_min: int) -> tuple[datetime, datetime]:
-    return P0 + timedelta(minutes=start_min), P0 + timedelta(minutes=end_min)
-
-
-def test_pending_empty_without_sealed_history() -> None:
-    assert pending_spans([span(0, 30)], [], coverage_start=None) == ()
-
-
-def test_pending_right_tail_and_fully_covered_window() -> None:
-    covered = [span(0, 120)]
-    assert pending_spans([span(180, 210)], covered, coverage_start=covered[0][0]) == (
-        span(180, 210),
-    )
-    assert pending_spans([span(0, 90)], covered, coverage_start=covered[0][0]) == ()
-
-
-def test_pending_internal_gap_between_sealed_stretches() -> None:
-    covered = [span(0, 60), span(90, 150)]
-    assert pending_spans([span(0, 150)], covered, coverage_start=covered[0][0]) == (span(60, 90),)
-
-
-def test_pending_never_promises_left_of_coverage() -> None:
-    covered = [span(120, 180)]
-    activity = [span(0, 60), span(200, 230)]
-    assert pending_spans(activity, covered, coverage_start=covered[0][0]) == (span(200, 230),)
-
-
-def test_pending_clips_the_boundary_span_and_merges_inputs() -> None:
-    covered = [span(30, 60)]
-    assert pending_spans([span(0, 90)], covered, coverage_start=covered[0][0]) == (span(60, 90),)
-    unsorted_covered = [span(60, 90), span(0, 30)]
-    adjacent_activity = [span(30, 60), span(0, 30)]
-    assert pending_spans(
-        adjacent_activity, unsorted_covered, coverage_start=unsorted_covered[1][0]
-    ) == (span(30, 60),)
+    assert (first.start, first.end) == (T0, T0 + timedelta(minutes=5))
+    assert (second.start, second.end) == (T0 + timedelta(minutes=5), T0 + timedelta(minutes=9))
+    assert first.end <= second.start  # the stored times of these two overlapped
+    assert (parent.start, parent.end) == (T0, T0 + timedelta(minutes=9))
