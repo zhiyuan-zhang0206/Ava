@@ -13,6 +13,7 @@ class TaskOwnerNotification:
     agent_id: int
     content: str
     resurrect: bool
+    link_task: bool = False
 
 
 def owner_change_notifications(
@@ -41,7 +42,7 @@ def owner_change_notifications(
             content += "\n\n" + "\n".join(f"- {change}" for change in changes)
         if description:
             content += f"\n\n{description}"
-        notes.append(TaskOwnerNotification(new_owner, content, resurrect=True))
+        notes.append(TaskOwnerNotification(new_owner, content, resurrect=True, link_task=True))
     if previous_owner is not None and previous_owner != actor and not previous_owner_terminated:
         notes.append(
             TaskOwnerNotification(

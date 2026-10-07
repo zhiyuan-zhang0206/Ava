@@ -15,8 +15,9 @@ whoever takes over spawns a new agent. Counter updates stay direct DB writes.
   in-progress tasks whose owner has not touched them within their
   `remind_interval_seconds` window and deliver one system-note digest per owner. An
   overdue window repeats at max(backoff, remind_interval_seconds), so a P3 task
-  (4h interval) is not nagged hourly; `last_reminded_at` gates it. A failed
-  task-counter write is retried without re-delivering (same-cause dedup).
+  (4h interval) is not nagged hourly; `last_reminded_at` gates it. Digest and
+  counter acceptance share a transaction under the selected task row locks;
+  a rollback leaves both absent, and a lost post-commit hint cannot duplicate it.
 - Escalate: when `reminder_count` reaches `AVA_TASK_ESCALATE_N` (default 3),
   notify the parent task's owner (the delegator) that the current owner is
   unresponsive — once per overdue window: the delivered digest stamps
@@ -42,7 +43,6 @@ import json
 import logging
 import os
 import sys
-import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -58,7 +58,7 @@ from base.daemon.health import (
     stop_health_server,
 )
 from base.daemon.shutdown import install_graceful_shutdown
-from base.db import Database, publish_inbound_wake
+from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -146,33 +146,13 @@ _REMINDER_SQL = """
 """
 
 
-# The dispatch loop owns a map of task ids whose reminder message was delivered
-# but whose counter write failed (a DB blip after a 2xx delivery), mapped to the
-# monotonic delivery time, and hands it to each sweep. While an entry is within
-# _DELIVER_DEDUP_WINDOW_S, a sweep retries the
-# counter write instead of re-delivering the message — same-cause dedup, so
-# the owner gets one reminder, not a duplicate minutes later. Entries expire
-# after the window: a task that went quiet again in a NEW overdue window gets
-# a fresh reminder (the owner's update reset the counters in between), and
-# expired entries are pruned each sweep so the dict stays bounded by the
-# number of recently delivered tasks. In-memory only: a daemon restart
-# forgets these, and the DB backoff floor (>= 1h) covers that gap.
-_DELIVER_DEDUP_WINDOW_S = 900.0
-
-
-def _advance_reminder_counters(pool: ConnectionPool, task_id: int) -> None:
-    """Advance last_reminded_at / reminder_count for a delivered reminder.
-
-    Split out of _run_reminders so a sweep can retry this write without
-    re-delivering the message (same-cause dedup). Raises on failure so the
-    caller records the task in the sweep's pending-counter-writes map."""
-    with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-        conn.execute("SET TRANSACTION READ WRITE")
-        cur.execute(
-            "UPDATE agent_tasks SET last_reminded_at = now(), reminder_count = reminder_count + 1 "
-            "WHERE id = %s",
-            (task_id,),
-        )
+def _advance_reminder_counters(cur: psycopg.Cursor, task_id: int) -> None:
+    """Advance cadence in the transaction containing the reminder inbound."""
+    cur.execute(
+        "UPDATE agent_tasks SET last_reminded_at = now(), reminder_count = reminder_count + 1 "
+        "WHERE id = %s",
+        (task_id,),
+    )
 
 
 def _reminder_digest_message(tasks: list[tuple[int, str, int, int, str]]) -> str:
@@ -204,89 +184,54 @@ def _run_reminders(
     db: Database,
     bus: EventBus,
     backoff_seconds: float,
-    pending_counter_writes: dict[int, float],
 ) -> int:
-    """Deliver one overdue-task digest per owner. Returns fully recorded digests.
-
-    `pending_counter_writes` is the caller's dedup map (task id -> monotonic delivery
-    time of a digest whose counter write failed); this sweep prunes and updates it."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(_REMINDER_SQL, (backoff_seconds,))
-        overdue = cur.fetchall()
-
-    sent = 0
-    # Expire dedup marks past the window BEFORE the loop: a stale mark must
-    # never suppress a legitimate reminder for a new overdue window (the
-    # owner's update resets the counters, so the SELECT picks the task again).
-    now_mono = time.monotonic()
-    for marked_task_id, marked_at in list(pending_counter_writes.items()):
-        if now_mono - marked_at > _DELIVER_DEDUP_WINDOW_S:
-            del pending_counter_writes[marked_task_id]
-    overdue_by_owner: dict[int, list[tuple[int, str, int, int, str]]] = defaultdict(list)
-    for task_id, owner, title, remind_interval_seconds, elapsed, priority in overdue:
-        if task_id in pending_counter_writes:
-            # Delivered on an earlier sweep but the counter write failed, so
-            # the backoff gate never advanced and the task is selected again.
-            # Finish the bookkeeping instead of re-delivering the same
-            # reminder minutes later (same-cause dedup).
-            try:
-                _advance_reminder_counters(pool, task_id)
-            except Exception as exc:
-                _log.error(
-                    "[task-maintenance] reminder counters for task %s failed: %r",
-                    task_id,
-                    exc,
-                )
-                continue
-            del pending_counter_writes[task_id]
-            _log.info(
-                "[task-maintenance] recorded earlier reminder for task %s (counter retry)",
-                task_id,
-            )
-            continue
-        overdue_by_owner[owner].append((task_id, title, remind_interval_seconds, elapsed, priority))
-    for owner, tasks in overdue_by_owner.items():
-        task_ids = [task_id for task_id, *_ in tasks]
-        try:
-            # Deliver before counters, so a failed digest leaves every task eligible.
-            deliver_message(pool, db, bus, owner, _reminder_digest_message(tasks))
-        except Exception as exc:
-            _log.error(
-                "[task-maintenance] reminder digest for owner %s (tasks %s) failed: %r",
+    """Commit owner digests and every task's reminder cadence together."""
+    queued: list[tuple[int, int, str, list[int]]] = []
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(_REMINDER_SQL + " FOR UPDATE SKIP LOCKED", (backoff_seconds,))
+        overdue_by_owner: dict[int, list[tuple[int, str, int, int, str]]] = defaultdict(list)
+        for task_id, owner, title, interval, elapsed, priority in cur.fetchall():
+            overdue_by_owner[owner].append((task_id, title, interval, elapsed, priority))
+        for owner, tasks in overdue_by_owner.items():
+            content = _reminder_digest_message(tasks)
+            inbound_id, _ = insert_inbound_message_in_transaction(
+                cur,
                 owner,
-                task_ids,
-                exc,
+                content,
+                "system",
+                kind="system_note",
+                payload={
+                    "note_tag": "task",
+                    "task_notification": True,
+                    "delivery_resurrect": False,
+                },
             )
-            continue
+            task_ids = [task_id for task_id, *_ in tasks]
+            for task_id in task_ids:
+                _advance_reminder_counters(cur, task_id)
+            queued.append((owner, inbound_id, content, task_ids))
+    for owner, inbound_id, content, task_ids in queued:
+        announce_reminder(db, bus, owner, inbound_id, content)
         telemetry.emit(
             "telemetry",
             "task_reminder_digest",
             agent_id=owner,
             source="system",
-            attributes={"owner_id": owner, "task_count": len(tasks), "task_ids": task_ids},
+            attributes={"owner_id": owner, "task_count": len(task_ids), "task_ids": task_ids},
         )
-        counter_failed = False
-        for task_id in task_ids:
-            try:
-                _advance_reminder_counters(pool, task_id)
-                _log.info(
-                    "[task-maintenance] recorded reminder digest for owner %s, task %s",
-                    owner,
-                    task_id,
-                )
-            except Exception as exc:
-                # Retry this bookkeeping without re-delivering the digest.
-                pending_counter_writes[task_id] = time.monotonic()
-                counter_failed = True
-                _log.error(
-                    "[task-maintenance] reminder counters for task %s failed after "
-                    "delivery: %r — retrying without re-delivery next sweep",
-                    task_id,
-                    exc,
-                )
-        if not counter_failed:
-            sent += 1
-    return sent
+    return len(queued)
+
+
+def announce_reminder(
+    db: Database, bus: EventBus, owner: int, inbound_id: int, content: str
+) -> None:
+    """Best-effort hints after durable acceptance; watchdog heals a lost wake."""
+    del content
+    try:
+        publish_agent_updated_sync(bus, owner)
+        publish_inbound_wake(db, bus, owner, str(inbound_id))
+    except Exception:
+        _log.exception("[task-maintenance] committed reminder %s lost its live hint", inbound_id)
 
 
 # ── Escalate pass ────────────────────────────────────────────────────────────
@@ -516,10 +461,9 @@ async def _dispatch_loop(
         backoff_seconds,
         escalate_n,
     )
-    pending_counter_writes: dict[int, float] = {}
     while True:
         try:
-            _run_reminders(pool, db, bus, backoff_seconds, pending_counter_writes)
+            _run_reminders(pool, db, bus, backoff_seconds)
             _run_escalate(pool, db, bus, escalate_n)
         except asyncio.CancelledError:
             raise

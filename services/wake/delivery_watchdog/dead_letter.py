@@ -101,14 +101,20 @@ def dead_letter_stale_pending_resurrects(pool: ConnectionPool, threshold_s: floa
 def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: float) -> int:
     """Complete stale lifecycle notices whose terminated owner cannot claim them.
 
-    Post-termination chats remain pending for the G4 resurrect-retry path; only
-    one-shot lifecycle notices with no remaining consumer are dead-lettered.
+    Post-termination chats remain pending for the G4 resurrect-retry path; one-shot lifecycle notices and task assignments past the same recovery age
+    limit are dead-lettered. Internal assignment notes retain delivery_result
+    failure evidence rather than disappearing.
     Impersonation termination notices belong to the next resurrection's native
     history, so their explicit marker preserves them regardless of age.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
+            "UPDATE inbound_messages m SET status = 'done', claimed_at = now(), "
+            "payload = CASE WHEN m.payload->'task_notification'='true'::jsonb "
+            "AND m.payload->'delivery_resurrect'='true'::jsonb THEN "
+            "m.payload||jsonb_build_object('delivery_result', "
+            "jsonb_build_object('outcome','failed','reason','resurrection_deadline_expired')) "
+            "ELSE m.payload END "
             "FROM agents_meta am "
             "WHERE m.agent_id = am.id "
             "  AND am.status = 'terminated' "
