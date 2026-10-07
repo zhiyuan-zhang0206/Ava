@@ -1,37 +1,14 @@
 #!/usr/bin/env python
 """One-pass TCC onboarding for the macOS permissions helper.
 
-Why this exists: the helper grants (Desktop/Documents/Downloads, AppleEvents
-targets, Screen Recording / Accessibility) must be in place BEFORE a host
-enables the helper-spawn backend (AVA_PERMISSIONS_HELPER_SPAWN) -- flipping
-first turns file access from the already-granted python identity into an
-ungranted helper identity (dialogs or silent denials). Instead of meeting the
-grants one at a time as workflows trip over them, this tool bumps them all in
-one sitting with the user present: it inventories the current grants with
-side-effect-free preflight queries, triggers each missing request, waits for
-the decision, and reports a final matrix.
+The helper's file, Automation, Screen Recording and Accessibility grants must
+be present before enabling helper-spawn. This command inventories them, triggers
+missing requests with the user present, and reports the resulting matrix.
 
-Mechanics:
-- Every trigger is a child process spawned through the permissions helper
-  (services.desktop.permissions_helper.client.spawn_process), so tccd attributes the
-  request to com.ava.permissions-helper -- the identity the grant must land
-  on. The inventory probe reuses the helper-spawned preflight pattern of
-  scripts/tcc-verify-spawn-chain.sh (zero dialogs, repeatable).
-- Documents folder can NOT be triggered through the helper's file_list/read
-  APIs: their path whitelist covers only Desktop, Downloads and .ava/incoming,
-  and asking for ~/Documents fails with "outside whitelist" before tccd is
-  reached. All folder triggers therefore use a spawned child that directly
-  accesses the directory (os.listdir), which works uniformly for every folder
-  service.
-- AppleEvents rows are keyed per target app; each target is triggered by a
-  spawned osascript child sending a benign "get version" command. These rows
-  are granted only by a live user decision (dialog), so run this tool with the
-  user at the machine. Screen Recording / Accessibility can not be requested
-  programmatically at all: they are verified from the helper ping, and when
-  missing the tool prints the System Settings path to fix them by hand.
-- The helper must be a build carrying the nursery spawn wire method. Older
-  builds answer "unknown method: spawn"; the tool reports that as "helper
-  build needs a rebuild" instead of failing obscurely.
+Requests run through the permissions helper so TCC attributes them to its identity.
+Folder probes access each directory directly; AppleEvents sends benign version queries.
+Screen Recording and Accessibility require System Settings when missing.
+The helper must support the nursery spawn wire method.
 
 Usage:
   .venv/bin/python scripts/tcc-onboard-helper-grants.py            # interactive, all items
@@ -460,7 +437,7 @@ def extended_note(group: str, attempted: set[str]) -> str:
     return "trigger method available via --fill-pending (experimental)"
 
 
-def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item and report live together
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
         "--workdir",
@@ -513,70 +490,18 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         help="seconds to wait for each dialog decision (default 90)",
     )
     parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    if sys.platform != "darwin":
-        print("FAIL: this onboarding tool is macOS-only (the permissions helper is).")
-        return 2
 
-    if args.tier == "L0":
-        # Silent posture: nothing is probed and nothing is triggered.
-        print("tier L0 (silent): no inventory probe and no triggers are performed.")
-        return 0
-
-    fill_error = fill_request_error(
-        fill_pending=args.fill_pending,
-        confirm_user_present=args.confirm_user_present,
-        check_only=args.check,
-    )
-    if fill_error is not None:
-        print(f"FAIL: {fill_error}")
-        return 2
-
-    raw_items = args.items if args.items is not None else ",".join(groups_for_tier(args.tier))
-    items = [part.strip() for part in raw_items.split(",") if part.strip()]
-    unknown = [part for part in items if part not in ITEM_GROUPS]
-    if unknown:
-        print(f"FAIL: unknown --items value(s): {', '.join(unknown)}")
-        return 2
-
-    workdir = Path(args.workdir).resolve()
-    workdir.mkdir(parents=True, exist_ok=True)
-    run_id = f"{time.strftime('%H%M%S')}-{os.getpid()}"
-
-    client = helper_client()
-    try:
-        ping = client.ping()
-    except Exception as exc:
-        print(f"FAIL: permissions helper unreachable: {exc!r}")
-        print("      install/start the helper first (see docs/conventions/runbook.md).")
-        return 2
-    print(
-        f"helper ping: ax_trusted={ping.get('ax_trusted')} "
-        f"preflight_screen={ping.get('preflight_screen')} pong={ping.get('pong')}"
-    )
-
-    matrix = preflight_matrix(client, workdir, run_id)
-    print("current helper grant state (preflight, zero dialogs):")
-    for service in PREFLIGHT_SERVICES:
-        print(f"  {service}: {matrix.get(service, 'unknown')}")
-
-    extended = [group for group in items if group in EXTENDED_GROUPS]
-    if args.tier is not None:
-        print(f"tier {args.tier} -- groups: {', '.join(items)}")
-    if extended:
-        print(
-            "extended groups (state read via preflight; trigger methods:"
-            " docs/conventions/tcc-helper-onboarding.md):"
-        )
-        for group in extended:
-            states = ", ".join(
-                f"{service}={matrix.get(service, 'unknown')}" for service in EXTENDED_GROUPS[group]
-            )
-            print(f"  {group}: {states}")
-
-    statuses: dict[str, str] = {}
-
+def _folder_grants(
+    items: list[str],
+    args: argparse.Namespace,
+    client: Any,
+    matrix: dict[str, str],
+    workdir: Path,
+    run_id: str,
+    statuses: dict[str, str],
+) -> None:
     if "folders" in items:
         print("\n== file & folders block ==")
         for item_id, service, folder in FOLDER_ITEMS:
@@ -603,6 +528,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
             statuses[item_id] = classify_touch(text)
             print(f"  [{item_id}] -> {statuses[item_id]}")
 
+
+def _apple_event_grants(
+    items: list[str],
+    args: argparse.Namespace,
+    client: Any,
+    workdir: Path,
+    run_id: str,
+    statuses: dict[str, str],
+) -> None:
     if "apple-events" in items and not args.check:
         print("\n== AppleEvents block (Automation dialogs, one per target app) ==")
         for target, script in APPLE_EVENT_TARGETS:
@@ -627,6 +561,8 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
             "\n== AppleEvents block: skipped in --check (no silent way to read Automation rows) =="
         )
 
+
+def _screen_access_grants(items: list[str], ping: dict[str, Any], statuses: dict[str, str]) -> None:
     if "sr-ax" in items:
         print("\n== Screen Recording / Accessibility ==")
         if ping.get("preflight_screen"):
@@ -648,6 +584,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
                 " Privacy & Security > Accessibility."
             )
 
+
+def _fill_pending_grants(
+    extended: list[str],
+    args: argparse.Namespace,
+    client: Any,
+    matrix: dict[str, str],
+    workdir: Path,
+    run_id: str,
+) -> tuple[dict[str, str], dict[str, str], set[str]]:
     fill_results: dict[str, str] = {}
     fill_attempted: set[str] = set()
     if args.fill_pending:
@@ -684,11 +629,20 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         else:
             print("\n== fill-pending: no extended groups in this run (nothing to fill) ==")
 
-    for group in extended:
-        statuses[group] = state_status(
-            EXTENDED_GROUPS[group], matrix, extended_note(group, fill_attempted)
-        )
+    return matrix, fill_results, fill_attempted
 
+
+def _report_result(
+    statuses: dict[str, str],
+    args: argparse.Namespace,
+    workdir: Path,
+    run_id: str,
+    items: list[str],
+    extended: list[str],
+    matrix: dict[str, str],
+    fill_attempted: set[str],
+    fill_results: dict[str, str],
+) -> int:
     unresolved_count = count_unresolved(statuses)
     unresolved = unresolved_count > 0
 
@@ -732,6 +686,107 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
 
         shutil.rmtree(workdir, ignore_errors=True)
     return 1 if unresolved else 0
+
+
+def _requested_items(args: argparse.Namespace) -> list[str] | None:
+    raw_items = args.items if args.items is not None else ",".join(groups_for_tier(args.tier))
+    items = [part.strip() for part in raw_items.split(",") if part.strip()]
+    unknown = [part for part in items if part not in ITEM_GROUPS]
+    if unknown:
+        print(f"FAIL: unknown --items value(s): {', '.join(unknown)}")
+        return None
+
+    return items
+
+
+def _describe_extended(
+    args: argparse.Namespace, items: list[str], matrix: dict[str, str]
+) -> list[str]:
+    extended = [group for group in items if group in EXTENDED_GROUPS]
+    if args.tier is not None:
+        print(f"tier {args.tier} -- groups: {', '.join(items)}")
+    if extended:
+        print(
+            "extended groups (state read via preflight; trigger methods:"
+            " docs/conventions/tcc-helper-onboarding.md):"
+        )
+        for group in extended:
+            states = ", ".join(
+                f"{service}={matrix.get(service, 'unknown')}" for service in EXTENDED_GROUPS[group]
+            )
+            print(f"  {group}: {states}")
+
+    return extended
+
+
+def main() -> int:
+    args = _parse_args()
+
+    if sys.platform != "darwin":
+        print("FAIL: this onboarding tool is macOS-only (the permissions helper is).")
+        return 2
+
+    if args.tier == "L0":
+        # Silent posture: nothing is probed and nothing is triggered.
+        print("tier L0 (silent): no inventory probe and no triggers are performed.")
+        return 0
+
+    fill_error = fill_request_error(
+        fill_pending=args.fill_pending,
+        confirm_user_present=args.confirm_user_present,
+        check_only=args.check,
+    )
+    if fill_error is not None:
+        print(f"FAIL: {fill_error}")
+        return 2
+
+    items = _requested_items(args)
+    if items is None:
+        return 2
+
+    workdir = Path(args.workdir).resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    run_id = f"{time.strftime('%H%M%S')}-{os.getpid()}"
+
+    client = helper_client()
+    try:
+        ping = client.ping()
+    except Exception as exc:
+        print(f"FAIL: permissions helper unreachable: {exc!r}")
+        print("      install/start the helper first (see docs/conventions/runbook.md).")
+        return 2
+    print(
+        f"helper ping: ax_trusted={ping.get('ax_trusted')} "
+        f"preflight_screen={ping.get('preflight_screen')} pong={ping.get('pong')}"
+    )
+
+    matrix = preflight_matrix(client, workdir, run_id)
+    print("current helper grant state (preflight, zero dialogs):")
+    for service in PREFLIGHT_SERVICES:
+        print(f"  {service}: {matrix.get(service, 'unknown')}")
+
+    extended = _describe_extended(args, items, matrix)
+
+    statuses: dict[str, str] = {}
+
+    _folder_grants(items, args, client, matrix, workdir, run_id, statuses)
+
+    _apple_event_grants(items, args, client, workdir, run_id, statuses)
+
+    _screen_access_grants(items, ping, statuses)
+
+    matrix, fill_results, fill_attempted = _fill_pending_grants(
+        extended, args, client, matrix, workdir, run_id
+    )
+
+    for group in extended:
+        statuses[group] = state_status(
+            EXTENDED_GROUPS[group], matrix, extended_note(group, fill_attempted)
+        )
+
+    return _report_result(
+        statuses, args, workdir, run_id, items, extended, matrix, fill_attempted, fill_results
+    )
 
 
 if __name__ == "__main__":

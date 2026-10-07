@@ -3,12 +3,7 @@
     "cli/commands/agents/impersonation_relay.py::asyncio-task:cmd_relay.run": 1,
     "cli/commands/lifecycle/root_driver.py::global-rebind:_direct_root_child": 1
   },
-  "files": {
-    "cli/commands/agents/tests/test_impersonation_bridge.py": 808,
-    "cli/commands/cluster/tests/test_cluster_health.py": 2115,
-    "cli/commands/management/tests/test_config_cmd.py": 804,
-    "cli/commands/observability/tests/test_converge_otel_collector.py": 1249
-  },
+  "files": {},
   "patch_targets": {
     "cli/commands/data_plane/tests/test_storage_ownership_data_plane.py::base.cluster.postgres._read": 1,
     "cli/commands/data_plane/tests/test_storage_ownership_data_plane.py::base.cluster.postgres._spawn": 2,

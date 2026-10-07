@@ -6,8 +6,5 @@
     "base/telemetry/tracing.py::thread:_start_arm_thread": 1,
     "base/telemetry/tracing.py::thread:_start_collector_retry": 1
   },
-  "files": {
-    "base/telemetry/otlp/tests/test_telemetry_otlp.py": 1169,
-    "base/telemetry/tests/test_tracing.py": 1724
-  }
+  "files": {}
 }

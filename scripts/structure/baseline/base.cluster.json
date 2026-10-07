@@ -5,7 +5,5 @@
     "base/cluster/postgres.py::ambient-container:_CHILDREN": 1,
     "base/cluster/rate_limit.py::ambient-instance:login_limiter": 1
   },
-  "files": {
-    "base/cluster/tests/test_machines.py": 849
-  }
+  "files": {}
 }
