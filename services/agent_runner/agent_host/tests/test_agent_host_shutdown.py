@@ -86,9 +86,9 @@ def _exercise_shutdown(failure: str) -> None:
 
     original_loops = daemon._background_loops
 
-    def loops() -> dict[str, Any]:
+    def loops(*args: Any) -> dict[str, Any]:
         if failure == "plugin":
-            return original_loops()
+            return original_loops(*args)
         failing = {} if failure == "dispatcher_returns" else {"failed": fail()}
         return {**failing, "sibling": background()}
 

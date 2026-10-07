@@ -35,6 +35,7 @@ Together with SDK wraps (a plugin's declared `SdkWrap`, applied by `ava/sdk_surf
 - `agent/hooks/framework.py:framework_hooks()` — The framework's own hooks per edge
 - `agent/hooks/_registry.py:make_hook_runner()` — Called at graph build time
 - `agent/hooks/__init__.py` — Public API re-exports (`Hook`, `HookName`, `make_hook_runner`)
+- `agent/hooks/understanding_chunks.py` — when understanding chunks are enqueued: after an llm turn (`due_chunk_update`) and at compaction (`enqueue_closing_chunk`, called by `stamp_compact_boundary`); see [[base/agents/history/hierarchy/docs/chunks.ava.okf.md]]
 - `agent/hooks/history_dump.py:dump_history()` — pre-compact JSONL dump of the full conversation, written by both compaction paths (`agent/graph/claim/_decide.py` and `agent/hooks/compact.py`) before the history is wiped
 
 ## Notes

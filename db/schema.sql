@@ -1950,11 +1950,12 @@ BEGIN
 END $$;
 
 -- ─────────────── understanding_nodes ───────────────
--- Materialized hierarchical understanding nodes (task #3704): the level tree
--- behind the run-timeline narrative layers. One row per sealed node, keyed by
--- the deterministic message span; the node's single text plus the hashes that
--- make writes idempotent (text_hash) and reruns free (input_hash). Boundaries
--- are never trimmed (#1125), so the span identity is stable across runs.
+-- The understanding tree behind the run-timeline narrative layers. One row per
+-- node, keyed by the deterministic message span: depth 1 is written by a chunk
+-- call (a group of message units and its summary), each level above by an
+-- upper-level grouping check. The node's single text plus the hashes that make
+-- writes idempotent (text_hash). Boundaries are never trimmed (#1125), so the
+-- span identity is stable across runs.
 CREATE TABLE understanding_nodes (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT NOT NULL,
@@ -1989,7 +1990,7 @@ CREATE INDEX understanding_nodes_reuse
     ON understanding_nodes (agent_id, input_hash);
 
 COMMENT ON TABLE understanding_nodes IS
-    'Materialized hierarchical understanding nodes (task #3704): one text per sealed (agent_id, depth, message span); append-only identity, hashes for idempotent writes and zero-cost reruns.';
+    'The understanding tree: one text per (agent_id, depth, message span) — depth 1 written by a chunk call, each level above by an upper-level grouping check; hashes make rewrites idempotent.';
 
 -- ava_runner surface: the generation pass ships as a gateway-side worker, but
 -- the operational first-run / ad-hoc regeneration path executes from the
@@ -2008,99 +2009,134 @@ BEGIN
     END IF;
 END $$;
 
--- ─────────────── hierarchy_jobs ───────────────
--- Understanding-tree build queue (task #3704 P2b): one row per execution
--- attempt of one agent build, enqueued by the compact-driven worker, claimed
--- atomically, executed in a child process. Hash-idempotent retries (the
--- generation reuse cache lives in understanding_nodes), crash-recoverable via
--- the stale-running sweep, scope+token stats for cost observability.
-CREATE TABLE hierarchy_jobs (
+-- ─────────────── understanding_chunk_jobs ───────────────
+-- Chunk-triggered understanding queue (see migrations/20261007T045501_understanding-chunk-tree.sql):
+-- one row per context stretch the understanding layer must describe; claimed
+-- with SKIP LOCKED by the agent-host loop. Gated grant: fresh bootstrap applies
+-- this baseline before install birth creates ava_runner.
+CREATE TABLE IF NOT EXISTS understanding_chunk_jobs (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('compact', 'tail')),
-    trigger_boundary TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed')),
-    include_tail BOOLEAN NOT NULL,
-    model TEXT,
-    engine_version TEXT,
-    prompt_version TEXT,
-    stretches INTEGER,
-    nodes INTEGER,
-    generated INTEGER,
-    reused INTEGER,
-    failed INTEGER,
-    skipped INTEGER,
-    src_tokens BIGINT,
-    out_tokens BIGINT,
-    error TEXT,
+    compact_version INTEGER NOT NULL,
+    start_index INTEGER NOT NULL,
+    end_index INTEGER NOT NULL,
+    end_msg_id TEXT NOT NULL,
+    boundary_checkpoint_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'running', 'done', 'failed', 'skipped')),
+    attempts INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ
+    claimed_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    error TEXT
 );
--- Enqueue de-dup: at most one live job per (agent, kind).
-CREATE UNIQUE INDEX hierarchy_jobs_live
-    ON hierarchy_jobs (agent_id, kind) WHERE status IN ('pending', 'running');
--- The claim/recovery paths read pending/running rows.
-CREATE INDEX hierarchy_jobs_live_status
-    ON hierarchy_jobs (status) WHERE status IN ('pending', 'running');
--- Per-agent attempt history (scan reads the last finished attempt).
-CREATE INDEX hierarchy_jobs_agent
-    ON hierarchy_jobs (agent_id, id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS understanding_chunk_jobs_identity
+    ON understanding_chunk_jobs (agent_id, compact_version, start_index, end_index);
+CREATE INDEX IF NOT EXISTS understanding_chunk_jobs_live
+    ON understanding_chunk_jobs (id) WHERE status IN ('pending', 'running');
 
-COMMENT ON TABLE hierarchy_jobs IS
-    'Understanding-tree build queue (task #3704 P2b): one row per execution attempt; hash-idempotent retries, crash-recoverable, scope+token stats.';
+COMMENT ON TABLE understanding_chunk_jobs IS
+    'Chunk-triggered understanding queue: one row per context stretch to describe; claimed with SKIP LOCKED by the agent-host loop, result lands as a depth-1 understanding_nodes row.';
 
--- ava_runner surface: the compact-boundary event enqueue (task #4674) inserts
--- one build job per new boundary from the agent process
--- (`mark_compact_boundary`'s async twin) — idempotent via the live partial
--- unique index, best-effort by design. Gated on the role's existence (fresh
--- bootstrap applies this baseline before install birth creates ava_runner),
--- and base/cluster/authority/groups.py's ensure_groups grants the same
--- surface at birth.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT INSERT ON hierarchy_jobs TO ava_runner;
+        GRANT SELECT, INSERT, UPDATE ON understanding_chunk_jobs TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_jobs_id_seq TO ava_runner;
     END IF;
 END $$;
 
--- ─────────────── hierarchy_worker_state ───────────────
--- Per-agent scan cursor of the hierarchy worker: the newest compact boundary
--- fully covered. First sight records it without building (silent baseline);
--- a job advances it only when the run skipped nothing. last_tail_seal_cp_id
--- is the tail channel's delta gate (task #3981 C): the newest checkpoint id a
--- tail seal has covered; null until the first tail seal.
-CREATE TABLE hierarchy_worker_state (
-    agent_id BIGINT PRIMARY KEY,
-    last_processed_boundary TEXT NOT NULL,
-    last_tail_seal_cp_id TEXT,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- ─────────────── understanding_chunk_calls ───────────────
+-- Raw record of each provider call of chunk-triggered understanding (see
+-- migrations/20261007T045501_understanding-chunk-tree.sql): the instruction, the reply as
+-- returned, usage, timing; failed calls included. Gated grant, like the queue.
+CREATE TABLE IF NOT EXISTS understanding_chunk_calls (
+    id BIGSERIAL PRIMARY KEY,
+    job_id BIGINT NOT NULL,
+    agent_id BIGINT NOT NULL,
+    attempt INTEGER NOT NULL,
+    round INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    instruction TEXT NOT NULL,
+    prefix_len INTEGER NOT NULL,
+    start_offset INTEGER NOT NULL,
+    content JSONB,
+    tool_calls JSONB,
+    additional_kwargs JSONB,
+    usage_metadata JSONB,
+    response_metadata JSONB,
+    duration_ms DOUBLE PRECISION NOT NULL,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    kind TEXT NOT NULL DEFAULT 'leaf',
+    problem TEXT
+);
+CREATE INDEX IF NOT EXISTS understanding_chunk_calls_job
+    ON understanding_chunk_calls (job_id, attempt, round);
+CREATE INDEX IF NOT EXISTS understanding_chunk_calls_agent
+    ON understanding_chunk_calls (agent_id, created_at);
+
+COMMENT ON TABLE understanding_chunk_calls IS
+    'Raw record of each provider call of chunk-triggered understanding (instruction, reply as returned, usage, timing, error); failed calls included.';
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT INSERT ON understanding_chunk_calls TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_calls_id_seq TO ava_runner;
+    END IF;
+END $$;
+
+-- ─────────────── understanding_group_state / understanding_group_calls ───────────────
+-- Upper-level grouping of the understanding tree (see migrations/20261007T045501_understanding-chunk-tree.sql):
+-- the per-(agent, level) check cursor with its lease, and the raw record of each grouping provider call.
+CREATE TABLE IF NOT EXISTS understanding_group_state (
+    agent_id BIGINT NOT NULL,
+    level INTEGER NOT NULL,
+    last_checked_open INTEGER NOT NULL DEFAULT 0,
+    claimed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (agent_id, level)
 );
 
-COMMENT ON TABLE hierarchy_worker_state IS
-    'Per-agent scan cursor of the understanding-tree worker (task #3704 P2b): newest fully covered compact boundary; the row itself is the silent baseline.';
+COMMENT ON TABLE understanding_group_state IS
+    'Upper-level grouping cursor per (agent, level): open-node count at the last check, and the lease of the runner checking it.';
 
--- ─────────────── hierarchy_worker_breaker ───────────────
--- The worker's regeneration circuit breaker (task #4674 guardrail): a
--- singleton row recording the last trip and its operator reset. The 24h
--- generated-node budget trips it and the worker stops claiming; resuming is
--- an explicit, auditable operator act:
---   UPDATE hierarchy_worker_breaker SET reset_at = now(), reset_note = '<who/why>'
---    WHERE id = 1;
--- Active trip = reset_at IS NULL; after a reset the first cooled (<= budget)
--- window reading sets rearmed_at, and only then may a new excursion trip.
--- The row exists only once a trip happened; its absence means armed.
-CREATE TABLE hierarchy_worker_breaker (
-    id             INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    tripped_at     TIMESTAMPTZ,
-    tripped_reason TEXT,
-    reset_at       TIMESTAMPTZ,
-    reset_note     TEXT,
-    rearmed_at     TIMESTAMPTZ
+CREATE TABLE IF NOT EXISTS understanding_group_calls (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    level INTEGER NOT NULL,
+    check_key TEXT NOT NULL,
+    round INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    mode TEXT,
+    open_ids BIGINT[] NOT NULL,
+    request TEXT NOT NULL,
+    content JSONB,
+    additional_kwargs JSONB,
+    usage_metadata JSONB,
+    response_metadata JSONB,
+    duration_ms DOUBLE PRECISION NOT NULL,
+    problem TEXT,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS understanding_group_calls_check
+    ON understanding_group_calls (check_key, round);
+CREATE INDEX IF NOT EXISTS understanding_group_calls_agent
+    ON understanding_group_calls (agent_id, created_at);
 
-COMMENT ON TABLE hierarchy_worker_breaker IS
-    'Regeneration circuit breaker (task #4674): singleton row; active trip = reset_at IS NULL; operators reset with reset_at + reset_note; re-arms (rearmed_at) only after a reset and a cooled window.';
+COMMENT ON TABLE understanding_group_calls IS
+    'Raw record of each provider call of an upper-level grouping check (request, reply as returned, usage, timing, refusal reason, error); failed calls included.';
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON understanding_group_state TO ava_runner;
+        GRANT INSERT ON understanding_group_calls TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_group_calls_id_seq TO ava_runner;
+    END IF;
+END $$;
 
 -- ─────────────── audit_events ───────────────
 -- The system of record for category=audit events: who did what to whom, kept

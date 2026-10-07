@@ -93,41 +93,6 @@ def test_delivery_outbox_abandoned_retention_rejects_nonpositive(raw: str) -> No
         DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_ABANDONED_RETENTION_DAYS": raw})
 
 
-def test_hierarchy_budget_must_stay_below_deadline() -> None:
-    import pydantic
-
-    from base.config.domains.daemon.settings import DaemonSettings
-
-    with pytest.raises(pydantic.ValidationError, match="hierarchy_job_budget_seconds"):
-        DaemonSettings.model_validate(
-            {
-                "AVA_HIERARCHY_JOB_BUDGET_SECONDS": 3600,
-                "AVA_HIERARCHY_JOB_DEADLINE_SECONDS": 3600,
-            }
-        )
-    # Strictly below is the designed shape: the budget is the graceful stop
-    # point and must leave the kill margin.
-    configured = DaemonSettings.model_validate(
-        {
-            "AVA_HIERARCHY_JOB_BUDGET_SECONDS": 2400,
-            "AVA_HIERARCHY_JOB_DEADLINE_SECONDS": 3600,
-        }
-    )
-    assert configured.hierarchy_job_budget_seconds == 2400
-    assert configured.hierarchy_job_deadline_seconds == 3600
-
-
-def test_hierarchy_tail_defaults_ship_dark() -> None:
-    """The C-leg tail knobs' defaults: off, 15min idle, 60min interval, cap 3."""
-    from base.config.domains.daemon.settings import DaemonSettings
-
-    configured = DaemonSettings.model_validate({})
-    assert configured.hierarchy_tail_seal_enabled is False
-    assert configured.hierarchy_tail_idle_minutes == 15.0
-    assert configured.hierarchy_tail_min_interval_minutes == 60.0
-    assert configured.hierarchy_tail_max_per_tick == 3
-
-
 def test_sdk_code_reminder_cadence_config_contract() -> None:
     """The code-category reminder cadence is a live per-agent enum whose
     default preserves the existing once-per-context-window behavior."""

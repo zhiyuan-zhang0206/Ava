@@ -64,6 +64,7 @@ from agent.graph.llm_errors import (
 from agent.graph.node_log import node_lifecycle
 from agent.graph.tool_calls import code_from_args
 from agent.hooks.compact import auto_compact_for_llm
+from agent.hooks.understanding_chunks import due_chunk_update
 from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
@@ -572,11 +573,20 @@ async def _llm_node_impl(
         ctx.require_agent().brain.llm_model,
     )
 
+    # Understanding chunk cut: an enqueue past the token threshold moves the
+    # segment's cut, carried on whichever command ends this turn.
+    cut_update = await due_chunk_update(
+        state.compact, list(state.messages), final_msg, pool=ctx.ops_pool, agent_id=agent_id
+    )
+
     silent_idle_cmd = _silent_idle_command(
         final_msg, agent_id, ctx.require_agent().brain.llm_model, ledger
     )
     if silent_idle_cmd is not None:
-        return silent_idle_cmd
+        return Command[LlmGoto](
+            update={**cast("dict[str, Any]", silent_idle_cmd.update), **cut_update},
+            goto=silent_idle_cmd.goto,  # pyright: ignore[reportArgumentType]
+        )
 
     # Any non-silent-idle turn ends the streak — a single real action clears it.
     ledger.reset_silent_idle(str(agent_id))
@@ -598,7 +608,7 @@ async def _llm_node_impl(
         else:
             logger.info("[{label}] {body}", label="halt", body="no tool_call (idle)")
         return Command[LlmGoto](
-            update={"messages": [final_msg], "halted": True},
+            update={"messages": [final_msg], "halted": True, **cut_update},
             goto=AFTER_EXEC,
         )
     logger.info(
@@ -609,4 +619,4 @@ async def _llm_node_impl(
     # CodeStart + CodeDelta have already been incrementally published by
     # RedisStreamHandler in _stream() + finish() fallback (see _callbacks.py
     # module docstring)
-    return Command[LlmGoto](update={"messages": [final_msg]}, goto=BEFORE_EXEC)
+    return Command[LlmGoto](update={"messages": [final_msg], **cut_update}, goto=BEFORE_EXEC)
