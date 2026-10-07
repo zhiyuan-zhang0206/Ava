@@ -217,11 +217,6 @@ _PER_TEST_TRUNCATE_TABLES = (
     # leaked row would survive into the next test (a stale layer in a
     # run-timeline read).
     "understanding_nodes",
-    # The retired hierarchy worker's tables stay until a later migration drops them; nothing
-    # writes them any more, the entries keep a test that seeded one isolated.
-    "hierarchy_jobs",
-    "hierarchy_worker_state",
-    "hierarchy_worker_breaker",
     "understanding_chunk_jobs",  # chunk-triggered understanding queue; no FK path
     "understanding_chunk_calls",  # raw record of its provider calls; no FK path
     "understanding_group_state",  # upper-level grouping cursor; no FK path
