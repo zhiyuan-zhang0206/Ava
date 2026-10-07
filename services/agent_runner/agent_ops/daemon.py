@@ -123,10 +123,6 @@ _DISPATCH_RETRY_ATTEMPTS = 3
 _DISPATCH_RETRY_BACKOFF_S = 0.5
 _sleep = asyncio.sleep
 
-# Bounded concurrent dispatches: a burst of /ops POSTs (a spawn fan-out) runs
-# at most this many op calls in parallel; the rest queue on the semaphore.
-_dispatch_sem: asyncio.Semaphore | None = None
-
 # Shared DB pool for all in-process ops calls — opened in `_main`, closed in
 # its finally; tests that bypass `_main` set this explicitly.
 _db_pool: ConnectionPool | None = None
@@ -150,8 +146,7 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), "services.agent_runner.agent_ops.daemon")
 
 
-# Health handler and `_run_arm` share the loop; restart drops state and idempotency makes retry safe.
-_active_ops: dict[str, tuple[str, float]] = {}
+ActiveOps = dict[str, tuple[str, float]]
 
 # The op arms' own thread pool, instead of asyncio's default executor.
 #
@@ -190,7 +185,9 @@ def _op_thread_pool() -> ThreadPoolExecutor:
     return _op_executor
 
 
-async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[str, object]]:
+async def _run_arm(
+    kind: str, payload: dict[str, Any], *, active_ops: ActiveOps
+) -> tuple[OpStatus, dict[str, object]]:
     """`_dispatch_sync` on this daemon's own pool (see `_op_executor`).
 
     An arm must not read contextvars: `run_in_executor` does not propagate context,
@@ -199,7 +196,7 @@ async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[s
     """
     loop = asyncio.get_running_loop()
     active = (kind, time.monotonic())
-    _active_ops[kind] = active
+    active_ops[kind] = active
     try:
         future = loop.run_in_executor(
             _op_thread_pool(), functools.partial(_dispatch_sync, kind, payload)
@@ -207,8 +204,8 @@ async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[s
         maintenance_activity.track_worker(future)
         return await asyncio.shield(future)
     finally:
-        if _active_ops.get(kind) == active:
-            _active_ops.pop(kind)
+        if active_ops.get(kind) == active:
+            active_ops.pop(kind)
 
 
 def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[str, object]]:
@@ -221,7 +218,9 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[s
     return dispatch_sync(kind, payload, pool=_db_pool, db=_ops_handles()[0])
 
 
-async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[str, object]]:
+async def _dispatch(
+    kind: str, payload: dict[str, Any], *, active_ops: ActiveOps
+) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
     `kind` ranges over `ops.rpc_schemas.OpKind` (the canonical op vocabulary);
@@ -279,7 +278,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
-                return await _run_arm(kind, payload)
+                return await _run_arm(kind, payload, active_ops=active_ops)
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
         # gateway's `_raise_proxied_wire_error_from_payload` can
@@ -303,7 +302,12 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[
 
 
 async def _dispatch_idempotent(
-    kind: str, payload: dict[str, Any], key: str, pool: ConnectionPool | None
+    kind: str,
+    payload: dict[str, Any],
+    key: str,
+    pool: ConnectionPool | None,
+    *,
+    active_ops: ActiveOps,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
@@ -323,7 +327,7 @@ async def _dispatch_idempotent(
         }
     for attempt in range(_DISPATCH_RETRY_ATTEMPTS):
         try:
-            return await _dispatch_idempotent_pass(kind, payload, key, pool)
+            return await _dispatch_idempotent_pass(kind, payload, key, pool, active_ops=active_ops)
         except psycopg.OperationalError:
             if attempt + 1 >= _DISPATCH_RETRY_ATTEMPTS:
                 raise
@@ -337,7 +341,7 @@ async def _dispatch_idempotent(
 
 
 async def _dispatch_idempotent_pass(
-    kind: str, payload: dict[str, Any], key: str, pool: ConnectionPool
+    kind: str, payload: dict[str, Any], key: str, pool: ConnectionPool, *, active_ops: ActiveOps
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op, deduplicated by `key` — the retry-safe path for
     non-idempotent ops (spawn / lifecycle).
@@ -375,7 +379,7 @@ async def _dispatch_idempotent_pass(
         owned = cur.fetchone() is not None
     if owned:
         try:
-            status, result = await _dispatch(kind, payload)
+            status, result = await _dispatch(kind, payload, active_ops=active_ops)
             status = OpStatus(status)
         except Exception:
             # No outcome was stored — a future same-key dispatch must be able to
@@ -409,16 +413,15 @@ async def _dispatch_idempotent_pass(
     }
 
 
-async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
+async def _ops_route(
+    body: bytes, *, active_ops: ActiveOps, dispatch_sem: asyncio.Semaphore
+) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
     Always responds HTTP 200 with {"status", "result"} once the body parses; a
     'failed' status is a semantic outcome the gateway re-raises, not an
     HTTP error. A malformed body (not JSON, missing kind) returns 400.
     """
-    sem = _dispatch_sem
-    if sem is None:
-        raise RuntimeError("_dispatch_sem not initialized; _main must run before serving /ops")
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -441,7 +444,7 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
             "application/json",
         )
 
-    async with sem:
+    async with dispatch_sem:
         try:
             with maintenance_activity.admission(envelope.kind):
                 if envelope.idempotency_key is not None:
@@ -449,10 +452,16 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
                     # first dispatch executes + stores, later same-key dispatches
                     # replay (see _dispatch_idempotent).
                     status, result = await _dispatch_idempotent(
-                        envelope.kind, envelope.payload, envelope.idempotency_key, _db_pool
+                        envelope.kind,
+                        envelope.payload,
+                        envelope.idempotency_key,
+                        _db_pool,
+                        active_ops=active_ops,
                     )
                 else:
-                    status, result = await _dispatch(envelope.kind, envelope.payload)
+                    status, result = await _dispatch(
+                        envelope.kind, envelope.payload, active_ops=active_ops
+                    )
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
             status, result = OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
@@ -469,13 +478,15 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
 
 
 async def _main() -> None:
+    # Request arms and health snapshots share only this daemon invocation's state.
+    active_ops: ActiveOps = {}
     if _is_running():
         _log.info("ava-ops pidfile %s indicates another instance is alive — exiting", _pidfile())
         sys.exit(1)
     _write_pidfile()
 
-    global _dispatch_sem, _db_pool  # noqa: PLW0603 — set once at startup, cleared in finally for test reuse
-    _dispatch_sem = asyncio.Semaphore(settings.services.ops_concurrency)
+    global _db_pool  # noqa: PLW0603 — set once at startup, cleared in finally for test reuse
+    dispatch_sem = asyncio.Semaphore(settings.services.ops_concurrency)
 
     our_machine = machine_name()
 
@@ -515,13 +526,17 @@ async def _main() -> None:
             "ops",
             endpoint.health_port,
             host=bind_host,
-            extra_routes={("POST", "/ops"): _ops_route},
+            extra_routes={
+                ("POST", "/ops"): functools.partial(
+                    _ops_route, active_ops=active_ops, dispatch_sem=dispatch_sem
+                )
+            },
             liveness=liveness,
-            components=lambda: health.ops_components(_active_ops),
+            components=lambda: health.ops_components(active_ops),
             extra=lambda: {
                 "maintenance": maintenance_activity.progress(),
                 "saturation": health.saturation(
-                    _active_ops, max(1, settings.services.ops_concurrency)
+                    active_ops, max(1, settings.services.ops_concurrency)
                 ),
             },
             auth_digests=acceptance,
@@ -545,7 +560,6 @@ async def _main() -> None:
     finally:
         pool.close()
         _db_pool = None
-        _dispatch_sem = None
         _shutdown_op_pool()
 
 
