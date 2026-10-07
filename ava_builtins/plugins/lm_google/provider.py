@@ -188,7 +188,7 @@ PROVIDER = ProviderContribution(
             effort_levels=("low", "medium", "high"),
             tuning=ModelTuning(
                 # The model page says its default thinking_level is `medium`
-                # (docs/decisions/2026-07-25-per-model-tuning-values.md).
+                # (docs/decisions/engineering/design/simplification/2026-07-25-per-model-tuning-values.md).
                 reasoning_effort="medium",
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),

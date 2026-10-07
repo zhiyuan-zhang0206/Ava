@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { useMediaQuery } = vi.hoisted(() => ({ useMediaQuery: vi.fn(() => true) }));
-vi.mock("@/lib/use-media-query", () => ({ useMediaQuery }));
+vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
 import {
   RUN_TIMELINE_SPLIT_LAYOUT_ID,

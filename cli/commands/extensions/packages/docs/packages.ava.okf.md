@@ -150,4 +150,4 @@ vendor's README works as-is.
 
 - [[install_registry.ava.okf.md]] — the registry these verbs write, and the scanner gate
 - [[okf/mcps/mcps.ava.okf.md|MCP integration]] — the MCP domain node
-- [[plugins.ava.okf.md]] — the plugin system
+- [[okf/plugins/plugins]] — the plugin system

@@ -9,7 +9,7 @@ and terminal, signal known shell/foreground groups, and report known leftovers.
 A surviving shell fails the stop; a known job leftover is diagnostic. Closure
 never proves that every descendant or detached process disappeared. A stopped
 service's ledger supplies only recorded birth identities, never a global scan.
-See docs/decisions/2026-10-07-pty-best-effort-closure.md.
+See docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
 
 # How long a normal stop's terminal closure waits between its HUP/TERM and the
-# SIGKILL of whatever is left (docs/decisions/2026-09-28-stop-escalates-to-sigkill.md):
+# SIGKILL of whatever is left (docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md):
 # a job that handles TERM gets this long to clean up. The stop's own deadline
 # caps it as well.
 _TERMINAL_STOP_GRACE_S = 10.0
@@ -248,7 +248,7 @@ def close_terminals(
     the SIGKILL leg is bounded by `_TERMINAL_KILL_WAIT_S` and runs even when
     the grace spent the rest of the deadline — a stop that reached its
     terminal phase closes its terminals
-    (docs/decisions/2026-10-07-pty-best-effort-closure.md). A shell that
+    (docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md). A shell that
     survives fails the stop, which keeps its maintenance hold. Known job
     leftovers are reported without failing the stop. A
     terminal still tearing down after that gets the rest of the deadline, and
@@ -299,7 +299,7 @@ def report_postgres_stop_escalation(
     caller owns a stop journal, collects the line for it
     (`_temporary_stop._finish_stop`); a leg that owns no journal passes
     nothing and still gets stderr and the event
-    (docs/decisions/2026-10-02-pg-stop-escalates-to-immediate.md).
+    (docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md).
     """
     killed = ", ".join(str(pid) for pid in escalation.killed) or "none"
     note = (

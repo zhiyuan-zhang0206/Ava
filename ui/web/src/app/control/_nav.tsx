@@ -18,9 +18,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api } from "@/lib/api";
-import { useBreakpoint } from "@/lib/breakpoint";
-import type { PresetView } from "@/lib/types";
+import { api } from "@/lib/transport/api";
+import { useBreakpoint } from "@/lib/layout/breakpoint";
+import type { PresetView } from "@/lib/contracts/types";
 
 import {
   controlAnchorIds,
@@ -28,8 +28,8 @@ import {
   PRESETS_QUERY_KEY,
   presetAnchorId,
 } from "./_sections";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 // The active anchor is the LAST one (document order = vertical order) whose top
 // has scrolled above this line, measured from the scroll container's top edge.

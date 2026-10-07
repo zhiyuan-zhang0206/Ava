@@ -11,8 +11,8 @@ import { Check, Copy, GitBranch } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { cn } from "@/lib/utils";
-import { copyToClipboard } from "@/lib/clipboard";
+import { cn } from "@/lib/format/utils";
+import { copyToClipboard } from "@/lib/format/clipboard";
 
 const ACTION_BTN_CLS = cn(
   "inline-flex items-center p-1 rounded",

@@ -270,7 +270,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
 
 
 # ─── kill_all_shell_sessions: the at-exit kill ───────────────────────────────
-# docs/decisions/2026-09-27-terminate-has-no-closed-state.md: a graceful terminate
+# docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md: a graceful terminate
 # that asked for it has the agent's shell sessions killed on its home host
 # after the last step returned, right before the termination commits.
 
@@ -424,7 +424,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
 ) -> None:
     """A step still draining past a force's kill may create a shell; the live
     host sweeps again when it observes the force quiescent, before recording
-    the observation (docs/decisions/2026-09-27-terminate-has-no-closed-state.md)."""
+    the observation (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md)."""
     monkeypatch.setattr(
         "services.agent_runner.agent_host.runtime.validate_model_config", _any_model
     )

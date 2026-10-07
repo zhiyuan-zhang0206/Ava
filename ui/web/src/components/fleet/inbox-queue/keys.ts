@@ -1,4 +1,4 @@
-import type { OpenNotice } from "@/lib/types";
+import type { OpenNotice } from "@/lib/contracts/types";
 
 // Merge-adjacent helpers for the Inbox queue. Task #1010 split these out of
 // index.tsx so the list modules can share them without an import cycle; the

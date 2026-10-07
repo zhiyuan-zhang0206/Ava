@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fail a PR that silently resurrects lines main deleted recently.
 
-Decision record: docs/decisions/2026-10-04-no-silent-resurrection.md.
-Working convention: docs/conventions/no-silent-resurrection.md.
+Decision record: docs/decisions/agents/lifecycle/2026-10-04-no-silent-resurrection.md.
+Working convention: docs/conventions/agents/no-silent-resurrection.md.
 
 The incident: #4245 (6ecfe14c3) deleted the delivery-watchdog field code; #4207
 (151bc92fe) then landed after replaying a stale branch through a conflict
@@ -63,7 +63,7 @@ DEFAULT_DAYS = 30
 # A "strong" line is meaningful enough that a resurrected run of them (or one
 # carrying a distinctive identifier) should have been noticed by the author.
 # The thresholds are the tuning knobs, set from the 30-day false-positive
-# sweep described in docs/conventions/no-silent-resurrection.md: the minimum unit
+# sweep described in docs/conventions/agents/no-silent-resurrection.md: the minimum unit
 # is three lines (the incident's blocks were 3+ lines; two-line idiom matches
 # dominated the noise) and a solo line needs a >=20-char identifier (short
 # framework names like OperationalError matched everything).
@@ -85,7 +85,7 @@ SKIPPED_FILES = frozenset(
         "uv.lock",
         "ui/web/package-lock.json",
         "ui/web/openapi.json",
-        "ui/web/src/lib/types-generated.ts",
+        "ui/web/src/lib/contracts/types-generated.ts",
         "base/host/env/config_lite_table.json",
         "shared/config_lite_table.json",
         "base/events/registry.md",

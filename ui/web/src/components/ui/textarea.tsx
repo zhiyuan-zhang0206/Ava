@@ -1,7 +1,7 @@
 import * as React from "react"
 
-import { cn } from "@/lib/utils"
-import { FLEX } from "@/lib/layout";
+import { cn } from "@/lib/format/utils"
+import { FLEX } from "@/lib/layout/layout";
 
 interface TextareaProps extends React.ComponentProps<"textarea"> {
   /** Show the focus ring/border highlight. The composer's message input

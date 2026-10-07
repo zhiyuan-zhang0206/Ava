@@ -8,7 +8,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 Stay on the shadcn / Radix / Tailwind mainstream. Do not add headless
 component libraries outside that ecosystem — the May 25 base-ui saga
-(see `docs/decisions/2026-05-25-frontend-radix-stack.md`) cost five PRs
+(see `docs/decisions/frontend/ui/2026-05-25-frontend-radix-stack.md`) cost five PRs
 because `@base-ui/react` looked maintained but had not been through
 real-iPhone-Chrome shake-out. That decision record carries the rule for
 evaluating any future candidate.

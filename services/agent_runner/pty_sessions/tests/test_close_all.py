@@ -2,7 +2,7 @@
 
 Real shells, real signals. The shells get SIGHUP and a known foreground group
 gets SIGTERM; known targets alive when the grace ends receive SIGKILL
-(docs/decisions/2026-09-28-stop-escalates-to-sigkill.md). A busy session whose shell
+(docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md). A busy session whose shell
 the closure verified gone comes back in `Outcome.closed`, which is what a stop
 turns into owner notices.
 """

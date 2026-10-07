@@ -332,5 +332,5 @@ def test_scan_uses_public_candidate_tool_and_preserves_report(
     assert scan.succeeded
     assert artifact.read_text() == "candidate evidence\n"
     prompt = module.worker_prompt("2026-10-05", scan)
-    assert "docs/conventions/tech-debt.md" in prompt
+    assert "docs/conventions/engineering/tech-debt.md" in prompt
     assert "ava-sweeper" not in prompt

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Check that ui/web/src/lib/constants-generated.ts is in sync with the
+# Check that ui/web/src/lib/contracts/constants-generated.ts is in sync with the
 # backend constant source of truth (base/events/live/projection.py EVENT_COALESCE_MS).
 # Does not mutate actual files (writes to temp + diff), compatible with the
 # pre-commit hook's stash/restore (mutating actual files, even with identical
@@ -16,9 +16,9 @@ cd "$(dirname "$0")/../.."  # repo root
 
 .venv/bin/python scripts/codegen/dump_frontend_constants.py "$TMPDIR" >/dev/null
 
-if ! diff -q ui/web/src/lib/constants-generated.ts "$TMPDIR/constants-generated.ts" >/dev/null; then
-    echo "ERROR: ui/web/src/lib/constants-generated.ts is out of sync with base/events/live/projection.py"
+if ! diff -q ui/web/src/lib/contracts/constants-generated.ts "$TMPDIR/constants-generated.ts" >/dev/null; then
+    echo "ERROR: ui/web/src/lib/contracts/constants-generated.ts is out of sync with base/events/live/projection.py"
     echo "   run ./scripts/codegen/dump_frontend_constants.py to regenerate"
-    diff ui/web/src/lib/constants-generated.ts "$TMPDIR/constants-generated.ts" | head -30
+    diff ui/web/src/lib/contracts/constants-generated.ts "$TMPDIR/constants-generated.ts" | head -30
     exit 1
 fi

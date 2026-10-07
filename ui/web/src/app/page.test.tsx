@@ -20,12 +20,12 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout";
+import { api } from "@/lib/transport/api";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
 
-import type { AgentRow } from "@/lib/types";
-import type { ConnectionState } from "@/lib/use-timeline";
+import type { AgentRow } from "@/lib/contracts/types";
+import type { ConnectionState } from "@/lib/timeline/use-timeline";
 
 // -- Hook + child-component mocks --
 // hoisted state lets individual tests change hook return values
@@ -59,7 +59,7 @@ const hooksState = {
   settings: { "display.timeline_width_ratio": 0.4 } as Record<string, unknown>,
 };
 
-vi.mock("@/lib/use-agents", () => ({
+vi.mock("@/lib/agents/use-agents", () => ({
   useAgents: () => ({
     agents: hooksState.agents,
     ancestors: [],
@@ -78,7 +78,7 @@ vi.mock("@/lib/use-agents", () => ({
   }),
 }));
 
-vi.mock("@/lib/use-timeline", () => ({
+vi.mock("@/lib/timeline/use-timeline", () => ({
   useTimeline: () => ({
     items: hooksState.timelineItems,
     streamingCode: false,
@@ -89,7 +89,7 @@ vi.mock("@/lib/use-timeline", () => ({
   }),
 }));
 
-vi.mock("@/lib/use-token-usage", () => ({
+vi.mock("@/lib/inspector/use-token-usage", () => ({
   useTokenUsage: () => ({
     contextTokens: 0,
     maxContextTokens: 0,
@@ -98,7 +98,7 @@ vi.mock("@/lib/use-token-usage", () => ({
   }),
 }));
 
-vi.mock("@/lib/use-user-settings", () => ({
+vi.mock("@/lib/state/use-user-settings", () => ({
   useUserSettings: () => ({
     settings: hooksState.settings,
     setSetting: hooksState.setSetting,
@@ -112,14 +112,14 @@ vi.mock("@/lib/use-user-settings", () => ({
 // their behavior is covered by use-cluster-health.test.tsx +
 // connection-notice.test.tsx + useEventStream.test.ts.
 
-vi.mock("@/lib/useEventStream", () => ({
+vi.mock("@/lib/transport/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
   AgentEventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
   useEventStream: vi.fn(),
   useAgentEventStream: vi.fn(),
 }));
 
-vi.mock("@/lib/store", () => ({
+vi.mock("@/lib/state/store", () => ({
   useStore: <T,>(selector: (s: unknown) => T): T => {
     const fakeState = {
       toast: hooksState.toast,
@@ -143,7 +143,7 @@ vi.mock("@/lib/store", () => ({
 // Breakpoint: tests default to desktop (isLarge = true). The inspector
 // mount-reset is desktop-only (task #793), so the mobile tests flip this.
 // R4 layer 4: the page consumes useBreakpoint — the single breakpoint source.
-vi.mock("@/lib/breakpoint", () => ({
+vi.mock("@/lib/layout/breakpoint", () => ({
   useBreakpoint: () => ({
     tier: hooksState.isDesktop ? "xl" : "xs",
     isNarrow: !hooksState.isDesktop,
@@ -153,7 +153,7 @@ vi.mock("@/lib/breakpoint", () => ({
 
 // requestScrollToBottom moved to the timeline store (useTimelineStore) when the
 // timeline split out of the app store; page.tsx reads it from there on send.
-vi.mock("@/lib/timeline-store", () => ({
+vi.mock("@/lib/timeline/timeline-store", () => ({
   useTimelineStore: <T,>(selector: (s: unknown) => T): T => {
     const fakeState = {
       requestScrollToBottom: hooksState.requestScrollToBottom,
@@ -162,7 +162,7 @@ vi.mock("@/lib/timeline-store", () => ({
   },
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   API_BASE: "",
   MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
     constructor(readonly clientMessageId: string) {
@@ -191,7 +191,7 @@ vi.mock("@/components/agent-sidebar", () => ({
   ),
 }));
 
-vi.mock("@/components/header-bar", () => ({
+vi.mock("@/components/shell/header-bar", () => ({
   HeaderBar: ({
     label,
     children,
@@ -217,7 +217,7 @@ vi.mock("@/components/timeline", () => ({
   ),
 }));
 
-vi.mock("@/components/composer", () => {
+vi.mock("@/components/conversation/composer", () => {
   function ComposerMock({
     mode,
     onSend,
@@ -266,13 +266,13 @@ vi.mock("@/components/composer", () => {
   return { Composer: ComposerMock };
 });
 
-vi.mock("@/components/upload-button", () => ({
+vi.mock("@/components/conversation/upload-button", () => ({
   UploadButton: ({ agentId }: { agentId: number | null }) => (
     <div data-testid="upload-button" data-agent-id={agentId ?? "null"} />
   ),
 }));
 
-vi.mock("@/components/content-toggle", () => ({
+vi.mock("@/components/content/content-toggle", () => ({
   ContentToggle: () => <div data-testid="content-toggle" />,
 }));
 
@@ -281,7 +281,7 @@ const inspectorMockState = vi.hoisted(() => ({
   mounts: 0,
 }));
 
-vi.mock("@/components/inspector-panel", async () => {
+vi.mock("@/components/inspector/inspector-panel", async () => {
   const React = await import("react");
   return {
     InspectorPanel: () => {
@@ -298,7 +298,7 @@ vi.mock("@/components/inspector-panel", async () => {
   };
 });
 
-vi.mock("@/components/inspector-toggle", () => ({
+vi.mock("@/components/inspector/inspector-toggle", () => ({
   InspectorToggle: () => <button data-testid="inspector-toggle">toggle</button>,
 }));
 

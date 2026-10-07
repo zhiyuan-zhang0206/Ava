@@ -1,7 +1,7 @@
 """`base.packages.plugins.manifest` unit tests — manifest validation, range algebra,
 pyproject mirror check (the S1–S2 contract layer, task #1244).
 
-Spec: `docs/conventions/plugin-spec-v2.md`.
+Spec: `docs/conventions/extensions/plugin-spec-v2.md`.
 """
 
 from pathlib import Path

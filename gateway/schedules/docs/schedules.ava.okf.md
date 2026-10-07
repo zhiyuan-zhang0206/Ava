@@ -52,7 +52,7 @@ Only applies to **crashes** (not clean exits) looping—clean exits go to `compl
 
 ## Key Dependencies
 
-- [[db.ava.okf.md]] — reads/writes the `schedules` and `schedule_fire_log` tables
+- [[agent/db/docs/db.ava.okf.md]] — reads/writes the `schedules` and `schedule_fire_log` tables
 - `base.cluster.session_name()` — generates the session name `ava-schedule-<id>`
 - [[agent/docs/lifecycle.ava.okf.md]] — agent lifecycle is independent of persistent schedule sessions
 

@@ -4,11 +4,11 @@ import { Inter, Geist_Mono } from "next/font/google";
 import { connection } from "next/server";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { VisualViewportHeightSync } from "@/components/visual-viewport-height-sync";
-import { Providers } from "@/components/providers";
+import { VisualViewportHeightSync } from "@/components/shell/visual-viewport-height-sync";
+import { Providers } from "@/components/shell/providers";
 import "./globals.css";
-import { FLEX, FLEX_COL } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_COL } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 const inter = Inter({
   variable: "--font-inter",

@@ -19,7 +19,7 @@ A gateway-owned daemon — every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (defaul
 - **Schema drift suicide**: `psycopg.ProgrammingError` (code↔DB drift) directly exits, relying on healthcheck to restart, not retrying to mask the issue.
 
 ## Key Dependencies
-- [[db.ava.okf.md]] — reads `agent_tasks` (SELECT overdue tasks, JOIN parent for `parent_owner` + task `priority`) + writes `last_reminded_at`/`reminder_count`/`escalated_at` bookkeeping + direct `inbound_messages` INSERT (`kind='system_note'`, `source='system'`) + user escalation path writes `agent_notices` (require_response, then `publish_agent_updated_sync` invalidates the live view after commit)
+- [[agent/db/docs/db.ava.okf.md]] — reads `agent_tasks` (SELECT overdue tasks, JOIN parent for `parent_owner` + task `priority`) + writes `last_reminded_at`/`reminder_count`/`escalated_at` bookkeeping + direct `inbound_messages` INSERT (`kind='system_note'`, `source='system'`) + user escalation path writes `agent_notices` (require_response, then `publish_agent_updated_sync` invalidates the live view after commit)
 - [[../../../../../gateway/docs/gateway.ava.okf.md]] — direct delivery refreshes the owner badge and only best-effort wakes Redis, never auto-resurrects
 - [[loop.ava.okf.md]] — reminder/escalation messages are received and processed by the owner/parent owner on their respective machines
 

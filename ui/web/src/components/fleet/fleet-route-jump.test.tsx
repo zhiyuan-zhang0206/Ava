@@ -8,8 +8,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, NoticeItem, TaskRow } from "@/lib/types";
-import type { TasksResult } from "@/lib/use-tasks";
+import type { AgentRow, NoticeItem, TaskRow } from "@/lib/contracts/types";
+import type { TasksResult } from "@/lib/notifications/use-tasks";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -45,7 +45,7 @@ vi.mock("@/components/fleet/task-graph", () => ({
 }));
 
 const isLargeMock = vi.fn<() => boolean>(() => true);
-vi.mock("@/lib/breakpoint", () => ({
+vi.mock("@/lib/layout/breakpoint", () => ({
   useBreakpoint: () => ({
     tier: isLargeMock() ? "xl" : "xs",
     isNarrow: !isLargeMock(),
@@ -88,9 +88,9 @@ const agentsMock = vi.fn<() => AgentRow[]>(() => [
     liveness_state: "online",
   },
 ]);
-vi.mock("@/lib/use-fleet-agents", () => ({ useFleetAgents: () => agentsMock() }));
+vi.mock("@/lib/agents/use-fleet-agents", () => ({ useFleetAgents: () => agentsMock() }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: {
     getNotices: () =>
       Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }),
@@ -120,13 +120,13 @@ const useNoticesMock = vi.fn<() => TestNoticesFeed>(() => ({
   resolvedError: false,
   isLoading: false,
 }));
-vi.mock("@/lib/use-notices", () => ({ useNotices: () => useNoticesMock() }));
+vi.mock("@/lib/notifications/use-notices", () => ({ useNotices: () => useNoticesMock() }));
 
 const useTasksMock = vi.fn<() => TasksResult>(() => ({ tasks: [], loading: false, error: false }));
-vi.mock("@/lib/use-tasks", () => ({ useTasks: () => useTasksMock() }));
+vi.mock("@/lib/notifications/use-tasks", () => ({ useTasks: () => useTasksMock() }));
 
-vi.mock("@/lib/use-all-pages", () => ({ useAllPages: () => [] }));
-vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
+vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
 
