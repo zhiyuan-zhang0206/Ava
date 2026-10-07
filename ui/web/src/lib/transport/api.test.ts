@@ -424,14 +424,16 @@ describe("agent label / messages / cancel", () => {
   });
 
   it("cancel POSTs JSON {agent_id} to /api/cancel (global endpoint)", async () => {
-    await api.cancel(8);
+    await api.cancel(8, "cancel-operation");
+    expect(calls[0].init?.headers).toMatchObject({ "Idempotency-Key": "cancel-operation" });
     expect(calls[0].url).toMatch(/\/api\/cancel$/);
     expect(calls[0].init?.method).toBe("POST");
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({ agent_id: 8 });
   });
 
   it("compact POSTs /api/agents/{id}/compact", async () => {
-    await api.compact(5);
+    await api.compact(5, "compact-operation");
+    expect(calls[0].init?.headers).toMatchObject({ "Idempotency-Key": "compact-operation" });
     expect(calls[0].url).toMatch(/\/api\/agents\/5\/compact$/);
     expect(calls[0].init?.method).toBe("POST");
   });

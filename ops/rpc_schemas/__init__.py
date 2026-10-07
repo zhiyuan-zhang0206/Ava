@@ -72,6 +72,7 @@ class CancelRequested(BaseModel):
     `already_terminated`: agent is dead — nothing to pause."""
 
     status: CancelResult
+    inbound_id: int | None = None
 
 
 class SpawnAgentRequest(BaseModel):

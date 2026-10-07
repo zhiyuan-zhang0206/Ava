@@ -257,12 +257,14 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="observed-session CAS close — repeated or stale requests leave the lease unchanged"
     ),
     ("POST", "/api/agents/{agent_id}/compact"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="each request enqueues a new compact command; no durable command receipt",
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="transactional compact acceptance; pending original inbound only permits recovery",
+        transactional_idempotency=True,
     ),
     ("POST", "/api/cancel"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="each request enqueues cancel; a delayed retry can cancel later work",
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="transactional cancel acceptance; native work-episode fencing remains separate",
+        transactional_idempotency=True,
     ),
     ("POST", "/api/agents/{agent_id}/terminate"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="termination is not bound to the observed incarnation"

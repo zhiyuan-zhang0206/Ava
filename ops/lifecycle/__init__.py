@@ -33,7 +33,6 @@ from psycopg_pool import ConnectionPool
 
 from base.agents import (
     AgentStatus,
-    CancelResult,
     CrashRecoveryResult,
     RestartResult,
     ResurrectAlreadyAlive,
@@ -129,38 +128,44 @@ from ops.rpc_schemas.terminate import ShellSessionsKill
 _log = logging.getLogger(__name__)
 
 
-def _cancel_blocking(
-    db: Database, bus: EventBus, agent_id: int, db_pool: ConnectionPool
-) -> int | None:
-    """Sync cancel section — via to_thread. Returns the inbound id, or None
-    when the agent is already terminated (the cancel would sit pending
-    forever / fire a spurious pause on a future resurrect)."""
-    if get_agent_status(db, agent_id) is AgentStatus.TERMINATED:
-        return None
-    with db_pool.connection() as conn:
-        return insert_inbound_message(
-            conn, agent_id, "", source="user", kind="cancel", database=db, bus=bus
-        )
-
-
 async def cancel_agent_op(
-    db: Database, bus: EventBus, agent_id: int, db_pool: ConnectionPool
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    db_pool: ConnectionPool,
+    *,
+    operation_key: str | None = None,
+    operation_path: str = "/api/cancel",
 ) -> CancelRequested:
-    """Pause/stop the agent: INSERT a durable kind='cancel' inbound.
+    """Commit a cancel acceptance; pending original rows permit recovery hints.
 
-    No cross-machine forwarding — the INSERT lands in the shared DB and the
-    agent (wherever it runs) is woken by the Redis pub/sub wake publish (PG
-    LISTEN/NOTIFY was retired: PgBouncer transaction pooling breaks
-    session-scoped LISTEN); the in-flight node interrupts on it, or the next
-    claim pass halts to idle. A cancel for an already-dead agent is a no-op
-    (the row would sit pending forever / fire a spurious pause on a future
-    resurrect), so short-circuit on TERMINATED.
+    Same-key replay preserves a terminated no-op even after resurrection.
+    This does not fence work episodes or recover after native claim/application.
     """
-    iid = await asyncio.to_thread(_cancel_blocking, db, bus, agent_id, db_pool)
-    if iid is None:
-        return CancelRequested(status=CancelResult.ALREADY_TERMINATED)
-    await publish_inbound_arrived(bus, agent_id, iid, "cancel", "user", "")
-    return CancelRequested(status=CancelResult.ENQUEUED)
+    from base import telemetry
+    from base.agents.messages.control_delivery import accept_control
+    from base.agents.messages.inbound import InboundKind
+    from base.db import publish_inbound_wake
+
+    receipt = await asyncio.to_thread(
+        accept_control,
+        db_pool,
+        agent_id,
+        InboundKind.CANCEL,
+        path=operation_path,
+        key=operation_key,
+    )
+    if receipt.event is not None:
+        telemetry.emit_prepared(receipt.event)
+    if receipt.pending and receipt.inbound_id is not None:
+        try:
+            await asyncio.to_thread(
+                publish_inbound_wake, db, bus, agent_id, str(receipt.inbound_id)
+            )
+            await publish_inbound_arrived(bus, agent_id, receipt.inbound_id, "cancel", "user", "")
+        except Exception:
+            _log.exception("cancel acceptance %s lost its live hint", receipt.inbound_id)
+    return CancelRequested(status=receipt.status, inbound_id=receipt.inbound_id)
 
 
 async def terminate_agent_op(

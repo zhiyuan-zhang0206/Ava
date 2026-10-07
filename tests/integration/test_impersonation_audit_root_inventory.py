@@ -40,7 +40,7 @@ _INVENTORY: dict[str, str] = {
     "base/db/__init__.py::insert_inbound_message_in_transaction": "central",
     "base/db/__init__.py::insert_spawn_prompt_in_transaction": "central",
     "base/db/__init__.py::insert_restart_completed_inbound": "central",
-    "base/db/__init__.py::insert_compact_request_inbound": "ineligible",
+    "base/agents/messages/control_delivery.py::insert_control_in_transaction": "ineligible",
     "base/host/env/audit.py::_emit_audit_event": "ineligible",
 }
 

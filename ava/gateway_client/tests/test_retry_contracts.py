@@ -50,7 +50,7 @@ def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) ->
         else:
             assert send().status_code == 503
     assert len(requests) == 1
-    if path == "/api/agents":
+    if path in ("/api/agents", "/api/cancel", "/api/agents/7/compact"):
         assert requests[0].headers["Idempotency-Key"]
 
 

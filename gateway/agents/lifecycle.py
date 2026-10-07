@@ -15,21 +15,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Literal
+from typing import Annotated, Literal
 
 import psycopg
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Path, Request
 from psycopg_pool import ConnectionPool, PoolTimeout
 from pydantic import BaseModel, Field
 
+from base.agents import AgentNotFound
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
+from base.agents.messages.control_delivery import ControlConflictError, accept_control
 from base.agents.messages.inbound import InboundKind
-from base.db import Database, agent_exists, insert_compact_request_inbound
+from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
-from base.events.live.bus import EventBus
 from gateway.agents.forward import forward_to_home_machine
 from gateway.agents.schemas import CancelRequest, CompactEnqueued
+from gateway.auth.request_principal import PrincipalScopeError, optional_request_key
 from ops import lifecycle as _ops
 from ops.rpc_schemas import (
     BillingResurrectRequest,
@@ -92,7 +94,7 @@ async def post_force_expire_impersonation(
 
 @router.post("/api/agents/{agent_id}/compact")
 async def post_compact(
-    agent_id: int,
+    agent_id: Annotated[int, Path(gt=0)],
     request: Request,
 ) -> CompactEnqueued:
     """Trigger compact — INSERT kind='compact_request' inbound; the claim
@@ -112,22 +114,37 @@ async def post_compact(
     process to claim it. The co-batched resurrect wins the claim node's recency
     routing, so the agent wakes and the requested compaction still runs.
     """
-    inbound_id = await asyncio.to_thread(
-        _compact_request_blocking,
-        request.app.state.db_pool,
-        request.app.state.db,
-        request.app.state.bus,
-        agent_id,
-    )
-    await _ops.resurrect_if_terminated(
-        request.app.state.db,
-        request.app.state.bus,
-        agent_id,
-        trigger_inbound_id=inbound_id,
-        trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
-    )
+    try:
+        receipt = await asyncio.to_thread(
+            accept_control,
+            request.app.state.db_pool,
+            agent_id,
+            InboundKind.COMPACT_REQUEST,
+            path=request.url.path,
+            key=optional_request_key(request),
+        )
+    except (PrincipalScopeError, ControlConflictError, AgentNotFound) as exc:
+        raise _control_http_error(exc) from exc
+    from base import telemetry
 
-    return CompactEnqueued(agent_id=agent_id, status="enqueued")
+    if receipt.event is not None:
+        telemetry.emit_prepared(receipt.event)
+    if receipt.pending and receipt.inbound_id is not None:
+        await asyncio.to_thread(
+            publish_inbound_wake,
+            request.app.state.db,
+            request.app.state.bus,
+            agent_id,
+            str(receipt.inbound_id),
+        )
+        await _ops.resurrect_if_terminated(
+            request.app.state.db,
+            request.app.state.bus,
+            agent_id,
+            trigger_inbound_id=receipt.inbound_id,
+            trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
+        )
+    return CompactEnqueued(agent_id=agent_id, status="enqueued", inbound_id=receipt.inbound_id)
 
 
 @router.post("/api/cancel")
@@ -144,19 +161,27 @@ async def post_cancel(body: CancelRequest, request: Request) -> CancelRequested:
     No cross-machine forwarding: the cancel is a durable row in the shared DB
     (plus a Redis wake), delivered regardless of which host runs the agent.
     """
-    return await _ops.cancel_agent_op(
-        request.app.state.db, request.app.state.bus, body.agent_id, request.app.state.db_pool
-    )
+    try:
+        return await _ops.cancel_agent_op(
+            request.app.state.db,
+            request.app.state.bus,
+            body.agent_id,
+            request.app.state.db_pool,
+            operation_key=optional_request_key(request),
+            operation_path=request.url.path,
+        )
+    except (PrincipalScopeError, ControlConflictError, AgentNotFound) as exc:
+        raise _control_http_error(exc) from exc
 
 
-def _compact_request_blocking(
-    pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int
-) -> int:
-    """Sync compact-request INSERT + 404 guard — via to_thread."""
-    with pool.connection() as conn:
-        if not agent_exists(conn, agent_id):
-            raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        return insert_compact_request_inbound(conn, agent_id, database=db, bus=bus)
+def _control_http_error(
+    exc: PrincipalScopeError | ControlConflictError | AgentNotFound,
+) -> HTTPException:
+    if isinstance(exc, PrincipalScopeError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, ControlConflictError):
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/api/agents/{agent_id}/terminate")

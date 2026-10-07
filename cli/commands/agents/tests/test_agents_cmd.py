@@ -216,6 +216,8 @@ def test_agents_cancel_posts_to_cancel_route(
     seen = _patch_post(monkeypatch, {"status": "enqueued"})
     assert _agents.cmd_agents_cancel(5) == 0
     assert seen["url"] == "http://gw:8000/api/cancel"
+    assert isinstance(seen["headers"], dict)
+    assert seen["headers"]["Idempotency-Key"]
     assert seen["json"] == {"agent_id": 5}
     assert "cancel" in capsys.readouterr().out
 
@@ -556,6 +558,8 @@ def test_agents_compact_posts_to_the_compact_route(
     seen = _patch_post(monkeypatch, {"agent_id": 7, "status": "enqueued"})
     assert _agents.cmd_agents_compact(7) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/compact"
+    assert isinstance(seen["headers"], dict)
+    assert seen["headers"]["Idempotency-Key"]
     assert seen["json"] is None  # the endpoint takes no body
     out = capsys.readouterr().out
     assert "compact" in out and "enqueued" in out
