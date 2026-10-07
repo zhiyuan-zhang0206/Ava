@@ -294,12 +294,19 @@ def test_at_watcher_revives_a_terminated_owner(spawned_agent: int, clean_shell_w
 
     def revived() -> tuple[bool, object]:
         rows = _inbounds(agent, f"watcher:{wid}")
-        return bool(rows and rows[0][2] == "done"), rows
+        wake_done = any(
+            "RESURRECT-WAKE-MARK" in content and status == "done" for _, content, status in rows
+        )
+        completion_done = any(
+            "Watcher 'e2e-resurrect' finished." in content and status == "done"
+            for _, content, status in rows
+        )
+        return wake_done and completion_done, rows
 
-    poll_until(revived, timeout=60.0, interval=0.3, what="watcher revives its owner")
+    poll_until(revived, timeout=60.0, interval=0.3, what="watcher wake and completion processed")
     wait_for_status(agent, "idling")
     poll_until(
-        lambda: _human_witness(agent, "RESURRECT-WAKE-MARK"),
+        lambda: _human_witness(agent, "RESURRECT-WAKE-MARK", "Watcher 'e2e-resurrect' finished."),
         timeout=60.0,
         interval=0.3,
         what="resurrected owner's wake in model input",
