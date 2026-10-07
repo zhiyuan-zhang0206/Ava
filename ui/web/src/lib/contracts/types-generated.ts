@@ -1797,6 +1797,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/notices/current/guarded-v1": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit Current
+         * @description Return the immutable acceptance of an observed global notice edit.
+         */
+        patch: operations["edit_current_api_agents__agent_id__notices_current_guarded_v1_patch"];
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/notices/current/dismiss/guarded-v1": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Current
+         * @description Withdraw only the observed global row and replay its original acceptance.
+         */
+        post: operations["dismiss_current_api_agents__agent_id__notices_current_dismiss_guarded_v1_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cluster/stopping": {
         parameters: {
             query?: never;
@@ -5557,6 +5597,24 @@ export interface components {
              */
             status: "expired" | "not_open";
         };
+        /**
+         * GuardedNoticeEdit
+         * @description Edit explicitly supplied fields on the observed global notice row.
+         */
+        GuardedNoticeEdit: {
+            /**
+             * Observed Notice Id
+             * @description Global NoticeItem.id from the feed/inspector; not the SDK notify local id.
+             */
+            observed_notice_id: number;
+            /** Title */
+            title?: string | null;
+            /** Content */
+            content?: string | null;
+            priority?: components["schemas"]["Priority"] | null;
+            /** Blocking */
+            blocking?: boolean | null;
+        };
         /** GuideDraftRequest */
         GuideDraftRequest: {
             /**
@@ -6670,6 +6728,17 @@ export interface components {
             /** Resolved Page */
             resolved_page: components["schemas"]["NoticeItem"][];
             next_cursor: components["schemas"]["NoticesCursor"] | null;
+        };
+        /**
+         * ObservedNotice
+         * @description Target the positive global feed ID, never notify()'s zero-based local ID.
+         */
+        ObservedNotice: {
+            /**
+             * Observed Notice Id
+             * @description Global NoticeItem.id from the feed/inspector; not the SDK notify local id.
+             */
+            observed_notice_id: number;
         };
         /**
          * OpenNotice
@@ -10891,6 +10960,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_current_api_agents__agent_id__notices_current_guarded_v1_patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuardedNoticeEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoticeItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_current_api_agents__agent_id__notices_current_dismiss_guarded_v1_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObservedNotice"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoticeItem"];
+                };
             };
             /** @description Validation Error */
             422: {
