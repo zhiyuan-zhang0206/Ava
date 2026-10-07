@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import subprocess
 import sys
@@ -143,6 +144,25 @@ async def test_live_child_timeout_requires_explicit_force(tmp_path: Path) -> Non
     assert not psutil.pid_exists(pid)
 
 
+def child_exited(child: psutil.Process) -> bool:
+    try:
+        return child.status() == psutil.STATUS_ZOMBIE or not child.is_running()
+    except psutil.NoSuchProcess:
+        return True
+
+
+def test_child_exit_observation_accepts_a_reaped_process() -> None:
+    with subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"],
+        stdin=subprocess.PIPE,
+    ) as process:
+        child = psutil.Process(process.pid)
+        process.communicate(input=b"exit", timeout=5)
+    with pytest.raises(psutil.NoSuchProcess):
+        child.status()
+    assert child_exited(child)
+
+
 async def test_normal_stop_signals_the_known_live_group(tmp_path: Path) -> None:
     child_file = tmp_path / "child"
     code = (
@@ -158,10 +178,14 @@ async def test_normal_stop_signals_the_known_live_group(tmp_path: Path) -> None:
         assert os.getpgid(child.pid) == (await row(owner))["pid"]
         assert os.getsid(child.pid) == os.getsid(0)
         await owner.down("worker")
-        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+        async with asyncio.timeout(2):
+            while not child_exited(child):
+                await asyncio.sleep(0.02)
+        assert child_exited(child)
     finally:
-        if child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
-            child.kill()
+        with contextlib.suppress(psutil.NoSuchProcess):
+            if not child_exited(child):
+                child.kill()
         await owner.shutdown()
 
 
