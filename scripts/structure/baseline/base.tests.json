@@ -1,7 +1,0 @@
-{
-  "patch_targets": {
-    "base/tests/test_connect_helpers.py::base.db.code_version_gate._has_log_sink": 1,
-    "base/tests/test_connect_helpers.py::base.db.code_version_gate._last_read_at": 2,
-    "base/tests/test_connect_helpers.py::base.native_process.code_version._db_gate_exempt": 1
-  }
-}
