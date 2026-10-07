@@ -10,7 +10,7 @@ from typing import Any
 import psycopg
 
 from base.db import Database
-from base.telemetry import usage
+from base.telemetry.metrics import usage
 from services.upkeep.events_maintenance import token_totals
 
 
