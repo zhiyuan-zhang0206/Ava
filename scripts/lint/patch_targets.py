@@ -53,10 +53,8 @@ There is no per-site opt-out. Today's sites are frozen in the `patch_targets` se
 structure baseline shards (`scripts/structure/baseline/`) as `path::target -> site count`:
 growth is a violation, a fixed site fails until its entry is lowered or removed, and against
 the base revision the section is shrink-only (a moved owner may carry a key, `git -M`
-renames carry keys), all enforced by `scripts/lint/code_structure.py`. Changing how a site
-is measured (the placement rule) re-freezes the section under a higher version in
-`scripts/structure/baseline/rules.json`; across that one change the guard holds the total
-(it may not rise) instead of the keys.
+renames carry keys), all enforced by `scripts/lint/code_structure.py`. Changing the placement rule or introducing a new lint does not allow freezing new
+sites. The guard remains shrink-only by key and count across rule versions.
 
 ## Scope and cost
 

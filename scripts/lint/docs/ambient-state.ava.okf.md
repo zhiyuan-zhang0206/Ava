@@ -32,7 +32,7 @@ Only the closed lists in `ambient_state/allowlist.py`, each entry with a reason,
 
 ## Scope and baseline
 
-Governed: the framework packages plus `schedules/`. Out of scope: tests, `__main__.py`, an `if __name__ == "__main__":` block, and skill scripts (`ava_builtins/skills/**`, `ava_builtins/plugins/*/**/skills/**`), which run as programs. Today's sites are frozen in the `ambient_state` section of the baseline shards as `path::rule:name -> site count`, matched exactly in both directions. Against the base revision the section is shrink-only with no pairing, so a renamed or moved site is fixed, not carried (a `git -M` rename carries keys once migrated). `locality.introduced` compares the section with itself in the change that adds the `ambient_state` package.
+Governed: the framework packages plus `schedules/`. Out of scope: tests, `__main__.py`, an `if __name__ == "__main__":` block, and skill scripts (`ava_builtins/skills/**`, `ava_builtins/plugins/*/**/skills/**`), which run as programs. Today's sites are frozen in the `ambient_state` section of the baseline shards as `path::rule:name -> site count`, matched exactly in both directions. Against the base revision the section is shrink-only with no pairing, so a renamed or moved site is fixed, not carried (a `git -M` rename carries keys once migrated). Adding a lint or changing its measurement rule does not permit freezing new exemptions; every key remains shrink-only.
 
 ## Library-layer ratchet
 
