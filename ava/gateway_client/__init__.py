@@ -153,12 +153,16 @@ def spawn(
     config: dict[str, object] | None = None,
     label: str | None = None,
     idempotency_key: str | None = None,
+    require_idempotency: bool = False,
 ) -> int:
-    """POST /api/agents → new agent_id."""
-    from base.api_contracts.idempotency import validate_idempotency_key
+    """Create an agent through legacy or explicitly guarded admission."""
+    from base.api_contracts.idempotency import PRINCIPAL_SCOPE
 
-    if idempotency_key is not None:
-        idempotency_key = validate_idempotency_key(idempotency_key)
+    from .creation_admission import validate_spawn_admission
+
+    idempotency_key = validate_spawn_admission(
+        require_idempotency=require_idempotency, key=idempotency_key, fork_from=fork_from
+    )
     body: dict = {"spawner": spawner}
     if prompt is not None:
         # prompt_source is schema-required only when prompt is given (the source concept only exists when non-empty)
@@ -173,9 +177,16 @@ def spawn(
     if label is not None:
         body["label"] = label
     # The transport supplies one creation key across connect-family retries.
-    # Ambiguous outcomes stay terminal until gateway capability is negotiated:
-    # an older gateway may ignore the key and create another agent.
-    resp = post("/api/agents", body, idempotency_key=idempotency_key)
+    # Explicit strong admission pins a guarded path; it never downgrades to
+    # legacy routing. Both paths retain conservative ambiguous-outcome retries.
+    path = "/api/keyed/v1/agents" if require_idempotency else "/api/agents"
+    scope: dict[str, Any] = {"idempotency_scope": PRINCIPAL_SCOPE} if require_idempotency else {}
+    resp = post(
+        path,
+        body,
+        idempotency_key=idempotency_key,
+        **scope,
+    )
     raise_from_response(resp)
     data = resp.json()
     normalized = data.get("config_normalized")
