@@ -60,7 +60,7 @@ Two AST rules keep a change, or a reader tracing one, inside one package plus
 its neighbors' public doors. The authoritative rule text — what counts as
 private, what a bypass is, today's single-owner decision — lives in the
 `scripts/lint/code_structure.py` module docstring (Rules 4 and 5); this
-section covers fixing a violation and maintaining its baseline. Rule 8 has
+section covers fixing a violation; no locality baseline allowances remain. Rule 8 has
 its own script (`scripts/lint/patch_targets.py`).
 
 - **Rule 4 — package doors.** Reaching a `_`-prefixed module or name from
@@ -100,8 +100,7 @@ its own script (`scripts/lint/patch_targets.py`).
   is not counted as a site at all. A guard reaching outside the skill (another
   skill, `ava_builtins/skills/` itself, or `ava_builtins/plugins/`), or any
   file-loader call regardless of its argument, is still a violation. The
-  `path_imports` baseline section is empty; unlike Rules 4 and 5 it has no
-  pairing, so any new key is refused.
+  Every measured path-import site fails directly, with no baseline allowance.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`base/db/connections.py`). Any other module making that
@@ -112,18 +111,15 @@ its own script (`scripts/lint/patch_targets.py`).
   decision only once its owner exists: an entry in `DECISIONS` with its owning
   module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
 
-Rules 4, 5 and 8 freeze today's sites in the `private_imports` /
-`owner_bypasses` / `patch_targets` sections of the baseline shards as exact
-`path::target -> site count` maps. Unlike the line/directory budgets, the
-count must match reality exactly in both directions: a new or grown site
-fails, and a shrunk or removed site fails too until its baseline entry is
-lowered or deleted — so a fixed reach-in cannot silently return uncounted.
-Against the base revision all three sections are shrink-only: a new key is accepted only against a same-file
-removal of the same private name with equal or greater value (the private
-owner module moved), and a git `-M` rename carries keys once they are migrated
-to the new path by hand. Changing how a section's sites are measured raises
-its version in `scripts/structure/baseline/rules.json` and re-freezes it; for
-that one change the guard holds the section's total instead of its keys.
+Rules 4, 5 and 6 reject every measured site directly. Their retired
+`private_imports`, `owner_bypasses` and `path_imports` baseline fields may not
+be reintroduced, even empty. Historical comparison revisions may carry empty
+retired fields; nonempty historical fields are invalid too.
+
+Rule 8 and ambient-state sites retain exact `path::target -> site count` maps
+in their baseline shards until the remaining debt is cleared. Their guards
+remain shrink-only, including when a rule version changes; see the patch-target
+and ambient-state lint owners.
 
 A test in the top-level `tests/` has no baseline section to be frozen in: it must stay by design
 or be listed in `scripts/structure/tests_location_allowed.py` as `contract` or `integration`
