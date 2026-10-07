@@ -257,8 +257,7 @@ async def test_serving_reads_bound_runtime_from_native_peer(
         source_digest="f" * 64,
     )
     monkeypatch.setattr(start_serving, "ava_home", lambda: short_tmp)
-    monkeypatch.setattr(start_serving, "state_path", lambda: short_tmp / "serving.json")
-    monkeypatch.setattr(start_serving, "_lock_path", lambda: short_tmp / "serving.lock")
+    monkeypatch.setattr(start_serving, "run_dir", lambda: short_tmp)
     root = _root_row() | {
         "running": True,
         "home": str(short_tmp),
