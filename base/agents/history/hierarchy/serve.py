@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from base.agents.history.hierarchy.store import StoredNode
+from base.agents.history.hierarchy.units import DisplayBlock
 from base.agents.history.hierarchy.usage import GenerationUsage, MessageUsage, Usage
 from base.log import logger
 
@@ -63,16 +64,26 @@ def serve_nodes(
     job_costs: Mapping[int, GenerationUsage],
     check_costs: Mapping[str, GenerationUsage],
     read: Sequence[datetime | None],
+    blocks: Sequence[DisplayBlock],
 ) -> list[ServedNode]:
     """The timed nodes, finest level first then in message order, each with its two cost figures.
 
-    A node's `start` / `end` are the read times (`units.read_times`) of the first and last
-    message of its span, so a level's nodes never overlap in time and a parent spans exactly its
-    children; the stored `start_ts` / `end_ts` are only used to tell a timed node from an untimed one.
+    A node sits on the extent of the layer-0 blocks it covers: it starts where the earliest block
+    that opens at its first message starts and ends where the latest block that closes at its last
+    message ends (`blocks` are `units.display_blocks`; a turn's thinking block starts at the read
+    time of the message before it). A level's nodes therefore abut exactly where their spans do,
+    never overlap, and a parent spans exactly its children. A message that opens or closes no block
+    falls back to its read time (`units.read_times`). The stored `start_ts` / `end_ts` are only used
+    to tell a timed node from an untimed one.
 
     A node whose span lies outside the history (an orphan: its checkpoints were rolled back or
     restored) is left out with a warning instead of failing the whole read.
     """
+    opens: dict[int, datetime] = {}
+    closes: dict[int, datetime] = {}
+    for block in blocks:
+        opens[block.i0] = min(block.start, opens.get(block.i0, block.start))
+        closes[block.i1] = max(block.end, closes.get(block.i1, block.end))
     served: list[ServedNode] = []
     for node in sorted(nodes, key=lambda node: (node.depth, node.span_start)):
         if node.start_ts is None or node.end_ts is None:
@@ -87,7 +98,8 @@ def serve_nodes(
                 count=len(read),
             )
             continue
-        start, end = read[node.span_start], read[node.span_end]
+        start = opens.get(node.span_start, read[node.span_start])
+        end = closes.get(node.span_end, read[node.span_end])
         if start is None or end is None:
             continue
         served.append(

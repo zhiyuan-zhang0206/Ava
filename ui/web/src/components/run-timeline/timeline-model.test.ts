@@ -5,6 +5,8 @@ import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineUnit } from "@
 
 import {
   axisTicks,
+  chainIds,
+  pendingSpans,
   cacheHitRate,
   clampViewport,
   MIN_VIEW_MS,
@@ -48,6 +50,7 @@ function unit(partial: Partial<RunTimelineUnit>): RunTimelineUnit {
     end: "2026-10-04T12:00:00Z",
     source: null,
     preview: "",
+    parent: null,
     ...partial,
   };
 }
@@ -192,5 +195,58 @@ describe("axisTicks", () => {
     const from = Date.parse("2026-10-04T12:00:00Z");
     const ticks = axisTicks({ from, to: from + 300 });
     expect(ticks[0].label).toMatch(/:\d\d\.\d{3}$/);
+  });
+});
+
+
+describe("chainIds", () => {
+  const nodes = [
+    { ...node(1, "a"), parent: "b" },
+    { ...node(2, "b"), parent: "c" },
+    { ...node(3, "c"), parent: null },
+    { ...node(1, "x"), parent: "b" },
+  ];
+  const units = [unit({ i0: 4, i1: 5, kind: "text", parent: "a" }), unit({ i0: 9, i1: 9, kind: "note" })];
+
+  it("is the node and every ancestor above it", () => {
+    expect([...chainIds({ kind: "node", id: "a" }, nodes, [])].sort()).toEqual(["a", "b", "c"]);
+    expect([...chainIds({ kind: "node", id: "c" }, nodes, [])]).toEqual(["c"]);
+  });
+
+  it("starts a message block at its covering leaf", () => {
+    const chain = chainIds({ kind: "unit", i0: 4, i1: 5, unitKind: "text" }, nodes, units);
+    expect([...chain].sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("is empty for a block no leaf covers, no selection, or an unloaded parent", () => {
+    expect(chainIds({ kind: "unit", i0: 9, i1: 9, unitKind: "note" }, nodes, units).size).toBe(0);
+    expect(chainIds(null, nodes, units).size).toBe(0);
+    expect([...chainIds({ kind: "node", id: "b" }, [nodes[1]], [])]).toEqual(["b"]);
+  });
+});
+
+describe("pendingSpans", () => {
+  const open = (id: string, level: number, first: number, last: number, parent: string | null = null) => ({
+    ...node(level, id),
+    parent,
+    span_start: first,
+    span_end: last,
+    start: `2026-10-04T12:0${first}:00Z`,
+    end: `2026-10-04T12:0${last}:00Z`,
+  });
+
+  it("covers the nodes one level down that have no parent, contiguous ones merged", () => {
+    const nodes = [
+      open("a", 1, 0, 1, "p"),
+      open("b", 1, 2, 3),
+      open("c", 1, 4, 5),
+      open("d", 1, 7, 8),
+      open("p", 2, 0, 1),
+    ];
+    expect(pendingSpans(nodes, 2)).toEqual([
+      { from: "2026-10-04T12:02:00Z", to: "2026-10-04T12:05:00Z" },
+      { from: "2026-10-04T12:07:00Z", to: "2026-10-04T12:08:00Z" },
+    ]);
+    expect(pendingSpans(nodes, 1)).toEqual([]);
   });
 });

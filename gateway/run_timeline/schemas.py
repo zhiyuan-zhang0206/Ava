@@ -73,6 +73,8 @@ class RunTimelineUnit(BaseModel):
     generation for the turn), `call` (an instant at the end of the stream) and `output` (the
     execution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the
     inclusive message-index span of the block's unit. Blocks without a time are not served.
+    `parent` is the level-1 node whose span holds the block's first message, None for a block no
+    node covers (a compaction segment's head, the not yet summarized tail).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -84,6 +86,7 @@ class RunTimelineUnit(BaseModel):
     end: datetime
     source: str | None
     preview: str
+    parent: str | None
 
 
 class RunTimelineEvent(BaseModel):

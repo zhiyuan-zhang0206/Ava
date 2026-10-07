@@ -169,6 +169,30 @@ def test_all_levels_and_every_unit_are_served_in_the_lifetime_window(
     assert result.nodes[2].usage.calls == 2 and result.nodes[2].usage.input == 300
 
 
+def test_a_unit_names_the_leaf_covering_its_first_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    world = World(monkeypatch)
+    world.nodes = [
+        stored(1, level=1, span=(1, 3), start=0, end=2),
+        stored(2, level=1, span=(4, 4), start=10, end=10),
+        stored(3, level=2, span=(1, 4), start=0, end=10),
+    ]
+    result = read(world)
+    assert [(u.kind, u.i0, u.parent) for u in result.units] == [
+        ("inbound", 1, "1"),
+        ("thinking", 2, "1"),
+        ("call", 2, "1"),
+        ("output", 2, "1"),
+        ("text", 4, "2"),
+    ]
+
+
+def test_a_unit_no_leaf_covers_has_no_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    world = World(monkeypatch)
+    world.nodes = [stored(1, level=1, span=(2, 3), start=0, end=2)]
+    result = read(world)
+    assert {u.i0: u.parent for u in result.units} == {1: None, 2: "1", 4: None}
+
+
 def test_a_narrowed_window_keeps_what_intersects_it(monkeypatch: pytest.MonkeyPatch) -> None:
     world = World(monkeypatch)
     world.nodes = [
