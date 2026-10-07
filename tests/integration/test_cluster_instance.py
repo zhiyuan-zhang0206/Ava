@@ -469,7 +469,7 @@ def test_rewritten_hba_is_reloaded_into_running_server(
 
 
 def test_hba_proof_refuses_a_postmaster_still_serving_trust(
-    isolated_cluster: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+    isolated_cluster: tuple[int, int],
 ) -> None:
     """The loaded-hba proof is behavioral: a postmaster that still admits a
     password-less dial (a trust line loaded) fails the proof, whatever file is
@@ -481,6 +481,5 @@ def test_hba_proof_refuses_a_postmaster_still_serving_trust(
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
     with psycopg.connect(ci.pg_admin_url(pg_port), autocommit=True) as conn:
         conn.execute("SELECT pg_reload_conf()")
-    monkeypatch.setattr(ci, "_HBA_PROOF_TIMEOUT_S", 1.0)
     with pytest.raises(RuntimeError, match="does not enforce password authentication"):
         ci.require_authenticated_hba(pg_port, "127.0.0.1")
