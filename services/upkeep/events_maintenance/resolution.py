@@ -125,7 +125,23 @@ class AlertClass:
     last_seen: datetime
 
 
-_last_auto_dismiss_day: list[date | None] = [None]
+@dataclass
+class AutoDismissCadence:
+    """Daily scan admission owned by one resolution loop.
+
+    A successful history fetch consumes the day before dismissal writes. Write
+    failures therefore retain the existing same-day suppression behavior.
+    """
+
+    last_scan_day: date | None = None
+
+    def due(self, at: datetime) -> bool:
+        """Whether this loop has not completed a history scan on this date."""
+        return self.last_scan_day != at.date()
+
+    def scanned(self, at: datetime) -> None:
+        """Consume the date after the history query and row decoding succeed."""
+        self.last_scan_day = at.date()
 
 
 def class_counts(conn: Any, *, start: datetime, end: datetime) -> dict[EventClass, int]:
@@ -268,7 +284,11 @@ def _insert_auto_dismissal(conn: Any, event_class: EventClass, days: int) -> boo
 
 
 def _stable_auto_classes(
-    now: datetime, conn: Any, current: dict[EventClass, int], config: EventsMaintenanceConfig
+    now: datetime,
+    conn: Any,
+    current: dict[EventClass, int],
+    config: EventsMaintenanceConfig,
+    cadence: AutoDismissCadence,
 ) -> set[EventClass]:
     """Classes non-empty in every six-hour slice of the configured history.
 
@@ -279,7 +299,7 @@ def _stable_auto_classes(
 
     if not config.events_auto_dismiss_enabled:
         return set()
-    if _last_auto_dismiss_day[0] == now.date():
+    if not cadence.due(now):
         return set()
 
     slots = config.events_auto_dismiss_days * 4
@@ -297,7 +317,7 @@ def _stable_auto_classes(
         EventClass(category=r[0], level=r[1], event_name=r[2], source=r[3], process=r[4])
         for r in rows
     }
-    _last_auto_dismiss_day[0] = now.date()
+    cadence.scanned(now)
     return stable & {event_class for event_class, count in current.items() if count > 0}
 
 
@@ -436,7 +456,10 @@ def level_splits(counts: dict[EventClass, int], active: set[EventClass]) -> dict
 
 
 def _read_window_counts(
-    pool: ConnectionPool, config: EventsMaintenanceConfig, at: datetime
+    pool: ConnectionPool,
+    config: EventsMaintenanceConfig,
+    at: datetime,
+    cadence: AutoDismissCadence,
 ) -> tuple[dict[EventClass, int], dict[EventClass, int], set[EventClass]] | None:
     """The six-hour and ten-minute class counts and the stable auto-dismiss classes at `at`,
     or None when the newest recorded event is too old to trust an empty window."""
@@ -450,12 +473,16 @@ def _read_window_counts(
         return (
             unresolved_counts,
             burst_counts,
-            _stable_auto_classes(at, conn, unresolved_counts, config),
+            _stable_auto_classes(at, conn, unresolved_counts, config, cadence),
         )
 
 
 def run_resolution_slice(
-    pool: ConnectionPool, config: EventsMaintenanceConfig, *, now: datetime | None = None
+    pool: ConnectionPool,
+    config: EventsMaintenanceConfig,
+    *,
+    cadence: AutoDismissCadence,
+    now: datetime | None = None,
 ) -> ResolutionResult | None:
     """Run one fixed-window resolution pass, or return None when the record is stale.
 
@@ -468,7 +495,7 @@ def run_resolution_slice(
 
     at = now or datetime.now(UTC)
     try:
-        counts = _read_window_counts(pool, config, at)
+        counts = _read_window_counts(pool, config, at, cadence)
     except Exception:
         _log.warning("resolution query failed; gauge not emitted", exc_info=True)
         return None
