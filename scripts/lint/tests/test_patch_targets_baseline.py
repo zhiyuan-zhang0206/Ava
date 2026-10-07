@@ -272,9 +272,10 @@ def test_a_version_belongs_to_its_section(
         f"{baseline_shards.SHARD_DIR}/base.json",
         '{"private_imports": {"base/x.py::base._y": 1}}',
     )
-    status, out = _gate(capsys)
+    status = lcs.main([])
+    out = capsys.readouterr().err
     assert status == 1
-    assert "added private_imports entry base/x.py::base._y" in out
+    assert "unknown section 'private_imports'" in out
     assert "rule version" not in out
 
 
