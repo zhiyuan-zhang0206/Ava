@@ -17,7 +17,7 @@ contrib. The version is pinned to the collector release the LGTM stack
 SHA256-pinned.
 
 Remote OTLP ingress is the bearer-authenticated machine-to-machine surface
-(docs/conventions/reachability-and-credentials.md): a gateway sidecar accepts
+(docs/conventions/data/reachability-and-credentials.md): a gateway sidecar accepts
 pure-runner relays, and an observability-station sidecar accepts remote
 gateway collectors — both through `otlp/remote` + `bearertokenauth/cluster`
 with the cluster's telemetry token (`telemetry_bearer`: derived from the
@@ -296,7 +296,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
 
     Served by any unit that remote peers dial OTLP into: a gateway (pure
     runner relays) and an observability station (remote gateway collectors,
-    WP4, task #1946 — docs/conventions/reachability-and-credentials.md). Remote
+    WP4, task #1946 — docs/conventions/data/reachability-and-credentials.md). Remote
     ingress exists only when the unit could actually have remote peers: no
     telemetry token (an open cluster: the zero-config single-box posture) and a loopback
     reachable host (co-located posture) both mean NO remote peers, so no
@@ -370,7 +370,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
 def _otlp_exporters(roles: MachineRoles | None) -> str:
     """Role-specific fan-out with stable component/queue identities.
 
-    Three shapes (docs/conventions/reachability-and-credentials.md):
+    Three shapes (docs/conventions/data/reachability-and-credentials.md):
     - a pure agent-runner relays every signal to its gateway's authenticated
       OTLP ingress (`otlp/remote` on the gateway sidecar);
     - a unit that consumes a remote observatory (`AVA_OBSERVABILITY_URL` set)

@@ -396,7 +396,7 @@ window.GRAPH_DATA = /*__GRAPH_DATA_JSON__*/;
   }
 
   const collapsed = new Set();
-  const domainIds = [...new Set(DATA.treeEdges.map(e => e.source))];
+  const domainIds = DATA.nodes.filter(n => n.parent && childrenOf.get(n.id).length).map(n => n.id);
 
   function isVisible(id) {
     let cur = nodeById.get(id).parent;
@@ -576,7 +576,7 @@ window.GRAPH_DATA = /*__GRAPH_DATA_JSON__*/;
   function cardHtml(d) {
     const kids = (childrenOf.get(d.id) || []).length;
     const toggle = kids
-      ? (collapsed.has(d.id) ? '\u25b8 ' + descendantCount(d.id) : '\u25be')
+      ? (collapsed.has(d.id) ? '\u25b8 ' : '\u25be ') + kids
       : '';
     // First tag uses colored pill, others use normal pill (up to 2 shown)
     const primaryTag = d.tags.length > 0 ? d.tags[0] : null;
@@ -589,7 +589,7 @@ window.GRAPH_DATA = /*__GRAPH_DATA_JSON__*/;
     tagsHtml += otherTags.map(t => '<span class="pill">' + escapeHtml(t) + '</span>').join('');
     return '<div class="card-row">'
       + tagsHtml
-      + (toggle ? '<span class="card-toggle">' + toggle + '</span>' : '')
+      + (toggle ? '<span class="card-toggle" title="Direct children">' + toggle + '</span>' : '')
       + '</div>'
       + '<div class="card-title">' + escapeHtml(d.title) + '</div>'
       + '<div class="card-desc">' + escapeHtml(truncate(d.description, 140)) + '</div>';

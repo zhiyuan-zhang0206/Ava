@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Ava
-description: Overview index of the Ava subsystem. Contains 13 sub-concepts.
+description: Overview index of the Ava subsystem.
 tags:
   - agent-lifecycle
   - agent-view
@@ -17,7 +17,7 @@ Overview of the Ava subsystem.
 ## Sub-concepts
 
 - [[agent-view.ava.okf.md|Agent View]]
-- [[agents.ava.okf.md|Agents]]
+- [[ava/agents/docs/agents.ava.okf.md|Agents]]
 - [[files.ava.okf.md|Files]]
 - [[okf/mcps/mcps.ava.okf.md|Mcps]]
 - [[presets.ava.okf.md|Presets]]

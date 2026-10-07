@@ -12,10 +12,10 @@ import { useEffect, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { useBreakpoint } from "@/lib/breakpoint";
-import { FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { panelLayoutStorage } from "@/lib/panel-layout-storage";
-import { cn } from "@/lib/utils";
+import { useBreakpoint } from "@/lib/layout/breakpoint";
+import { FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
+import { cn } from "@/lib/format/utils";
 
 export const RUN_TIMELINE_SPLIT_LAYOUT_ID = "ava.run-timeline.split";
 const PANEL_MAIN = "panel-run-timeline-main";

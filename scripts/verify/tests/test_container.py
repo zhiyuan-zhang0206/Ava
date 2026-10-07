@@ -1,6 +1,6 @@
 """The Linux verification container keeps to its boundary, offline.
 
-The boundary rules (future/infra/verification-boundaries.md): nothing of the host's
+The boundary rules (future/infra/engineering/verification-boundaries.md): nothing of the host's
 cluster, credentials or container runtime enters; nothing is published; no secret
 reaches an image layer or the container; the image runs as an ordinary user and
 carries no source. A real run needs Docker and several minutes; these tests fail

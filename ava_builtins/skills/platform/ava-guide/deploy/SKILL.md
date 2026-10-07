@@ -17,7 +17,7 @@ Use [secrets](references/secrets.md) for credential handling and
 
 Use macOS or Linux, including WSL2. Native Windows application startup is not
 supported by the root service owner; see
-`docs/conventions/windows-setup.md` in the Ava source checkout.
+`docs/conventions/operations/windows-setup.md` in the Ava source checkout.
 
 Acquire Git, uv, Python 3.12, and the host packages independently. A gateway with
 local storage requires Postgres 17 with pgvector, Redis 8.2, and PgBouncer

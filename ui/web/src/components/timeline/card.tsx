@@ -35,25 +35,25 @@ import {
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
-import { formatTokensCompact } from "@/lib/format-number";
+import { formatTokensCompact } from "@/lib/format/format-number";
 import {
   formatDuration,
   summarizeCode,
   summarizeOutput,
   type SdkCall,
-} from "@/lib/item-summary";
-import { preloadPythonCodeHighlighter } from "@/components/python-code";
-import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline-colors";
-import type { BackendTimelineItem } from "@/lib/types";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { useThrottledStreaming } from "@/lib/use-throttled-streaming";
-import { cn } from "@/lib/utils";
+} from "@/lib/format/item-summary";
+import { preloadPythonCodeHighlighter } from "@/components/content/python-code";
+import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
+import { cn } from "@/lib/format/utils";
 
 import { classifyMarker, markerVisual } from "./markers";
-import { inboundKind } from "./runs";
-import { isLiveCode, isLiveExecution, isLiveReasoning, useNow } from "./reasoning-clock";
+import { inboundKind } from "./model/runs";
+import { isLiveCode, isLiveExecution, isLiveReasoning, useNow } from "./model/reasoning-clock";
 import { ItemTimestamp } from "./timestamp";
-import { FLEX, MIN_W_0 } from "@/lib/layout";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 // Which of the four rich header summaries a card renders in place of a static
 // title. null = a plain icon + title header.

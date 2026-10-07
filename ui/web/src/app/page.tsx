@@ -34,41 +34,41 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
-import { AlertsBadge } from "@/components/alerts-badge";
-import { CodeHighlighterPreloader } from "@/components/code-highlighter-preloader";
-import { ErrorBoundary } from "@/components/error-boundary";
-import { Composer } from "@/components/composer";
-import { ContentToggle } from "@/components/content-toggle";
-import { HeaderBar } from "@/components/header-bar";
-import { HomeLayout } from "@/components/home-layout";
-import { InspectorPanelSkeleton } from "@/components/inspector-panel-skeleton";
-import { InspectorToggle } from "@/components/inspector-toggle";
-import { PendingStrip } from "@/components/pending-strip";
-import { UploadButton } from "@/components/upload-button";
+import { AlertsBadge } from "@/components/notifications/alerts-badge";
+import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
+import { ErrorBoundary } from "@/components/connection/error-boundary";
+import { Composer } from "@/components/conversation/composer";
+import { ContentToggle } from "@/components/content/content-toggle";
+import { HeaderBar } from "@/components/shell/header-bar";
+import { HomeLayout } from "@/components/shell/home-layout";
+import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
+import { InspectorToggle } from "@/components/inspector/inspector-toggle";
+import { PendingStrip } from "@/components/conversation/pending-strip";
+import { UploadButton } from "@/components/conversation/upload-button";
 import { TimelineView } from "@/components/timeline";
-import { api, MessageDeliveryUnknownError } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
-import { useInspectorOpen } from "@/lib/inspector-panel-store";
-import { useBreakpoint } from "@/lib/breakpoint";
-import { useSidebarCollapsed } from "@/lib/sidebar";
-import { useStore } from "@/lib/store";
-import { useTimelineStore } from "@/lib/timeline-store";
-import type { AgentRow, ContentBlock } from "@/lib/types";
-import { useAgents } from "@/lib/use-agents";
-import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/use-pending-messages";
-import { useTimeline } from "@/lib/use-timeline";
-import { timelineMaxWidthCss } from "@/lib/timeline-width";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { useTokenUsage } from "@/lib/use-token-usage";
-import { AgentEventStreamProvider } from "@/lib/useEventStream";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
+import { errMsg } from "@/lib/contracts/errors";
+import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
+import { useBreakpoint } from "@/lib/layout/breakpoint";
+import { useSidebarCollapsed } from "@/lib/agents/sidebar";
+import { useStore } from "@/lib/state/store";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
+import type { AgentRow, ContentBlock } from "@/lib/contracts/types";
+import { useAgents } from "@/lib/agents/use-agents";
+import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/agents/use-pending-messages";
+import { useTimeline } from "@/lib/timeline/use-timeline";
+import { timelineMaxWidthCss } from "@/lib/timeline/timeline-width";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { useTokenUsage } from "@/lib/inspector/use-token-usage";
+import { AgentEventStreamProvider } from "@/lib/transport/useEventStream";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 // The toggle stays in the initial graph; the panel body is needed only after
 // the existing open-state guard below renders it.
 const LazyInspectorPanel = dynamic(
   () =>
-    import("@/components/inspector-panel").then((module) => module.InspectorPanel),
+    import("@/components/inspector/inspector-panel").then((module) => module.InspectorPanel),
   { loading: () => <InspectorPanelSkeleton /> },
 );
 

@@ -27,23 +27,23 @@ import {
   Ruler,
   Sparkles,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/format/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { Fragment } from "react";
 
-import { api } from "@/lib/api";
-import { groupedModels, isSuperseded, providerLabel } from "@/lib/models";
-import { useBreakpoint } from "@/lib/breakpoint";
+import { api } from "@/lib/transport/api";
+import { groupedModels, isSuperseded, providerLabel } from "@/lib/contracts/models";
+import { useBreakpoint } from "@/lib/layout/breakpoint";
 import {
   TIMELINE_NARROW_BREAKPOINT_PX,
   TIMELINE_WIDTH_RATIO_DEFAULT,
   TIMELINE_WIDTH_RATIO_MAX,
   TIMELINE_WIDTH_RATIO_MIN,
-} from "@/lib/timeline-width";
-import { themePackId, useThemePacks } from "@/lib/use-theme-packs";
-import { useDebouncedSetting, useUserSettings } from "@/lib/use-user-settings";
-import { FLEX } from "@/lib/layout";
+} from "@/lib/timeline/timeline-width";
+import { themePackId, useThemePacks } from "@/lib/plugins/use-theme-packs";
+import { useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
+import { FLEX } from "@/lib/layout/layout";
 import { RadioRow, SettingsSection, SliderRow, TimelineColorsSection, ToggleRow } from "./_rows";
 
 // ── Page ──

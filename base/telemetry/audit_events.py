@@ -3,7 +3,7 @@
 Every agent operation (spawn, send_message, terminate, compact, status_change,
 skill_invoked, ...) is an audit event, and Postgres is its system of record: the
 ``audit_events`` table is append-only and permanent
-(docs/decisions/2026-10-02-audit-events-in-postgres.md). Loki and the day-stamped
+(docs/decisions/data/database/2026-10-02-audit-events-in-postgres.md). Loki and the day-stamped
 JSONL mirror receive the same event through the unified emitter
 (`base.telemetry`) as a projection that sheds under overload, truncates long
 lines and expires after 84 hours; losing the projection loses no record.
@@ -24,7 +24,7 @@ The primitives that record an event, one of which every audit emit site must use
 
 An event is built with :func:`prepare_event_log`. The one audit event not recorded
 here is the `.env` write audit, whose record is the per-home JSONL
-(docs/decisions/2026-10-02-env-write-audit-stays-local.md).
+(docs/decisions/runtime/config/2026-10-02-env-write-audit-stays-local.md).
 
 Payload tiering
 ---------------

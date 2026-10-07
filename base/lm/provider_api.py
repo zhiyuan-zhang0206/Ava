@@ -3,7 +3,7 @@
 A provider plugin makes one more vendor's models *nameable*. It never decides
 which model an agent runs on — no routing, no fallback, no per-turn hook
 (``base/lm/docs/model-providers-as-plugins.md``,
-``docs/decisions/2026-07-29-no-runtime-model-routing.md``). A ``provider.py`` registers nothing: it
+``docs/decisions/engineering/design/simplification/2026-07-29-no-runtime-model-routing.md``). A ``provider.py`` registers nothing: it
 exports ``contribute()`` returning a ``PluginContributions`` whose ``providers`` hold one
 ``ProviderContribution`` each (the binding, the model rows and the prices). The process's model
 catalog (``base/lm/catalog.py``) is built by ``base/lm/plugin_providers.py``, which loads every
@@ -27,7 +27,7 @@ present keys to split runners, and every agent process and exec child reads the 
 from its own boot of that channel. Plugin config images do not carry provider secrets.
 
 Builder contract (plain Python, documented rather than schema'd — see
-``docs/decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md``):
+``docs/decisions/extensions/plugins/2026-07-19-plugin-core-boundary-wrapper-extension.md``):
 
 - ``build(ctx)`` returns a ``BaseChatModel`` with no tools bound (the caller
   binds them). It is a pure function of ``ctx`` — no caller, agent, error
@@ -124,11 +124,11 @@ class PriceRates:
     """One model's complete price and vendor declaration (USD per 1M tokens).
 
     Plugins declare prices in code — the plugin is itself the reviewed object
-    (``docs/decisions/2026-07-29-skill-trust-tiers-and-install-scan.md``). The
+    (``docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md``). The
     flat fields are a readable shortcut for one unbounded base tier. ``periods``
     carries history, tiers, and recurring windows when present; its shape mirrors
     ``base/lm/pricing/pricing_catalog_archive.json`` so runtime and archive selection
-    share one parser (``docs/decisions/2026-08-18-versioned-model-pricing-catalog.md``).
+    share one parser (``docs/decisions/observability/events/2026-08-18-versioned-model-pricing-catalog.md``).
     """
 
     cache_miss: float  # input tokens not served from cache

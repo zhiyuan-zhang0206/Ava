@@ -5,7 +5,7 @@ import {
   browserFacingRequestUrl,
   buildContentSecurityPolicy,
   gatewayOriginForRequest,
-} from "@/lib/content-security-policy";
+} from "@/lib/auth/content-security-policy";
 
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");

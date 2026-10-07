@@ -1,0 +1,958 @@
+// Thin fetch wrapper over FastAPI endpoints.
+//
+// API_BASE is resolved in api-base.ts so telemetry can share it without an
+// api.ts ↔ telemetry.ts import cycle.
+//
+// The gateway is reachable only on the cluster's private network (one trust group)
+// Authentication is via session cookie (browser) or Bearer token (SDK).
+
+import { API_BASE } from "./api-base";
+import { track } from "../telemetry/telemetry";
+import type { NoticesFeed,
+  UserSettingListResponse,
+  UserSettingRow,
+  AgentInspectStatistics,
+  AgentInspectLive,
+  AgentMachineRow,
+  InspectWidget,
+  AgentMessageEnqueued,
+  AgentRow,
+  WireAgentRow,
+  WireAgentRoster,
+  WireAgentDirectoryPage,
+  AgentRoster,
+  AgentDirectoryPage,
+  ConversationSnapshotResponse,
+  ContextBreakdownResponse,
+  DefaultModelView,
+  AlertsResponse,
+  AlertsWindow,
+  ResolveNoticeIn,
+  CancelRequested,
+  ClusterStatus,
+  CommandItem,
+  ContentBlock,
+  CompactEnqueued,
+  ConfigView,
+  ConfigWriteResult,
+  WireFleetGraph,
+  GuideDraftResponse,
+  TaskListResponse,
+  TaskFields,
+  TaskRow,
+  TaskSummaryRow,
+  InventoryAggregate,
+  InventoryWriteResult,
+  SkillView,
+  SkillsView,
+  MemoryGraphResponse,
+  MemoryNoteResponse,
+  ModelsResponse,
+  PackageDraftResponse,
+  PackageKind,
+  PageRow,
+  PendingInbound,
+  PresetUpdate,
+  PresetView,
+  ResolvedConfigView,
+  RestartAgentResponse,
+  ResurrectAgentResponse,
+  RunTimelineMessages,
+  RunTimelineResponse,
+  ShellCapture,
+  SpawnAgentRequest,
+  SpawnedAgent,
+  StatsDashboard,
+  AlertClassRow,
+  AlertClassesResponse,
+  AlertClassSample,
+  EventResolutionRow,
+  SystemStatus,
+  TerminateAgentResponse,
+  TimelineResponse,
+  TokenUsageResponse,
+  ScheduleCreate,
+  ScheduleDraftResponse,
+  ScheduleLogsView,
+  ScheduleRunView,
+  ScheduleSummary,
+  ScheduleUpdate,
+  ScheduleView,
+  UiContributionsResponse,
+  UploadedBatch,
+} from "../contracts/types";
+import { projectAgentStatus } from "../contracts/types";
+import { sendMessageWithReconciliation } from "../agents/message-delivery";
+
+export { MessageDeliveryUnknownError } from "../agents/message-delivery";
+export { API_BASE } from "./api-base";
+
+// Thrown by `ok()` for any non-2xx response. Carries the HTTP status so
+// callers can distinguish "the server answered but rejected the request"
+// (e.g. 401 bad credentials) from a network-level failure (fetch reject —
+// connection refused, DNS failure, timeout, CORS), which never reaches here
+// at all and surfaces as a plain TypeError instead. See auth-context.tsx's
+// `login()` for the canonical consumer of this distinction.
+export class ApiError extends Error {
+  status: number;
+  agentId?: number;
+  launchState?: { status: string; availability?: { reason: string; evidence_at?: string | null } | null };
+  retryLaunchPath?: string;
+  constructor(status: number, message: string, body?: Record<string, unknown>) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    if (body?.reason === "agent_launch_failed" && typeof body.agent_id === "number") {
+      this.agentId = body.agent_id;
+      if (typeof body.retry_launch_path === "string") this.retryLaunchPath = body.retry_launch_path;
+      if (body.state && typeof body.state === "object") {
+        this.launchState = body.state as ApiError["launchState"];
+      }
+    }
+  }
+}
+
+async function ok<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let body: Record<string, unknown> | undefined;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* A non-JSON error keeps its HTTP status and raw text. */ }
+    throw new ApiError(
+      res.status,
+      typeof body?.detail === "string" ? body.detail : `HTTP ${res.status}: ${text || res.statusText}`,
+      body,
+    );
+  }
+  return res.json() as Promise<T>;
+}
+
+const url = (path: string): string => `${API_BASE}${path}`;
+
+// Absolute url for a gateway-served asset (e.g. an uploaded image's reference
+// path) — the frontend (:3000) and gateway (:8000) are different origins, so an
+// <img src> needs the gateway base prepended.
+export const assetUrl = (path: string): string => `${API_BASE}${path}`;
+
+function apiTimingKey(path: string): string {
+  const pathname = path.split("?", 1)[0].replace(/^\/api\/?/, "");
+  // Numeric route segments use the schema-safe literal `id`. Dot separators
+  // keep keys within the gateway's lowercase letters, digits, dots, dashes,
+  // and underscores alphabet: `^[a-z0-9._-]{1,128}$` (no slashes or braces).
+  return pathname
+    .split("/")
+    .map((segment) => (/^\d+$/.test(segment) ? "id" : segment))
+    .join(".");
+}
+
+// All fetch calls go through this. ``credentials: "include"`` sends the
+// session cookie on cross-origin requests (frontend :3000 -> gateway :8000).
+async function f(path: string, init?: RequestInit): Promise<Response> {
+  const startedAt = performance.now();
+  try {
+    return await fetch(url(path), { ...init, credentials: "include" });
+  } finally {
+    const durationMs = performance.now() - startedAt;
+    if (durationMs > 800 && path.split("?", 1)[0] !== "/api/frontend-telemetry") {
+      track("api-timing", {
+        key: apiTimingKey(path),
+        value: Math.round(durationMs),
+        dedupe: false,
+      });
+    }
+  }
+}
+
+async function jsonWithTimeout<T>(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+  callerSignal?: AbortSignal,
+  timeoutLabel = "request",
+): Promise<T> {
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  if (callerSignal?.aborted) controller.abort();
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new DOMException(`${timeoutLabel} exceeded ${timeoutMs}ms`, "TimeoutError"));
+      controller.abort();
+    }, timeoutMs);
+  });
+  try {
+    // The bound covers BOTH fetch and body consumption. Clearing the timer when
+    // headers arrive leaves `res.json()` able to hang the Composer forever.
+    return await Promise.race([
+      f(path, { ...init, signal: controller.signal }).then(ok<T>),
+      timeout,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
+// The backend's aggregate deadline is 30s. This wider client bound adds
+// serialization/network transit margin while still bounding a dead gateway
+// or a response body that never completes.
+const INSPECT_REQUEST_TIMEOUT_MS = 35_000;
+
+function isAmbiguousDeliveryError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status === 408 || error.status === 429 || error.status >= 500;
+}
+
+const POST: RequestInit = { method: "POST" };
+const POST_JSON = (body: unknown): RequestInit => ({
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+const PATCH_JSON = (body: unknown): RequestInit => ({
+  method: "PATCH",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+const PUT_JSON = (body: unknown): RequestInit => ({
+  method: "PUT",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+export const api = {
+  head: (path: string): Promise<Response> => f(path, { method: "HEAD" }),
+
+  // Returns one tail window of the timeline (newest `limit` items). Pass
+  // `before` = the oldest item_id currently held to page further back for
+  // scroll-up history; `has_more` reports whether older items remain.
+  getTimeline: (
+    agentId: number,
+    opts?: { limit?: number; before?: string; signal?: AbortSignal },
+  ): Promise<TimelineResponse> => {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.before != null) params.set("before", opts.before);
+    const qs = params.toString();
+    return f(`/api/agents/${agentId}/timeline${qs ? `?${qs}` : ""}`, { signal: opts?.signal }).then(
+      ok<TimelineResponse>,
+    );
+  },
+
+  getTokenUsage: (agentId: number, signal?: AbortSignal): Promise<TokenUsageResponse> => {
+    return f(`/api/agents/${agentId}/token-usage`, { signal }).then(ok<TokenUsageResponse>);
+  },
+
+  // One switch-refresh read of the selected agent's three conversation
+  // models (task #3900 batch 2): head timeline window + token usage +
+  // pending inbounds in a single round trip. The three sections are written
+  // into the same query keys the standalone readers use (agent-reconcile.ts);
+  // those endpoints stay authoritative for first paint and their own readers.
+  getConversationSnapshot: (
+    agentId: number,
+    signal?: AbortSignal,
+  ): Promise<ConversationSnapshotResponse> => {
+    return f(`/api/agents/${agentId}/conversation-snapshot`, { signal }).then(
+      ok<ConversationSnapshotResponse>,
+    );
+  },
+
+  getContextBreakdown: (agentId: number): Promise<ContextBreakdownResponse> => {
+    return f(`/api/agents/${agentId}/context-breakdown`).then(ok<ContextBreakdownResponse>);
+  },
+
+  // The understanding tree and the layer-0 message units in a window; no
+  // window means the agent's whole lifetime.
+  getRunTimeline: (
+    agentId: number,
+    options?: { from?: string; to?: string },
+  ): Promise<RunTimelineResponse> => {
+    const params = new URLSearchParams();
+    if (options?.from != null) params.set("from", options.from);
+    if (options?.to != null) params.set("to", options.to);
+    const query = params.toString();
+    return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
+      ok<RunTimelineResponse>,
+    );
+  },
+
+  // Raw messages `start..end` (inclusive stitched indices, the spans nodes and
+  // units carry), at most `limit` of them; `next_start` continues a cut range.
+  // Parts clipped by the per-read budget report `text_truncated`; `full`
+  // returns them uncut.
+  getRunTimelineMessages: (
+    agentId: number,
+    range: { start: number; end: number; limit?: number; full?: boolean },
+  ): Promise<RunTimelineMessages> => {
+    const params = new URLSearchParams({ start: String(range.start), end: String(range.end) });
+    if (range.limit != null) params.set("limit", String(range.limit));
+    if (range.full) params.set("full", "true");
+    return f(`/api/agents/${agentId}/run-timeline/messages?${params.toString()}`).then(
+      ok<RunTimelineMessages>,
+    );
+  },
+
+  // Persisted observed statistics with explicit window, source precision, and
+  // coverage. `hours` selects the window (0 = 5m); omitted = since spawn.
+  getAgentInspectStatistics: (
+    agentId: number,
+    hours?: number | null,
+    signal?: AbortSignal,
+  ): Promise<AgentInspectStatistics> => {
+    const params = new URLSearchParams();
+    if (hours != null) params.set("hours", String(hours));
+    const qs = params.toString();
+    return jsonWithTimeout<AgentInspectStatistics>(
+      `/api/agents/${agentId}/inspect/statistics${qs ? `?${qs}` : ""}`,
+      {},
+      INSPECT_REQUEST_TIMEOUT_MS,
+      signal,
+      "Inspector request",
+    );
+  },
+
+  // Window-independent current state: shells, liveness, configuration, notice,
+  // timestamps, and heartbeat. Independent from persisted statistics.
+  getAgentInspectLive: (
+    agentId: number,
+    signal?: AbortSignal,
+  ): Promise<AgentInspectLive> => {
+    return jsonWithTimeout<AgentInspectLive>(
+      `/api/agents/${agentId}/inspect/live`,
+      {},
+      INSPECT_REQUEST_TIMEOUT_MS,
+      signal,
+      "Inspector live request",
+    );
+  },
+
+  // The panel's plugin widgets (task #2909) — what the enabled plugins embed
+  // for this agent, with the notice/task targets already resolved kernel-side.
+  // Same cheap, window-independent shape as the live half.
+  getAgentInspectWidgets: (
+    agentId: number,
+    signal?: AbortSignal,
+  ): Promise<InspectWidget[]> => {
+    return jsonWithTimeout<InspectWidget[]>(
+      `/api/agents/${agentId}/inspect/widgets`,
+      {},
+      INSPECT_REQUEST_TIMEOUT_MS,
+      signal,
+      "Inspector widgets request",
+    );
+  },
+
+  // A recent tail of one of the agent's persistent shells — the terminal
+  // output the /shell/{agentId}/{sessionId} page fetches on demand. `lines`
+  // controls how many trailing lines to capture (50–2000, default 200).
+  // 404 if the agent or the live shell session is gone.
+  getAgentShell: (agentId: number, sessionId: number, lines?: number): Promise<ShellCapture> => {
+    const qs = lines != null ? `?lines=${lines}` : "";
+    return f(`/api/agents/${agentId}/shell/${sessionId}${qs}`).then(ok<ShellCapture>);
+  },
+
+  getPendingMessages: (agentId: number, signal?: AbortSignal): Promise<PendingInbound[]> => {
+    return f(`/api/agents/${agentId}/pending`, { signal }).then(ok<PendingInbound[]>);
+  },
+
+  getCommands: (agentId?: number | null): Promise<CommandItem[]> => {
+    const qs = agentId != null ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+    return f(`/api/commands${qs}`).then(ok<CommandItem[]>);
+  },
+
+  // `content` is a plain string, or a list of OpenAI-shaped content blocks for
+  // a multimodal message (text + image_url referencing an upload of this agent).
+  sendMessage: (
+    agentId: number,
+    content: string | ContentBlock[],
+    clientMessageId: string,
+  ): Promise<AgentMessageEnqueued> => {
+    return sendMessageWithReconciliation(
+      agentId,
+      content,
+      clientMessageId,
+      jsonWithTimeout,
+      isAmbiguousDeliveryError,
+    );
+  },
+
+  // The unified inbox feed (Task #1024, R4 layer 2, decision Q1=A): one
+  // request carries the whole Inbox panel — the open queue split by kind
+  // (open = FYI, awaiting = require_response) plus one keyset page of the
+  // resolved history and its next_cursor. The frontend's Inbox consumes
+  // ONLY this endpoint now; the standalone /open + /resolved endpoints stay
+  // for the IM bridge and CLI.
+  getNotices: (params?: {
+    limit?: number;
+    resolvedLimit?: number;
+    beforeAt?: string;
+    beforeId?: number;
+  }): Promise<NoticesFeed> => {
+    const sp = new URLSearchParams();
+    if (params?.limit != null) sp.set("limit", String(params.limit));
+    if (params?.resolvedLimit != null) sp.set("resolved_limit", String(params.resolvedLimit));
+    if (params?.beforeAt != null) sp.set("before_at", params.beforeAt);
+    if (params?.beforeId != null) sp.set("before_id", String(params.beforeId));
+    const qs = sp.toString();
+    return f(`/api/notices${qs ? `?${qs}` : ""}`).then(ok<NoticesFeed>);
+  },
+
+  // Resolve one open notice. `action` is the explicit close verb: 'answer' /
+  // 'dismiss' on a require_response notice ('answer' needs a reply), 'read' on an
+  // FYI notice. A non-empty reply (and a dismissed require_response notice) wakes
+  // the agent with a chat inbound. A 'read' on an already-resolved notice is an
+  // idempotent success (user ruling 2026-08-28 — no "already read" error); 409
+  // only when the notice does not exist or the action does not match its kind.
+  resolveNotice: (
+    agentId: number,
+    noticeId: number,
+    body: ResolveNoticeIn,
+  ): Promise<{ status: string }> => {
+    return f(
+      `/api/agents/${agentId}/notices/${noticeId}/resolve`,
+      POST_JSON(body),
+    ).then(ok<{ status: string }>);
+  },
+
+  compact: (agentId: number): Promise<CompactEnqueued> => {
+    return f(`/api/agents/${agentId}/compact`, POST).then(ok<CompactEnqueued>);
+  },
+
+  cancel: (agentId: number): Promise<CancelRequested> => {
+    // Each agent runs its own turn — the gateway watcher dispatches to
+    // the corresponding cancel_event. Returns as soon as the signal is
+    // sent; the actual kernel response is delivered to the UI via the
+    // SSE `cancelled` event.
+    return f("/api/cancel", POST_JSON({ agent_id: agentId })).then(
+      ok<CancelRequested>,
+    );
+  },
+
+  // --- lifecycle ---
+  //
+  // Selecting a sidebar row = selecting the agent to view;
+  // spawn / terminate all operate by agent_id.
+
+  getAgentRoster: (signal?: AbortSignal): Promise<AgentRoster> =>
+    f("/api/agents/roster", { signal }).then(ok<WireAgentRoster>).then((roster) => ({
+      agents: roster.agents.map(projectAgentStatus), ancestors: roster.ancestors,
+    })),
+
+  listAgents: (options: { scope?: "live" | "terminated" | "all"; query?: string; beforeId?: number; limit?: number; signal?: AbortSignal } = {}): Promise<AgentDirectoryPage> => {
+    const params = new URLSearchParams({ scope: options.scope ?? "live", limit: String(options.limit ?? 100) });
+    if (options.query) params.set("query", options.query);
+    if (options.beforeId != null) params.set("before_id", String(options.beforeId));
+    return f(`/api/agents?${params}`, { signal: options.signal }).then(ok<WireAgentDirectoryPage>)
+      .then((page) => ({ ...page, agents: page.agents.map(projectAgentStatus) }));
+  },
+
+  getAgent: (agentId: number, signal?: AbortSignal): Promise<AgentRow> =>
+    f(`/api/agents/${agentId}`, { signal }).then(ok<WireAgentRow>).then(projectAgentStatus),
+
+  spawnAgent: (req: SpawnAgentRequest = {}): Promise<SpawnedAgent> => {
+    return f("/api/agents", POST_JSON(req)).then(ok<SpawnedAgent>);
+  },
+  retryAgentLaunch: (agentId: number): Promise<SpawnedAgent> =>
+    f(`/api/agents/${agentId}/retry-launch`, { method: "POST" }).then(ok<SpawnedAgent>),
+
+  // force=false (default) → graceful path: backend inserts a terminate
+  // inbound and the agent exits after its current turn. force=true → backend
+  // skips the inbound path and directly kills the OS process + force-marks
+  // status='terminated'; for agents stuck in a loop / hung call that never
+  // reach the point where the graceful signal is consumed.
+  terminateAgent: (agentId: number, force = false): Promise<TerminateAgentResponse> => {
+    return f(
+      `/api/agents/${agentId}/terminate`,
+      force ? POST_JSON({ force: true }) : POST,
+    ).then(ok<TerminateAgentResponse>);
+  },
+
+  forceExpireImpersonation: (agentId: number, sessionId: number): Promise<{ session_id: number; status: "expired" | "not_open" }> =>
+    f(`/api/agents/${agentId}/impersonation/force-expire`, POST_JSON({ session_id: sessionId }))
+      .then(ok<{ session_id: number; status: "expired" | "not_open" }>),
+
+  restartAgent: (agentId: number): Promise<RestartAgentResponse> => {
+    return f(`/api/agents/${agentId}/restart`, POST).then(ok<RestartAgentResponse>);
+  },
+
+  resurrectAgent: (
+    agentId: number,
+    prompt?: string,
+  ): Promise<ResurrectAgentResponse> => {
+    // The resurrect button is a pure lifecycle event — no prompt; the agent
+    // just wakes (it still gets the "you have been resurrected" marker). A
+    // prompt, when given (the "with prompt..." path), is inserted as a chat
+    // inbound in the same transaction as the resurrect lifecycle inbound.
+    // resurrected_by is left to the backend default ("user").
+    return f(
+      `/api/agents/${agentId}/resurrect`,
+      POST_JSON(prompt !== undefined ? { prompt } : {}),
+    ).then(ok<ResurrectAgentResponse>);
+  },
+
+  // --- agent label ---
+  //
+  // The label is auto-generated by a gateway BackgroundTask running a
+  // backend LLM whenever spawn carries a prompt (<=12 chars, language
+  // follows the prompt). Users can also override / reset it via PATCH.
+  // An empty string resets back to NULL, and the frontend falls back to
+  // showing `#N`. After the DB write, the backend publishes a
+  // LabelUpdated SSE event to push every client.
+
+  patchAgentLabel: (agentId: number, label: string): Promise<void> => {
+    return f(`/api/agents/${agentId}`, PATCH_JSON({ label })).then(async (res) => {
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+      }
+    });
+  },
+
+  // --- ava.ui.show pages ---
+  //
+  // page-load fetches open pages; SSE page_opened / page_closed prompt
+  // coalesced list refetches. PageRow.url is a gateway reverse-proxy URL
+  // (shape: /pages/<agent_id>-<name>/); the frontend opens it in a new
+  // tab.
+
+  listPages: (agentId: number): Promise<PageRow[]> => {
+    return f(`/api/agents/${agentId}/pages`).then(ok<PageRow[]>);
+  },
+
+  // Every agent's currently-open pages in one fetch — the fleet-wide twin of
+  // listPages, so a many-agent view (the inbox) can surface each agent's live
+  // page without a per-agent request. SSE page events prompt list refetches.
+  listAllPages: (): Promise<PageRow[]> => {
+    return f(`/api/pages`).then(ok<PageRow[]>);
+  },
+
+  // --- fleet graph ---
+  // The weighted agent-relationship graph for the fleet Graph View
+  // (spawn/fork lineage + aggregated message edges + dynamic weights).
+  // `hours` windows both node score and edge events (whitelisted backend-side,
+  // 0 = 5m; 1/6/24/72/168 = hours; omitted = all-time). `decayLambda` is the per-day edge-weight
+  // decay constant (default 0.5 backend-side).
+  getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<WireFleetGraph> => {
+    const params = new URLSearchParams();
+    if (opts?.hours != null) params.set("hours", String(opts.hours));
+    if (opts?.decayLambda != null) params.set("decay_lambda", String(opts.decayLambda));
+    const qs = params.toString();
+    return f(`/api/fleet/graph${qs ? `?${qs}` : ""}`).then(ok<WireFleetGraph>);
+  },
+
+  // --- tasks ---
+  // The task registry (GET /api/tasks). `fields` chooses the full or metadata
+  // projection; `window` narrows the list by last activity on the backend.
+  getTasks: <T extends TaskFields = "full">(
+    opts?: { window?: string; fields?: T },
+  ): Promise<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>> => {
+    const params = new URLSearchParams();
+    if (opts?.window != null) params.set("window", opts.window);
+    if (opts?.fields != null) params.set("fields", opts.fields);
+    const qs = params.toString();
+    return f(`/api/tasks${qs ? `?${qs}` : ""}`).then(
+      ok<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>>,
+    );
+  },
+
+  // --- memory graph ---
+  // OKF concept-note graph rendered by /okf.
+  getMemoryGraph: (): Promise<MemoryGraphResponse> => {
+    return f("/api/memory/graph").then(ok<MemoryGraphResponse>);
+  },
+
+  // One parsed memory note (markdown body with frontmatter stripped) by its
+  // graph-carried relative path — the click-to-view side panel's data source.
+  getMemoryNote: (path: string): Promise<MemoryNoteResponse> => {
+    const q = new URLSearchParams({ path });
+    return f(`/api/memory/note?${q.toString()}`).then(ok<MemoryNoteResponse>);
+  },
+
+  // --- stats ---
+  // One endpoint loads all the stat cards at the top of the sidebar in a
+  // single request (live count / tokens / avg turn / warnings+errors).
+  // `hours` selects the aggregation window — whitelisted backend-side
+  // (0 = 5m; 1/6/24/72/168 = hours), anything else 422s.
+  getStatsDashboard: (hours: number, signal?: AbortSignal): Promise<StatsDashboard> => {
+    return jsonWithTimeout<StatsDashboard>(
+      `/api/stats/dashboard?hours=${hours}`,
+      {},
+      40_000,
+      signal,
+      "stats dashboard",
+    );
+  },
+
+  // The same window's warning/error classes, most frequent first — each row says
+  // whether an active dismissal cancels it (`dismissal_id`).
+  getAlertClasses: (hours: number, signal?: AbortSignal): Promise<AlertClassesResponse> => {
+    return jsonWithTimeout<AlertClassesResponse>(
+      `/api/stats/alert-classes?hours=${hours}`,
+      {},
+      40_000,
+      signal,
+      "alert classes",
+    );
+  },
+
+  // The newest events of one class in the window (the row's expanded detail).
+  getAlertClassSamples: (
+    cls: Pick<AlertClassRow, "level" | "event_name" | "source" | "process">,
+    hours: number,
+    signal?: AbortSignal,
+  ): Promise<AlertClassSample[]> => {
+    const q = new URLSearchParams({
+      level: cls.level,
+      event_name: cls.event_name,
+      source: cls.source,
+      process: cls.process,
+      hours: String(hours),
+    });
+    return f(`/api/stats/alert-classes/samples?${q.toString()}`, { signal })
+      .then(ok<{ samples: AlertClassSample[] }>)
+      .then((body) => body.samples);
+  },
+
+  // Dismiss one class (the identity is the row's own, process included), and
+  // reopen it by the dismissal id the row carries.
+  dismissAlertClass: (
+    cls: Pick<AlertClassRow, "category" | "level" | "event_name" | "source" | "process">,
+  ): Promise<EventResolutionRow> =>
+    f("/api/event-resolutions", POST_JSON(cls)).then(ok<EventResolutionRow>),
+
+  reopenAlertClass: (dismissalId: number): Promise<EventResolutionRow> =>
+    f(`/api/event-resolutions/${dismissalId}/reopen`, POST).then(ok<EventResolutionRow>),
+
+  // --- ops monitor (Insights Ops tab) ---
+  // Time-bucketed ops series from the LGTM stack (Loki + Prometheus) —
+  // SSE/event-log backlog, LLM latency + TPS, process restart counts — one
+  // round trip per window.
+  // Polled at 60s while the Ops section is visible (useSectionVisible).
+
+  // --- alerts (the system→human alert store, Task #1224) ---
+  // Alert instances in the Alertmanager webhook shape, separate from Notice.
+  // The SSE live tail (/api/alerts/stream) folds into the ["alerts"] cache;
+  // this fetch is the initial load + refetch fallback.
+  getAlerts: (params: {
+    window?: AlertsWindow;
+    status?: string;
+    severity?: string;
+    limit?: number;
+  } = {}): Promise<AlertsResponse> => {
+    const q = new URLSearchParams();
+    if (params.window) q.set("window", params.window);
+    if (params.status) q.set("status", params.status);
+    if (params.severity) q.set("severity", params.severity);
+    if (params.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return f(`/api/alerts${qs ? `?${qs}` : ""}`).then(ok<AlertsResponse>);
+  },
+
+  // --- config (runtime config panel) ---
+  //
+  // `machine` targets a specific host's view; omitted = this gateway
+  // (cluster + this host's own host fields). For a remote machine the host
+  // fields carry that machine's values + capability hints, while cluster /
+  // agent fields are the gateway's own (machine-independent).
+
+  getConfig: (machine?: string): Promise<ConfigView> => {
+    const qs = machine != null ? `?machine=${encodeURIComponent(machine)}` : "";
+    return f(`/api/config${qs}`).then(ok<ConfigView>);
+  },
+
+  // Per-model resolution of the settings that have per-model defaults, each row
+  // naming the layer its effective value came from. No `machine` — every
+  // per-model-defaultable field is cluster-scope. Omitting `model` resolves
+  // against the cluster's own model.
+  getResolvedConfig: (model?: string): Promise<ResolvedConfigView> => {
+    const qs = model != null ? `?model=${encodeURIComponent(model)}` : "";
+    return f(`/api/config/resolved${qs}`).then(ok<ResolvedConfigView>);
+  },
+
+  // Every registered machine + its live status (name / description / live).
+  // Backs the config-page machine selector and ava.agents.list_machines().
+  getMachines: (): Promise<AgentMachineRow[]> => {
+    return f("/api/cluster/machines").then(ok<AgentMachineRow[]>);
+  },
+
+  // --- system status ---
+
+  getModels: (): Promise<ModelsResponse> => {
+    return f("/api/models").then(ok<ModelsResponse>);
+  },
+
+  // The model a NEW agent is born on, and which layer produced it ("cluster" =
+  // the DB row set here, "config" = the .env / code default showing through).
+  // Its own narrow endpoint, not a field on PUT /api/config.
+  getDefaultModel: (): Promise<DefaultModelView> => {
+    return f("/api/config/default-model").then(ok<DefaultModelView>);
+  },
+
+  // Set the cluster's default model. 400s on an id outside the spawnable roster.
+  // Applies to agents born after the write — every existing agent keeps the model
+  // frozen on its own row.
+  putDefaultModel: (model: string): Promise<DefaultModelView> => {
+    return f("/api/config/default-model", PUT_JSON({ model })).then(ok<DefaultModelView>);
+  },
+
+  // --- File Upload ---
+
+  // `deliver=false` saves the files silently and returns their reference urls
+  // without notifying the agent — the native-image-attachment path, where the
+  // caller carries the returned url into the next multimodal message. The
+  // default (true) is the paperclip / drag-drop notify path for arbitrary files.
+  uploadFiles: (
+    agentId: number,
+    files: File[],
+    onProgress?: (pct: number) => void,
+    deliver = true,
+  ): Promise<UploadedBatch> => {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append("files", file, file.name);
+    }
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url(`/api/agents/${agentId}/uploads?deliver=${deliver}`));
+      xhr.withCredentials = true;
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText) as UploadedBatch);
+        } else {
+          let msg = `HTTP ${xhr.status}`;
+          try { const err = JSON.parse(xhr.responseText) as { detail?: string }; if (err.detail) msg = err.detail; } catch { /* */ }
+          reject(new Error(msg));
+        }
+      };
+      xhr.onerror = () => reject(new Error("Upload failed"));
+      xhr.send(formData);
+    });
+  },
+
+  getSystemStatus: (): Promise<SystemStatus> => {
+    return f("/api/status").then(ok<SystemStatus>);
+  },
+
+  // This host's cluster snapshot. Unlike /api/status, this path bypasses the
+  // cluster-paused 503 middleware, so it is the one status source readable while
+  // the cluster is paused.
+  getClusterStatus: (): Promise<ClusterStatus> => {
+    return f("/api/cluster/status").then(ok<ClusterStatus>);
+  },
+
+  // Full-replace of the override layer. `machine` targets a host's overrides
+  // (host-scope keys only — a cluster key on a remote PUT is rejected 400);
+  // omitted = this gateway. Returns per-field verdicts: `applied` is true
+  // iff every field passed (atomic — one bad field writes nothing), `results`
+  // carries the per-field ok/reason, `restart_required` the union of written
+  // fields' restart targets for the per-machine banner.
+  async putConfig(
+    body: Record<string, unknown>,
+    machine?: string,
+  ): Promise<ConfigWriteResult> {
+    const qs = machine != null ? `?machine=${encodeURIComponent(machine)}` : "";
+    const res = await f(`/api/config${qs}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+    }
+    return res.json() as Promise<ConfigWriteResult>;
+  },
+
+  // --- inventory (Plugins & MCP, cross-machine matrix) ---
+  //
+  // GET /api/inventory (no machine arg) returns the collapsed cross-machine
+  // matrix: every machine considered + per plugin/MCP-server its per-host
+  // state. The single-machine ?machine= view exists on the backend but the UI
+  // drives entirely off the aggregate, so only the matrix getter is exposed.
+  getInventory: (): Promise<InventoryAggregate> => {
+    return f("/api/inventory").then(ok<InventoryAggregate>);
+  },
+
+  // Enable/disable plugins + MCP servers on ONE host. `machine` targets that
+  // host's inventory; the body carries the desired on/off per item name.
+  // Returns per-item verdicts: `applied` is true iff every item passed (atomic
+  // — one rejected item writes nothing), `plugin_results` / `mcp_results` carry
+  // the per-item ok/reason.
+  async putInventory(
+    body: { plugins?: Record<string, boolean>; mcp_servers?: Record<string, boolean> },
+    machine: string,
+  ): Promise<InventoryWriteResult> {
+    const res = await f(`/api/inventory?machine=${encodeURIComponent(machine)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+    }
+    return res.json() as Promise<InventoryWriteResult>;
+  },
+
+  // This gateway host's installed skills — name / source layer (core/plugin/
+  // machine) / enabled / local drift. Read-only, single-host (skills are
+  // per-machine; there is no cross-machine matrix like inventory).
+  getSkills: (): Promise<SkillsView> => {
+    return f("/api/skills").then(ok<SkillsView>);
+  },
+
+  // Toggle one skill's enabled flag in the install registry. The change is
+  // immediate; the skill scanner picks it up on the next agent spawn.
+  putSkillEnabled: (name: string, enabled: boolean): Promise<SkillView> => {
+    return f("/api/skills", PUT_JSON({ name, enabled })).then(ok<SkillView>);
+  },
+
+  // ── Auth ───────────────────────────────────────────────────────────
+
+  // Authenticate with the cluster password. The username field is accepted
+  // for Chrome password-manager compatibility but not validated — only the
+  // password (cluster secret) matters. On success the gateway sets a session
+  // cookie; subsequent requests carry it automatically.
+  login: (username: string, password: string): Promise<{ ok: boolean }> => {
+    return f("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    }).then(ok<{ ok: boolean }>);
+  },
+
+  // Clear the session cookie. Idempotent — always succeeds.
+  logout: (): Promise<{ ok: boolean }> => {
+    return f("/api/auth/logout", { method: "POST" }).then(
+      ok<{ ok: boolean }>,
+    );
+  },
+
+  // Check whether the current request carries a valid session cookie.
+  checkAuth: (): Promise<{ authenticated: boolean }> => {
+    return f("/api/auth/check").then(ok<{ authenticated: boolean }>);
+  },
+
+  // --- Schedules (GET /api/schedules) ---
+
+  listSchedules: (): Promise<ScheduleSummary[]> => {
+    return f("/api/schedules").then(ok<ScheduleSummary[]>);
+  },
+
+  getSchedule: (id: number): Promise<ScheduleView> => {
+    return f(`/api/schedules/${id}`).then(ok<ScheduleView>);
+  },
+
+  createSchedule: (body: ScheduleCreate): Promise<ScheduleView> => {
+    return f("/api/schedules", POST_JSON(body)).then(ok<ScheduleView>);
+  },
+
+  updateSchedule: (id: number, body: ScheduleUpdate): Promise<ScheduleView> => {
+    return f(`/api/schedules/${id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(ok<ScheduleView>);
+  },
+
+  deleteSchedule: (id: number): Promise<{ status: string }> => {
+    return f(`/api/schedules/${id}`, { method: "DELETE" }).then(ok<{ status: string }>);
+  },
+
+  startSchedule: (id: number): Promise<ScheduleView> => {
+    return f(`/api/schedules/${id}/start`, POST).then(ok<ScheduleView>);
+  },
+
+  stopSchedule: (id: number): Promise<ScheduleView> => {
+    return f(`/api/schedules/${id}/stop`, POST).then(ok<ScheduleView>);
+  },
+
+  restartSchedule: (id: number): Promise<ScheduleView> => {
+    return f(`/api/schedules/${id}/restart`, POST).then(ok<ScheduleView>);
+  },
+
+  scheduleLogs: (id: number, lines = 200): Promise<ScheduleLogsView> => {
+    return f(`/api/schedules/${id}/logs?lines=${lines}`).then(ok<ScheduleLogsView>);
+  },
+
+  scheduleRuns: (id: number, limit = 50): Promise<ScheduleRunView[]> => {
+    return f(`/api/schedules/${id}/runs?limit=${limit}`).then(ok<ScheduleRunView[]>);
+  },
+
+  draftSchedule: (nl: string): Promise<ScheduleDraftResponse> => {
+    return f("/api/schedules/draft", POST_JSON({ nl })).then(ok<ScheduleDraftResponse>);
+  },
+
+  // Spawn an ava-guide agent for a natural-language ops request; returns its id
+  // so the Control page's Guide entry can open the conversation.
+  draftGuide: (nl: string): Promise<GuideDraftResponse> => {
+    return f("/api/guide/draft", POST_JSON({ nl })).then(ok<GuideDraftResponse>);
+  },
+
+  // Spawn an ava-package-installer agent to find, install, and verify a skill /
+  // plugin / MCP server; returns its id so the Control page can open the
+  // conversation. The whole lifecycle happens in that session — there is no
+  // install-by-URL endpoint on purpose.
+  draftPackage: (kind: PackageKind, nl: string): Promise<PackageDraftResponse> => {
+    return f("/api/packages/draft", POST_JSON({ kind, nl })).then(ok<PackageDraftResponse>);
+  },
+
+  // --- Presets (config templates; GET /api/presets) ---
+  //
+  // A preset bundles a per-agent config overlay under a name; selecting one at
+  // spawn time seeds the new agent's config from it (an explicit config wins
+  // per field). Managed on the /presets page; picked in the spawn dialog.
+  // Creation is natural-language only — the presets page composes a prompt
+  // pointing a plain spawnAgent() call at ava.skills.ava_guide.presets, which
+  // designs the config and creates it directly; this client has no raw
+  // createPreset and no dedicated draft endpoint.
+
+  listPresets: (): Promise<PresetView[]> => {
+    return f("/api/presets").then(ok<PresetView[]>);
+  },
+
+  updatePreset: (id: number, body: PresetUpdate): Promise<PresetView> => {
+    return f(`/api/presets/${id}`, PATCH_JSON(body)).then(ok<PresetView>);
+  },
+
+  deletePreset: (id: number): Promise<{ status: string }> => {
+    return f(`/api/presets/${id}`, { method: "DELETE" }).then(ok<{ status: string }>);
+  },
+
+  // --- User settings (GET /api/settings, PUT /api/settings/{key}) ---
+  //
+  // Persistent key-value preferences stored server-side (user_settings DB
+  // table). Each key maps to an opaque JSONB value; the frontend owns the
+  // shape and validation of its own keys. Defaults live in USER_SETTING_DEFAULTS.
+
+  getSettings: (): Promise<UserSettingListResponse> => {
+    return f("/api/settings").then(ok<UserSettingListResponse>);
+  },
+
+  putSetting: (key: string, value: unknown): Promise<UserSettingRow> => {
+    return f(`/api/settings/${encodeURIComponent(key)}`, PUT_JSON({ value })).then(
+      ok<UserSettingRow>,
+    );
+  },
+
+  // --- Plugin console contributions (GET /api/ui/contributions) ---
+  //
+  // The merged, plugin-attributed declaration set of the cluster's enabled
+  // plugins. Read like any other server data; it changes only when a plugin is
+  // installed, enabled, or upgraded.
+
+  getUiContributions: (): Promise<UiContributionsResponse> => {
+    return f("/api/ui/contributions").then(ok<UiContributionsResponse>);
+  },
+};

@@ -5,7 +5,7 @@
 // The reconciliation is: debounced invalidation (the poll below it keeps
 // self-healing). Debounce state belongs to the fold owner, not the hook.
 
-import type { SystemEvent } from "../types";
+import type { SystemEvent } from "../contracts/types";
 import type { FoldOutcome } from "./types";
 import { NO_FOLD } from "./types";
 

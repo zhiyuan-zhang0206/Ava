@@ -22,7 +22,7 @@ vi.mock("@/app/control/inventory/page", () => ({
 // The Plugins section also carries plugin-contributed page links, which read
 // the contributions endpoint. Kept real (it renders nothing when no plugin
 // declares one) with the api boundary mocked, like every other test here.
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: { getUiContributions: vi.fn().mockResolvedValue({ themes: [], nav: [] }) },
   assetUrl: (p: string) => p,
 }));

@@ -64,4 +64,4 @@ across plugins, widget ids unique within one, `plugin` filled from the entry). A
 (`metrics`, `inspectWidgets`; `base/packages/plugins/gate.py`). A refused or unloadable face costs only that plugin and
 leaves no partial state.
 
-Why: [docs/decisions/2026-10-03-plugins-declare-the-framework-registers.md](../../docs/decisions/2026-10-03-plugins-declare-the-framework-registers.md).
+Why: [docs/decisions/extensions/plugins/2026-10-03-plugins-declare-the-framework-registers.md](../../docs/decisions/extensions/plugins/2026-10-03-plugins-declare-the-framework-registers.md).

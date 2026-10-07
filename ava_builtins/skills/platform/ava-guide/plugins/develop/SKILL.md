@@ -9,7 +9,7 @@ Developing a plugin is **L3** of the four-layer modification model (see the
 `ava-guide.modification-layers` skill): it happens entirely inside your deployment,
 gated by the deployment owner. It does **not** ride the kernel pipeline — no
 worktree/PR/CI against the kernel repo, no fleet update. Design record:
-`docs/decisions/2026-08-19-four-layer-modification-model.md`.
+`docs/decisions/extensions/skills/2026-08-19-four-layer-modification-model.md`.
 
 **Plugins live in their own repos** (user ruling, issue #42). The builtin
 plugins under `<repo>/ava_builtins/plugins/` are a kernel-shipped base set —
@@ -33,7 +33,7 @@ here) and optionally `setup.py` (idempotent `scaffold()`, run by explicit
 Plugin discovery is a filesystem scan — a hand-placed directory is found; no
 registration step is needed to develop. Look at a builtin under
 `<repo>/ava_builtins/plugins/` (e.g. `ava_code`) for the shape, and at
-`docs/conventions/plugin-spec-v2.md` for the contribution-surface vocabulary.
+`docs/conventions/extensions/plugin-spec-v2.md` for the contribution-surface vocabulary.
 
 Enable it on this machine: `ava plugins enable <name>` (writes the per-machine
 `plugins_config.json`).
@@ -41,7 +41,7 @@ Enable it on this machine: `ava plugins enable <name>` (writes the per-machine
 ### 2. Test at the restart boundary
 
 **The reload boundary is the agent process's `self.restart`** (user ruling
-2026-08-13, recorded in `docs/conventions/plugin-spec-v2.md`). There is no
+2026-08-13, recorded in `docs/conventions/extensions/plugin-spec-v2.md`). There is no
 in-process hot reload: after editing plugin code, restart the affected agent process
 (internal agents can use `ava.self.restart(...)`; operators use the documented
 agent restart command) and the fresh process loads the new code. Canary it
@@ -55,7 +55,7 @@ import + `plugin.py` entry cheap and fail-fast.
 
 Create a git repo for it — public or local; a local bare/plain repo is enough
 (`git init`, commit). Add an `ava-plugin.json` manifest at the package root
-(`docs/conventions/plugin-spec-v2.md`): identity, version, `engines.ava` range,
+(`docs/conventions/extensions/plugin-spec-v2.md`): identity, version, `engines.ava` range,
 dependencies. The manifest is validated at install time where the install
 flow supports the package kind.
 

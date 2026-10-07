@@ -17,14 +17,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/api";
-import { formatRelative } from "@/lib/time";
-import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/types";
-import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
+import { api } from "@/lib/transport/api";
+import { formatRelative } from "@/lib/format/time";
+import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/contracts/types";
+import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
 
 import { useSectionVisible } from "@/app/control/_visibility";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export default function StatusPage() {
   const t = useTranslations("insights.status");

@@ -143,7 +143,7 @@ server, behind the gateway's normal auth). Plugin pages get the sibling mount:
   containment, not a security boundary**: plugin Python already runs in agent
   processes with shell and DB access, so the trust decision is made at install
   time (the install scan gate + trust tier,
-  `future/infra/skill-supply-chain-trust.md`) — a plugin page learns nothing
+  `future/infra/security/skill-supply-chain-trust.md`) — a plugin page learns nothing
   its Python half does not already have. What the iframe buys is that a
   broken/slow page cannot take down the console, and the app's own bundle
   stays free of third-party code.
@@ -292,7 +292,7 @@ composer/plugin extension point.
   (`gateway/extensions/ui_contributions.py` — the enabled plugins' manifests,
   merged and plugin-attributed; themes today, the other two arrays land with
   their slices, which is additive) + the Display-settings picker + the
-  `display.theme_pack` `user_settings` key + `ui/web/src/components/theme-pack-tokens.tsx`,
+  `display.theme_pack` `user_settings` key + `ui/web/src/components/plugins/theme-pack-tokens.tsx`,
   which writes the declared tokens as inline custom properties on the root
   element.
 
@@ -314,7 +314,7 @@ composer/plugin extension point.
   follow-up to U1 rather than part of a slice): a theme entry is
   `{name, tokens, darkTokens?}`. `tokens` is the light half, `darkTokens` the
   dark one, selected by the resolved next-themes mode
-  (`ui/web/src/components/theme-pack-tokens.tsx`); both halves validate against
+  (`ui/web/src/components/plugins/theme-pack-tokens.tsx`); both halves validate against
   the same closed vocabulary and the same color-literal rule, and
   `UiThemeContribution.dark_tokens` carries the dark half on the wire.
 
@@ -370,7 +370,7 @@ composer/plugin extension point.
   closed-set kinds (`taskList` today) with its own components: no third-party
   code, no markup — unknown kinds are skipped, never interpreted. Widgets
   interleave with the panel's built-in sections by an `order` key (keys table
-  in `docs/conventions/plugin-spec-v2.md`). Deliberate boundary vs U4: this lane is
+  in `docs/conventions/extensions/plugin-spec-v2.md`). Deliberate boundary vs U4: this lane is
   host-rendered closed-set data for targets that exist per agent; U4's
   sections stay for plugin-served content (markdown/kv/table/page over the
   plugin's own mount).

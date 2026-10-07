@@ -37,7 +37,7 @@ refuse there. A row the current runtime force-terminated while it was
 unowned resurrects the same way. It carries no resource evidence; the force
 recorded an `unowned_termination` receipt because the runtime's own birth
 epoch or `lifecycle_release` had left the row unowned
-(`docs/decisions/2026-09-29-unowned-termination-resurrects.md`). A legacy row
+(`docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md`). A legacy row
 never qualifies.
 
 An agent terminated before the runtime incarnation existed has NULL resources
@@ -46,7 +46,7 @@ carries a minted hosted identity: kind `hosted`, a fresh generation and owner,
 no pid. Resources stay NULL and no receipt exists. That identity only passes
 the resurrection gate; the resurrection CAS clears it, and the successor is
 admitted as protocol zero like any NULL row. It is never admission evidence
-(`docs/decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
+(`docs/decisions/agents/lifecycle/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
 No code mints such an identity.
 
-Why: `docs/decisions/2026-09-27-existing-agent-closed-predecessor-admission.md`.
+Why: `docs/decisions/agents/lifecycle/2026-09-27-existing-agent-closed-predecessor-admission.md`.

@@ -1,6 +1,6 @@
 """Landing cluster extensions on a machine — `base/packages/extensions/materialize.py`.
 
-Slice S2 of `future/infra/extension-ownership.md`. The contract is a three-way
+Slice S2 of `future/infra/extensions/extension-ownership.md`. The contract is a three-way
 verdict per extension, and the third case is the one worth the file:
 
 1. **absent** -> extract. The catch-up that makes a machine fungible.

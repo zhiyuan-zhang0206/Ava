@@ -180,6 +180,11 @@ def ignore_selectors(surface: str, registry: dict[str, object]) -> tuple[str, ..
     return tuple(entry["selector"] for entry in [*common, *routes.get(surface, [])])
 
 
+def golden_capture_path(root: Path, name: str) -> Path:
+    """Group reference captures by their route domain."""
+    return root / name.partition("-")[0] / name
+
+
 def diff_regions(page: Page, actual: bytes, expected: bytes) -> tuple[int, list[DiffRegion]]:
     result = page.evaluate(
         PIXEL_DIFF,
@@ -223,7 +228,7 @@ def capture_crop(
         current.append(path.read_bytes())
         if frame == 1:
             page.wait_for_timeout(1000)
-    golden_paths = [golden / f"{key}-golden-{frame}.png" for frame in (1, 2)]
+    golden_paths = [golden_capture_path(golden, f"{key}-golden-{frame}.png") for frame in (1, 2)]
     if not all(path.is_file() for path in golden_paths):
         return {"surface": key.rsplit("-", 2)[0], "status": "baseline-missing", "drifted": True}
     frame_results = []

@@ -80,7 +80,7 @@ env:
   # no PR gates on the subset — the full fan-out gates and the subset plus its
   # comparison report run informational beside it. Set back to "shadow" to
   # restore that behavior; all routing below derives from this one value.
-  # See docs/conventions/test-selection.md.
+  # See docs/conventions/engineering/test-selection.md.
   TEST_SELECTION_MODE: "enforce"
   # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
   UV_FROZEN: "1"
@@ -1706,7 +1706,7 @@ jobs:
       - name: Unit tests (vitest run)
         id: vitest
         working-directory: ui/web
-        run: npx vitest run --coverage
+        run: npx vitest run --config tests/vitest.config.mts --coverage
       # vitest.config.mts already emits json-summary for this gate. Timing-sensitive
       # src/**/flaky/** tests run serially below with coverage disabled, so this
       # checks the stable parallel denominator. Raise toward the measured value
@@ -1731,12 +1731,12 @@ jobs:
               )
           EOF
       # Timing-sensitive tests (src/**/flaky/**) run serially in
-      # their own vitest process — see ui/web/vitest.flaky.config.mts.
+      # their own vitest process — see ui/web/tests/vitest.flaky.config.mts.
       - name: Flaky unit tests (vitest run, serial)
         id: vitest-flaky
         if: ${{ !cancelled() }}
         working-directory: ui/web
-        run: npx vitest run --config vitest.flaky.config.mts
+        run: npx vitest run --config tests/vitest.flaky.config.mts
 
       - name: Validate native test results
         if: ${{ !cancelled() }}

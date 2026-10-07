@@ -6,8 +6,8 @@
 
 import { memo, useCallback } from "react";
 
-import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline-colors";
-import type { BackendTimelineItem } from "@/lib/types";
+import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 import { CopyButton, ForkButton } from "./buttons";
 import { type CardConfig, CardHeader, MessageCard, messageCardConfig } from "./card";

@@ -114,12 +114,11 @@ def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | No
     The rule is purely filesystem-derived, as `index.ava.okf.md` documents,
     and runs on logical paths (`logical_path`): a directory's overview node is
     the same-named file **inside** the directory (`<dir>/<dir>.ava.okf.md`),
-    so `a/b/c.ava.okf.md` parents to `a/b/b.ava.okf.md` when it exists —
-    whether either file sits in `a/b/` itself or in its `a/b/docs/` layer.
-    Only the cross-domain index layer in `okf/` has no filesystem parent and
-    falls back to `root` (the apex, `okf/index.ava.okf.md`); a bundle-root
-    file's parent is `root`, not a literal `index.ava.okf.md`, and so is an
-    overview's own.
+    so `a/b/c.ava.okf.md` parents to the nearest ancestor overview, starting
+    with `a/b/b.ava.okf.md` and then `a/a.ava.okf.md`. An overview skips itself
+    and searches above its directory. Either node may sit in a `docs/` layer.
+    Nodes with no ancestor overview fall back to `root` (the apex,
+    `okf/index.ava.okf.md`), including top-level cross-domain index nodes.
 
     The result is the **physical** path of the parent, looked up among
     `all_paths`. Every returned parent is a path that exists, which is what
@@ -140,16 +139,12 @@ def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | No
         physical[logical] = candidate
 
     logical = logical_path(path)
-    parent_dir = posix(str(Path(logical).parent))
-    if parent_dir in {"", "."}:
-        return root
-
-    # The overview file inside the parent directory, named after it
-    # (logically `agent/agent.ava.okf.md` is the overview of `agent/`).
-    internal = posix(str(Path(parent_dir) / (Path(parent_dir).name + EXT)))
-    if internal != logical and internal in physical:
-        return physical[internal]
-
+    directory = Path(logical).parent
+    while directory != Path():
+        overview = posix(str(directory / (directory.name + EXT)))
+        if overview != logical and overview in physical:
+            return physical[overview]
+        directory = directory.parent
     return root
 
 
