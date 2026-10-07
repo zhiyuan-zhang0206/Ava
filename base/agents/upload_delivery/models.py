@@ -50,7 +50,7 @@ class Object(Record):
 
 class Manifest(Record):
     batch_id: str = Field(pattern=BATCH_ID_PATTERN)
-    agent_id: int = Field(gt=0)
+    agent_id: int = Field(gt=0, lt=2**63)
     objects: list[Object] = Field(min_length=1, max_length=1000)
 
     @model_validator(mode="after")
