@@ -6,9 +6,8 @@ a module from a file (`importlib.util.spec_from_file_location`,
 an unreviewed code package that sidesteps the package doors, budgets and locality
 rules. Shared code belongs in a governed package the script imports normally, and
 the script stays a thin entry point. Files under a `tests/` directory are exempt.
-Rule 6 in scripts/lint/code_structure.py; the
-frozen sites live in the `path_imports` section of the scripts/structure/baseline/ shards
-as `path::target -> site count`, matched exactly like the locality sections.
+Rule 6 in scripts/lint/code_structure.py rejects every measured site directly;
+there is no baseline allowance.
 
 **One narrow exception** (2026-09-29 narrowing): a script under
 `ava_builtins/skills/<group>/<skill>/` may run a one-line `sys.path.insert(0, ...)` /
@@ -49,7 +48,7 @@ FIX = (
     "package) and import it normally; keep the script a thin entry point"
 )
 _PATH_MUTATORS = frozenset({"insert", "append", "extend", "remove", "pop", "clear"})
-# Loader callable -> the site key it is frozen under.
+# Loader callable -> its measured site key.
 _LOADERS = {
     "spec_from_file_location": "importlib.util.spec_from_file_location",
     "SourceFileLoader": "importlib.machinery.SourceFileLoader",
@@ -292,7 +291,7 @@ def measure(tree: ast.Module, rel_path: str) -> Sites:
     A test file (under any `tests/` directory) is exempt: a test loads the script
     it proves by path on purpose. Skips a call that `_is_allowed_skill_guard`
     recognizes as the endorsed within-skill `__file__` guard — that shape is not
-    a site at all, so it is never frozen in the baseline (see the module
+    a site at all, so it never becomes a violation (see the module
     docstring)."""
     if not rel_path.startswith(_SCOPE) or lint_common.is_test_path(rel_path):
         return {}
