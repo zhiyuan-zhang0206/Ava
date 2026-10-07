@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, TypedDict
 
 from services.entrypoints.im_bridge.outbound_types import PreparedOutboundSend
@@ -98,6 +99,8 @@ class IMAdapter(ABC):
     """
 
     channel: str = ""
+    selection_requires_account_proof: bool = False
+    """Native account-bound selection must never bootstrap from legacy peer-only state."""
 
     def __init__(self, core: Any) -> None:
         # Any: adapters are also constructed with test doubles; the core
@@ -176,3 +179,21 @@ class IMAdapter(ABC):
         replies; the base implementation refuses — check ``can_type`` first."""
 
         raise NotImplementedError(f"{type(self).__name__} cannot show typing")
+
+
+class CoreCommand(StrEnum):
+    LIST = "/list"
+    SWITCH = "/switch"
+    STATUS = "/status"
+    SPAWN = "/spawn"
+    COMMANDS = "/commands"
+    HELP = "/help"
+
+
+def parse_command(text: str) -> tuple[CoreCommand | None, str]:
+    command, _, argument = text.partition(" ")
+    try:
+        return CoreCommand(command.lower()), argument
+    except ValueError:
+        # Unknown slash commands intentionally belong to the agent's chat owner.
+        return None, argument

@@ -140,10 +140,17 @@ class SpawnMenuMixin:
     async def _spawn_execute(
         self, state: ChatState, *, idempotency_key: str | None = None
     ) -> Reply:
+        reply, _birth_id = await self.execute_spawn(state, idempotency_key=idempotency_key)
+        return reply
+
+    async def execute_spawn(
+        self, state: ChatState, *, idempotency_key: str | None = None
+    ) -> tuple[Reply, int | None]:
+        """Return the actual acknowledged birth ID separately from its human hint."""
         draft = state.spawn_draft
         state.spawn_draft = None
         if draft is None:
-            return Reply(copy.SPAWN_NOTHING_TO_SPAWN)
+            return Reply(copy.SPAWN_NOTHING_TO_SPAWN), None
         config: dict[str, object] = {}
         if draft.model:
             config["llm_model"] = draft.model
@@ -155,7 +162,7 @@ class SpawnMenuMixin:
             )
         except Exception as exc:
             _log.warning("spawn failed: %r", exc)
-            return Reply(copy.SPAWN_FAILED.format(exc=exc))
+            return Reply(copy.SPAWN_FAILED.format(exc=exc)), None
         if draft.preset_label:
             text = copy.SPAWNED_WITH_PRESET.format(preset=draft.preset_label, agent_id=agent_id)
         else:
@@ -163,4 +170,4 @@ class SpawnMenuMixin:
         return Reply(
             text + copy.SPAWNED_TAP_TO_SWITCH,
             buttons=[(copy.SPAWN_SWITCH_BUTTON.format(agent_id=agent_id), f"/switch {agent_id}")],
-        )
+        ), agent_id
