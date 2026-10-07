@@ -858,8 +858,11 @@ export const api = {
     return f(`/api/schedules/${id}`).then(ok<ScheduleView>);
   },
 
-  createSchedule: (body: ScheduleCreate): Promise<ScheduleView> => {
-    return f("/api/schedules", POST_JSON(body)).then(ok<ScheduleView>);
+  createSchedule: (body: ScheduleCreate, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+    const init = POST_JSON(body);
+    const headers = new Headers(init.headers);
+    headers.set("Idempotency-Key", operationKey);
+    return f("/api/schedules", { ...init, headers }).then(ok<ScheduleView>);
   },
 
   updateSchedule: (id: number, body: ScheduleUpdate, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {

@@ -251,3 +251,15 @@ def request_key(request: Request, key: str, *, method: str, path: str) -> str:
     if not isinstance(principal, AuthPrincipal):
         raise PrincipalScopeError("principal-v1 requires a verified credential principal")
     return principal_key(principal, method, path, key)
+
+
+def optional_request_key(request: Request) -> str | None:
+    """Read an optional HTTP operation identity without activating a new scope."""
+    key = request.headers.get("Idempotency-Key")
+    if key is None:
+        if request.headers.get(SCOPE_HEADER) is not None:
+            raise PrincipalScopeError("Idempotency-Scope requires Idempotency-Key")
+        return None
+    if not key or len(key) > 128:
+        raise PrincipalScopeError("idempotency key must contain 1 to 128 characters")
+    return request_key(request, key, method=request.method, path=request.url.path)
