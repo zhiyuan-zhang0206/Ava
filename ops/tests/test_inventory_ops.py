@@ -36,11 +36,15 @@ def _write_machine_mcp(unit_home: Path, servers: dict[str, dict]) -> None:
 @pytest.fixture
 def _machine_only_mcp(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isolate the MCP merged map to just the machine `mcp.json` under test —
-    builtin `mcps/` and plugin `.mcp.json` sources are stubbed empty. Also pins
+    the public MCP loader supplies that real file's server map. Also pins
     the host role to agent-runner (the ops' precondition): inventory ops run only
     there, and the test env has no AVA_MACHINE_SERVE_* set."""
-    monkeypatch.setattr(mcp_cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(mcp_cfg_mod, "_plugin_config_paths", list)
+
+    def machine_config(*, include_disabled: bool = False) -> dict[str, dict[str, object]]:
+        assert include_disabled is True
+        return mcp_cfg_mod.read_servers(unit_home / "mcp.json")
+
+    monkeypatch.setattr(mcp_cfg_mod, "load_mcp_config", machine_config)
     # is_agent_runner() (the ops precondition) reads base.cluster.machine.machine_role;
     # ops.machine_role is only used to format the rejection message. Pin both.
     monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"agent-runner"}))

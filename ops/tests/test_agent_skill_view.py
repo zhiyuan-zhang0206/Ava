@@ -40,7 +40,12 @@ def load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         "base.packages.extensions.install_registry.loadable_skill_names", lambda: {"load-skill"}
     )
-    monkeypatch.setattr(composer_commands, "_command_dirs", list)
+    command_sources = unit_home / "empty-command-sources"
+    monkeypatch.setattr(composer_commands, "repo_root", lambda: command_sources)
+    monkeypatch.setattr(composer_commands, "repo_plugins_dir", lambda: command_sources / "plugins")
+    monkeypatch.setattr(
+        composer_commands, "external_plugin_read_root", lambda: command_sources / "external-plugins"
+    )
     return root
 
 
