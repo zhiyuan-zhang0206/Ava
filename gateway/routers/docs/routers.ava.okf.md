@@ -7,7 +7,10 @@ tags: []
 
 # Gateway Routers
 
-Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). A surface whose routes, helpers and wire models change together is a feature package; a single-module surface stays in `gateway/routers/<domain>.py` with its models in `gateway/schemas/<domain>.py`:
+`gateway/app.py` mounts route modules. Cohesive route/helper/model domains live
+in `gateway/<feature>/`; single-module routers live in
+`gateway/routers/<domain>.py`, with models in `gateway/schemas/<domain>.py`.
+
 
 | package | routers |
 |---|---|
@@ -72,3 +75,5 @@ handler/mounting split, and boundary typing:
 ## Notes
 
 New endpoint → add it to its feature package, or create `gateway/routers/<domain>.py` for a new single-module surface; then `include_router` in `app.py`. Frontend/CLI/SDK share the same endpoints.
+
+Guarded page registry receipts: [[gateway/routers/docs/page-acceptance.ava.okf.md]].

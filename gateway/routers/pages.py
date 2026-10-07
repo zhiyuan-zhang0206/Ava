@@ -23,17 +23,21 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
+from contextlib import nullcontext
+from typing import Annotated
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 from starlette.background import BackgroundTask
 
 from base.agents import AgentStatus
 from base.config import settings
 from base.db import agent_exists
+from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed, PageOpened
 from base.log import logger
@@ -45,16 +49,18 @@ from base.packages.docs.pages_copy import (
     PAGE_SERVER_TIMEOUT_BODY,
 )
 from base.telemetry.alerts import display_language
-from gateway.schemas.pages import PageRegisterRequest
+from gateway.routers import page_acceptance
+from gateway.schemas.pages import PageCloseRequest, PageRegisterRequest
 from ops.pages import (
     PagePortConflictError,
     assert_port_free,
-    close_all_agent_pages,
+    close_all_agent_pages_in_transaction,
     close_page,
     get_open_page_target,
     list_all_open_pages,
     list_open_pages,
-    register_page,
+    lock_page_agent,
+    register_page_in_transaction,
 )
 from ops.rpc_schemas import PageRow
 
@@ -81,7 +87,9 @@ class PageHostCache:
         self._hosts: OrderedDict[str, tuple[float, frozenset[str]]] = OrderedDict()
         self._lock = threading.Lock()
 
-    def dial_hosts(self, pool: ConnectionPool, machine: str) -> frozenset[str]:
+    def dial_hosts(
+        self, pool: ConnectionPool, machine: str, *, connection: Connection | None = None
+    ) -> frozenset[str]:
         """Return the cached host allowlist advertised by one machine."""
         now = time.monotonic()
         with self._lock:
@@ -90,7 +98,10 @@ class PageHostCache:
                 self._hosts.move_to_end(machine)
                 return cached[1]
         hosts = {machine}
-        with pool.connection() as conn, conn.cursor() as cur:
+        with (
+            pool.connection() if connection is None else nullcontext(connection) as conn,
+            conn.cursor() as cur,
+        ):
             cur.execute(
                 "SELECT url FROM machine_units "
                 "WHERE machine_name = %s AND stopped_at IS NULL AND url IS NOT NULL",
@@ -245,6 +256,72 @@ async def post_page_register(agent_id: int, body: PageRegisterRequest, request: 
         ),
     )
     return record
+
+
+@router.post("/api/keyed/v1/agents/{agent_id}/pages", status_code=201, response_model=PageRow)
+async def post_guarded_page_register(
+    agent_id: int,
+    body: PageRegisterRequest,
+    request: Request,
+    key: Annotated[str, Depends(page_acceptance.operation_key)],
+) -> PageRow:
+    """Accept one registration atomically; never downgrade this intent to the legacy path."""
+    result = await asyncio.to_thread(
+        page_acceptance.register,
+        request.app.state.db_pool,
+        key,
+        agent_id,
+        body,
+        _absolute_url(request, ""),
+        lambda connection: _validate_page_dial_target(
+            request.app.state.db_pool,
+            request.app.state.page_host_cache,
+            agent_id,
+            body.host,
+            body.port,
+            connection=connection,
+        ),
+    )
+    if not result.replayed:
+        for name in result.closed_names:
+            await _publish_page_event(
+                request.app.state.bus, PageClosed(agent_id=agent_id, name=name)
+            )
+        await _publish_page_event(
+            request.app.state.bus,
+            PageOpened(
+                agent_id=agent_id,
+                page_id=result.record.id,
+                name=result.record.name,
+                port=result.record.port,
+                title=result.record.title,
+                url=result.record.url,
+            ),
+        )
+    return result.record
+
+
+@router.post("/api/keyed/v1/agents/{agent_id}/pages/{name}/close", response_model=PageRow)
+async def post_guarded_page_close(
+    agent_id: int,
+    name: str,
+    body: PageCloseRequest,
+    request: Request,
+    key: Annotated[str, Depends(page_acceptance.operation_key)],
+) -> PageRow:
+    """Close only the observed row; replay returns its historical acceptance."""
+    result = await asyncio.to_thread(
+        page_acceptance.close,
+        request.app.state.db_pool,
+        key,
+        agent_id,
+        name,
+        body.expected_page_id,
+        _absolute_url(request, ""),
+    )
+    if not result.replayed:
+        await _publish_page_event(request.app.state.bus, PageClosed(agent_id=agent_id, name=name))
+    return result.record
 
 
 @router.delete("/api/agents/{agent_id}/pages/{name}")
@@ -458,9 +535,14 @@ def _is_loopback_host(host: str) -> bool:
         return False
 
 
-def _agent_machine(pool: ConnectionPool, agent_id: int) -> str | None:
+def _agent_machine(
+    pool: ConnectionPool, agent_id: int, *, connection: Connection | None = None
+) -> str | None:
     """Return a page agent's registered home machine, if it is usable."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with (
+        pool.connection() if connection is None else nullcontext(connection) as conn,
+        conn.cursor() as cur,
+    ):
         cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     machine = row[0] if row is not None else None
@@ -474,9 +556,10 @@ def _validate_nonloopback_page_host(
     host: str,
     *,
     status_code: int,
+    connection: Connection | None = None,
 ) -> None:
     """Fail closed unless `host` is this agent machine's advertised address."""
-    machine = _agent_machine(pool, agent_id)
+    machine = _agent_machine(pool, agent_id, connection=connection)
     if machine is None:
         raise HTTPException(
             status_code=status_code,
@@ -485,7 +568,7 @@ def _validate_nonloopback_page_host(
                 "machine is unknown — refusing to proxy to it"
             ),
         )
-    if host not in host_cache.dial_hosts(pool, machine):
+    if host not in host_cache.dial_hosts(pool, machine, connection=connection):
         raise HTTPException(
             status_code=status_code,
             detail=(
@@ -509,7 +592,13 @@ def _validate_proxy_page_target(
 
 
 def _validate_page_dial_target(
-    pool: ConnectionPool, host_cache: PageHostCache, agent_id: int, host: str, port: int
+    pool: ConnectionPool,
+    host_cache: PageHostCache,
+    agent_id: int,
+    host: str,
+    port: int,
+    *,
+    connection: Connection | None = None,
 ) -> None:
     """SSRF guard for the page reverse proxy (audit round-2 P1-4).
 
@@ -538,7 +627,9 @@ def _validate_page_dial_target(
         )
     if _is_loopback_host(host):
         return
-    _validate_nonloopback_page_host(pool, host_cache, agent_id, host, status_code=400)
+    _validate_nonloopback_page_host(
+        pool, host_cache, agent_id, host, status_code=400, connection=connection
+    )
 
 
 def _register_page_blocking(
@@ -554,7 +645,8 @@ def _register_page_blocking(
     under the live-port unique index for a registration that races the check.
     """
     _validate_page_dial_target(pool, host_cache, agent_id, body.host, body.port)
-    with pool.connection() as conn:
+    with write_transaction(pool) as conn:
+        lock_page_agent(conn, agent_id)
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
         with conn.cursor() as cur:
@@ -568,8 +660,8 @@ def _register_page_blocking(
         try:
             assert_port_free(conn, agent_id, body.host, body.port)
             # Close any existing open pages for this agent before registering a new one.
-            closed_names = close_all_agent_pages(conn, agent_id)
-            record = register_page(
+            closed_names = close_all_agent_pages_in_transaction(conn, agent_id)
+            record = register_page_in_transaction(
                 conn,
                 agent_id,
                 body.name,
@@ -586,7 +678,8 @@ def _register_page_blocking(
 
 def _close_page_blocking(pool: ConnectionPool, agent_id: int, name: str) -> PageRow:
     """Sync page-close CAS — via to_thread (404 guards included)."""
-    with pool.connection() as conn:
+    with write_transaction(pool) as conn:
+        lock_page_agent(conn, agent_id)
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
         record = close_page(conn, agent_id, name)

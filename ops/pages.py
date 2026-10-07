@@ -141,6 +141,13 @@ def assert_port_free(db: psycopg.Connection, agent_id: int, host: str, port: int
         raise PagePortConflictError(_port_conflict_message(host, port, owner))
 
 
+def lock_page_agent(db: psycopg.Connection, agent_id: int) -> None:
+    """Serialize page mutations for one agent until the caller commits."""
+    db.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"agent-pages:{agent_id}",)
+    )
+
+
 def register_page(
     db: psycopg.Connection,
     agent_id: int,
@@ -151,22 +158,41 @@ def register_page(
     serve_dir: str | None = None,
     ttl_seconds: int | None = None,
 ) -> PageRow:
-    """Register or update an open page.
+    """Register/update a page and commit, preserving the legacy call boundary."""
+    record = register_page_in_transaction(
+        db, agent_id, name, port, host, title, serve_dir, ttl_seconds
+    )
+    db.commit()
+    return record
+
+
+def register_page_in_transaction(
+    db: psycopg.Connection,
+    agent_id: int,
+    name: str,
+    port: int,
+    host: str,
+    title: str | None,
+    serve_dir: str | None = None,
+    ttl_seconds: int | None = None,
+) -> PageRow:
+    """Register or update an open page in the caller-owned transaction.
 
     If an open row with the same name exists -> UPDATE host + port + title +
     serve_dir (agent restarted server on different port). None -> INSERT.
-    Returns the final row snapshot. The caller is responsible for
-    publishing the PageOpened event.
+    Returns the final row snapshot without committing. The caller owns commit
+    and publishing the PageOpened event.
 
     `serve_dir` is the directory the page server serves, recorded by
     ava.ui.serve() so agent boot can re-serve a dead page
     server after resurrect/restart; NULL for ava.ui.show() pages (the agent
     manages those servers itself).
     """
+    lock_page_agent(db, agent_id)
     ttl = ttl_seconds if ttl_seconds is not None else settings.daemon.page_default_ttl_seconds
     expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
     try:
-        with db.cursor() as cur:
+        with db.transaction(), db.cursor() as cur:
             cur.execute(
                 "UPDATE agent_pages SET port = %s, host = %s, title = %s, serve_dir = %s, "  # noqa: S608
                 "expires_at = %s, expired_at = NULL "
@@ -190,7 +216,6 @@ def register_page(
         # name the occupant when a fresh read still sees it (its transaction
         # committed). Other unique violations (the (agent_id, name) index)
         # are not this function's rule — re-raise.
-        db.rollback()
         if exc.diag.constraint_name != _LIVE_PORT_INDEX:
             raise
         raise PagePortConflictError(
@@ -198,7 +223,6 @@ def register_page(
                 host, port, find_live_page_on_port(db, host, port, exclude_agent_id=agent_id)
             )
         ) from exc
-    db.commit()
     return _row_to_record(row)
 
 
@@ -208,6 +232,7 @@ def close_page(
     name: str,
 ) -> PageRow | None:
     """CAS open->closed. Returns None for 0 rows (caller distinguishes not-found / already-closed)."""
+    lock_page_agent(db, agent_id)
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agent_pages SET closed_at = now() "  # noqa: S608
@@ -268,7 +293,14 @@ def list_all_open_pages(db: psycopg.Connection) -> list[PageRow]:
     return [_row_to_record(r) for r in rows]
 
 
-def close_all_agent_pages(
+def close_all_agent_pages(db: psycopg.Connection, agent_id: int) -> list[str]:
+    """Close this agent's open pages and commit at the legacy call boundary."""
+    names = close_all_agent_pages_in_transaction(db, agent_id)
+    db.commit()
+    return names
+
+
+def close_all_agent_pages_in_transaction(
     db: psycopg.Connection,
     agent_id: int,
 ) -> list[str]:
@@ -286,6 +318,7 @@ def close_all_agent_pages(
     bulk-close is still needed for the terminate cascade and for the
     migration path where pre-existing agents had multiple pages.
     """
+    lock_page_agent(db, agent_id)
     with db.cursor() as cur:
         cur.execute(
             "SELECT name FROM agent_pages "
@@ -299,7 +332,6 @@ def close_all_agent_pages(
                 "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL",
                 (agent_id,),
             )
-    db.commit()
     return names
 
 
@@ -323,3 +355,37 @@ def list_open_page_names(db: psycopg.Connection, agent_id: int) -> list[str]:
             (agent_id,),
         )
         return [r[0] for r in cur.fetchall()]
+
+
+class PageTargetChangedError(ValueError):
+    """The named page no longer denotes the caller's observed registry row."""
+
+
+def close_observed_page_in_transaction(
+    db: psycopg.Connection, agent_id: int, name: str, expected_page_id: int
+) -> PageRow:
+    """Close the latest named row only when its immutable ID matches.
+
+    An already closed matching row is accepted without another effect. A newer
+    registration makes the observation stale even when that newer row is closed.
+    """
+    lock_page_agent(db, agent_id)
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
+            "WHERE agent_id = %s AND name = %s ORDER BY id DESC LIMIT 1 FOR UPDATE",
+            (agent_id, name),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] != expected_page_id:
+            raise PageTargetChangedError(
+                "observed page is no longer the latest registration for this name"
+            )
+        if row[8] is None:
+            cur.execute(
+                "UPDATE agent_pages SET closed_at = now() WHERE id = %s RETURNING "  # noqa: S608 — owned fixed projection
+                + _SELECT_COLUMNS,
+                (expected_page_id,),
+            )
+            row = fetch_one(cur, "close observed page")
+    return _row_to_record(row)
