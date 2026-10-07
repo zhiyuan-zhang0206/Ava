@@ -1,18 +1,8 @@
-"""Feishu adapter for IM Bridge — enterprise self-built app + bot.
+"""Feishu enterprise bot: private text over lark-oapi WS events and REST sends.
 
-Connects over the lark-oapi WebSocket long connection (``im.message.receive_v1``
-event), so no public IP is needed. Only p2p (private-chat) text messages are
-bridged; group chats and media messages are ignored. Replies go through the
-REST ``im/v1/messages`` create API keyed by the sender's ``open_id`` (the
-contract's feishu session id).
-
-Credentials arrive in the ``FeishuCredentialsConfig`` slice the daemon builds
-(``AVA_FEISHU_APP_ID`` / ``AVA_FEISHU_APP_SECRET``). Missing credentials make
-``start()`` log and no-op — the daemon keeps running without the feishu link.
-
-Platform side (operator action, not code): in the Feishu open platform enable
-the app's long-connection event subscription and add the "message received"
-(``im.message.receive_v1``) event; the bot must be available in the p2p chat.
+Credentials come from FeishuCredentialsConfig; missing credentials skip start.
+The operator enables im.message.receive_v1 long-connection subscriptions and
+makes the bot available in the p2p chat. Polling recovers missed WS events.
 """
 
 from __future__ import annotations
@@ -28,6 +18,11 @@ from base.log import logger
 from services.entrypoints.im_bridge.adapters import feishu_poll_cursor as cursors
 from services.entrypoints.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
+from services.entrypoints.im_bridge.outbound_types import (
+    PreparedTimelineSend,
+    TimelineAdapterKind,
+    TimelineChunk,
+)
 from services.entrypoints.im_bridge.state import _load_switch_state
 from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage
 
@@ -49,16 +44,12 @@ def _backoff_delay(interval: float, failures: int) -> float:
 
 
 class FeishuAdapter(IMAdapter):
-    """Bridge p2p text messages between Feishu and the IM Bridge core.
+    """Bridge enterprise bot p2p text through WS events and polling fallback.
 
-    The lark-oapi WebSocket client is synchronous and blocks forever inside
-    ``Client.start()``; it also binds a module-level event loop on its FIRST
-    import (``lark_oapi/ws/client.py`` calls ``asyncio.get_event_loop()`` at
-    module scope). Every lark import therefore happens lazily inside the
-    dedicated ws thread, so the SDK's loop is a fresh thread-local loop and
-    ``start()``'s ``run_until_complete`` never touches the daemon's own loop.
-    The SDK reconnects with backoff automatically (``auto_reconnect`` default).
-    Outbound uses a separate REST ``lark.Client`` run via ``asyncio.to_thread``.
+    The lark WS SDK binds an event loop at its first import and blocks in
+    Client.start(). Import it lazily in the dedicated WS thread so its
+    run_until_complete never touches the daemon loop; SDK reconnect stays
+    automatic. Outbound uses a separate REST client via asyncio.to_thread.
     """
 
     channel = "feishu"
@@ -624,6 +615,38 @@ class FeishuAdapter(IMAdapter):
             idempotency_key=cursors.idempotency_key(getattr(item, "message_id", None)),
         )
 
+    async def timeline_account_id(self) -> str:
+        if not self._config.feishu_app_id or not self._config.feishu_app_secret:
+            raise RuntimeError("feishu timeline account is not configured")
+        return self._config.feishu_app_id
+
+    async def prepare_timeline(self, text: str) -> PreparedTimelineSend:
+        return PreparedTimelineSend(
+            adapter_kind=TimelineAdapterKind.FEISHU,
+            account_id=await self.timeline_account_id(),
+            chunks=tuple(TimelineChunk(text=part) for part in _segment(text, MAX_SEGMENT_CHARS)),
+            markdown=False,
+        )
+
+    async def send_prepared_timeline(self, chat_id: str, prepared: PreparedTimelineSend) -> None:
+        if (
+            prepared.adapter_kind != TimelineAdapterKind.FEISHU
+            or prepared.account_id != await self.timeline_account_id()
+        ):
+            raise RuntimeError("feishu prepared account or adapter mismatch")
+        self._check_send_ready()
+        if self._rest_client is None:
+            self._rest_client = await asyncio.to_thread(self._build_rest_client)
+        for chunk in prepared.chunks:
+            await asyncio.to_thread(self._send_one, self._rest_client, chat_id, chunk.text)
+        await self._register_sent_chat(chat_id)
+
+    def _check_send_ready(self) -> None:
+        if not self._app_id or not self._app_secret:
+            raise RuntimeError("feishu send failed: adapter not configured")
+        if self._ws_thread is None or not self._ws_thread.is_alive():
+            raise RuntimeError("feishu send failed: adapter not started")
+
     async def send(
         self,
         chat_id: str,
@@ -632,23 +655,13 @@ class FeishuAdapter(IMAdapter):
         buttons: list[tuple[str, str]] | None = None,
         markdown: bool = False,
     ) -> None:
-        """Send a message to a user (open_id).
+        """Send a card with buttons, or plain text segmented at the platform cap.
 
-        With ``buttons`` this is an interactive card (the button callback
-        value is the command, routed through core.handle_inbound exactly like
-        a typed command); without, plain text, segmenting at
-        MAX_SEGMENT_CHARS (a card must not be segmented — buttons belong to
-        the whole message). ``markdown`` is accepted for the shared contract
-        but not rendered (text messages are plain)."""
+        Markdown is accepted by the shared contract but not rendered.
+        """
 
         del markdown  # platform contract: accepted, not rendered
-        if not self._app_id or not self._app_secret:
-            raise RuntimeError(
-                "feishu send failed: adapter not configured "
-                "(missing FEISHU_APP_ID / FEISHU_APP_SECRET)"
-            )
-        if self._ws_thread is None or not self._ws_thread.is_alive():
-            raise RuntimeError("feishu send failed: adapter not started")
+        self._check_send_ready()
         if self._rest_client is None:
             self._rest_client = await asyncio.to_thread(self._build_rest_client)
         if buttons:
@@ -656,17 +669,11 @@ class FeishuAdapter(IMAdapter):
         else:
             for segment in _segment(text, MAX_SEGMENT_CHARS):
                 await asyncio.to_thread(self._send_one, self._rest_client, chat_id, segment)
-        # The send response carries the p2p chat id — register it for polling
-        # so the user's next message is picked up without the WS event path.
+        # Register the returned p2p chat for polling.
         await self._register_sent_chat(chat_id)
 
     async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
-        """Send an outbound notification to the last p2p sender (the user).
-
-        Feishu has no configured owner id — the only chat we know is the
-        p2p sender of an inbound message; before the first message there is
-        nowhere to send and the fan-out skips this channel.
-        """
+        """Send to the last known p2p sender; skip if there is no owner chat."""
 
         del markdown  # platform contract: accepted, not rendered
         if not self._last_open_id:

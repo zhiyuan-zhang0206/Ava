@@ -42,7 +42,13 @@ def pool() -> Iterator[ConnectionPool[Any]]:
 
 
 def _item(item_id: str, text: str, kind: str = "agent_chat") -> dict[str, Any]:
-    return {"kind": kind, "item_id": item_id, "payload": text}
+    return {
+        "kind": kind,
+        "item_id": item_id,
+        "payload": text,
+        "source_message_id": "stored-" + item_id,
+        "source_block_idx": 0,
+    }
 
 
 class _Gateway:
@@ -95,7 +101,9 @@ class _Adapter(IMAdapter):
 def _core(
     gateway: _Gateway, pool: ConnectionPool[Any] | None = None
 ) -> tuple[IMBridgeCore, _Adapter]:
-    core = IMBridgeCore(im_bridge_config(), gateway, db_pool=pool)  # type: ignore[arg-type]
+    from services.entrypoints.im_bridge.tests import test_im_bridge_core
+
+    core = IMBridgeCore(im_bridge_config(), gateway, db_pool=pool or test_im_bridge_core.TEST_POOL)  # type: ignore[arg-type]
     adapter = _Adapter()
     core.register(adapter)
     return core, adapter
@@ -111,17 +119,21 @@ def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
     pool: ConnectionPool,
 ) -> None:
     async def scenario() -> None:
-        core, adapter = _core(_Gateway(), pool)
+        core, adapter = _core(_Gateway([_item("1.0", "old")]), pool)
         state = _bound_state(core)
-        await core._push_snapshot(_KEY, state, {"items": [_item("1.0", "old")]})
+        await core._push_snapshot(_KEY, state, {"items": []})
+        await core.timeline_worker.run_once()
         assert adapter.sent == ["[Ava #405] old"]
 
-        core2, adapter2 = _core(_Gateway(), pool)  # daemon restart
+        core2, adapter2 = _core(
+            _Gateway([_item("1.0", "old"), _item("2.0", "new")]), pool
+        )  # daemon restart
         await core2.restore_subscriptions()
         state2 = _bound_state(core2)
         await core2._push_snapshot(
             _KEY, state2, {"items": [_item("1.0", "old"), _item("2.0", "new")]}
         )
+        await core2.timeline_worker.run_once()
         assert adapter2.sent == ["[Ava #405] new"]
 
     asyncio.run(scenario())
@@ -131,10 +143,11 @@ def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
     pool: ConnectionPool,
 ) -> None:
     async def scenario() -> None:
-        core, _ = _core(_Gateway(), pool)
+        core, _ = _core(_Gateway([_item("1.0", "seen")]), pool)
         state = _bound_state(core)
         core._persist_switch(state)
-        await core._push_snapshot(_KEY, state, {"items": [_item("1.0", "seen")]})
+        await core._push_snapshot(_KEY, state, {"items": []})
+        await core.timeline_worker.run_once()
 
         # the bridge is down; the agent says two more things (timeline only)
         gateway2 = _Gateway(
@@ -143,6 +156,8 @@ def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
         core2, adapter2 = _core(gateway2, pool)
         await core2.restore_subscriptions()
         await asyncio.sleep(0.05)
+        await core2.timeline_worker.run_once()
+        await core2.timeline_worker.run_once()
 
         assert adapter2.sent == ["[Ava #405] missed one", "[Ava #405] missed two"]
         for task in core2._subscriptions.values():
@@ -160,13 +175,18 @@ def test_restore_without_a_saved_watermark_pushes_nothing(pool: ConnectionPool[A
         state = _bound_state(core)
         core._persist_switch(state)
 
+        from base.db.transaction import write_transaction
+
+        with write_transaction(pool) as conn:
+            conn.execute("INSERT INTO im_bridge_cursors(channel,chat_id) VALUES (%s,%s)", _KEY)
         gateway2 = _Gateway([_item("1.0", "history")])
         core2, adapter2 = _core(gateway2, pool)
         await core2.restore_subscriptions()
         await asyncio.sleep(0.05)
 
         assert adapter2.sent == []
-        assert gateway2.timeline_calls == 0
+        assert gateway2.timeline_calls > 0
+        assert core2.timeline_outbox.pending_streams({"telegram": "test-account"}) == []
         for task in core2._subscriptions.values():
             task.cancel()
 

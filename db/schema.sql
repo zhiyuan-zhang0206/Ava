@@ -2374,6 +2374,8 @@ CREATE TABLE im_bridge_cursors (
     channel         TEXT        NOT NULL,
     chat_id         TEXT        NOT NULL,
     push_agent_id   BIGINT,
+    push_account_id TEXT,
+    push_initialized BOOLEAN NOT NULL DEFAULT FALSE,
     push_item_id    TEXT,
     push_created_at TEXT,
     poll_message_id TEXT,
@@ -2381,14 +2383,62 @@ CREATE TABLE im_bridge_cursors (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (channel, chat_id),
     CONSTRAINT im_bridge_cursors_push_pair
-        CHECK ((push_agent_id IS NULL) = (push_item_id IS NULL))
+        CHECK (push_item_id IS NULL OR push_agent_id IS NOT NULL)
 );
 
 COMMENT ON TABLE im_bridge_cursors IS
-    'Durable im-bridge positions: push_* = newest agent item pushed to the chat (for push_agent_id), poll_* = newest handled platform message of a polled conversation (message id, create time in ms; id NULL = time-only position). A restart resumes from here instead of losing what happened while the bridge was down.';
-
+    'Durable im-bridge selection and positions: push_* = timeline acceptance, poll_* = independently handled platform inbound. Acceptance and provider intents commit atomically; cursor advancement is not proof of delivery.';
+COMMENT ON COLUMN im_bridge_cursors.push_agent_id IS
+    'Canonical recipient selection after initialization/binding; push_item_id belongs to this agent and may be NULL after explicit empty acceptance or clear.';
+COMMENT ON COLUMN im_bridge_cursors.push_initialized IS
+    'Explicitly accepted initial history, including empty switch batches. FALSE legacy NULL positions remain held without implicit backfill.';
 COMMENT ON COLUMN im_bridge_cursors.push_created_at IS
-    'created_at of the newest pushed item (ISO-8601, wire format); primary push watermark, immune to post-compact item_id renumbering. NULL = row written before the column, compared by push_item_id alone.';
+    'Timestamp of newest durably accepted timeline item, not proof of provider delivery. NULL legacy positions compare item_id alone.';
+
+CREATE TABLE im_bridge_outbound_intents (
+    id BIGSERIAL PRIMARY KEY,
+    channel TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    agent_id BIGINT NOT NULL,
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('message', 'inbound')),
+    source_id TEXT NOT NULL,
+    block_idx INTEGER NOT NULL CHECK (block_idx >= 0),
+    replay_id TEXT NOT NULL DEFAULT '',
+    request JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'sending', 'sent', 'uncertain', 'failed')),
+    attempt_id UUID,
+    outcome_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    UNIQUE (channel, account_id, chat_id, agent_id, source_kind, source_id, block_idx, replay_id),
+    CHECK ((status = 'queued') = (attempt_id IS NULL))
+);
+CREATE INDEX im_bridge_outbound_pending ON im_bridge_outbound_intents (id)
+    WHERE status IN ('queued', 'sending');
+COMMENT ON TABLE im_bridge_outbound_intents IS
+    'Immutable timeline outbound acceptance; cursor advancement commits with intent insertion. Sending is persisted before provider calls; unresolved attempts are uncertain and never automatically replayed. No expiry.';
+COMMENT ON COLUMN im_bridge_cursors.push_account_id IS
+    'Nonsecret adapter account owning the accepted push cursor; legacy NULL binds once without backfill. Explicit switch replay alone may rebind another account.';
+
+
+CREATE TABLE im_bridge_outbound_replays (
+    channel TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    replay_id TEXT NOT NULL,
+    switch_arg TEXT NOT NULL,
+    agent_id BIGINT NOT NULL,
+    intent_ids BIGINT[] NOT NULL,
+    push_item_id TEXT,
+    push_created_at TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (channel, account_id, chat_id, replay_id)
+);
+COMMENT ON TABLE im_bridge_outbound_replays IS
+    'Immutable switch-replay batch acceptance receipts; repeated platform invocations recover the original selected intent IDs and cursor. No expiry or foreign-key pin to delivery rows.';
 
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `base.deploy.schema.migrations`. Keyed by
@@ -2545,3 +2595,4 @@ CREATE TABLE task_creation_receipts (
 );
 
 INSERT INTO schema_migrations (name) VALUES ('20261007T190652_task-creation-receipts');
+INSERT INTO schema_migrations (name) VALUES ('20261007T181301_im-timeline-outbox');
