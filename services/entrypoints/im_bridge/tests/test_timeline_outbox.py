@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
@@ -31,7 +32,7 @@ from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 
 @pytest.fixture
 def pool() -> Iterator[ConnectionPool]:
-    with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
+    with ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=2) as pool:
         yield pool
 
 
@@ -63,7 +64,9 @@ class RecordingAdapter(IMAdapter):
             markdown=False,
         )
 
-    async def send(self, chat_id: str, text: str, *, buttons=None, markdown=False) -> None:
+    async def send(
+        self, chat_id: str, text: str, *, buttons: Any = None, markdown: Any = False
+    ) -> None:
         raise AssertionError("timeline delivery must not use command retry owner")
 
     async def send_prepared_timeline(self, chat_id: str, prepared: PreparedTimelineSend) -> None:
@@ -140,11 +143,11 @@ def test_acceptance_replays_atomic_batch_and_target_conflicts(pool: ConnectionPo
 
 
 def test_concurrent_acceptance_commits_one_intent_and_cursor(pool: ConnectionPool) -> None:
-    def accept():
+    def accept(_index: int):
         return TimelineOutboxStore(pool).accept("telegram", "bot", "chat", 7, [candidate()])
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(lambda _: accept(), range(2)))
+        results = list(executor.map(accept, range(2)))
     assert sum(len(result.intent_ids) for result in results) == 1
     with pool.connection() as conn:
         assert conn.execute("SELECT push_item_id FROM im_bridge_cursors").fetchone() == ("1.0",)
@@ -157,7 +160,7 @@ def test_failed_insert_rolls_back_cursor_and_earlier_intent(
     store = TimelineOutboxStore(pool)
     original = store._insert
 
-    def fail_second(conn, intent):
+    def fail_second(conn: Connection, intent: TimelineIntent):
         if intent.source.identity == "persisted-2":
             raise RuntimeError("injected insert failure")
         return original(conn, intent)
@@ -190,7 +193,8 @@ def test_legacy_unqualified_blocks_cursor_and_account_rebind_requires_replay(
     result = store.accept(
         "telegram", "bot", "chat", 7, [candidate(), candidate(2, qualified=False), candidate(3)]
     )
-    assert result.blocked and result.watermark.item_id == "1.0"
+    assert result.blocked and result.watermark is not None
+    assert result.watermark.item_id == "1.0"
     with pytest.raises(OutboundAccountMismatchError):
         store.accept("telegram", "new", "chat", 7, [candidate(2, account="new")])
     store.accept(
@@ -240,7 +244,7 @@ def test_old_accounts_cannot_starve_current_account_limit(pool: ConnectionPool) 
     ],
 )
 async def test_worker_records_whole_send_outcome_without_secret(
-    pool: ConnectionPool, error, expected: str
+    pool: ConnectionPool, error: Any, expected: str
 ) -> None:
     store = TimelineOutboxStore(pool)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
@@ -257,7 +261,7 @@ async def test_worker_records_whole_send_outcome_without_secret(
 async def test_two_pools_gate_live_send_then_recover_crash_and_continue(
     pool: ConnectionPool,
 ) -> None:
-    with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool2:
+    with ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=2) as pool2:
         store = TimelineOutboxStore(pool)
         store.accept("telegram", "bot", "chat", 7, [candidate(), candidate(2, text="later")])
         live = RecordingAdapter()
@@ -285,7 +289,7 @@ async def test_two_pools_gate_live_send_then_recover_crash_and_continue(
 
 def test_worker_rejects_single_connection_configuration() -> None:
     with (
-        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1) as small,
+        ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=1) as small,
         pytest.raises(ValueError, match="max_size >= 2"),
     ):
         TimelineOutboxWorker(TimelineOutboxStore(small), {}).validate_pool()
@@ -293,14 +297,14 @@ def test_worker_rejects_single_connection_configuration() -> None:
 
 @pytest.mark.parametrize("committed", [False, True])
 async def test_success_before_outcome_commit_failure_never_repeats_external_send(
-    pool, monkeypatch, committed
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, committed: bool
 ) -> None:
     store = TimelineOutboxStore(pool)
     original = store.accept("telegram", "bot", "chat", 7, [candidate()]).intent_ids[0]
     adapter = RecordingAdapter()
     finish = store.finish
 
-    def lost(*args):
+    def lost(*args: Any):
         if committed:
             finish(*args)
         raise RuntimeError("outcome commit acknowledgement lost")

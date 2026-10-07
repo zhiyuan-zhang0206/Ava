@@ -2,6 +2,7 @@
 
 import asyncio
 from threading import Event
+from typing import Any, cast
 
 import pytest
 
@@ -9,6 +10,7 @@ from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.outbound_types import OutboundIdentityConflictError
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakeGateway,
+    FakePlainAdapter,
     _row,
     create_test_core,
 )
@@ -41,7 +43,7 @@ async def test_accepted_switch_recovers_after_commit_before_json_cache_write(
     core = create_test_core(gateway())
     state = core._get_or_create_state("telegram", "chat")
 
-    def crashed(_self, _state, _selected):
+    def crashed(_self: Any, _state: Any, _selected: Any):
         raise RuntimeError("lost process before JSON selection cache write")
 
     original = IMBridgeCore._apply_selection
@@ -67,7 +69,7 @@ async def test_recipient_mutex_orders_old_receipt_read_and_later_switch(
     read, release = Event(), Event()
     original = core.timeline_outbox.lookup_replay
 
-    def delayed(*args):
+    def delayed(*args: Any):
         result = original(*args)
         if args[3] == "A":
             read.set()
@@ -90,7 +92,7 @@ async def test_status_clear_is_cas_and_survives_restart() -> None:
     core = create_test_core(gateway())
     state = core._get_or_create_state("telegram", "chat")
     await core._cmd_switch(state, "7", replay_id="A")
-    core.gateway.agents = []
+    cast(FakeGateway, core.gateway).agents = []
     await core._cmd_status(state)
     assert state.current_agent_id is None
     restarted = create_test_core(gateway())
@@ -115,11 +117,15 @@ async def test_empty_switch_accepts_first_later_output_without_another_command()
         }
     ]
     await core.poll_timeline_outbound()
-    assert core.adapters["telegram"].sent == [("chat", "[Ava #7] first output")]
+    assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
+        ("chat", "[Ava #7] first output")
+    ]
 
 
 @pytest.mark.parametrize("json_agent", [8, None])
-async def test_legacy_json_choice_bootstraps_once_without_reviving_old_cursor(json_agent) -> None:
+async def test_legacy_json_choice_bootstraps_once_without_reviving_old_cursor(
+    json_agent: int | None,
+) -> None:
     from services.entrypoints.im_bridge.cursor_store import PushWatermark
     from services.entrypoints.im_bridge.state import _save_switch_state
 
@@ -162,7 +168,9 @@ async def test_spawn_switch_button_empty_receipt_then_first_output() -> None:
     ]
     await core.poll_timeline_outbound()
     assert upstream.sent == [(777, "first prompt", "user")]
-    assert core.adapters["telegram"].sent == [("chat", "[Ava #777] first answer")]
+    assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
+        ("chat", "[Ava #777] first answer")
+    ]
 
 
 async def test_postcommit_acceptance_response_loss_does_not_lose_or_duplicate_send(
@@ -173,7 +181,7 @@ async def test_postcommit_acceptance_response_loss_does_not_lose_or_duplicate_se
     state = ChatState("telegram", "chat", current_agent_id=7)
     original = core.timeline_outbox.accept
 
-    def lost(*args, **kwargs):
+    def lost(*args: Any, **kwargs: Any):
         original(*args, **kwargs)
         raise RuntimeError("lost acceptance response after commit")
 
@@ -184,7 +192,7 @@ async def test_postcommit_acceptance_response_loss_does_not_lose_or_duplicate_se
     monkeypatch.setattr(core.timeline_outbox, "accept", original)
     await core._push_snapshot(("telegram", "chat"), state, {})
     await core.timeline_worker.run_once()
-    assert core.adapters["telegram"].sent == [("chat", "[Ava #7] reply")]
+    assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [("chat", "[Ava #7] reply")]
 
 
 async def test_live_sse_snapshot_is_only_a_wakeup_and_periodic_pull_catches_commit() -> None:
@@ -203,7 +211,9 @@ async def test_live_sse_snapshot_is_only_a_wakeup_and_periodic_pull_catches_comm
     assert core.timeline_outbox.pending_streams({"telegram": "test-account"}) == []
     upstream.timeline = [dict(live, payload="committed")]
     await core.poll_timeline_outbound()  # No second SSE event is required.
-    assert core.adapters["telegram"].sent == [("chat", "[Ava #7] committed")]
+    assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
+        ("chat", "[Ava #7] committed")
+    ]
 
 
 async def test_live_sse_mutex_orders_acceptance_before_clear_and_late_old_producer_stays_held(
@@ -228,7 +238,7 @@ async def test_live_sse_mutex_orders_acceptance_before_clear_and_late_old_produc
     adapter = core.adapters["telegram"]
     original = adapter.prepare_timeline
 
-    async def paused(text):
+    async def paused(text: str):
         started.set()
         await release.wait()
         return await original(text)

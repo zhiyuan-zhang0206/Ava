@@ -1,6 +1,9 @@
 """Durable acceptance retains stamped ordering without a cursor-only rollback."""
 
+from typing import cast
+
 import pytest
+from psycopg_pool import ConnectionPool
 
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
 from services.entrypoints.im_bridge.outbound_store import TimelineOutboxStore
@@ -19,7 +22,12 @@ from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as po
     ],
 )
 def test_durable_cursor_orders_compact_and_numeric_tail(
-    pool, saved_id, saved_stamp, item_id, item_stamp, accepted
+    pool: ConnectionPool,
+    saved_id: str,
+    saved_stamp: str | None,
+    item_id: str,
+    item_stamp: str | None,
+    accepted: bool,
 ) -> None:
     cursors = CursorStore(pool)
     cursors.save_push("telegram", "chat", 7, PushWatermark(saved_stamp, saved_id))
@@ -35,7 +43,7 @@ def test_durable_cursor_orders_compact_and_numeric_tail(
     assert cursors.load_push() == {("telegram", "chat", 7): expected}
 
 
-def test_legacy_numbering_rollback_cannot_advance_without_an_intent(pool) -> None:
+def test_legacy_numbering_rollback_cannot_advance_without_an_intent(pool: ConnectionPool) -> None:
     cursors = CursorStore(pool)
     original = PushWatermark(None, "377.1")
     cursors.save_push("telegram", "chat", 7, original)
@@ -46,14 +54,18 @@ def test_legacy_numbering_rollback_cannot_advance_without_an_intent(pool) -> Non
 
 
 async def test_equal_stamp_blocks_keep_numeric_order_and_distinct_source_ordinals() -> None:
-    from services.entrypoints.im_bridge.tests.test_im_bridge_core import FakeGateway, _core
+    from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
+        FakeGateway,
+        FakePlainAdapter,
+        _core,
+    )
 
     core = _core(FakeGateway())
     state = core._get_or_create_state("telegram", "chat")
     state.current_agent_id = 7
     stamp = "2026-10-03T11:00:00Z"
     core.cursor_store.save_push("telegram", "chat", 7, PushWatermark(stamp, "1.8"))
-    core.gateway.timeline = [
+    cast(FakeGateway, core.gateway).timeline = [
         {
             "kind": "agent_chat",
             "item_id": f"1.{block}",
@@ -68,7 +80,7 @@ async def test_equal_stamp_blocks_keep_numeric_order_and_distinct_source_ordinal
     assert core.cursor_store.load_push() == {("telegram", "chat", 7): PushWatermark(stamp, "1.10")}
     await core.timeline_worker.run_once()
     await core.timeline_worker.run_once()
-    assert core.adapters["telegram"].sent == [
+    assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
         ("chat", "[Ava #7] block 9"),
         ("chat", "[Ava #7] block 10"),
     ]
