@@ -17,7 +17,7 @@ clock inside the stream keeps the recorded timestamps exact and stable.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,11 +25,17 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_with_cache_retry
-from agent.llm.cache import LlmInvocation
+from agent.llm.cache import CacheRef, LlmInvocation
 from ava_builtins.plugins.lm_google import gemini_cache
-from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
 from base.agents.observation.turn_progress import TurnProgress
 from base.host.env.agent_slices import AgentSlices
+
+
+@dataclass
+class _NamedCacheRef:
+    """The agent's opaque cache contract; provider TTL and memo keys are not consumed here."""
+
+    name: str
 
 
 class _FakeClock:
@@ -228,23 +234,26 @@ async def test_stale_cache_retry_uses_second_attempt_window(
     fake_llm.astream.side_effect = lambda _messages: _flaky_stream()
     invocations = {"n": 0}
 
+    cache_ref: CacheRef = _NamedCacheRef(name="cache-1")
+
     def _invocation_factory(llm):
         invocations["n"] += 1
         if invocations["n"] == 1:
             return LlmInvocation(
                 runnable=llm,  # pyright: ignore[reportUnknownArgumentType]
                 messages=[HumanMessage(content="hi")],
-                cache_ref=CacheRef(
-                    name="cache-1",
-                    key="k",
-                    expire_time=datetime.now(UTC) + timedelta(hours=1),
-                ),
+                cache_ref=cache_ref,
             )
         return _plain_invocation(llm)  # pyright: ignore[reportUnknownArgumentType]
 
     _patch_prepare(monkeypatch, _invocation_factory)
     monkeypatch.setattr(gemini_cache, "is_stale_cache_error", lambda _exc: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(gemini_cache, "invalidate", lambda _ref: None)  # pyright: ignore[reportUnknownArgumentType]
+    invalidated: list[CacheRef] = []
+
+    def invalidate(ref: CacheRef) -> None:
+        invalidated.append(ref)
+
+    monkeypatch.setattr(gemini_cache, "invalidate", invalidate)
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
@@ -252,6 +261,7 @@ async def test_stale_cache_retry_uses_second_attempt_window(
         fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
     )
 
+    assert len(invalidated) == 1 and invalidated[0] is cache_ref
     assert handler.reset_calls == 1
     assert handler.llm_decode_ms == 3000.0  # (1008 - 1005) * 1000 — 2nd attempt only
     assert handler.llm_latency_ms == 8000.0  # (1008 - 1000) * 1000 — whole call

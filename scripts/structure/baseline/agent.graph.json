@@ -16,6 +16,5 @@
   },
   "files": {},
   "patch_targets": {
-    "agent/graph/tests/test_build_with_extensions.py::base.packages.plugins.enable_config._dangling_reported": 1
   }
 }
