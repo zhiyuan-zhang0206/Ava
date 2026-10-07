@@ -310,24 +310,20 @@ def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
 
     # The newest recorded event is an hour old: an empty window may only mean a stalled writer.
     later = datetime.now(UTC) + timedelta(hours=1)
-    assert (
-        resolution.run_resolution_slice(
-            pool, events_maintenance_config(), now=later, cadence=resolution.AutoDismissCadence()
-        )
-        is None
+    result = resolution.run_resolution_slice(
+        pool, events_maintenance_config(), now=later, cadence=resolution.AutoDismissCadence()
     )
+    assert result is None
     assert emitted == []
 
     def boom(*_args: object, **_kwargs: object) -> dict[resolution.EventClass, int]:
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(resolution, "class_counts", boom)
-    assert (
-        resolution.run_resolution_slice(
-            pool, events_maintenance_config(), cadence=resolution.AutoDismissCadence()
-        )
-        is None
+    result = resolution.run_resolution_slice(
+        pool, events_maintenance_config(), cadence=resolution.AutoDismissCadence()
     )
+    assert result is None
     assert emitted == []
 
 
