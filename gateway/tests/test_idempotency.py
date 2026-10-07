@@ -31,7 +31,6 @@ from base.api_contracts.contracts import Idempotency
 from base.events.live.bus import EventBus
 from gateway.app import app
 from gateway.middleware import idempotency
-from ops.rpc_schemas import ContentBlock
 
 
 @pytest.fixture
@@ -221,7 +220,18 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A receipt survives model/upload changes after the original commit."""
-    from gateway.agents import state
+    from base.agents.uploads import agent_upload_dir
+    from base.lm import factory
+
+    upload_dir = agent_upload_dir(agent_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    image = upload_dir / "gone.png"
+    image.write_bytes(b"test image")
+
+    def supports_vision(_model: str) -> bool:
+        return True
+
+    monkeypatch.setattr(factory, "model_supports_vision", supports_vision)
 
     body = {
         "content": [
@@ -232,31 +242,18 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
         ],
         "source": "user",
     }
-    original_normalize = state._normalize_message_content
-
-    def _normalize_without_mutable_gates(
-        _request: Request,
-        _agent_id: int,
-        content: str | list[ContentBlock],
-    ) -> tuple[str, dict[str, object] | None]:
-        return original_normalize(content)
-
-    monkeypatch.setattr(
-        state,
-        "_prepare_message_content",
-        _normalize_without_mutable_gates,
-    )
     sent = client.post(
         f"/api/agents/{agent_id}/messages",
         json=body,
         headers={"Idempotency-Key": "key-multimodal-reconcile"},
     )
     assert sent.status_code == 201, sent.text
+    image.unlink()
 
     def _mutable_gate_must_not_run(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("same-key receipt lookup re-ran current model/upload validation")
 
-    monkeypatch.setattr(state, "_prepare_message_content", _mutable_gate_must_not_run)
+    monkeypatch.setattr(factory, "model_supports_vision", _mutable_gate_must_not_run)
     retried = client.post(
         f"/api/agents/{agent_id}/messages",
         json=body,

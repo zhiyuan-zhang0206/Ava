@@ -582,6 +582,7 @@ def get_run_timeline(
         strip_read = executor.submit(
             copy_context().run,
             strip_for_window_or_none,
+            request.app.state.strip_cache,
             db,
             agent_id,
             window_start,
