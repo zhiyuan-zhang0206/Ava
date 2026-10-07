@@ -122,6 +122,6 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 ## Key Dependencies
 
 - [[cli.ava.okf.md]] — the CLI domain overview: verbs, cluster identity, idempotent first start
-- [[cli/commands/extensions/docs/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` package surface
+- [[cli/commands/extensions/packages/docs/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` package surface
 - [[cli/commands/lifecycle/docs/lifecycle.ava.okf.md]] — start, stop, restart,
   maintenance and the application root

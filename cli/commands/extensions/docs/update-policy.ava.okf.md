@@ -81,7 +81,7 @@ fields at install time.
 
 ## Key Dependencies
 
-- Parent: [[packages.ava.okf.md|Package Commands]]
+- Parent: [[cli/commands/extensions/packages/docs/packages.ava.okf.md|Package Commands]]
 - [[install_registry.ava.okf.md]] — schema v2 (rows carry `update`; the registry carries `channels`)
 - [[okf/skills/load-directory-sync.ava.okf.md]] — the load directory this pass writes (the fourth bulk writer)
 - [host versioning](../../../../docs/conventions/engineering/host-versioning.md) — the derived host version the gates compare against
