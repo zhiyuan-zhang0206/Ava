@@ -576,7 +576,13 @@ async def _llm_node_impl(
     # Understanding chunk cut: an enqueue past the token threshold moves the
     # segment's cut, carried on whichever command ends this turn.
     cut_update = await due_chunk_update(
-        state.compact, list(state.messages), final_msg, pool=ctx.ops_pool, agent_id=agent_id
+        state.compact,
+        list(state.messages),
+        final_msg,
+        pool=ctx.ops_pool,
+        agent_id=agent_id,
+        model=ctx.require_agent().brain.llm_model,
+        overrides=ctx.require_agent().overrides,
     )
 
     silent_idle_cmd = _silent_idle_command(

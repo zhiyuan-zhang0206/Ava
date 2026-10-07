@@ -16,6 +16,7 @@ is described on its own: jobs of one agent do not depend on each other.
 
 This module holds the pure pieces and the queue SQL (`understanding_chunk_jobs`):
 
+- `chunk_threshold` — the chunk size, a ratio of the model's soft compaction threshold;
 - `plan_chunk` / `plan_closing_chunk` — the trigger rule and the chunk cut;
 - `enqueue_chunk` — best-effort enqueue (never raises, never blocks the turn);
 - `claim_job` / `finish_job` / `release_job` / `backlog` — the consumer's queue;
@@ -52,6 +53,8 @@ from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.store import SCHEMA_VERSION
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.db.transaction import async_write_transaction
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.context_budget import resolve_context_budget
 from base.log import logger
 
 # Stored on the node rows a chunk produces, so a text traces to its rules.
@@ -73,6 +76,18 @@ MAX_ATTEMPTS = 20
 # attempt) is failed after waiting this long; the clock starts when it first waits, so a job that
 # sits in the queue while the feature is off is not timed.
 GIVE_UP_AFTER_SECONDS = 6 * 3600.0
+
+
+def chunk_threshold(model: str, overrides: ModelOverrides | None, ratio: float) -> int:
+    """The chunk size in tokens: `ratio` x the model's soft compaction threshold.
+
+    The one definition of the size, shared by the llm node's hook, the manual build and the replay
+    tool. `overrides` is the agent's own tuning (a soft threshold it set wins over the model's).
+
+    Raises:
+        UnknownModelWindowError: `model` has no context window in the registry.
+    """
+    return max(1, round(ratio * resolve_context_budget(model, overrides).soft_compact_tokens))
 
 
 @dataclass(frozen=True)

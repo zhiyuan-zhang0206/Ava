@@ -15,7 +15,8 @@ never enqueue into the host's own cluster):
 `plan` / `enqueue` run the llm node's trigger rule (`agent/hooks/understanding_chunks.py`)
 over the stored history, with the threshold `ratio x` the agent model's compact soft
 threshold (`resolve_context_budget(...).soft_compact_tokens`) in place of
-`AVA_UNDERSTANDING_CHUNK_TOKENS`. Every AI message's `usage_metadata.input_tokens` is the
+`chunk_threshold`'s default; without `--ratio` the configured
+`AVA_UNDERSTANDING_CHUNK_RATIO` applies, as for the live hook. Every AI message's `usage_metadata.input_tokens` is the
 provider-reported figure the live hook reads. A first AI turn records the baseline, a
 chunk fires when the figure has grown by the threshold, and the stretch left after the
 last cut closes the segment (as compaction does). `enqueue` then inserts those chunks into
@@ -82,9 +83,14 @@ from base.agents.history.hierarchy.chunk_plan import (  # noqa: E402
     plan_history,
     segment_requests,
 )
-from base.agents.history.hierarchy.chunks import enqueue_chunk, message_time  # noqa: E402
+from base.agents.history.hierarchy.chunks import (  # noqa: E402
+    chunk_threshold,
+    enqueue_chunk,
+    message_time,
+)
 from base.agents.history.hierarchy.rebuild import run_rebuild  # noqa: E402
 from base.agents.observation.snapshot import agent_model_target  # noqa: E402
+from base.config import settings  # noqa: E402
 from base.db import Database  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
 
@@ -106,12 +112,20 @@ def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[str]]:
 
 
 def _threshold(
-    db: Database, agent_id: int, ratio: float, explicit: int | None
+    db: Database, agent_id: int, ratio: float | None, explicit: int | None
 ) -> tuple[str, int, int]:
     """(model, soft threshold, chunk threshold) for the agent."""
     model, overrides = agent_model_target(db, agent_id, fallback="")
     soft = resolve_context_budget(model, overrides).soft_compact_tokens
-    return model, soft, explicit if explicit is not None else round(soft * ratio)
+    if explicit is not None:
+        return model, soft, explicit
+    return (
+        model,
+        soft,
+        chunk_threshold(
+            model, overrides, settings.agent.understanding_chunk_ratio if ratio is None else ratio
+        ),
+    )
 
 
 def _describe(
@@ -290,10 +304,8 @@ def main() -> None:
     if args.command == "regroup":
         asyncio.run(_regroup(db, args.agent_id))
         return
-    if args.ratio is None and args.threshold_tokens is None:
-        sys.exit("--ratio or --threshold-tokens is required")
     history, boundaries = _load(db, args.agent_id)
-    model, soft, threshold = _threshold(db, args.agent_id, args.ratio or 0.0, args.threshold_tokens)
+    model, soft, threshold = _threshold(db, args.agent_id, args.ratio, args.threshold_tokens)
     planned = plan_history(history, boundaries, threshold=threshold)
     print(
         f"agent {args.agent_id}: {len(history.messages)} messages in {len(history.segment_starts)}"

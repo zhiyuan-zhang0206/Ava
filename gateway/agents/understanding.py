@@ -40,6 +40,7 @@ from base.agents.history.hierarchy.build import (
     load_build,
     plan_jobs,
 )
+from base.agents.history.hierarchy.chunks import chunk_threshold
 from base.agents.history.hierarchy.sessions import (
     Session,
     SessionBoundaryError,
@@ -53,30 +54,31 @@ from base.config import settings
 from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.db import Database, agent_exists
 from base.host.env.runtime_config import read_env_aliases
+from base.lm.context_budget import UnknownModelWindowError
 
 router = APIRouter()
 
 _ENABLED_ALIAS = "AVA_UNDERSTANDING_ENABLED"
-_CHUNK_TOKENS_ALIAS = "AVA_UNDERSTANDING_CHUNK_TOKENS"
+_CHUNK_RATIO_ALIAS = "AVA_UNDERSTANDING_CHUNK_RATIO"
 
 
-def chunk_threshold() -> int:
-    """`AVA_UNDERSTANDING_CHUNK_TOKENS`, as the agent host that consumes the jobs reads it.
+def chunk_ratio() -> float:
+    """`AVA_UNDERSTANDING_CHUNK_RATIO`, as the agent host that consumes the jobs reads it.
 
     The gateway profile does not construct the `agent` config domain (the cluster's value lives in
     the unit's `.env`, which the gateway pops from its environment), so outside a process that has
     the domain the value is read from that file, else the field's default.
     """
     if settings.has_domain("agent"):
-        return settings.agent.understanding_chunk_tokens
-    raw = read_env_aliases().get(_CHUNK_TOKENS_ALIAS)
+        return settings.agent.understanding_chunk_ratio
+    raw = read_env_aliases().get(_CHUNK_RATIO_ALIAS)
     if raw:
-        return int(raw)
-    return AgentRuntimeSettings.model_fields["understanding_chunk_tokens"].default
+        return float(raw)
+    return AgentRuntimeSettings.model_fields["understanding_chunk_ratio"].default
 
 
 def feature_enabled() -> bool:
-    """`AVA_UNDERSTANDING_ENABLED`, read like `chunk_threshold` (the field's default when unset)."""
+    """`AVA_UNDERSTANDING_ENABLED`, read like `chunk_ratio` (the field's default when unset)."""
     if settings.has_domain("agent"):
         return settings.agent.understanding_enabled
     raw = read_env_aliases().get(_ENABLED_ALIAS)
@@ -309,13 +311,20 @@ def build_model(db: Database, agent_id: int) -> str:
     return agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model)[0]
 
 
+def chunk_size(db: Database, agent_id: int) -> int:
+    """The agent's chunk size in tokens: the ratio of its own model's soft compaction threshold,
+    with its own overrides (the rule of the live hook)."""
+    model, overrides = agent_model_target(db, agent_id, fallback=settings.lm.hierarchy_model)
+    return chunk_threshold(model, overrides, chunk_ratio())
+
+
 def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
     _require_agent(request, agent_id)
     db: Database = request.app.state.db
     history, sessions = _load(db, agent_id)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
     model = build_model(db, agent_id)
-    jobs = plan_jobs(history, sessions, covered, threshold=chunk_threshold())
+    jobs = plan_jobs(history, sessions, covered, threshold=chunk_size(db, agent_id))
     return SessionsResponse(
         agent_id=agent_id,
         model=model,
@@ -378,7 +387,7 @@ def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> Buil
     history, sessions = _load(db, agent_id)
     chosen = _select(sessions, body)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
-    planned = plan_jobs(history, chosen, covered, threshold=chunk_threshold())
+    planned = plan_jobs(history, chosen, covered, threshold=chunk_size(db, agent_id))
     estimate = _estimate_out(estimate_cost(build_model(db, agent_id), planned))
     numbers = [s.number for s in chosen]
     enabled = feature_enabled()
@@ -417,6 +426,8 @@ async def _run[T](fn: Callable[..., T], *args: object) -> T:
         return await asyncio.to_thread(fn, *args)
     except CheckpointReadError as exc:
         raise HTTPException(status_code=503, detail=f"history unreadable: {exc}") from exc
+    except UnknownModelWindowError as exc:
+        raise HTTPException(status_code=409, detail=f"chunk size unknown: {exc}") from exc
     except SessionBoundaryError as exc:
         raise HTTPException(
             status_code=409, detail=f"history segments and boundaries disagree: {exc}"
@@ -447,8 +458,8 @@ async def post_understanding_build(
 
     Choose sessions by number (`sessions`) or by a `from` / `to` range (every session whose
     read-time extent intersects it). Each chosen session is cut into chunks by the live rule
-    (a chunk per `AVA_UNDERSTANDING_CHUNK_TOKENS` of growth in the provider-reported input, the
-    session's remainder last); what level-1 nodes already cover is skipped exactly, a chunk that
+    (a chunk per `AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold of
+    growth in the provider-reported input, the session's remainder last); what level-1 nodes already cover is skipped exactly, a chunk that
     overlaps it is cut to its uncovered runs. The jobs run on the agent hosts' consumer in order,
     one agent at a time; the session still in progress is built to the last request the agent has
     sent. Once the agent's chunk jobs have all ended, every node above level 1 and the grouping

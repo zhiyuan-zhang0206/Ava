@@ -92,7 +92,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         lambda *_a: list(reversed(state["boundaries"])),
     )
     monkeypatch.setattr(module, "build_model", lambda *_a: _MODEL)
-    monkeypatch.setattr(settings.agent, "understanding_chunk_tokens", 1000)
+    monkeypatch.setattr(module, "chunk_size", lambda *_a: 1000)
     return state
 
 
@@ -440,13 +440,13 @@ def test_a_process_without_the_agent_domain_reads_the_switch_and_chunk_size_from
     read from the unit's `.env`, the field defaults when it does not set them."""
     agent = _seed_agent(db_conn)
     monkeypatch.setattr(module, "settings", SimpleNamespace(has_domain=lambda _name: False))
-    file_values = {"AVA_UNDERSTANDING_ENABLED": "true", "AVA_UNDERSTANDING_CHUNK_TOKENS": "1000"}
+    file_values = {"AVA_UNDERSTANDING_ENABLED": "true", "AVA_UNDERSTANDING_CHUNK_RATIO": "0.25"}
     monkeypatch.setattr(module, "read_env_aliases", lambda: file_values)
     with _client() as client:
         body = _build(client, agent, sessions=[1], dry_run=True)
     assert body["understanding_enabled"] is True
-    assert [(j["start_index"], j["end_index"]) for j in body["jobs"]] == [(1, 8), (8, 13)]
+    assert module.chunk_ratio() == 0.25
 
     file_values.clear()
     assert module.feature_enabled() is False
-    assert module.chunk_threshold() == 60000
+    assert module.chunk_ratio() == 0.5

@@ -1,3 +1,5 @@
+# pyright: reportUnknownArgumentType = warning
+# pyright: reportUnknownLambdaType = warning
 """The replay planner cuts a stored segment exactly where the live trigger would have."""
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ def _segment() -> list[AnyMessage]:
 
 async def test_live_chunks_match_the_hook_turn_by_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(settings.agent, "understanding_chunk_tokens", _THRESHOLD)
+    monkeypatch.setattr(uc, "chunk_threshold", lambda _model, _overrides, _ratio: _THRESHOLD)
     enqueued: list[tuple[int, int, str | None]] = []
 
     async def fake_enqueue(pool: Any, agent_id: int, **kwargs: Any) -> bool:
@@ -55,7 +57,9 @@ async def test_live_chunks_match_the_hook_turn_by_turn(monkeypatch: pytest.Monke
     compact = CompactState()
     for i, msg in enumerate(msgs):
         if isinstance(msg, AIMessage):
-            update = await uc.due_chunk_update(compact, msgs[:i], msg, pool=MagicMock(), agent_id=1)
+            update = await uc.due_chunk_update(
+                compact, msgs[:i], msg, pool=MagicMock(), agent_id=1, model="m", overrides=None
+            )
             compact = update.get("compact", compact)
 
     planned = plan_replay(msgs, threshold=_THRESHOLD)

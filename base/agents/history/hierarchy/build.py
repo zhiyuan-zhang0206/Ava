@@ -1,8 +1,8 @@
 """Manual build of the understanding tree, session by session.
 
 A build cuts the chosen sessions' material (`sessions.py`) into chunks with the live trigger rule
-(`chunk_plan.plan_replay`, threshold `AVA_UNDERSTANDING_CHUNK_TOKENS`: a chunk per that many tokens
-of growth in the provider-reported input, the session's closing remainder last), subtracts what
+(`chunk_plan.plan_replay`, threshold `chunks.chunk_threshold`: a chunk per `AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's
+soft compaction threshold of growth in the provider-reported input, the session's closing remainder last), subtracts what
 level-1 nodes already cover — a chunk is cut down to the runs nothing covers, one job per run — and
 enqueues the rest as ordinary chunk jobs. The consumer describes them like any other; the levels
 above are rebuilt once the agent's chunk jobs have all ended (`rebuild.py`). A build records its jobs

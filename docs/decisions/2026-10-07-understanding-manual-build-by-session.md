@@ -9,7 +9,7 @@ What is decided:
   newest segment, with no boundary checkpoint, is the session in progress. Building it is what
   closing the live segment was.
 - **A build is the live trigger rule, replayed, minus coverage.** The chunks are cut as the hook
-  would have cut them (`AVA_UNDERSTANDING_CHUNK_TOKENS`, the closing remainder last); a chunk that
+  would have cut them (`AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold, the closing remainder last); a chunk that
   overlaps level-1 nodes is cut down to its uncovered runs, one job each, so a repeated or
   overlapping build never re-describes what exists. The jobs are ordinary chunk jobs.
 - **The levels above are rebuilt from the leaves, by a job.** A build also queues one
@@ -32,5 +32,4 @@ Rejected, and why:
   boundary) mean nothing to a rebuild, and the claim query would grow a second personality.
 - *Growing the upper levels as the build's leaves land.* Sessions are described out of order and in
   bulk; a grouping over a level with holes is wrong, and the tree would be redone anyway.
-- *A ratio of the model's context window as the chunk size.* The live hook uses the absolute token
-  growth; a build must cut where the hook would have.
+- *An absolute token count as the chunk size.* A fixed 60K cuts a 380K-token session into about three times the aligned number of level-1 calls; the size is a ratio of the agent model's soft compaction threshold, so it follows the model and the agent's own overrides.
