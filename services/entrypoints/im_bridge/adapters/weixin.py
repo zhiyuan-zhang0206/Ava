@@ -35,9 +35,9 @@ from base.host.private_storage import write_private_bytes
 from base.log import logger
 from base.paths import ava_home
 from services.entrypoints.im_bridge.outbound_types import (
-    PreparedTimelineSend,
-    TimelineAdapterKind,
-    TimelineChunk,
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
 )
 from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
 
@@ -590,7 +590,7 @@ class WeixinAdapter(IMAdapter):
             cutoff = time.monotonic() - DEDUP_TTL_SECONDS
             self._seen = {k: t for k, t in self._seen.items() if t >= cutoff}
 
-    async def timeline_account_id(self) -> str:
+    async def outbound_account_id(self) -> str:
         if not self._configured or not self._account_id:
             raise RuntimeError("weixin timeline account is not configured")
         endpoint = urlsplit(self._base_url)
@@ -599,18 +599,18 @@ class WeixinAdapter(IMAdapter):
         # Both values come from the existing login record; no credential enters the intent.
         return json.dumps([self._base_url, self._account_id])
 
-    async def prepare_timeline(self, text: str) -> PreparedTimelineSend:
-        return PreparedTimelineSend(
-            adapter_kind=TimelineAdapterKind.WEIXIN,
-            account_id=await self.timeline_account_id(),
-            chunks=tuple(TimelineChunk(text=chunk) for chunk in _split_text(text)),
+    async def prepare_timeline(self, text: str) -> PreparedOutboundSend:
+        return PreparedOutboundSend(
+            adapter_kind=OutboundAdapterKind.WEIXIN,
+            account_id=await self.outbound_account_id(),
+            chunks=tuple(OutboundChunk(text=chunk) for chunk in _split_text(text)),
             markdown=False,
         )
 
-    async def send_prepared_timeline(self, chat_id: str, prepared: PreparedTimelineSend) -> None:
+    async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
         if (
-            prepared.adapter_kind != TimelineAdapterKind.WEIXIN
-            or prepared.account_id != await self.timeline_account_id()
+            prepared.adapter_kind != OutboundAdapterKind.WEIXIN
+            or prepared.account_id != await self.outbound_account_id()
         ):
             raise SendNotStartedError("weixin prepared account or adapter mismatch")
         await self._send_chunks(chat_id, tuple(chunk.text for chunk in prepared.chunks))

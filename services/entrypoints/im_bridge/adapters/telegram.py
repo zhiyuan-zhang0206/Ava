@@ -28,9 +28,9 @@ from base.log import logger
 from base.paths import ava_home
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
 from services.entrypoints.im_bridge.outbound_types import (
-    PreparedTimelineSend,
-    TimelineAdapterKind,
-    TimelineChunk,
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
 )
 from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
 
@@ -331,7 +331,7 @@ class TelegramAdapter(IMAdapter):
                 f"telegram typing failed: HTTP {resp.status_code} - {resp.text[:200]}"
             )
 
-    async def timeline_account_id(self) -> str:
+    async def outbound_account_id(self) -> str:
         if not self._token or self._owner_id == 0:
             raise RuntimeError("telegram timeline account is not configured")
         async with self._identity_lock:
@@ -358,24 +358,44 @@ class TelegramAdapter(IMAdapter):
                 self._bot_id = str(bot_id)
             return self._bot_id
 
-    async def prepare_timeline(self, text: str) -> PreparedTimelineSend:
-        return PreparedTimelineSend(
-            adapter_kind=TimelineAdapterKind.TELEGRAM,
-            account_id=await self.timeline_account_id(),
+    async def prepare_timeline(self, text: str) -> PreparedOutboundSend:
+        return PreparedOutboundSend(
+            adapter_kind=OutboundAdapterKind.TELEGRAM,
+            account_id=await self.outbound_account_id(),
             chunks=tuple(
-                TimelineChunk(text=_to_html(chunk), fallback_text=chunk, html=True)
+                OutboundChunk(text=_to_html(chunk), fallback_text=chunk, html=True)
                 for chunk in _split_text(text)
             ),
             markdown=True,
         )
 
-    async def send_prepared_timeline(self, chat_id: str, prepared: PreparedTimelineSend) -> None:
+    async def prepare_notice_owner(
+        self, text: str, buttons: tuple[tuple[str, str], ...]
+    ) -> tuple[str, PreparedOutboundSend]:
+        if not self._owner_id:
+            raise SendNotStartedError("telegram notice owner is not configured")
+        recipient = str(self._owner_id)
+        prepared = PreparedOutboundSend(
+            adapter_kind=OutboundAdapterKind.TELEGRAM,
+            account_id=await self.outbound_account_id(),
+            chunks=tuple(
+                OutboundChunk(text=_escape_html(chunk), fallback_text=chunk, html=True)
+                for chunk in _split_text(text)
+            ),
+            markdown=False,
+            buttons=buttons,
+        )
+        return recipient, prepared
+
+    async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
         if (
-            prepared.adapter_kind != TimelineAdapterKind.TELEGRAM
-            or prepared.account_id != await self.timeline_account_id()
+            prepared.adapter_kind != OutboundAdapterKind.TELEGRAM
+            or prepared.account_id != await self.outbound_account_id()
         ):
             raise SendNotStartedError("telegram prepared account or adapter mismatch")
-        await self._send_chunks(chat_id, prepared.chunks, buttons=None)
+        await self._send_chunks(
+            chat_id, prepared.chunks, buttons=list(prepared.buttons) if prepared.buttons else None
+        )
 
     async def send(
         self,
@@ -389,7 +409,7 @@ class TelegramAdapter(IMAdapter):
         plain text if Telegram rejects the markup."""
 
         chunks = tuple(
-            TimelineChunk(
+            OutboundChunk(
                 text=_to_html(chunk) if markdown else _escape_html(chunk),
                 fallback_text=chunk,
                 html=True,
@@ -401,7 +421,7 @@ class TelegramAdapter(IMAdapter):
     async def _send_chunks(
         self,
         chat_id: str,
-        chunks: tuple[TimelineChunk, ...],
+        chunks: tuple[OutboundChunk, ...],
         *,
         buttons: list[tuple[str, str]] | None,
     ) -> None:

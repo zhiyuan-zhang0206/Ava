@@ -126,7 +126,7 @@ def test_chat_typing_starts_and_stops_on_agent_reply(
     state.current_agent_id = 405
 
     async def scenario() -> None:
-        core.timeline_outbox.accept(
+        core.outbound_store.accept(
             state.channel, "test-account", state.chat_id, 405, [], replay_id="initial-switch"
         )
         out = await core._handle_chat(state, "hi")
@@ -145,7 +145,7 @@ def test_chat_typing_starts_and_stops_on_agent_reply(
             }
         ]
         await core._push_snapshot(("telegram", "12345"), state, {"items": []})
-        await core.timeline_worker.run_once()
+        await core.outbound_worker.run_once()
         await asyncio.sleep(0.06)
         assert len(adapter.typing_calls) == calls_before  # stopped by the reply
         assert adapter.sent == [("12345", "[Ava #405] answer")]
@@ -164,7 +164,7 @@ def test_typing_skipped_for_plain_adapters() -> None:
     state.current_agent_id = 405
 
     async def scenario() -> None:
-        core.timeline_outbox.accept(
+        core.outbound_store.accept(
             state.channel, "test-account", state.chat_id, 405, [], replay_id="initial-switch"
         )
         await core._handle_chat(state, "hi")
@@ -180,7 +180,7 @@ def test_typing_skipped_for_plain_adapters() -> None:
             }
         ]
         await core._push_snapshot(("weixin", "67890"), state, {"items": []})
-        await core.timeline_worker.run_once()
+        await core.outbound_worker.run_once()
         assert adapter.sent == [("67890", "[Ava #405] answer")]
 
     asyncio.run(scenario())
@@ -593,7 +593,7 @@ def test_push_snapshot_watermark_compares_numerically() -> None:
             for item in snapshot("10.1", "ten")["items"]
         ]
         await core._push_snapshot(("telegram", "12345"), state, {})
-        await core.timeline_worker.run_once()
+        await core.outbound_worker.run_once()
         assert adapter.sent == [("12345", "[Ava #405] ten")]
         assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(None, "10.1")
         # the reverse: an older item behind a newer watermark is stale
@@ -602,7 +602,7 @@ def test_push_snapshot_watermark_compares_numerically() -> None:
             for item in snapshot("9.9", "nine")["items"]
         ]
         await core._push_snapshot(("telegram", "12345"), state, {})
-        await core.timeline_worker.run_once()
+        await core.outbound_worker.run_once()
         assert adapter.sent == [("12345", "[Ava #405] ten")]  # unchanged
 
     asyncio.run(scenario())

@@ -46,18 +46,16 @@ verified contract before enabling ambiguous retries.
 
 ## Timeline server Outbox
 
-Timeline dialog uses `TimelineOutboxStore`, not the command watchdog send path.
+Timeline dialog uses `IMOutboxStore`, not the command watchdog send path.
 `IMBridgeCore._push_snapshot` treats SSE as a wakeup and fetches the committed
-Gateway timeline. A periodic committed-tail pull covers an SSE emitted before
-checkpoint commit with no later event. `_accept_timeline` freezes adapter kind,
+Gateway timeline. Periodic committed-tail pulls cover pre-commit SSE with no later event. `_accept_timeline` freezes adapter kind,
 account, recipient, rendered chunks and Telegram's confirmed-rejection plain
 fallback. The manifest stores no bot token, app secret or Weixin context token.
 Authentication and ephemeral transport context remain adapter-owned.
 
 Acceptance locks the recipient's `im_bridge_cursors` row and inserts
 `im_bridge_outbound_intents` in the **same transaction** as cursor advancement.
-Only a persistent message ID/block coordinate or explicit persisted inbound
-ID/block qualifies a source. Positional UI anchors, timestamps and text hashes
+Persistent message/block or persisted inbound/block IDs qualify a source. Positional UI anchors, timestamps and text hashes
 never identify an outbound intent. A fresh unqualified source holds the cursor;
 regular acceptance may commit its preceding qualified prefix. A replay batch
 with an unqualified source is held as a whole. Historical qualification is not
@@ -92,9 +90,11 @@ acceptance can rebind. Queued intents for unavailable accounts keep their exact
 original target and a fixed diagnostic; eligible accounts are filtered before
 the worker's bounded stream selection so old records cannot starve new ones.
 
+Normal notices share [this Outbox](notice-poll.ava.okf.md).
+
 ## Dispatch, uncertainty and retention
 
-One whole-send runs per daemon. A PgBouncer transaction-pooling-compatible
+One send runs per daemon. A transaction-pooling-compatible
 `pg_try_advisory_xact_lock` gates each account/recipient stream on connection A.
 **This transaction intentionally spans the network send.** Connection B uses
 short transactions to recover abandoned `sending` rows to `uncertain`, commit a
@@ -122,7 +122,7 @@ this is not an exactly-once provider guarantee. A multi-chunk uncertain attempt
 may have delivered any prefix; there are no persisted chunk acknowledgements,
 resumable chunk retries or automatic reconciliation yet.
 
-#4477 remains open for notice/ops producer identity and atomic acceptance,
+#4477 remains open for explicit notice/ops producer identity and acceptance,
 provider capability verification, chunk acknowledgement/progress and an
 operator-directed reconciliation/retention policy. Their existing immediate
 send paths above remain separate. The pre-existing `state.outbox.jsonl` is the

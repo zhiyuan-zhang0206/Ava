@@ -104,15 +104,15 @@ def test_push_snapshot_watermark_is_per_chat() -> None:
         committed("1.1", "2.1")
         await core._push_snapshot(("telegram", "12345"), state_a, {})
         await core._push_snapshot(("weixin", "wx123"), state_b, {})
-        await core.timeline_worker.run_once()
-        await core.timeline_worker.run_once()
+        await core.outbound_worker.run_once()
+        await core.outbound_worker.run_once()
         assert adapter.sent == [("12345", "[Ava #405] p1.1"), ("12345", "[Ava #405] p2.1")]
         assert plain.sent == [("wx123", "[Ava #405] p1.1"), ("wx123", "[Ava #405] p2.1")]
         committed("3.1")
         await core._push_snapshot(("telegram", "12345"), state_a, {})
         committed("4.1")
         await core._push_snapshot(("weixin", "wx123"), state_b, {})
-        await core.timeline_worker.run_once()
+        await core.outbound_worker.run_once()
         assert adapter.sent[-1:] == [("12345", "[Ava #405] p3.1")]
         assert plain.sent[-1:] == [("wx123", "[Ava #405] p4.1")]
         assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(None, "3.1")

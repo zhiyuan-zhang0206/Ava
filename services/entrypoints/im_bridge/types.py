@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
-from services.entrypoints.im_bridge.outbound_types import PreparedTimelineSend
+from services.entrypoints.im_bridge.outbound_types import PreparedOutboundSend
 
 
 class SendNotStartedError(RuntimeError):
@@ -136,15 +136,21 @@ class IMAdapter(ABC):
         markdown. Raise on failure. Core retries only SendNotStartedError, which proves
         no earlier chunk was accepted; all ambiguous/partial sends stop."""
 
-    async def timeline_account_id(self) -> str:
+    async def outbound_account_id(self) -> str:
         """Resolve the current authenticated non-secret account identity."""
         raise NotImplementedError(f"{type(self).__name__} has no durable timeline capability")
 
-    async def prepare_timeline(self, text: str) -> PreparedTimelineSend:
+    async def prepare_timeline(self, text: str) -> PreparedOutboundSend:
         """Freeze credential-free rendering before the intent/cursor commit."""
         raise NotImplementedError(f"{type(self).__name__} has no durable timeline capability")
 
-    async def send_prepared_timeline(self, chat_id: str, prepared: PreparedTimelineSend) -> None:
+    async def prepare_notice_owner(
+        self, text: str, buttons: tuple[tuple[str, str], ...]
+    ) -> tuple[str, PreparedOutboundSend]:
+        """Freeze the notice owner's target and rendering without sending."""
+        raise NotImplementedError(f"{type(self).__name__} has no durable notice capability")
+
+    async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
         """Send exactly the accepted rendering; never rebuild or change its account."""
         raise NotImplementedError(f"{type(self).__name__} has no durable timeline capability")
 

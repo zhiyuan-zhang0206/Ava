@@ -245,6 +245,8 @@ _PER_TEST_TRUNCATE_TABLES = (
     # im-bridge durable cursors: no FK path; a leaked row would make the next
     # test's bridge resume (or replay) from a stale position.
     "im_bridge_cursors",
+    "im_bridge_notice_acceptances",
+    "im_bridge_notice_poll_state",
     "im_bridge_outbound_intents",
     "im_bridge_outbound_replays",
     # ttl-reaper cadence clocks: no FK path; a leaked stamp would make the next
