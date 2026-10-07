@@ -8,7 +8,9 @@ import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 
+from base.db import Database
 from services.entrypoints.im_bridge.adapters.tests.test_weixin_adapter import FakeCore, _message
 from services.entrypoints.im_bridge.adapters.tests.test_weixin_adapter import env as env
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
@@ -140,9 +142,11 @@ def create_agent(conn: psycopg.Connection) -> int:
 
 
 def core_for_agent(
-    client: GatewayClient, agent_id: int, monkeypatch: pytest.MonkeyPatch
-) -> IMBridgeCore:
-    bridge_core = IMBridgeCore(im_bridge_config(im_send_retry_delays=(0.0,)), client)
+    client: GatewayClient, agent_id: int, monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool
+) -> tuple[IMBridgeCore, WeixinAdapter]:
+    bridge_core = IMBridgeCore(im_bridge_config(im_send_retry_delays=(0.0,)), client, db_pool=pool)
+    adapter = WeixinAdapter(bridge_core)
+    bridge_core.register(adapter)
 
     def ignore_activity(*_args: object, **_kwargs: object) -> None:
         pass
@@ -153,13 +157,14 @@ def core_for_agent(
     state = bridge_core._get_or_create_state("weixin", "peer-1")
     state.current_agent_id = agent_id
     bridge_core._persist_switch(state)
-    return bridge_core
+    return bridge_core, adapter
 
 
 async def test_real_gateway_response_loss_then_bridge_restart_recovers_one_inbound(
     env: Path,
     gateway_unit: TestClient,
     db_conn: psycopg.Connection,
+    database: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent_id = create_agent(db_conn)
@@ -184,21 +189,22 @@ async def test_real_gateway_response_loss_then_bridge_restart_recovers_one_inbou
             raise httpx.ReadError("injected lost committed response", request=request)
         return httpx.Response(response.status_code, json=response.json())
 
-    async with httpx.AsyncClient(
-        base_url="http://test-gateway", transport=httpx.MockTransport(handler)
-    ) as transport:
-        client = GatewayClient(
-            im_bridge_config(im_send_retry_delays=(0.0,)),
-            gateway_url="http://test-gateway",
-            auth_headers={},
-        )
-        client._client = transport
-        first = core_for_agent(client, agent_id, monkeypatch)
-        await WeixinAdapter(first)._handle_message(_message(text="same", message_id="123"))
-        # Reconstruct both core and adapter: the gateway must recover its original receipt.
-        second = core_for_agent(client, agent_id, monkeypatch)
-        await WeixinAdapter(second)._handle_message(_message(text="same", message_id="123"))
-        await WeixinAdapter(second)._handle_message(_message(text="same", message_id="124"))
+    with database.pool(min_size=1, max_size=2) as pool:
+        async with httpx.AsyncClient(
+            base_url="http://test-gateway", transport=httpx.MockTransport(handler)
+        ) as transport:
+            client = GatewayClient(
+                im_bridge_config(im_send_retry_delays=(0.0,)),
+                gateway_url="http://test-gateway",
+                auth_headers={},
+            )
+            client._client = transport
+            _first, first_adapter = core_for_agent(client, agent_id, monkeypatch, pool)
+            await first_adapter._handle_message(_message(text="same", message_id="123"))
+            # Reconstruct both core and adapter: the gateway must recover its original receipt.
+            _second, second_adapter = core_for_agent(client, agent_id, monkeypatch, pool)
+            await second_adapter._handle_message(_message(text="same", message_id="123"))
+            await second_adapter._handle_message(_message(text="same", message_id="124"))
     assert keys[0] == keys[1]
     assert keys[2] != keys[1]
     assert db_conn.execute(

@@ -9,10 +9,10 @@ tags:
 
 # Write retry surface inventory
 
-Non-GET policy: `base/api_contracts/contracts.py`.
-`natural` means repeatable effects;
-`keyed` requires a business receipt; `one-shot` forbids ambiguous automatic retries.
-Login mints sessions; telemetry inserts events; upstream writes have no retry promise. Machine control has a separate operator boundary.
+Policy: `base/api_contracts/contracts.py`.
+`natural` means repeatable effects; `keyed` requires a receipt;
+`one-shot` forbids ambiguous automatic retries.
+Versioned routes: [[gateway/docs/idempotency/write-surfaces/guarded-creation.ava.okf.md]].
 
 Preset/schedule creation and schedule mutations now have optional transactional
 keyed receipts, but their routes conservatively remain `NON_IDEMPOTENT` (`one-shot`
@@ -82,4 +82,4 @@ Owners:
 | `POST /api/agents/{agent_id}/messages/reconcile` | natural | idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery |
 | `POST /api/agents/{agent_id}/system-note` | keyed | optional principal-scoped identity reuses one system-note inbound; changed payload or resurrection policy conflicts |
 | `PATCH /api/tasks/{task_id}` | keyed / transactional | receipt commits with task and notification; replay skips writes and wakes |
-| `POST /api/agents/{agent_id}/uploads` | one-shot | [upload acceptance owner](../../routers/docs/upload-batches.ava.okf.md) |
+| `POST /api/agents/{agent_id}/uploads` | one-shot | [upload acceptance owner](../../../routers/docs/upload-batches.ava.okf.md) |
