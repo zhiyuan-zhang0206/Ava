@@ -319,7 +319,7 @@ async def post_guarded_page_close(
         body.expected_page_id,
         _absolute_url(request, ""),
     )
-    if not result.replayed:
+    if result.closed_names:
         await _publish_page_event(request.app.state.bus, PageClosed(agent_id=agent_id, name=name))
     return result.record
 

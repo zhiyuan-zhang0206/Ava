@@ -363,7 +363,7 @@ class PageTargetChangedError(ValueError):
 
 def close_observed_page_in_transaction(
     db: psycopg.Connection, agent_id: int, name: str, expected_page_id: int
-) -> PageRow:
+) -> tuple[PageRow, bool]:
     """Close the latest named row only when its immutable ID matches.
 
     An already closed matching row is accepted without another effect. A newer
@@ -381,11 +381,12 @@ def close_observed_page_in_transaction(
             raise PageTargetChangedError(
                 "observed page is no longer the latest registration for this name"
             )
-        if row[8] is None:
+        changed = row[8] is None
+        if changed:
             cur.execute(
                 "UPDATE agent_pages SET closed_at = now() WHERE id = %s RETURNING "  # noqa: S608 — owned fixed projection
                 + _SELECT_COLUMNS,
                 (expected_page_id,),
             )
             row = fetch_one(cur, "close observed page")
-    return _row_to_record(row)
+    return _row_to_record(row), changed

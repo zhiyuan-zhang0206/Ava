@@ -28,7 +28,9 @@ host validation and TTL/default evaluation. A same-key replay returns the origin
 
 One writable transaction acquires the scoped-key gate, then the existing
 agent-page transaction gate. Fresh acceptance checks the target and, for
-registration, its current status and permitted dial target. Replacement closes
+registration, its current status and permitted dial target under the same target
+row locks. Host validation reuses the already borrowed transaction connection,
+so a fully occupied pool does not require a second backend to admit a write. Replacement closes
 the previous page, inserts the new row and stores its acceptance in that same
 transaction. Any failure before commit rolls back all three. Concurrent duplicate
 requests share one registry ID and original TTL; different keys represent
@@ -39,7 +41,8 @@ committing or discarding the caller's outer transaction.
 Guarded close verifies that the latest registry row for the original name has
 the observed numeric ID. A mismatch or missing row returns 409 before effect,
 so an observation of A cannot close a later B after name reuse. A matching already
-closed row accepts a new close intent without changing its snapshot. Original
+closed row accepts a new close intent without changing its snapshot or publishing
+an obsolete name-based close hint. Original
 close receipt replay bypasses current target checks and returns the historical
 acceptance even after B appears or the target is removed. No fresh nonexistent
 agent is accepted.
