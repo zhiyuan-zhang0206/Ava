@@ -86,9 +86,12 @@ async def object_file(
         )
     except UploadDeliveryConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
+    headers = render_safe_headers(item.name)
+    # FileResponse safely encodes the original display name for attachment.
+    headers.pop("Content-Disposition", None)
     return FileResponse(
         path,
         media_type=item.content_type,
         filename=item.filename,
-        headers=render_safe_headers(item.name),
+        headers=headers,
     )

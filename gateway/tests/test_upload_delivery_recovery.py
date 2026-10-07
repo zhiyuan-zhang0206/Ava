@@ -265,3 +265,23 @@ def test_completed_receipt_rejects_different_immutable_intent(uploaded_agent, ch
     with pytest.raises(UploadDeliveryConflictError, match="stored intent"):
         source.complete(app.state.db_pool, changed_request, proof_for(changed_request))
     assert source.complete(app.state.db_pool, request, proof_for(request)) == iid
+
+
+def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers(uploaded_agent):
+    from urllib.parse import quote
+
+    client, agent = uploaded_agent
+    name = "original display café.html"
+    response = client.post(
+        f"/api/keyed/v1/agents/{agent}/uploads",
+        headers=HEADERS,
+        files=[("files", (name, b"<script>bad()</script>", "text/html"))],
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["files"][0]["filename"] == name
+    served = client.get(response.json()["status_url"] + "/objects/0")
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "text/html; charset=utf-8"
+    assert served.headers["x-content-type-options"] == "nosniff"
+    assert served.headers["content-disposition"] == "attachment; filename*=utf-8''" + quote(name)
+    assert served.content == b"<script>bad()</script>"
