@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+from services.entrypoints.im_bridge.outbound_types import PreparedTimelineSend
+
 
 class SendNotStartedError(RuntimeError):
     """Adapter proof that this logical send has no accepted or ambiguous chunks.
@@ -133,6 +135,18 @@ class IMAdapter(ABC):
         platform may render; ``markdown`` marks agent content that may carry
         markdown. Raise on failure. Core retries only SendNotStartedError, which proves
         no earlier chunk was accepted; all ambiguous/partial sends stop."""
+
+    async def timeline_account_id(self) -> str:
+        """Resolve the current authenticated non-secret account identity."""
+        raise NotImplementedError(f"{type(self).__name__} has no durable timeline capability")
+
+    async def prepare_timeline(self, text: str) -> PreparedTimelineSend:
+        """Freeze credential-free rendering before the intent/cursor commit."""
+        raise NotImplementedError(f"{type(self).__name__} has no durable timeline capability")
+
+    async def send_prepared_timeline(self, chat_id: str, prepared: PreparedTimelineSend) -> None:
+        """Send exactly the accepted rendering; never rebuild or change its account."""
+        raise NotImplementedError(f"{type(self).__name__} has no durable timeline capability")
 
     async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
         """Send ``text`` to the user's private chat on this channel.

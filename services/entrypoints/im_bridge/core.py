@@ -1,9 +1,6 @@
-"""IM Bridge core — message envelope, command routing, per-channel session
-state, and SSE subscription push. Each channel is an adapter plugged into
-this core; the core owns the gateway client, the command set (/list /switch
-/status /help), and the SSE push of an agent's new messages to the chat that
-switched to it. Timeline layout mirrors the frontend (cold load + snapshot
-events render through the same filter).
+"""IM Bridge command routing, chat selection and committed timeline acceptance.
+
+Channel adapters own provider rendering; the timeline outbox owns delivery.
 """
 
 from __future__ import annotations
@@ -12,14 +9,28 @@ import asyncio
 import logging
 import time
 import uuid
-from datetime import UTC, datetime
 from functools import partial
 from typing import Any, Literal
 
+from base.deploy.maintenance import admission
 from services.entrypoints.im_bridge import copy, notice_bridge, push_watchdog
 from services.entrypoints.im_bridge.config import ImBridgeConfig
-from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
+from services.entrypoints.im_bridge.cursor_store import (
+    CursorStore,
+    PushWatermark,
+)
+from services.entrypoints.im_bridge.cursor_store import (
+    item_key as _item_key,
+)
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
+from services.entrypoints.im_bridge.outbound_store import TimelineOutboxStore
+from services.entrypoints.im_bridge.outbound_types import (
+    TimelineAcceptance,
+    TimelineCandidate,
+    TimelineIntent,
+    timeline_source,
+)
+from services.entrypoints.im_bridge.outbound_worker import TimelineOutboxWorker
 from services.entrypoints.im_bridge.spawn_menu import SpawnMenuMixin
 from services.entrypoints.im_bridge.state import (
     _load_outbox,
@@ -35,7 +46,6 @@ from services.entrypoints.im_bridge.types import (
     InboundMessage,
     Reply,
     SendNotStartedError,
-    SpawnDraft,
 )
 
 _log = logging.getLogger("services.entrypoints.im_bridge.core")
@@ -56,9 +66,6 @@ def _display_status(status: str) -> str:
     return status
 
 
-_PUSH_LIMIT = 2000  # per-message char cap before splitting
-
-
 def _is_dialog_item(it: dict[str, Any]) -> bool:
     """The default push filter: user-originated messages + agent text output.
 
@@ -74,13 +81,9 @@ def _is_dialog_item(it: dict[str, Any]) -> bool:
     return True
 
 
-# SSE read timeout + enqueue backoff are configurable (task #698 G8);
-# 120s only trips on a dead connection (keep-alive ~1/s); the 2+4+8+16+32s
-# backoff covers a gateway mid-rollout, then we give up.
+# SSE timeout and inbound enqueue backoff come from the service config slice.
 
-# The native "typing" indicator (sendChatAction) lasts ~5 seconds per call, so
-# refresh it every 4s while the agent works; give up after 5 minutes so a
-# silent agent does not type forever.
+# Refresh Telegram's ~5-second typing indicator every 4s, for at most 5 minutes.
 _TYPING_INTERVAL_S = 4.0
 _TYPING_MAX_S = 300.0
 
@@ -92,22 +95,16 @@ class IMBridgeCore(SpawnMenuMixin):
         self.config = config
         self.gateway = gateway
         self.cursor_store = CursorStore(db_pool)
+        self.timeline_outbox = TimelineOutboxStore(db_pool)
         self.notice_bridge = notice_bridge.NoticeBridge(self, config, db_pool=db_pool)
         self.adapters: dict[str, IMAdapter] = {}
+        self.timeline_worker = TimelineOutboxWorker(self.timeline_outbox, self.adapters)
         self.chats: dict[tuple[str, str], ChatState] = {}
+        self._selection_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
         self._typing_tasks: dict[tuple[str, str], asyncio.Task[Any]] = {}
         self._last_pushed: dict[tuple[str, str, int], PushWatermark] = {}
-        # (channel, chat_id, agent_id) -> newest pushed item (created_at +
-        # item_id; created_at is the primary key, so a compact renumbering a
-        # session's item ids cannot strand the push — `PushWatermark`).
-        # Per-chat, not per-agent: two chats switched to the same agent share
-        # one snapshot stream, and a shared watermark let the later chat's
-        # snapshot advance it past what the earlier chat had pushed.
-        # Persisted (`_set_watermark`, loaded by `restore_subscriptions`): the
-        # SSE feed is a live tail, so what the agent said while this daemon
-        # was down is recovered from the timeline past the saved watermark
-        # (`_catch_up`), not from the feed.
+        # Post-commit memory cache; the cursor row owns acceptance and selection.
 
         self._switch_state = _load_switch_state()
         self._disabled_channels: set[str] = set(config.im_disabled_adapters)
@@ -117,17 +114,11 @@ class IMBridgeCore(SpawnMenuMixin):
         self.adapters[adapter.channel] = adapter
 
     async def notify_user(self, text: str) -> dict[str, str]:
-        """Fan one outbound message out to every loaded adapter's owner chat.
+        """Fan ops notifications to loaded owner chats, isolating each result.
 
-        Used by the ops-alerts pipeline (the gateway POSTs to the daemon's
-        ``/send`` RPC): the user gets the alert on whichever IM channels are
-        actually connected. A channel that fails (unconfigured, no known
-        chat, platform error) is logged and skipped — one broken channel must
-        not stop the others. A proven unstarted send gets one retry after the
-        shared bounded jitter backoff; an adapter that
-        cannot resolve an owner chat (``NotImplementedError``) is skipped
-        without a retry — no retry can change that. Only SendNotStartedError proves
-        the whole message is safe to retry; ambiguous or partial sends stop."""
+        This separate producer keeps its existing immediate send contract.
+        Only SendNotStartedError permits one bounded retry; uncertain sends stop.
+        """
 
         results: dict[str, str] = {}
         for channel, adapter in self.adapters.items():
@@ -203,7 +194,12 @@ class IMBridgeCore(SpawnMenuMixin):
                     state, text, idempotency_key=msg.idempotency_key
                 )
             elif text.startswith("/"):
-                reply = await self._handle_command(state, text, msg.idempotency_key)
+                reply = await self._handle_command(
+                    state,
+                    text,
+                    msg.idempotency_key,
+                    replay_id=msg.idempotency_key or msg.message_id or uuid.uuid4().hex,
+                )
             else:
                 try:
                     reply = await self._handle_chat(state, text, msg.idempotency_key)
@@ -264,10 +260,7 @@ class IMBridgeCore(SpawnMenuMixin):
             self._outbox_replay_task = asyncio.create_task(self._outbox_replay_loop())
 
     async def _outbox_replay_loop(self) -> None:
-        """Drain the outbox with backoff, forever: a failed entry already
-        burned the full send backoff inside send_message, so wait it out
-        again before touching the gateway. Idle rounds sleep and do nothing
-        (created on first enqueue and at daemon start)."""
+        """Drain the existing inbound journal through the keyed gateway API."""
 
         # quiesce-exempt: replays a local file outbox through the gateway API; no database
         while True:
@@ -306,14 +299,19 @@ class IMBridgeCore(SpawnMenuMixin):
     # -- commands ------------------------------------------------------------
 
     async def _handle_command(
-        self, state: ChatState, text: str, idempotency_key: str | None = None
+        self,
+        state: ChatState,
+        text: str,
+        idempotency_key: str | None = None,
+        *,
+        replay_id: str | None = None,
     ) -> Reply | list[Reply] | None:
         cmd, _, arg = text.partition(" ")
         cmd = cmd.lower()
         if cmd == "/list":
             return await self._cmd_list(state.channel)
         if cmd == "/switch":
-            return await self._cmd_switch(state, arg.strip())
+            return await self._cmd_switch(state, arg.strip(), replay_id=replay_id)
         if cmd == "/status":
             return await self._cmd_status(state)
         if cmd == "/spawn":
@@ -380,11 +378,62 @@ class IMBridgeCore(SpawnMenuMixin):
                     break
         return None
 
-    async def _cmd_switch(self, state: ChatState, arg: str) -> Reply | list[Reply]:
+    async def _cmd_switch(
+        self, state: ChatState, arg: str, *, replay_id: str | None = None
+    ) -> Reply | list[Reply]:
+        async with self._selection_lock(state):
+            return await self._cmd_switch_locked(state, arg, replay_id=replay_id)
+
+    def _selection_lock(self, state: ChatState) -> asyncio.Lock:
+        return self._selection_locks.setdefault((state.channel, state.chat_id), asyncio.Lock())
+
+    def _apply_selection(self, state: ChatState, selected: int | None) -> None:
+        previous = state.current_agent_id
+        state.current_agent_id = selected
+        self._persist_switch(state)
+        if selected is None:
+            task = self._subscriptions.pop((state.channel, state.chat_id), None)
+            if task is not None:
+                task.cancel()
+        else:
+            self._ensure_subscription(state, prev_agent=previous)
+
+    async def _sync_selection(self, state: ChatState) -> int | None:
+        if admission.quiesced():
+            raise RuntimeError("IM selection is held during maintenance")
+        account = await self.adapters[state.channel].timeline_account_id()
+        selected = await asyncio.to_thread(
+            self.timeline_outbox.selection,
+            state.channel,
+            account,
+            state.chat_id,
+            state.current_agent_id,
+        )
+        self._apply_selection(state, selected)
+        return selected
+
+    async def _cmd_switch_locked(
+        self, state: ChatState, arg: str, *, replay_id: str | None = None
+    ) -> Reply | list[Reply]:
         if not arg:
             # user ruling: /switch without an id is an error — the picker
             # lives on /list's tap-to-switch card, not here
             return Reply(copy.SWITCH_USAGE)
+        if admission.quiesced():
+            raise RuntimeError("IM switch acceptance is held during maintenance")
+        replay_id = replay_id or uuid.uuid4().hex
+        account = await self.adapters[state.channel].timeline_account_id()
+        recovered = await asyncio.to_thread(
+            self.timeline_outbox.lookup_replay,
+            state.channel,
+            account,
+            state.chat_id,
+            replay_id,
+            arg,
+        )
+        if recovered is not None:
+            self._apply_selection(state, recovered.selected_agent_id)
+            return []
         target = await self._find_switch_target(arg)
         if target is None:
             return Reply(copy.AGENT_NOT_FOUND.format(arg=arg))
@@ -394,10 +443,6 @@ class IMBridgeCore(SpawnMenuMixin):
                     agent_id=target["agent_id"], status=target["status"]
                 )
             )
-        prev = state.current_agent_id
-        state.current_agent_id = target["agent_id"]
-        self._persist_switch(state)
-        self._ensure_subscription(state, prev_agent=prev)
         # Raw timeline mixes dialog items with non-dialog ones (agent_updated,
         # task events...), so fetch a wider window and keep the most recent
         # `replay` dialog messages (user feedback: replay showed only 2).
@@ -414,25 +459,39 @@ class IMBridgeCore(SpawnMenuMixin):
                 else copy.SWITCHED_TO_UNNAMED.format(agent_id=target["agent_id"])
             )
         ]
+        acceptance = await self._accept_timeline(
+            state,
+            target["agent_id"],
+            list(reversed(msgs)),
+            replay_id=replay_id,
+            switch_arg=arg,
+        )
+        if acceptance.blocked:
+            raise ValueError("switch replay requires durable timeline source identities")
+        self._apply_selection(state, acceptance.selected_agent_id)
         if not msgs:
             replies.append(Reply(copy.NO_MESSAGES_YET))
-            return replies
-        # record push watermark so the subscription only sends what's new
-        await self._set_watermark(
-            (state.channel, state.chat_id, target["agent_id"]), _watermark_of(msgs[-1])
-        )
-        # one message per item — never a wall of concatenated text
-        for it in reversed(msgs):
-            replies.append(Reply(_render_item(it, target["agent_id"]), markdown=True))
         return replies
 
     async def _cmd_status(self, state: ChatState) -> Reply:
+        async with self._selection_lock(state):
+            return await self._cmd_status_locked(state)
+
+    async def _cmd_status_locked(self, state: ChatState) -> Reply:
+        await self._sync_selection(state)
         if state.current_agent_id is None:
             return Reply(copy.NO_AGENT_SWITCHED)
         a = await self.gateway.get_agent(state.current_agent_id)
         if a is None:
-            state.current_agent_id = None
-            self._persist_switch(state)
+            account = await self.adapters[state.channel].timeline_account_id()
+            await asyncio.to_thread(
+                self.timeline_outbox.clear_selection,
+                state.channel,
+                account,
+                state.chat_id,
+                state.current_agent_id,
+            )
+            await self._sync_selection(state)
             return Reply(copy.CURRENT_AGENT_GONE)
         label = a.get("label") or copy.UNNAMED_LABEL
         lines = [
@@ -479,6 +538,13 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _handle_chat(
         self, state: ChatState, text: str, idempotency_key: str | None = None
     ) -> Reply | None:
+        async with self._selection_lock(state):
+            return await self._handle_chat_locked(state, text, idempotency_key)
+
+    async def _handle_chat_locked(
+        self, state: ChatState, text: str, idempotency_key: str | None = None
+    ) -> Reply | None:
+        await self._sync_selection(state)
         if state.current_agent_id is None:
             return Reply(copy.NO_AGENT_SWITCHED)
         # Replies arrive via SSE push — make sure the subscription exists even
@@ -533,27 +599,36 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _deliver_item(self, state: ChatState, it: dict[str, Any], agent_id: int) -> None:
         """Push one fresh dialog item as a message."""
 
-        await self._send(
-            state.channel, state.chat_id, Reply(_render_item(it, agent_id), markdown=True)
-        )
+        await self._accept_timeline(state, agent_id, [it])
 
     # -- subscription push ----------------------------------------------------
 
     async def restore_subscriptions(self) -> None:
-        """Rebuild SSE subscriptions from switch_state (Task #804); channels
-        disabled via AVA_IM_DISABLED_ADAPTERS get none (in-memory subs die
-        with the daemon). Loads the saved push watermarks first: each
-        restored subscription then catches up from its own."""
+        """Restore canonical selection and bootstrap the legacy JSON cache once."""
         self._last_pushed.update(await asyncio.to_thread(self.cursor_store.load_push))
-        for key, agent_id in self._switch_state.items():
-            channel, sep, chat_id = key.partition(":")
-            if not sep or not channel or not chat_id:
+        legacy = {
+            (channel, chat): agent
+            for key, agent in self._switch_state.items()
+            for channel, separator, chat in [key.partition(":")]
+            if separator and channel and chat
+        }
+        candidates = await asyncio.to_thread(self.timeline_outbox.restore_candidates, legacy)
+        for (channel, chat_id), agent_id in candidates.items():
+            if channel not in self.adapters or channel in self._disabled_channels:
                 continue
             state = self._get_or_create_state(channel, chat_id)
-            if state.current_agent_id != agent_id:
-                state.current_agent_id = agent_id
-            self._ensure_subscription(state, catch_up=True)
-            await asyncio.sleep(0)  # let the subscription task spin up
+            state.current_agent_id = agent_id
+            try:
+                async with self._selection_lock(state):
+                    await self._sync_selection(state)
+            except Exception as exc:
+                _log.warning(
+                    "selection restore held channel=%s class=%s", channel, type(exc).__name__
+                )
+                continue
+            if state.current_agent_id is not None:
+                self._ensure_subscription(state, catch_up=True)
+            await asyncio.sleep(0)
 
     def _ensure_subscription(
         self, state: ChatState, prev_agent: int | None = None, *, catch_up: bool = False
@@ -572,9 +647,6 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _subscription_loop(
         self, key: tuple[str, str], state: ChatState, *, catch_up: bool = False
     ) -> None:
-        # Escalate INFO->WARNING after 12 consecutive reconnect failures
-        # (~1 min at the 5s retry): one drop per gateway restart is expected,
-        # and is reported once, at its first failure.
         _sse_reconnect_warn_after = 12
         failures = 0
         # quiesce-exempt: an SSE reconnect loop against the gateway; a cursor is written only when an event arrives
@@ -594,12 +666,7 @@ class IMBridgeCore(SpawnMenuMixin):
                 return
             except Exception:
                 failures += 1
-                # stdlib %-style (a loguru '{}' placeholder here used to raise
-                # TypeError inside this except block, which the surrounding try
-                # does not catch — the reconnect loop and with it all pushes
-                # died, Task #1032). The first failure of a streak is reported
-                # at WARNING with its traceback; the retries that follow are
-                # INFO until the streak is long enough to escalate again.
+                # Report the first failure and sustained reconnect failures.
                 if failures == 1 or failures >= _sse_reconnect_warn_after:
                     _log.warning(
                         "sse loop error, reconnecting in 5s (x%d)", failures, exc_info=True
@@ -611,30 +678,22 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _push_snapshot(
         self, key: tuple[str, str], state: ChatState, event: dict[str, Any]
     ) -> None:
-        await self._push_items(key, state, event.get("items", []))
+        del event
+        # SSE contains live reducer snapshots, not a checkpoint commit receipt.
+        # It only wakes a read through the committed timeline owner.
+        if state.current_agent_id is not None:
+            await self._catch_up(key, state, state.current_agent_id)
 
     async def _catch_up(self, key: tuple[str, str], state: ChatState, agent_id: int) -> None:
-        """Push what the agent said past the saved watermark while no
-        subscription was listening (daemon down, SSE reconnecting): the feed
-        is a live tail, so the timeline is the only place those items still
-        are. Without a saved watermark nothing is pushed — a chat never
-        pushed to has no position to resume from. Bounded by the /switch
-        timeline window."""
+        async with self._selection_lock(state):
+            await self._catch_up_locked(key, state, agent_id)
 
-        if (*key, agent_id) not in self._last_pushed:
-            return
+    async def _catch_up_locked(self, key: tuple[str, str], state: ChatState, agent_id: int) -> None:
+        """Accept committed tail through the locked cursor owner."""
+
         items = await self.gateway.get_timeline(agent_id)
-        await self._push_items(key, state, items)
-
-    async def _set_watermark(
-        self, watermark_key: tuple[str, str, int], watermark: PushWatermark
-    ) -> None:
-        """Save, then advance: a failed save leaves the memory watermark behind,
-        so nothing is delivered past an unsaved position (the subscription
-        loop reconnects and retries)."""
-
-        await asyncio.to_thread(self.cursor_store.save_push, *watermark_key, watermark)
-        self._last_pushed[watermark_key] = watermark
+        if state.current_agent_id == agent_id:
+            await self._push_items(key, state, items)
 
     async def _push_items(
         self, key: tuple[str, str], state: ChatState, raw_items: list[Any]
@@ -642,75 +701,79 @@ class IMBridgeCore(SpawnMenuMixin):
         if state.current_agent_id is None:
             return
         agent_id = state.current_agent_id
-        items: list[dict[str, Any]] = [it for it in raw_items if _is_dialog_item(it)]
+        items = [it for it in raw_items if _is_dialog_item(it)]
         if not items:
             return
         items.sort(key=lambda it: _item_key(str(it.get("item_id", "0.0"))))
-        watermark_key = (*key, agent_id)  # (channel, chat_id, agent_id)
-        watermark = self._last_pushed.get(watermark_key)
-        # _is_after_watermark keeps the numeric item_id comparison (Task #1032:
-        # the old string compare called '9.5' > '10.1' false, so the first
-        # message across a magnitude boundary silently stopped all pushes),
-        # with created_at as the primary key (#4933: immune to the compact
-        # that renumbers a session's item ids).
-        fresh = [it for it in items if watermark is None or _is_after_watermark(it, watermark)]
-        if not fresh:
-            await self._reset_watermark_on_rollback(watermark_key, items, watermark)
-            return
-        if any(it.get("kind") == "agent_chat" for it in fresh):
-            self._stop_typing(state)  # the agent's first text output ends the indicator
-        await self._set_watermark(watermark_key, _watermark_of(fresh[-1]))
-        for it in fresh:
-            await self._deliver_item(state, it, agent_id)
+        acceptance = await self._accept_timeline(state, agent_id, items)
+        if acceptance.intent_ids and any(it.get("kind") == "agent_chat" for it in items):
+            self._stop_typing(state)
+        if acceptance.blocked:
+            _log.warning(
+                "timeline acceptance held for unqualified source channel=%s chat=%s agent=%s",
+                *key,
+                agent_id,
+            )
 
-    async def _reset_watermark_on_rollback(
+    async def _accept_timeline(
         self,
-        watermark_key: tuple[str, str, int],
+        state: ChatState,
+        agent_id: int,
         items: list[dict[str, Any]],
-        watermark: PushWatermark | None,
-    ) -> None:
-        """A non-empty batch entirely at or behind the watermark: nothing
-        new, or an item_id renumbering rollback. The check runs ONLY when a
-        stamp cannot decide: when both the watermark and the batch max carry
-        a readable created_at and the max is not after it (a stamped item
-        after the watermark would have been fresh), the batch is simply old
-        content in a compact-renumbered session — a compact wiping the ids is
-        not an incident, so this stays quiet (review 2026-10-03: judging by
-        item_id alone fired one spurious ERROR + reset per compact per chat
-        while snapshots carried only the wiped tail). For a legacy watermark
-        without a stamp — or a batch max without one — the numbering check
-        stands: the observed max lying STRICTLY behind the watermark's
-        item_id is a rollback (2026-10-03: both affected pushes stranded for
-        hours with zero log lines). On a rollback: name it, skip the
-        triggering batch — never replay it, the log line is the evidence —
-        reset the watermark to the observed max, and resume from the next
-        item. One reset per rollback: afterwards the observed max IS the
-        watermark, so the same batch observed again stays quiet."""
-
-        if watermark is None:
-            return
-        observed_max = items[-1]  # sorted by item_id: the batch's maximum
-        observed_stamp = _parse_stamp(observed_max.get("created_at"))
-        watermark_stamp = _parse_stamp(watermark.created_at)
-        if (
-            observed_stamp is not None
-            and watermark_stamp is not None
-            and observed_stamp <= watermark_stamp
-        ):
-            return
-        observed_id = str(observed_max["item_id"])
-        if _item_key(observed_id) >= _item_key(watermark.item_id):
-            return
-        _log.error(
-            "push watermark rolled back: every item sits behind it "
-            "(session compacted?); resetting to the observed max and "
-            "skipping this batch — channel=%s chat=%s agent=%s old=%s "
-            "observed_max=%s",
-            *watermark_key,
-            watermark.item_id,
-            observed_id,
+        *,
+        replay_id: str = "",
+        switch_arg: str = "",
+    ) -> TimelineAcceptance:
+        if admission.quiesced():
+            return TimelineAcceptance((), None, blocked=True)
+        adapter = self.adapters[state.channel]
+        account = await adapter.timeline_account_id()
+        candidates: list[TimelineCandidate] = []
+        for item in items:
+            source = timeline_source(item)
+            intent = None
+            if source is not None:
+                prepared = await adapter.prepare_timeline(_render_item(item, agent_id))
+                intent = TimelineIntent(
+                    channel=state.channel,
+                    chat_id=state.chat_id,
+                    agent_id=agent_id,
+                    source=source,
+                    prepared=prepared,
+                    replay_id=replay_id,
+                )
+            candidates.append(TimelineCandidate(item, intent))
+        acceptance = await asyncio.to_thread(
+            self.timeline_outbox.accept,
+            state.channel,
+            account,
+            state.chat_id,
+            agent_id,
+            candidates,
+            replay_id=replay_id,
+            switch_arg=switch_arg,
         )
-        await self._set_watermark(watermark_key, _watermark_of(observed_max))
+        if acceptance.watermark is not None and acceptance.selected_agent_id == agent_id:
+            self._last_pushed[(state.channel, state.chat_id, agent_id)] = acceptance.watermark
+        return acceptance
+
+    async def poll_timeline_outbound(self) -> None:
+        """A committed-tail pull covers an SSE event emitted before its commit."""
+        for key, state in list(self.chats.items()):
+            if state.current_agent_id is None:
+                continue
+            try:
+                async with self._selection_lock(state):
+                    selected = await self._sync_selection(state)
+                    if selected is not None:
+                        await self._catch_up_locked(key, state, selected)
+            except Exception as exc:
+                _log.warning(
+                    "committed timeline pull failed channel=%s class=%s",
+                    state.channel,
+                    type(exc).__name__,
+                )
+        await self.timeline_worker.run_once()
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -719,65 +782,6 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
-
-
-def _spawn_button(draft: SpawnDraft) -> tuple[str, str]:
-    """The summary [Spawn] button every menu layer carries: the current
-    selections (or "default") so the layer is completable as-is (user
-    ruling: the button shows the selection summary)."""
-
-    preset = draft.preset_label if draft.preset_id is not None else "default"
-    summary = f"Spawn: {preset} / {draft.model or 'default'} / {draft.effort or 'default'}"
-    return (summary, "spawn:go")
-
-
-def _parse_stamp(raw: object) -> datetime | None:
-    """Parse an ISO-8601 created_at to an aware datetime (naive reads as UTC);
-    None for absent or unparseable values — a legacy item or row, which
-    compares by item_id alone."""
-
-    if not isinstance(raw, str) or not raw:
-        return None
-    try:
-        stamp = datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    return stamp if stamp.tzinfo is not None else stamp.replace(tzinfo=UTC)
-
-
-def _watermark_of(item: dict[str, Any]) -> PushWatermark:
-    """The push position one timeline item stands for: its created_at when
-    stamped (stored verbatim), its item_id always."""
-
-    raw = item.get("created_at")
-    stamped = raw if isinstance(raw, str) and _parse_stamp(raw) is not None else None
-    return PushWatermark(created_at=stamped, item_id=str(item["item_id"]))
-
-
-def _is_after_watermark(item: dict[str, Any], watermark: PushWatermark) -> bool:
-    """Whether *item* sits past *watermark* on the chat's push position.
-
-    created_at is the primary key: monotone across the session's whole life,
-    while item_id (f"{msg_idx}.{block_idx}") is a POSITION that a compact
-    renumbers — the id-only comparison froze both affected pushes on
-    2026-10-03 (#4932/#4933). Equal stamps (the blocks of one message share
-    one) fall through to the numeric item_id order; a stamp missing or
-    unreadable on either side also falls back to item_id alone — the
-    legacy-row semantics the rollback reset recovers."""
-
-    item_stamp = _parse_stamp(item.get("created_at"))
-    watermark_stamp = _parse_stamp(watermark.created_at)
-    if item_stamp is not None and watermark_stamp is not None and item_stamp != watermark_stamp:
-        return item_stamp > watermark_stamp
-    return _item_key(str(item["item_id"])) > _item_key(watermark.item_id)
-
-
-def _item_key(item_id: str) -> tuple[int, int]:
-    try:
-        msg_idx, block_idx = item_id.split(".", 1)
-        return (int(msg_idx), int(block_idx or 0))
-    except ValueError:
-        return (0, 0)
 
 
 def _render_item(it: dict[str, Any], agent_id: int | None = None) -> str:
