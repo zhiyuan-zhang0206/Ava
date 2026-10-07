@@ -247,8 +247,28 @@ def _upsert_row(
     return row, did_insert
 
 
+def alert_instance_fingerprint(alert: dict[str, Any]) -> str:
+    """Use the webhook fingerprint or the established Alertmanager fallback."""
+    labels: dict[str, str] = alert.get("labels") or {}
+    return alert.get("fingerprint") or fingerprint(labels)
+
+
+def resolve_alert_key(conn: psycopg.Connection, alert: dict[str, Any]) -> AlertKey | None:
+    """Resolve the existing instance identity without inventing a missing start time."""
+    labels: dict[str, str] = alert.get("labels") or {}
+    fp = alert_instance_fingerprint(alert)
+    starts_at = parse_ts(alert.get("starts_at") or "")
+    if starts_at is None:
+        starts_at = _existing_starts_at(conn, fp, parse_alertname(labels))
+    return (fp, starts_at) if starts_at is not None else None
+
+
 def upsert_alert(
-    conn: psycopg.Connection, alert: dict[str, Any], source: str = "grafana"
+    conn: psycopg.Connection,
+    alert: dict[str, Any],
+    source: str = "grafana",
+    *,
+    instance_key: AlertKey | None = None,
 ) -> tuple[AlertKey, bool, bool, dict[str, Any]]:
     """Upsert one alert instance; return (key, did_insert, should_notify, row).
 
@@ -277,13 +297,11 @@ def upsert_alert(
     status = normalize_status(str(alert.get("status") or "firing"))
     severity = parse_severity(labels)
     alertname = parse_alertname(labels)
-    fp = alert.get("fingerprint") or fingerprint(labels)
-    starts_at = parse_ts(alert.get("starts_at") or "")
-
-    if starts_at is None:
-        starts_at = _existing_starts_at(conn, fp, alertname)
-        if starts_at is None:
-            return (fp, datetime.min.replace(tzinfo=UTC)), False, False, {}
+    key = instance_key or resolve_alert_key(conn, alert)
+    if key is None:
+        fp = alert_instance_fingerprint(alert)
+        return (fp, datetime.min.replace(tzinfo=UTC)), False, False, {}
+    fp, starts_at = key
 
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
