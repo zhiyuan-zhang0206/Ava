@@ -1,6 +1,6 @@
 """Turn-scoped agent identity — the contextvar half of "who am I".
 
-Phase 1 of `future/infra/agent-runner-as-server.md`: in the hosted runner many
+Phase 1 of `future/infra/lifecycle/agent-runner-as-server.md`: in the hosted runner many
 agents' turns share one process, so the two process-level identity channels —
 the identity of the bound `AvaContext` (`ava.sdk_surface.process_context`, bound once by the
 agent bootstrap) and the `AVA_AGENT_ID`

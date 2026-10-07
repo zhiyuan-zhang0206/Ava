@@ -30,9 +30,9 @@ import { McpInventory, PluginsInventory } from "@/app/control/inventory/page";
 import PresetsPage from "@/app/control/presets/page";
 import SchedulesPage from "@/app/control/schedules/page";
 import SkillsPage from "@/app/control/skills/page";
-import { PluginNavList } from "@/components/plugin-nav";
+import { PluginNavList } from "@/components/plugins/plugin-nav";
 import { buttonVariants } from "@/components/ui/button";
-import { assetUrl } from "@/lib/api";
+import { assetUrl } from "@/lib/transport/api";
 
 import { ControlNav } from "./_nav";
 import {
@@ -40,8 +40,8 @@ import {
   CONTROL_SECTIONS,
 } from "./_sections";
 import { ControlSection } from "./_section";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export default function ControlPage() {
   const t = useTranslations("control");

@@ -45,7 +45,7 @@ groups are enumerated in [[cli/docs/operator-surfaces.ava.okf.md]].
 
 Ordinary `ava start` resumes the existing local maintenance hold after readiness. Durable
 agent identity and work survive both stop and restart; live terminal processes
-survive neither. See [operator procedure](../../docs/conventions/graceful-maintenance.md).
+survive neither. See [operator procedure](../../docs/conventions/operations/graceful-maintenance.md).
 
 ## Init and idempotent start
 

@@ -3,11 +3,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { AgentRow as AgentRowItem } from "@/components/agent-row";
-import { api } from "@/lib/api";
+import { AgentRow as AgentRowItem } from "@/components/agents/agent-row";
+import { api } from "@/lib/transport/api";
 import { AGENT_DIRECTORY_QUERY_KEY } from "@/lib/fold/agents";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 import type { InnerProps } from "./types";
 
 /** Only the current archive page is retained. Search restarts at the latest page. */

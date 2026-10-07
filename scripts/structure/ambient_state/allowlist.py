@@ -181,7 +181,7 @@ ALLOWED: dict[str, str] = {
     "base/native_process/group_closure.py::hidden-singleton:_proc_listpids": "a ctypes loader of one OS entry point: code, not state",
     "base/native_process/pidfd.py::hidden-singleton:_api": "a ctypes loader of the pidfd syscalls: code, not state",
     "ava/__init__.py::ambient-instance:extend": "a namespace of functions built once and never rebound or filled afterwards",
-    "ava/sdk_surface/process_context.py::contextvar:_CURRENT": "the process's AvaContext: the one in-process entry to the run's context, as LangGraph's get_runtime() reads the run's Runtime (docs/decisions/2026-10-04-ava-state-and-context.md)",
+    "ava/sdk_surface/process_context.py::contextvar:_CURRENT": "the process's AvaContext: the one in-process entry to the run's context, as LangGraph's get_runtime() reads the run's Runtime (docs/decisions/agents/context/2026-10-04-ava-state-and-context.md)",
 }
 
 # ── 4. slice-governed packages ─────────────────────────────────────────────

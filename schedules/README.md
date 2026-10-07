@@ -59,7 +59,7 @@ default. The checkout is the source of truth for a built-in's code: a hand edit 
 its stored script is replaced at the next provision; edit the template instead.
 Schedules that are not in the manifest (agent-created ones) are never read or
 written by provisioning. Rationale and rejected alternatives:
-[decision](../docs/decisions/2026-10-03-builtin-schedules-resync-from-repo.md).
+[decision](../docs/decisions/agents/scheduling/2026-10-03-builtin-schedules-resync-from-repo.md).
 
 ### Adding or changing a built-in
 

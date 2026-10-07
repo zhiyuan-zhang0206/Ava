@@ -30,7 +30,7 @@ def test_is_doc_path_leaves_nested_code_docs_to_their_directory(path: str) -> No
 @pytest.mark.parametrize(
     ("paths", "expected"),
     [
-        (["ui/web/app/page.tsx", "ui/web/src/lib/api.ts"], (True, False)),
+        (["ui/web/app/page.tsx", "ui/web/src/lib/transport/api.ts"], (True, False)),
         (["agent/graph/exec/node.py"], (False, True)),
         (
             [

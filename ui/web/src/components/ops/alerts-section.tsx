@@ -15,12 +15,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDuration } from "@/lib/item-summary";
-import { FLEX, MIN_W_0 } from "@/lib/layout";
-import { formatRelativeTime } from "@/lib/sidebar";
-import type { Alert, AlertSeverity, AlertStatus } from "@/lib/types";
-import { useAlertsSection } from "@/lib/use-alerts";
-import { cn } from "@/lib/utils";
+import { formatDuration } from "@/lib/format/item-summary";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { formatRelativeTime } from "@/lib/agents/sidebar";
+import type { Alert, AlertSeverity, AlertStatus } from "@/lib/contracts/types";
+import { useAlertsSection } from "@/lib/notifications/use-alerts";
+import { cn } from "@/lib/format/utils";
 
 // Unresolved severity pill fill — critical = destructive, error = orange,
 // warning = yellow. Resolved pills use muted tokens below; the word stays

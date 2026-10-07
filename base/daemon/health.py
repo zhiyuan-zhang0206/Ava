@@ -480,7 +480,7 @@ def _probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
       expand-contract pair (#1038) and may only land once every deployed gateway
       emits the field. A rolling upgrade updates agent-runners and the gateway at
       different moments; a ``name`` mismatch is ``PORT_TAKEN``, which is terminal
-      (``docs/decisions/2026-07-29-identity-mismatch-is-terminal.md``), so a runner
+      (``docs/decisions/runtime/processes/identity/2026-07-29-identity-mismatch-is-terminal.md``), so a runner
       on new code probing a gateway still on old code would read ``name=None`` and
       terminal-fail a perfectly healthy gateway — the very thing ``ava cluster
       health-probe`` polls with ``--auto-rollback --threshold 3`` armed. **Do not

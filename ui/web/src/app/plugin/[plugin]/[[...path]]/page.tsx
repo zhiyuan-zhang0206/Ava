@@ -13,11 +13,11 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { ErrorBoundary } from "@/components/error-boundary";
-import { PluginPageFrame } from "@/components/plugin-page-frame";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
-import { useUiContributions } from "@/lib/ui-contributions";
-import { cn } from "@/lib/utils";
+import { ErrorBoundary } from "@/components/connection/error-boundary";
+import { PluginPageFrame } from "@/components/plugins/plugin-page-frame";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { useUiContributions } from "@/lib/plugins/ui-contributions";
+import { cn } from "@/lib/format/utils";
 
 export default function PluginPage({
   params,

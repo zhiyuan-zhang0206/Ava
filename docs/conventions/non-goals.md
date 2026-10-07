@@ -25,7 +25,7 @@ first and ask "what changed that made it worth doing".
   in the hands of whoever is deciding the sub-task, once, at spawn, not a framework router with none
   of that context. **This is not a rejection of multi-model support**: the registry
   (`base/lm/registry.py`) backs 9 providers side by side, each with its own per-model tuning
-  (`docs/decisions/2026-07-25-per-model-config-registry.md`) — "single model" language elsewhere
+  (`docs/decisions/runtime/config/2026-07-25-per-model-config-registry.md`) — "single model" language elsewhere
   describes today's default *operating* configuration (one operator, one provider live per
   deployment), not a registry limit. What is rejected here is a dispatcher choosing FOR the agent
   inside a turn boundary as a mistake-shim or an opaque router. **Carve-out**: at open-source /
@@ -33,7 +33,7 @@ first and ask "what changed that made it worth doing".
   operator present to swap on an outage) — a different problem from today's mistake-shim, already
   scoped out of this non-goal in
   [`future/roadmap/open-source-prerequisites.md`](../../future/roadmap/open-source-prerequisites.md)
-  ("Provider fallback chain"). See `docs/decisions/2026-07-29-no-runtime-model-routing.md`.
+  ("Provider fallback chain"). See `docs/decisions/engineering/design/simplification/2026-07-29-no-runtime-model-routing.md`.
 - **Cross-agent atomic rollback**: users rarely use rollback in practice (code version drifting from message
   history confuses the agent); use cancel + resend / fork instead — trigger:
   a real use case appears that needs "reset multiple agents together to a point in time", and fork

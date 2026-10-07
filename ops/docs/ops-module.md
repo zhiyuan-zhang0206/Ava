@@ -2,7 +2,7 @@
 
 The ops layer owns desired service state, lifecycle operations and deployment
 coordination. Its design rationale is recorded in
-[the ops decision](../../docs/decisions/2026-07-19-ops-k8s-semantics-without-k8s.md).
+[the ops decision](../../docs/decisions/runtime/hosts/2026-07-19-ops-k8s-semantics-without-k8s.md).
 
 | Responsibility | Current implementation |
 |---|---|
@@ -16,9 +16,9 @@ coordination. Its design rationale is recorded in
 | Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
 
 Each package door is the module it grew from; `ops.agents`,
-`ops.rpc_schemas`, `ops.cluster_status`, `ops.agent_pause` and `ops.roster`
+`ops.rpc_schemas`, `ops.cluster.operations_status`, `ops.agent_pause` and `ops.roster`
 kept their import paths. Module names never repeat the package name, so the
-op clusters read `ops.lifecycle`, `ops.cluster.operations`, `ops.host_config`,
+op clusters read `ops.lifecycle`, `ops.cluster.operations.operations`, `ops.host_config`,
 `ops.inventory` and `ops.uploads`. `python -m ops.private_files` stays top-level:
 it is an operator entry point beside its `private-files/` manifest.
 
@@ -38,11 +38,11 @@ flush, actual continuation completion and resource settlement. Ordinary stop
 shares that drain and then closes the selected local services, PTYs and data
 plane; restart keeps the data plane and browser.
 Timeout fails without implicit force. The complete operator contract is in
-[graceful maintenance](../../docs/conventions/graceful-maintenance.md).
+[graceful maintenance](../../docs/conventions/operations/graceful-maintenance.md).
 
 A fleet update is `python -m cli.fleet_update`. What the update path still lacks
 is recorded in the
-[unified lifecycle plan](../../future/infra/unified-cluster-lifecycle.md). Retired
+[unified lifecycle plan](../../future/infra/lifecycle/unified-cluster-lifecycle.md). Retired
 updater RPCs cannot be used to fill those gaps.
 
 The native OS unit supervises the application root, which owns its service

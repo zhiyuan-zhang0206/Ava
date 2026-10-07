@@ -3,11 +3,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentArchive } from "./archive";
 import type { InnerProps } from "./types";
-import type { AgentRow } from "@/lib/types";
-import { api } from "@/lib/api";
-vi.mock("@/lib/api", () => ({ api: { listAgents: vi.fn() } }));
+import type { AgentRow } from "@/lib/contracts/types";
+import { api } from "@/lib/transport/api";
+vi.mock("@/lib/transport/api", () => ({ api: { listAgents: vi.fn() } }));
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("@/components/agent-row", () => ({ AgentRow: ({ agent, onSelect }: { agent: AgentRow; onSelect: () => void }) => <li><button onClick={onSelect}>#{agent.agent_id}</button></li> }));
+vi.mock("@/components/agents/agent-row", () => ({ AgentRow: ({ agent, onSelect }: { agent: AgentRow; onSelect: () => void }) => <li><button onClick={onSelect}>#{agent.agent_id}</button></li> }));
 const props = { onSelect: vi.fn(), pendingActions: {}, wide: true } as unknown as InnerProps & { wide: boolean };
 const row = (id: number) => ({ agent_id: id }) as AgentRow;
 let client: QueryClient;

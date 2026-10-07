@@ -9,20 +9,20 @@ import { ChevronLeft, Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 
-import { api } from "@/lib/api";
-import { useBreakpoint } from "@/lib/breakpoint";
-import { errMsg } from "@/lib/errors";
-import { useSidebarCollapsed, useSidebarViewMode } from "@/lib/sidebar";
-import { useStore } from "@/lib/store";
-import { useUserSettings } from "@/lib/use-user-settings";
+import { api } from "@/lib/transport/api";
+import { useBreakpoint } from "@/lib/layout/breakpoint";
+import { errMsg } from "@/lib/contracts/errors";
+import { useSidebarCollapsed, useSidebarViewMode } from "@/lib/agents/sidebar";
+import { useStore } from "@/lib/state/store";
+import { useUserSettings } from "@/lib/state/use-user-settings";
 
 import { SidebarBody } from "./body";
 import { SidebarFooter } from "./footer";
 import { CollapsedSidebar, SidebarHeader } from "./header";
 import { SearchOverlay } from "./search-overlay";
 import type { DesktopProps, MobileProps, Props } from "./types";
-import { FLEX, FLEX_COL } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_COL } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export function AgentSidebar(props: Props) {
   // R4 layer 4: one responsive mechanism — breakpoint + conditional render.

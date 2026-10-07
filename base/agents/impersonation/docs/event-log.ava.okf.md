@@ -9,7 +9,7 @@ tags:
 
 # Impersonation event log
 
-Decision: `docs/decisions/2026-10-02-impersonation-event-log-in-postgres.md`.
+Decision: `docs/decisions/agents/impersonation/2026-10-02-impersonation-event-log-in-postgres.md`.
 
 The record of what a borrowed identity did lives in `agent_impersonation_entries`,
 the lease's permanent, immutable, sequenced log. New automatic leases carry

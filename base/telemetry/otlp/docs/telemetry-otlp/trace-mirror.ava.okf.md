@@ -28,7 +28,7 @@ unauthenticated Tempo / Loki / Prometheus ports stay loopback-only. The backend
 stack under `deploy/lgtm/` is required serving infrastructure (the gateway's
 ops and inspect endpoints, ops alerting and the events-maintenance rollup read
 from it), not a stop-anytime viewer. Tempo is the only trace viewer
-([why](../../../../../docs/decisions/2026-08-11-otel-viewer-selection.md)).
+([why](../../../../../docs/decisions/observability/telemetry/2026-08-11-otel-viewer-selection.md)).
 
 ## Why the mirror is JSONL
 

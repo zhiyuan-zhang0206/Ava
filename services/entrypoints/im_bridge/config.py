@@ -5,7 +5,7 @@ field name the registry, `.env` and the config API already use. The slices are
 plain frozen dataclasses: `services/entrypoints/im_bridge/daemon.py` (the composition root)
 is the only module that reads `settings` and builds them, and everything else
 receives the slice it needs through its constructor. See
-`future/infra/dependency-injection.md`.
+`future/infra/security/dependency-injection.md`.
 """
 
 from __future__ import annotations

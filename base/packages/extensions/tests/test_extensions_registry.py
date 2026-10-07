@@ -1,6 +1,6 @@
 """The cluster extension registry — `base/packages/extensions/registry.py` + its schema.
 
-Slice S2 of `future/infra/extension-ownership.md`. What is locked here is what
+Slice S2 of `future/infra/extensions/extension-ownership.md`. What is locked here is what
 the ownership model rests on:
 
 1. **The size cap is a constraint, not a convention** — enforced in Python AND

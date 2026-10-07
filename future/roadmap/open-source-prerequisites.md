@@ -41,7 +41,7 @@ provider has an outage or rate-limits. An ordered fallback chain
 
 Why this is *not* the banned "model fallback" non-goal at that point: the
 non-goal (`docs/conventions/non-goals.md`,
-`docs/decisions/2026-07-29-no-runtime-model-routing.md`) rejects fallback as a
+`docs/decisions/engineering/design/simplification/2026-07-29-no-runtime-model-routing.md`) rejects fallback as a
 way to *paper over model mistakes*, or an opaque cost/load router, for a
 single operator who can just swap. For a public multi-tenant deployment,
 fallback is an *availability* mechanism, not a mistake-shim — different problem,

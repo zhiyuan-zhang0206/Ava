@@ -28,7 +28,7 @@ Interface for executing shell commands. Three modes: one-shot `run()`, backgroun
 - `list() → dict[int, str | None]` — List your sessions (id → name, unnamed as None).
 
 ## Key Dependencies
-- [[sessions.ava.okf.md]] — the session backend is the underlying implementation of sessions
+- [[agent/docs/sessions.ava.okf.md]] — the session backend is the underlying implementation of sessions
 - [[ava/shell/coding_tools/docs/coding-tools.ava.okf.md|ava.shell.coding_tools]] — launchers that start Claude Code / Codex in these sessions (not agent-facing)
 
 ## Notes

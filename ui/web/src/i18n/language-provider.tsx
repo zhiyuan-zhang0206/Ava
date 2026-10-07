@@ -21,7 +21,7 @@
 import { NextIntlClientProvider } from "next-intl";
 import { useEffect } from "react";
 
-import { useUserSettings } from "@/lib/use-user-settings";
+import { useUserSettings } from "@/lib/state/use-user-settings";
 
 import en from "../../messages/en";
 import zh from "../../messages/zh";
