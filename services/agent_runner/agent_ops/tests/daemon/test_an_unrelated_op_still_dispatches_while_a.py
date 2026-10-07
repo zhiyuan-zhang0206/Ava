@@ -44,10 +44,12 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
 
     monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
 
-    stuck = asyncio.ensure_future(daemon._dispatch("inventory_read", {}, active_ops={}))
+    stuck = asyncio.ensure_future(
+        daemon._dispatch("inventory_read", {}, active_ops={}, workers=set())
+    )
     await asyncio.to_thread(started.wait, 10)
 
-    status, result = await daemon._dispatch("status_probe", {}, active_ops={})
+    status, result = await daemon._dispatch("status_probe", {}, active_ops={}, workers=set())
     assert (status, result) == ("completed", {"ready": True})
 
     release.set()
@@ -86,9 +88,11 @@ async def test_two_config_writes_cannot_interleave(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(daemon.inventory, "inventory_write_op", _slow_write)
 
     await asyncio.gather(
-        daemon._dispatch("config_write", {"overrides": {}}, active_ops={}),
-        daemon._dispatch("config_write", {"overrides": {}}, active_ops={}),
-        daemon._dispatch("inventory_write", {"plugins": {}, "mcp_servers": {}}, active_ops={}),
+        daemon._dispatch("config_write", {"overrides": {}}, active_ops={}, workers=set()),
+        daemon._dispatch("config_write", {"overrides": {}}, active_ops={}, workers=set()),
+        daemon._dispatch(
+            "inventory_write", {"plugins": {}, "mcp_servers": {}}, active_ops={}, workers=set()
+        ),
     )
 
     assert not overlapped, "two state writes ran concurrently — .env can lose fields"
@@ -113,6 +117,7 @@ async def test_config_write_op_receives_actor_and_trace(monkeypatch: pytest.Monk
         "config_write",
         {"overrides": {}, "actor": "user_session:administrator", "trace_id": "trace-9"},
         active_ops={},
+        workers=set(),
     )
     assert status == "completed"
     assert captured == {
@@ -136,7 +141,9 @@ async def test_config_audit_read_op_receives_last(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     monkeypatch.setattr(daemon.host_config, "config_audit_read_op", _capture)
-    status, _ = await daemon._dispatch("config_audit_read", {"last": 7}, active_ops={})
+    status, _ = await daemon._dispatch(
+        "config_audit_read", {"last": 7}, active_ops={}, workers=set()
+    )
     assert status == "completed"
     assert captured == {"last": 7}
 
@@ -146,7 +153,9 @@ async def test_config_audit_read_rejects_out_of_range_last(
 ) -> None:
     """`last` outside 1..200 fails payload validation before any read."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    status, result = await daemon._dispatch("config_audit_read", {"last": 201}, active_ops={})
+    status, result = await daemon._dispatch(
+        "config_audit_read", {"last": 201}, active_ops={}, workers=set()
+    )
     assert status == "failed"
     assert "last" in str(result["error"])
 
@@ -178,7 +187,7 @@ async def test_op_arms_do_not_run_on_the_default_executor(
 
     monkeypatch.setattr(daemon.host_config, "config_read_op", _note_thread)
 
-    await daemon._dispatch("config_read", {}, active_ops={})
+    await daemon._dispatch("config_read", {}, active_ops={}, workers=set())
 
     assert seen and seen[0].startswith("ava-ops-arm"), f"arm ran on {seen!r}"
 
