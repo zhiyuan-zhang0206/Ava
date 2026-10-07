@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
 from base.native_process.os_platform import IS_WINDOWS
 from tests.factories.secret_argv import (
@@ -27,6 +29,7 @@ pytestmark = pytest.mark.skipif(
 def test_schedule_launch(
     pty_service: PtyServiceProcess,
     secrets_in_creator_env: None,
+    db_conn: psycopg.Connection,
     unit_home: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -47,16 +50,26 @@ def test_schedule_launch(
     stub.chmod(0o755)
     monkeypatch.setattr(sm, "REPO_ROOT", unit_home)
 
-    manager = ScheduleManager(None)  # type: ignore[arg-type] — _launch's pool-touching writes are stubbed below
-    monkeypatch.setattr(ScheduleManager, "_set_status", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
-    # The orphan-run close is a pool write like _set_status — stubbed the same
-    # way; this test asserts argv cleanliness, not DB behavior.
-    monkeypatch.setattr(ScheduleManager, "_close_null_runs", lambda _self, _sid: None)  # pyright: ignore[reportUnknownArgumentType]
-    manager._launch(7)
+    row = db_conn.execute(
+        "INSERT INTO schedules (name, script, command, enabled, desired_revision) "
+        "VALUES ('argv-security-probe', 'pass', 'python schedule.py', true, 1) RETURNING id"
+    ).fetchone()
+    assert row is not None
+    schedule_id = int(row[0])
+    db_conn.commit()
+    # Launch reads the authoritative desired revision before creating a session.
+    # Keep those reads/writes real while the runner stays a PTY stub.
+    pool: ConnectionPool[psycopg.Connection] = ConnectionPool(
+        db_conn.info.dsn, min_size=1, max_size=2, open=True
+    )
+    try:
+        ScheduleManager(pool)._launch(schedule_id)
+    finally:
+        pool.close()
 
     assert wait_for(dump.exists), f"the runner never started:\n{pty_service.output()}"
     runner_env = dump.read_text()
-    assert "AVA_SCHEDULE_ID=7\n" in runner_env, "the schedule id rides the request env"
+    assert f"AVA_SCHEDULE_ID={schedule_id}\n" in runner_env, "the schedule id rides the request env"
     for secret in SECRET_VALUES:
         assert secret not in runner_env, f"{secret!r} reached the schedule's environment"
     assert_service_tree_clean(pty_service, label="ScheduleManager._launch")
