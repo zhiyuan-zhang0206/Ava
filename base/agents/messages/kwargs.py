@@ -97,7 +97,7 @@ class NoteTag(StrEnum):
 class AvaMessageKwargs(TypedDict, total=False):
     """The `ava_*` metadata bag on a message's `additional_kwargs`. Every key is
     contextual to the message kind (total=False): an `inbound` carries source /
-    inbound_id / image_urls, an `exec_output` carries exit_code / exec_ms /
+    inbound_id / image_urls, an `exec_output` carries exec_ms /
     sdk_calls, a `system_note` carries note_tag, a compact summary carries
     `ava_compact_id`, an AIMessage carries the reasoning timings. `sdk_calls`
     is the one framework key without the `ava_` prefix — the frozen wire name
@@ -125,9 +125,6 @@ class AvaMessageKwargs(TypedDict, total=False):
     ava_image_urls: list[str]
     ava_note_tag: str
     ava_task_id: int
-    ava_exit_code: int
-    ava_cancelled: bool
-    ava_timed_out: bool
     ava_exec_ms: int | None
     sdk_calls: list[dict[str, Any]] | None
     ava_reasoning_ms_by_block: dict[str, int]

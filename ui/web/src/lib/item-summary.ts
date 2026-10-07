@@ -31,9 +31,6 @@ export interface CodeSummary {
 export interface OutputSummary {
   readonly lines: number;
   readonly chars: number;
-  /** Whether the output looks like it carried a Python error (traceback or a
-   *  trailing `SomeError: ...` line) — surfaced as a red dot on the chip. */
-  readonly hasError: boolean;
 }
 
 /** The first dotted segment of a method; an undotted method is its own namespace. */
@@ -70,15 +67,10 @@ export function summarizeCode(
   };
 }
 
-// Traceback header, or a line that is just `WordError: ...` / `WordException:
-// ...` (multiline flag so a trailing error line in a longer dump is caught).
-const ERROR_RE = /Traceback \(most recent call last\):|^[A-Za-z_][\w.]*(Error|Exception):/m;
-
 export function summarizeOutput(payload: string): OutputSummary {
   return {
     lines: lineCount(payload),
     chars: payload.length,
-    hasError: ERROR_RE.test(payload),
   };
 }
 

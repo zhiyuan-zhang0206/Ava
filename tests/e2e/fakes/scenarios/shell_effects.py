@@ -35,7 +35,7 @@ failure = ava.shell.run_background("sleep 4; echo POLICY-FAILURE; exit 9", name=
 (root / "policy-handles").write_text(f"{{success.session_id}}\\n{{success.output_path}}\\n{{failure.session_id}}\\n{{failure.output_path}}")
 print("policy-jobs", success.session_id, failure.session_id)
 """
-    return RecordingModel(script=(exec_call(1, code), say("jobs started"), say("failure noticed")))
+    return RecordingModel(script=(exec_call(1, code), say("jobs started"), say("jobs buffered")))
 
 
 def build_session_verbs(model: str) -> RecordingModel:
@@ -104,7 +104,7 @@ launch = ava.watcher.launch(
 )
 at = ava.watcher.at(datetime.timedelta(seconds=4), "AT-WAKE-MARK", name="e2e-at", notify="always")
 cron = ava.watcher.cron("* * * * *", "CRON-WAKE-MARK", timezone="UTC",
-    end_time=datetime.timedelta(seconds=90), name="e2e-cron", notify="failure")
+    end_time=datetime.timedelta(seconds=90), name="e2e-cron", notify="always")
 (root / "watcher-ids").write_text(f"{{launch}} {{at}} {{cron}}")
 print("watchers-created", launch, at, cron)
 """
@@ -134,7 +134,7 @@ import ava
 import datetime
 from pathlib import Path
 wid = ava.watcher.at(datetime.timedelta(seconds=15), "RESURRECT-WAKE-MARK",
-    name="e2e-resurrect", notify="failure")
+    name="e2e-resurrect", notify="always")
 Path({str(root / "resurrection-id")!r}).write_text(str(wid))
 print("resurrection-watcher", wid)
 """

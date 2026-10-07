@@ -240,7 +240,7 @@ class TestAiMessageItems:
         the code_output item so the collapsed chip can read 'ran in Xs'."""
         from agent.messages import exec_output_message
 
-        msg = exec_output_message(content="hello", tool_call_id="t1", exit_code=0, exec_ms=1300)
+        msg = exec_output_message(content="hello", tool_call_id="t1", exec_ms=1300)
         items, _ = build_timeline_items([msg], [])
         assert len(items) == 1
         assert items[0].kind == "code_output"
@@ -831,7 +831,7 @@ class TestAttachItems:
                 }
             ],
         )
-        output = exec_output_message(content="ok", tool_call_id="tc-1", exit_code=0)
+        output = exec_output_message(content="ok", tool_call_id="tc-1")
         attach = self._attach_message(tmp_path)
         items, count = build_timeline_items([tool_call, output, attach], [])
         assert count == 3

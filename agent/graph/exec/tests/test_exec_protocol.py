@@ -79,10 +79,12 @@ def test_typed_blob_aimessage_exact_round_trip() -> None:
 
 
 def test_typed_blob_tool_and_human_messages_exact_round_trip() -> None:
-    """ToolMessage additional_kwargs (ava_exit_code) and a plain HumanMessage
+    """ToolMessage additional_kwargs (ava_msg_type) and a plain HumanMessage
     survive unchanged."""
     msgs = [
-        ToolMessage(content="out", tool_call_id="tc-1", additional_kwargs={"ava_exit_code": 0}),
+        ToolMessage(
+            content="out", tool_call_id="tc-1", additional_kwargs={"ava_msg_type": "exec_output"}
+        ),
         HumanMessage(content="hi"),
     ]
     back = loads_typed(dumps_typed(msgs))

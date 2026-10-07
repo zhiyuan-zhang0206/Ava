@@ -8,7 +8,6 @@ import psycopg
 
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
-    CompletionNoticeOutcome,
     CompletionNoticePolicy,
     delivery_required_for_agent,
     format_digest,
@@ -16,65 +15,38 @@ from base.daemon.schedules.completion_notices import (
 )
 
 
-def test_hourly_keeps_failures_immediate_and_counts_them_in_the_digest() -> None:
-    success = CompletionNotice(
+def test_hourly_buffers_every_notice_and_digest_counts_them() -> None:
+    first = CompletionNotice(
         source="shell:1",
-        content="Background command 'build' exited with code 0. Full output at build.log.",
-        outcome=CompletionNoticeOutcome.EXIT,
-        exit_code=0,
+        content="Background command 'build' finished. Full output at build.log.",
     )
-    failure = CompletionNotice(
+    second = CompletionNotice(
         source="watcher:2",
-        content="Watcher 'check' exited with code 1. Full output at check.log.",
-        outcome=CompletionNoticeOutcome.EXIT,
-        exit_code=1,
+        content="Watcher 'check' finished. Full output at check.log.",
     )
 
-    assert not immediate_delivery_required(CompletionNoticePolicy.HOURLY, success)
-    assert immediate_delivery_required(CompletionNoticePolicy.HOURLY, failure)
+    assert not immediate_delivery_required(CompletionNoticePolicy.HOURLY, first)
+    assert not immediate_delivery_required(CompletionNoticePolicy.HOURLY, second)
+    assert immediate_delivery_required(CompletionNoticePolicy.ALL, first)
 
     digest = format_digest(
         agent_id=7,
         window_start=datetime(
             2026, 9, 22, 10, tzinfo=UTC
         ),  # time-bomb-ok: fixed UTC formatting contract
-        notices=[success, failure],
+        notices=[first, second],
     )
 
     assert "2 completion notices" in digest
     assert "build.log" in digest
-    assert "Recent failures (already delivered immediately; latest 5):" in digest
     assert "check.log" in digest
-
-
-def test_failures_policy_suppresses_only_successes() -> None:
-    assert not immediate_delivery_required(
-        CompletionNoticePolicy.FAILURES,
-        CompletionNotice(
-            source="shell:1", content="ok", outcome=CompletionNoticeOutcome.EXIT, exit_code=0
-        ),
-    )
-    assert immediate_delivery_required(
-        CompletionNoticePolicy.FAILURES,
-        CompletionNotice(
-            source="shell:1", content="failed", outcome=CompletionNoticeOutcome.EXIT, exit_code=1
-        ),
-    )
-    assert immediate_delivery_required(
-        CompletionNoticePolicy.FAILURES,
-        CompletionNotice(
-            source="watcher:1", content="missed", outcome=CompletionNoticeOutcome.MISSED
-        ),
-    )
 
 
 def test_digest_bounds_rendered_logs_but_keeps_the_total_count() -> None:
     notices = [
         CompletionNotice(
             source=f"shell:{index}",
-            content=f"Background command '{index}' exited with code 0. Full output at {index}.log.",
-            outcome=CompletionNoticeOutcome.EXIT,
-            exit_code=0,
+            content=f"Background command '{index}' finished. Full output at {index}.log.",
         )
         for index in range(23)
     ]
@@ -86,15 +58,15 @@ def test_digest_bounds_rendered_logs_but_keeps_the_total_count() -> None:
         notices=notices,
     )
     assert "23 completion notices" in digest
-    assert "3 older successful completion(s) omitted" in digest
+    assert "3 older completion(s) omitted" in digest
     assert "at 0.log." not in digest
     assert "at 22.log." in digest
 
 
-def test_buffered_success_stays_suppressed_after_a_policy_flip(
+def test_buffered_notice_stays_suppressed_after_a_policy_flip(
     db_conn: psycopg.Connection,
 ) -> None:
-    """A failed response replay cannot duplicate a success buffered under hourly."""
+    """A failed response replay cannot duplicate a notice buffered under hourly."""
     from base.db import create_agent
 
     agent_id = create_agent(db_conn)
@@ -107,9 +79,7 @@ def test_buffered_success_stays_suppressed_after_a_policy_flip(
     db_conn.commit()
     notice = CompletionNotice(
         source="shell:91",
-        content="Background command 'build' exited with code 0. Full output at build.log.",
-        outcome=CompletionNoticeOutcome.EXIT,
-        exit_code=0,
+        content="Background command 'build' finished. Full output at build.log.",
     )
     assert not delivery_required_for_agent(db_conn, agent_id, notice, "all")
     db_conn.commit()

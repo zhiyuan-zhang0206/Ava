@@ -287,9 +287,9 @@ def test_flush_replays_hourly_completion_through_the_policy_boundary(
     path = outbox.record_failed_send(
         agent_id=agent_id,
         source="shell:77",
-        content="Background command 'build' exited with code 0. Full output at build.log.",
+        content="Background command 'build' finished. Full output at build.log.",
         client_message_id="hourly-key",
-        completion_notice={"outcome": "exit", "exit_code": 0},
+        completion_notice=True,
         now=_NOW,
     )
     assert path is not None
@@ -301,10 +301,10 @@ def test_flush_replays_hourly_completion_through_the_policy_boundary(
     assert _inbounds(db_conn, agent_id) == []
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT source, exit_code FROM completion_notice_events WHERE agent_id = %s",
+            "SELECT source FROM completion_notice_events WHERE agent_id = %s",
             (agent_id,),
         )
-        assert cur.fetchone() == ("shell:77", 0)
+        assert cur.fetchone() == ("shell:77",)
 
 
 def test_flush_replay_after_interrupted_retire_is_exactly_once(
@@ -744,26 +744,28 @@ def test_invalid_journal_state_is_isolated_from_healthy_delivery(
     assert not good.exists() and corrupt.exists()
 
 
-def test_invalid_completion_outcome_isolated_from_other_replays(
+def test_legacy_completion_marker_is_isolated_from_other_replays(
     journal: Path,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     publish_wake: Callable[[int, str], bool],
 ) -> None:
-    """A damaged completion marker is permanent while the next message still lands."""
+    """A pre-boolean completion marker on disk is unreadable while the next message still lands."""
     agent_id = _agent(db_conn)
     bad_path = outbox.record_failed_send(
         agent_id=agent_id,
         source="watcher:bad",
         content="damaged",
         client_message_id="bad-completion",
-        completion_notice={"outcome": "unknown"},
+        completion_notice=True,
         now=_NOW,
     )
     assert bad_path is not None
+    raw = json.loads(bad_path.read_text())
+    raw["completion_notice"] = {"outcome": "exit", "exit_code": 0}
+    bad_path.write_text(json.dumps(raw))
+    assert outbox._read(bad_path) is None
     _record(agent_id=agent_id, key="good-chat", content="good", now=_NOW)
     report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
-    assert report.abandoned == 1 and report.delivered == 1
-    bad = outbox._read(bad_path)
-    assert bad is not None and bad.abandon_reason == "completion_notice_payload"
+    assert report.delivered == 1
     assert len(_inbounds(db_conn, agent_id)) == 1

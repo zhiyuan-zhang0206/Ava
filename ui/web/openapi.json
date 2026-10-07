@@ -7270,14 +7270,9 @@
             "title": "Source"
           },
           "completion_notice": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CompletionNoticeIn"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "boolean",
+            "title": "Completion Notice",
+            "default": false
           }
         },
         "type": "object",
@@ -8872,40 +8867,6 @@
         ],
         "title": "CompactEnqueued",
         "description": "POST /api/agents/{id}/compact response — returns immediately after\npending insert, does not wait for the kernel loop to finish."
-      },
-      "CompletionNoticeIn": {
-        "properties": {
-          "outcome": {
-            "$ref": "#/components/schemas/CompletionNoticeOutcome"
-          },
-          "exit_code": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exit Code"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "outcome"
-        ],
-        "title": "CompletionNoticeIn",
-        "description": "Platform-only completion metadata carried with a shell or watcher chat."
-      },
-      "CompletionNoticeOutcome": {
-        "type": "string",
-        "enum": [
-          "exit",
-          "missed"
-        ],
-        "title": "CompletionNoticeOutcome",
-        "description": "What happened to the process or watcher represented by a notice."
       },
       "ConfigAuditView": {
         "properties": {

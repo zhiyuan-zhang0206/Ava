@@ -57,7 +57,7 @@ def test_post_message_inserts_chat_pending(db_conn: psycopg.Connection) -> None:
     assert _pending_rows(db_conn, tid) == [("chat", "pending", "hi agent")]
 
 
-def test_hourly_completion_policy_buffers_success_and_delivers_failure(
+def test_hourly_completion_policy_buffers_every_notice(
     db_conn: psycopg.Connection,
 ) -> None:
     """The canary assertion path reads the active policy and the durable count."""
@@ -70,26 +70,26 @@ def test_hourly_completion_policy_buffers_success_and_delivers_failure(
     db_conn.commit()
     policy = policy_for_agent(db_conn, tid, current_default_completion_notice_policy())
     with TestClient(app) as client:
-        success = client.post(
+        first = client.post(
             f"/api/agents/{tid}/messages",
             json={
-                "content": "Background command 'build' exited with code 0. Full output at log.",
+                "content": "Background command 'build' finished. Full output at log.",
                 "source": "shell:55",
-                "completion_notice": {"outcome": "exit", "exit_code": 0},
+                "completion_notice": True,
             },
         )
-        failure = client.post(
+        second = client.post(
             f"/api/agents/{tid}/messages",
             json={
-                "content": "Background command 'build' exited with code 137. Full output at log.",
+                "content": "Background command 'test' finished. Full output at log.",
                 "source": "shell:56",
-                "completion_notice": {"outcome": "exit", "exit_code": 137},
+                "completion_notice": True,
             },
         )
     assert policy == "hourly"
-    assert success.status_code == 201 and success.json()["inbound_id"] is None
-    assert failure.status_code == 201 and failure.json()["inbound_id"] is not None
-    assert len(_pending_rows(db_conn, tid)) == 1
+    assert first.status_code == 201 and first.json()["inbound_id"] is None
+    assert second.status_code == 201 and second.json()["inbound_id"] is None
+    assert len(_pending_rows(db_conn, tid)) == 0
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT count(*) FROM completion_notice_events WHERE agent_id = %s",
@@ -98,49 +98,19 @@ def test_hourly_completion_policy_buffers_success_and_delivers_failure(
         assert cur.fetchone() == (2,)
 
 
-def test_default_completion_policy_preserves_every_exit(db_conn: psycopg.Connection) -> None:
+def test_default_completion_policy_preserves_every_completion(db_conn: psycopg.Connection) -> None:
     """No overlay retains the pre-policy one-completion-message behavior."""
     tid = _seed_agent(db_conn)
     with TestClient(app) as client:
         response = client.post(
             f"/api/agents/{tid}/messages",
             json={
-                "content": "Background command 'default' exited with code 0. Full output at log.",
+                "content": "Background command 'default' finished. Full output at log.",
                 "source": "shell:59",
-                "completion_notice": {"outcome": "exit", "exit_code": 0},
+                "completion_notice": True,
             },
         )
     assert response.status_code == 201 and response.json()["inbound_id"] is not None
-    assert len(_pending_rows(db_conn, tid)) == 1
-
-
-def test_failures_completion_policy_suppresses_only_successes(db_conn: psycopg.Connection) -> None:
-    tid = _seed_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
-            ('{"completion_notice_policy": "failures"}', tid),
-        )
-    db_conn.commit()
-    with TestClient(app) as client:
-        success = client.post(
-            f"/api/agents/{tid}/messages",
-            json={
-                "content": "Background command 'ok' exited with code 0. Full output at log.",
-                "source": "shell:57",
-                "completion_notice": {"outcome": "exit", "exit_code": 0},
-            },
-        )
-        failure = client.post(
-            f"/api/agents/{tid}/messages",
-            json={
-                "content": "Background command 'bad' exited with code 1. Full output at log.",
-                "source": "shell:58",
-                "completion_notice": {"outcome": "exit", "exit_code": 1},
-            },
-        )
-    assert success.status_code == 201 and success.json()["inbound_id"] is None
-    assert failure.status_code == 201 and failure.json()["inbound_id"] is not None
     assert len(_pending_rows(db_conn, tid)) == 1
 
 

@@ -202,12 +202,11 @@ def _boot_crash(exc: Exception, code_reached: bool | None) -> object:
     return _ExecCrashed(output="", exc=exc, full_traceback=None, code_reached=code_reached)
 
 
-def _dispatch(result: object, monkeypatch: pytest.MonkeyPatch) -> tuple[bool, str, int]:
+def _dispatch(result: object, monkeypatch: pytest.MonkeyPatch) -> tuple[bool, str]:
     from agent.graph.exec.node import _dispatch_exec_result
 
     del monkeypatch
-    halted, text, code = _dispatch_exec_result(result, None, 7, referenced_messages=())  # type: ignore[arg-type]
-    return halted, text, code
+    return _dispatch_exec_result(result, None, 7, referenced_messages=())  # type: ignore[arg-type]
 
 
 def test_dispatch_boot_crash_reports_not_executed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,7 +215,7 @@ def test_dispatch_boot_crash_reports_not_executed(monkeypatch: pytest.MonkeyPatc
     from agent.graph.exec._result import ExecChildError
 
     exc = ExecChildError("BootstrapFetchError", "could not fetch cluster config", "tb")
-    halted, text, _code = _dispatch(_boot_crash(exc, False), monkeypatch)
+    halted, text = _dispatch(_boot_crash(exc, False), monkeypatch)
     assert halted is False
     assert "Code execution output" in text
     assert "the code was NOT executed" in text
@@ -231,7 +230,7 @@ def test_dispatch_crash_with_unknown_code_reached_stays_honest(
     from agent.graph.exec._result import ExecChildError
 
     exc = ExecChildError("exec_subprocess_aborted", "child exited without a result envelope", None)
-    halted, text, _code = _dispatch(_boot_crash(exc, None), monkeypatch)
+    halted, text = _dispatch(_boot_crash(exc, None), monkeypatch)
     assert halted is False
     assert "whether the code executed is unknown" in text
     assert "(no output)" not in text
@@ -244,7 +243,7 @@ def test_dispatch_crash_after_code_ran_but_printed_nothing(
     from agent.graph.exec._result import ExecChildError
 
     exc = ExecChildError("OSError", "result envelope write failed", None)
-    halted, text, _code = _dispatch(_boot_crash(exc, True), monkeypatch)
+    halted, text = _dispatch(_boot_crash(exc, True), monkeypatch)
     assert halted is False
     assert "your code may have had effects, but no output was recovered" in text
     assert "inspect state before retrying" in text
@@ -260,7 +259,7 @@ def test_dispatch_crash_with_output_keeps_the_output(monkeypatch: pytest.MonkeyP
         exc=ExecChildError("ValueError", "boom", None),
         code_reached=True,
     )
-    halted, text, _code = _dispatch(result, monkeypatch)
+    halted, text = _dispatch(result, monkeypatch)
     assert halted is False
     assert "Traceback (most recent call last)" in text
     assert "(no output)" not in text

@@ -57,7 +57,7 @@ def _h_agents_send(args: argparse.Namespace) -> int:
             args.content,
             args.source,
             args.tail_file,
-            args.completion_exit_code,
+            completion=args.completion,
         )
     except ProvenanceError as exc:
         print(f"ava: {exc}", file=sys.stderr)
@@ -199,10 +199,9 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "carry the end of the command's output this way)",
     )
     agents_send_p.add_argument(
-        "--completion-exit-code",
-        type=int,
-        default=None,
-        help="mark this shell/watcher send as a platform completion with this exit code",
+        "--completion",
+        action="store_true",
+        help="mark this shell/watcher send as a platform completion (the agent's notice policy applies)",
     )
     agents_send_p.set_defaults(func=_h_agents_send)
 

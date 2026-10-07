@@ -84,7 +84,6 @@ _ENTRY_SUFFIX = ".json"
 
 # Content type the SDK accepts: a plain string or OpenAI-shaped blocks.
 Content = str | list[dict[str, object]]
-CompletionNoticePayload = completion_notices.CompletionNoticePayload
 
 # HTTP statuses that mean "the gateway or one of its backends hiccuped" — a
 # delivery attempt worth replaying once the backend returns. 500 = unhandled
@@ -188,20 +187,17 @@ def _canonical_content(content: Content) -> str:
     return "j:" + json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def _canonical_completion_notice(notice: CompletionNoticePayload | None) -> str:
-    return "" if notice is None else json.dumps(notice, sort_keys=True, separators=(",", ":"))
-
-
 def fingerprint(
     agent_id: int,
     source: str,
     content: Content,
-    completion_notice: CompletionNoticePayload | None = None,
+    *,
+    completion_notice: bool = False,
 ) -> str:
-    """Identity of one logical message, including platform completion metadata."""
+    """Identity of one logical message, including its platform-completion marker."""
     raw = f"{agent_id}\x1f{source}\x1f{_canonical_content(content)}"
-    if completion_notice is not None:
-        raw += f"\x1f{_canonical_completion_notice(completion_notice)}"
+    if completion_notice:
+        raw += "\x1fcompletion"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -258,7 +254,7 @@ class OutboxEntry:
     abandon_reason: str | None
     abandon_detail: str | None
     abandoned_at: str | None
-    completion_notice: CompletionNoticePayload | None = None
+    completion_notice: bool = False
 
     def as_dict(self) -> dict[str, object]:
         raw: dict[str, object] = {
@@ -279,8 +275,8 @@ class OutboxEntry:
             "abandon_detail": self.abandon_detail,
             "abandoned_at": self.abandoned_at,
         }
-        if self.completion_notice is not None:
-            raw["completion_notice"] = self.completion_notice
+        if self.completion_notice:
+            raw["completion_notice"] = True
         return raw
 
 
@@ -319,8 +315,8 @@ def _read(path: Path) -> OutboxEntry | None:
         content = raw.get("content")
         if not isinstance(content, str) and not isinstance(content, list):
             return None
-        completion_notice = raw.get("completion_notice")
-        if completion_notice is not None and not isinstance(completion_notice, dict):
+        completion_notice = raw.get("completion_notice", False)
+        if not isinstance(completion_notice, bool):
             return None
         entry = OutboxEntry(
             schema_version=_ENTRY_SCHEMA,
@@ -339,7 +335,7 @@ def _read(path: Path) -> OutboxEntry | None:
             abandon_reason=cast("str | None", raw.get("abandon_reason")),
             abandon_detail=cast("str | None", raw.get("abandon_detail")),
             abandoned_at=cast("str | None", raw.get("abandoned_at")),
-            completion_notice=cast("CompletionNoticePayload | None", completion_notice),
+            completion_notice=completion_notice,
         )
         # Timestamps must parse (and carry a timezone) before anything consumes
         # them — see the docstring.
@@ -353,7 +349,12 @@ def _read(path: Path) -> OutboxEntry | None:
         # matches its name was corrupted or hand-edited; never trust it.
         expected = _entry_path_name(
             entry.agent_id,
-            fingerprint(entry.agent_id, entry.source, entry.content, entry.completion_notice),
+            fingerprint(
+                entry.agent_id,
+                entry.source,
+                entry.content,
+                completion_notice=entry.completion_notice,
+            ),
             created,
         )
         if path.name != expected:
@@ -382,7 +383,7 @@ def logical_key(
     agent_id: int,
     source: str,
     content: Content,
-    completion_notice: CompletionNoticePayload | None = None,
+    completion_notice: bool = False,
 ) -> str:
     """The idempotency key for this logical message.
 
@@ -396,7 +397,9 @@ def logical_key(
     enabled, window = send_path_settings()
     if not enabled:
         return uuid.uuid4().hex
-    message_fingerprint = fingerprint(agent_id, source, content, completion_notice)
+    message_fingerprint = fingerprint(
+        agent_id, source, content, completion_notice=completion_notice
+    )
     now = time.monotonic()
     with _registry_lock:
         for stale in [fp for fp, (_, at) in _registry.items() if now - at > window]:
@@ -416,7 +419,7 @@ def note_send_succeeded(
     source: str,
     content: Content,
     key: str,
-    completion_notice: CompletionNoticePayload | None = None,
+    completion_notice: bool = False,
 ) -> None:
     """One logical message landed: retire its key and any pending record.
 
@@ -424,7 +427,9 @@ def note_send_succeeded(
     must not turn a delivered message into a failed call.
     """
     try:
-        message_fingerprint = fingerprint(agent_id, source, content, completion_notice)
+        message_fingerprint = fingerprint(
+            agent_id, source, content, completion_notice=completion_notice
+        )
         with _registry_lock:
             _registry.pop(message_fingerprint, None)
         for path in _matching_paths(agent_id, message_fingerprint):
@@ -449,7 +454,7 @@ def record_failed_send(
     source: str,
     content: Content,
     client_message_id: str,
-    completion_notice: CompletionNoticePayload | None = None,
+    completion_notice: bool = False,
     now: datetime | None = None,
 ) -> Path | None:
     """Durably record one failed delivery; returns the record path or None.
@@ -465,7 +470,9 @@ def record_failed_send(
         if not snapshot.enabled:
             return None
         moment = now or datetime.now(UTC)
-        message_fingerprint = fingerprint(agent_id, source, content, completion_notice)
+        message_fingerprint = fingerprint(
+            agent_id, source, content, completion_notice=completion_notice
+        )
         for path in _matching_paths(agent_id, message_fingerprint):
             entry = _read(path)
             if entry is None or entry.state is not DeliveryOutboxState.PENDING:
@@ -551,13 +558,8 @@ def _deliver(
         if cur.fetchone() is None:
             # A missing agent row is permanent: ids are never re-assigned.
             raise PermanentDeliveryError("agent_missing")
-    try:
-        notice = completion_notices.completion_notice_from_metadata(
-            entry.source, entry.content, text, entry.completion_notice
-        )
-    except completion_notices.CompletionNoticePayloadError as exc:
-        raise PermanentDeliveryError(str(exc)) from exc
-    if notice is not None:
+    if entry.completion_notice:
+        notice = completion_notices.CompletionNotice(source=entry.source, content=text)
         with pool.connection(timeout=connect_timeout_s) as conn:
             required = completion_notices.delivery_required_for_agent(
                 conn,

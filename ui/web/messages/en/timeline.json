@@ -1,6 +1,5 @@
 {
   "systemPrompt": "System prompt",
-  "error": "Error",
   "thinking": "Thinking",
   "thinkingFor": "Thinking for {duration}",
   "thoughtFor": "Thought for {duration}",

@@ -82,7 +82,7 @@ def exec_out(text: str, ts: str = T0) -> ToolMessage:
     return ToolMessage(
         content=text,
         tool_call_id="tc1",
-        additional_kwargs={"ava_msg_type": "exec_output", "ava_exit_code": 0, "ava_created_at": ts},
+        additional_kwargs={"ava_msg_type": "exec_output", "ava_created_at": ts},
     )
 
 

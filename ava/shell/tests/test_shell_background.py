@@ -41,10 +41,11 @@ def test_notified_line_structure(tmp_path: Path) -> None:
     # before anything else runs; CLI notice with source + tail; close after delivery.
     assert line.startswith(f"( make build ) 2>&1 | tee {log}; _ec=${{PIPESTATUS[0]}}; ")
     assert "agents send 5" in line
-    assert "Background command 'build' exited with code ${_ec}" in line
+    assert "Background command 'build' finished. Full output at" in line
+    assert "exited with code" not in line
     assert "--source shell:3" in line
     assert f"--tail-file {log}" in line
-    assert "--completion-exit-code ${_ec}" in line
+    assert "--completion" in line
     assert line.endswith("; exit $_ec")
 
 
@@ -65,9 +66,8 @@ def test_notified_line_keep_leaves_session_open(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("notify", "expected_fragment"),
     [
-        (None, "--completion-exit-code ${_ec}"),
+        (None, "--completion"),
         ("always", "agents send 5"),
-        ("failure", 'if [ "$_ec" -ne 0 ]; then'),
     ],
 )
 def test_notified_line_applies_notify_policy(
@@ -83,10 +83,13 @@ def test_notified_line_applies_notify_policy(
         notify=notify,
     )
     assert expected_fragment in line
-    if notify is None or notify == "always":
-        assert 'if [ "$_ec" -ne 0 ]; then' not in line
-    else:
-        assert line.index('if [ "$_ec" -ne 0 ]; then') < line.index("agents send 5")
+    assert ("--completion" in line) is (notify is None)
+    assert 'if [ "$_ec"' not in line
+
+
+def test_notify_failure_is_rejected() -> None:
+    with pytest.raises(ValueError, match="notify must be one of"):
+        background.validate_notify("failure")
 
 
 def test_notified_line_rejects_unknown_notify(tmp_path: Path) -> None:
@@ -217,7 +220,7 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert "2>&1 | tee" in cmd
     assert "_ec=${PIPESTATUS[0]}" in cmd
     assert "--source shell:7" in cmd
-    assert "--completion-exit-code ${_ec}" in cmd
+    assert "--completion" in cmd
     assert cmd.endswith("; exit $_ec")
 
 
@@ -232,11 +235,11 @@ def _assert_completion_notice_argv(argv: list[str], handle: Any) -> None:
     assert argv[0] == "agents"
     assert argv[1] == "send"
     assert argv[2] == str(ava.self.AGENT_ID)
-    assert "exited with code 3" in argv[3]  # subshell exit code, ${_ec} expanded
+    assert "finished" in argv[3]
+    assert "exited with code" not in argv[3]
     assert f"shell:{handle.session_id}" in argv
     assert handle.output_path in argv  # --tail-file target
-    assert "--completion-exit-code" in argv
-    assert "3" in argv
+    assert "--completion" in argv
 
 
 @pytest.mark.flaky  # real pty session + time.sleep polling (15s deadline)
@@ -269,10 +272,10 @@ def test_run_background_e2e_notice_log_and_close(
 
 
 @pytest.mark.flaky  # real pty session + signal delivery polling (15s deadline)
-def test_run_background_failure_notify_reports_sigkill(
+def test_run_background_notice_after_sigkill_has_no_status(
     _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The shell-level failure policy still reports a SIGKILL exit (137)."""
+    """A SIGKILL'd command still sends its notice, and the notice names no exit code."""
     argv_file = tmp_path / "argv.txt"
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
@@ -284,14 +287,14 @@ def test_run_background_failure_notify_reports_sigkill(
         name="test-bg-sigkill",
         cwd=str(tmp_path),
         ttl=120,
-        notify="failure",
+        notify="always",
     )
 
     deadline = time.time() + 15
     while time.time() < deadline and not argv_file.exists():
         time.sleep(0.3)
-    assert argv_file.exists(), "failure completion notice never fired"
-    assert "exited with code 137" in argv_file.read_text()
+    assert argv_file.exists(), "completion notice never fired"
+    assert "exited with code" not in argv_file.read_text()
 
     deadline = time.time() + 10
     while time.time() < deadline and handle.session_id in ava.shell.sessions.list():

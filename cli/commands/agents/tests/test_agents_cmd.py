@@ -335,16 +335,17 @@ def test_agents_send_appends_tail_file(
     # --tail-file appends the end of the file (bounded), so the notice carries
     # the command's last output without a follow-up read.
     log = tmp_path / "out.log"
-    log.write_text("early stuff\n" + "x" * 5000 + "\nFAILED: test_foo\n")
+    log.write_text("early stuff\nmiddle\n" + "x" * 5000 + "\nline a\nline b\nFAILED: test_foo\n")
     seen = _patch_post(monkeypatch, {"status": "delivered"})
-    assert _agents.cmd_agents_send(5, "exited with code 1", "shell:3", str(log)) == 0
+    assert _agents.cmd_agents_send(5, "finished", "shell:3", str(log)) == 0
     body = seen["json"]
     assert isinstance(body, dict)
     content = body["content"]
-    assert content.startswith("exited with code 1")  # pyright: ignore[reportUnknownMemberType]
+    assert content.startswith("finished")  # pyright: ignore[reportUnknownMemberType]
     assert "Last output" in content
     assert "FAILED: test_foo" in content
-    assert "early stuff" not in content  # only the tail rides along
+    assert "early stuff" not in content  # only the last 3 lines ride along
+    assert "line a" in content and "x" * 100 not in content
     assert (
         len(content) < 3000  # pyright: ignore[reportUnknownArgumentType]
     )  # bounded by the tail cap  # pyright: ignore[reportUnknownArgumentType]
@@ -357,11 +358,11 @@ def test_agents_send_missing_tail_file_still_delivers(
     # abort the POST — the failure rides inside the delivered message instead.
     seen = _patch_post(monkeypatch, {"status": "delivered"})
     missing = tmp_path / "gone.log"
-    assert _agents.cmd_agents_send(5, "exited with code 0", "shell:3", str(missing)) == 0
+    assert _agents.cmd_agents_send(5, "finished", "shell:3", str(missing)) == 0
     body = seen["json"]
     assert isinstance(body, dict)
     content = body["content"]
-    assert content.startswith("exited with code 0")  # pyright: ignore[reportUnknownMemberType]
+    assert content.startswith("finished")  # pyright: ignore[reportUnknownMemberType]
     assert "[tail unavailable:" in content
 
 
@@ -423,7 +424,7 @@ def test_agents_send_transport_failure_is_recorded(monkeypatch: pytest.MonkeyPat
             "source": "shell:3",
             "content": "notice",
             "client_message_id": "key-cli-1",
-            "completion_notice": None,
+            "completion_notice": False,
         }
     ]
     headers = seen["headers"]
@@ -477,7 +478,7 @@ def test_agents_send_success_retires_the_pending_record(monkeypatch: pytest.Monk
             "source": "shell:3",
             "content": "build done",
             "key": "key-cli-1",
-            "completion_notice": None,
+            "completion_notice": False,
         }
     ]
     headers = seen["headers"]
