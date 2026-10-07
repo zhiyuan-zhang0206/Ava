@@ -110,7 +110,6 @@ interface SendAttempt {
   agentId: number | null;
   content: string;
   imageUrls: string[];
-  uncertain?: boolean;
 }
 
 function isAttempt(attempt: SendAttempt | null, clientMessageId: string): boolean {
@@ -217,11 +216,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     agentId == null ? null : readSendAttempt(agentId),
   );
   const sendAttemptRef = useRef<SendAttempt | null>(initialSendAttempt);
-  const [uncertainAttempt, setUncertainAttempt] = useState<SendAttempt | null>(
-    initialSendAttempt?.uncertain ? initialSendAttempt : null,
-  );
-  const activeUncertain = uncertainAttempt?.agentId === agentId;
-  const composerLocked = sending || activeUncertain;
+  const composerLocked = sending;
   // The command list is owned here (not in the dropdown) so it doubles as the
   // lookup for the committed command's instruction hint, shown once the name is
   // followed by whitespace and the dropdown has closed.
@@ -350,7 +345,6 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       setCaret(draft.length); // resume at the end, like the browser does
       const attempt = readSendAttempt(agentId);
       sendAttemptRef.current = attempt;
-      setUncertainAttempt(attempt?.uncertain ? attempt : null);
     }
     prevAgentIdRef.current = agentId;
     // `value` is intentionally omitted — we only want to react to agentId
@@ -404,25 +398,22 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   const send = async (
     content: string,
     imageUrls: string[],
-    forcedAttempt?: SendAttempt,
   ) => {
     if (sendingRef.current) return; // synchronous physical dedup against repeated dispatch
     sendingRef.current = true;
     setSending(true);
     const sendingAgentId = agentId;
-    let activeAttempt: SendAttempt | null = forcedAttempt ?? null;
-    let retryingUncertain = forcedAttempt?.uncertain === true;
+    let activeAttempt: SendAttempt | null = null;
     try {
       const signature = JSON.stringify([sendingAgentId, content, imageUrls]);
-      let candidate = activeAttempt ?? sendAttemptRef.current;
+      let candidate = sendAttemptRef.current;
       if (candidate?.signature !== signature && sendingAgentId != null) {
         const persisted = readSendAttempt(sendingAgentId);
         candidate = persisted?.signature === signature ? persisted : null;
       }
-      retryingUncertain ||= candidate?.uncertain === true;
       const attempt: SendAttempt =
         candidate?.signature === signature
-          ? { ...candidate, uncertain: false }
+          ? candidate
           : {
               signature,
               clientMessageId: newClientMessageId(),
@@ -432,7 +423,6 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
             };
       activeAttempt = attempt;
       sendAttemptRef.current = attempt;
-      setUncertainAttempt(null);
       if (sendingAgentId != null) {
         writeSession(sendAttemptKey(sendingAgentId), JSON.stringify(attempt));
         markMessageSent(sendingAgentId);
@@ -457,15 +447,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
         }
         if (isAttempt(sendAttemptRef.current, attempt.clientMessageId)) {
           sendAttemptRef.current = null;
-          setUncertainAttempt(null);
         }
-      } else if (retryingUncertain) {
-        const uncertain = { ...attempt, uncertain: true };
-        sendAttemptRef.current = uncertain;
-        if (uncertain.agentId != null) {
-          writeSession(sendAttemptKey(uncertain.agentId), JSON.stringify(uncertain));
-        }
-        setUncertainAttempt(uncertain);
       } else if (sendingAgentId != null) {
         clearMessageSent(sendingAgentId);
       }
@@ -474,14 +456,8 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
         if (activeAttempt?.agentId != null) clearMessageSent(activeAttempt.agentId);
         throw error;
       }
-      if (activeAttempt != null) {
-        const uncertain = { ...activeAttempt, uncertain: true };
-        sendAttemptRef.current = uncertain;
-        if (uncertain.agentId != null) {
-          writeSession(sendAttemptKey(uncertain.agentId), JSON.stringify(uncertain));
-        }
-        setUncertainAttempt(uncertain);
-      }
+      // Keep the original attempt for a normal Send of the unchanged draft.
+      // An ambiguous response does not require a separate composer mode.
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -499,27 +475,6 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     if (uploadingImages) return; // wait for in-flight uploads so none are dropped
     if (!content && readyImageUrls.length === 0) return;
     void send(content, readyImageUrls);
-  };
-
-  const retryUncertain = () => {
-    if (!activeUncertain) return;
-    void send(
-      uncertainAttempt.content,
-      uncertainAttempt.imageUrls,
-      uncertainAttempt,
-    );
-  };
-
-  const abandonUncertain = () => {
-    if (!activeUncertain) return;
-    if (uncertainAttempt.agentId != null) {
-      removeSession(sendAttemptKey(uncertainAttempt.agentId));
-      clearMessageSent(uncertainAttempt.agentId);
-    }
-    if (sendAttemptRef.current?.clientMessageId === uncertainAttempt.clientMessageId) {
-      sendAttemptRef.current = null;
-    }
-    setUncertainAttempt(null);
   };
 
   // Picking a command does NOT send — every command takes a natural-language
@@ -711,23 +666,6 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
               </button>
             </div>
           ))}
-        </div>
-      ) : null}
-      {activeUncertain ? (
-        <div
-          role="status"
-          className={cn(
-            "flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs",
-            FLEX,
-          )}
-        >
-          <span>{t("deliveryUnconfirmedStatus")}</span>
-          <button type="button" className="underline" onClick={retryUncertain}>
-            {t("retrySameMessage")}
-          </button>
-          <button type="button" className="underline" onClick={abandonUncertain}>
-            {t("sendAnotherAnyway")}
-          </button>
         </div>
       ) : null}
       <div className="relative">
