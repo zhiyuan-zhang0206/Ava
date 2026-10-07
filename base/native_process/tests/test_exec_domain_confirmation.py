@@ -10,7 +10,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from agent.graph.exec import _process
+from base.native_process import exec_domain as _process
 from base.native_process import group_closure
 
 

@@ -1,15 +1,30 @@
 """Real durable restart ownership, journal failure and parked-intent preservation."""
 
-from typing import Any
-from unittest.mock import MagicMock
+import asyncio
+from pathlib import Path
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import psycopg
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.graph import START, StateGraph
+from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+from agent import state as states
 from agent.db import claim_inbound_batch
+from agent.graph.claim.node import claim_node
+from agent.graph.exec.node import exec_node
+from agent.impersonation import protect_native_hooks
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from agent.startup import wrap_saver_writes_with_nstep_interval
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
@@ -19,8 +34,9 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
-from tests.agent.test_maintenance import WHEN, _agent
-from tests.agent.test_maintenance import isolate as isolate
+from tests.factories.maintenance import WHEN, maintenance_agent, start_cluster_through_ready_gate
+from tests.factories.maintenance import isolate as isolate
+from tests.factories.maintenance import maintenance_agent as _agent
 
 
 async def test_successor_cannot_sign_original_host_final_cleanup(
@@ -301,3 +317,196 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     current = admission.require_operation("commit-gap", WHEN)
     assert current.maintenance is not None and current.maintenance.drained == (agent,)
     cohort.verify_drained(db_conn, current.maintenance)
+
+
+def _model_that_runs_the_effect_tool_once(
+    calls: list[str], entered: asyncio.Event, finish: asyncio.Event, effect: Path
+) -> Any:
+    """The llm node: park on `finish`, then ask `execute_code` to write `effect`; end on the next call."""
+
+    async def model(_state: states.BaseAgentState) -> Command[Any]:
+        calls.append("model")
+        if calls.count("model") == 2:
+            return Command(
+                update={"halted": True, "messages": [AIMessage(content="Finished")]}, goto="__end__"
+            )
+        entered.set()
+        await finish.wait()
+        return Command(
+            update={
+                "messages": [
+                    AIMessage(
+                        content="Finish the admitted action",
+                        tool_calls=[
+                            {
+                                "id": "one",
+                                "name": "execute_code",
+                                "args": {
+                                    "code": f"from pathlib import Path\nPath({str(effect)!r}).write_text('once')"
+                                },
+                            }
+                        ],
+                    )
+                ]
+            },
+            goto="before_exec",
+        )
+
+    return model
+
+
+def _real_exec_graph_builder(model: Any, calls: list[str]) -> Any:
+    """claim -> before_llm -> llm -> before_exec -> real exec -> after_exec -> claim."""
+
+    async def route(_state: Any, _runtime: Any, _config: Any) -> Command[Any]:
+        return Command(goto="llm")
+
+    async def before_exec(_state: Any, _runtime: Any, _config: Any) -> Command[Any]:
+        calls.append("before_exec")
+        return Command(goto="exec")
+
+    async def after_exec(_state: Any, _runtime: Any, _config: Any) -> Command[Any]:
+        calls.append("after_exec")
+        return Command(goto="claim")
+
+    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
+    builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))
+    builder.add_node(
+        "before_llm",
+        protect_native_hooks(route),
+        destinations=("llm", "claim", "__end__"),
+    )
+    builder.add_node("llm", model, destinations=("before_exec", "__end__"))
+    builder.add_node(
+        "before_exec", protect_native_hooks(before_exec), destinations=("exec", "__end__")
+    )
+    builder.add_node(
+        "exec", protect_native_hooks(cast(Any, exec_node)), destinations=("after_exec", "__end__")
+    )
+    builder.add_node(
+        "after_exec", protect_native_hooks(after_exec), destinations=("claim", "__end__")
+    )
+    builder.add_edge(START, "claim")
+    return builder
+
+
+def _host_driving_invoke_until_done(
+    monkeypatch: pytest.MonkeyPatch,
+    pool: AsyncConnectionPool[Any],
+    saver: AsyncPostgresSaver,
+    graph: Any,
+    ctx: AvaContext,
+) -> AgentHost:
+    host = AgentHost(
+        pool=pool,
+        checkpointer=saver,
+        graph=graph,
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
+    monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
+
+    async def drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
+        return await host._invoke_until_done(_agent, ctx)
+
+    monkeypatch.setattr(host, "_drive_turns", drive)
+    return host
+
+
+async def _assert_cold_checkpoint_carries_the_exec_tool_result(
+    aops_pool: AsyncConnectionPool[Any], config: RunnableConfig
+) -> None:
+    reader = AsyncPostgresSaver(aops_pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget_tuple(config)
+    assert cold is not None
+    messages = cold.checkpoint["channel_values"]["messages"]
+    assert any(
+        isinstance(message, ToolMessage) and message.tool_call_id == "one" for message in messages
+    )
+
+
+async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_receipt(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent = maintenance_agent(db_conn)
+    entered, finish = asyncio.Event(), asyncio.Event()
+    calls: list[str] = []
+    effect = tmp_path / "effect.txt"
+    model = _model_that_runs_the_effect_tool_once(calls, entered, finish, effect)
+
+    saver = AsyncPostgresSaver(aops_pool)
+    await saver.setup()
+    wrap_saver_writes_with_nstep_interval(saver, 100)
+    builder = _real_exec_graph_builder(model, calls)
+    graph = builder.compile(checkpointer=saver)
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent)}}
+    await graph.aupdate_state(
+        config, {"messages": [HumanMessage(content="Do the action")], "halted": False}
+    )
+    ctx = AvaContext(
+        ops_pool=aops_pool,
+        event_publisher=MagicMock(),
+        llm=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
+        identity=AgentIdentity(agent_id=agent, owns_loop=True),
+    )
+    monkeypatch.setattr(
+        "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
+    )
+    host = _host_driving_invoke_until_done(monkeypatch, aops_pool, saver, graph, ctx)
+    work = asyncio.create_task(host.run_turn(agent))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        pause_owner.begin_maintenance("move", WHEN)
+        hold = cohort.prepare(
+            db_conn,
+            machine=machine_name(),
+            host_owner=host._owner,
+            holder="move",
+            acquired_at=WHEN,
+        )
+        assert not hold.drained
+        finish.set()
+        await asyncio.wait_for(work, 15)
+        current = admission.require_operation("move", WHEN)
+        assert current.maintenance is not None
+        assert current.maintenance.drained == (agent,)
+        cohort.verify_drained(db_conn, current.maintenance)
+        await _assert_cold_checkpoint_carries_the_exec_tool_result(aops_pool, config)
+        assert effect.read_text() == "once"
+        assert calls == ["model", "before_exec", "after_exec"]
+        await host.run_turn(agent)
+        assert calls == ["model", "before_exec", "after_exec"]
+        # Drop the old host's in-memory graph/cache: recovery consumes the
+        # durable restart pointer and real cold checkpoint after explicit release.
+        assert current.maintenance is not None
+        start_cluster_through_ready_gate(monkeypatch)
+        successor = _host_driving_invoke_until_done(
+            monkeypatch,
+            aops_pool,
+            AsyncPostgresSaver(aops_pool),
+            builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
+            ctx,
+        )
+        wakes = await successor.pending_inbound_wakes(stale_after_s=300)
+        assert agent in [wake.agent_id for wake in wakes]
+        await successor.run_turn(agent)
+        assert calls == ["model", "before_exec", "after_exec", "model"]
+        assert effect.read_text() == "once"
+        assert db_conn.execute(
+            "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s",
+            (hold.commands[agent],),
+        ).fetchone() == ("done", True)
+        after = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
+        assert after is not None and after.checkpoint["channel_values"]["halted"] is True
+    finally:
+        finish.set()
+        if not work.done():
+            await asyncio.wait_for(work, 15)
