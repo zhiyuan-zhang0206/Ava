@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 import psycopg
 from pydantic import BaseModel, Field
@@ -69,7 +70,7 @@ _FULL_COLS = (
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay, mp.last_probe_at, a.lease_expires_at, "
     "mp.agent_host_online, a.last_admission_outcome, a.last_admission_at, "
-    "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config"
+    "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -169,6 +170,7 @@ class AgentSnapshot(BaseModel):
     # intent. `last_probe_at` preserves the actual machine observation time.
     liveness_state: LivenessState
     last_probe_at: datetime | None
+    last_launch_attempt_id: UUID | None = None
     availability: AgentAvailability | None = None
     observation: AgentObservation | None = None
     notices_awaiting_response: list[OpenNotice]
@@ -207,6 +209,7 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
+            "last_launch_attempt_id": row[26],
             "spawner": row[1],
             "fork_source_agent_id": row[2],
             "fork_source_checkpoint_id": row[3],

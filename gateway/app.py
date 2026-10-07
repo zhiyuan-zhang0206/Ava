@@ -74,6 +74,7 @@ from base.events.live.bus import EventBus
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import model_catalog
 from gateway.agents import conversation as conversation_router
+from gateway.agents import launch_retry as agents_launch_retry_router
 from gateway.agents import lifecycle as agents_lifecycle_router
 from gateway.agents import notices as notices_router
 from gateway.agents import router as agents_router
@@ -553,6 +554,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 app.include_router(auth_router.router)
 app.include_router(bootstrap_router.router)
 app.include_router(agents_router.router)
+app.include_router(agents_launch_retry_router.router)
 app.include_router(agents_lifecycle_router.router)
 app.include_router(agents_understanding_router.router)
 app.include_router(agents_state_router.router)
