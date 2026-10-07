@@ -112,3 +112,14 @@ def test_health_control_pool_timeout_returns_degraded_with_identity(
         ],
         "degraded_reasons": ["db: PoolTimeout: control pool saturated"],
     }
+
+
+def test_control_plane_bypasses_an_unreadable_admission_journal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unexpected_read(_request: object) -> bool:
+        raise AssertionError("control-plane request read the business admission journal")
+
+    monkeypatch.setattr("gateway.app._cluster_is_paused", unexpected_read)
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
