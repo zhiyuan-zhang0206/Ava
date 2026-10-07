@@ -103,3 +103,30 @@ class TestValidateMigrationsAtRef:
         self._init_repo(tmp_path, [f"{_SYN}.sql"])
         with pytest.raises(MigrationLayoutError, match="cannot read migrations/"):
             validate_migrations_at_ref("no-such-ref", repo_root=tmp_path)
+
+
+def test_nested_migrations_are_sorted_by_name_not_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths: list[Path] = []
+    for directory, name in (("z/early", _SYN), ("a/later", _SYN2)):
+        path = tmp_path / directory / f"{name}.sql"
+        path.parent.mkdir(parents=True)
+        path.write_text("SELECT 1;")
+        paths.append(path)
+    _init_repo(tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    assert _list_migration_files() == list(zip((_SYN, _SYN2), paths, strict=True))
+
+
+def test_duplicate_migration_name_in_separate_groups_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for directory in ("one", "two"):
+        path = tmp_path / directory / f"{_SYN}.sql"
+        path.parent.mkdir()
+        path.write_text("SELECT 1;")
+    _init_repo(tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    with pytest.raises(MigrationLayoutError, match="duplicate migration name"):
+        _list_migration_files()

@@ -19,7 +19,7 @@ Checks:
    kebab tail is one typo away from colliding.
 4. **merged migrations are immutable** — against the base revision (the
    merge-base with `origin/main`, or `--base` in CI) no existing
-   migration file may be modified, deleted or renamed; only additions pass.
+   migration name or SQL bytes may change; directory-only moves preserve identity.
    A DB that already applied a migration will never re-run it, so editing the
    file forks what a fresh DB builds from what the applied ones hold, and
    deleting it makes the applied set disagree with the code's required set
@@ -275,7 +275,7 @@ _ROLE_SWITCH_RE = re.compile(
 def _check_no_role_switch() -> list[str]:
     """Baseline and migrations must keep the owner role they are applied as."""
     errors: list[str] = []
-    for path in [SCHEMA_SQL, *sorted(MIGRATIONS_DIR.glob("*.sql"))]:
+    for path in [SCHEMA_SQL, *sorted(MIGRATIONS_DIR.rglob("*.sql"))]:
         masked, _ = _mask_nonstatic_sql(path.read_text(encoding="utf-8"))
         for match in _ROLE_SWITCH_RE.finditer(masked):
             lineno = masked.count("\n", 0, match.start()) + 1
@@ -306,9 +306,8 @@ def _collect_migrations() -> tuple[set[str], list[str]]:
         errors.append(f"migrations/ directory does not exist: {MIGRATIONS_DIR}")
         return ups, errors
 
-    for entry in sorted(MIGRATIONS_DIR.iterdir()):
+    for entry in sorted(MIGRATIONS_DIR.rglob("*")):
         if entry.is_dir():
-            errors.append(f"migrations/ should not have subdirectories: {entry.name}")
             continue
         if entry.name.startswith(".") or entry.name == "README.md":
             continue
@@ -381,7 +380,7 @@ def _check_backfill_snapshot_drop_plans() -> list[str]:
     creations: list[tuple[str, str]] = []
     drops: dict[str, list[str]] = {}
 
-    for entry in sorted(MIGRATIONS_DIR.iterdir()):
+    for entry in sorted(MIGRATIONS_DIR.rglob("*")):
         if not entry.name.endswith(".sql"):
             continue
         text, _ = _mask_nonstatic_sql(entry.read_text(encoding="utf-8"))
@@ -632,7 +631,7 @@ def _unseeded_ddl(
     """
     facts: list[tuple[str, list[_DdlCandidate], list[tuple[int, int]]]] = []
     all_drops: _DropKeys = {k: set() for k in ("column", "table", "index", "constraint", "trigger")}
-    for entry in sorted(MIGRATIONS_DIR.iterdir()):
+    for entry in sorted(MIGRATIONS_DIR.rglob("*")):
         match = _FILENAME_RE.match(entry.name) if entry.name.endswith(".sql") else None
         if not match or match.group(1) in seeded:
             continue
@@ -738,13 +737,7 @@ def _immutability_base(ref: str | None) -> str | None:
 
 
 def _check_merged_migrations_immutable(base: str | None) -> list[str]:
-    """No migration file present at `base` may be modified, deleted or renamed.
-
-    Renames are reported as a deletion of the old name (`--no-renames`). The
-    working tree is compared, so an uncommitted edit fails at commit time too.
-    Only up migrations are in scope: `.down.sql` files are rejected by the
-    filename check instead.
-    """
+    """Merged SQL bytes and migration names are immutable; directories may change."""
     if base is None:
         print(
             "note: no base revision (origin/main merge-base) — skipping the "
@@ -752,18 +745,27 @@ def _check_merged_migrations_immutable(base: str | None) -> list[str]:
             file=sys.stderr,
         )
         return []
-    result = _git(
-        "diff", "--name-status", "--no-renames", "--diff-filter=MD", base, "--", "migrations"
-    )
+    result = _git("ls-tree", "-r", "-z", base, "--", "migrations")
     if result.returncode != 0:
-        return [f"cannot diff migrations/ against {base}: {result.stderr.strip()}"]
+        return [f"cannot read migrations/ at {base}: {result.stderr.strip()}"]
+    current = {entry.name: entry for entry in MIGRATIONS_DIR.rglob("*.sql")}
     errors: list[str] = []
-    for line in result.stdout.splitlines():
-        status, _, path = line.partition("\t")
-        name = path.rpartition("/")[2]
-        if _FILENAME_RE.match(name) is None:
+    for record in result.stdout.split("\0"):
+        metadata, separator, old_path = record.partition("\t")
+        name = Path(old_path).name
+        if not separator or _FILENAME_RE.match(name) is None:
             continue
-        verb = "modified" if status == "M" else "deleted or renamed"
+        path = current.get(name)
+        if path is None:
+            verb = "deleted or renamed"
+        else:
+            digest = _git("hash-object", str(path))
+            if digest.returncode != 0:
+                errors.append(f"cannot hash migration {path}: {digest.stderr.strip()}")
+                continue
+            if digest.stdout.strip() == metadata.split()[2]:
+                continue
+            verb = "modified"
         errors.append(
             f"{name}: a migration already on main was {verb} — merged migrations are "
             "immutable (a DB that applied it never re-runs it, and a missing file breaks "
