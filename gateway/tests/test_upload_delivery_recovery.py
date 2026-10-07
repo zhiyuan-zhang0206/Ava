@@ -1,12 +1,15 @@
 """Real native transactions, filesystem faults and guarded delivered-upload consumers."""
 
+import asyncio
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery import source, storage
@@ -33,8 +36,12 @@ def uploaded_agent(
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+
     # Deterministic fault tests call a real round explicitly; no background race.
-    monkeypatch.setattr(UploadRecovery, "start", lambda _self, _group: None)
+    def no_background(_self: UploadRecovery, _group: asyncio.TaskGroup) -> None:
+        return None
+
+    monkeypatch.setattr(UploadRecovery, "start", no_background)
     unit = current_unit()
     agent = _seed_agent(db_conn)
     db_conn.execute(
@@ -70,7 +77,7 @@ def post(
     )
 
 
-def request_for(pool, batch_id: str) -> ReceiveRequest:
+def request_for(pool: ConnectionPool, batch_id: str) -> ReceiveRequest:
     return next(item for item in source.due(pool) if item.manifest.batch_id == batch_id)
 
 
@@ -84,7 +91,9 @@ def proof_for(request: ReceiveRequest) -> CopyProof:
     )
 
 
-def test_lost_response_replay_retains_original_notification_after_deletion(uploaded_agent, db_conn):
+def test_lost_response_replay_retains_original_notification_after_deletion(
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+):
     client, agent = uploaded_agent
     response = post(client, agent)
     assert response.status_code == 202, response.text
@@ -108,7 +117,9 @@ def test_lost_response_replay_retains_original_notification_after_deletion(uploa
     assert client.get(obj).content == b"bytes"
 
 
-def test_changed_manifest_and_invalid_guard_have_no_effect(uploaded_agent, db_conn):
+def test_changed_manifest_and_invalid_guard_have_no_effect(
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+):
     client, agent = uploaded_agent
     assert post(client, agent).status_code == 202
     assert post(client, agent, data=b"changed").status_code == 409
@@ -134,12 +145,14 @@ def test_changed_manifest_and_invalid_guard_have_no_effect(uploaded_agent, db_co
 
 
 def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
-    uploaded_agent, db_conn, monkeypatch
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ):
     client, agent = uploaded_agent
     original = storage.publish
 
-    def fail_after(*args):
+    def fail_after(*args: Any):
         original(*args)
         raise OSError("fault after source fsync")
 
@@ -147,26 +160,27 @@ def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
     assert post(client, agent).status_code == 500
     assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == ("receiving",)
     monkeypatch.setattr(storage, "publish", original)
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        values = list(
-            executor.map(
-                lambda _: source.accept(
-                    app.state.db_pool,
-                    "direct",
-                    agent,
-                    ["f.png"],
-                    [("f.png", b"native", "image/png")],
-                    InboundProvenance("cluster_bearer", "http"),
-                ),
-                range(2),
-            )
+
+    def recover(_index: int):
+        return source.accept(
+            app.state.db_pool,
+            "direct",
+            agent,
+            ["f.png"],
+            [("f.png", b"native", "image/png")],
+            InboundProvenance("cluster_bearer", "http"),
         )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        values = list(executor.map(recover, range(2)))
     assert values[0] == values[1]
     assert post(client, agent).status_code == 202
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (2,)
 
 
-def test_placement_or_bad_proof_rejected_before_inbound(uploaded_agent, db_conn):
+def test_placement_or_bad_proof_rejected_before_inbound(
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+):
     client, agent = uploaded_agent
     first = post(client, agent).json()
     request = request_for(app.state.db_pool, first["batch_id"])
@@ -185,7 +199,9 @@ def test_placement_or_bad_proof_rejected_before_inbound(uploaded_agent, db_conn)
 
 
 def test_receiver_same_physical_root_different_home_counts_once_and_verifies_ready(
-    uploaded_agent, db_conn, monkeypatch
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ):
     client, agent = uploaded_agent
     first = post(client, agent).json()
@@ -205,7 +221,7 @@ def test_receiver_same_physical_root_different_home_counts_once_and_verifies_rea
 
 
 def test_receiver_wrong_actual_unit_and_legacy_writer_cannot_overwrite_nested_final(
-    uploaded_agent, monkeypatch
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
     client, agent = uploaded_agent
     first = post(client, agent).json()
@@ -226,7 +242,7 @@ def test_receiver_wrong_actual_unit_and_legacy_writer_cannot_overwrite_nested_fi
 
 
 def test_legacy_flat_admission_counts_hidden_files_and_receiving_reservation(
-    uploaded_agent, monkeypatch
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
     client, agent = uploaded_agent
     assert post(client, agent).status_code == 202
@@ -239,7 +255,9 @@ def test_legacy_flat_admission_counts_hidden_files_and_receiving_reservation(
     assert response.status_code == 413
 
 
-def test_name_byte_budget_includes_atomic_primitive_temporary_name(uploaded_agent, db_conn):
+def test_name_byte_budget_includes_atomic_primitive_temporary_name(
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+):
     client, agent = uploaded_agent
     rejected = post(client, agent, name="x." + "a" * 184)
     assert rejected.status_code == 422
@@ -251,7 +269,9 @@ def test_name_byte_budget_includes_atomic_primitive_temporary_name(uploaded_agen
 
 
 @pytest.mark.parametrize("changed", ["source", "target", "manifest"])
-def test_completed_receipt_rejects_different_immutable_intent(uploaded_agent, changed):
+def test_completed_receipt_rejects_different_immutable_intent(
+    uploaded_agent: tuple[TestClient, int], changed: str
+):
     client, agent = uploaded_agent
     batch = post(client, agent).json()["batch_id"]
     request = request_for(app.state.db_pool, batch)
@@ -267,7 +287,9 @@ def test_completed_receipt_rejects_different_immutable_intent(uploaded_agent, ch
     assert source.complete(app.state.db_pool, request, proof_for(request)) == iid
 
 
-def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers(uploaded_agent):
+def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers(
+    uploaded_agent: tuple[TestClient, int],
+):
     from urllib.parse import quote
 
     client, agent = uploaded_agent
@@ -289,7 +311,7 @@ def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers
 
 @pytest.mark.parametrize("invalid_agent", [-1, 0, 2**63, 2**70])
 def test_guarded_routes_reject_invalid_agent_paths_before_native_effects(
-    uploaded_agent, db_conn, invalid_agent
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any], invalid_agent: int
 ):
     client, _agent = uploaded_agent
     assert post(client, invalid_agent).status_code == 422

@@ -3,14 +3,18 @@
 import asyncio
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx2 as httpx
 import psycopg
 import pytest
+from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import CopyProof, ReceiveRequest
+from base.db import Database
 from gateway.app import app
 from gateway.tests.test_upload_delivery_recovery import (
     post,
@@ -29,14 +33,17 @@ from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 
 @pytest.mark.parametrize("stage", ["before", "after"])
 def test_source_ready_commit_failure_or_lost_receipt_recovers(
-    uploaded_agent, db_conn, monkeypatch, stage
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
 ):
     client, agent = uploaded_agent
     original = source.write_transaction
     count = 0
 
     @contextmanager
-    def faulty(pool):
+    def faulty(pool: ConnectionPool):
         nonlocal count
         count += 1
         this = count
@@ -61,7 +68,10 @@ def test_source_ready_commit_failure_or_lost_receipt_recovers(
 
 @pytest.mark.parametrize("stage", ["before", "after"])
 def test_inbound_transaction_rollback_and_commit_ack_loss(
-    uploaded_agent, db_conn, monkeypatch, stage
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
 ):
     client, agent = uploaded_agent
     request = request_for(app.state.db_pool, post(client, agent).json()["batch_id"])
@@ -69,7 +79,7 @@ def test_inbound_transaction_rollback_and_commit_ack_loss(
     original = source.write_transaction
 
     @contextmanager
-    def faulty(pool):
+    def faulty(pool: ConnectionPool):
         with original(pool) as conn:
             yield conn
             if stage == "before":
@@ -97,7 +107,9 @@ def test_inbound_transaction_rollback_and_commit_ack_loss(
 
 
 @pytest.mark.parametrize("version", [None, True, 1.0, 2, "1"])
-def test_explicit_native_request_and_proof_versions_fail_fast(uploaded_agent, monkeypatch, version):
+def test_explicit_native_request_and_proof_versions_fail_fast(
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch, version: object
+):
     client, agent = uploaded_agent
     request = request_for(app.state.db_pool, post(client, agent).json()["batch_id"])
     for model, payload in (
@@ -121,7 +133,10 @@ def test_explicit_native_request_and_proof_versions_fail_fast(uploaded_agent, mo
 
 @pytest.mark.asyncio
 async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
-    uploaded_agent, db_conn, monkeypatch, tmp_path
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
     client, agent = uploaded_agent
     source_unit = receiver.current_unit()
@@ -137,9 +152,13 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     request = request_for(app.state.db_pool, first["batch_id"])
     remote_dir = tmp_path / "remote-disk" / f"AvaAgent-{agent}"
     monkeypatch.setattr(receiver, "current_unit", lambda: target)
-    monkeypatch.setattr(receiver, "agent_upload_dir", lambda _id, **_kwargs: remote_dir)
 
-    def get(url, **_kwargs):
+    def directory(_id: int, **_kwargs: Any) -> Path:
+        return remote_dir
+
+    monkeypatch.setattr(receiver, "agent_upload_dir", directory)
+
+    def get(url: str, **_kwargs: Any):
         # A receiver file/network phase has released its own DB connection.
         with app.state.db_pool.connection(timeout=1) as conn:
             assert conn.execute("SELECT 1").fetchone() == (1,)
@@ -151,7 +170,9 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     monkeypatch.setattr(receiver, "http_get", get)
     calls = 0
 
-    async def dispatch(_db, machine, kind, payload, **kwargs):
+    async def dispatch(
+        _db: Database, machine: str, kind: str, payload: dict[str, Any], **kwargs: Any
+    ):
         nonlocal calls
         assert machine == "remote" and kind == "upload-receive-v1"
         assert kwargs.get("idempotency_key") is None
@@ -183,7 +204,9 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
 
 
 @pytest.mark.asyncio
-async def test_unknown_remote_kind_holds_without_legacy_fallback(uploaded_agent, monkeypatch):
+async def test_unknown_remote_kind_holds_without_legacy_fallback(
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
+):
     from services.agent_runner.agent_ops import daemon
 
     client, agent = uploaded_agent
@@ -192,9 +215,11 @@ async def test_unknown_remote_kind_holds_without_legacy_fallback(uploaded_agent,
         update={"target": request.target.model_copy(update={"home": "/old"})}
     )
     original = daemon.is_op_kind
-    monkeypatch.setattr(
-        daemon, "is_op_kind", lambda value: value != "upload-receive-v1" and original(value)
-    )
+
+    def old_kind(value: str) -> bool:
+        return value != "upload-receive-v1" and original(value)
+
+    monkeypatch.setattr(daemon, "is_op_kind", old_kind)
     status, result = await daemon._dispatch(
         "upload-receive-v1",
         request.model_dump(),
@@ -202,15 +227,19 @@ async def test_unknown_remote_kind_holds_without_legacy_fallback(uploaded_agent,
         workers=set(),
         pool=app.state.db_pool,
     )
-    assert status == OpStatus.FAILED and "unknown kind" in result["error"]
+    assert status == OpStatus.FAILED and "unknown kind" in str(result["error"])
     # Source does not reinterpret an unsupported version as legacy upload_receive.
     recovery = worker.UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
 
-    async def dispatch(*_args, **_kwargs):
+    async def dispatch(*_args: Any, **_kwargs: Any):
         raise ClusterOpFailed(result)
 
     monkeypatch.setattr(worker, "dispatch_to_machine", dispatch)
-    monkeypatch.setattr(source, "validate_pending", lambda *_args: True)
+
+    def eligible(*_args: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(source, "validate_pending", eligible)
     await recovery.copy(request)
     assert source.status(app.state.db_pool, agent, request.manifest.batch_id).state == "hold"
     await recovery.close()
@@ -218,7 +247,10 @@ async def test_unknown_remote_kind_holds_without_legacy_fallback(uploaded_agent,
 
 @pytest.mark.parametrize("stage", ["before", "after"])
 def test_receiver_ready_commit_boundary_recovers_without_second_copy(
-    uploaded_agent, db_conn, monkeypatch, stage
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
 ):
     client, agent = uploaded_agent
     request = request_for(app.state.db_pool, post(client, agent).json()["batch_id"])
@@ -226,7 +258,7 @@ def test_receiver_ready_commit_boundary_recovers_without_second_copy(
     count = 0
 
     @contextmanager
-    def faulty(pool):
+    def faulty(pool: ConnectionPool):
         nonlocal count
         count += 1
         current = count
@@ -248,18 +280,23 @@ def test_receiver_ready_commit_boundary_recovers_without_second_copy(
     ).fetchone() == (1,)
 
 
-def test_concurrent_receivers_and_inbound_acceptance_one_identity(uploaded_agent, db_conn):
+def test_concurrent_receivers_and_inbound_acceptance_one_identity(
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+):
     from concurrent.futures import ThreadPoolExecutor
 
     client, agent = uploaded_agent
     request = request_for(app.state.db_pool, post(client, agent).json()["batch_id"])
+
+    def copied(_index: int) -> CopyProof:
+        return receiver.receive(app.state.db_pool, request)
+
+    def completed(proof: CopyProof) -> int:
+        return source.complete(app.state.db_pool, request, proof)
+
     with ThreadPoolExecutor(max_workers=3) as executor:
-        proofs = list(
-            executor.map(lambda _: receiver.receive(app.state.db_pool, request), range(3))
-        )
-        receipts = list(
-            executor.map(lambda proof: source.complete(app.state.db_pool, request, proof), proofs)
-        )
+        proofs = list(executor.map(copied, range(3)))
+        receipts = list(executor.map(completed, proofs))
     assert proofs[0] == proofs[1] == proofs[2]
     assert len(set(receipts)) == 1
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_copies").fetchone() == (1,)
@@ -269,7 +306,7 @@ def test_concurrent_receivers_and_inbound_acceptance_one_identity(uploaded_agent
 
 
 def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_ready(
-    uploaded_agent, monkeypatch
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
     client, agent = uploaded_agent
     request = request_for(app.state.db_pool, post(client, agent).json()["batch_id"])
@@ -289,7 +326,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
     path = Path(proof.directory) / item.name
     path.unlink()
 
-    def gone(url, **_kwargs):
+    def gone(url: str, **_kwargs: Any):
         return httpx.Response(404, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(receiver, "http_get", gone)
@@ -300,7 +337,9 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
     assert not path.exists()
 
 
-def test_actual_old_gateway_has_no_guarded_upload_admission(uploaded_agent, db_conn):
+def test_actual_old_gateway_has_no_guarded_upload_admission(
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -316,15 +355,19 @@ def test_actual_old_gateway_has_no_guarded_upload_admission(uploaded_agent, db_c
 
 
 def test_single_connection_receiver_releases_pool_across_http(
-    uploaded_agent, monkeypatch, tmp_path
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     client, agent = uploaded_agent
     request = request_for(app.state.db_pool, post(client, agent).json()["batch_id"])
     remote_dir = tmp_path / "single-native" / f"AvaAgent-{agent}"
-    monkeypatch.setattr(receiver, "agent_upload_dir", lambda _id, **_kwargs: remote_dir)
+
+    def directory(_id: int, **_kwargs: Any) -> Path:
+        return remote_dir
+
+    monkeypatch.setattr(receiver, "agent_upload_dir", directory)
     with app.state.db.pool(min_size=1, max_size=1) as pool:
 
-        def get(url, **_kwargs):
+        def get(url: str, **_kwargs: Any):
             with pool.connection(timeout=0.5) as conn:
                 assert conn.execute("SELECT 1").fetchone() == (1,)
             result = client.get(url.removeprefix(receiver.gateway_api_base().rstrip("/")))
@@ -338,7 +381,9 @@ def test_single_connection_receiver_releases_pool_across_http(
 
 
 def test_auth_revocation_and_missing_target_never_recover_by_bypassing_admission(
-    uploaded_agent, db_conn, monkeypatch
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ):
     from base.config import settings
 
@@ -354,7 +399,9 @@ def test_auth_revocation_and_missing_target_never_recover_by_bypassing_admission
 
 @pytest.mark.asyncio
 async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
-    uploaded_agent, db_conn, monkeypatch
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ):
     client, agent = uploaded_agent
     unit = receiver.current_unit()
@@ -372,9 +419,11 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     assert request.source != request.target and request.target == target
     monkeypatch.setattr(receiver, "current_unit", lambda: target)
     monkeypatch.setattr(receiver, "MAX_AGENT_UPLOAD_BYTES", 5)
-    calls = []
+    calls: list[tuple[str, str, dict[str, Any]]] = []
 
-    async def dispatch(_db, machine, kind, payload, **kwargs):
+    async def dispatch(
+        _db: Database, machine: str, kind: str, payload: dict[str, Any], **kwargs: Any
+    ):
         calls.append((machine, kind, kwargs))
         status, result = await asyncio.to_thread(
             dispatch_sync, kind, payload, pool=app.state.db_pool, db=app.state.db
@@ -391,23 +440,29 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
 
 
 @pytest.mark.parametrize("ready", [False, True])
-def test_legacy_remote_quota_counts_hidden_ready_and_receiving(uploaded_agent, monkeypatch, ready):
+def test_legacy_remote_quota_counts_hidden_ready_and_receiving(
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch, ready: bool
+):
     from base.agents.upload_delivery import storage
     from base.agents.upload_delivery.models import UploadQuotaExceededError
     from ops import uploads
 
     client, agent = uploaded_agent
+
+    def paused(*_args: Any) -> None:
+        raise OSError("paused")
+
     if not ready:
-        monkeypatch.setattr(storage, "publish", lambda *_: (_ for _ in ()).throw(OSError("paused")))
+        monkeypatch.setattr(storage, "publish", paused)
     assert post(client, agent).status_code == (202 if ready else 500)
     monkeypatch.setattr(uploads, "MAX_AGENT_UPLOAD_BYTES", 5)
-    monkeypatch.setattr(
-        uploads,
-        "http_get",
-        lambda *_args, **_kwargs: httpx.Response(
+
+    def flat_get(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        return httpx.Response(
             200, content=b"x", request=httpx.Request("GET", "http://gateway.test")
-        ),
-    )
+        )
+
+    monkeypatch.setattr(uploads, "http_get", flat_get)
     with pytest.raises(UploadQuotaExceededError):
         dispatch_sync(
             "upload_receive",
@@ -419,7 +474,7 @@ def test_legacy_remote_quota_counts_hidden_ready_and_receiving(uploaded_agent, m
 
 
 def test_legacy_remote_overwrite_net_quota_and_network_without_db_borrow(
-    uploaded_agent, monkeypatch
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
     from ops import uploads
 
@@ -430,7 +485,7 @@ def test_legacy_remote_overwrite_net_quota_and_network_without_db_borrow(
     with app.state.db.pool(min_size=1, max_size=1) as pool:
         pool.wait()
 
-        def fetch(*_args, **_kwargs):
+        def fetch(*_args: Any, **_kwargs: Any):
             with pool.connection() as conn:
                 assert conn.execute("SELECT 1").fetchone() == (1,)
             return httpx.Response(
