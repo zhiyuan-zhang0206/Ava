@@ -191,8 +191,10 @@ def test_task_status_enum_is_single_sourced_across_wire_and_frontend() -> None:
     enum = openapi["components"]["schemas"]["TaskStatus"]["enum"]
     assert set(enum) == {s.value for s in TaskStatus}
 
-    types_ts = (root / "ui" / "web" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
+    types_ts = (root / "ui" / "web" / "src" / "lib" / "contracts" / "types.ts").read_text(
+        encoding="utf-8"
+    )
     assert 'export type TaskStatus = Schemas["TaskStatus"];' in types_ts, (
-        "lib/types.ts must alias the generated TaskStatus schema (single source), "
+        "lib/contracts/types.ts must alias the generated TaskStatus schema (single source), "
         "not restate a status union"
     )
