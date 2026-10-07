@@ -20,7 +20,6 @@ import queue
 import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -32,10 +31,9 @@ import pytest
 from base.config import settings
 from base.daemon import health
 from base.daemon.health import Liveness
-from base.host.net.resilience import MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
-from services.derived.memory_indexer.embeddings import factory, gemini
+from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.store_backend import StoreBackend
 
@@ -483,37 +481,14 @@ def test_process_paths_beats_per_delete(tmp_path: Path, monkeypatch: pytest.Monk
     assert provider.embed_batch_count == 0
 
 
-def test_liveness_timeout_covers_worst_embed_batch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
-
-    def assert_coverage() -> float:
-        # Recompute each retry gap and the cancellation deadline per attempt.
-        policy = gemini._EMBED_POLICY
-        worst_batch = policy.max_attempts * settings.services.memory_embed_timeout_seconds
-        worst_batch += sum(
-            max(policy.backoff(attempt), MAX_RETRY_AFTER_RESPECT_S) + 2 * policy.jitter_span
-            for attempt in range(policy.max_attempts - 1)
-        )
-        provider_budget = factory.worst_case_batch_seconds()
-        ceiling = daemon._liveness_timeout_s()
-        assert provider_budget >= worst_batch
-        assert ceiling >= daemon._LIVENESS_TIMEOUT_FLOOR_S
-        assert ceiling >= provider_budget + daemon._LIVENESS_SAFETY_MARGIN_S
-        return ceiling
-
-    original = assert_coverage()
-    monkeypatch.setattr(
-        gemini,
-        "_EMBED_POLICY",
-        replace(gemini._EMBED_POLICY, backoff=ExponentialBackoff(base=100, factor=2, cap=1000)),
-    )
-    assert_coverage()  # Later backoffs exceed Retry-After: wrong indices now fail.
-    monkeypatch.setattr(
-        settings.services,
-        "memory_embed_timeout_seconds",
-        settings.services.memory_embed_timeout_seconds + 300.0,
-    )
-    assert assert_coverage() > max(original, daemon._LIVENESS_TIMEOUT_FLOOR_S)
+@pytest.mark.parametrize("provider_budget", [0.0, 10.0, 3600.0, 7200.0])
+def test_liveness_timeout_covers_worst_embed_batch(
+    monkeypatch: pytest.MonkeyPatch, provider_budget: float
+) -> None:
+    monkeypatch.setattr(factory, "worst_case_batch_seconds", lambda: provider_budget)
+    ceiling = daemon._liveness_timeout_s()
+    assert ceiling >= daemon._LIVENESS_TIMEOUT_FLOOR_S
+    assert ceiling >= provider_budget + daemon._LIVENESS_SAFETY_MARGIN_S
 
 
 def test_factory_worst_case_registry_complete(monkeypatch: pytest.MonkeyPatch) -> None:

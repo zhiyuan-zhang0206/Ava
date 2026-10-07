@@ -19,18 +19,31 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from base.db import Database
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.inspector import InspectWidgetSpec
-from gateway.app import app
 from gateway.inspect import _plugin_widgets
+from gateway.inspect.router import router
+
+
+@pytest.fixture
+def app(database: Database) -> Iterator[FastAPI]:
+    """Exercise this package's HTTP router with a real isolated database."""
+    application = FastAPI()
+    application.include_router(router)
+    with database.pool(max_size=2) as pool:
+        application.state.db_pool = pool
+        yield application
 
 
 def _widget(**over: Any) -> InspectWidgetSpec:
@@ -120,7 +133,7 @@ def _insert_task(
     return row[0]
 
 
-def _get(aid: int) -> Any:
+def _get(app: FastAPI, aid: int) -> Any:
     with TestClient(app) as client:
         return client.get(f"/api/agents/{aid}/inspect/widgets")
 
@@ -129,28 +142,30 @@ def _get(aid: int) -> Any:
 
 
 def test_empty_registry_returns_empty(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_loader(monkeypatch)
     aid = _insert_agent(db_conn)
     db_conn.commit()
-    resp = _get(aid)
+    resp = _get(app, aid)
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-def test_unknown_agent_404(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_agent_404(
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """No agents_meta row -> 404 (same contract as /inspect)."""
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
-    assert _get(999999).status_code == 404
+    assert _get(app, 999999).status_code == 404
 
 
 # ── taskList resolution ───────────────────────────────────────────────────────
 
 
 def test_lists_only_the_agents_active_tasks(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _insert_agent(db_conn)
     other = _insert_agent(db_conn, label="other")
@@ -175,7 +190,7 @@ def test_lists_only_the_agents_active_tasks(
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
 
-    body = _get(aid).json()
+    body = _get(app, aid).json()
     assert len(body) == 1
     widget = body[0]
     assert (widget["plugin"], widget["id"], widget["kind"], widget["order"]) == (
@@ -190,7 +205,7 @@ def test_lists_only_the_agents_active_tasks(
 
 
 def test_task_list_shows_every_active_task(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _insert_agent(db_conn)
     root = _root_task_id(db_conn)
@@ -203,14 +218,14 @@ def test_task_list_shows_every_active_task(
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
 
-    tasks = _get(aid).json()[0]["tasks"]
+    tasks = _get(app, aid).json()[0]["tasks"]
     assert len(tasks) == 11
     # One rung (the default P2): id ascending — the complete list, no cap.
     assert [t["id"] for t in tasks] == ids
 
 
 def test_task_rows_carry_their_own_priority(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Each taskList row carries its own P0..P3 rung (task #3819) and the rows
     come rung-first, not newest-first (task #3866, user request 2026-09-17:
@@ -233,7 +248,7 @@ def test_task_rows_carry_their_own_priority(
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
 
-    tasks = _get(aid).json()[0]["tasks"]
+    tasks = _get(app, aid).json()[0]["tasks"]
     # P0 first, then the P1 pair in id order — p1b ("next-b") is the more
     # RECENT update but carries the later id, so a recency tie-break would
     # flip them; then the newest-row P3.
@@ -246,16 +261,16 @@ def test_task_rows_carry_their_own_priority(
 
 
 def test_widget_without_tasks_is_dropped(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _insert_agent(db_conn)
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
-    assert _get(aid).json() == []
+    assert _get(app, aid).json() == []
 
 
 def test_widgets_keep_registration_order(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _insert_agent(db_conn)
     root = _root_task_id(db_conn)
@@ -267,7 +282,7 @@ def test_widgets_keep_registration_order(
     )
     db_conn.commit()
 
-    body = _get(aid).json()
+    body = _get(app, aid).json()
     assert [w["id"] for w in body] == ["second", "first"]
     assert [w["order"] for w in body] == [750, 10]
 

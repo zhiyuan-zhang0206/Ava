@@ -20,22 +20,24 @@ import importlib
 import json
 import sys
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from base.db import Database
 from base.packages.plugins import enable_config
 from base.telemetry.metrics.plugin_metrics import MetricSpec
-from gateway.app import app
 from gateway.inspect import _plugin_metrics
 from gateway.inspect._plugin_metrics import (
     _render_metric_query,
     _translate_macros,
 )
+from gateway.inspect.router import router
 
 # A valid inspector query — the static-SQL shape (task #180 PR C): the
 # template era (macros + {event_name}/{category}/{{agent_id}} placeholders)
@@ -53,6 +55,16 @@ _DEMO_QUERY = (
 
 # A stat-shaped inspector query (one aggregate row).
 _STAT_QUERY = "SELECT count(*) AS live FROM agents_meta WHERE status IN ('running', 'idling')"
+
+
+@pytest.fixture
+def app(database: Database) -> Iterator[FastAPI]:
+    """Exercise this package's HTTP router with a real isolated database."""
+    application = FastAPI()
+    application.include_router(router)
+    with database.pool(max_size=2) as pool:
+        application.state.db_pool = pool
+        yield application
 
 
 def _metric(
@@ -108,7 +120,7 @@ def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
 
 
 def test_metrics_empty_registry_returns_empty(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No registered metrics -> 200 []."""
     _patch_loader(monkeypatch)
@@ -121,7 +133,7 @@ def test_metrics_empty_registry_returns_empty(
 
 
 def test_metrics_unknown_agent_404(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No agents_meta row -> 404 (same contract as /inspect)."""
     _patch_loader(monkeypatch, _metric())
@@ -135,7 +147,7 @@ def test_metrics_unknown_agent_404(
 
 
 def test_metrics_filters_inspector_output(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Only metrics whose output includes 'inspector' are returned; a
     grafana-only metric (even one sharing the same table shape) is skipped."""
@@ -157,7 +169,9 @@ def test_metrics_filters_inspector_output(
     assert [m["name"] for m in body] == ["insp_metric"]
 
 
-def test_metrics_stat_scalar(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_metrics_stat_scalar(
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A stat metric returns the single aggregate as `value`. The SQL
     inspector surface is static now (task #180 PR C — no macro windows), so
     the query counts exactly what its own predicates select."""
@@ -216,7 +230,7 @@ def test_metrics_macro_translation_unit() -> None:
     ],
 )
 def test_metrics_tampered_query_500(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tampered: str
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tampered: str
 ) -> None:
     """A registry file edited after generation fails the second validation ->
     500 with the reason (never executed)."""
@@ -257,7 +271,7 @@ def test_metrics_render_static_sql_passes_through() -> None:
 
 
 def test_metrics_runtime_query_error_per_metric(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A query that passes the whitelist but fails at runtime (a bad cast on
     the row values) lands in that metric's `error`; the sibling metric still
@@ -282,7 +296,7 @@ def test_metrics_runtime_query_error_per_metric(
 
 
 def test_metrics_read_only_is_transaction_scoped(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The read-only enforcement must NOT leak onto pooled connections.
 
@@ -348,7 +362,7 @@ def _usage(db: psycopg.Connection, agent_id: int, cost: float, *, minutes_ago: f
 
 
 def test_metrics_logql_timeseries_is_answered_from_telemetry_events(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A logql inspector metric is evaluated on Postgres over the fixed 24h window in 1h
     steps (the range-vector window ends at each step), and folds into the same
@@ -372,7 +386,7 @@ def test_metrics_logql_timeseries_is_answered_from_telemetry_events(
 
 
 def test_metrics_logql_stat_is_the_last_step_over_the_whole_range(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A stat-shaped logql metric returns the last step as `value`; `$__range` is 24h."""
     aid = _insert_agent(db_conn)
@@ -402,7 +416,7 @@ def test_metrics_logql_stat_is_the_last_step_over_the_whole_range(
 
 
 def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A template the evaluator does not understand lands in the metric's `error` field;
     sibling metrics still render."""
@@ -428,7 +442,7 @@ def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
 
 
 def test_metrics_logql_tampered_query_500(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A tampered logql registry row (lost selector / json pipeline) fails
     the rendered-form re-validation -> 500, never executed."""

@@ -3,7 +3,7 @@
 Covers what the data registry enforces when it admits an `inspect_widgets` declaration: plugin
 attribution from the registry entry, per-plugin id uniqueness, and the closed kind vocabulary plus
 the widget shape. The per-agent resolution side lives in
-`ava_builtins/plugins/tests/test_agent_inspect_widgets.py`.
+`gateway/inspect/tests/test_agent_inspect_widgets.py`.
 """
 
 from typing import Any
