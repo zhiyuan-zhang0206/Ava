@@ -11,15 +11,14 @@ not evaluate the credential at all.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base import config
 from base.cluster import rate_limit
-from base.cluster.rate_limit import login_limiter
-from gateway.app import app
+from gateway.app import app, lifespan
+from gateway.auth.router import router
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -39,15 +38,6 @@ def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enable auth with a known secret, mirroring test_auth.py."""
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-
-
-@pytest.fixture(autouse=True)
-def _reset_limiter() -> Iterator[None]:
-    """The limiter is a process-wide singleton; each test starts (and ends)
-    with a clean slate so no test leaks a lockout into the next one."""
-    login_limiter.reset()
-    yield
-    login_limiter.reset()
 
 
 def _wrong_login(
@@ -124,10 +114,32 @@ def test_lockout_is_per_ip() -> None:
         assert (
             attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
         )
-    # A different IP is unaffected — its correct password still logs in.
-    with TestClient(app, client=("203.0.113.8", 40000)) as other:
+        # A different IP in the same lifespan keeps an independent counter.
+        other = TestClient(app, client=("203.0.113.8", 40000))
         resp = other.post("/api/auth/login", json={"password": _SECRET})
-    assert resp.status_code == 200
+        assert resp.status_code == 200
+        assert (
+            attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
+        )
+
+
+def test_login_lockout_is_isolated_between_application_lifespans() -> None:
+    first = FastAPI(lifespan=lifespan)
+    second = FastAPI(lifespan=lifespan)
+    first.include_router(router)
+    second.include_router(router)
+    with TestClient(first) as attacker, TestClient(second) as independent:
+        assert first.state.login_limiter is not second.state.login_limiter
+        for _ in range(config.settings.gateway.login_max_failures):
+            _wrong_login(attacker)
+        assert (
+            attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
+        )
+        _wrong_login(independent)
+        assert independent.post("/api/auth/login", json={"password": _SECRET}).status_code == 200
+        assert (
+            attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
+        )
 
 
 def test_lockout_threshold_and_window_follow_config(monkeypatch: pytest.MonkeyPatch) -> None:
