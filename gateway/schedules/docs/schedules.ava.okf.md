@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Schedule Manager & Runner
-description: The built-in schedule supervisor—a schedule is a supervised resident process (not a cron trigger). The schedule-manager service guarantees a live session for every enabled schedule.
+description: The built-in supervisor keeps a live session for each enabled schedule—a resident process, not a cron trigger.
 tags: []
 ---
 
