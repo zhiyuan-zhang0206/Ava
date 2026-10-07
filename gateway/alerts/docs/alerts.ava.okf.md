@@ -111,6 +111,15 @@ equal severity and downgrades stay silent. IM failures are logged, never fail th
 Reconciliation repairs the durable store and SSE view but does not synthesize
 an IM recovery without Grafana's resolved notification payload.
 
+### Shadow transition facts
+
+The ingest transaction freezes inactive revision/group/member snapshots through
+`base.telemetry.alerts.shadow.AlertShadowBatch`; fingerprint gates preserve
+input-order instance resolution. Repeated observations retain the original group.
+Legacy sending and `notified_at` remain unchanged. Shadow history is never proof
+of non-delivery and cannot be automatically dispatched. See
+[[alert-shadow-facts]] for transaction ownership and the future activation boundary.
+
 ### List
 
 `GET /api/alerts?window=1h|6h|24h|7d&status=&severity=&limit=`
