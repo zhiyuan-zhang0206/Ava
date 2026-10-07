@@ -9,7 +9,8 @@ description: Standalone SDK creation returns an immutable accepted Task snapshot
 `ava.tasks.create(..., operation_key="...")` accepts a caller-chosen key of
 1–128 characters. Retain the same key and inputs when the response is lost.
 Keyless calls preserve their existing behavior. This contract covers standalone
-creation; `create_and_assign` includes agent spawn and does not accept a key.
+creation. Compound creation has its own explicit opt-in contract in
+[[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md]].
 It does not protect retries of an entire `execute_code` script.
 
 ## Operation identity and request
@@ -62,5 +63,6 @@ objects. It has no foreign keys to mutable task/agent rows and no automatic TTL.
 Receipt retention must preserve tombstones: deleting a receipt silently enables
 execution of the same operation again. This change introduces no cleanup owner.
 
-Compound `create_and_assign` still needs durable identity across spawn and task
-creation. A title hash or a new key on each retry cannot provide that contract.
+Keyless `create_and_assign` retains its separate spawn/create recipe; explicit
+strong mode uses one server-owned compound receipt. Standalone task keys are not
+child-step keys for that recipe.

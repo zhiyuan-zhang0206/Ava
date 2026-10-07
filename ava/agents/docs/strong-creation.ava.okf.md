@@ -57,6 +57,7 @@ and explicit `retry_launch(agent_id)` remain separate recovery operations.
 The default `require_idempotency=False` keeps `/api/agents` and its existing
 headers, key behavior and retry gate. It does not promise recovery when an old
 server ignores the key. Existing scripts, schedules and task compound creation
-are not silently upgraded. `create_and_assign` still needs its own durable
-compound identity across agent spawn and task creation. Fork strong admission
+are not silently upgraded. `create_and_assign` has a separate explicit
+[[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|guarded compound acceptance]]
+mode with its own receipt; standalone spawn keys do not make a script atomic. Fork strong admission
 and automatic ambiguous retry activation remain separate work.

@@ -70,7 +70,7 @@ retention requires an explicit replay horizon before removing tombstones.
 ## Remaining operations
 
 Standalone `create` has its own provenance-scoped receipt owner in
-[[task_creation_receipts.ava.okf.md]]. Compound `create_and_assign` still needs
-durable identity across spawn and task creation; these effects do not become
-one transaction and remain separate work under #4472. Gateway task PATCH has its own actual-path and
+[[task_creation_receipts.ava.okf.md]]. Compound `create_and_assign` has a separate
+explicit [[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|guarded acceptance]]
+mode; keyless calls retain their existing separate transactions. Gateway task PATCH has its own actual-path and
 credential-scoped receipt owner rather than sharing the SDK namespace.
