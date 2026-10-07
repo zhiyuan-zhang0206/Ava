@@ -4,8 +4,6 @@
     "gateway/tests/test_agents_endpoints.py::gateway.routers.memory._backend_topk": 1,
     "gateway/tests/test_idempotency.py::gateway.agents.state._prepare_message_content": 2,
     "gateway/tests/test_inspect_metrics.py::gateway.inspect._metrics": 1,
-    "gateway/tests/test_sse.py::gateway.events.sse._HEARTBEAT_SECONDS": 1,
-    "gateway/tests/test_status_cluster.py::gateway.cluster.status._probe_agent_runner": 1,
     "gateway/tests/test_terminate_forward.py::gateway.agents.lifecycle._open_tasks_hint_blocking": 1
   }
 }

@@ -16,6 +16,7 @@ import contextlib
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import psycopg
 import pytest
@@ -384,11 +385,18 @@ def test_sse_emits_heartbeat_data_event_when_idle(
     """Idle (no business event) for _HEARTBEAT_SECONDS -> a visible
     `data: {"role":"heartbeat"}` frame goes out. The client watchdog needs a real
     data frame (the `: hb` comment is invisible to EventSource.onmessage), so this
-    pins that one actually reaches the client. _HEARTBEAT_SECONDS=0 fires it on the
-    first idle tick instead of waiting the real 15s."""
+    pins that one actually reaches the client. Advance the stream's clock past its
+    normal heartbeat interval on the first idle tick."""
     from gateway.events import sse as sse_mod
 
-    monkeypatch.setattr(sse_mod, "_HEARTBEAT_SECONDS", 0.0)
+    now = 0.0
+
+    def monotonic() -> float:
+        nonlocal now
+        now += 20.0
+        return now
+
+    monkeypatch.setattr(sse_mod, "time", SimpleNamespace(monotonic=monotonic))
     tid = create_agent(db_conn)
     # no payloads -> the stream sits idle -> the heartbeat is the first data frame (count_heartbeats=True: this test is
     # ABOUT the heartbeat — the default filters them out as load noise)
