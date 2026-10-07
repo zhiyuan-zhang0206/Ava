@@ -38,6 +38,7 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
     The Pydantic arms dump with mode="json"; default=str on the final dumps is
     the last-resort fallback for plain-dict results and any future op.
     """
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     from datetime import UTC
 
     dispatch_sem = asyncio.Semaphore(1)
@@ -48,6 +49,7 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
         *,
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
+        pool: ConnectionPool,
     ):  # type: ignore[no-untyped-def]
         return "completed", {"at": datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)}
 
@@ -58,6 +60,7 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
         dispatch_sem=dispatch_sem,
         workers=set(),
         requests=set(),
+        pool=dispatch_pool,
     )
     assert status == 200
     assert ctype == "application/json"
@@ -70,6 +73,7 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
 async def test_ops_route_failed_status_is_still_http_200(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 'failed' dispatch is a semantic outcome the gateway re-raises, not an
     HTTP error — the envelope carries it at HTTP 200."""
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_sem = asyncio.Semaphore(1)
 
     async def _fake_dispatch(
@@ -78,6 +82,7 @@ async def test_ops_route_failed_status_is_still_http_200(monkeypatch: pytest.Mon
         *,
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
+        pool: ConnectionPool,
     ):  # type: ignore[no-untyped-def]
         return "failed", {"error": "boom"}
 
@@ -88,6 +93,7 @@ async def test_ops_route_failed_status_is_still_http_200(monkeypatch: pytest.Mon
         dispatch_sem=dispatch_sem,
         workers=set(),
         requests=set(),
+        pool=dispatch_pool,
     )
     assert status == 200
     assert json.loads(body) == {"status": "failed", "result": {"error": "boom"}}
@@ -96,9 +102,15 @@ async def test_ops_route_failed_status_is_still_http_200(monkeypatch: pytest.Mon
 @pytest.mark.asyncio
 async def test_ops_route_malformed_body_400() -> None:
     """Non-JSON body and a body missing `kind` both return 400 without dispatching."""
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_sem = asyncio.Semaphore(1)
     status, body, _ = await daemon._ops_route(
-        b"not json", active_ops={}, dispatch_sem=dispatch_sem, workers=set(), requests=set()
+        b"not json",
+        active_ops={},
+        dispatch_sem=dispatch_sem,
+        workers=set(),
+        requests=set(),
+        pool=dispatch_pool,
     )
     assert status == 400
     assert "invalid JSON" in json.loads(body)["error"]
@@ -108,6 +120,7 @@ async def test_ops_route_malformed_body_400() -> None:
         dispatch_sem=dispatch_sem,
         workers=set(),
         requests=set(),
+        pool=dispatch_pool,
     )
     assert status == 400
     assert "kind" in json.loads(body)["error"]
@@ -117,6 +130,7 @@ async def test_ops_route_malformed_body_400() -> None:
 async def test_ops_route_crash_becomes_failed_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """A crash inside _dispatch is caught and returned as a failed result (HTTP 200),
     never leaks as a 500 the gateway can't interpret."""
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_sem = asyncio.Semaphore(1)
 
     async def _boom(
@@ -125,6 +139,7 @@ async def test_ops_route_crash_becomes_failed_result(monkeypatch: pytest.MonkeyP
         *,
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
+        pool: ConnectionPool,
     ):  # type: ignore[no-untyped-def]
         raise RuntimeError("kaboom")
 
@@ -135,6 +150,7 @@ async def test_ops_route_crash_becomes_failed_result(monkeypatch: pytest.MonkeyP
         dispatch_sem=dispatch_sem,
         workers=set(),
         requests=set(),
+        pool=dispatch_pool,
     )
     assert status == 200
     parsed = json.loads(body)
@@ -155,6 +171,7 @@ def test_ops_route_requires_its_daemon_semaphore() -> None:
 @pytest.mark.asyncio
 async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
     """Concurrent /ops requests run at most ops_concurrency dispatches in parallel."""
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     cap = 3
     dispatch_sem = asyncio.Semaphore(cap)
     in_flight = 0
@@ -167,6 +184,7 @@ async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPa
         *,
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
+        pool: ConnectionPool,
     ):  # type: ignore[no-untyped-def]
         nonlocal in_flight, peak
         async with lock:
@@ -186,7 +204,12 @@ async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPa
     results = await asyncio.gather(
         *[
             daemon._ops_route(
-                b, active_ops={}, dispatch_sem=dispatch_sem, workers=set(), requests=set()
+                b,
+                active_ops={},
+                dispatch_sem=dispatch_sem,
+                workers=set(),
+                requests=set(),
+                pool=dispatch_pool,
             )
             for b in bodies
         ]
@@ -339,7 +362,6 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
     """The first dispatch with a key executes the op and stores its outcome in
     the shared api_idempotency table (method='ops' rows: path=kind,
     op_status + result)."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
@@ -372,7 +394,6 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
     """A second dispatch with the same key replays the stored outcome — the op
     is NOT re-executed. This is what makes the gateway's retry of a non-
     idempotent op (spawn) safe: a lost response cannot create a twin agent."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
@@ -403,7 +424,6 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
     monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """A duplicate lifecycle request waits within its bounded budget and replays its owner."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 60)
     calls: dict[str, int] = {}
@@ -415,6 +435,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         *,
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
+        pool: ConnectionPool,
     ) -> tuple[str, dict[str, object]]:
         calls["n"] = calls.get("n", 0) + 1
         started.set()
@@ -447,7 +468,6 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
     monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """A duplicate wait expires without executing again or claiming completion."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 2)
     calls: dict[str, int] = {}
@@ -459,6 +479,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         *,
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
+        pool: ConnectionPool,
     ) -> tuple[str, dict[str, object]]:
         calls["n"] = calls.get("n", 0) + 1
         started.set()
@@ -493,7 +514,6 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
     monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """Different keys are different logical ops — each executes."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
@@ -523,7 +543,6 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
 ) -> None:
     """A business-failed outcome is stored like a success and replayed on a
     same-key retry — a deterministic business failure must not re-run the op."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
 
     async def _fake_lifecycle(  # type: ignore[no-untyped-def]
         _db: object,
@@ -566,7 +585,7 @@ async def test_ops_route_dedupes_by_envelope_key(
 ) -> None:
     """End-to-end through _ops_route: an envelope carrying idempotency_key goes
     through the dedup path — two identical POSTs execute the op once."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
+    dispatch_pool: ConnectionPool = ops_pool
     dispatch_sem = asyncio.Semaphore(4)
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
@@ -576,10 +595,20 @@ async def test_ops_route_dedupes_by_envelope_key(
     ).encode()
 
     code1, payload1, _ = await daemon._ops_route(
-        body, active_ops={}, dispatch_sem=dispatch_sem, workers=set(), requests=set()
+        body,
+        active_ops={},
+        dispatch_sem=dispatch_sem,
+        workers=set(),
+        requests=set(),
+        pool=dispatch_pool,
     )
     code2, payload2, _ = await daemon._ops_route(
-        body, active_ops={}, dispatch_sem=dispatch_sem, workers=set(), requests=set()
+        body,
+        active_ops={},
+        dispatch_sem=dispatch_sem,
+        workers=set(),
+        requests=set(),
+        pool=dispatch_pool,
     )
 
     assert code1 == 200 and code2 == 200
@@ -594,17 +623,27 @@ async def test_ops_route_without_key_does_not_dedupe(
 ) -> None:
     """An envelope WITHOUT idempotency_key takes the plain _dispatch path — no
     dedup row is written (idempotent ops have nothing to dedupe)."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
+    dispatch_pool: ConnectionPool = ops_pool
     dispatch_sem = asyncio.Semaphore(4)
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     body = json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode()
     await daemon._ops_route(
-        body, active_ops={}, dispatch_sem=dispatch_sem, workers=set(), requests=set()
+        body,
+        active_ops={},
+        dispatch_sem=dispatch_sem,
+        workers=set(),
+        requests=set(),
+        pool=dispatch_pool,
     )
     await daemon._ops_route(
-        body, active_ops={}, dispatch_sem=dispatch_sem, workers=set(), requests=set()
+        body,
+        active_ops={},
+        dispatch_sem=dispatch_sem,
+        workers=set(),
+        requests=set(),
+        pool=dispatch_pool,
     )
 
     assert calls["n"] == 2  # no key → no dedup → both execute
@@ -718,23 +757,6 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_idempotent_no_pool_fails_cleanly() -> None:
-    """Without a pool the wrapper returns failed without retrying (the pass
-    would crash on `pool.connection()`)."""
-    status, result = await daemon._dispatch_idempotent(
-        "spawn-launch",
-        {"agent_id": 1},
-        "key-4",
-        None,
-        active_ops={},
-        workers=set(),
-    )
-    assert status == "failed"
-    assert isinstance(result["error"], str)
-    assert "not initialized" in result["error"]
-
-
-@pytest.mark.asyncio
 async def test_a_blocking_op_does_not_freeze_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -747,7 +769,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
     The op here blocks until the test releases it. What must stay true is that the
     loop keeps turning meanwhile: other coroutines run, other ops dispatch, and the
     health endpoint's `await` still gets its turn."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+    dispatch_pool: ConnectionPool = _stub_pool()
     started = threading.Event()
     release = threading.Event()
 
@@ -758,7 +780,9 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
 
     monkeypatch.setattr(daemon, "_dispatch_sync", _wedged)
 
-    task = asyncio.ensure_future(daemon._dispatch("config_read", {}, active_ops={}, workers=set()))
+    task = asyncio.ensure_future(
+        daemon._dispatch("config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool)
+    )
     await asyncio.to_thread(started.wait, 10)
 
     # The loop is still ours: this only completes if nothing is holding it.
