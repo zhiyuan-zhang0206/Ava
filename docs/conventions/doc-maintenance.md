@@ -3,6 +3,27 @@
 How documentation is structured and maintained. Read when writing or maintaining
 project docs.
 
+## Comments, docstrings and documentation
+
+Keep implementation explanations close to the code and system explanations at
+their documentation owner:
+
+- Comments explain a non-obvious local constraint, ordering requirement or reason
+  an apparently simpler implementation would be wrong. Do not narrate statements,
+  repeat type annotations or copy a component's documentation into source files.
+- Docstrings describe the callable or module contract: purpose, inputs, results,
+  relevant exceptions and side effects. Agent-visible SDK docstrings also serve
+  as help content; follow [SDK docstring discipline](sdk-docstring-discipline.md).
+- Component-local `docs/` explain responsibilities, cross-file relationships and
+  usage. Cross-cutting rules belong in `docs/conventions/`; design alternatives
+  and trade-offs belong in `docs/decisions/`.
+
+Keep each explanation at one owner and link to it where useful. Remove stale or
+redundant explanations when changing code. If understanding an implementation
+requires extensive commentary, first consider clearer names, smaller functions
+or a simpler design. Do not impose comment-count or comment-ratio budgets: judge
+whether an explanation adds information that the code and its owner do not.
+
 ## Five axes, one fact per place
 
 Every documented fact belongs to exactly one axis, and the axis is identifiable
