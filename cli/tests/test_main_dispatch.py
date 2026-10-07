@@ -104,7 +104,8 @@ assert 'base.config' not in sys.modules
 assert not any(name in sys.modules for name in (
     'cli.commands.agents.control', 'cli.commands.agents.notices',
     'cli.commands.agents.timeline', 'cli.commands.agents.impersonation',
-    'cli.commands.agents.impersonation_relay', 'cli.commands.agents.codex_app_server',
+    'cli.commands.agents.impersonation_relay', 'cli.commands.agents.impersonation_adapters',
+    'cli.commands.agents.codex_app_server',
 ))
 """
     result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.

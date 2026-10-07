@@ -12,6 +12,7 @@ import pytest
 
 from base.agents.impersonation.status import ImpersonationStatus
 from base.events.live import redis_listener
+from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
@@ -223,7 +224,7 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
     def deliver(thread_id: str, _message: str, *, endpoint: str) -> None:
         delivered.append((UUID(thread_id), endpoint))
 
-    monkeypatch.setattr(relay, "live_submit", deliver)
+    monkeypatch.setattr(adapters, "live_submit", deliver)
     assert args.func(args) == 0
     assert delivered == [(THREAD_ID, remote)]
     assert listener.closed
@@ -279,7 +280,7 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
             return "ActiveTurnNotSteerable"
         return None
 
-    monkeypatch.setattr(relay, "live_submit", deliver)
+    monkeypatch.setattr(adapters, "live_submit", deliver)
     args.codex_remote = "unix:///tmp/ava-codex.sock"
     assert args.func(args) == (1 if refuse else 0)
     if refuse:

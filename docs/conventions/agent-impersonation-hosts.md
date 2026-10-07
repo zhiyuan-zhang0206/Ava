@@ -7,6 +7,17 @@ an already-open host conversation, in self-contained envelopes that carry the
 message ids and the exact ACK command; the external agent acknowledges each batch on
 receipt and processes messages as they arrive.
 
+All providers use the same relay process and delivery loop in
+`cli/commands/agents/impersonation_relay.py`. Provider adapters in
+`cli/commands/agents/impersonation_adapters.py` bind a destination and send the
+loop's envelopes: Codex uses its app-server socket, Claude flushes text to
+Monitor, and dsh emits one JSON string per stdout line. Adapters also declare
+terminal-notice ownership: Codex's durable native host scan sends its notices;
+controller-session adapters deliver theirs through stdout. The shared loop owns
+inbox reads, batching, delivery reservations, retry budgets and exit behavior;
+adapters do not acknowledge messages or renew leases. Process supervision stays
+with the existing owner for each provider, as described below.
+
 This page is the operator and mechanism side. The executor's side of each host
 is its host guide under `.agents/skills/impersonator-guide/reference/`
 (`claude_code.md`, `codex.md`, `deepseek_harness.md`).
