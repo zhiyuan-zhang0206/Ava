@@ -213,7 +213,7 @@ class AgentRuntimeSettings(EnvSettings):
     understanding_group_corrections: int = Field(
         default=2,
         alias="AVA_UNDERSTANDING_GROUP_CORRECTIONS",
-        description="Correction rounds of one grouping reply: a chunk call whose group start numbers are not in its catalog or out of order, or an upper-level check whose ids or group sizes do not fit, is sent back in the same conversation for the model to fix. Past this many corrections a chunk job fails (and is retried) or an upper-level check fails (its raw calls stay recorded; the level is checked again after `AVA_UNDERSTANDING_GROUP_CHECK_OPEN` more open nodes).",
+        description="Correction rounds of one grouping reply: a chunk call whose groups carry invalid first/last unit numbers or do not cover the whole catalog without gaps, or an upper-level check whose ids are invalid or not consecutive, is sent back in the same conversation for the model to fix. Past this many corrections a chunk job fails (and is retried) or an upper-level check fails (its raw calls stay recorded; the level is checked again after `AVA_UNDERSTANDING_GROUP_CHECK_OPEN` more open nodes).",
         ge=0,
         json_schema_extra={
             "restart_required": "agent",
