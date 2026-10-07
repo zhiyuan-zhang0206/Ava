@@ -701,3 +701,55 @@ def _capture_im(monkeypatch: pytest.MonkeyPatch, *, ok: bool = True) -> list[str
 
     monkeypatch.setattr(alerts_router, "notify_im", _capture)
     return sent
+
+
+def test_shadow_groups_preserve_legacy_retry_grouping_and_notified_fact(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Native observations freeze once while legacy retries retain their existing grouping."""
+    sent: list[str] = []
+
+    def unavailable(text: str) -> bool:
+        sent.append(text)
+        return False
+
+    monkeypatch.setattr(alerts_router, "notify_im", unavailable)
+    a, b, c = [_alert(fingerprint=fp, summary=fp) for fp in ("a", "b", "c")]
+    with TestClient(app) as client:
+        first = _ingest(client, _webhook(alerts=[a, b]))
+        second = _ingest(client, _webhook(alerts=[a, b, c]))
+        assert first.json() == {"processed": 2, "inserted": 2, "updated": 0, "notified": 0}
+        assert second.json() == {"processed": 3, "inserted": 1, "updated": 2, "notified": 0}
+    assert len(sent) == 2
+    assert sent[0] != sent[1]  # Legacy second POST still includes A+B+C.
+    rows = db_conn.execute(
+        "SELECT text,origin FROM alert_notification_groups ORDER BY id"
+    ).fetchall()
+    assert rows[0] == (sent[0], "shadow")
+    assert rows[1][0] != sent[1]  # Only C is a new immutable shadow operation.
+    assert db_conn.execute("SELECT count(*) FROM alert_notification_members").fetchone() == (3,)
+    assert db_conn.execute(
+        "SELECT count(*) FROM alerts WHERE notified_at IS NOT NULL"
+    ).fetchone() == (0,)
+
+
+def test_shadow_keeps_input_order_missing_start_resolution(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A later entry still finds the same instance inserted earlier in this POST."""
+    sent: list[str] = []
+
+    def unavailable(text: str) -> bool:
+        sent.append(text)
+        return False
+
+    monkeypatch.setattr(alerts_router, "notify_im", unavailable)
+    first = _alert(fingerprint="same")
+    later = _alert(fingerprint="same", starts_at="", summary="later")
+    with TestClient(app) as client:
+        response = _ingest(client, _webhook(alerts=[first, later]))
+    assert response.json() == {"processed": 2, "inserted": 1, "updated": 1, "notified": 0}
+    assert len(sent) == 1
+    assert "later" in sent[0]
+    assert db_conn.execute("SELECT count(*) FROM alert_notification_members").fetchone() == (1,)
+    assert db_conn.execute("SELECT annotations->>'summary' FROM alerts").fetchone() == ("later",)
