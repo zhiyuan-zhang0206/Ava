@@ -242,7 +242,6 @@ DEFERRED: dict[str, str] = {
         "base/daemon/health.py::ambient-container:_warned_windows_8106",
         "base/events/live/redis_client.py::ambient-container:_warn_last",
         "base/packages/plugins/enable_config.py::ambient-container:_dangling_reported",
-        "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at",
         "services/supervision/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy",
     )
 }

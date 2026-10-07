@@ -169,6 +169,20 @@ from gateway.schedules import router as schedules_router
 _log = logging.getLogger(__name__)
 
 
+def _build_request_resources(app: FastAPI) -> None:
+    """Build caches, concurrency gates, and event throttles for one gateway lifespan."""
+    app.state.telemetry_staleness = TelemetryStaleness()
+    app.state.status_cache = StatusCache()
+    app.state.identity_mismatch_log = IdentityMismatchLog()
+    app.state.inspect_query_cache = inspect_router.build_query_cache()
+    app.state.upload_locks = uploads_router.AgentUploadLocks()
+    app.state.memory_search_gate = memory_router.build_search_gate()
+    app.state.memory_graph_cache = memory_router.MemoryGraphCache()
+    app.state.auth401_log = rejection_log.AuthRejectionLog()
+    app.state.strip_cache = SegmentReadCache()
+    app.state.fleet_graph_stale_emitter = fleet_graph_router.FleetGraphStaleEmitter()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """App-level resources: data-plane and control-plane DB pools.
@@ -198,15 +212,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.started_at = time.time()
     app.state.db = Database.from_settings()
     app.state.bus = EventBus.from_settings()
-    app.state.telemetry_staleness = TelemetryStaleness()
-    app.state.status_cache = StatusCache()
-    app.state.identity_mismatch_log = IdentityMismatchLog()
-    app.state.inspect_query_cache = inspect_router.build_query_cache()
-    app.state.upload_locks = uploads_router.AgentUploadLocks()
-    app.state.memory_search_gate = memory_router.build_search_gate()
-    app.state.auth401_log = rejection_log.AuthRejectionLog()
-    app.state.strip_cache = SegmentReadCache()
-    app.state.memory_graph_cache = memory_router.MemoryGraphCache()
+    _build_request_resources(app)
     app.state.db_pool = app.state.db.pool(max_size=8)
     app.state.sessions = SessionStore(app.state.db_pool)
     app.state.session_keys = SessionKeys()

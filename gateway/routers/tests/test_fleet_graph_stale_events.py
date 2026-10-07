@@ -11,7 +11,6 @@ rate cap collapses repeats.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +21,7 @@ from psycopg import errors as pg_errors
 from base import telemetry
 from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
+from gateway.routers.fleet_graph import FleetGraphStaleEmitter
 from gateway.routers.tests.staleness_support import use_heartbeat_age
 
 _STALE_EVENT = "fleet_graph_stale"
@@ -65,16 +65,6 @@ def _fresh_heartbeat_age(pool: object, *, now: datetime) -> float:
 def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     """The success-path heartbeat guard must not dial real services here."""
     use_heartbeat_age(monkeypatch, _fresh_heartbeat_age)
-
-
-@pytest.fixture(autouse=True)
-def _reset_stale_emitter() -> Iterator[None]:
-    """The emitter's per-reason rate cap is process-global state."""
-    import gateway.routers.fleet_graph as fg
-
-    fg._stale_emit_at.clear()
-    yield
-    fg._stale_emit_at.clear()
 
 
 @pytest.fixture
@@ -184,15 +174,27 @@ def test_stale_emit_rate_cap_collapses_repeats(
     """
     import gateway.routers.fleet_graph as fg
 
-    fg._emit_stale("pg_budget")
-    fg._emit_stale("pg_timeout")  # a different reason is not suppressed
-    fg._emit_stale("pg_budget")  # same reason inside the default window
+    emitter = FleetGraphStaleEmitter()
+    emitter.emit("pg_budget")
+    emitter.emit("pg_timeout")  # a different reason is not suppressed
+    emitter.emit("pg_budget")  # same reason inside the default window
     assert [event["reason"] for event in emitted] == ["pg_budget", "pg_timeout"]
 
     monkeypatch.setattr(fg, "_stale_emit_interval_s", lambda: 0.0)
-    fg._emit_stale("pg_budget")
+    emitter.emit("pg_budget")
     assert [event["reason"] for event in emitted] == [
         "pg_budget",
         "pg_timeout",
         "pg_budget",
     ]
+
+
+def test_stale_emitter_lifetimes_have_independent_warning_budgets(
+    emitted: list[dict[str, Any]],
+) -> None:
+    first = FleetGraphStaleEmitter(clock=lambda: 100.0)
+    second = FleetGraphStaleEmitter(clock=lambda: 100.0)
+    first.emit("pg_timeout")
+    first.emit("pg_timeout")
+    second.emit("pg_timeout")
+    assert [event["reason"] for event in emitted] == ["pg_timeout", "pg_timeout"]

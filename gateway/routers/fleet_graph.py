@@ -19,13 +19,14 @@ retains and caches the fetched graph, marked separately as telemetry-degraded;
 only fallback data uses the graph's stale flag.
 
 Each stale-serving fallback emits one `fleet_graph_stale` event per episode
-via `_emit_stale`, watched by the ops rule `ava-ops-fleet-graph-stale` (#3925).
+via its lifespan-owned `FleetGraphStaleEmitter`, watched by the ops rule `ava-ops-fleet-graph-stale` (#3925).
 """
 
 from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, LiteralString, NamedTuple
 
@@ -160,34 +161,38 @@ def _stale_emit_interval_s() -> float:
     return settings.display.fleet_graph_stale_emit_interval_s
 
 
-_stale_emit_at: dict[str, float] = {}
-_stale_emit_lock = threading.Lock()
+class FleetGraphStaleEmitter:
+    """Per-reason event throttles owned by one gateway application lifespan."""
 
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._last: dict[str, float] = {}
+        self._lock = threading.Lock()
 
-def _emit_stale(reason: FleetGraphStaleReason) -> None:
-    """One `fleet_graph_stale` event per degradation episode.
+    def emit(self, reason: FleetGraphStaleReason) -> None:
+        """One `fleet_graph_stale` event per degradation episode.
 
-    Every stale-serving fallback funnels through here, so a degraded answer
-    is attributable in the event stream (and alertable) instead of only in a
-    logger.warning line (task #3925, user ruling 2026-09-18). `route` is the
-    fixed `_STALE_ROUTE`; `reason` is the closed FleetGraphStaleReason set.
+        Every stale-serving fallback funnels through here, so a degraded answer
+        is attributable in the event stream (and alertable) instead of only in a
+        logger.warning line (task #3925, user ruling 2026-09-18). `route` is the
+        fixed `_STALE_ROUTE`; `reason` is the closed FleetGraphStaleReason set.
 
-    Rate cap: at most one event per reason per
-    `display.fleet_graph_stale_emit_interval_s` seconds — the alert counts
-    episodes (two in ten minutes), not polls or storms.
-    """
-    now = time.monotonic()
-    with _stale_emit_lock:
-        last = _stale_emit_at.get(reason)
-        if last is not None and now - last < _stale_emit_interval_s():
-            return
-        _stale_emit_at[reason] = now
-    telemetry.emit(
-        "telemetry",
-        "fleet_graph_stale",
-        level="warning",
-        attributes={"route": _STALE_ROUTE, "reason": reason},
-    )
+        Rate cap: at most one event per reason per
+        `display.fleet_graph_stale_emit_interval_s` seconds — the alert counts
+        episodes (two in ten minutes), not polls or storms.
+        """
+        now = self._clock()
+        with self._lock:
+            last = self._last.get(reason)
+            if last is not None and now - last < _stale_emit_interval_s():
+                return
+            self._last[reason] = now
+        telemetry.emit(
+            "telemetry",
+            "fleet_graph_stale",
+            level="warning",
+            attributes={"route": _STALE_ROUTE, "reason": reason},
+        )
 
 
 class _PgGraphData(NamedTuple):
@@ -367,7 +372,7 @@ def get_fleet_graph(
         # A canceled PG query cannot provide a fresh node set, but a complete
         # prior graph is still strictly more useful than an empty fleet.
         logger.warning("fleet_graph query canceled (statement timeout) — serving stale graph")
-        _emit_stale("pg_timeout")
+        request.app.state.fleet_graph_stale_emitter.emit("pg_timeout")
         return _stale_graph(bus, key, [])
 
     node_rows = pg_data.node_rows
@@ -377,7 +382,7 @@ def get_fleet_graph(
     # triggers degradation, and degraded results never replace last-good data.
     if _monotonic() > deadline:
         logger.warning("fleet_graph PG phase exceeded route budget — serving stale graph")
-        _emit_stale("pg_budget")
+        request.app.state.fleet_graph_stale_emitter.emit("pg_budget")
         return _stale_graph(bus, key, _build_nodes(node_rows))
 
     nodes = _build_nodes(node_rows, pg_data.tokens)
