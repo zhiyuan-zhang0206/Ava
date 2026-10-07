@@ -82,7 +82,11 @@ async def test_callback_invocation_uses_click_identity_not_shared_bot_message() 
                     "message": {"message_id": 10, "chat": {"id": 42}},
                 }
             )
-    assert [msg.message_id for msg in core.inbound] == ["callback:first", "callback:second"]
+    assert [msg.message_id for msg in core.inbound] == ["10", "10"]
+    assert [msg.idempotency_key for msg in core.inbound] == [
+        "telegram-callback:first",
+        "telegram-callback:second",
+    ]
 
 
 async def test_weixin_preparation_uses_existing_login_identity_not_context_or_token(
