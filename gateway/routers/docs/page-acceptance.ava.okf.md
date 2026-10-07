@@ -50,11 +50,18 @@ agent is accepted.
 The public legacy paths and SDK signatures remain one-shot. Their HTTP page
 mutations join the same agent-page gate; registration now commits close and
 replacement together rather than exposing a separately committed close on
-failure. The existing committing SQL wrappers remain available; explicit
+failure. Both upgraded HTTP handlers close every `closed_at IS NULL` row,
+including expired rows, before registration. Thus even an expired same-name
+registration receives a new numeric ID; legacy HTTP previously revived that
+row in place. Raw SQL upsert/revival keeps its existing row-maintenance behavior. The existing committing SQL wrappers remain available; explicit
 `*_in_transaction` primitives leave commit ownership with their caller. Older
 gateways do not know the versioned paths and cannot execute them. This server
 slice does not activate SDK/UI guarded calls or automatic ambiguous retries;
 existing route retry gates remain conservative during mixed-version operation.
+The new-ID guarantee covers upgraded HTTP registration handlers. An older
+legacy handler or explicit raw upsert can still revive an expired row in place;
+numeric ID alone cannot fence that rewrite. Client activation needs a verified
+writer compatibility floor before promising safety across those mixed writers.
 
 A `PageRow` proves registry acceptance, not server readiness or content delivery.
 The returned historical URL is still the existing name-based reverse-proxy URL:
