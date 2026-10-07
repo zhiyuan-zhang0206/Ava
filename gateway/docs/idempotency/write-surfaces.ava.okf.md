@@ -9,16 +9,19 @@ tags:
 
 # Write retry surface inventory
 
+Non-GET snapshot; live policy: `base/api_contracts/contracts.py`.
+`natural` means repeatable effects/CAS;
+`keyed` requires a business receipt; `one-shot` forbids ambiguous automatic retries.
+Login intentionally mints sessions; telemetry inserts events; upstream writes
+inherit no safe-retry promise. Machine control has a separate operator boundary.
 
-The following audit snapshot lists every declared non-GET surface. The live
-policy is always the route-contract owner above, not this table. `natural`
-means repeatable effects/CAS; `keyed` requires the business receipt; `one-shot`
-forbids ambiguous automatic retries. Later domain PRs update their live
-contracts only after proving their effects, then refresh affected inventory
-rows. Newly protected optional-key routes preserve keyless single-attempt callers;
-SDK ambiguous retry remains gated until server support is positively known. Login intentionally mints another session; telemetry intentionally
-inserts events; upstream proxy writes inherit no safe-retry promise. Machine
-control remains a separately audited operator boundary.
+Preset/schedule creation and schedule mutations now have optional transactional
+keyed receipts, but their routes conservatively remain `NON_IDEMPOTENT` (`one-shot`
+below). Keyless calls retain legacy semantics. Positive server negotiation and
+ambiguous retry activation remain future work; older gateways may ignore keys.
+Domain evidence:
+[[gateway/routers/docs/resource-creation.ava.okf.md]] and
+[[gateway/schedules/docs/schedule-convergence.ava.okf.md]].
 
 | Method and route | Retry policy | Effect / evidence |
 |---|---|---|
@@ -64,15 +67,15 @@ control remains a separately audited operator boundary.
 | `POST /api/packages/draft` | one-shot | LLM generation incurs a fresh external request and token cost |
 | `POST /api/agents/{agent_id}/pages` | natural | register page — upsert, repeats are harmless |
 | `DELETE /api/agents/{agent_id}/pages/{name}` | natural | close page — CAS, repeats are harmless |
-| `POST /api/presets` | one-shot | create preset — pure INSERT; a retry duplicates the row |
+| `POST /api/presets` | one-shot | optional keyed creation receipt commits with the resource; replay returns original identity after rename/delete |
 | `PATCH /api/presets/{preset_id}` | natural | update — repeats are harmless |
 | `DELETE /api/presets/{preset_id}` | natural | delete — repeats are harmless |
-| `POST /api/schedules` | one-shot | create schedule — pure INSERT; a retry duplicates the row |
+| `POST /api/schedules` | one-shot | optional keyed creation receipt commits with resource/version; replay returns original identity after rename/delete |
 | `POST /api/schedules/draft` | one-shot | LLM generation incurs a fresh external request and token cost |
-| `POST /api/schedules/{schedule_id}/start` | one-shot | schedule control enqueues a fresh sync; no durable command receipt |
-| `POST /api/schedules/{schedule_id}/stop` | one-shot | schedule control enqueues a fresh sync; no durable command receipt |
-| `POST /api/schedules/{schedule_id}/restart` | one-shot | schedule control enqueues a fresh sync; no durable command receipt |
-| `PUT /api/schedules/{schedule_id}` | one-shot | script edits append versions and can restart the process |
+| `POST /api/schedules/{schedule_id}/start` | one-shot | optional keyed receipt commits desired state/sync; replay returns original acceptance without re-enabling later state |
+| `POST /api/schedules/{schedule_id}/stop` | one-shot | optional keyed receipt commits desired state/sync; unchanged disabled state is a no-op |
+| `POST /api/schedules/{schedule_id}/restart` | one-shot | optional keyed receipt commits one new desired revision/sync; same-key replay does not restart again |
+| `PUT /api/schedules/{schedule_id}` | one-shot | optional keyed receipt commits edit/version/revision/sync; same-value edits are no-ops |
 | `DELETE /api/schedules/{schedule_id}` | natural | delete — repeats are harmless |
 | `PUT /api/settings/{key}` | natural | set one key — PUT is idempotent |
 | `PUT /api/skills` | natural | full replace — PUT is idempotent |
