@@ -18,6 +18,9 @@ class LlmUsage(TypedDict):
     with the price in force at the call, never re-priced against the current
     registry). ``cost_usd`` is the call's USD cost at the snapshot rates;
     the three rates are USD per 1M tokens (cache miss / cache hit / output).
+    Optional ``price_write_5m`` / ``price_write_1h`` and corresponding
+    ``cache_write_5m`` / ``cache_write_1h`` preserve cache-creation subdivisions
+    of total input and their TTL-specific USD per 1M rates.
     All four are absent on rows written before the snapshot shipped, and on
     calls of a model with no known price (a row never carries a null cost —
     absent means unpriced).
@@ -39,6 +42,8 @@ class LlmUsage(TypedDict):
     in_total: int
     out_total: int
     cache_read: int
+    cache_write_5m: NotRequired[int]
+    cache_write_1h: NotRequired[int]
     reasoning: int
     latency_ms: float | None
     decode_ms: float | None
@@ -46,6 +51,8 @@ class LlmUsage(TypedDict):
     price_miss: float | None
     price_hit: float | None
     price_out: float | None
+    price_write_5m: NotRequired[float]
+    price_write_1h: NotRequired[float]
     unpriced: int | None
     usage_kind: str
     source: NotRequired[str]

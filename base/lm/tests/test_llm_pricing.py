@@ -391,8 +391,8 @@ def test_cost_usd_unknown_model_is_none() -> None:
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        ("claude-fable-5-1", Rates(10.0, 0.25, 50.0)),
-        ("claude-fable-5", Rates(10.0, 1.0, 50.0)),
+        ("claude-fable-5-1", Rates(10.0, 0.25, 50.0, cache_write_5m=12.5, cache_write_1h=20)),
+        ("claude-fable-5", Rates(10.0, 1.0, 50.0, cache_write_5m=12.5, cache_write_1h=20)),
     ],
 )
 def test_claude_fable_versions_keep_their_published_cache_read_rates(

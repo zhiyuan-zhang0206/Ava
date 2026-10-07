@@ -16,5 +16,8 @@
   "spawnAgent": "创建 agent",
   "hostUnavailable": "Agent host 不可用",
   "hostUnknown": "Agent host 状态未知",
-  "noReadyRunner": "没有 host 可用的 agent runner"
+  "noReadyRunner": "没有 host 可用的 agent runner",
+  "priceBreakdown": "输入 / 缓存读取 / 输出，美元 / 百万 token",
+  "pricingConditions": "当前基础档价格；长上下文和定时价格窗口可能采用不同费率。",
+  "cacheWritePrice": "缓存写入（{duration}）：{price} / 百万 token"
 }
