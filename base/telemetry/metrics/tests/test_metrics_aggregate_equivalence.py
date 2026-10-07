@@ -70,6 +70,29 @@ def test_equivalence_empty(fake: TelemetryStream) -> None:
     _run_aggregate(fake, since_compact=True)
 
 
+def test_pre_snapshot_compatibility_keeps_model_and_agent_tier_scopes(
+    fake: TelemetryStream,
+) -> None:
+    for aid in (1, 2):
+        _add(
+            fake,
+            event="llm_usage",
+            agent_id=aid,
+            payload={
+                "model": "gpt-6-sol",
+                "in_total": 200_000,
+                "out_total": 0,
+                "cache_read": 0,
+            },
+        )
+    _text, data, rollups = _run_aggregate(fake)
+    # The old compatibility path selects tiers from per-model window sums;
+    # per-agent rollups select from each agent's sums. Recorded calls never use it.
+    assert data["metrics"]["llm_turns"]["cost_usd"] == pytest.approx(1.6)
+    assert rollups[1]["cost_usd"] == pytest.approx(0.4)
+    assert rollups[2]["cost_usd"] == pytest.approx(0.4)
+
+
 def test_cache_write_cost_snapshots_survive_aggregation_and_unpriced_calls(
     fake: TelemetryStream,
 ) -> None:
