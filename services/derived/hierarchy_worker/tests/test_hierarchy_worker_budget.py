@@ -7,6 +7,8 @@ resume as earlier jobs age out of the window. The anomaly breaker counts only th
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import psycopg
 import pytest
 
@@ -14,6 +16,11 @@ from base.config import settings
 from base.db.tests.fakes import fake_database
 from services.derived.hierarchy_worker import runner
 from services.derived.hierarchy_worker.tests.slices import hierarchy_config
+
+
+@pytest.fixture
+def scan_cadence() -> runner.FallbackScanCadence:
+    return runner.FallbackScanCadence()
 
 
 def cid(nth: int) -> str:
@@ -125,6 +132,7 @@ def test_a_deferred_claim_parks_first_builds_and_takes_the_rest(
 
 
 def test_the_tick_defers_first_builds_without_tripping_anything(
+    scan_cadence: runner.FallbackScanCadence,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen: list[bool] = []
@@ -140,10 +148,6 @@ def test_the_tick_defers_first_builds_without_tripping_anything(
         seen.append(defer_first_builds)
 
     monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
-    monkeypatch.setattr(runner, "_fallback_scanned_at", None)
-
-    def not_due(_now: object, _config: object) -> bool:
-        return False
 
     def quiet(_conn: object, _config: object) -> bool:
         return False
@@ -151,7 +155,7 @@ def test_the_tick_defers_first_builds_without_tripping_anything(
     def spent(_conn: object, _config: object) -> bool:
         return True
 
-    monkeypatch.setattr(runner, "_fallback_scan_due", not_due)
+    scan_cadence.last_scanned_at = datetime.now(UTC)
     monkeypatch.setattr(runner, "_regen_budget_check", quiet)
     monkeypatch.setattr(runner, "_first_builds_deferred", spent)
     monkeypatch.setattr(runner, "claim_next", fake_claim)
@@ -159,6 +163,6 @@ def test_the_tick_defers_first_builds_without_tripping_anything(
     def connect(**_kw: object) -> _Conn:
         return _Conn()
 
-    runner.run_tick(hierarchy_config(), fake_database(connect))
+    runner.run_tick(hierarchy_config(), fake_database(connect), cadence=scan_cadence)
 
     assert seen == [True]  # the drain asked the claim to defer first builds
