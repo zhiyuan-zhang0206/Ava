@@ -158,7 +158,10 @@ class GatewayClient:
         )
         if resp.status_code != 201:
             raise RuntimeError(f"spawn failed: HTTP {resp.status_code} - {resp.text[:300]}")
-        return int(resp.json()["id"])
+        agent_id = resp.json()["id"]
+        if type(agent_id) is not int or agent_id <= 0:
+            raise TypeError("spawn response requires a positive integer agent id")
+        return agent_id
 
     async def list_commands(self) -> list[dict[str, Any]]:
         """GET /api/commands — the Ava slash-command catalog (every active

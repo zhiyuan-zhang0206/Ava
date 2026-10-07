@@ -245,6 +245,9 @@ _PER_TEST_TRUNCATE_TABLES = (
     "telemetry_events",
     # im-bridge durable cursors: no FK path; a leaked row would make the next
     # test's bridge resume (or replay) from a stale position.
+    "weixin_ingress_receipts",
+    "weixin_ingress_cursors",
+    "weixin_ingress_bindings",
     "im_bridge_cursors",
     "im_bridge_notice_acceptances",
     "im_bridge_notice_poll_state",

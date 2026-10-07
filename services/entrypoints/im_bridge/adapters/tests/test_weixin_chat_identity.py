@@ -8,14 +8,21 @@ import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from psycopg_pool import ConnectionPool
 
 from base.db import Database
-from services.entrypoints.im_bridge.adapters.tests.test_weixin_adapter import FakeCore, _message
+from services.entrypoints.im_bridge.adapters.tests.test_weixin_adapter import _message
 from services.entrypoints.im_bridge.adapters.tests.test_weixin_adapter import env as env
-from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
+from services.entrypoints.im_bridge.adapters.weixin import (
+    WeixinAdapter,
+    _ordinary_chat_key,
+    load_account,
+    save_account,
+)
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
+from services.entrypoints.im_bridge.ingress.identity import source_chat_key
+from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
+from services.entrypoints.im_bridge.ingress.types import IngressStatus, ProviderSource
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
 
 
@@ -31,11 +38,15 @@ def set_account(
 
 
 async def inbound_key(provider_id: object, text: str = "same") -> str | None:
-    core = FakeCore()
-    message = _message(text=text)
-    message["message_id"] = provider_id
-    await WeixinAdapter(core)._handle_message(message)
-    return core.inbound[0].idempotency_key
+    account = load_account()
+    assert account is not None
+    return _ordinary_chat_key(
+        base_url=account["base_url"],
+        account_id=account["account_id"],
+        sender_id="peer-1",
+        provider_id=provider_id,
+        text=text,
+    )
 
 
 async def test_uint64_identity_is_lossless_and_canonical_across_restart(env: Path) -> None:
@@ -83,11 +94,17 @@ async def test_commands_and_notice_paths_do_not_receive_ordinary_chat_keys(
     assert await inbound_key("123", text) is None
 
 
-async def test_spawn_identity_bytes_remain_unchanged(env: Path) -> None:
-    import hashlib
-
-    expected = "weixin-spawn:" + hashlib.sha256(json.dumps(["peer-1", "123"]).encode()).hexdigest()
-    assert await inbound_key("123", "spawn:go") == expected
+async def test_spawn_source_identity_is_account_qualified_not_legacy_peer_hash(env: Path) -> None:
+    source = ProviderSource(
+        namespace="https://ilinkai.weixin.qq.com",
+        account_id="bot-id",
+        sender_id="peer-1",
+        message_id="123",
+    )
+    assert source_chat_key(source).startswith("weixin-chat-v1:")
+    assert source_chat_key(source.model_copy(update={"account_id": "other"})) != source_chat_key(
+        source
+    )
 
 
 @pytest.mark.parametrize(
@@ -115,22 +132,26 @@ async def test_account_sender_and_endpoint_scope_separate_same_provider_id(env: 
     assert await inbound_key("123") != first
     set_account(base_url="https://ILINKAI.WEIXIN.QQ.COM:443/")
     assert await inbound_key("123") == first
-    core = FakeCore()
-    await WeixinAdapter(core)._handle_message(
-        _message(text="same", message_id="123", from_user_id="other-peer")
+    assert (
+        _ordinary_chat_key(
+            base_url="https://ilinkai.weixin.qq.com",
+            account_id="bot-id",
+            sender_id="other-peer",
+            provider_id="123",
+            text="same",
+        )
+        != first
     )
-    assert core.inbound[0].idempotency_key != first
     set_account(account_id=" ")
     assert await inbound_key("123") is None
 
 
 async def test_voice_transcript_is_ordinary_chat_with_event_identity(env: Path) -> None:
-    core = FakeCore()
-    message = _message(text="", message_id="123")
-    message["item_list"] = [{"type": 3, "voice_item": {"text": "transcript"}}]
-    await WeixinAdapter(core)._handle_message(message)
-    assert core.inbound[0].text == "[voice transcript] transcript"
-    assert core.inbound[0].idempotency_key == await inbound_key("123")
+    from services.entrypoints.im_bridge.adapters.weixin import _extract_text
+
+    text = _extract_text([{"type": 3, "voice_item": {"text": "transcript"}}])
+    assert text == "[voice transcript] transcript"
+    assert await inbound_key("123", text) == await inbound_key("123")
 
 
 def create_agent(conn: psycopg.Connection) -> int:
@@ -139,25 +160,6 @@ def create_agent(conn: psycopg.Connection) -> int:
     conn.execute("INSERT INTO agents_meta(id,status) VALUES (%s,'running')", (row[0],))
     conn.commit()
     return row[0]
-
-
-def core_for_agent(
-    client: GatewayClient, agent_id: int, monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool
-) -> tuple[IMBridgeCore, WeixinAdapter]:
-    bridge_core = IMBridgeCore(im_bridge_config(im_send_retry_delays=(0.0,)), client, db_pool=pool)
-    adapter = WeixinAdapter(bridge_core)
-    bridge_core.register(adapter)
-
-    def ignore_activity(*_args: object, **_kwargs: object) -> None:
-        pass
-
-    monkeypatch.setattr(bridge_core, "_ensure_subscription", ignore_activity)
-    monkeypatch.setattr(bridge_core, "_start_typing", ignore_activity)
-    monkeypatch.setattr(bridge_core, "ensure_outbox_replay", lambda: None)
-    state = bridge_core._get_or_create_state("weixin", "peer-1")
-    state.current_agent_id = agent_id
-    bridge_core._persist_switch(state)
-    return bridge_core, adapter
 
 
 async def test_real_gateway_response_loss_then_bridge_restart_recovers_one_inbound(
@@ -199,17 +201,30 @@ async def test_real_gateway_response_loss_then_bridge_restart_recovers_one_inbou
                 auth_headers={},
             )
             client._client = transport
-            _first, first_adapter = core_for_agent(client, agent_id, monkeypatch, pool)
-            await first_adapter._handle_message(_message(text="same", message_id="123"))
-            # Reconstruct both core and adapter: the gateway must recover its original receipt.
-            _second, second_adapter = core_for_agent(client, agent_id, monkeypatch, pool)
-            await second_adapter._handle_message(_message(text="same", message_id="123"))
-            await second_adapter._handle_message(_message(text="same", message_id="124"))
-    assert keys[0] == keys[1]
-    assert keys[2] != keys[1]
+            key = await inbound_key("123")
+            with pytest.raises(RuntimeError, match="after 1 attempts"):
+                await client.send_message(agent_id, "same", idempotency_key=key)
+            assert lost
+            # Legacy HTTP admission exists even though its first response was lost.
+            # Cutover adopts that original target without issuing another HTTP call.
+            core = IMBridgeCore(im_bridge_config(im_send_retry_delays=(0.0,)), client, db_pool=pool)
+            adapter = WeixinAdapter(core)
+            core.register(adapter)
+            store = WeixinIngressStore(pool)
+            held = store.initialize("https://ilinkai.weixin.qq.com", "bot-id", None)
+            store.begin_cutover(held, expected_cursor="")
+            receipt = await adapter._handle_message(_message(text="same", message_id="123"))
+            assert receipt.status == IngressStatus.ACCEPTED
+            assert receipt.route.agent_id == agent_id
+            count = len(keys)
+            assert await adapter._handle_message(_message(text="same", message_id="123")) == receipt
+            assert len(keys) == count
+            _ingress, current = await adapter._ensure_ingress()
+            store.checkpoint(current, "", "cutover-empty", provider_empty=True)
+    assert all(item == keys[0] for item in keys)
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)
-    ).fetchone() == (2,)
+    ).fetchone() == (1,)
 
 
 async def test_same_event_changed_body_or_selection_does_not_claim_recovery(

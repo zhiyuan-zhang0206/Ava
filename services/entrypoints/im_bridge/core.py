@@ -1,7 +1,4 @@
-"""IM Bridge command routing, chat selection and committed timeline acceptance.
-
-Channel adapters own provider rendering; the IM outbox owns durable delivery.
-"""
+"""IM command routing, chat selection and durable timeline acceptance."""
 
 from __future__ import annotations
 
@@ -24,12 +21,7 @@ from services.entrypoints.im_bridge.cursor_store import (
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound_types import (
-    OutboundIntent,
-    TimelineAcceptance,
-    TimelineCandidate,
-    timeline_source,
-)
+from services.entrypoints.im_bridge.outbound_types import TimelineAcceptance
 from services.entrypoints.im_bridge.outbound_worker import IMOutboxWorker
 from services.entrypoints.im_bridge.spawn_menu import SpawnMenuMixin
 from services.entrypoints.im_bridge.state import (
@@ -39,6 +31,17 @@ from services.entrypoints.im_bridge.state import (
     _save_outbox,
     _save_switch_state,
 )
+from services.entrypoints.im_bridge.timeline_acceptance import (
+    SelectionAdmission,
+    accept_timeline,
+    apply_account_selection,
+    hold_selection,
+    register_adapter,
+    render_item,
+    selection_account,
+    sync_selection,
+)
+from services.entrypoints.im_bridge.timeline_acceptance import truncate as _truncate
 from services.entrypoints.im_bridge.types import (
     AgentRow,
     ChatState,
@@ -46,6 +49,7 @@ from services.entrypoints.im_bridge.types import (
     InboundMessage,
     Reply,
     SendNotStartedError,
+    parse_command,
 )
 
 _log = logging.getLogger("services.entrypoints.im_bridge.core")
@@ -88,6 +92,9 @@ _TYPING_INTERVAL_S = 4.0
 _TYPING_MAX_S = 300.0
 
 
+_render_item = render_item  # Compatibility for the existing renderer consumer.
+
+
 class IMBridgeCore(SpawnMenuMixin):
     """Owns per-channel chat state, command routing, and subscription pushes."""
 
@@ -111,7 +118,7 @@ class IMBridgeCore(SpawnMenuMixin):
         self._outbox_replay_task: asyncio.Task[Any] | None = None
 
     def register(self, adapter: IMAdapter) -> None:
-        self.adapters[adapter.channel] = adapter
+        register_adapter(self, adapter)
 
     async def notify_user(self, text: str) -> dict[str, str]:
         """Fan ops notifications to loaded owner chats, isolating each result.
@@ -276,6 +283,12 @@ class IMBridgeCore(SpawnMenuMixin):
             return
         remaining: list[_OutboxEntry] = []
         for entry in entries:
+            if entry.channel == "weixin":
+                _log.warning(
+                    "im_bridge: legacy Weixin journal held reason=unbound_provider_account"
+                )
+                remaining.append(entry)
+                continue
             try:
                 await self.gateway.send_message(
                     entry.agent_id,
@@ -289,8 +302,10 @@ class IMBridgeCore(SpawnMenuMixin):
                 _log.info("im_bridge: outbox replay delivered id=%s", entry.id)
         _save_outbox(remaining)
 
-    async def _send(self, channel: str, chat_id: str, reply: Reply) -> None:
-        adapter = self.adapters.get(channel)
+    async def _send(
+        self, channel: str, chat_id: str, reply: Reply, *, adapter: IMAdapter | None = None
+    ) -> None:
+        adapter = adapter or self.adapters.get(channel)
         if adapter is None:
             _log.error("no adapter for channel %s", channel)
             return
@@ -305,15 +320,17 @@ class IMBridgeCore(SpawnMenuMixin):
         idempotency_key: str | None = None,
         *,
         replay_id: str | None = None,
+        selection_admission: SelectionAdmission | None = None,
     ) -> Reply | list[Reply] | None:
-        cmd, _, arg = text.partition(" ")
-        cmd = cmd.lower()
+        cmd, arg = parse_command(text)
         if cmd == "/list":
             return await self._cmd_list(state.channel)
         if cmd == "/switch":
-            return await self._cmd_switch(state, arg.strip(), replay_id=replay_id)
+            return await self._cmd_switch(
+                state, arg.strip(), replay_id=replay_id, selection_admission=selection_admission
+            )
         if cmd == "/status":
-            return await self._cmd_status(state)
+            return await self._cmd_status(state, selection_admission=selection_admission)
         if cmd == "/spawn":
             # args are ignored — /spawn is a pure menu (user ruling)
             return await self._cmd_spawn(state)
@@ -379,10 +396,17 @@ class IMBridgeCore(SpawnMenuMixin):
         return None
 
     async def _cmd_switch(
-        self, state: ChatState, arg: str, *, replay_id: str | None = None
+        self,
+        state: ChatState,
+        arg: str,
+        *,
+        replay_id: str | None = None,
+        selection_admission: SelectionAdmission | None = None,
     ) -> Reply | list[Reply]:
         async with self._selection_lock(state):
-            return await self._cmd_switch_locked(state, arg, replay_id=replay_id)
+            return await self._cmd_switch_locked(
+                state, arg, replay_id=replay_id, selection_admission=selection_admission
+            )
 
     def _selection_lock(self, state: ChatState) -> asyncio.Lock:
         return self._selection_locks.setdefault((state.channel, state.chat_id), asyncio.Lock())
@@ -398,22 +422,19 @@ class IMBridgeCore(SpawnMenuMixin):
         else:
             self._ensure_subscription(state, prev_agent=previous)
 
+    def _hold_selection(self, state: ChatState) -> None:
+        hold_selection(self, state)
+
     async def _sync_selection(self, state: ChatState) -> int | None:
-        if admission.quiesced():
-            raise RuntimeError("IM selection is held during maintenance")
-        account = await self.adapters[state.channel].outbound_account_id()
-        selected = await asyncio.to_thread(
-            self.outbound_store.selection,
-            state.channel,
-            account,
-            state.chat_id,
-            state.current_agent_id,
-        )
-        self._apply_selection(state, selected)
-        return selected
+        return await sync_selection(self, state)
 
     async def _cmd_switch_locked(
-        self, state: ChatState, arg: str, *, replay_id: str | None = None
+        self,
+        state: ChatState,
+        arg: str,
+        *,
+        replay_id: str | None = None,
+        selection_admission: SelectionAdmission | None = None,
     ) -> Reply | list[Reply]:
         if not arg:
             # user ruling: /switch without an id is an error — the picker
@@ -422,7 +443,7 @@ class IMBridgeCore(SpawnMenuMixin):
         if admission.quiesced():
             raise RuntimeError("IM switch acceptance is held during maintenance")
         replay_id = replay_id or uuid.uuid4().hex
-        account = await self.adapters[state.channel].outbound_account_id()
+        account = await selection_account(self, state, selection_admission)
         recovered = await asyncio.to_thread(
             self.outbound_store.lookup_replay,
             state.channel,
@@ -432,7 +453,7 @@ class IMBridgeCore(SpawnMenuMixin):
             arg,
         )
         if recovered is not None:
-            self._apply_selection(state, recovered.selected_agent_id)
+            apply_account_selection(self, state, recovered.selected_agent_id, selection_admission)
             return []
         target = await self._find_switch_target(arg)
         if target is None:
@@ -465,33 +486,45 @@ class IMBridgeCore(SpawnMenuMixin):
             list(reversed(msgs)),
             replay_id=replay_id,
             switch_arg=arg,
+            selection_admission=selection_admission,
         )
         if acceptance.blocked:
             raise ValueError("switch replay requires durable timeline source identities")
-        self._apply_selection(state, acceptance.selected_agent_id)
+        apply_account_selection(self, state, acceptance.selected_agent_id, selection_admission)
         if not msgs:
             replies.append(Reply(copy.NO_MESSAGES_YET))
         return replies
 
-    async def _cmd_status(self, state: ChatState) -> Reply:
+    async def _cmd_status(
+        self, state: ChatState, *, selection_admission: SelectionAdmission | None = None
+    ) -> Reply:
         async with self._selection_lock(state):
-            return await self._cmd_status_locked(state)
+            return await self._cmd_status_locked(state, selection_admission=selection_admission)
 
-    async def _cmd_status_locked(self, state: ChatState) -> Reply:
-        await self._sync_selection(state)
+    async def _cmd_status_locked(
+        self, state: ChatState, *, selection_admission: SelectionAdmission | None = None
+    ) -> Reply:
+        if selection_admission is None:
+            await self._sync_selection(state)
         if state.current_agent_id is None:
             return Reply(copy.NO_AGENT_SWITCHED)
         a = await self.gateway.get_agent(state.current_agent_id)
         if a is None:
-            account = await self.adapters[state.channel].outbound_account_id()
+            account = (
+                selection_admission.account_id
+                if selection_admission is not None
+                else await self.adapters[state.channel].outbound_account_id()
+            )
             await asyncio.to_thread(
                 self.outbound_store.clear_selection,
                 state.channel,
                 account,
                 state.chat_id,
                 state.current_agent_id,
+                guard=selection_admission.guard if selection_admission is not None else None,
             )
-            await self._sync_selection(state)
+            if selection_admission is None:
+                await self._sync_selection(state)
             return Reply(copy.CURRENT_AGENT_GONE)
         label = a.get("label") or copy.UNNAMED_LABEL
         lines = [
@@ -723,39 +756,17 @@ class IMBridgeCore(SpawnMenuMixin):
         *,
         replay_id: str = "",
         switch_arg: str = "",
+        selection_admission: SelectionAdmission | None = None,
     ) -> TimelineAcceptance:
-        if admission.quiesced():
-            return TimelineAcceptance((), None, blocked=True)
-        adapter = self.adapters[state.channel]
-        account = await adapter.outbound_account_id()
-        candidates: list[TimelineCandidate] = []
-        for item in items:
-            source = timeline_source(item)
-            intent = None
-            if source is not None:
-                prepared = await adapter.prepare_timeline(_render_item(item, agent_id))
-                intent = OutboundIntent(
-                    channel=state.channel,
-                    chat_id=state.chat_id,
-                    agent_id=agent_id,
-                    source=source,
-                    prepared=prepared,
-                    replay_id=replay_id,
-                )
-            candidates.append(TimelineCandidate(item, intent))
-        acceptance = await asyncio.to_thread(
-            self.outbound_store.accept,
-            state.channel,
-            account,
-            state.chat_id,
+        return await accept_timeline(
+            self,
+            state,
             agent_id,
-            candidates,
+            items,
             replay_id=replay_id,
             switch_arg=switch_arg,
+            selection_admission=selection_admission,
         )
-        if acceptance.watermark is not None and acceptance.selected_agent_id == agent_id:
-            self._last_pushed[(state.channel, state.chat_id, agent_id)] = acceptance.watermark
-        return acceptance
 
     async def poll_timeline_outbound(self) -> None:
         """A committed-tail pull covers an SSE event emitted before its commit."""
@@ -774,26 +785,3 @@ class IMBridgeCore(SpawnMenuMixin):
                     type(exc).__name__,
                 )
         await self.outbound_worker.run_once()
-
-
-def _truncate(text: str, limit: int) -> str:
-    """Clip to ``limit`` chars, ASCII ellipsis when cut."""
-
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3] + "..."
-
-
-def _render_item(it: dict[str, Any], agent_id: int | None = None) -> str:
-    """One pushed line: the human's own words or the agent's text output,
-    tagged so the reader always knows who is speaking (the user's format:
-    ``[User]`` / ``[Ava #<id>]``)."""
-
-    payload = (it.get("payload") or "").strip()
-    kind = it.get("kind", "")
-    if kind == "inbound_chat":
-        return f"[User] {payload}"
-    if kind == "agent_chat":
-        who = f"Ava #{agent_id}" if agent_id is not None else "Ava"
-        return f"[{who}] {payload}"
-    return f"[{kind}] {payload}"

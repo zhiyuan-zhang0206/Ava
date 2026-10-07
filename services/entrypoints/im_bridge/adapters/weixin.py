@@ -26,7 +26,7 @@ import struct
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -34,12 +34,33 @@ import httpx
 from base.host.private_storage import write_private_bytes
 from base.log import logger
 from base.paths import ava_home
+from services.entrypoints.im_bridge.ingress.identity import (
+    poll_result_codes,
+    poll_update_fields,
+    source_chat_key,
+    validate_message_items,
+)
+from services.entrypoints.im_bridge.ingress.identity import (
+    provider_namespace as _provider_namespace,
+)
+from services.entrypoints.im_bridge.ingress.identity import (
+    uint64_message_id as _uint64_message_id,
+)
+from services.entrypoints.im_bridge.ingress.runtime import WeixinIngress
+from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
+from services.entrypoints.im_bridge.ingress.types import (
+    IngressBindingState,
+    IngressReceipt,
+    PollBinding,
+    ProviderSource,
+    StalePollBindingError,
+)
 from services.entrypoints.im_bridge.outbound_types import (
     OutboundAdapterKind,
     OutboundChunk,
     PreparedOutboundSend,
 )
-from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
+from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 
 ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
 EP_GET_UPDATES = "ilink/bot/getupdates"
@@ -76,6 +97,10 @@ ITEM_TEXT = 1
 ITEM_VOICE = 3
 MSG_TYPE_BOT = 2
 MSG_STATE_FINISH = 2
+
+
+class _LongPollTimeoutError(Exception):
+    """No provider response was observed; never empty-history evidence."""
 
 
 class _SessionExpiredError(Exception):
@@ -124,11 +149,17 @@ def save_account(*, account_id: str, bot_token: str, user_id: str, base_url: str
     )
 
 
-class ContextTokenStore:
-    """Disk-backed per-peer ``context_token`` cache (iLink session continuity)."""
+def _account_cache_path(name: str, namespace: str, account_id: str) -> Path:
+    """Account-qualified caches never import or overwrite unbound legacy cache evidence."""
+    scope = hashlib.sha256(json.dumps([namespace, account_id]).encode()).hexdigest()
+    return _state_dir() / f"weixin_{name}_{scope}.json"
 
-    def __init__(self) -> None:
-        self._path = _state_dir() / "weixin_context_tokens.json"
+
+class ContextTokenStore:
+    """Disk-backed account-qualified per-peer iLink session cache."""
+
+    def __init__(self, *, namespace: str, account_id: str) -> None:
+        self._path = _account_cache_path("context_tokens", namespace, account_id)
         self._cache: dict[str, str] = {}
 
     def restore(self) -> None:
@@ -162,23 +193,15 @@ class ContextTokenStore:
             logger.warning("weixin: failed to persist context tokens: {}", exc)
 
 
-def _load_sync_buf() -> str:
-    """The persisted getUpdates continuation token ("" on first run)."""
+def _legacy_sync_cursor() -> str | None:
+    """Unbound legacy continuation evidence is held until explicitly account-bound."""
     path = _state_dir() / "weixin_sync.json"
     if not path.exists():
-        return ""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ""
-    return str(data.get("get_updates_buf") or "")
-
-
-def _save_sync_buf(sync_buf: str) -> None:
-    try:
-        _atomic_write_json(_state_dir() / "weixin_sync.json", {"get_updates_buf": sync_buf})
-    except OSError as exc:
-        logger.warning("weixin: failed to persist sync buf: {}", exc)
+        return None
+    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("get_updates_buf"), str):
+        raise TypeError("legacy Weixin cursor requires operator inspection before binding")
+    return data["get_updates_buf"]
 
 
 def _random_wechat_uin() -> str:
@@ -261,10 +284,6 @@ def _split_text(text: str, limit: int = _MAX_MESSAGE_LENGTH) -> list[str]:
     return chunks
 
 
-def _content_key(sender_id: str, text: str) -> str:
-    return f"content:{sender_id}:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
-
-
 def _outbound_message(
     to: str, text: str, context_token: str | None, client_id: str
 ) -> dict[str, Any]:
@@ -286,43 +305,6 @@ def _outbound_message(
     return {"msg": message}
 
 
-def _uint64_message_id(provider_id: object) -> str | None:
-    """Canonical positive iLink uint64, without float or boolean coercion."""
-    if type(provider_id) is int:
-        value = provider_id
-    elif (
-        isinstance(provider_id, str)
-        and provider_id.isascii()
-        and provider_id.isdigit()
-        and len(provider_id) <= 20
-    ):
-        value = int(provider_id)
-    else:
-        return None
-    return str(value) if 0 < value < 2**64 else None
-
-
-def _provider_namespace(base_url: str) -> str | None:
-    """Qualify the configured HTTPS provider endpoint without credential components."""
-    try:
-        endpoint = urlsplit(base_url)
-        host, port = endpoint.hostname, endpoint.port
-        if (
-            endpoint.scheme != "https"
-            or not host
-            or endpoint.username is not None
-            or endpoint.password is not None
-        ):
-            return None
-        if endpoint.query or endpoint.fragment:
-            return None
-        host = f"[{host}]" if ":" in host else host
-        authority = host.lower() + (f":{port}" if port not in (None, 443) else "")
-        return f"https://{authority}{endpoint.path.rstrip('/')}"
-    except ValueError:
-        return None
-
-
 def _ordinary_chat_key(
     *, base_url: str, account_id: object, sender_id: object, provider_id: object, text: str
 ) -> str | None:
@@ -336,8 +318,14 @@ def _ordinary_chat_key(
     message_id, namespace = _uint64_message_id(provider_id), _provider_namespace(base_url)
     if message_id is None or namespace is None:
         return None
-    material = json.dumps([namespace, account_id.strip(), sender_id.strip(), message_id])
-    return "weixin-chat-v1:" + hashlib.sha256(material.encode()).hexdigest()
+    return source_chat_key(
+        ProviderSource(
+            namespace=namespace,
+            account_id=account_id.strip(),
+            sender_id=sender_id.strip(),
+            message_id=message_id,
+        )
+    )
 
 
 def _safe_id(value: str, keep: int = 8) -> str:
@@ -373,6 +361,7 @@ class WeixinAdapter(IMAdapter):
     """
 
     channel = "weixin"
+    selection_requires_account_proof = True
     MAX_MESSAGE_LENGTH = _MAX_MESSAGE_LENGTH
 
     def __init__(self, core: Any, *, client: httpx.AsyncClient | None = None) -> None:
@@ -381,8 +370,11 @@ class WeixinAdapter(IMAdapter):
         self._owns_client = client is None
         self._poll_task: asyncio.Task[None] | None = None
         self._running = False
-        self._tokens = ContextTokenStore()
-        self._seen: dict[str, float] = {}  # dedup key -> monotonic timestamp
+        self._seen: dict[str, float] = {}  # post-retention diagnostic cache only
+        self._ingress: WeixinIngress | None = None
+        self._binding: PollBinding | None = None
+        self._ingress_init_lock = asyncio.Lock()
+        self._poll_lock = asyncio.Lock()
         self._last_inbound: dict[str, float] = {}  # peer -> epoch of last inbound msg
         # Push-failure watchdog state (Task #829): consecutive sendmessage
         # failures mean the iLink context_token expired — the core emits the
@@ -399,6 +391,13 @@ class WeixinAdapter(IMAdapter):
         self._base_url = str((account or {}).get("base_url") or ILINK_BASE_URL).rstrip("/")
         self._token = str((account or {}).get("bot_token") or "")
         self._user_id = str((account or {}).get("user_id") or "")
+        namespace = _provider_namespace(self._base_url)
+        if self._configured and (namespace is None or not self._account_id.strip()):
+            raise ValueError("Weixin account requires a qualified HTTPS namespace and account id")
+        self._cache_namespace = namespace or "unconfigured"
+        self._tokens = ContextTokenStore(
+            namespace=self._cache_namespace, account_id=self._account_id
+        )
 
     @property
     def _http(self) -> httpx.AsyncClient:
@@ -437,7 +436,7 @@ class WeixinAdapter(IMAdapter):
 
     async def _poll_loop(self) -> None:
         """Long-poll getUpdates forever; reconnect with backoff on failure."""
-        sync_buf = _load_sync_buf()
+        sync_buf = ""
         timeout_ms = LONG_POLL_TIMEOUT_MS
         failures = 0
         while self._running:
@@ -474,7 +473,7 @@ class WeixinAdapter(IMAdapter):
     def _restore_activity(self) -> None:
         """Load persisted per-peer last-inbound timestamps (daemon restarts
         keep the peer map)."""
-        path = _state_dir() / "weixin_activity.json"
+        path = _account_cache_path("activity", self._cache_namespace, self._account_id)
         if not path.exists():
             return
         try:
@@ -491,7 +490,7 @@ class WeixinAdapter(IMAdapter):
         """Persist per-peer activity (daemon restarts keep the window)."""
         try:
             _atomic_write_json(
-                _state_dir() / "weixin_activity.json",
+                _account_cache_path("activity", self._cache_namespace, self._account_id),
                 {"last_inbound": self._last_inbound},
             )
         except OSError as exc:
@@ -503,82 +502,88 @@ class WeixinAdapter(IMAdapter):
         self._last_inbound[peer_id] = time.time()
         self._persist_activity()
 
+    async def _ensure_ingress(self) -> tuple[WeixinIngress, PollBinding]:
+        async with self._ingress_init_lock:
+            if self._ingress is None or self._binding is None:
+                namespace = _provider_namespace(self._base_url)
+                if namespace is None or not self._account_id.strip():
+                    raise ValueError("Weixin ingress requires a qualified namespace and account")
+                self._ingress = WeixinIngress(
+                    self.core, WeixinIngressStore(self.core.notice_bridge.db_pool), self
+                )
+                self._binding = await self._ingress.initialize(
+                    namespace, self._account_id, _legacy_sync_cursor()
+                )
+            previous_state = self._binding.state
+            self._binding = await asyncio.to_thread(
+                self._ingress.store.refresh_binding, self._binding
+            )
+            if previous_state == IngressBindingState.HELD:
+                await asyncio.to_thread(self._ingress.store.recover_claims, self._binding)
+            return self._ingress, self._binding
+
     async def _poll_once(self, sync_buf: str, timeout_ms: int) -> tuple[str, int]:
+        async with self._poll_lock:
+            return await self._poll_batch(sync_buf, timeout_ms)
+
+    async def _poll_batch(self, sync_buf: str, timeout_ms: int) -> tuple[str, int]:
         """One getUpdates round; returns the (possibly advanced) sync buffer and
         the server-suggested long-poll timeout."""
-        resp = await self._post(
-            EP_GET_UPDATES,
-            {"get_updates_buf": sync_buf},
-            timeout=timeout_ms / 1000.0,
-        )
-        suggested = resp.get("longpolling_timeout_ms")
-        if isinstance(suggested, int) and suggested > 0:
-            timeout_ms = suggested
-        ret = resp.get("ret", 0)
-        errcode = resp.get("errcode", 0)
-        if ret not in (0, None) or errcode not in (0, None):
+        ingress, binding = await self._ensure_ingress()
+        if binding.state == IngressBindingState.ACTIVE:
+            await ingress.recover_retained(binding)
+            await ingress.recover_subscriptions(binding)
+        # SQL owns the opaque cursor; a local or legacy JSON value cannot move it.
+        if sync_buf and sync_buf != binding.cursor:
+            raise StalePollBindingError("local Weixin cursor differs from durable binding")
+        sync_buf = binding.cursor
+        try:
+            resp = await self._post(
+                EP_GET_UPDATES, {"get_updates_buf": sync_buf}, timeout=timeout_ms / 1000.0
+            )
+        except _LongPollTimeoutError:
+            return sync_buf, timeout_ms
+        ret, errcode = poll_result_codes(resp)
+        if ret != 0 or errcode not in (0, None):
             if SESSION_EXPIRED_ERRCODE in (ret, errcode) or _is_stale_session_ret(
                 ret, errcode, resp.get("errmsg")
             ):
                 raise _SessionExpiredError
-            raise RuntimeError(
-                "iLink getupdates error: "
-                f"ret={ret} errcode={errcode} errmsg={str(resp.get('errmsg') or '')[:200]}"
-            )
-        new_buf = str(resp.get("get_updates_buf") or "")
-        # Deliver every message BEFORE advancing the continuation token — a
-        # failure here keeps the buf put, so the same messages are re-fetched
-        # next poll instead of being silently dropped (e.g. during a rollout).
-        msgs: list[dict[str, Any]] = resp.get("msgs") or []
+            raise RuntimeError(f"iLink getupdates error: ret={ret} errcode={errcode}")
+        msgs, new_buf, timeout_ms = poll_update_fields(resp, timeout_ms)
         for message in msgs:
             await self._handle_message(message)
-        if new_buf and new_buf != sync_buf:
-            sync_buf = new_buf
-            _save_sync_buf(sync_buf)
+        if new_buf is not None and (
+            new_buf != sync_buf or binding.state == IngressBindingState.DRAINING
+        ):
+            self._binding = await asyncio.to_thread(
+                ingress.store.checkpoint,
+                binding,
+                sync_buf,
+                new_buf,
+                provider_empty=not msgs and "msgs" in resp,
+            )
+            sync_buf = self._binding.cursor
         return sync_buf, timeout_ms
 
-    async def _handle_message(self, message: dict[str, Any]) -> None:
-        """Normalize one iLink message into the core; capture context_token."""
-        text_sender = _dm_text(message, self._account_id)
-        if text_sender is None:
-            return
-        text, sender_id = text_sender
-        message_id = str(message.get("message_id") or "").strip()
-        # Provider identity separates deliberate identical messages. Content is
-        # only a legacy heuristic when the provider supplied no identity.
-        keys = (
-            ["message:" + json.dumps([sender_id, message_id])]
-            if message_id
-            else [_content_key(sender_id, text)]
-        )
-        if any(self._is_duplicate(k) for k in keys):
-            return
-        for key in keys:
-            self._mark_seen(key)
-        context_token = str(message.get("context_token") or "").strip()
-        if context_token:
+    async def _handle_message(self, message: dict[str, Any]) -> IngressReceipt:
+        """Durably retain qualified provider source before acknowledging it."""
+        ingress, binding = await self._ensure_ingress()
+        item_list: list[dict[str, Any]] = message.get("item_list", [])
+        if not isinstance(item_list, list) or any(not isinstance(item, dict) for item in item_list):
+            raise TypeError("Weixin message items must be objects")
+        validate_message_items(item_list)
+        text = _extract_text(item_list)
+        receipt = await ingress.accept(binding, message, text)
+        await ingress.recover_after_accept(binding, receipt)
+        # No pre-admission seen-set shortcut can suppress a failed/restarted source.
+        self._mark_seen(str(receipt.id))
+        sender_id = receipt.source.sender_id
+        context_token = message.get("context_token")
+        if isinstance(context_token, str) and context_token:
             self._tokens.set(sender_id, context_token)
-        self._mark_inbound(sender_id)  # extends the iLink active-push window
-        await self.core.handle_inbound(
-            InboundMessage(
-                channel=self.channel,
-                chat_id=sender_id,
-                text=text,
-                message_id=message_id or None,
-                idempotency_key=(
-                    "weixin-spawn:"
-                    + hashlib.sha256(json.dumps([sender_id, message_id]).encode()).hexdigest()
-                    if message_id and text.strip().startswith("spawn:go")
-                    else _ordinary_chat_key(
-                        base_url=self._base_url,
-                        account_id=(self._account or {}).get("account_id"),
-                        sender_id=message.get("from_user_id"),
-                        provider_id=message.get("message_id"),
-                        text=text,
-                    )
-                ),
-            )
-        )
+        self._mark_inbound(sender_id)
+        return receipt
 
     def _is_duplicate(self, key: str) -> bool:
         stamp = self._seen.get(key)
@@ -715,8 +720,8 @@ class WeixinAdapter(IMAdapter):
     ) -> dict[str, Any]:
         """Authenticated iLink POST; sanitized errors (never the token/URL).
 
-        A getUpdates timeout is the long-poll's normal "nothing new" signal and
-        returns an empty batch; other timeouts raise.
+        A getUpdates timeout is transport observation only, never a synthetic
+        provider empty response; other timeouts retain their send classification.
         """
         try:
             resp = await self._http.post(
@@ -733,11 +738,7 @@ class WeixinAdapter(IMAdapter):
                     f"weixin send not started: {type(exc).__name__}"
                 ) from None
             if endpoint == EP_GET_UPDATES:
-                return {
-                    "ret": 0,
-                    "msgs": [],
-                    "get_updates_buf": str(payload.get("get_updates_buf") or ""),
-                }
+                raise _LongPollTimeoutError from None
             raise RuntimeError("weixin send timed out") from None
         except httpx.HTTPError as exc:
             if endpoint == EP_SEND_MESSAGE and isinstance(exc, httpx.ConnectError):
@@ -745,7 +746,10 @@ class WeixinAdapter(IMAdapter):
             raise RuntimeError(f"weixin {endpoint} request failed: {type(exc).__name__}") from None
         if resp.status_code != 200:
             raise RuntimeError(f"iLink POST {endpoint} HTTP {resp.status_code}: {resp.text[:200]}")
-        return resp.json()
+        result = resp.json()
+        if not isinstance(result, dict):
+            raise TypeError("Weixin provider response must be an object")
+        return cast(dict[str, Any], result)
 
 
 def main(argv: list[str] | None = None) -> int:
