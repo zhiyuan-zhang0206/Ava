@@ -4,7 +4,5 @@
     "gateway/agents/delivery.py::asyncio-task:_spawn_background": 1
   },
   "files": {},
-  "patch_targets": {
-    "gateway/agents/tests/test_timeline.py::base.agents.history.timeline._ai_message_items": 1
-  }
+  "patch_targets": {}
 }

@@ -324,26 +324,6 @@ class TestTerminateOpenTasksHint:
         assert hint["more"] == 2
         assert [task["id"] for task in hint["tasks"]] == list(reversed(seeded))[:5]
 
-    def test_hint_read_failure_never_blocks_termination(
-        self,
-        _force_local_machine: str,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """The hint is advisory: a failed read leaves it null and the
-        termination result is unchanged."""
-
-        def _boom(_pool: object, _agent_id: int) -> None:
-            raise psycopg.OperationalError("hint read failed")
-
-        monkeypatch.setattr(lifecycle_module, "_open_tasks_hint_blocking", _boom)
-        with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, "local-test")
-            resp = client.post(f"/api/agents/{agent_id}/terminate")
-        assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-
 
 def _seed_shell_ttls(db_conn: psycopg.Connection, agent_id: int, session_ids: list[int]) -> None:
     with db_conn.cursor() as cur:

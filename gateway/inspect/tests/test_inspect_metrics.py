@@ -1,16 +1,30 @@
 """Persisted metric reads: evidence, source seams, exact arithmetic, and windows."""
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
 import psycopg
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from base.db import Database
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
-from gateway.app import app
 from gateway.inspect import _metrics
+from gateway.inspect.router import build_query_cache, router
+
+
+@pytest.fixture
+def app(database: Database) -> Iterator[FastAPI]:
+    """Exercise the owning inspector router with a real isolated database."""
+    application = FastAPI()
+    application.include_router(router)
+    application.state.inspect_query_cache = build_query_cache()
+    with database.pool(max_size=2) as pool:
+        application.state.db_pool = pool
+        yield application
 
 
 def _agent(conn: psycopg.Connection, born: datetime) -> int:
@@ -265,7 +279,7 @@ def test_state_intervals_exclude_terminated_gaps(db_conn: psycopg.Connection) ->
 
 
 def test_statistics_http_does_not_read_logs_or_current_state(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from gateway.inspect import router as inspect_router
 
@@ -284,7 +298,7 @@ def test_statistics_http_does_not_read_logs_or_current_state(
 
 
 def test_statistics_read_invokes_the_coverage_note(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The coverage note is wired into the statistics read (#3869 review): a
     change that drops the call must fail here, not just in review."""
