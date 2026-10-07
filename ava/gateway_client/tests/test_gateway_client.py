@@ -389,6 +389,10 @@ class TestSpawn:
         agent_id = spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
         assert agent_id == 42
         assert mock_client.post.call_count == 2
+        keys = [
+            call.kwargs["headers"]["Idempotency-Key"] for call in mock_client.post.call_args_list
+        ]
+        assert keys[0] == keys[1] and keys[0]
 
     @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
     @pytest.mark.usefixtures("retry_waits")

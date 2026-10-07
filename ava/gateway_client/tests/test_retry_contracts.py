@@ -11,6 +11,7 @@ from base.agents import GatewayUnavailable
     ("method", "path"),
     [
         ("POST", "/api/cancel"),
+        ("POST", "/api/agents"),
         ("POST", "/api/agents/7/restart"),
         ("POST", "/api/agents/7/compact"),
         ("POST", "/api/agents/7/notices/1/resolve"),
@@ -49,6 +50,8 @@ def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) ->
         else:
             assert send().status_code == 503
     assert len(requests) == 1
+    if path == "/api/agents":
+        assert requests[0].headers["Idempotency-Key"]
 
 
 @pytest.mark.parametrize("method", ["PATCH", "DELETE"])

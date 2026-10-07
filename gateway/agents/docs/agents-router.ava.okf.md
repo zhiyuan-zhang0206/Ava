@@ -81,9 +81,10 @@ with changed request data returns 409; a keyless create still creates a new
 identity. `Idempotency-Scope: principal-v1` uses the existing authenticated
 principal namespace; legacy raw keys remain global. Creation identities remain
 with the agent row and are not pruned with response caches. A replay never
-launches an agent that has since been admitted or terminated. Client-side
-automatic retry activation requires proven gateway capability; this additive
-server contract alone does not make old gateways safe to retry.
+launches an agent that has since been admitted or terminated. The SDK supplies
+one key per creation call and reuses it for connect-family retries. Automatic
+retry of an ambiguous outcome requires proven gateway capability and remains
+disabled because an older gateway may ignore the key.
 The versioned op name also gates a rolling runner: old ops servers reject it
 before reaching their old launch handler, so they cannot force-terminate the
 committed row. New runners still accept the legacy `spawn-launch` operation
