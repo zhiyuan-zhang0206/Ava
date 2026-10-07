@@ -30,15 +30,8 @@ normally (the Claude/Codex launchers live in `ava/shell/coding_tools/`, their
 siblings is refused by Rule 6 below. Moving implementation into a governed
 package does not make it a public SDK capability; see [SDK and skill ownership](#sdk-and-skill-ownership).
 
-Existing over-limit files are frozen in the structure baseline,
-`scripts/structure/baseline/*.json`: storage shards let unrelated areas edit different files. A module move may
-keep its existing debt in the same shard while updating its path; the storage
-filename does not define ownership. Duplicate section/key entries are refused.
-New violations and growth above a frozen value fail the gate. The baseline is
-shrink-only: a guard compares it with the base revision described below and
-rejects added file entries or raised values. After splitting a file, lower
-its baseline value by hand to its current line count, or remove its entry
-once it is within budget. Enforced by `scripts/lint/code_structure.py`.
+Every over-limit file fails the gate. File-budget baselines have been removed
+and cannot be reintroduced. Enforced by `scripts/lint/code_structure.py`.
 
 ## Directory budget: ≤20 direct entries
 
@@ -55,13 +48,11 @@ level is checked independently. `__pycache__`, dot-prefixed entries, and symlink
 and are not traversed. `migrations` subtrees are entirely exempt. The repo-root `docs/` and
 `ui/` are outside the scope.
 
-Existing over-limit directories are frozen in the `directories` sections of
-the baseline shards, with the same containment and shrink-only
-rules as files. After reorganizing a directory, lower its count by hand or
-remove its entry when it reaches the cap. A full gate run checks the whole
-scope; an explicit directory target checks itself and its descendants, and
-an explicit file target checks the file and its containing directory. The
-baseline guard runs in both modes.
+Every over-limit directory in this scope fails the gate; directory-budget
+baselines have been removed and cannot be reintroduced. A full gate run checks
+the whole scope; an explicit directory target checks itself and its descendants,
+and an explicit file target checks the file and its containing directory.
+The remaining site-exemption guard runs in both modes.
 
 ## Locality: package doors and single owners
 
@@ -193,32 +184,11 @@ Keys use `<repo-relative .py path>::<qualname>` with Python qualification:
 Repeated qualified names in one file are ordered by source appearance:
 the first keeps its key, then `#2`, `#3`, and so on are appended.
 
-The `complexity` and `nesting` sections of the baseline shards
-freeze hard violations, alongside `directories` and `files`. Function keys
-must name scoped `.py` paths and non-empty qualified names. Values must be
-integers at or above 15 for complexity, or above 5 for nesting; an entry
-below its threshold is invalid. An unlisted hard violation or growth above
-its frozen value fails. Existing violations at or below their frozen values
-pass. Stale entries are allowed; delete them when the violation disappears.
-Hand-edit entries only to lower a still-over-budget value or delete an entry.
+Every hard function violation fails, including after a file or function rename.
+Complexity and nesting baselines and rename allowances have been removed and
+cannot be reintroduced. Refactor the implementation until it meets the budget.
 
-Function renames have one allowance: an added function key must pair with a
-distinct removed key in the **same section and file**, with a new value no
-greater than the removed value. One removal cannot cover two additions.
-File renames carry their frozen keys: when `git diff -M` detects a move between
-the comparison base and the working tree (any similarity — a real move also
-rewrites import paths, so keyed files typically land around R9x), the `files`,
-`complexity`, and `nesting` keys of the old path are read as the new path's
-keys. Migrate the baseline entries with the move — remove the old key, add the
-new one with the same value; the guard accepts that edit. The frozen values
-still cap the new path: a raised value or an unpaired new key stays a violation,
-and a rewrite git no longer detects as a rename is evaluated fresh. Directory
-counts follow the move (they are per-directory, not per-file). Directory and file sections never
-permit added keys. All sections reject raised values. New files belong in existing subdirectories with room, or
-arrive with a real directory split that lowers counts, without raising the
-baseline.
-
-The guard chooses its comparison base in this order:
+The remaining site-exemption guard chooses its comparison base in this order:
 
 1. If `LINT_STRUCTURE_BASELINE_BASE` is set, use its merge base with `HEAD`,
    or resolve the value directly to a commit if no merge base exists.
@@ -228,9 +198,9 @@ The guard chooses its comparison base in this order:
 3. Otherwise use `HEAD`.
 
 The guard reads the baseline at that revision. An absent baseline emits a
-note and skips comparison; a legacy two-section baseline compares its file
-and directory sections and notes that the new sections are introductions.
-Malformed baselines fail. This catches raises after committing them too:
+note and skips comparison. Empty retired budget sections in the comparison
+revision are discarded; nonempty retired sections or malformed baselines fail.
+Retired sections are always refused in the working tree, including empty ones. This catches raises after committing them too:
 before the structural hooks run, CI sets the explicit base to the base
 revision of the triggering event — the same revision the checked-out merge
 ref was built from. Pinning both sides to one event matters: a base branch
