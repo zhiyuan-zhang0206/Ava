@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import psycopg
 import pytest
@@ -192,12 +193,17 @@ def test_close_receipt_and_stale_observation_preserve_new_page(
 
 
 def test_fresh_already_closed_observation_is_accepted(
-    client: TestClient, db_conn: psycopg.Connection
+    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent = _agent(db_conn)
     first = client.post(_path(agent), json=BODY, headers=HEADERS).json()
     body = {"expected_page_id": first["id"]}
     accepted = client.post(_close_path(agent), json=body, headers=_key("close"))
+
+    async def forbid_old_hint(*args: object) -> None:
+        raise AssertionError("already-closed acceptance must not publish obsolete name hints")
+
+    monkeypatch.setattr(pages, "_publish_page_event", forbid_old_hint)
     no_effect = client.post(_close_path(agent), json=body, headers=_key("already-closed"))
     assert no_effect.status_code == 200 and no_effect.json() == accepted.json()
 
@@ -379,3 +385,46 @@ def test_host_validation_reuses_single_borrowed_connection(
         patch.setattr(app.state, "db_pool", pool)
         result = client.post(_path(agent), json={**BODY, "host": "page-home"}, headers=HEADERS)
     assert result.status_code == 201, result.text
+
+
+def test_placement_is_locked_before_host_validation(
+    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from psycopg_pool import ConnectionPool
+
+    agent = _agent(db_conn)
+    db_conn.execute("UPDATE agents_meta SET machine='page-home' WHERE id=%s", (agent,))
+    db_conn.commit()
+    entered, proceed = Event(), Event()
+    original = pages._validate_page_dial_target
+
+    def paused_validation(
+        pool: ConnectionPool,
+        cache: pages.PageHostCache,
+        agent_id: int,
+        host: str,
+        port: int,
+        *,
+        connection: psycopg.Connection | None = None,
+    ) -> None:
+        entered.set()
+        assert proceed.wait(5), "test did not release target validation"
+        original(pool, cache, agent_id, host, port, connection=connection)
+
+    monkeypatch.setattr(pages, "_validate_page_dial_target", paused_validation)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        accepted = executor.submit(
+            client.post, _path(agent), json={**BODY, "host": "page-home"}, headers=HEADERS
+        )
+        try:
+            assert entered.wait(5), "guarded request did not reach host validation"
+            with psycopg.connect(settings.data_plane.db_url) as other:
+                other.execute("SET LOCAL lock_timeout='100ms'")
+                with pytest.raises(psycopg.errors.LockNotAvailable):
+                    other.execute(
+                        "UPDATE agents_meta SET machine='moved-home' WHERE id=%s", (agent,)
+                    )
+                other.rollback()
+        finally:
+            proceed.set()
+        assert accepted.result().status_code == 201
