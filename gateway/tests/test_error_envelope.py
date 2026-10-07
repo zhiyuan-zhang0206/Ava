@@ -22,6 +22,7 @@ from base.agents import AgentNotFound, AvaAgentError, ErrorReason
 from gateway.app import (
     _cluster_auth_middleware,
     _cluster_pause_middleware,
+    app,
 )
 from gateway.auth import rejection_log
 from gateway.auth.cors import cors_allowed_origins
@@ -169,9 +170,9 @@ def _request(
 ) -> Request:
     """Build the smallest request shape accepted by the direct middleware calls.
 
-    The scope deliberately carries no `app`: a request without a session
-    cookie must never reach the session store (`request.app.state.db_pool`),
-    so bearer and anonymous requests pay no session lookup.
+    The scope carries its application-owned rejection counters but no session
+    store. A request without a session cookie must never reach `db_pool`, so
+    bearer and anonymous requests pay no session lookup.
     """
     return Request(
         {
@@ -186,21 +187,15 @@ def _request(
             "client": client,
             "server": ("testserver", 80),
             "state": {},
+            "app": app,
         }
     )
 
 
 @pytest.fixture(autouse=True)
-def _clear_auth401_throttle_state() -> Iterator[None]:
-    """Keep process-local auth-401 throttle + aggregate-count state from
-    coupling tests."""
-    rejection_log._auth401_last_warn.clear()
-    rejection_log._auth401_suppressed.clear()
-    rejection_log._auth401_total = 0
-    yield
-    rejection_log._auth401_last_warn.clear()
-    rejection_log._auth401_suppressed.clear()
-    rejection_log._auth401_total = 0
+def _auth401_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each middleware test gets its own gateway-lifetime counters."""
+    monkeypatch.setattr(app.state, "auth401_log", rejection_log.AuthRejectionLog(), raising=False)
 
 
 def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,8 +334,8 @@ def test_auth_middleware_logs_browser_ua_401_at_debug(
     assert "path=/api/agents" in records[0].getMessage()
     assert "client=127.0.0.1" in records[0].getMessage()
     assert "Mozilla/5.0" in records[0].getMessage()
-    assert rejection_log._auth401_total == 1  # the aggregate still counts it
-    assert rejection_log._auth401_last_warn == {}  # and it burns no WARNING budget
+    assert app.state.auth401_log.total == 1  # the aggregate still counts it
+    assert app.state.auth401_log.last_warn == {}  # and it burns no WARNING budget
 
 
 def test_auth_middleware_warns_on_first_non_stream_401(
@@ -375,7 +370,7 @@ def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
     records = _auth401_records(caplog)
     assert [record.levelno for record in records] == [logging.DEBUG]
     assert "suppressed" in records[0].getMessage()
-    assert rejection_log._auth401_suppressed[("127.0.0.1", "/api/agents")] == 1
+    assert app.state.auth401_log.suppressed[("127.0.0.1", "/api/agents")] == 1
 
 
 def test_auth_middleware_warns_after_cooldown_with_suppressed_count(
@@ -415,8 +410,8 @@ def test_auth_middleware_prunes_idle_401_throttle_keys(
     response = _unauthorized_auth_response(_request(path="/api/alerts"))
 
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
-    assert stale_key not in rejection_log._auth401_last_warn
-    assert stale_key not in rejection_log._auth401_suppressed
+    assert stale_key not in app.state.auth401_log.last_warn
+    assert stale_key not in app.state.auth401_log.suppressed
 
 
 def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
@@ -452,14 +447,14 @@ def test_auth401_aggregate_counts_every_rejection(monkeypatch: pytest.MonkeyPatc
     SSE flood paths and throttled repeats included (the log severity is
     throttled, the count must not be; task #1712)."""
     _enable_cluster_auth(monkeypatch)
-    assert rejection_log._auth401_total == 0
+    assert app.state.auth401_log.total == 0
 
     _unauthorized_auth_response(_request(path="/api/events/stream"))
     _unauthorized_auth_response(_request(path="/api/events/stream"))
     _unauthorized_auth_response(_request(path="/api/agents"))
     _unauthorized_auth_response(_request(path="/api/agents"))
 
-    assert rejection_log._auth401_total == 4
+    assert app.state.auth401_log.total == 4
 
 
 def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -469,10 +464,10 @@ def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyP
     _unauthorized_auth_response(_request())
     _unauthorized_auth_response(_request())
 
-    assert rejection_log.drain_auth401_count() == 2
-    assert rejection_log.drain_auth401_count() == 0
+    assert app.state.auth401_log.drain() == 2
+    assert app.state.auth401_log.drain() == 0
     _unauthorized_auth_response(_request())
-    assert rejection_log.drain_auth401_count() == 1
+    assert app.state.auth401_log.drain() == 1
 
 
 def test_auth401_emit_aggregate_event(monkeypatch: pytest.MonkeyPatch) -> None:

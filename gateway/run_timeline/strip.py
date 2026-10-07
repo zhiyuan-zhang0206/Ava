@@ -84,7 +84,9 @@ class SegmentReadCache:
     """Tiny per-process LRU + TTL cache for the checkpoint segments the
     strip reads. `clock` is injectable for tests."""
 
-    def __init__(self, max_entries: int, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self, max_entries: int = _CACHE_MAX_ENTRIES, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self._entries: dict[tuple[object, ...], tuple[float, object]] = {}
         self._lock = threading.Lock()
         self._max_entries = max_entries
@@ -115,15 +117,14 @@ class SegmentReadCache:
         return value
 
 
-_STRIP_CACHE = SegmentReadCache(_CACHE_MAX_ENTRIES)
-
-
-def _cached_current_messages(database: Database, agent_id: int) -> list[BaseMessage]:
+def _cached_current_messages(
+    cache: SegmentReadCache, database: Database, agent_id: int
+) -> list[BaseMessage]:
     from base.agents.history.checkpoint import load_checkpoint_messages
 
     return cast(
         "list[BaseMessage]",
-        _STRIP_CACHE.get(
+        cache.get(
             ("current", agent_id),
             _CACHE_TTL_CURRENT_S,
             lambda: load_checkpoint_messages(database, agent_id),
@@ -131,12 +132,12 @@ def _cached_current_messages(database: Database, agent_id: int) -> list[BaseMess
     )
 
 
-def _cached_boundaries(database: Database, agent_id: int) -> list[str]:
+def _cached_boundaries(cache: SegmentReadCache, database: Database, agent_id: int) -> list[str]:
     from base.agents.history.checkpoint import list_compact_boundary_checkpoint_ids
 
     return cast(
         "list[str]",
-        _STRIP_CACHE.get(
+        cache.get(
             ("boundaries", agent_id),
             _CACHE_TTL_BOUNDARIES_S,
             lambda: list_compact_boundary_checkpoint_ids(database, agent_id),
@@ -144,12 +145,14 @@ def _cached_boundaries(database: Database, agent_id: int) -> list[str]:
     )
 
 
-def _cached_segment_messages(database: Database, agent_id: int, boundary: str) -> list[BaseMessage]:
+def _cached_segment_messages(
+    cache: SegmentReadCache, database: Database, agent_id: int, boundary: str
+) -> list[BaseMessage]:
     from base.agents.history.checkpoint import load_checkpoint_messages_segment
 
     return cast(
         "list[BaseMessage]",
-        _STRIP_CACHE.get(
+        cache.get(
             ("segment", agent_id, boundary),
             _CACHE_TTL_SEALED_S,
             lambda: load_checkpoint_messages_segment(database, agent_id, boundary),
@@ -268,6 +271,7 @@ def _placed_min_ts(groups: list[tuple[str, list[TimelineItem]]]) -> datetime | N
 
 
 def _extend_with_history(
+    cache: SegmentReadCache,
     database: Database,
     agent_id: int,
     groups: list[tuple[str, list[TimelineItem]]],
@@ -277,10 +281,10 @@ def _extend_with_history(
 
     True when the walk cap cut it short (truncation is reported, never silent).
     """
-    boundaries = _cached_boundaries(database, agent_id)
+    boundaries = _cached_boundaries(cache, database, agent_id)
     covered = False
     for rank, boundary in enumerate(boundaries[:_MESSAGE_SEGMENT_WALK_MAX], start=1):
-        segment = _cached_segment_messages(database, agent_id, boundary)
+        segment = _cached_segment_messages(cache, database, agent_id, boundary)
         if not segment:
             continue
         segment_items, _ = build_timeline_items(segment, [], segment_prefix=f"s{rank}.{boundary}")
@@ -311,6 +315,7 @@ def _place_in_window(
 
 
 def _strip_messages_for_window(
+    cache: SegmentReadCache,
     database: Database,
     agent_id: int,
     window_start: datetime,
@@ -331,14 +336,14 @@ def _strip_messages_for_window(
         budget = settings.display.run_timeline_messages_max
     truncated = False
 
-    current = _cached_current_messages(database, agent_id)
+    current = _cached_current_messages(cache, database, agent_id)
     anchors = _chat_inbound_anchors(database, agent_id) if needs_chat_anchors(current) else []
     current_items, _ = build_timeline_items(current, anchors)
     groups = _group_strip_items(current_items)
 
     current_min = _placed_min_ts(groups)
     if current_min is None or current_min > window_start:
-        truncated = _extend_with_history(database, agent_id, groups, window_start)
+        truncated = _extend_with_history(cache, database, agent_id, groups, window_start)
 
     placed, unplaceable = _place_in_window(groups, window_start, window_end)
     if unplaceable:
@@ -351,6 +356,7 @@ def _strip_messages_for_window(
 
 
 def strip_for_window_or_none(
+    cache: SegmentReadCache,
     database: Database,
     agent_id: int,
     window_start: datetime,
@@ -367,20 +373,24 @@ def strip_for_window_or_none(
     if messages_max is not None:
         budget = min(messages_max, settings.display.run_timeline_messages_max)
     try:
-        return _strip_messages_for_window(database, agent_id, window_start, window_end, budget)
+        return _strip_messages_for_window(
+            cache, database, agent_id, window_start, window_end, budget
+        )
     except Exception:
         logger.exception("run-timeline strip read failed for agent {}", agent_id)
         return None, None
 
 
-def _strip_message_group(database: Database, agent_id: int, key: str) -> list[TimelineItem]:
+def _strip_message_group(
+    cache: SegmentReadCache, database: Database, agent_id: int, key: str
+) -> list[TimelineItem]:
     """Resolve one strip key to its items; 404 for unknown or malformed keys."""
 
     def not_found() -> HTTPException:
         return HTTPException(status_code=404, detail=f"message {key} not found")
 
     if key.startswith("c."):
-        current = _cached_current_messages(database, agent_id)
+        current = _cached_current_messages(cache, database, agent_id)
         anchors = _chat_inbound_anchors(database, agent_id) if needs_chat_anchors(current) else []
         items, _ = build_timeline_items(current, anchors)
     elif key.startswith("s") and "." in key:
@@ -388,7 +398,7 @@ def _strip_message_group(database: Database, agent_id: int, key: str) -> list[Ti
         if "." not in rest:
             raise not_found()
         boundary, _idx = rest.rsplit(".", 1)
-        segment = _cached_segment_messages(database, agent_id, boundary)
+        segment = _cached_segment_messages(cache, database, agent_id, boundary)
         if not segment:
             raise not_found()
         items, _ = build_timeline_items(segment, [], segment_prefix=f"{rank}.{boundary}")
@@ -417,7 +427,7 @@ def get_run_timeline_message(
     ``display.run_timeline_message_text_max`` come back clipped with
     ``content_truncated``; refetch with ``full=true`` for the uncut text.
     """
-    group = _strip_message_group(request.app.state.db, agent_id, key)
+    group = _strip_message_group(request.app.state.strip_cache, request.app.state.db, agent_id, key)
     text_max = settings.display.run_timeline_message_text_max
     parts: list[RunTimelineMessageDetailPart] = []
     content_truncated = False
