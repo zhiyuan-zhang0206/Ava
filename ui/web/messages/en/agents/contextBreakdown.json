@@ -25,5 +25,9 @@
     "output": "Text output",
     "tool_call": "Tool calls",
     "tool_response": "Tool responses"
-  }
+  },
+  "pointTitle": "Context at request #{request} · session {session} of {sessions} · {time}",
+  "pointSubtitle": "Follows the selected block; with none selected, the last request in view",
+  "pointEmpty": "The agent has made no LLM request yet.",
+  "categoryToggle": "Highlight {category} blocks on the timeline"
 }

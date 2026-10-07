@@ -12,21 +12,18 @@ import { useEffect, useRef, useState } from "react";
 
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
-import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { buttonVariants } from "@/components/ui/button";
-
 import {
-  BLOCK_CLASSES,
-  axisTicks,
   blockClass,
   chainIds,
-  classColor,
   firstLine,
+  hoverLit,
+  inboundSources,
   isSelected,
   layoutRow,
   levelsTopFirst,
+  matchesHighlight,
   MARKER_HIT_PX,
   MARKER_LINE_PX,
   type RowPlacement,
@@ -36,12 +33,22 @@ import {
   unitColor,
   viewportWindow,
   zoomViewport,
+  unitKey,
   type BlockClass,
+  type Highlight,
+  type Hover,
   type Selection,
   type Viewport,
 } from "./timeline-model";
+import { RunTimelineAxis } from "./run-timeline-axis";
+import { ContextSizeRow } from "./run-timeline-context-row";
+import { RunTimelineLegend } from "./run-timeline-legend";
+import { RowShell } from "./run-timeline-row-shell";
+import { readoutText, requestReadout } from "./run-timeline-readout";
 
 const NODE_LABEL_CHARS = 80;
+// The opacity of everything a highlight does not name.
+const FADED = "opacity-[0.12]";
 // Track width assumed until the first measurement.
 const DEFAULT_TRACK_PX = 1000;
 // Height of one marker lane's hit area; markers stacked at one instant take one lane each.
@@ -52,7 +59,6 @@ const UNIT_ROW_PX = 24;
 const DRAG_THRESHOLD_PX = 4;
 const WHEEL_ZOOM_RATE = 0.0015;
 const PINCH_ZOOM_RATE = 0.01;
-const BUTTON_ZOOM = 0.5;
 
 // The hatching of a stretch the level above has not summarized yet.
 const PENDING_HATCH =
@@ -103,32 +109,6 @@ function MarkerLine({
   );
 }
 
-function RowShell({
-  label,
-  height,
-  testId,
-  children,
-}: {
-  label: string;
-  height: string;
-  testId: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={cn(FLEX, "items-stretch gap-2")} data-testid={testId}>
-      <div className="w-20 shrink-0 self-center truncate text-right text-[11px] text-muted-foreground">
-        {label}
-      </div>
-      <div
-        data-track=""
-        className={cn("relative rounded bg-muted/40 [touch-action:pan-y]", MIN_W_0, OVERFLOW_HIDDEN, height, "grow")}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
 export function RunTimelineRows({
   data,
   base,
@@ -137,6 +117,8 @@ export function RunTimelineRows({
   selection,
   onSelect,
   onDrill,
+  highlight,
+  onHighlight,
 }: {
   data: RunTimelineResponse;
   /** The whole loaded extent: the viewport never leaves it. */
@@ -146,14 +128,18 @@ export function RunTimelineRows({
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
   onDrill: (selection: Selection) => void;
+  /** The legend's highlight: every block of one class (or one source) stays lit, the rest fades. */
+  highlight: Highlight | null;
+  onHighlight: (highlight: Highlight | null) => void;
 }) {
   const t = useTranslations("runTimeline");
+  const [hover, setHover] = useState<Hover | null>(null);
+  const lit = hoverLit(hover, data.nodes, data.units);
   const levels = levelsTopFirst(data.nodes);
   const visible = viewportWindow(view);
   // A selection lights itself and every ancestor; the rest steps back.
   const chain = chainIds(selection, data.nodes, data.units);
   const dim = selection !== null;
-  const ticks = axisTicks(view);
   const chartRef = useRef<HTMLDivElement>(null);
   const live = useRef({ base, view, onView });
   // The view a wheel event produced that React has not rendered yet.
@@ -238,8 +224,6 @@ export function RunTimelineRows({
     }
     drag.current = null;
   };
-  const zoomButton = (factor: number) => onView(zoomViewport(view, base, 0.5, factor));
-  const atBase = view.from <= base.from && view.to >= base.to;
   const classLabel: Record<BlockClass, string> = {
     human: t("blockHuman"),
     agent: t("blockAgent"),
@@ -250,6 +234,23 @@ export function RunTimelineRows({
     note: t("blockNote"),
   };
   const unitLabel = (unit: Pick<RunTimelineUnit, "kind" | "source">) => classLabel[blockClass(unit)];
+  const sourceLabel = (source: string) =>
+    source.startsWith("agent:") ? t("sourceFromAgent", { id: source.slice("agent:".length) }) : source;
+  const sources = highlight !== null && (highlight.cls === "human" || highlight.cls === "agent")
+    ? inboundSources(data.units, highlight.cls)
+    : [];
+  const readout = readoutText(hover, {
+    data,
+    t,
+    unitLabel,
+    sourceLabel,
+  });
+  const hoverProps = (target: Hover) => ({
+    onMouseEnter: () => setHover(target),
+    onMouseLeave: () => setHover(null),
+    onFocus: () => setHover(target),
+    onBlur: () => setHover(null),
+  });
 
   return (
     <div
@@ -269,6 +270,14 @@ export function RunTimelineRows({
       }}
       className="select-none space-y-1.5 rounded-[10px] border border-border bg-card p-3"
     >
+      <p
+        data-testid="run-timeline-readout"
+        data-hovering={readout === null ? undefined : ""}
+        className="h-4 truncate pl-[88px] font-mono text-[10px] text-muted-foreground"
+      >
+        {readout ?? t("readoutIdle")}
+      </p>
+
       {data.events.length > 0 ? (
         <RowShell label={t("lifecycleRow")} height="h-5" testId="run-timeline-row-lifecycle">
           {data.events.map((event) => {
@@ -329,6 +338,9 @@ export function RunTimelineRows({
               if (place === undefined) return null;
               const picked = isSelected(selection, { kind: "node", id: node.id });
               const ancestor = !picked && chain.has(node.id);
+              const hovered = hover?.kind === "node" && hover.id === node.id;
+              const hoverLight = !picked && !ancestor && lit.nodeIds.has(node.id);
+              const faded = highlight !== null && !picked;
               const label = firstLine(node.summary, NODE_LABEL_CHARS);
               return (
                 <button
@@ -339,9 +351,12 @@ export function RunTimelineRows({
                   data-testid="run-timeline-node"
                   data-node-id={node.id}
                   data-highlight={picked ? "self" : ancestor ? "ancestor" : "none"}
+                  data-hover={hovered ? "self" : lit.nodeIds.has(node.id) ? "lit" : undefined}
+                  data-faded={faded ? "" : undefined}
                   data-marker={place.marker ? "" : undefined}
                   onClick={() => onSelect({ kind: "node", id: node.id })}
                   onDoubleClick={() => onDrill({ kind: "node", id: node.id })}
+                  {...hoverProps({ kind: "node", id: node.id })}
                   className={cn(
                     "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
                     place.marker
@@ -349,7 +364,11 @@ export function RunTimelineRows({
                       : "inset-y-0 truncate rounded border px-1 text-left text-[10px] leading-8 border-border bg-primary/20 text-foreground hover:bg-primary/30",
                     !place.marker && picked && "bg-primary/45 ring-2 ring-foreground",
                     !place.marker && ancestor && "bg-primary/40 ring-2 ring-foreground/60",
-                    dim && !picked && !ancestor && "opacity-40",
+                    !place.marker && hoverLight && "bg-primary/30 ring-1 ring-foreground/40",
+                    !place.marker && hoverLight && hovered && "ring-foreground/70",
+                    faded
+                      ? FADED
+                      : dim && !picked && !ancestor && !hoverLight && "opacity-40",
                   )}
                   style={placeStyle(place)}
                 >
@@ -357,9 +376,9 @@ export function RunTimelineRows({
                     <MarkerLine
                       place={place}
                       rowPx={LEVEL_ROW_PX}
-                      strong={picked || ancestor}
+                      strong={picked || ancestor || hoverLight}
                       color={
-                        picked || ancestor ? "var(--foreground)" : "color-mix(in srgb, var(--primary) 70%, transparent)"
+                        picked || ancestor || hoverLight ? "var(--foreground)" : "color-mix(in srgb, var(--primary) 70%, transparent)"
                       }
                     />
                   ) : (
@@ -376,112 +395,85 @@ export function RunTimelineRows({
         {(() => {
           const places = new Map(
             layoutRow(
-              data.units.map((unit) => ({ key: `${unit.kind}-${unit.i0}-${unit.i1}`, start: unit.start, end: unit.end })),
+              data.units.map((unit) => ({ key: unitKey(unit), start: unit.start, end: unit.end })),
               visible,
               trackPx,
             ).map((place) => [place.key, place]),
           );
           return data.units.map((unit) => {
-          const place = places.get(`${unit.kind}-${unit.i0}-${unit.i1}`);
-          if (place === undefined) return null;
-          const candidate: Selection = {
-            kind: "unit",
-            i0: unit.i0,
-            i1: unit.i1,
-            unitKind: unit.kind,
-          };
-          const picked = isSelected(selection, candidate);
-          return (
-            <button
-              key={`${unit.kind}-${unit.i0}-${unit.i1}`}
-              type="button"
-              aria-label={t("unitAria", { kind: unitLabel(unit), preview: unit.preview })}
-              aria-pressed={picked}
-              title={`${unitLabel(unit)} · #${unit.i0}–#${unit.i1}\n${unit.preview}`}
-              data-testid="run-timeline-unit"
-              data-unit-kind={unit.kind}
-              data-block-class={blockClass(unit)}
-              data-highlight={picked ? "self" : "none"}
-              data-marker={place.marker ? "" : undefined}
-              onClick={() => onSelect(candidate)}
-              onDoubleClick={() => onDrill(candidate)}
-              className={cn(
-                "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
-                !place.marker && "inset-y-1 rounded-sm",
-                !place.marker && picked && "ring-2 ring-foreground",
-                dim && !picked && "opacity-40",
-              )}
-              style={place.marker ? placeStyle(place) : { ...placeStyle(place), background: unitColor(unit) }}
-            >
-              {place.marker ? (
-                <MarkerLine place={place} rowPx={UNIT_ROW_PX} strong={picked} color={picked ? "var(--foreground)" : unitColor(unit)} />
-              ) : null}
-            </button>
-          );
+            const key = unitKey(unit);
+            const place = places.get(key);
+            if (place === undefined) return null;
+            const candidate: Selection = {
+              kind: "unit",
+              i0: unit.i0,
+              i1: unit.i1,
+              unitKind: unit.kind,
+            };
+            const picked = isSelected(selection, candidate);
+            const hovered = hover?.kind === "unit" && isSelected(hover, candidate);
+            const hoverLight = hovered || lit.unitKeys.has(key);
+            const matched = highlight !== null && matchesHighlight(unit, highlight);
+            const faded = highlight !== null && !matched && !picked;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-label={t("unitAria", { kind: unitLabel(unit), preview: unit.preview })}
+                aria-pressed={picked}
+                data-testid="run-timeline-unit"
+                data-unit-kind={unit.kind}
+                data-block-class={blockClass(unit)}
+                data-highlight={picked ? "self" : "none"}
+                data-hover={hovered ? "self" : hoverLight ? "lit" : undefined}
+                data-faded={faded ? "" : undefined}
+                data-matched={matched ? "" : undefined}
+                data-marker={place.marker ? "" : undefined}
+                onClick={() => onSelect(candidate)}
+                onDoubleClick={() => onDrill(candidate)}
+                {...hoverProps(candidate)}
+                className={cn(
+                  "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
+                  !place.marker && "inset-y-1 rounded-sm",
+                  !place.marker && picked && "ring-2 ring-foreground",
+                  !place.marker && !picked && hoverLight && (hovered ? "ring-1 ring-foreground/70" : "ring-1 ring-foreground/40"),
+                  faded ? FADED : highlight === null && selection !== null && !picked && !hoverLight && "opacity-40",
+                )}
+                style={place.marker ? placeStyle(place) : { ...placeStyle(place), background: unitColor(unit) }}
+              >
+                {place.marker ? (
+                  <MarkerLine
+                    place={place}
+                    rowPx={UNIT_ROW_PX}
+                    strong={picked || hoverLight}
+                    color={picked || hoverLight ? "var(--foreground)" : unitColor(unit)}
+                  />
+                ) : null}
+              </button>
+            );
           });
         })()}
       </RowShell>
 
-      <div className={cn(FLEX, "gap-2 text-[10px] text-muted-foreground")}>
-        <div className={cn(FLEX, "w-20 shrink-0 justify-end gap-0.5")}>
-          <button
-            type="button"
-            aria-label={t("zoomIn")}
-            title={t("zoomIn")}
-            onClick={() => zoomButton(BUTTON_ZOOM)}
-            className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1.5 text-xs")}
-          >
-            +
-          </button>
-          <button
-            type="button"
-            aria-label={t("zoomOut")}
-            title={t("zoomOut")}
-            onClick={() => zoomButton(1 / BUTTON_ZOOM)}
-            className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1.5 text-xs")}
-          >
-            −
-          </button>
-          <button
-            type="button"
-            aria-label={t("zoomReset")}
-            title={t("zoomReset")}
-            disabled={atBase}
-            onClick={() => onView(base)}
-            className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1.5 text-xs")}
-          >
-            ⤢
-          </button>
-        </div>
-        <div className={cn("relative h-4 grow font-mono tabular-nums", MIN_W_0)} data-testid="run-timeline-axis">
-          {ticks.map((tick) => (
-            <span
-              key={tick.left}
-              className="absolute top-0 -translate-x-1/2 whitespace-nowrap"
-              style={{ left: `${tick.left}%` }}
-            >
-              {tick.label}
-            </span>
-          ))}
-        </div>
-      </div>
+      {data.requests.length > 0 ? (
+        <ContextSizeRow
+          requests={data.requests}
+          visible={visible}
+          hover={hover}
+          hoverProps={hoverProps}
+          describe={(request) => requestReadout(t, request)}
+        />
+      ) : null}
 
-      <ul
-        aria-label={t("legendLabel")}
-        data-testid="run-timeline-legend"
-        className={cn(FLEX, "flex-wrap gap-x-3 gap-y-1 pl-[88px] text-[10px] text-muted-foreground")}
-      >
-        {BLOCK_CLASSES.map((kind) => (
-          <li key={kind} className={cn(FLEX, "items-center gap-1")}>
-            <span
-              aria-hidden="true"
-              className="inline-block h-2.5 w-2.5 rounded-sm"
-              style={{ background: classColor(kind) }}
-            />
-            {classLabel[kind]}
-          </li>
-        ))}
-      </ul>
+      <RunTimelineAxis view={view} base={base} onView={onView} />
+
+      <RunTimelineLegend
+        highlight={highlight}
+        onHighlight={onHighlight}
+        classLabel={classLabel}
+        sources={sources}
+        sourceLabel={sourceLabel}
+      />
 
       {data.nodes.length === 0 && data.units.length === 0 ? (
         <p className="pt-1 text-xs text-muted-foreground">{t("empty")}</p>

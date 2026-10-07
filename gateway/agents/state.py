@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from langchain_core.messages import BaseMessage
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import (
@@ -688,11 +689,28 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
     no kernel/agent involvement. A checkpoint read failure / no checkpoint yields
     an empty breakdown with zeroed totals (same tolerance as token-usage: the
     panel re-opens fine later)."""
-    from base.lm.context_budget import (
-        UnknownModelWindowError,
-        latest_input_tokens,
-        resolve_context_budget,
+    from base.lm.context_budget import latest_input_tokens
+
+    try:
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
+    except CheckpointReadError as exc:
+        _log.warning(
+            "context-breakdown: checkpoint read failed for agent %s, returning empty: %r",
+            agent_id,
+            exc,
+        )
+        messages = []
+    return context_breakdown_response(
+        request, agent_id, messages, latest_input_tokens(messages) or 0
     )
+
+
+def context_breakdown_response(
+    request: Request, agent_id: int, messages: list[BaseMessage], total_input_tokens: int
+) -> ContextBreakdownResponse:
+    """The breakdown of `messages` (one LLM request's input) anchored to the provider's
+    `total_input_tokens`, with the agent's resolved window and compaction thresholds."""
+    from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
     from gateway.agents.context_breakdown import SectionNode, compute_breakdown
 
     def _to_context_section(node: SectionNode) -> ContextSection:
@@ -713,17 +731,6 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
     except UnknownModelWindowError as exc:
         _log.warning("context-breakdown: %s", exc)
 
-    try:
-        messages = load_checkpoint_messages(request.app.state.db, agent_id)
-    except CheckpointReadError as exc:
-        _log.warning(
-            "context-breakdown: checkpoint read failed for agent %s, returning empty: %r",
-            agent_id,
-            exc,
-        )
-        messages = []
-
-    total_input_tokens = latest_input_tokens(messages) or 0
     categories, sections, estimated_total = compute_breakdown(messages, total_input_tokens)
     return ContextBreakdownResponse(
         total_input_tokens=total_input_tokens,
