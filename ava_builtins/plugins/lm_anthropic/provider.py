@@ -380,8 +380,10 @@ PROVIDER = ProviderContribution(
             cache_miss=2.0,
             cache_hit=0.20,
             output=10.0,
+            cache_write_5m=2.500,
+            cache_write_1h=4.0,
             source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
+            source_checked_at="2026-10-08",
             vendor="anthropic",
             periods=(
                 PricePeriod(
@@ -394,6 +396,8 @@ PROVIDER = ProviderContribution(
                             cache_miss="2.0",
                             cache_hit="0.20",
                             output="10.0",
+                            cache_write_5m="2.500",
+                            cache_write_1h="4.0",
                         ),
                     ),
                 ),
@@ -403,10 +407,11 @@ PROVIDER = ProviderContribution(
             cache_miss=2.0,
             cache_hit=0.20,
             output=10.0,
+            cache_write_5m=2.500,
+            cache_write_1h=4.0,
             source_url="https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
-            source_checked_at="2026-09-30",
+            source_checked_at="2026-10-08",
             vendor="anthropic",
-            # Cache writes cost $2.50/M for 5m or $4/M for 1h; no cache-write field.
             periods=(
                 PricePeriod(
                     effective_from=None,
@@ -418,6 +423,8 @@ PROVIDER = ProviderContribution(
                             cache_miss="2.0",
                             cache_hit="0.20",
                             output="10.0",
+                            cache_write_5m="2.500",
+                            cache_write_1h="4.0",
                         ),
                     ),
                 ),
@@ -427,8 +434,10 @@ PROVIDER = ProviderContribution(
             cache_miss=1.0,
             cache_hit=0.10,
             output=5.0,
+            cache_write_5m=1.250,
+            cache_write_1h=2.0,
             source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
+            source_checked_at="2026-10-08",
             vendor="anthropic",
             periods=(
                 PricePeriod(
@@ -441,6 +450,8 @@ PROVIDER = ProviderContribution(
                             cache_miss="1.0",
                             cache_hit="0.10",
                             output="5.0",
+                            cache_write_5m="1.250",
+                            cache_write_1h="2.0",
                         ),
                     ),
                 ),
@@ -450,8 +461,10 @@ PROVIDER = ProviderContribution(
             cache_miss=5.0,
             cache_hit=0.50,
             output=25.0,
+            cache_write_5m=6.250,
+            cache_write_1h=10.0,
             source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
+            source_checked_at="2026-10-08",
             vendor="anthropic",
             periods=(
                 PricePeriod(
@@ -464,6 +477,8 @@ PROVIDER = ProviderContribution(
                             cache_miss="5.0",
                             cache_hit="0.50",
                             output="25.0",
+                            cache_write_5m="6.250",
+                            cache_write_1h="10.0",
                         ),
                     ),
                 ),
@@ -473,10 +488,11 @@ PROVIDER = ProviderContribution(
             cache_miss=4.0,
             cache_hit=0.20,
             output=20.0,
+            cache_write_5m=5.000,
+            cache_write_1h=8.0,
             source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-09-25",
+            source_checked_at="2026-10-08",
             vendor="anthropic",
-            # Cache writes cost $5/M for 5m or $8/M for 1h; no cache-write field.
             periods=(
                 PricePeriod(
                     effective_from=None,
@@ -488,6 +504,8 @@ PROVIDER = ProviderContribution(
                             cache_miss="4.0",
                             cache_hit="0.20",
                             output="20.0",
+                            cache_write_5m="5.000",
+                            cache_write_1h="8.0",
                         ),
                     ),
                 ),
@@ -497,8 +515,10 @@ PROVIDER = ProviderContribution(
             cache_miss=10.0,
             cache_hit=1.0,
             output=50.0,
+            cache_write_5m=12.500,
+            cache_write_1h=20.0,
             source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
+            source_checked_at="2026-10-08",
             vendor="anthropic",
             periods=(
                 PricePeriod(
@@ -511,6 +531,8 @@ PROVIDER = ProviderContribution(
                             cache_miss="10.0",
                             cache_hit="1.0",
                             output="50.0",
+                            cache_write_5m="12.500",
+                            cache_write_1h="20.0",
                         ),
                     ),
                 ),
@@ -520,8 +542,10 @@ PROVIDER = ProviderContribution(
             cache_miss=10.0,
             cache_hit=0.25,
             output=50.0,
+            cache_write_5m=12.500,
+            cache_write_1h=20.0,
             source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-09-02",
+            source_checked_at="2026-10-08",
             vendor="anthropic",
             periods=(
                 PricePeriod(
@@ -534,6 +558,8 @@ PROVIDER = ProviderContribution(
                             cache_miss="10.0",
                             cache_hit="0.25",
                             output="50.0",
+                            cache_write_5m="12.500",
+                            cache_write_1h="20.0",
                         ),
                     ),
                 ),
@@ -554,8 +580,10 @@ def contribute() -> PluginContributions:
                         cache_miss=10,
                         cache_hit=1,
                         output=50,
+                        cache_write_5m=12.50,
+                        cache_write_1h=20,
                         source_url="https://platform.claude.com/docs/en/about-claude/pricing",
-                        source_checked_at="2026-10-07",
+                        source_checked_at="2026-10-08",
                         vendor="anthropic",
                         periods=(
                             PricePeriod(
@@ -568,6 +596,8 @@ def contribute() -> PluginContributions:
                                         cache_miss="10",
                                         cache_hit="1",
                                         output="50",
+                                        cache_write_5m="12.50",
+                                        cache_write_1h="20",
                                     ),
                                 ),
                             ),
@@ -577,8 +607,10 @@ def contribute() -> PluginContributions:
                         cache_miss=8,
                         cache_hit=0.4,
                         output=40,
+                        cache_write_5m=10.00,
+                        cache_write_1h=16,
                         source_url="https://platform.claude.com/docs/en/about-claude/pricing",
-                        source_checked_at="2026-10-07",
+                        source_checked_at="2026-10-08",
                         vendor="anthropic",
                         periods=(
                             PricePeriod(
@@ -591,6 +623,8 @@ def contribute() -> PluginContributions:
                                         cache_miss="8",
                                         cache_hit="0.4",
                                         output="40",
+                                        cache_write_5m="10.00",
+                                        cache_write_1h="16",
                                     ),
                                 ),
                             ),

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-10-07.1",
+  "catalog_version": "2026-10-08-cache-writes",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -561,7 +561,7 @@
     "claude-sonnet-5": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -573,7 +573,9 @@
               "rates": {
                 "input": "2.0",
                 "cache_read": "0.20",
-                "output": "10.0"
+                "output": "10.0",
+                "cache_write_5m": "2.500",
+                "cache_write_1h": "4.0"
               },
               "utc_daily_overrides": []
             }
@@ -584,7 +586,7 @@
     "claude-sonnet-5-5": {
       "vendor": "anthropic",
       "source_url": "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
-      "source_checked_at": "2026-09-30",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -596,7 +598,9 @@
               "rates": {
                 "input": "2.0",
                 "cache_read": "0.20",
-                "output": "10.0"
+                "output": "10.0",
+                "cache_write_5m": "2.500",
+                "cache_write_1h": "4.0"
               },
               "utc_daily_overrides": []
             }
@@ -607,7 +611,7 @@
     "claude-haiku-4-5-20251001": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -619,7 +623,9 @@
               "rates": {
                 "input": "1.0",
                 "cache_read": "0.10",
-                "output": "5.0"
+                "output": "5.0",
+                "cache_write_5m": "1.250",
+                "cache_write_1h": "2.0"
               },
               "utc_daily_overrides": []
             }
@@ -630,7 +636,7 @@
     "claude-opus-5": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -642,7 +648,9 @@
               "rates": {
                 "input": "5.0",
                 "cache_read": "0.50",
-                "output": "25.0"
+                "output": "25.0",
+                "cache_write_5m": "6.250",
+                "cache_write_1h": "10.0"
               },
               "utc_daily_overrides": []
             }
@@ -653,7 +661,7 @@
     "claude-opus-5-5": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-09-25",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -665,7 +673,9 @@
               "rates": {
                 "input": "4.0",
                 "cache_read": "0.20",
-                "output": "20.0"
+                "output": "20.0",
+                "cache_write_5m": "5.000",
+                "cache_write_1h": "8.0"
               },
               "utc_daily_overrides": []
             }
@@ -676,7 +686,7 @@
     "claude-fable-5": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -688,7 +698,9 @@
               "rates": {
                 "input": "10.0",
                 "cache_read": "1.0",
-                "output": "50.0"
+                "output": "50.0",
+                "cache_write_5m": "12.500",
+                "cache_write_1h": "20.0"
               },
               "utc_daily_overrides": []
             }
@@ -699,7 +711,7 @@
     "claude-fable-5-1": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-09-02",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -711,7 +723,9 @@
               "rates": {
                 "input": "10.0",
                 "cache_read": "0.25",
-                "output": "50.0"
+                "output": "50.0",
+                "cache_write_5m": "12.500",
+                "cache_write_1h": "20.0"
               },
               "utc_daily_overrides": []
             }
@@ -722,7 +736,7 @@
     "claude-opus-4-8": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -734,7 +748,9 @@
               "rates": {
                 "input": "5.0",
                 "cache_read": "0.50",
-                "output": "25.0"
+                "output": "25.0",
+                "cache_write_5m": "6.250",
+                "cache_write_1h": "10.0"
               },
               "utc_daily_overrides": []
             }
@@ -745,7 +761,7 @@
     "claude-sonnet-4-6": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -757,7 +773,9 @@
               "rates": {
                 "input": "3.0",
                 "cache_read": "0.30",
-                "output": "15.0"
+                "output": "15.0",
+                "cache_write_5m": "3.750",
+                "cache_write_1h": "6.0"
               },
               "utc_daily_overrides": []
             }
@@ -768,7 +786,7 @@
     "claude-opus-4-7": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -780,7 +798,9 @@
               "rates": {
                 "input": "5.0",
                 "cache_read": "0.50",
-                "output": "25.0"
+                "output": "25.0",
+                "cache_write_5m": "6.250",
+                "cache_write_1h": "10.0"
               },
               "utc_daily_overrides": []
             }
@@ -791,7 +811,7 @@
     "claude-opus-4-6": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -803,7 +823,9 @@
               "rates": {
                 "input": "5.0",
                 "cache_read": "0.50",
-                "output": "25.0"
+                "output": "25.0",
+                "cache_write_5m": "6.250",
+                "cache_write_1h": "10.0"
               },
               "utc_daily_overrides": []
             }
@@ -814,7 +836,7 @@
     "claude-haiku-4-5": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
-      "source_checked_at": "2026-06-27",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -826,7 +848,9 @@
               "rates": {
                 "input": "1.0",
                 "cache_read": "0.10",
-                "output": "5.0"
+                "output": "5.0",
+                "cache_write_5m": "1.250",
+                "cache_write_1h": "2.0"
               },
               "utc_daily_overrides": []
             }
@@ -1708,7 +1732,7 @@
     "claude-opus-5-fast": {
       "vendor": "anthropic",
       "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -1720,7 +1744,9 @@
               "rates": {
                 "input": "10",
                 "cache_read": "1",
-                "output": "50"
+                "output": "50",
+                "cache_write_5m": "12.50",
+                "cache_write_1h": "20"
               },
               "utc_daily_overrides": []
             }
@@ -1731,7 +1757,7 @@
     "claude-opus-5-5-fast": {
       "vendor": "anthropic",
       "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-08",
       "periods": [
         {
           "effective_from": null,
@@ -1743,7 +1769,9 @@
               "rates": {
                 "input": "8",
                 "cache_read": "0.4",
-                "output": "40"
+                "output": "40",
+                "cache_write_5m": "10.00",
+                "cache_write_1h": "16"
               },
               "utc_daily_overrides": []
             }

@@ -92,6 +92,39 @@ def test_emit_billing_event_records_schema_v1_attributes(monkeypatch: pytest.Mon
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", span.attributes["ava.billing.ts"])
 
 
+@pytest.mark.parametrize("path", ["message", "durable"])
+def test_message_billing_accounts_for_both_cache_write_ttls(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    from base.lm.billing import emit_billing_from_message
+    from base.lm.usage import log_usage_from_message
+
+    tracer = _enable_tracing(monkeypatch)
+    message = AIMessage(
+        content="answer",
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 50,
+            "total_tokens": 1050,
+            "input_token_details": {
+                "cache_read": 200,
+                "ephemeral_5m_input_tokens": 300,
+                "ephemeral_1h_input_tokens": 400,
+            },
+        },
+    )
+    if path == "message":
+        emit_billing_from_message(message, model="claude-opus-5-5", usage_kind="chat")
+    else:
+        log_usage_from_message(message, model="claude-opus-5-5", usage_kind="agent")
+    assert len(tracer.spans) == 1
+    attrs = tracer.spans[0].attributes
+    assert attrs["ava.billing.cache_write_5m_tokens"] == 300
+    assert attrs["ava.billing.cache_write_1h_tokens"] == 400
+    assert attrs["ava.billing.cost"] == pytest.approx(0.00614)
+
+
 def test_emit_billing_from_message_marks_unpriced_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """A known vendor without catalog pricing records an explicit free-unpriced span.
 

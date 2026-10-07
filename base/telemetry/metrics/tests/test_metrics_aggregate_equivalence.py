@@ -70,6 +70,47 @@ def test_equivalence_empty(fake: TelemetryStream) -> None:
     _run_aggregate(fake, since_compact=True)
 
 
+def test_cache_write_cost_snapshots_survive_aggregation_and_unpriced_calls(
+    fake: TelemetryStream,
+) -> None:
+    base = {
+        "model": "claude-opus-5-5",
+        "in_total": 1000,
+        "out_total": 50,
+        "cache_read": 200,
+        "cache_write_5m": 300,
+        "cache_write_1h": 400,
+    }
+    _add(fake, event="llm_usage", agent_id=1, payload={**base, "cost_usd": 0.00614})
+    # A recorded zero is a known cost; an explicit unpriced call must never be re-priced.
+    _add(fake, event="llm_usage", agent_id=1, payload={**base, "cost_usd": 0})
+    _add(fake, event="llm_usage", agent_id=1, payload={**base, "unpriced": 1})
+    # Service rows remain in the window's cost, outside per-agent rollups.
+    _add(fake, event="llm_usage", agent_id=None, payload={**base, "cost_usd": 0.01228})
+    # Pre-snapshot input preserves its existing compatibility calculation.
+    _add(
+        fake,
+        event="llm_usage",
+        agent_id=2,
+        payload={
+            "model": "claude-opus-5-5",
+            "in_total": 1000,
+            "out_total": 0,
+            "cache_read": 0,
+        },
+    )
+    _text, data, rollups = _run_aggregate(fake)
+    llm = data["metrics"]["llm_turns"]
+    assert llm["cost_usd"] == pytest.approx(round(0.00614 + 0.01228 + 0.004, 4))
+    assert llm["cost_unpriced_calls"] == 1
+    assert rollups[1]["cost_usd"] == pytest.approx(round(0.00614, 4))
+    assert rollups[2]["cost_usd"] == pytest.approx(0.004)
+
+    # Aggregation also shares the single-agent and since-compact scope.
+    _text, filtered, _rollups = _run_aggregate(fake, agent=1, since_compact=True)
+    assert filtered["metrics"]["llm_turns"]["cost_usd"] == pytest.approx(round(0.00614, 4))
+
+
 def _write_full_thread_scenario(fake: TelemetryStream, aid: int) -> None:
     _add(fake, event="code", agent_id=aid, payload={"body": "print(1)"})
     _add(fake, event="syntax_fix", agent_id=aid, payload={"fixes": "ruff,ruff_format"})

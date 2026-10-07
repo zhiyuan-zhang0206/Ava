@@ -11,6 +11,7 @@ the helper functions (`pctiles`, `third_of`, `_fix_kinds`, `cost_usd`) so the ma
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -29,7 +30,12 @@ from base.telemetry.metrics import (
     pctiles,
     third_of,
 )
-from base.telemetry.metrics.aggregate_sql import LIFECYCLE_EVENTS, read_agent_window, read_window
+from base.telemetry.metrics.aggregate_sql import (
+    LIFECYCLE_EVENTS,
+    LlmCostSums,
+    read_agent_window,
+    read_window,
+)
 
 
 @dataclass(frozen=True)
@@ -90,6 +96,7 @@ class EventAggregate:
         tuple[str, int, int, int, int, int]
     ]  # (model, calls, in, out, cached, reasoning)
     llm_position: dict[str, tuple[int, int]]  # third -> (cache_read, in_total)
+    llm_costs: dict[int | None, dict[str, LlmCostSums]]
     turn_total: int
     turn_ok: int
     turn_durations: list[float]
@@ -182,6 +189,7 @@ def fetch_aggregate(
         output_len=lengths["output_len"],
         llm_by_model=_llm_by_model(data["llm_per_agent"]),
         llm_position=data["llm_position"],
+        llm_costs=data["llm_costs"],
         turn_total=_total(rows, "turn_total"),
         turn_ok=_total(rows, "turn_ok"),
         turn_durations=lengths["turn_dur"],
@@ -212,26 +220,36 @@ def fetch_agent_rollups(
     raw: dict[int | None, dict[str, Any]] = data["per_agent"]
     per_agent = _per_agent_aggs(raw, datetime.now(UTC))
     total = sum(int(r["events"]) for r in raw.values())
-    return total, agent_rollups(per_agent, _llm_by_agent(data["llm_per_agent"]))
+    return total, agent_rollups(per_agent, _llm_by_agent(data["llm_per_agent"]), data["llm_costs"])
 
 
-def _llm_totals_from_models(rows: list[tuple[str, int, int, int, int, int]]) -> _LlmTotals:
-    """Token + cost totals from per-model sums — cost_usd is linear in tokens
-    per model, so pricing the summed tokens once per model equals the per-row
-    loop (`_llm_totals`) exactly; every call on an unpriced model is unpriced."""
+def _cost_totals(rows: Iterable[tuple[str, LlmCostSums]]) -> tuple[float, int]:
+    """Sum immutable cost snapshots, retaining the pre-snapshot compatibility path."""
+    cost = 0.0
+    unpriced = 0
+    for model, row in rows:
+        cost += row.cost
+        unpriced += row.unpriced
+        if row.legacy_calls:
+            price = cost_usd(model, row.legacy_in, row.legacy_out, row.legacy_cached)
+            if price is None:
+                unpriced += row.legacy_calls
+            else:
+                cost += price
+    return cost, unpriced
+
+
+def _llm_totals_from_models(
+    rows: list[tuple[str, int, int, int, int, int]],
+    costs: dict[int | None, dict[str, LlmCostSums]],
+) -> _LlmTotals:
+    """Sum token counts and recorded USD independently; only legacy rows reprice."""
     calls = sum(r[1] for r in rows)
     tin = sum(r[2] for r in rows)
     tout = sum(r[3] for r in rows)
     tcached = sum(r[4] for r in rows)
     treason = sum(r[5] for r in rows)
-    cost = 0.0
-    unpriced = 0
-    for model, n, i, o, c, _r in rows:
-        price = cost_usd(model, i, o, c)
-        if price is None:
-            unpriced += n
-        else:
-            cost += price
+    cost, unpriced = _cost_totals(row for models in costs.values() for row in models.items())
     return _LlmTotals(calls, tin, tout, tcached, treason, cost, unpriced)
 
 
@@ -284,7 +302,7 @@ def _data_exec(agg: EventAggregate) -> dict[str, Any]:
 
 def _data_llm_turns(agg: EventAggregate) -> dict[str, Any]:
     """The `llm_turns` section data."""
-    totals = _llm_totals_from_models(agg.llm_by_model)
+    totals = _llm_totals_from_models(agg.llm_by_model, agg.llm_costs)
     # position thirds over each agent's llm_usage rows: (cache_read, in_total) sums.
     pos_hit = {
         b: round(c / i * 100, 1) if i else 0.0
@@ -421,6 +439,7 @@ def build_report_from_aggregate(
 def agent_rollups(
     per_agent: dict[int | None, _PerAgentAgg],
     per_agent_llm: dict[int | None, list[tuple[str, int, int, int, int]]],
+    costs: dict[int | None, dict[str, LlmCostSums]],
 ) -> dict[int, dict[str, Any]]:
     """Per-agent headline counters for `/api/metrics/agents` (service rows excluded)."""
     out: dict[int, dict[str, Any]] = {}
@@ -432,11 +451,7 @@ def agent_rollups(
         tin = sum(r[2] for r in usage)
         tout = sum(r[3] for r in usage)
         tcached = sum(r[4] for r in usage)
-        cost = 0.0
-        for model, _n, i, o, c in usage:
-            price = cost_usd(model, i, o, c)
-            if price is not None:
-                cost += price
+        cost, _unpriced = _cost_totals(costs.get(aid, {}).items())
         out[aid] = {
             "events": row.events,
             "cost_usd": round(cost, 4),
