@@ -336,7 +336,7 @@ def request_breakdown(
         if isinstance(request, AIMessage) and request.usage_metadata
         else None
     )
-    if reported == found.total.tokens:
+    if reported is not None and reported == found.total.tokens:
         found = replace(
             found, total=TokenTotal(tokens=reported, estimated=False, exact_fraction=1.0)
         )
