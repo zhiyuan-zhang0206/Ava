@@ -115,7 +115,7 @@ its directory's first two path components). New or growing
 violations fail; the baseline itself may only lose entries or lower values versus
 the configured base (or merge-base with origin/main, falling back to HEAD).
 A rule change to a section raises its version in `scripts/structure/baseline/rules.json`;
-against a base of another version the guard holds the section's total only, not its keys.
+the guard still checks every key and count. A rule upgrade cannot add exemptions.
 After splitting, shrink the relevant baseline values or remove fixed entries
 by hand. Explicit targets restrict budget checks to the selected files/directories;
 a file also checks its parent directory. The baseline guard always runs.
@@ -600,7 +600,7 @@ def _baseline_guard(
         base = _baseline_base()
     except ValueError as exc:
         return [f"{baseline_shards.SHARD_DIR}: {exc}"]
-    shards = locality.introduced(baseline_shards.read_at(_REPO_ROOT, base), _REPO_ROOT, base)
+    shards = baseline_shards.read_at(_REPO_ROOT, base)
     if shards is None:
         print(
             f"note: baseline guard skipped: git {base}:{baseline_shards.SHARD_DIR} unavailable",
@@ -618,11 +618,11 @@ def _baseline_guard(
     errors: list[str] = []
     for kind, entries in baseline.items():
         was, now = rules_was.get(kind, 1), rules_now.get(kind, 1)
-        if was != now:  # the rule changed: the keys are not comparable, only the total is
-            errors.extend(
-                baseline_shards.rule_change_errors(kind, entries, previous[kind], was, now)
+        if now < was:
+            errors.append(
+                f"{baseline_shards.SHARD_DIR}/{baseline_shards.RULES_FILE}: "
+                f"{kind} rule version went back from {was} to {now}"
             )
-            continue
         errors.extend(
             _section_guard(
                 kind,
