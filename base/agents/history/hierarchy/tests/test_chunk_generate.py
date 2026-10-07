@@ -285,16 +285,18 @@ def test_request_is_prefix_plus_one_instruction_with_tools_bound() -> None:
     assert "[1] human message: fix the flaky test" in request[-1].content
 
 
-def test_an_open_element_is_refused_and_corrected_like_any_bad_reply() -> None:
+def test_an_unclosed_group_is_refused_and_corrected() -> None:
     llm = _Recorder(
         [
-            AIMessage(content='<group first="1" last="2">look</group><open start="3"/>'),
+            AIMessage(
+                content='<group first="1" last="2">look<group first="3" last="3">run</group>'
+            ),
             AIMessage(content=_TWO),
         ]
     )
     out = _gen(llm, corrections=1)
-    assert out.groups[-1] == UnitGroup(2, 2, "run")  # the corrected reply runs to the end
-    assert "there is no <open> element" in llm.requests[1][-1].content
+    assert out.groups[-1] == UnitGroup(2, 2, "run")  # the corrected reply tiles the catalog
+    assert "opens 2 <group> tags but holds 1" in llm.requests[1][-1].content
 
 
 def test_tool_call_reply_is_refused_and_retried_then_answered() -> None:

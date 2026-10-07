@@ -265,10 +265,11 @@ def test_the_understanding_calls_retry_a_rate_limit_five_times() -> None:
         assert inspect.signature(fn).parameters["retry_attempts"].default == 5
 
 
-def test_a_group_of_one_summary_stays_open_without_an_error() -> None:
-    reply = _reply((100, 102), (103, 103), (104, 106))
-    assert parse_groups(reply, _nodes(8), must_close=False) == [
+def test_only_a_group_of_one_summary_at_the_end_stays_open_without_an_error() -> None:
+    reply = _reply((100, 102), (103, 103), (104, 106), (107, 107))
+    assert parse_groups(reply, _nodes(9), must_close=False) == [
         Group(100, 102, "s100"),
+        Group(103, 103, "s103"),
         Group(104, 106, "s104"),
     ]
     assert parse_groups(_reply((100, 100)), _nodes(5), must_close=False) == []
@@ -277,3 +278,28 @@ def test_a_group_of_one_summary_stays_open_without_an_error() -> None:
 def test_only_single_groups_under_must_close_close_nothing_and_are_refused() -> None:
     with pytest.raises(GroupReplyError, match="at least one group must be closed"):
         parse_groups(_reply((100, 100), (101, 101)), _nodes(5), must_close=True)
+
+
+def test_a_huge_number_and_a_mention_of_the_tag_are_handled_without_an_exception() -> None:
+    nodes = _nodes(8)
+    with pytest.raises(GroupReplyError, match="opens 1 <group> tags but holds 0"):
+        parse_groups(
+            '<group first="100" last="' + "9" * 5000 + '">a</group>', nodes, must_close=False
+        )
+    text = '<group first="100" last="102">on the <group> tag and <group first x</group>'
+    assert parse_groups(text, nodes, must_close=False) == [
+        Group(100, 102, "on the <group> tag and <group first x")
+    ]
+
+
+def test_a_trailing_single_group_stays_open_and_the_others_close_in_order() -> None:
+    nodes = _nodes(8)
+    middle = _reply((100, 100), (101, 103), (104, 104), (105, 106))
+    assert [(g.first, g.last) for g in parse_groups(middle, nodes, must_close=False)] == [
+        (100, 100),
+        (101, 103),
+        (104, 104),
+        (105, 106),
+    ]
+    tail = _reply((100, 102), (103, 103))
+    assert [(g.first, g.last) for g in parse_groups(tail, nodes, must_close=False)] == [(100, 102)]
