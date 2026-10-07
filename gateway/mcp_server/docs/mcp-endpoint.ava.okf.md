@@ -65,6 +65,9 @@ surface and result shapes are the ones external MCP clients drive.
 
 Creation `spawn_agent` accepts an optional 1–128 character `idempotency_key`, scoped to the authenticated MCP client and `POST /api/agents`. Reusing it with the same body recovers the same birth; changed arguments conflict. Another key creates another agent. JSON-RPC request IDs are not operation identities. Without a key, each call remains a separate creation.
 
+Guarded credential creation and its one-time-token recovery exception are owned by
+[credential creation receipts](credential-creation.ava.okf.md).
+
 ## Why not a router
 
 `/mcp` is not a FastAPI router: the MCP protocol is JSON-RPC over HTTP with its

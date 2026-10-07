@@ -2716,3 +2716,12 @@ COMMENT ON TABLE im_bridge_alert_acceptances IS
 COMMENT ON COLUMN alerts.notified_revision IS
     'Native revision completed by at least one real SENT channel; legacy notified_at never populates this fact.';
 INSERT INTO schema_migrations (name) VALUES ('20261007T211550_native-alert-outbound');
+CREATE TABLE mcp_credential_creation_receipts (
+    operation_key TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+    acceptance JSONB NOT NULL,
+    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE mcp_credential_creation_receipts IS
+    'Original credential creation metadata only. No token or credential hash, cleanup FK, expiry, or implicit token reissue.';
+INSERT INTO schema_migrations (name) VALUES ('20261007T221349_mcp-credential-creation-receipts');

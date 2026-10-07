@@ -8,22 +8,26 @@ machine token or a runner-minted session gets 403 (`require_human_credential`).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from gateway.auth.request_principal import require_human_credential
 from gateway.mcp_server import clients
+from gateway.mcp_server.clients import McpClientScope as McpClientScope
+from gateway.mcp_server.creation_receipts import (
+    CredentialCreationRequest,
+    CredentialCreationResult,
+    OperationKey,
+    accept_creation,
+)
 
 router = APIRouter(dependencies=[Depends(require_human_credential)])
-
-McpClientScope = Literal["read", "write"]
 
 
 class McpClientCreate(BaseModel):
     name: str
-    scope: McpClientScope = "read"
+    scope: McpClientScope = McpClientScope.READ
 
 
 class McpClientCreated(BaseModel):
@@ -68,3 +72,11 @@ def post_mcp_client_revoke(request: Request, client_id: int) -> McpClientRevoked
     if not clients.revoke_client(request.app.state.db_pool, client_id):
         raise HTTPException(status_code=404, detail="active MCP client not found")
     return McpClientRevoked(ok=True)
+
+
+@router.post("/api/keyed/v1/mcp/clients")
+def post_guarded_mcp_client(
+    request: Request, body: CredentialCreationRequest, operation_key: OperationKey
+) -> CredentialCreationResult:
+    """Create once; replay only original metadata, never the one-time plaintext token."""
+    return accept_creation(request.app.state.db_pool, operation_key, body)
