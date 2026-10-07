@@ -32,7 +32,11 @@ The boot-path index is generated: `base/host/env/config_lite_table.json` (read b
 hand-written `base/host/env/config_lite_table.py`, outside this package because
 `base/host/env/registry.py` consumes its surfaces before Settings exists) is
 produced from the live registry by `scripts/codegen/gen_config_lite_table.py` and
-byte-compared by the `config-lite-table-fresh` gate. A field a process never
+byte-compared by the `config-lite-table-fresh` gate. The reader parses the JSON once
+and exposes read-only mappings with tuple rows and immutable literal defaults;
+the decoded construction payload is local and is not retained as shared state.
+Facade callers requesting a mutable alias map still receive an independent copy.
+A field a process never
 touches is no longer validated at import (the accepted semantic change of task
 #3621): local-source units keep their import-time required-field check, a
 configured runner still fetches bootstrap at the same point, and the

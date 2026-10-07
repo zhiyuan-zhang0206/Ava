@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import MappingProxyType
 
 from base.deploy.progress_timeout import (
     CRITICAL_SERVICE_SESSIONS,
@@ -28,7 +29,7 @@ from services.supervision.ava_root_glue.diagnostics import (
     RootHealthRounds,
 )
 
-STATIC_PROBES: Mapping[str, str] = {}
+STATIC_PROBES: Mapping[str, str] = MappingProxyType({})
 """Spec-less unit id -> `"module:attribute"` probe reference.
 
 v1 is empty on purpose: the host-policy / data-plane / native-stack class is

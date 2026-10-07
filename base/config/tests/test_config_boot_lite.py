@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The real merged pin map of a `deepseek-v4-flash` exec child (task #3621
@@ -41,9 +43,25 @@ _LITE_CONFIG_MODULES = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _isolated_boot_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default child boots a local source; explicit home cases still override it."""
+    home = tmp_path / "boot-home"
+    home.mkdir()
+    (home / ".env").write_text(
+        "AVA_MACHINE_SERVE_GATEWAY=true\n"
+        "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/test\n"
+        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AVA_HOME", str(home))
+
+
 def _clean_env(**overrides: str) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.pop("VIRTUAL_ENV", None)
+    # Keep pytest's isolated home; cleaning config keys must not select a live unit.
+    env["AVA_HOME"] = os.environ["AVA_HOME"]
     env.update(overrides)
     return env
 
