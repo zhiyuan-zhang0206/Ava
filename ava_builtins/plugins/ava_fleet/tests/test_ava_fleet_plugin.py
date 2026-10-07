@@ -665,7 +665,7 @@ def test_fleet_spawn_preserves_caller_creation_key(
         return 42
 
     monkeypatch.setattr(ava.gateway_client, "spawn", capture)
-    assert ava.agents.spawn(prompt="one goal", label="worker", idempotency_key="fleet-birth") == 42
+    assert ava.agents.spawn(prompt="one goal", idempotency_key="fleet-birth") == 42
     assert captured[0]["idempotency_key"] == "fleet-birth"
-    assert captured[0]["label"] == "worker"
+    assert captured[0]["label"] is None
     assert "idempotency_key" in inspect.signature(ava.agents.spawn).parameters
