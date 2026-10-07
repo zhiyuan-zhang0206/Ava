@@ -2,8 +2,7 @@
   "ambient_state": {
     "base/host/env/config_lite_table.py::ambient-instance:_RAW": 1,
     "base/host/env/dotenv_boot.py::global-rebind:_db_authority_refusal": 2,
-    "base/host/net/__init__.py::import-time-call:base.host.net.httpx_cli_guard.block_httpx_cli": 1,
-    "base/host/net/resilience.py::ambient-instance:http_classifier": 1
+    "base/host/net/__init__.py::import-time-call:base.host.net.httpx_cli_guard.block_httpx_cli": 1
   },
   "files": {},
   "patch_targets": {
