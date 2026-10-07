@@ -232,12 +232,28 @@ def build_timeline_items(
             items.append(item)
         else:
             items.extend(_message_items(msg, msg_idx, kwargs, next_ts, sdk_by_id))
+    _add_source_coordinates(items, messages)
     if segment_prefix:
         items = [
             item.model_copy(update={"item_id": f"{segment_prefix}.{item.item_id}"})
             for item in items
         ]
     return items, msg_count
+
+
+def _add_source_coordinates(items: list[TimelineItem], messages: Sequence[BaseMessage]) -> None:
+    """Attach persisted source coordinates without changing UI position keys."""
+    for item in items:
+        msg_idx, block_idx = (int(part) for part in item.item_id.split("."))
+        message = messages[msg_idx]
+        kwargs = read_ava_kwargs(message)
+        if message.id and not kwargs.get("ava_ephemeral_message_id"):
+            item.source_message_id = message.id
+            item.source_block_idx = block_idx
+        embedded_id = kwargs.get("ava_inbound_id")
+        if isinstance(embedded_id, int) and not isinstance(embedded_id, bool) and embedded_id > 0:
+            item.source_inbound_id = embedded_id
+            item.source_block_idx = block_idx
 
 
 def _message_items(

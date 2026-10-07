@@ -33,8 +33,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Generator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Generator, Mapping, Sequence
+from contextlib import aclosing, closing, contextmanager
 from contextvars import ContextVar  # noqa: TID251 — recovery scope must reach LangGraph child tasks
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -55,6 +55,10 @@ from langgraph.errors import EmptyChannelError
 from langgraph.graph.message import add_messages
 
 from base.agents.history.checkpoint_postgres_walks import install_checkpoint_postgres_walk_patch
+from base.agents.messages.identity import (
+    normalize_checkpoint_message_ids,
+    normalize_stored_message_ids,
+)
 from base.log import logger
 
 install_checkpoint_postgres_walk_patch()
@@ -300,9 +304,9 @@ def _fold_messages(state: Any, writes: Sequence[Any]) -> Any:
     span = _current_span()
     if span is not None:
         span.fold_path = "fallback"
-    result: Any = [] if state is MISSING else state
+    result: Any = [] if state is MISSING else normalize_stored_message_ids(state)
     for group in groups:
-        result = add_messages(result, group)
+        result = add_messages(result, normalize_stored_message_ids(group))
     return result
 
 
@@ -313,10 +317,12 @@ def _fold_history(entry: Mapping[str, Any]) -> list[BaseMessage]:
     missing, a plain list, or a `_DeltaSnapshot` (unwrapped), and an
     `Overwrite` write resets the base the same way the runtime's replay does.
     """
-    channel = DeltaChannel[Any](_fold_messages).from_checkpoint(entry.get("seed", MISSING))
+    channel = DeltaChannel[Any](_fold_messages).from_checkpoint(
+        normalize_stored_message_ids(entry.get("seed", MISSING))
+    )
     channel.replay_writes(entry["writes"])
     try:
-        return cast("list[BaseMessage]", channel.get())
+        return cast("list[BaseMessage]", normalize_stored_message_ids(channel.get()))
     except EmptyChannelError:
         return []
 
@@ -380,6 +386,7 @@ def reconstruct_delta_messages(checkpointer: PostgresSaver, tuple_: CheckpointTu
     call for a stored `_DeltaSnapshot` (which is unwrapped, not folded).
     """
     checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
+    normalize_checkpoint_message_ids(tuple_)
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
     if kind is None:
         return False
@@ -410,6 +417,7 @@ async def areconstruct_delta_messages(
 ) -> bool:
     """Async twin of `reconstruct_delta_messages`."""
     checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
+    normalize_checkpoint_message_ids(tuple_)
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
     if kind is None:
         return False
@@ -438,6 +446,7 @@ async def areconstruct_delta_messages(
 async def _areconstruct_in_recovery(
     saver: AsyncPostgresSaver, tuple_: CheckpointTuple, read_generation: int | None
 ) -> bool:
+    normalize_checkpoint_message_ids(tuple_)
     scope = _recovery_scope.get()
     configurable = tuple_.config["configurable"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     if (
@@ -692,6 +701,28 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
                 )
                 raise
 
+    _wrap_history_identity_reads(saver)
     _instrument_history_callbacks(saver)
     saver.get_tuple = get_tuple  # type: ignore[method-assign]
     saver.aget_tuple = aget_tuple  # type: ignore[method-assign]
+
+
+def _wrap_history_identity_reads(saver: AsyncPostgresSaver) -> None:
+    """State-history readers bypass get_tuple; normalize their raw tuples too."""
+    orig_list = saver.list
+    orig_alist = saver.alist
+
+    def list_tuples(*args: Any, **kwargs: Any) -> Generator[CheckpointTuple, None, None]:
+        with closing(cast(Any, orig_list(*args, **kwargs))) as iterator:
+            for tuple_ in iterator:
+                normalize_checkpoint_message_ids(tuple_)
+                yield tuple_
+
+    async def alist_tuples(*args: Any, **kwargs: Any) -> AsyncIterator[CheckpointTuple]:
+        async with aclosing(cast(Any, orig_alist(*args, **kwargs))) as iterator:
+            async for tuple_ in iterator:
+                normalize_checkpoint_message_ids(tuple_)
+                yield tuple_
+
+    saver.list = list_tuples  # type: ignore[method-assign]
+    saver.alist = alist_tuples  # type: ignore[method-assign]

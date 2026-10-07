@@ -59,6 +59,12 @@ class TimelineItem(BaseModel):
     created_at: str | None = None  # ISO-8601
     impersonation: ImpersonationMetadata | None = None
     inbound_id: int | None = None
+    # Durable source coordinates; item_id remains the frontend position key.
+    # Missing/ephemeral source IDs are excluded. Only an explicitly embedded
+    # inbound row ID qualifies; positional legacy UI anchors do not.
+    source_message_id: str | None = None
+    source_inbound_id: int | None = None
+    source_block_idx: int | None = None
     # The compact run this item belongs to (None elsewhere): a forced/auto
     # compact's summary message carries `ava_compact_id`, pairing the item
     # with the live compact_started / compact_finished events (ticking

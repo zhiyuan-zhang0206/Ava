@@ -77,6 +77,8 @@ from langchain_core.messages import (
 from langchain_core.messages.utils import message_chunk_to_message
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 
+from base.agents.messages.identity import normalize_stored_message_ids
+
 
 class MessagesMutationError(RuntimeError):
     """A messages-channel mutation violated the append-only invariant.
@@ -350,7 +352,9 @@ def guarded_delta_reducer(state: Any, writes: Sequence[Any]) -> Any:
                 result = fast[0]
                 cached = fast  # fast IS the (messages, ids) index for the next write
                 continue
-        result = guarded_add_messages(result, delta)
+        result = guarded_add_messages(
+            normalize_stored_message_ids(result), normalize_stored_message_ids(delta)
+        )
         cached = None
         markers = _is_delta(result)
     return result
