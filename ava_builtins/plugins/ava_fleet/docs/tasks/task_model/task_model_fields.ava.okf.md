@@ -16,7 +16,7 @@ Auto-increment primary key, globally unique. Assigned by the database on creatio
 
 ## `parent_id`
 
-Pointer to parent task (foreign key). `NULL` **only** appears on the system [[task_model_root.ava.okf.md|Root Task]] — all other tasks always have a parent: if `create()` omits `parent`, it falls back to root. All tasks form a parent-child tree; query the full subtree with `list(parent=..., recursive=True)` via recursive CTE.
+Pointer to parent task (foreign key). `NULL` **only** appears on the system [[task_model_root.ava.okf.md|Root Task]] — all other tasks always have a parent: `create()` requires an explicit `parent` id. All tasks form a parent-child tree; query the full subtree with `list(parent=..., recursive=True)` via recursive CTE.
 
 Constraint: a child is always created after its parent (`created_at` monotonically increasing) — cycles are impossible.
 

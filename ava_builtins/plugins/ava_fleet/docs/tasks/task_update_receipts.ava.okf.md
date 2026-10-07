@@ -69,8 +69,8 @@ retention requires an explicit replay horizon before removing tombstones.
 
 ## Remaining operations
 
-Direct `create` and the compound `create_and_assign` operation have no receipt
-under this contract. Open-title uniqueness does not replay a creation result;
-agent creation and task creation do not become one transaction. Those contracts
-remain separate work under #4472. Gateway task PATCH has its own actual-path and
+Standalone `create` has its own provenance-scoped receipt owner in
+[[task_creation_receipts.ava.okf.md]]. Compound `create_and_assign` still needs
+durable identity across spawn and task creation; these effects do not become
+one transaction and remain separate work under #4472. Gateway task PATCH has its own actual-path and
 credential-scoped receipt owner rather than sharing the SDK namespace.
