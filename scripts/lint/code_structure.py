@@ -72,25 +72,17 @@ transport posture. A site that genuinely cannot go through the owner goes in tha
 decision's `allowed` map with a one-line reason; an allowed module that stops
 bypassing, or no longer exists, fails as stale.
 
-Rules 4 and 5 freeze today's sites in the `private_imports` / `owner_bypasses`
-baseline sections as `path::target -> site count`. Unlike the budgets, the
-frozen counts must match reality exactly: a new or grown site is a violation,
-and a removed one fails until its entry is lowered or deleted, so a fixed
-reach-in cannot silently return. Against the base revision they are shrink-only:
-a new key needs a same-file removal of the SAME private name with equal or
-greater value (its owner module moved), and git -M renames carry keys. A file
-split, a move to another file, or a swap for a different private name cannot
-carry a frozen site — fix the site instead. Why locality:
-docs/conventions/python-conventions.md.
+Rules 4 and 5 have no baseline allowances. Every measured reach-in or decision-owner
+bypass fails directly. The owner resolution and decision contracts remain in
+scripts/structure/locality.py; see docs/conventions/python-conventions.md.
 
 ### Rule 6: no path imports under ava_builtins/ (package doors)
 
 `scripts/structure/path_imports.py`: a skill or plugin module may not edit `sys.path`, call
 `site.addsitedir`, or load a module by file path (`spec_from_file_location`, `SourceFileLoader`,
 `runpy.run_path`): a path import sidesteps the package doors and the budgets. Shared code goes
-into a governed package the script imports normally. Frozen in the `path_imports` section as
-`path::target -> site count`, matched exactly like Rules 4 and 5, with no allowlist and no
-pairing. The one narrow exception (a within-skill `__file__` guard) is in `path_imports.py`.
+into a governed package the script imports normally. Every measured path-import site
+fails directly; no baseline can permit it. The one narrow exception (a within-skill `__file__` guard) is in `path_imports.py`.
 
 ### Rule 9: ambient state (inject what is read to decide)
 
@@ -144,7 +136,8 @@ from scripts.structure import quality_budget as quality  # noqa: E402 — standa
 
 _HARD_CEILING = 800
 # Baseline sections whose frozen `path::target` site counts must match reality exactly.
-_SITE_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SECTION)
+_SITE_SECTIONS = (*locality.EXTERNAL_SECTIONS, ambient_state.SECTION)
+_MEASURED_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SECTION)
 _DIRECTORY_CEILING = 20
 
 # AST rules track [tool.importlinter] root_packages; budgets also cover tooling/tests.
@@ -373,10 +366,14 @@ def _parse_baseline(
 ) -> dict[str, dict[str, int]]:
     """Validate remaining site exemptions; retired budgets cannot be reintroduced.
 
-    The comparison revision may still contain empty budget sections from before
-    retirement. They convey no allowance and are discarded after validation.
+    The comparison revision may still contain empty budget or locality sections from
+    before retirement. They convey no allowance and are discarded after validation.
     """
-    retired = ("directories", "files", *quality.QUALITY_SECTIONS) if historical else ()
+    retired = (
+        ("directories", "files", *quality.QUALITY_SECTIONS, *locality.STRICT_SECTIONS)
+        if historical
+        else ()
+    )
     baseline = baseline_shards.merge(shards, (*_SITE_SECTIONS, *retired))
     for kind in retired:
         if baseline.pop(kind):
@@ -612,7 +609,7 @@ def _check_ast_and_quality(
     ast_files = _ast_rule_files(argv)
     locality.reset_caches()
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality.QUALITY_SECTIONS}
-    sites: dict[str, locality.Sites] = {kind: {} for kind in _SITE_SECTIONS}
+    sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
     scanned: set[str] = set()
     errors: list[str] = []
     for path in sorted(files | ast_files):

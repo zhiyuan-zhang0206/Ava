@@ -458,135 +458,47 @@ def test_measure_scans_a_non_test_file_for_both_rules(tmp_path: pathlib.Path) ->
     assert measured["owner_bypasses"] == {"gateway/db.py::postgres-dial": [3]}
 
 
-# --- site_errors: frozen counts must match reality exactly ------------------
+# --- strict site diagnostics: all measured occurrences fail -----------------
 
 
-def _site_errors(
-    tmp_path: pathlib.Path,
-    *,
-    measured: dict[str, list[int]],
-    frozen: dict[str, int],
-    scanned: set[str],
-    exists: frozenset[str] = frozenset(),
-    renames: dict[str, str] | None = None,
-) -> list[str]:
-    for rel in exists:
-        _write(tmp_path, rel, "x = 1\n")
-    return locality.site_errors(
-        {"private_imports": measured, "owner_bypasses": {}},
-        {"private_imports": frozen, "owner_bypasses": {}},
-        scanned=scanned,
+def test_site_errors_reports_every_occurrence_in_line_order(tmp_path: pathlib.Path) -> None:
+    errors = locality.site_errors(
+        {"private_imports": {"gateway/db.py::a._priv": [9, 5]}},
+        {},
+        scanned={"gateway/db.py"},
         repo_root=tmp_path,
-        renames=renames,
     )
-
-
-def test_site_errors_flags_a_brand_new_site(tmp_path: pathlib.Path) -> None:
-    errors = _site_errors(
-        tmp_path, measured={"gateway/db.py::a._priv": [5]}, frozen={}, scanned={"gateway/db.py"}
-    )
-
-    assert len(errors) == 1
-    assert errors[0].startswith("gateway/db.py:5: reaches private `a._priv`")
-    assert "grew above" not in errors[0]
-    assert "renamed file" not in errors[0]
-
-
-def test_site_errors_flags_growth_above_the_frozen_count(tmp_path: pathlib.Path) -> None:
-    errors = _site_errors(
-        tmp_path,
-        measured={"gateway/db.py::a._priv": [5, 9]},
-        frozen={"gateway/db.py::a._priv": 1},
-        scanned={"gateway/db.py"},
-    )
-
     assert len(errors) == 2
-    assert errors[0].startswith("gateway/db.py:5:")
-    assert errors[1].startswith("gateway/db.py:9:")
-    assert all("grew above its frozen count 1" in error for error in errors)
+    assert errors[0].startswith("gateway/db.py:5: reaches private `a._priv`")
+    assert errors[1].startswith("gateway/db.py:9: reaches private `a._priv`")
+    assert all("frozen" not in error for error in errors)
 
 
-def test_site_errors_flags_shrinkage_to_lower(tmp_path: pathlib.Path) -> None:
-    errors = _site_errors(
-        tmp_path,
-        measured={"gateway/db.py::a._priv": [5]},
-        frozen={"gateway/db.py::a._priv": 3},
-        scanned={"gateway/db.py"},
-    )
-
-    assert len(errors) == 1
-    assert "stale private_imports entry gateway/db.py::a._priv" in errors[0]
-    assert "frozen at 3 but the code has 1" in errors[0]
-    assert "lower it to 1" in errors[0]
-
-
-def test_site_errors_flags_a_removed_site_to_remove(tmp_path: pathlib.Path) -> None:
-    errors = _site_errors(
-        tmp_path, measured={}, frozen={"gateway/db.py::a._priv": 2}, scanned={"gateway/db.py"}
-    )
-
-    assert len(errors) == 1
-    assert "stale private_imports entry gateway/db.py::a._priv" in errors[0]
-    assert "the code has 0" in errors[0]
-    assert "remove it" in errors[0]
-
-
-def test_site_errors_flags_a_deleted_files_entry_as_stale(tmp_path: pathlib.Path) -> None:
-    """A frozen entry for a file that no longer exists is checked even if this
-    run never scanned it — it cannot hide behind "not scanned this time"."""
-    errors = _site_errors(
-        tmp_path, measured={}, frozen={"gateway/gone.py::a._priv": 1}, scanned=set()
-    )
-
-    assert len(errors) == 1
-    assert "stale private_imports entry gateway/gone.py::a._priv" in errors[0]
-    assert "remove it" in errors[0]
-
-
-def test_site_errors_skips_an_unscanned_but_still_existing_file(tmp_path: pathlib.Path) -> None:
-    errors = _site_errors(
-        tmp_path,
-        measured={},
-        frozen={"gateway/other.py::a._priv": 1},
-        scanned=set(),
-        exists=frozenset({"gateway/other.py"}),
-    )
-
-    assert errors == []
-
-
-def test_site_errors_new_site_on_a_renamed_file_gets_a_migration_hint(
-    tmp_path: pathlib.Path,
-) -> None:
-    errors = _site_errors(
-        tmp_path,
-        measured={"gateway/db_new.py::a._priv": [5]},
-        frozen={},
+def test_site_errors_gives_no_rename_allowance(tmp_path: pathlib.Path) -> None:
+    errors = locality.site_errors(
+        {"private_imports": {"gateway/db_new.py::a._priv": [5]}},
+        {},
         scanned={"gateway/db_new.py"},
+        repo_root=tmp_path,
         renames={"gateway/db_old.py": "gateway/db_new.py"},
     )
-
     assert len(errors) == 1
-    assert "renamed file: migrate the baseline key from gateway/db_old.py" in errors[0]
-    assert "grew above" not in errors[0]
+    assert "reaches private `a._priv`" in errors[0]
+    assert "migrate" not in errors[0]
 
 
-def test_growth_errors_are_emitted_in_line_order_even_when_recorded_out_of_order(
-    tmp_path: pathlib.Path,
-) -> None:
-    """Attribute-based reach-ins are recorded in a separate pass after every
-    import-based one (see private_imports), so a later import line can land in
-    `sites` before an earlier attribute line — confirmed below: [5, 2], not
-    [2, 5]. site_errors must still report the errors in line order regardless."""
+def test_import_and_attribute_reach_ins_both_fail_in_source_order(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, "a/_priv/mod.py", "x = 1\n")
-    source = "import a\na._priv.x\n\n\nimport a._priv\n"
-
-    sites = locality.private_imports(_parse(source), "gateway/x.py", ("a", "gateway"), tmp_path)
-
+    sites = locality.private_imports(
+        _parse("import a\na._priv.x\n\n\nimport a._priv\n"),
+        "gateway/x.py",
+        ("a", "gateway"),
+        tmp_path,
+    )
     assert sites == {"gateway/x.py::a._priv": [5, 2]}
-
-    errors = _site_errors(tmp_path, measured=sites, frozen={}, scanned={"gateway/x.py"})
-
+    errors = locality.site_errors(
+        {"private_imports": sites}, {}, scanned={"gateway/x.py"}, repo_root=tmp_path
+    )
     assert len(errors) == 2
     assert errors[0].startswith("gateway/x.py:2:")
     assert errors[1].startswith("gateway/x.py:5:")
