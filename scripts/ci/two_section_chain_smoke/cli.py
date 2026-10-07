@@ -112,7 +112,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         phases.append(name)
         print(f"PHASE {name}: PASS ({detail})")
 
-    try:
+    def build_helper() -> Path:
         # ---- build ---------------------------------------------------------
         print(f"workdir: {workdir}")
         app = workdir / "app" / "AvaPermissionsHelper.app"
@@ -153,6 +153,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
         phase_pass("build", f"ad-hoc signed helper at {app}")
 
+        return exe
+
+    def write_fixtures() -> Path:
         # ---- fixtures ------------------------------------------------------
         # Fresh run surface: stale fixtures/logs from an earlier run must not
         # satisfy this run's waits (the attribution split checks read files, not memory), and stale run-directory files
@@ -225,6 +228,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         with plist_path.open("wb") as handle:
             plistlib.dump(plist, handle)
 
+        return plist_path
+
+    def launch_helper() -> int:
         # ---- launch --------------------------------------------------------
         _bootout(label)
         helper_sock.unlink(missing_ok=True)
@@ -245,6 +251,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
         phase_pass("launch", f"helper pid {helper_pid}, ping={ping}")
 
+        return helper_pid
+
+    def check_chain() -> tuple[int, dict[str, int]]:
         # ---- chain ---------------------------------------------------------
         _wait_for("root socket", (run_dir / _ROOT_SOCKET).exists, _ROOT_WAIT_S, "chain")
         status = _wait_for(
@@ -279,6 +288,34 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             f"launchd -> helper {helper_pid} -> root {root_pid} -> units {list(initial_units.values())}",
         )
 
+        return root_pid, initial_units
+
+    def attribution_rows(log_text: str) -> list[str]:
+        attributed = []
+        for unit_id, unit_pid in initial_units.items():
+            matched = None
+            for line in log_text.splitlines():
+                found = _ATTRIBUTION_RE.search(line)
+                if found and int(found.group("requesting_pid")) == unit_pid:
+                    matched = found
+                    break
+            if matched is None:
+                _fail(
+                    "attribute",
+                    f"no AUTHREQ_ATTRIBUTION line for unit {unit_id} pid {unit_pid}; "
+                    "see evidence/tccd-attribution-window.txt",
+                )
+            if int(matched.group("responsible_pid")) != helper_pid:
+                _fail(
+                    "attribute",
+                    f"unit {unit_id} attributed to pid {matched.group('responsible_pid')} "
+                    f"({matched.group('responsible_id')}), not helper {helper_pid}",
+                )
+            attributed.append(f"{unit_id}={matched.group('responsible_id')}")
+
+        return attributed
+
+    def check_attribution() -> None:
         # ---- attribution (F11) --------------------------------------------
         if args.skip_attribution:
             print("PHASE attribute: SKIP (--skip-attribution)")
@@ -314,27 +351,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 timeout=120.0,
             ).stdout
             _save(evidence, "tccd-attribution-window.txt", log_text)
-            attributed = []
-            for unit_id, unit_pid in initial_units.items():
-                matched = None
-                for line in log_text.splitlines():
-                    found = _ATTRIBUTION_RE.search(line)
-                    if found and int(found.group("requesting_pid")) == unit_pid:
-                        matched = found
-                        break
-                if matched is None:
-                    _fail(
-                        "attribute",
-                        f"no AUTHREQ_ATTRIBUTION line for unit {unit_id} pid {unit_pid}; "
-                        "see evidence/tccd-attribution-window.txt",
-                    )
-                if int(matched.group("responsible_pid")) != helper_pid:
-                    _fail(
-                        "attribute",
-                        f"unit {unit_id} attributed to pid {matched.group('responsible_pid')} "
-                        f"({matched.group('responsible_id')}), not helper {helper_pid}",
-                    )
-                attributed.append(f"{unit_id}={matched.group('responsible_id')}")
+            attributed = attribution_rows(log_text)
             prompting = [
                 line
                 for line in log_text.splitlines()
@@ -346,6 +363,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 "attribute", f"units resolve to helper {helper_pid} ({', '.join(attributed)})"
             )
 
+    def check_conflict() -> None:
         # ---- conflict (helper crash) --------------------------------------
         # F12b (task #3380): sample the whole tree + TCC attribution across the
         # helper death/replacement window at five points -- h0 before the kill
@@ -465,6 +483,29 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "conflict", f"orphan {root_pid} refused + closed natively; reseeded root {reseeded_pid}"
         )
 
+    def cleanup() -> None:
+        _bootout(label)
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            alive = [pid for pid in recorded_pids if _pid_alive(pid)]
+            if not alive:
+                break
+            for pid in alive:
+                _kill(pid, signal.SIGTERM)
+            time.sleep(0.25)
+        for pid in [pid for pid in recorded_pids if _pid_alive(pid)]:
+            _kill(pid, signal.SIGKILL)
+        if args.cleanup:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    try:
+        exe = build_helper()
+        plist_path = write_fixtures()
+        helper_pid = launch_helper()
+        root_pid, initial_units = check_chain()
+        check_attribution()
+        check_conflict()
+
         print("\nSMOKE PASS: " + ", ".join(phases))
         return 0
     except SmokeError as failure:
@@ -483,16 +524,4 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         print(f"evidence retained at: {evidence}")
         return 1
     finally:
-        _bootout(label)
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            alive = [pid for pid in recorded_pids if _pid_alive(pid)]
-            if not alive:
-                break
-            for pid in alive:
-                _kill(pid, signal.SIGTERM)
-            time.sleep(0.25)
-        for pid in [pid for pid in recorded_pids if _pid_alive(pid)]:
-            _kill(pid, signal.SIGKILL)
-        if args.cleanup:
-            shutil.rmtree(workdir, ignore_errors=True)
+        cleanup()

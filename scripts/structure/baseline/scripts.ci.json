@@ -1,9 +1,4 @@
 {
-  "complexity": {
-    "scripts/ci/test_selector.py::select_tests": 27,
-    "scripts/ci/two_section_chain_smoke/cli.py::main": 61
-  },
-  "files": {
-    "scripts/ci/tests/test_ci_monitor.py": 1977
-  }
+  "complexity": {},
+  "files": {}
 }

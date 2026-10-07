@@ -43,3 +43,9 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
   opt into an isolated native proof with owned cleanup. The `os.exec*` guard
   protects the test runner itself from process replacement.
 - Plugin registrations (sections, namespaces, state fields) reset together after any test that loaded them, and the `_qualname` stamp `install_namespace` leaves on each namespace module taken off: autouse guard in `tests/fixtures/plugin_registrations.py`, wired via `pytest_plugins`
+
+Large test modules keep shared fixtures and test doubles in their existing owner.
+Additional cases live in responsibility subdirectories, import those helpers
+explicitly, and carry the same `path_scopes.toml` fixture dependencies. Module
+marks and repository-root lookups follow the moved cases; no size baseline is
+needed to collect or execute them.
