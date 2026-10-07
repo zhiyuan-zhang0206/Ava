@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 
 from base.agents.history.hierarchy.serve import serve_nodes
 from base.agents.history.hierarchy.store import StoredNode
+from base.agents.history.hierarchy.units import DisplayBlock
 from base.agents.history.hierarchy.usage import GenerationUsage, MessageUsage
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
@@ -57,7 +58,7 @@ def test_every_level_is_served_finest_first_with_stable_levels() -> None:
         node(2, level=1, span=(3, 5), parent_id=3),
         node(1, level=1, span=(0, 2), parent_id=3),
     ]
-    served = serve_nodes(nodes, MessageUsage(MESSAGES), {}, {}, READ)
+    served = serve_nodes(nodes, MessageUsage(MESSAGES), {}, {}, READ, [])
     assert [(n.id, n.level, n.parent) for n in served] == [
         ("1", 1, "3"),
         ("2", 1, "3"),
@@ -66,7 +67,9 @@ def test_every_level_is_served_finest_first_with_stable_levels() -> None:
 
 
 def test_a_node_carries_the_agent_cost_over_its_span() -> None:
-    (served,) = serve_nodes([node(1, level=1, span=(1, 2))], MessageUsage(MESSAGES), {}, {}, READ)
+    (served,) = serve_nodes(
+        [node(1, level=1, span=(1, 2))], MessageUsage(MESSAGES), {}, {}, READ, []
+    )
     assert (served.usage.calls, served.usage.input, served.usage.output) == (2, 50, 5)
 
 
@@ -80,7 +83,7 @@ def test_a_node_carries_the_cost_of_the_job_or_check_that_wrote_it() -> None:
         node(4, level=2, span=(0, 4), check_key="ck"),
     ]
     first, second, unlinked, parent = serve_nodes(
-        nodes, MessageUsage(MESSAGES), {7: job}, {"ck": check}, READ
+        nodes, MessageUsage(MESSAGES), {7: job}, {"ck": check}, READ, []
     )
     assert first.generation == job and second.generation == job
     assert unlinked.generation is None and parent.generation == check
@@ -88,7 +91,7 @@ def test_a_node_carries_the_cost_of_the_job_or_check_that_wrote_it() -> None:
 
 def test_a_node_with_unknown_time_is_not_served() -> None:
     nodes = [node(1, level=1, span=(0, 1), start=None, end=None)]
-    assert serve_nodes(nodes, MessageUsage(MESSAGES), {}, {}, READ) == []
+    assert serve_nodes(nodes, MessageUsage(MESSAGES), {}, {}, READ, []) == []
 
 
 def test_a_span_beyond_the_history_is_left_out_not_an_error() -> None:
@@ -98,6 +101,7 @@ def test_a_span_beyond_the_history_is_left_out_not_an_error() -> None:
         {},
         {},
         READ,
+        [],
     )
     assert [n.id for n in served] == ["2"]
 
@@ -116,8 +120,40 @@ def test_a_node_is_placed_on_the_read_times_of_its_first_and_last_message() -> N
         {},
         {},
         read,
+        [],
     )
     assert (first.start, first.end) == (T0, T0 + timedelta(minutes=5))
     assert (second.start, second.end) == (T0 + timedelta(minutes=5), T0 + timedelta(minutes=9))
     assert first.end <= second.start  # the stored times of these two overlapped
     assert (parent.start, parent.end) == (T0, T0 + timedelta(minutes=9))
+
+
+def test_a_node_sits_on_the_blocks_it_covers_so_neighbours_abut_where_their_spans_do() -> None:
+    def at(minute: int) -> datetime:
+        return T0 + timedelta(minutes=minute)
+
+    # Message 2 is a turn whose generation began when message 1 was read: its thinking block
+    # starts at minute 1, not at its own read time (minute 4).
+    blocks = [
+        DisplayBlock("inbound", 0, 0, at(0), at(0), "user", "hi"),
+        DisplayBlock("inbound", 1, 1, at(1), at(1), "user", "again"),
+        DisplayBlock("thinking", 2, 2, at(1), at(4), None, "plan"),
+        DisplayBlock("output", 2, 3, at(4), at(6), None, "done"),
+    ]
+    read = [at(0), at(1), at(4), at(6), at(6), at(6)]
+    first, second, parent = serve_nodes(
+        [
+            node(1, level=1, span=(0, 1)),
+            node(2, level=1, span=(2, 3)),
+            node(3, level=2, span=(0, 3)),
+        ],
+        MessageUsage(MESSAGES),
+        {},
+        {},
+        read,
+        blocks,
+    )
+    assert (first.start, first.end) == (at(0), at(1))
+    assert (second.start, second.end) == (at(1), at(6))  # not minute 4: its thinking is its own
+    assert first.end == second.start
+    assert (parent.start, parent.end) == (at(0), at(6))
