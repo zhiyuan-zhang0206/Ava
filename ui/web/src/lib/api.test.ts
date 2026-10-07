@@ -784,3 +784,18 @@ describe("schedule operation identities", () => {
     expect(second).not.toBe(first);
   });
 });
+
+describe("schedule creation identity", () => {
+  it("keeps a supplied creation key and body stable across resubmission", async () => {
+    const body = { name: "daily", script: "pass", command: "python schedule.py", enabled: true };
+    await api.createSchedule(body, "create-once");
+    await api.createSchedule(body, "create-once");
+    expect(calls[0].init?.body).toBe(calls[1].init?.body);
+    for (const call of calls) {
+      const headers = new Headers(call.init?.headers);
+      expect(headers.get("Idempotency-Key")).toBe("create-once");
+      expect(headers.get("content-type")).toBe("application/json");
+      expect(headers.has("Idempotency-Scope")).toBe(false);
+    }
+  });
+});

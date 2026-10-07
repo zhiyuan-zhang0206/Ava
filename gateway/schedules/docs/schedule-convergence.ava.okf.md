@@ -69,3 +69,6 @@ recovery policy, not receipt replay or proof of exactly-once script execution.
 The optional list metadata is opt-in, preserving the old client's response
 shape. An older PTY service cannot supply this evidence and must be upgraded
 before a pending versioned live session can be safely adopted.
+
+Schedule resource creation has separate fingerprint-only receipts; see
+[[gateway/routers/docs/resource-creation.ava.okf.md]].

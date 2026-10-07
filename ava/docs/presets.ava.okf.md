@@ -24,7 +24,7 @@ CRUD (create / update / delete) **is not in the SDK**—presets are operational 
 
 ## Write Side: CLI / REST / Guide Sub-skill
 - **CLI**: `ava presets ls / get / create / update / delete` (`--name` / `--label` / `--description` / `--config <json>`).
-- **REST**: `/api/presets` ([[gateway/routers/docs/routers.ava.okf.md|gateway router]] `presets.py`, POST 201/409).
+- **REST**: `/api/presets` ([[gateway/routers/docs/routers.ava.okf.md|gateway router]] `presets.py`, POST 201/409). Optional stable creation keys recover the original resource; see [[gateway/routers/docs/resource-creation.ava.okf.md|creation receipts]].
 - **playbook**: Turn the user's request for "a new agent type / add a preset" into a preset operational manual in the `presets` sub-skill of [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md|ava-guide]] (d31660c8).
 
 ## Data Types

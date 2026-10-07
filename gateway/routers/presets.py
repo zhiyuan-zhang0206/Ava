@@ -34,6 +34,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
 from base.db.transaction import write_transaction
+from gateway import creation_receipts
 
 router = APIRouter()
 
@@ -114,10 +115,25 @@ async def list_presets(request: Request) -> list[PresetView]:
     return await asyncio.to_thread(_list_blocking, request.app.state.db_pool)
 
 
-def _create_blocking(pool: ConnectionPool, body: PresetCreate) -> tuple[Any, ...]:
+def _create_blocking(
+    pool: ConnectionPool, body: PresetCreate, key: str | None = None
+) -> tuple[Any, ...]:
     """Sync create INSERT — via to_thread (409 on name clash)."""
     try:
         with write_transaction(pool) as conn, conn.cursor() as cur:
+            created = creation_receipts.begin(
+                conn, key, {"resource": "preset", "body": body.model_dump()}
+            )
+            if created is not None:
+                return (
+                    created.resource_id,
+                    body.name,
+                    body.label,
+                    body.description,
+                    body.config,
+                    created.created_at,
+                    created.updated_at,
+                )
             cur.execute(
                 f"INSERT INTO agent_presets (name, label, description, config) "  # noqa: S608 — _COLS is a fixed literal
                 f"VALUES (%s, %s, %s, %s) RETURNING {_COLS}",
@@ -125,6 +141,7 @@ def _create_blocking(pool: ConnectionPool, body: PresetCreate) -> tuple[Any, ...
             )
             row = cur.fetchone()
             assert row is not None  # noqa: S101 — INSERT ... RETURNING always yields a row
+            creation_receipts.finish(conn, key, creation_receipts.Creation(row[0], row[5], row[6]))
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
             status_code=409, detail=f"preset named {body.name!r} already exists"
@@ -136,7 +153,9 @@ def _create_blocking(pool: ConnectionPool, body: PresetCreate) -> tuple[Any, ...
 async def create_preset(request: Request, body: PresetCreate) -> PresetView:
     """Create a preset. 409 on a name clash."""
     _validate_config_keys(body.config)
-    row = await asyncio.to_thread(_create_blocking, request.app.state.db_pool, body)
+    row = await asyncio.to_thread(
+        _create_blocking, request.app.state.db_pool, body, creation_receipts.operation_key(request)
+    )
     return _view(row)
 
 

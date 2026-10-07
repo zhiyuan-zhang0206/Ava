@@ -121,7 +121,10 @@ def cmd_schedules_create(
         body["description"] = description
 
     resp = dial_post(
-        f"{_gateway_base()}/api/schedules", json=body, timeout=_TIMEOUT_S, headers=_headers()
+        f"{_gateway_base()}/api/schedules",
+        json=body,
+        timeout=_TIMEOUT_S,
+        headers=_mutation_headers(),
     )
     if resp.status_code == 409:
         print(f"schedule named {name!r} already exists", file=sys.stderr)
