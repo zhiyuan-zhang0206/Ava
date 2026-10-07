@@ -604,6 +604,7 @@ class AgentHost:
         )
         turn = 0
         pending_failure: PendingTurnFailure | None = None
+        failure_recovered = False
         while True:
             turn += 1
             pending: PendingWorkResult | None = None
@@ -619,6 +620,7 @@ class AgentHost:
                                 ctx,
                                 config,
                                 pending_failure,
+                                recovering=failure_recovered,
                             )
                         prepared = (
                             pending.result
@@ -639,6 +641,7 @@ class AgentHost:
                         if incarnation is None:
                             raise
                         kind = await self._recover_completed_work(incarnation, pending)
+                        failure_recovered = pending_failure is not None
                         if kind is not None:
                             return TurnOutcome(exited=kind == "terminate", crashed=False)
                     except Exception as exc:
@@ -699,6 +702,7 @@ class AgentHost:
             incarnation = current_incarnation(agent_id)
             if incarnation is None:
                 raise RuntimeError("hosted lifecycle return has no admitted incarnation")
+            self.drop_agent(agent_id)
             async with database_phase():
                 if pending.lifecycle_command_id is None:
                     pending.lifecycle_command_id = await pending_hosted_lifecycle_id(
@@ -706,7 +710,6 @@ class AgentHost:
                     )
                 if pending.lifecycle_command_id is None:
                     return TurnOutcome(exited=False, crashed=False)
-                self.drop_agent(agent_id)
                 kind = await apply_hosted_lifecycle(
                     self._control_pool,
                     incarnation,
