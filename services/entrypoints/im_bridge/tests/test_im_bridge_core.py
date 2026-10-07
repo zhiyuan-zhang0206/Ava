@@ -62,6 +62,7 @@ class FakeGateway:
         self.sent: list[tuple[int, str, str]] = []
         self.sent_keys: list[str | None] = []
         self.spawned: list[tuple[str | None, dict[str, object] | None]] = []
+        self.creation_keys: list[str | None] = []
         self.timeline_limits: list[int | None] = []
         self.send_failures = send_failures
         self.stream_failures = stream_failures
@@ -118,8 +119,15 @@ class FakeGateway:
     async def list_models(self) -> dict[str, Any]:
         return self.models
 
-    async def spawn_agent(self, *, preset: str | None, config: dict[str, object] | None) -> int:
+    async def spawn_agent(
+        self,
+        *,
+        preset: str | None,
+        config: dict[str, object] | None,
+        idempotency_key: str | None = None,
+    ) -> int:
         self.spawned.append((preset, config))
+        self.creation_keys.append(idempotency_key)
         return 777
 
     async def get_timeline(self, agent_id: int, limit: int | None = None) -> list[dict[str, Any]]:
@@ -693,3 +701,19 @@ class FakeFlakyWeixinAdapter(FakePlainAdapter):
 
 
 # --- Task #1032: three P0s — watermark compare / inbound outbox / SSE log ---
+
+
+async def test_spawn_submission_forwards_adapter_event_key() -> None:
+    from services.entrypoints.im_bridge.types import InboundMessage
+
+    gateway = FakeGateway()
+    core = _core(gateway)
+    await core.handle_inbound(
+        InboundMessage(
+            channel="telegram",
+            chat_id="42",
+            text="spawn:go",
+            idempotency_key="telegram-callback:one",
+        )
+    )
+    assert gateway.creation_keys == ["telegram-callback:one"]

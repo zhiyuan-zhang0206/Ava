@@ -111,7 +111,9 @@ class SpawnMenuMixin:
         draft.preset_label = picked.get("label") or picked["name"]
         return None
 
-    async def _handle_spawn_menu(self, state: ChatState, text: str) -> Reply | list[Reply]:
+    async def _handle_spawn_menu(
+        self, state: ChatState, text: str, *, idempotency_key: str | None = None
+    ) -> Reply | list[Reply]:
         """One tap in the spawn menu: record the selection, render the next
         layer; ``spawn:go`` executes with the current draft."""
 
@@ -132,10 +134,12 @@ class SpawnMenuMixin:
             draft.effort = value or None  # empty = provider default
             return await self._spawn_layer_effort(state)
         if action == "go":
-            return await self._spawn_execute(state)
+            return await self._spawn_execute(state, idempotency_key=idempotency_key)
         return Reply(copy.SPAWN_UNKNOWN_ACTION)
 
-    async def _spawn_execute(self, state: ChatState) -> Reply:
+    async def _spawn_execute(
+        self, state: ChatState, *, idempotency_key: str | None = None
+    ) -> Reply:
         draft = state.spawn_draft
         state.spawn_draft = None
         if draft is None:
@@ -146,7 +150,9 @@ class SpawnMenuMixin:
         if draft.effort:
             config["reasoning_effort"] = draft.effort
         try:
-            agent_id = await self.gateway.spawn_agent(preset=draft.preset_name, config=config)
+            agent_id = await self.gateway.spawn_agent(
+                preset=draft.preset_name, config=config, idempotency_key=idempotency_key
+            )
         except Exception as exc:
             _log.warning("spawn failed: %r", exc)
             return Reply(copy.SPAWN_FAILED.format(exc=exc))

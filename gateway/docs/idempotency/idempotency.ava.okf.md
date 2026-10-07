@@ -15,6 +15,10 @@ not prove that repeating a request is safe. Cancel can stop later work; restart
 can interrupt the process started by the first call. Until a domain protects
 these effects, its route declares `NON_IDEMPOTENT`.
 
+`base/api_contracts/idempotency.py` owns strict supplied-key validation (string,
+1–128 characters); omission is handled by each caller boundary, never by
+replacing an invalid key. SDK creation and MCP principal keys share this rule.
+
 ## Identity and acceptance
 
 One operation ID identifies one intent. A deliberate second identical operation

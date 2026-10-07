@@ -30,6 +30,8 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         `label` is a short human-readable name shown in the fleet views (one
         is generated if omitted). `machine` picks which host runs it — omit it
         for the default host; a name that is not an agent-runner is rejected.
+        Reuse an optional `idempotency_key` with the same arguments for the same
+        creation. Changed arguments conflict; use another key for a new agent.
         `config_overlay` overrides per-agent settings, currently
         `{"llm_model": "<model id>"}`.
         """,

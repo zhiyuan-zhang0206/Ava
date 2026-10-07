@@ -21,6 +21,8 @@ from typing import Any, Literal
 
 from starlette.requests import Request
 
+from base.api_contracts.idempotency import validate_idempotency_key
+
 SCOPE_HEADER = "Idempotency-Scope"
 PRINCIPAL_SCOPE = "principal-v1"
 _STORAGE_PREFIX = "principal-v1:"
@@ -222,8 +224,10 @@ def current_session_fact(
 
 def principal_key(principal: AuthPrincipal, method: str, path: str, key: str) -> str:
     """Stable opaque key under actual credential + logical operation identity."""
-    if not key or len(key) > 128:
-        raise PrincipalScopeError("idempotency key must contain 1 to 128 characters")
+    try:
+        key = validate_idempotency_key(key)
+    except (TypeError, ValueError) as exc:
+        raise PrincipalScopeError(str(exc)) from exc
     material = json.dumps([principal.kind, principal.subject, method.upper(), path, key])
     return _STORAGE_PREFIX + hashlib.sha256(material.encode()).hexdigest()
 

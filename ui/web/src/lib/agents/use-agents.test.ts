@@ -102,7 +102,7 @@ describe("useAgents.spawn", () => {
       returned = await result.current.spawn();
     });
 
-    expect(api.spawnAgent).toHaveBeenCalledWith({});
+    expect(api.spawnAgent).toHaveBeenCalledWith({}, expect.any(String));
     expect(returned).toBe(42);
     expect(useStore.getState().activeId).toBe(42);
   });
@@ -118,7 +118,7 @@ describe("useAgents.spawn", () => {
       await result.current.spawn(undefined, undefined, "coder");
     });
 
-    expect(api.spawnAgent).toHaveBeenCalledWith({ config: { preset: "coder" } });
+    expect(api.spawnAgent).toHaveBeenCalledWith({ config: { preset: "coder" } }, expect.any(String));
   });
 
   it("preset + model → both inside config, explicit fields next to the preset", async () => {
@@ -134,7 +134,7 @@ describe("useAgents.spawn", () => {
 
     expect(api.spawnAgent).toHaveBeenCalledWith({
       config: { llm_model: "claude-sonnet-5", reasoning_effort: "high", preset: "coder" },
-    });
+    }, expect.any(String));
   });
 
   it("with machine arg → forwarded to api.spawnAgent({machine})", async () => {
@@ -148,7 +148,7 @@ describe("useAgents.spawn", () => {
       await result.current.spawn("wsl");
     });
 
-    expect(api.spawnAgent).toHaveBeenCalledWith({ machine: "wsl" });
+    expect(api.spawnAgent).toHaveBeenCalledWith({ machine: "wsl" }, expect.any(String));
   });
 
   it("failure → calls showError + returns null + does not change activeId", async () => {
@@ -210,7 +210,7 @@ describe("useAgents.fork", () => {
     });
 
     // source id=2 in MOCK_AGENTS has machine='wsl' → fork passes it through by default
-    expect(api.spawnAgent).toHaveBeenCalledWith({ fork_from: 2, machine: "wsl" });
+    expect(api.spawnAgent).toHaveBeenCalledWith({ fork_from: 2, machine: "wsl" }, expect.any(String));
     expect(returned).toBe(99);
     expect(useStore.getState().activeId).toBe(99);
   });
@@ -235,7 +235,7 @@ describe("useAgents.fork", () => {
     expect(api.spawnAgent).toHaveBeenCalledWith({
       fork_from: 9,
       machine: "archive-host",
-    });
+    }, expect.any(String));
   });
 
   it("fork with prompt → passes prompt + prompt_source 'user'", async () => {
@@ -254,7 +254,7 @@ describe("useAgents.fork", () => {
       machine: "wsl",
       prompt: "explore the auth flow",
       prompt_source: "user",
-    });
+    }, expect.any(String));
   });
 
   it("missing source is confirmed by its detail read before refusing a fork", async () => {

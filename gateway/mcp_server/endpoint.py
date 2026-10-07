@@ -366,8 +366,23 @@ def _register_fleet_tools(
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         _require_write_scope("spawn_agent")
+        creation_key = None
+        if idempotency_key is not None:
+            client = _CURRENT_MCP_CLIENT.get()
+            if client is None:
+                raise ToolError("authenticated MCP client context is missing")
+            try:
+                creation_key = principal_key(
+                    AuthPrincipal("mcp_client", str(client["id"])),
+                    "POST",
+                    "/api/agents",
+                    idempotency_key,
+                )
+            except PrincipalScopeError as exc:
+                raise ToolError(str(exc)) from exc
         body = SpawnAgentRequest(
             prompt=prompt,
             prompt_source=_MESSAGE_SOURCE,
@@ -382,7 +397,11 @@ def _register_fleet_tools(
         # through the router module so tests patch the same seam as the REST
         # spawn route.
         try:
-            spawned = await _agents_router.create_and_launch_agent(body, target, pool, db, bus)
+            spawned = await _agents_router.create_and_launch_agent(
+                body, target, pool, db, bus, creation_key=creation_key
+            )
+        except HTTPException as exc:
+            raise ToolError(str(exc.detail)) from exc
         except AvaAgentError as exc:
             # Business errors are AvaAgentError instances — surface their
             # message as a tool error, not a protocol error.

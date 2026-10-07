@@ -280,6 +280,9 @@ class TelegramAdapter(IMAdapter):
                 chat_id=chat_id,
                 text=data,
                 message_id=str(message.get("message_id") or ""),
+                idempotency_key=(
+                    f"telegram-callback:{callback['id']}" if callback.get("id") else None
+                ),
             )
         )
         await self._answer_callback(str(callback.get("id") or ""))

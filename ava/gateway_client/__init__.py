@@ -152,8 +152,13 @@ def spawn(
     machine: str | None = None,
     config: dict[str, object] | None = None,
     label: str | None = None,
+    idempotency_key: str | None = None,
 ) -> int:
     """POST /api/agents → new agent_id."""
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    if idempotency_key is not None:
+        idempotency_key = validate_idempotency_key(idempotency_key)
     body: dict = {"spawner": spawner}
     if prompt is not None:
         # prompt_source is schema-required only when prompt is given (the source concept only exists when non-empty)
@@ -170,7 +175,7 @@ def spawn(
     # The transport supplies one creation key across connect-family retries.
     # Ambiguous outcomes stay terminal until gateway capability is negotiated:
     # an older gateway may ignore the key and create another agent.
-    resp = post("/api/agents", body)
+    resp = post("/api/agents", body, idempotency_key=idempotency_key)
     raise_from_response(resp)
     data = resp.json()
     normalized = data.get("config_normalized")

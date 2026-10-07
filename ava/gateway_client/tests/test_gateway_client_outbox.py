@@ -185,3 +185,38 @@ def test_disabled_outbox_records_nothing_and_never_reuses_keys(
         send_message(42, content="hello", source="watcher:7")
     assert _keys(mock_client)[0] != first_key
     assert _records(journal) == []
+
+
+@patch("ava.gateway_client.transport._http", new_callable=_client_mock)
+def test_creation_explicit_key_survives_lost_response_and_caller_retry(
+    mock_client: MagicMock,
+) -> None:
+    from ava.gateway_client import spawn
+
+    response = httpx.Response(
+        201, json={"id": 42}, request=httpx.Request("POST", "http://gateway/api/agents")
+    )
+    mock_client.post.side_effect = [httpx.ReadTimeout("reply lost"), response, response]
+    kwargs = {"spawner": "user", "prompt": "hello", "fork_from": None, "prompt_source": "user"}
+    with pytest.raises(GatewayUnavailable):
+        spawn(**kwargs, idempotency_key="creation-a")
+    assert mock_client.post.call_count == 1
+    assert spawn(**kwargs, idempotency_key="creation-a") == 42
+    assert spawn(**kwargs, idempotency_key="creation-b") == 42
+    assert _keys(mock_client) == ["creation-a", "creation-a", "creation-b"]
+    assert all(
+        "Idempotency-Scope" not in call.kwargs["headers"]
+        for call in mock_client.post.call_args_list
+    )
+
+
+@pytest.mark.parametrize("key", ["", "x" * 129, 12, ("key",)])
+@patch("ava.gateway_client.transport._http", new_callable=_client_mock)
+def test_creation_rejects_malformed_key_before_http(mock_client: MagicMock, key: object) -> None:
+    from ava.gateway_client import spawn
+
+    with pytest.raises((TypeError, ValueError), match="idempotency key"):
+        spawn(
+            spawner="user", prompt=None, fork_from=None, prompt_source="user", idempotency_key=key
+        )  # pyright: ignore[reportArgumentType]
+    mock_client.post.assert_not_called()

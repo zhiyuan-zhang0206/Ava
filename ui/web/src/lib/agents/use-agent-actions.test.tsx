@@ -33,3 +33,18 @@ it("selects the committed agent after launch failure instead of retrying create"
   expect(invalidate).toHaveBeenCalledWith({ queryKey: AGENTS_QUERY_KEY });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: [...AGENT_DETAIL_QUERY_KEY, 123] });
 });
+
+
+it("holds one creation key across mutation retries and gives concurrent actions distinct keys", async () => {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: 1, retryDelay: 0 }, queries: { retry: false } } });
+  const spawn = vi.spyOn(api, "spawnAgent").mockRejectedValueOnce(new Error("before send"))
+    .mockResolvedValue({ id: 42 });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result } = renderHook(() => useAgentActions(vi.fn(), []), { wrapper });
+  await act(async () => { await result.current.spawn(); });
+  expect(spawn.mock.calls[0][1]).toBe(spawn.mock.calls[1][1]);
+  await act(async () => { await Promise.all([result.current.spawn(), result.current.spawn()]); });
+  expect(spawn.mock.calls[2][1]).not.toBe(spawn.mock.calls[3][1]);
+  client.clear();
+});

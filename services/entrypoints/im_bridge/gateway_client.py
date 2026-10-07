@@ -129,10 +129,23 @@ class GatewayClient:
             raise RuntimeError(f"list models failed: HTTP {resp.status_code}")
         return resp.json()
 
-    async def spawn_agent(self, *, preset: str | None, config: dict[str, object] | None) -> int:
+    async def spawn_agent(
+        self,
+        *,
+        preset: str | None,
+        config: dict[str, object] | None,
+        idempotency_key: str | None = None,
+    ) -> int:
         """POST /api/agents — create an agent, return its id. A named preset
         rides config_overlay["preset"] (task #4086: the top-level field is
         retired); the gateway folds it into config, the runner never sees it."""
+        from base.api_contracts.idempotency import validate_idempotency_key
+
+        key = (
+            uuid.uuid4().hex
+            if idempotency_key is None
+            else validate_idempotency_key(idempotency_key)
+        )
         client = await self._http()
         overlay = dict(config) if config else {}
         if preset is not None:
@@ -140,7 +153,9 @@ class GatewayClient:
         payload: dict[str, object] = {"spawner": "user"}
         if overlay:
             payload["config"] = overlay
-        resp = await client.post("/api/agents", headers=self._headers(), json=payload)
+        resp = await client.post(
+            "/api/agents", headers={**self._headers(), "Idempotency-Key": key}, json=payload
+        )
         if resp.status_code != 201:
             raise RuntimeError(f"spawn failed: HTTP {resp.status_code} - {resp.text[:300]}")
         return int(resp.json()["id"])

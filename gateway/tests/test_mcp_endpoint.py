@@ -201,7 +201,7 @@ async def test_gateway_contract_matches_pre_extraction_golden() -> None:
     }
     encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     assert hashlib.sha256(encoded.encode()).hexdigest() == (
-        "9222f5212d0d92b23cb8eb52db0314f9f6c59bae0cf2ab590efe32ff395f4227"
+        "66d3d15ba554f8cc51b31628b1988110bbf552d6d219c77397409a045453023d"
     )
     assert endpoint.project_message is project_message
     assert project_message({"type": "ai", "tool_calls": [{"args": {"other": 1}}]}) == {
@@ -613,3 +613,54 @@ def test_sse_messages_keeps_unicode_line_separators(ch: str) -> None:
     message = {"jsonrpc": "2.0", "id": 1, "result": {"label": f"a{ch}b"}}
     body = "event: message\r\ndata: " + json.dumps(message, ensure_ascii=False) + "\r\n\r\n"
     assert _sse_messages(body) == [message]
+
+
+def test_creation_key_replays_identity_conflicts_and_scopes_to_client() -> None:
+    with TestClient(app) as client:
+        first = _create_token(client, name="creation-first")
+        second = _create_token(client, name="creation-second")
+        args = {"prompt": "same goal", "idempotency_key": "creation-a"}
+        original = _tool_result(_tool_call(client, first, "spawn_agent", args))
+        replay = _tool_result(_tool_call(client, first, "spawn_agent", args))
+        assert replay["id"] == original["id"]
+        changed = _tool_call(client, first, "spawn_agent", {**args, "prompt": "changed goal"})
+        assert changed["result"].get("isError") is True
+        other = _tool_result(_tool_call(client, second, "spawn_agent", args))
+        assert other["id"] != original["id"]
+        new = _tool_result(
+            _tool_call(client, first, "spawn_agent", {**args, "idempotency_key": "creation-b"})
+        )
+        assert new["id"] != original["id"]
+
+
+@pytest.mark.parametrize("key", ["", "x" * 129])
+def test_creation_tool_rejects_invalid_key(key: str) -> None:
+    with TestClient(app) as client:
+        token = _create_token(client)
+        response = _tool_call(
+            client, token, "spawn_agent", {"prompt": "goal", "idempotency_key": key}
+        )
+    assert response["result"].get("isError") is True
+
+
+def test_concurrent_mcp_creation_retries_share_one_identity() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    with TestClient(app) as client:
+        token = _create_token(client)
+
+        def submit(index: int) -> int:
+            result = _tool_result(
+                _tool_call(
+                    client,
+                    token,
+                    "spawn_agent",
+                    {"prompt": "one concurrent goal", "idempotency_key": "concurrent-birth"},
+                    req_id=index + 10,
+                )
+            )
+            return int(result["id"])
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            ids = list(executor.map(submit, range(3)))
+    assert len(set(ids)) == 1
