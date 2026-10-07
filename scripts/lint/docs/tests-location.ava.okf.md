@@ -21,7 +21,7 @@ A *top-level test* is a `test_*.py` file under `tests/`. It may stay only if one
 | registry | where | meaning |
 |---|---|---|
 | `BY_DESIGN` | `scripts/structure/tests_location_allowed.py` | a directory or file with no package to move to: `tests/e2e/`, `tests/ui/`, `tests/fixtures/`, `tests/factories/` and three real-process proofs under `tests/integration/`. Repeats `placement.TOP_LEVEL_*`; a test locks the two together |
-| `ALLOWED` | same file | one test with a category and a one-line reason. `contract`: the test's subject is a repository artifact (workflows, `pyproject.toml`, `db/schema.sql`, migrations, `ui/`, `schedules/`, `deploy/`, skill scripts) or the test harness itself, which no package owns; a scan over the whole tree counts. `integration`: it spans units that may not import each other (agent and ops, cli and gateway), so no package may hold it |
+| `ALLOWED` | same file | one test with a category and a one-line reason. `contract`: the test's subject is a repository artifact (workflows, `pyproject.toml`, `db/schema.sql`, migrations, `ui/`, `deploy/`, skill scripts) or the test harness itself, which no package owns; a scan over the whole tree counts. `integration`: it spans units that may not import each other (agent and ops, cli and gateway), so no package may hold it |
 
 Anything else is a violation: a new top-level test is refused, there is no baseline of debt to add it to. An entry whose file is gone, an `ALLOWED` entry under `BY_DESIGN`, a category other than the two or an empty reason fails too, so the registry cannot rot into a permit wall. The verdict never looks at what the test imports: an unrelated production commit cannot move it.
 

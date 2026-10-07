@@ -476,6 +476,7 @@ testpaths = [
     "gateway/**/tests",
     "ops/**/tests",
     "scripts/**/tests",
+    "schedules/**/tests",
     "services/**/tests",
 ]
 # A test module is a `test_*.py` file inside a `tests/` directory. Location, not

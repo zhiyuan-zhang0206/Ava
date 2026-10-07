@@ -42,7 +42,7 @@ def _report_failure(detail: str) -> None:
 
 
 def _load_exporter() -> Any:
-    scripts_dir = _REPO_ROOT / "scripts" / "ci"
+    scripts_dir = _REPO_ROOT / "scripts" / "ci" / "pull_requests"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     return __import__("runs_export")

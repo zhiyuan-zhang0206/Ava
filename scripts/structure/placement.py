@@ -86,14 +86,10 @@ from typing import cast
 
 from scripts.structure import import_cache, lint_common, placement_evidence, service_units
 
-# First-party code tops that take part in placement (import-linter roots + scripts).
-CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts")
-# Further first-party tops a test may patch into; they take no part in placement.
-PATCH_TOPS = (*CODE_TOPS, "schedules", "commands", "demos")
+# First-party Python code participates in placement, including runnable templates.
+CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts", "schedules", "commands", "demos")
+PATCH_TOPS = CODE_TOPS
 _ARTIFACT_TOPS = (
-    "schedules",
-    "commands",
-    "demos",
     "db",
     "deploy",
     "ui",
