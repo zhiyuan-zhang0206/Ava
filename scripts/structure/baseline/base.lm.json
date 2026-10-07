@@ -1,6 +1,5 @@
 {
   "ambient_state": {
     "base/lm/plugin_providers.py::ambient-instance:_STATE": 1
-  },
-  "files": {}
+  }
 }

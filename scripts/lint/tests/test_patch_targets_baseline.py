@@ -71,7 +71,7 @@ def _guard(root: pathlib.Path, rev: str, renames: dict[str, str] | None = None) 
     """`code_structure._baseline_guard` for this section, against `rev` in `root`."""
     previous = _sections(root, rev)[patch_targets.SECTION]
     current = _sections(root, None)[patch_targets.SECTION]
-    remapped = lcs._remap_renamed_keys(patch_targets.SECTION, previous, renames or {})
+    remapped = lcs._remap_renamed_keys(previous, renames or {})
     return lcs._section_guard(patch_targets.SECTION, current, remapped, renames=renames)
 
 

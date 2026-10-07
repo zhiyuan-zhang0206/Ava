@@ -89,15 +89,15 @@ def test_duplicate_baseline_entry_across_shards_is_an_actionable_error(
 ) -> None:
     directory = _clear_baseline_dir(tmp_path)
     (directory / "base.json").write_text(
-        json.dumps({"files": {"tests/big.py": 801}}), encoding="utf-8"
+        json.dumps({"patch_targets": {"base/q.py::base.db._pool": 2}}), encoding="utf-8"
     )
     (directory / "tests.json").write_text(
-        json.dumps({"files": {"tests/big.py": 801}}), encoding="utf-8"
+        json.dumps({"patch_targets": {"base/q.py::base.db._pool": 2}}), encoding="utf-8"
     )
     assert lcs.main([]) == 1
     captured = capsys.readouterr()
     assert f"{baseline_shards.SHARD_DIR}: invalid baseline" in captured.err
-    assert "duplicates files entry 'tests/big.py'" in captured.err
+    assert "duplicates patch_targets entry 'base/q.py::base.db._pool'" in captured.err
 
 
 def test_missing_baseline_directory_is_an_actionable_error(
@@ -126,10 +126,10 @@ def test_an_empty_committed_baseline_still_enforces_the_guard(
 
     directory = _clear_baseline_dir(tmp_path)
     (directory / "tests.json").write_text(
-        json.dumps({"files": {"tests/new.py": 805}}), encoding="utf-8"
+        json.dumps({"patch_targets": {"base/new.py::base.db._pool": 2}}), encoding="utf-8"
     )
 
     assert lcs.main([]) == 1
     captured = capsys.readouterr()
     assert "guard skipped" not in captured.err
-    assert "added files entry tests/new.py" in captured.out
+    assert "added patch_targets entry base/new.py::base.db._pool" in captured.out
