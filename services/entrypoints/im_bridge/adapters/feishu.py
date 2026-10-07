@@ -19,9 +19,9 @@ from services.entrypoints.im_bridge.adapters import feishu_poll_cursor as cursor
 from services.entrypoints.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
 from services.entrypoints.im_bridge.outbound_types import (
-    PreparedTimelineSend,
-    TimelineAdapterKind,
-    TimelineChunk,
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
 )
 from services.entrypoints.im_bridge.state import _load_switch_state
 from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage
@@ -615,23 +615,23 @@ class FeishuAdapter(IMAdapter):
             idempotency_key=cursors.idempotency_key(getattr(item, "message_id", None)),
         )
 
-    async def timeline_account_id(self) -> str:
+    async def outbound_account_id(self) -> str:
         if not self._config.feishu_app_id or not self._config.feishu_app_secret:
             raise RuntimeError("feishu timeline account is not configured")
         return self._config.feishu_app_id
 
-    async def prepare_timeline(self, text: str) -> PreparedTimelineSend:
-        return PreparedTimelineSend(
-            adapter_kind=TimelineAdapterKind.FEISHU,
-            account_id=await self.timeline_account_id(),
-            chunks=tuple(TimelineChunk(text=part) for part in _segment(text, MAX_SEGMENT_CHARS)),
+    async def prepare_timeline(self, text: str) -> PreparedOutboundSend:
+        return PreparedOutboundSend(
+            adapter_kind=OutboundAdapterKind.FEISHU,
+            account_id=await self.outbound_account_id(),
+            chunks=tuple(OutboundChunk(text=part) for part in _segment(text, MAX_SEGMENT_CHARS)),
             markdown=False,
         )
 
-    async def send_prepared_timeline(self, chat_id: str, prepared: PreparedTimelineSend) -> None:
+    async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
         if (
-            prepared.adapter_kind != TimelineAdapterKind.FEISHU
-            or prepared.account_id != await self.timeline_account_id()
+            prepared.adapter_kind != OutboundAdapterKind.FEISHU
+            or prepared.account_id != await self.outbound_account_id()
         ):
             raise RuntimeError("feishu prepared account or adapter mismatch")
         self._check_send_ready()

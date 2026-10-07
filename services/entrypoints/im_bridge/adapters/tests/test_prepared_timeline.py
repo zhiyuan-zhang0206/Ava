@@ -1,6 +1,7 @@
 """Adapter rendering is frozen without tokens before durable acceptance."""
 
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -25,10 +26,10 @@ async def test_telegram_getme_is_cached_and_frozen_html_uses_plain_rejection_fal
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         prepared = await adapter.prepare_timeline("**hello** <user>")
-        assert await adapter.timeline_account_id() == "123"
+        assert await adapter.outbound_account_id() == "123"
         assert prepared.chunks[0].text == "<b>hello</b> &lt;user&gt;"
         assert "TEST-TOKEN" not in prepared.model_dump_json()
-        await adapter.send_prepared_timeline("42", prepared)
+        await adapter.send_prepared_outbound("42", prepared)
     assert len([call for call in calls if call.url.path.endswith("getMe")]) == 1
     assert json.loads(calls[-1].content) == {"chat_id": "42", "text": "**hello** <user>"}
 
@@ -49,7 +50,7 @@ async def test_telegram_second_chunk_connect_failure_is_uncertain_not_unstarted(
         adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         prepared = await adapter.prepare_timeline("x" * 4097)
         with pytest.raises(RuntimeError, match="acknowledged") as error:
-            await adapter.send_prepared_timeline("42", prepared)
+            await adapter.send_prepared_outbound("42", prepared)
         assert not isinstance(error.value, SendNotStartedError)
         assert "TEST-TOKEN" not in str(error.value)
     assert chunks == 2
@@ -114,3 +115,72 @@ async def test_weixin_preparation_uses_existing_login_identity_not_context_or_to
     adapter._base_url = "https://user:PRIVATE@ilink.example"
     with pytest.raises(ValueError, match="credentials"):
         await adapter.prepare_timeline("hello")
+
+
+async def test_notice_freezes_owner_plain_rendering_and_buttons_before_send() -> None:
+    from services.entrypoints.im_bridge.outbound_types import PreparedOutboundSend
+
+    sent: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getMe"):
+            return httpx.Response(200, json={"ok": True, "result": {"id": 123}})
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        buttons = (("Reply", "notice:reply:7:42"), ("Queue", "notice:list"))
+        recipient, prepared = await adapter.prepare_notice_owner("**plain** <notice>", buttons)
+        adapter._config = replace(adapter._config, telegram_owner_id=999)
+        restored = PreparedOutboundSend.model_validate_json(prepared.model_dump_json())
+        await adapter.send_prepared_outbound(recipient, restored)
+    assert recipient == "42"
+    assert sent == [
+        {
+            "chat_id": "42",
+            "text": "**plain** &lt;notice&gt;",
+            "parse_mode": "HTML",
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{"text": "Reply", "callback_data": "notice:reply:7:42"}],
+                    [{"text": "Queue", "callback_data": "notice:list"}],
+                ]
+            },
+        }
+    ]
+    assert "TEST-TOKEN" not in prepared.model_dump_json()
+
+
+async def test_legacy_manifest_json_without_new_fields_still_dispatches() -> None:
+    from services.entrypoints.im_bridge.outbound_types import OutboundIntent
+
+    bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getMe"):
+            return httpx.Response(200, json={"ok": True, "result": {"id": 123}})
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
+
+    legacy = json.dumps(
+        {
+            "channel": "telegram",
+            "chat_id": "42",
+            "agent_id": 7,
+            "source": {"kind": "message", "identity": "persisted", "block_idx": 0},
+            "prepared": {
+                "adapter_kind": "telegram-v1",
+                "account_id": "123",
+                "chunks": [{"text": "frozen", "fallback_text": None, "html": False}],
+                "markdown": False,
+                "buttons": None,
+            },
+            "replay_id": "",
+        }
+    )
+    intent = OutboundIntent.model_validate_json(legacy)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        await adapter.send_prepared_outbound(intent.chat_id, intent.prepared)
+    assert bodies == [{"chat_id": "42", "text": "frozen"}]

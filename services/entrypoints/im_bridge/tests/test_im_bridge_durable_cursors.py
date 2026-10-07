@@ -122,7 +122,7 @@ def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
         core, adapter = _core(_Gateway([_item("1.0", "old")]), pool)
         state = _bound_state(core)
         await core._push_snapshot(_KEY, state, {"items": []})
-        await core.timeline_worker.run_once()
+        await core.outbound_worker.run_once()
         assert adapter.sent == ["[Ava #405] old"]
 
         core2, adapter2 = _core(
@@ -133,7 +133,7 @@ def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
         await core2._push_snapshot(
             _KEY, state2, {"items": [_item("1.0", "old"), _item("2.0", "new")]}
         )
-        await core2.timeline_worker.run_once()
+        await core2.outbound_worker.run_once()
         assert adapter2.sent == ["[Ava #405] new"]
 
     asyncio.run(scenario())
@@ -147,7 +147,7 @@ def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
         state = _bound_state(core)
         core._persist_switch(state)
         await core._push_snapshot(_KEY, state, {"items": []})
-        await core.timeline_worker.run_once()
+        await core.outbound_worker.run_once()
 
         # the bridge is down; the agent says two more things (timeline only)
         gateway2 = _Gateway(
@@ -156,8 +156,8 @@ def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
         core2, adapter2 = _core(gateway2, pool)
         await core2.restore_subscriptions()
         await asyncio.sleep(0.05)
-        await core2.timeline_worker.run_once()
-        await core2.timeline_worker.run_once()
+        await core2.outbound_worker.run_once()
+        await core2.outbound_worker.run_once()
 
         assert adapter2.sent == ["[Ava #405] missed one", "[Ava #405] missed two"]
         for task in core2._subscriptions.values():
@@ -186,7 +186,7 @@ def test_restore_without_a_saved_watermark_pushes_nothing(pool: ConnectionPool[A
 
         assert adapter2.sent == []
         assert gateway2.timeline_calls > 0
-        assert core2.timeline_outbox.pending_streams({"telegram": "test-account"}) == []
+        assert core2.outbound_store.pending_streams({"telegram": "test-account"}) == []
         for task in core2._subscriptions.values():
             task.cancel()
 

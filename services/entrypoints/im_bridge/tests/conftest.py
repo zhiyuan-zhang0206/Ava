@@ -8,9 +8,9 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from services.entrypoints.im_bridge.outbound_types import (
-    PreparedTimelineSend,
-    TimelineAdapterKind,
-    TimelineChunk,
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
 )
 from services.entrypoints.im_bridge.types import IMAdapter
 
@@ -24,21 +24,21 @@ def _core_durable_seams(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iter
     async def account(self: IMAdapter) -> str:
         return "test-account"
 
-    async def prepare(self: IMAdapter, text: str) -> PreparedTimelineSend:
-        return PreparedTimelineSend(
-            adapter_kind=TimelineAdapterKind(self.channel + "-v1"),
+    async def prepare(self: IMAdapter, text: str) -> PreparedOutboundSend:
+        return PreparedOutboundSend(
+            adapter_kind=OutboundAdapterKind(self.channel + "-v1"),
             account_id="test-account",
-            chunks=(TimelineChunk(text=text),),
+            chunks=(OutboundChunk(text=text),),
             markdown=True,
         )
 
-    async def send_prepared(self: IMAdapter, chat_id: str, prepared: PreparedTimelineSend) -> None:
+    async def send_prepared(self: IMAdapter, chat_id: str, prepared: PreparedOutboundSend) -> None:
         for chunk in prepared.chunks:
             await self.send(chat_id, chunk.text, markdown=prepared.markdown)
 
-    monkeypatch.setattr(IMAdapter, "timeline_account_id", account)
+    monkeypatch.setattr(IMAdapter, "outbound_account_id", account)
     monkeypatch.setattr(IMAdapter, "prepare_timeline", prepare)
-    monkeypatch.setattr(IMAdapter, "send_prepared_timeline", send_prepared)
+    monkeypatch.setattr(IMAdapter, "send_prepared_outbound", send_prepared)
     with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
         monkeypatch.setattr(test_im_bridge_core, "TEST_POOL", pool)
         yield
