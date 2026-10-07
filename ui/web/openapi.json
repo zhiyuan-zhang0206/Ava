@@ -5178,6 +5178,56 @@
         }
       }
     },
+    "/api/agents/{agent_id}/run-timeline/context": {
+      "get": {
+        "summary": "Get Run Timeline Context",
+        "description": "The context breakdown of the LLM request at (or next after) message index `at`.",
+        "operationId": "get_run_timeline_context_api_agents__agent_id__run_timeline_context_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTimelineContext"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/run-timeline": {
       "get": {
         "summary": "Get Run Timeline",
@@ -14064,6 +14114,77 @@
         ],
         "title": "ResurrectResult"
       },
+      "RunTimelineContext": {
+        "properties": {
+          "total_input_tokens": {
+            "type": "integer",
+            "title": "Total Input Tokens"
+          },
+          "estimated_total": {
+            "type": "integer",
+            "title": "Estimated Total"
+          },
+          "max_input_tokens": {
+            "type": "integer",
+            "title": "Max Input Tokens",
+            "default": 0
+          },
+          "soft_compact_tokens": {
+            "type": "integer",
+            "title": "Soft Compact Tokens",
+            "default": 0
+          },
+          "hard_compact_tokens": {
+            "type": "integer",
+            "title": "Hard Compact Tokens",
+            "default": 0
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/ContextSection"
+            },
+            "type": "array",
+            "title": "Sections"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/ContextCategory"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "request": {
+            "type": "integer",
+            "title": "Request"
+          },
+          "session": {
+            "type": "integer",
+            "title": "Session"
+          },
+          "sessions": {
+            "type": "integer",
+            "title": "Sessions"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_input_tokens",
+          "estimated_total",
+          "sections",
+          "categories",
+          "request",
+          "session",
+          "sessions",
+          "ts"
+        ],
+        "title": "RunTimelineContext",
+        "description": "GET /api/agents/{agent_id}/run-timeline/context — what one LLM request's context held.\n\nThe breakdown of the request `request` (`categories` sum to its `input_tokens`), plus where\nit sits: `session` of `sessions` compaction segments (zero-based) and the time it was sent."
+      },
       "RunTimelineEvent": {
         "properties": {
           "ts": {
@@ -14319,6 +14440,36 @@
         "title": "RunTimelineNode",
         "description": "One understanding-tree node.\n\n`level` is the engine level, stable across windows: 1 is the finest (leaves),\neach level up groups the one below. `span_start`..`span_end` is the inclusive\nmessage-index span in the stitched history, the indices the raw-message route\nreads. `generation` is None for a node with no understanding-call record."
       },
+      "RunTimelineRequest": {
+        "properties": {
+          "idx": {
+            "type": "integer",
+            "title": "Idx"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "session": {
+            "type": "integer",
+            "title": "Session"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "idx",
+          "ts",
+          "session",
+          "input_tokens"
+        ],
+        "title": "RunTimelineRequest",
+        "description": "One LLM request of the agent: an AIMessage carrying `usage_metadata`.\n\n`idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent\n(the read time of the message before it, the start of the turn's thinking block);\n`session` the zero-based compaction segment it was sent in; `input_tokens` the provider's\ntotal input tokens of that request, the size of its context."
+      },
       "RunTimelineResponse": {
         "properties": {
           "agent_id": {
@@ -14358,6 +14509,13 @@
             },
             "type": "array",
             "title": "Events"
+          },
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/RunTimelineRequest"
+            },
+            "type": "array",
+            "title": "Requests"
           }
         },
         "type": "object",
@@ -14367,10 +14525,11 @@
           "lifetime",
           "nodes",
           "units",
-          "events"
+          "events",
+          "requests"
         ],
         "title": "RunTimelineResponse",
-        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent."
+        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. `events` are optional lifecycle markers\nin the window; they play no part in the extent. `requests` are the agent's LLM requests\nsent in the window (the context-size row)."
       },
       "RunTimelineUnit": {
         "properties": {

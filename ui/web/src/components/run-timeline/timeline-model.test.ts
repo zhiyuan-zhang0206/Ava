@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { categoryColor } from "@/lib/context-colors";
-import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
+import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineRequest, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
   axisTicks,
@@ -23,6 +23,15 @@ import {
   spanBox,
   unitColor,
   unitWindow,
+  categoryClass,
+  classCategory,
+  contextPoint,
+  hoverLit,
+  inboundSources,
+  matchesHighlight,
+  maxInput,
+  nodeAncestors,
+  nodeChildren,
 } from "./timeline-model";
 
 const WINDOW = { from: "2026-10-04T12:00:00Z", to: "2026-10-04T14:00:00Z" };
@@ -307,5 +316,87 @@ describe("layoutRow", () => {
     const places = layoutRow([item("end", 999, 1000), item("gone", 5000, 6000)], VIEW, 1000);
     expect(places.map((place) => place.key)).toEqual(["end"]);
     expect(places[0].left + places[0].width).toBeLessThanOrEqual(1000);
+  });
+});
+
+
+describe("highlight and hover model", () => {
+  const unitAt = (kind: RunTimelineUnit["kind"], i0: number, source: string | null = null): RunTimelineUnit => ({
+    kind,
+    i0,
+    i1: i0,
+    start: "2026-10-04T12:00:00Z",
+    end: "2026-10-04T12:00:01Z",
+    source,
+    preview: "p",
+    parent: null,
+  });
+  const treeNode = (id: string, level: number, parent: string | null, span: [number, number]): RunTimelineNode => ({
+    ...node(level, id),
+    parent,
+    span_start: span[0],
+    span_end: span[1],
+  });
+  const nodes = [treeNode("a", 1, "c", [0, 4]), treeNode("b", 1, "c", [5, 9]), treeNode("c", 2, null, [0, 9])];
+
+  it("matches a block by class, and by source when one is given", () => {
+    const fromTwelve = unitAt("inbound", 1, "agent:12");
+    expect(matchesHighlight(fromTwelve, { cls: "agent", source: null })).toBe(true);
+    expect(matchesHighlight(fromTwelve, { cls: "agent", source: "agent:12" })).toBe(true);
+    expect(matchesHighlight(fromTwelve, { cls: "agent", source: "agent:9" })).toBe(false);
+    expect(matchesHighlight(fromTwelve, { cls: "human", source: null })).toBe(false);
+    expect(matchesHighlight(unitAt("call", 2), { cls: "call", source: null })).toBe(true);
+  });
+
+  it("lists the distinct sources of one inbound class in order of appearance", () => {
+    const units = [unitAt("inbound", 1, "agent:9"), unitAt("inbound", 2, "user"), unitAt("inbound", 3, "agent:9"), unitAt("inbound", 4, "agent:3")];
+    expect(inboundSources(units, "agent")).toEqual(["agent:9", "agent:3"]);
+    expect(inboundSources(units, "human")).toEqual(["user"]);
+  });
+
+  it("maps breakdown categories to block classes and back", () => {
+    for (const cls of BLOCK_CLASSES) expect(categoryClass(classCategory(cls))).toBe(cls);
+    expect(categoryClass("system_prompt")).toBeNull();
+  });
+
+  it("hovering a block lights its chain; hovering a node lights its chain and the blocks it covers", () => {
+    const units = [unitAt("text", 2), unitAt("text", 7)];
+    units[0] = { ...units[0], parent: "a" };
+    units[1] = { ...units[1], parent: "b" };
+    const onUnit = hoverLit({ kind: "unit", i0: 2, i1: 2, unitKind: "text" }, nodes, units);
+    expect([...onUnit.nodeIds].sort()).toEqual(["a", "c"]);
+    expect(onUnit.unitKeys.size).toBe(0);
+    const onNode = hoverLit({ kind: "node", id: "b" }, nodes, units);
+    expect([...onNode.nodeIds].sort()).toEqual(["b", "c"]);
+    expect([...onNode.unitKeys]).toEqual(["text-7-7"]);
+    expect(hoverLit({ kind: "request", idx: 2 }, nodes, units).nodeIds.size).toBe(0);
+    expect(hoverLit(null, nodes, units).unitKeys.size).toBe(0);
+  });
+
+  it("walks a node's loaded ancestors and children", () => {
+    expect(nodeAncestors(nodes[0], nodes).map((n) => n.id)).toEqual(["c"]);
+    expect(nodeAncestors(nodes[2], nodes)).toEqual([]);
+    expect(nodeChildren(nodes[2], nodes).map((n) => n.id)).toEqual(["a", "b"]);
+  });
+
+  const request = (idx: number, iso: string, tokens = 10): RunTimelineRequest => ({ idx, ts: iso, session: 0, input_tokens: tokens });
+  const requests = [request(2, "2026-10-04T12:10:00Z", 50), request(8, "2026-10-04T12:50:00Z", 20)];
+  const view = (from: string, to: string) => ({ from: Date.parse(from), to: Date.parse(to) });
+
+  it("follows a selection's own message, else the last request in view, else the nearest", () => {
+    const whole = view("2026-10-04T12:00:00Z", "2026-10-04T13:00:00Z");
+    expect(contextPoint({ kind: "unit", i0: 5, i1: 5, unitKind: "text" }, nodes, requests, whole)).toBe(5);
+    expect(contextPoint({ kind: "node", id: "b" }, nodes, requests, whole)).toBe(5);
+    expect(contextPoint(null, nodes, requests, whole)).toBe(8);
+    expect(contextPoint(null, nodes, requests, view("2026-10-04T12:00:00Z", "2026-10-04T12:30:00Z"))).toBe(2);
+    // nothing in view: the last one before it
+    expect(contextPoint(null, nodes, requests, view("2026-10-04T12:20:00Z", "2026-10-04T12:30:00Z"))).toBe(2);
+    expect(contextPoint(null, nodes, requests, view("2026-10-04T11:00:00Z", "2026-10-04T11:30:00Z"))).toBe(2);
+    expect(contextPoint(null, nodes, [], whole)).toBeNull();
+  });
+
+  it("scales the context row to the largest input", () => {
+    expect(maxInput(requests)).toBe(50);
+    expect(maxInput([])).toBe(0);
   });
 });

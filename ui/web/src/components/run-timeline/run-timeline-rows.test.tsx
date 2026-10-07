@@ -40,13 +40,15 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
   const onSelect = vi.fn();
   render(
     <RunTimelineRows
-      data={{ nodes: [], units: [], events: [], ...data } as RunTimelineResponse}
+      data={{ nodes: [], units: [], events: [], requests: [], ...data } as RunTimelineResponse}
       base={BASE}
       view={BASE}
       onView={vi.fn()}
       selection={selection}
       onSelect={onSelect}
       onDrill={vi.fn()}
+      highlight={null}
+      onHighlight={vi.fn()}
     />,
   );
   return onSelect;
