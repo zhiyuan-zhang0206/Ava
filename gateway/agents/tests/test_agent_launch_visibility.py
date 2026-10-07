@@ -213,7 +213,7 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     event_bus: EventBus,
 ) -> None:
     from base.cluster.machine import machine_name
-    from ops.agents import spawn
+    from ops.agents import birth_transaction, spawn
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agents_meta")
@@ -222,7 +222,7 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     def _fail_insert(*_args: object) -> int:
         raise RuntimeError("prompt insert refused")
 
-    monkeypatch.setattr(spawn, "insert_spawn_prompt_in_transaction", _fail_insert)
+    monkeypatch.setattr(birth_transaction, "insert_spawn_prompt_in_transaction", _fail_insert)
     with pytest.raises(RuntimeError, match="prompt insert refused"):
         spawn.create_agent_row(
             database, event_bus, machine=machine_name(), prompt="Work", prompt_source="user"

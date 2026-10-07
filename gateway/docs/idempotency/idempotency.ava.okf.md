@@ -101,4 +101,4 @@ policy. Domain workers own crash-window and concurrency tests.
 
 ## Write-surface inventory
 
-See [[write-surfaces.ava.okf.md]] for the audited write boundaries.
+See [[write-surfaces/write-surfaces.ava.okf.md]] for the audited write boundaries.
