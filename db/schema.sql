@@ -459,11 +459,8 @@ CREATE TABLE completion_notice_events (
     agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     source TEXT NOT NULL,
     content TEXT NOT NULL,
-    outcome TEXT CHECK (outcome IN ('exit', 'missed')),
-    exit_code INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    digest_inbound_id BIGINT REFERENCES inbound_messages(id),
-    CONSTRAINT completion_notice_events_source_outcome_unique UNIQUE (agent_id, source, outcome)
+    digest_inbound_id BIGINT REFERENCES inbound_messages(id)
 );
 
 CREATE UNIQUE INDEX completion_notice_events_agent_source_unique
@@ -2420,3 +2417,5 @@ BEGIN
 END $$;
 
 INSERT INTO schema_migrations (name) VALUES ('20261005T095252_separate-impersonation-transport-lifecycle');
+INSERT INTO schema_migrations (name) VALUES ('20261006T181011_completion-notice-events-stop-outcome');
+INSERT INTO schema_migrations (name) VALUES ('20261007T113552_completion-notice-events-drop-outcome');
