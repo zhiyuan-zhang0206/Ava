@@ -248,7 +248,12 @@ async def test_stale_cache_retry_uses_second_attempt_window(
 
     _patch_prepare(monkeypatch, _invocation_factory)
     monkeypatch.setattr(gemini_cache, "is_stale_cache_error", lambda _exc: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(gemini_cache, "invalidate", lambda _ref: None)  # pyright: ignore[reportUnknownArgumentType]
+    invalidated: list[CacheRef] = []
+
+    def invalidate(ref: CacheRef) -> None:
+        invalidated.append(ref)
+
+    monkeypatch.setattr(gemini_cache, "invalidate", invalidate)
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
@@ -256,6 +261,7 @@ async def test_stale_cache_retry_uses_second_attempt_window(
         fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
     )
 
+    assert len(invalidated) == 1 and invalidated[0] is cache_ref
     assert handler.reset_calls == 1
     assert handler.llm_decode_ms == 3000.0  # (1008 - 1005) * 1000 — 2nd attempt only
     assert handler.llm_latency_ms == 8000.0  # (1008 - 1000) * 1000 — whole call
