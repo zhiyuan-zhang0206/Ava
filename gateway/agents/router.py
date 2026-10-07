@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
@@ -31,7 +31,7 @@ from base.agents import (
     SpawnTargetNotAgentRunner,
 )
 from base.agents.impersonation.manifest import record_central_event
-from base.agents.labels import publish_label_updated, spawn_prompt_with_label
+from base.agents.labels import publish_label_updated
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
@@ -44,15 +44,16 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents import forward
+from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
 from gateway.agents.forward import forward_spawn_to_remote
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.inspect import neighbors
 from gateway.inspect.schemas import BornChainResponse, BornChainRow
 from gateway.schemas.models import ModelsResponse
-from ops.agents.spawn import create_agent_row
-from ops.lifecycle.launch import spawn_prechecks_blocking
+from ops.agents.creation_identity import CreationConflictError
+from ops.agents.spawn import create_agent_row as create_agent_row
+from ops.lifecycle.launch import spawn_prechecks_blocking as spawn_prechecks_blocking
 from ops.rpc_schemas import (
-    ConfigNormalization,
     LaunchAgentRequest,
     SpawnAgentRequest,
     SpawnedAgent,
@@ -432,80 +433,6 @@ def _validate_fork_config(
     return (preset_name or source_preset), (delta or None)
 
 
-async def create_and_launch_agent(
-    body: SpawnAgentRequest, target: str, pool: ConnectionPool, db: Database, bus: EventBus
-) -> SpawnedAgent:
-    """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
-    ROW in-process -> forward a launch-only op to the target runner.
-
-    The target runner's ops server runs as the least-privilege `ava_runner`
-    role, which by design cannot INSERT agents / agents_meta — so the row is
-    created HERE, in the gateway process, as the main data-plane identity. The
-    forward op (`kind="spawn-launch-v2"`) validates and wakes the hosted runner.
-    The first prompt is committed with the row before this forward.
-
-    Every spawn in the system funnels through this helper (POST /api/agents,
-    the guide / packages / schedules draft routers, the MCP tools server), so
-    preflight, row creation, and launch stay uniform across entry points.
-    """
-    preset_name, tail_skills, model_receipt = await asyncio.to_thread(
-        _spawn_preflight_blocking, db, target, body, pool
-    )
-    # fork_checkpoint resolution stays gateway-side: LangGraph checkpoints are
-    # append-only and "latest" drifts under concurrent writes, so the gateway
-    # resolves an explicit id before creating the row.
-    fork_checkpoint = await asyncio.to_thread(spawn_prechecks_blocking, body, pool)
-    new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
-        create_agent_row,
-        db,
-        bus,
-        spawner=body.spawner,
-        fork_from=body.fork_from,
-        fork_checkpoint=fork_checkpoint,
-        machine=target,
-        config=body.config,
-        label=body.label,
-        preset_name=preset_name,
-        fork_tail_skills=tail_skills,
-        prompt=body.prompt,
-        prompt_source=body.prompt_source,
-    )
-    if prompt_inbound_id is not None and body.prompt_source is not None and body.prompt is not None:
-        from ops.lifecycle.events import publish_inbound_arrived
-
-        prompt_content = spawn_prompt_with_label(body.prompt, body.label)
-        try:
-            await publish_inbound_arrived(
-                bus,
-                new_id,
-                prompt_inbound_id,
-                "chat",
-                body.prompt_source,
-                prompt_content,
-            )
-        except Exception as exc:
-            logger.warning("created agent {} inbound hint failed: {}", new_id, type(exc).__name__)
-    launch = LaunchAgentRequest(
-        agent_id=new_id,
-        launch_attempt_id=launch_attempt_id,
-        config=body.config,
-        birth_config=birth_config,
-    )
-    # The endpoint response is the launch op's verdict (the launched agent id —
-    # equal to new_id in production; the runner answers for the launch). A
-    # withdrawal settlement travels as the spawner's receipt (task #4306).
-    spawned = await _dispatch_committed_launch(pool, db, bus, target, launch)
-    if model_receipt is not None:
-        spawned = spawned.model_copy(
-            update={
-                "config_normalized": ConfigNormalization(
-                    requested=model_receipt[0], resolved=model_receipt[1]
-                )
-            }
-        )
-    return await _accepted_launch_receipt(pool, spawned)
-
-
 async def _accepted_launch_receipt(pool: ConnectionPool, spawned: SpawnedAgent) -> SpawnedAgent:
     observed = await asyncio.to_thread(_creation_availability, pool, spawned.id)
     return spawned.model_copy(
@@ -657,7 +584,13 @@ def _creation_availability(pool: ConnectionPool, agent_id: int) -> AgentAvailabi
 
 
 @router.post("/api/agents", status_code=201, response_model_exclude_none=True)
-async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent:
+async def post_agents(
+    body: SpawnAgentRequest,
+    request: Request,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128
+    ),
+) -> SpawnedAgent:
     """Spawn a new agent — uniform HTTP path for SDK / frontend / scripts.
 
     Spawn is HTTP-uniform: every spawn funnels through
@@ -682,9 +615,18 @@ async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent
     registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).
     """
     target = body.machine if body.machine is not None else machine_name()
-    return await create_and_launch_agent(
-        body, target, request.app.state.db_pool, request.app.state.db, request.app.state.bus
-    )
+    key = scoped_creation_key(request, idempotency_key)
+    try:
+        return await create_and_launch_agent(
+            body,
+            target,
+            request.app.state.db_pool,
+            request.app.state.db,
+            request.app.state.bus,
+            **({"creation_key": key} if key is not None else {}),
+        )
+    except CreationConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _prepare_retry_launch(

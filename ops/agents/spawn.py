@@ -39,6 +39,7 @@ from base.events.live.bus import EventBus
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
+from ops.agents.creation_identity import recover_birth
 
 
 def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
@@ -193,6 +194,8 @@ def create_agent_row(
     prompt_source: str | None = None,
     preset_name: str | None = None,
     fork_tail_skills: list[str] | None = None,
+    creation_key: str | None = None,
+    creation_request_hash: str | None = None,
 ) -> tuple[int, dict[str, object] | None, int | None, UUID]:
     """Create the agent row: agents + agents_meta + fork copy, NO launch.
 
@@ -252,6 +255,9 @@ def create_agent_row(
         prompt: optional chat message committed with the row;
             paired with prompt_source (both None or both given).
         prompt_source: provenance tag for `prompt` ('agent:N' / 'user').
+        creation_key: optional scoped identity for one creation intent.
+        creation_request_hash: immutable caller request digest paired with the key;
+            same-key races return the previously committed agent identity.
 
     Returns:
         (new agent_id, birth_config dict, chat inbound id, launch attempt id).
@@ -271,6 +277,9 @@ def create_agent_row(
     prompt_event: telemetry.Event | None = None
     with db.connect() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
+        existing = recover_birth(conn, creation_key, creation_request_hash)
+        if existing is not None:
+            return existing.agent_id, existing.birth_config, None, existing.launch_attempt_id
         # label: when the spawner assigns one, store it sticky (label_user_set=TRUE)
         # so the labeler's CAS (WHERE label IS NULL AND NOT label_user_set) skips it.
         # Otherwise leave NULL — the labeler generates a short name via LLM CAS when
@@ -324,8 +333,8 @@ def create_agent_row(
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
             "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name, "
-            "last_launch_attempt_id, last_resurrect_inbound_id) "
-            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s, 0)",
+            "last_launch_attempt_id, last_resurrect_inbound_id, creation_key, creation_request_hash) "
+            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s, 0, %s, %s)",
             (
                 new_id,
                 lineage_spawner,
@@ -337,6 +346,8 @@ def create_agent_row(
                 json.dumps(birth_config, sort_keys=True),
                 preset_name,
                 launch_attempt_id,
+                creation_key,
+                creation_request_hash,
             ),
         )
         if fork_from is not None and fork_checkpoint is not None:

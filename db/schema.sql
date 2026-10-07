@@ -661,6 +661,18 @@ DO $$ BEGIN
     END IF;
 END $$;
 
+ALTER TABLE agents_meta ADD COLUMN creation_key TEXT;
+ALTER TABLE agents_meta ADD COLUMN creation_request_hash TEXT;
+ALTER TABLE agents_meta ADD CONSTRAINT agents_meta_creation_identity_check CHECK (
+    (creation_key IS NULL AND creation_request_hash IS NULL) OR
+    (creation_key IS NOT NULL AND char_length(creation_key) BETWEEN 1 AND 128
+     AND creation_request_hash IS NOT NULL AND creation_request_hash ~ '^[0-9a-f]{64}$')
+);
+CREATE UNIQUE INDEX agents_meta_creation_key ON agents_meta (creation_key)
+    WHERE creation_key IS NOT NULL;
+COMMENT ON COLUMN agents_meta.creation_key IS
+    'Immutable creation intent; retained with agent identity so lost-response retries cannot create another agent.';
+
 -- ─────────────── api_idempotency ───────────────
 -- Generic AtLeastOnceWithKey dedup (R3 doorplate ①): routes whose contract
 -- declares Idempotency.AT_LEAST_ONCE_WITH_KEY (POST /api/agents/{id}/messages)
@@ -2419,3 +2431,5 @@ END $$;
 INSERT INTO schema_migrations (name) VALUES ('20261005T095252_separate-impersonation-transport-lifecycle');
 INSERT INTO schema_migrations (name) VALUES ('20261006T181011_completion-notice-events-stop-outcome');
 INSERT INTO schema_migrations (name) VALUES ('20261007T113552_completion-notice-events-drop-outcome');
+
+INSERT INTO schema_migrations (name) VALUES ('20261007T103034_agent-creation-identity');
