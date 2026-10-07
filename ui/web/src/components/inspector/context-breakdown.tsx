@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ChevronRight, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
@@ -9,10 +9,13 @@ import { ContextMeter, useContextMeterWidthClass } from "@/components/inspector/
 import { api } from "@/lib/transport/api";
 import { categoryColor } from "@/lib/context-colors";
 import { errMsg } from "@/lib/contracts/errors";
+import { formatShort } from "@/lib/format/time";
 import { formatTokens } from "@/lib/format/format-number";
-import type { ContextBreakdownResponse, ContextSection } from "@/lib/contracts/types";
+import type { ContextBreakdownResponse } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+
+import { SectionRows } from "./context-sections";
 
 // API kind → message key (contextBreakdown.categories.*). An unknown kind
 // keeps its raw name at render — fail-visible (the P4-5 review condition).
@@ -167,22 +170,70 @@ export function ContextButton(props: ContextButtonProps) {
   );
 }
 
+/** Lets the categories that stand for a kind of timeline block be clicked to highlight it there. */
+export interface CategoryHighlight {
+  /** The category whose blocks are highlighted now, if any. */
+  active: string | null;
+  /** Whether the category has blocks on the timeline (a row without them is not a button). */
+  has: (category: string) => boolean;
+  onToggle: (category: string) => void;
+}
+
 /** The breakdown as a standalone card — the composer panel's body rendered
  * inline (run page, task #4023 P4-3), chart-side above the timeline. Demo
- * parity: the pilot-w1 card caps at 520px (`#cbd` in its stylesheet). */
-export function ContextBreakdownCard({ agentId }: { agentId: number }) {
+ * parity: the pilot-w1 card caps at 520px (`#cbd` in its stylesheet).
+ *
+ * Without `at` it shows the agent's current context. With `at` (the run timeline's point: a
+ * message index, null while the agent has made no request) it shows what the LLM request at or
+ * after that message held, titled with its session and time. */
+export function ContextBreakdownCard({
+  agentId,
+  at,
+  categoryHighlight,
+}: {
+  agentId: number;
+  at?: number | null;
+  categoryHighlight?: CategoryHighlight;
+}) {
   const t = useTranslations("contextBreakdown");
+  const pointed = at !== undefined;
+  const point = useQuery({
+    queryKey: ["run-timeline-context", agentId, at] as const,
+    queryFn: () => api.getRunTimelineContext(agentId, at ?? 0),
+    enabled: pointed && at !== null,
+    staleTime: 10_000,
+    // Panning moves the point often: the card keeps the last one's numbers until the next arrives.
+    placeholderData: keepPreviousData,
+  });
+  const title = point.data
+    ? t("pointTitle", {
+        request: point.data.request,
+        session: point.data.session + 1,
+        sessions: point.data.sessions,
+        time: formatShort(point.data.ts),
+      })
+    : t("title");
   return (
     <section
       data-testid="context-breakdown-card"
       aria-label={t("title")}
       className="max-w-[520px] rounded border border-border bg-card p-4"
     >
-      <h2 className="mb-1 text-sm font-semibold">{t("title")}</h2>
+      <h2 className="mb-1 text-sm font-semibold" data-testid="context-breakdown-heading">
+        {title}
+      </h2>
       <p data-testid="context-breakdown-subtitle" className="mb-2 text-muted-foreground text-xs">
-        {t("subtitle")}
+        {pointed ? t("pointSubtitle") : t("subtitle")}
       </p>
-      <ContextBreakdownBody agentId={agentId} />
+      {!pointed ? (
+        <ContextBreakdownBody agentId={agentId} categoryHighlight={categoryHighlight} />
+      ) : at === null ? (
+        <p data-testid="context-breakdown-empty" className="text-muted-foreground text-xs">
+          {t("pointEmpty")}
+        </p>
+      ) : (
+        <BreakdownQuery query={point} categoryHighlight={categoryHighlight} />
+      )}
     </section>
   );
 }
@@ -193,9 +244,14 @@ export function ContextBreakdownCard({ agentId }: { agentId: number }) {
  * endpoint mirrors the token-usage values (`resolve_context_budget`), so the
  * body carries no live meter props; the collapsed `ContextMeter` keeps its
  * own live values. */
-function ContextBreakdownBody({ agentId }: { agentId: number }) {
-  const t = useTranslations("contextBreakdown");
-  const { data, isPending, isError, error, refetch } = useQuery({
+function ContextBreakdownBody({
+  agentId,
+  categoryHighlight,
+}: {
+  agentId: number;
+  categoryHighlight?: CategoryHighlight;
+}) {
+  const query = useQuery({
     queryKey: ["context-breakdown", agentId] as const,
     queryFn: () => api.getContextBreakdown(agentId),
     staleTime: 10_000,
@@ -203,6 +259,18 @@ function ContextBreakdownBody({ agentId }: { agentId: number }) {
     // open instead of showing a cached snapshot until the staleTime lapses.
     refetchOnMount: "always",
   });
+  return <BreakdownQuery query={query} categoryHighlight={categoryHighlight} />;
+}
+
+function BreakdownQuery({
+  query,
+  categoryHighlight,
+}: {
+  query: UseQueryResult<ContextBreakdownResponse>;
+  categoryHighlight?: CategoryHighlight;
+}) {
+  const t = useTranslations("contextBreakdown");
+  const { data, isPending, isError, error, refetch } = query;
 
   if (isPending) {
     return (
@@ -236,10 +304,16 @@ function ContextBreakdownBody({ agentId }: { agentId: number }) {
       </div>
     );
   }
-  return <BreakdownContent data={data} />;
+  return <BreakdownContent data={data} categoryHighlight={categoryHighlight} />;
 }
 
-function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
+function BreakdownContent({
+  data,
+  categoryHighlight,
+}: {
+  data: ContextBreakdownResponse;
+  categoryHighlight?: CategoryHighlight;
+}) {
   const t = useTranslations("contextBreakdown");
   // The anchor the percentages are relative to: the provider truth when a call
   // has run, else the chars/4 estimate.
@@ -309,19 +383,45 @@ function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
 
       {/* Category legend. */}
       <ul className={cn("gap-1", FLEX, FLEX_COL)} data-testid="context-breakdown-categories">
-        {categories.map((c) => (
-          <li key={c.key} className={cn("items-center gap-2 text-xs", FLEX)}>
-            <span
-              className="size-2.5 shrink-0 rounded-[2px]"
-              style={{ backgroundColor: categoryColor(c.key) }}
-            />
-            <span className={cn("truncate", FLEX_1)}>{categoryName(c.key)}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              {formatTokens(c.tokens)}
-              {total > 0 ? ` · ${((c.tokens / total) * 100).toFixed(2)}%` : ""}
-            </span>
-          </li>
-        ))}
+        {categories.map((c) => {
+          const row = (
+            <>
+              <span
+                className="size-2.5 shrink-0 rounded-[2px]"
+                style={{ backgroundColor: categoryColor(c.key) }}
+              />
+              <span className={cn("truncate", FLEX_1, "text-left")}>{categoryName(c.key)}</span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {formatTokens(c.tokens)}
+                {total > 0 ? ` · ${((c.tokens / total) * 100).toFixed(2)}%` : ""}
+              </span>
+            </>
+          );
+          const clickable = categoryHighlight?.has(c.key) === true;
+          const active = categoryHighlight?.active === c.key;
+          return clickable ? (
+            <li key={c.key} className="text-xs">
+              <button
+                  type="button"
+                  aria-pressed={active}
+                  title={t("categoryToggle", { category: categoryName(c.key) })}
+                  data-testid={`context-breakdown-category-${c.key}`}
+                  onClick={() => categoryHighlight.onToggle(c.key)}
+                  className={cn(
+                    "w-full items-center gap-2 rounded px-1 py-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    FLEX,
+                    active && "bg-muted ring-1 ring-foreground/50",
+                  )}
+                >
+                  {row}
+              </button>
+            </li>
+          ) : (
+            <li key={c.key} className={cn("items-center gap-2 px-1 py-0.5 text-xs", FLEX)}>
+              {row}
+            </li>
+          );
+        })}
       </ul>
 
       {/* System-prompt sections — a recursive tree: any section over the
@@ -361,56 +461,5 @@ function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
         </p>
       ) : null}
     </div>
-  );
-}
-
-/** One level of the section tree. `depth` drives the indent (inline padding, so
- * no dynamically-composed Tailwind class); the top level carries the testid the
- * panel test keys on. */
-function SectionRows({ nodes, depth }: { nodes: ContextSection[]; depth: number }) {
-  return (
-    <ul
-      className={cn("gap-0.5", FLEX, FLEX_COL)}
-      data-testid={depth === 0 ? "context-breakdown-sections" : undefined}
-    >
-      {nodes.map((node, i) => (
-        <SectionRow key={`${node.name}-${i}`} node={node} depth={depth} />
-      ))}
-    </ul>
-  );
-}
-
-/** A single section row. A node with `children` gets a disclosure toggle; a
- * leaf gets none — its label starts at the same left edge as sibling chevrons
- * (no spacer). The chevron sits flush against the label (no gap). `min-w-0` +
- * `truncate` keep even deep indentation from forcing horizontal scroll. */
-function SectionRow({ node, depth }: { node: ContextSection; depth: number }) {
-  const t = useTranslations("contextBreakdown");
-  const [open, setOpen] = useState(false);
-  const children = node.children ?? [];
-  const hasChildren = children.length > 0;
-  return (
-    <li>
-      <div className={cn("items-center text-xs", FLEX)} style={{ paddingLeft: depth * 12 }}>
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            aria-expanded={open}
-            aria-label={
-              open ? t("collapse", { target: node.name }) : t("expand", { target: node.name })
-            }
-            className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
-          </button>
-        ) : null}
-        <span className={cn("truncate text-muted-foreground", MIN_W_0, FLEX_1)}>{node.name}</span>
-        <span className="ml-1 shrink-0 tabular-nums text-muted-foreground">
-          {formatTokens(node.tokens)}
-        </span>
-      </div>
-      {open && hasChildren ? <SectionRows nodes={children} depth={depth + 1} /> : null}
-    </li>
   );
 }

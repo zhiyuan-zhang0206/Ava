@@ -5,6 +5,7 @@
 import type {
   RunTimelineMessagePart,
   RunTimelineNode,
+  RunTimelineRequest,
   RunTimelineUnit,
   RunTimelineUsage,
 } from "@/lib/contracts/types";
@@ -34,6 +35,12 @@ export function isSelected(selection: Selection | null, candidate: Selection): b
     );
   }
   return false;
+}
+
+export type Hover = Selection | { kind: "request"; idx: number };
+
+export function unitKey(unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1">): string {
+  return `${unit.kind}-${unit.i0}-${unit.i1}`;
 }
 
 /**
@@ -346,4 +353,90 @@ export function axisTicks(view: Viewport, target = 6): AxisTick[] {
     ticks.push({ left: ((at - view.from) / span) * 100, label: tickLabel(at, step) });
   }
   return ticks;
+}
+
+/** What the legend (or a context breakdown row) highlights: every block of one class, optionally of one source only. */
+export interface Highlight {
+  cls: BlockClass;
+  source: string | null;
+}
+
+export function matchesHighlight(unit: Pick<RunTimelineUnit, "kind" | "source">, highlight: Highlight): boolean {
+  return blockClass(unit) === highlight.cls && (highlight.source === null || unit.source === highlight.source);
+}
+
+/** The distinct sources of the inbound blocks of one class, in order of first appearance. */
+export function inboundSources(units: readonly RunTimelineUnit[], cls: "human" | "agent"): string[] {
+  const sources: string[] = [];
+  for (const unit of units) {
+    if (unit.source !== null && blockClass(unit) === cls && !sources.includes(unit.source)) sources.push(unit.source);
+  }
+  return sources;
+}
+
+/** The context breakdown category a block class is drawn from, and back (a category with no blocks maps to null). */
+export function classCategory(cls: BlockClass): string {
+  return CLASS_CATEGORY[cls];
+}
+
+export function categoryClass(category: string): BlockClass | null {
+  return BLOCK_CLASSES.find((cls) => CLASS_CATEGORY[cls] === category) ?? null;
+}
+
+/**
+ * What hovering lights up, more softly than a selection: the hovered block's ancestor chain; for a
+ * node also the blocks its message span covers.
+ */
+export function hoverLit(
+  hover: Hover | null,
+  nodes: readonly RunTimelineNode[],
+  units: readonly RunTimelineUnit[],
+): { nodeIds: Set<string>; unitKeys: Set<string> } {
+  if (hover === null || hover.kind === "request") return { nodeIds: new Set(), unitKeys: new Set() };
+  const nodeIds = chainIds(hover, nodes, units);
+  const node = hover.kind === "node" ? nodes.find((candidate) => candidate.id === hover.id) : undefined;
+  const covered =
+    node === undefined ? [] : units.filter((unit) => unit.i0 >= node.span_start && unit.i0 <= node.span_end);
+  return { nodeIds, unitKeys: new Set(covered.map(unitKey)) };
+}
+
+/** A node's ancestors, nearest first, as far as they are loaded. */
+export function nodeAncestors(node: RunTimelineNode, nodes: readonly RunTimelineNode[]): RunTimelineNode[] {
+  const byId = new Map(nodes.map((candidate) => [candidate.id, candidate]));
+  const out: RunTimelineNode[] = [];
+  let next = node.parent === null ? undefined : byId.get(node.parent);
+  while (next !== undefined && !out.includes(next)) {
+    out.push(next);
+    next = next.parent === null ? undefined : byId.get(next.parent);
+  }
+  return out;
+}
+
+export function nodeChildren(node: RunTimelineNode, nodes: readonly RunTimelineNode[]): RunTimelineNode[] {
+  return nodes.filter((candidate) => candidate.parent === node.id).sort((a, b) => a.span_start - b.span_start);
+}
+
+/**
+ * The message index the context breakdown follows: a selected block's own request (the first at or
+ * after it), a selected node's first; with nothing selected, the last request sent inside the viewport
+ * (else the last one before it, else the first). Null when the agent made no request.
+ */
+export function contextPoint(
+  selection: Selection | null,
+  nodes: readonly RunTimelineNode[],
+  requests: readonly RunTimelineRequest[],
+  view: Viewport,
+): number | null {
+  if (selection?.kind === "unit") return selection.i0;
+  if (selection?.kind === "node") return nodes.find((node) => node.id === selection.id)?.span_start ?? null;
+  const sent = requests.map((request) => ({ request, at: Date.parse(request.ts) }));
+  const inside = sent.filter(({ at }) => at >= view.from && at <= view.to);
+  const before = sent.filter(({ at }) => at < view.from);
+  const pick = inside.at(-1) ?? before.at(-1) ?? sent.at(0);
+  return pick?.request.idx ?? null;
+}
+
+/** The largest input size among the requests: what the context-size row scales to. */
+export function maxInput(requests: readonly RunTimelineRequest[]): number {
+  return requests.reduce((top, request) => Math.max(top, request.input_tokens), 0);
 }

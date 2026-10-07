@@ -26,6 +26,8 @@ from base.db import Database
 from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.run_timeline import _lifecycle
+from gateway.run_timeline.context import llm_requests
+from gateway.run_timeline.context import router as context_router
 from gateway.run_timeline.history import HistoryView, HistoryViewCache
 from gateway.run_timeline.messages import router as messages_router
 from gateway.run_timeline.schemas import (
@@ -40,6 +42,7 @@ from gateway.run_timeline.schemas import (
 
 router = APIRouter()
 router.include_router(messages_router)
+router.include_router(context_router)
 
 # What the window is when the agent has neither a message nor a node.
 _EMPTY_WINDOW = timedelta(hours=24)
@@ -157,4 +160,5 @@ def get_run_timeline(
         ],
         units=_units(view, served, start, end),
         events=_events(db, agent_id, start, end),
+        requests=[r for r in llm_requests(view) if start <= r.ts <= end],
     )
