@@ -80,7 +80,7 @@ class _FakeAccounting(SimpleNamespace):
 
 
 def _install_fake_accounting(monkeypatch: pytest.MonkeyPatch, accounting: Any) -> list[dict]:
-    sys.modules["accounting"] = accounting  # type: ignore[assignment]
+    monkeypatch.setattr(accounting.module, "_load_accounting", lambda: accounting)
     emitted: list[dict] = []
 
     def record_emit(category: str, event_name: str, **kwargs: Any) -> None:
@@ -93,20 +93,12 @@ def _install_fake_accounting(monkeypatch: pytest.MonkeyPatch, accounting: Any) -
 def test_repo_root_survives_runtime_materialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The script finds the source root from base.__file__, not its own path.
-
-    The gateway materializes the script to ~/.ava/schedules/<id>/ before
-    executing it; there, ``Path(__file__).parents[1]`` is ~/.ava/schedules,
-    not the repo root, and ``scripts/accounting`` becomes unimportable
-    (the 2026-09-08 05:00 first-fire failure). Loading a copy from a flat
-    runtime-style directory must still resolve _REPO_ROOT to the deployed
-    source root.
-    """
+    """A materialized template resolves its installed package from outside the checkout."""
     mat_dir = tmp_path / "schedules" / "11"
     mat_dir.mkdir(parents=True)
     mat_path = mat_dir / SCHEDULE_PATH.name
     shutil.copy(SCHEDULE_PATH, mat_path)
-    monkeypatch.syspath_prepend(str(REPO_ROOT))
+    monkeypatch.chdir(mat_dir)
 
     spec = importlib.util.spec_from_file_location("c9_daily_materialized", mat_path)
     assert spec is not None and spec.loader is not None
@@ -117,9 +109,10 @@ def test_repo_root_survives_runtime_materialization(
     finally:
         sys.modules.pop(spec.name, None)
 
-    assert module._REPO_ROOT == REPO_ROOT
-    assert mat_dir != module._REPO_ROOT
-    assert tmp_path != module._REPO_ROOT
+    saved_path = list(sys.path)
+    loaded = module._load_accounting()
+    assert Path(loaded.__file__).resolve() == REPO_ROOT / "scripts/ci/pull_requests/accounting.py"
+    assert sys.path == saved_path
 
 
 def test_manifest_declares_c9_daily_report_schedule() -> None:
@@ -199,16 +192,12 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     accounting = _FakeAccounting(module)
-    sys.modules["accounting"] = accounting  # type: ignore[assignment]
     emitted = _install_fake_accounting(monkeypatch, accounting)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)  # 05:00 cluster
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
 
-    try:
-        assert fire_slot_once(database, slot, None, fire=module._fire)
-    finally:
-        sys.modules.pop("accounting", None)
+    assert fire_slot_once(database, slot, None, fire=module._fire)
 
     assert accounting.windows == [("2026-09-05T21:00:00Z", "2026-09-06T21:00:00Z")]
     assert len(emitted) == 1
@@ -233,21 +222,17 @@ def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
 
     monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
     accounting = _FakeAccounting(module)
-    sys.modules["accounting"] = accounting  # type: ignore[assignment]
     emitted = _install_fake_accounting(monkeypatch, accounting)
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 0, 30, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
 
-    try:
-        fired_slots = catch_up(
-            database,
-            [(module.CRON, None)],
-            timezone="UTC",
-            fire=module._fire,
-            now=datetime(2026, 9, 8, 10, 30, tzinfo=UTC),
-        )
-    finally:
-        sys.modules.pop("accounting", None)
+    fired_slots = catch_up(
+        database,
+        [(module.CRON, None)],
+        timezone="UTC",
+        fire=module._fire,
+        now=datetime(2026, 9, 8, 10, 30, tzinfo=UTC),
+    )
 
     # Missed 05:00 slots: 09-06, 09-07, 09-08 — catch-up keeps the two most
     # recent, and each must reconcile its OWN day.
@@ -275,17 +260,14 @@ def test_fire_reports_failure_without_raising(
         raise RuntimeError("gh api down")
 
     accounting.collect = broken_collect  # type: ignore[method-assign]
-    sys.modules["accounting"] = accounting  # type: ignore[assignment]
+    monkeypatch.setattr(module, "_load_accounting", lambda: accounting)
     failures: list[str] = []
     monkeypatch.setattr(module, "_report_failure", failures.append)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
 
-    try:
-        assert fire_slot_once(database, slot, None, fire=module._fire)
-    finally:
-        sys.modules.pop("accounting", None)
+    assert fire_slot_once(database, slot, None, fire=module._fire)
 
     assert len(failures) == 1
     assert "RuntimeError" in failures[0]
@@ -348,11 +330,9 @@ def test_load_accounting_resolves_under_scripts_ci() -> None:
     """The loader must resolve accounting.py from its post-move home (scripts/ci/pull_requests/)."""
     module = _load_schedule_module()
     saved_path = list(sys.path)
-    try:
-        loaded = module._load_accounting()
-        assert (
-            Path(loaded.__file__).resolve()
-            == REPO_ROOT / "scripts" / "ci" / "pull_requests" / "accounting.py"
-        )
-    finally:
-        sys.path[:] = saved_path
+    loaded = module._load_accounting()
+    assert (
+        Path(loaded.__file__).resolve()
+        == REPO_ROOT / "scripts" / "ci" / "pull_requests" / "accounting.py"
+    )
+    assert sys.path == saved_path
