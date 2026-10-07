@@ -239,6 +239,8 @@ ignore_imports = [
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.
     "services.agent_runner.agent_host.host -> agent.impersonation",
+    # Failure recovery preserves the same pre-settlement takeover preparation.
+    "services.agent_runner.agent_host.invocation -> agent.impersonation",
     "services.agent_runner.agent_host.* -> agent.startup",
     "services.agent_runner.agent_host.* -> agent.state",
 ]
