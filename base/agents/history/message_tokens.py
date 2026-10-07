@@ -13,7 +13,7 @@ to a provider-reported total; there is no unanchored estimate. Two sources:
 - `exact`: the provider's own number -- an AIMessage's `output_tokens`, or the
   whole remainder when one message sits in the interval.
 - `estimated`: a provider-reported total shared among several messages in
-  proportion to the fitted estimator (`base/agents/messages/text_chars.py`),
+  proportion to the fitted estimator (`base/agents/messages/token_estimate.py`),
   summing exactly to the total.
 
 Boundaries, all re-anchoring on a later provider total instead of guessing:
@@ -25,9 +25,11 @@ Boundaries, all re-anchoring on a later provider total instead of guessing:
 - Negative difference (crash repair, rewritten history): the offending anchor is
   dropped and the interval merges; if no earlier anchor is consistent the later
   request re-anchors the whole context before it.
-- Model switch: the first request on the new model re-anchors the whole context
-  before it (a new tokenizer's total), shared by the estimator; later intervals
-  subtract as usual.
+- Model switch: every message keeps the value it was read with. The messages
+  first read by the new model's first request get their estimated share of that
+  request's whole-context input (two tokenizers cannot be subtracted); later
+  intervals subtract as usual. A context drawn after the switch (`context_through`)
+  re-splits what came before it against the new model's total (estimated).
 - Tail after the last request: a sealed segment's closing request (the
   compaction LLM call reading the whole segment, `ClosingRequest`) anchors it.
   Without one the tail was never read by any LLM -- `context_tokens` is None
@@ -45,7 +47,8 @@ from typing import Literal, cast
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
 from base.agents.history.checkpoint import FullHistory
-from base.agents.messages.text_chars import (
+from base.agents.history.closing_request import ClosingRequest
+from base.agents.messages.token_estimate import (
     ai_message_texts,
     estimate_message_tokens,
     estimate_text_tokens,
@@ -69,15 +72,12 @@ class MessageTokens:
 
 
 @dataclass(frozen=True)
-class ClosingRequest:
-    """The request that read a whole sealed segment: the compaction LLM call.
-    `input_tokens` is its provider-reported input; `extra_tokens` is what it
-    added beyond the segment's messages (the compaction instruction), subtracted
-    before the tail is anchored -- non-zero makes the tail estimated."""
+class ModelSwitch:
+    """The first request on a new model: body index of its AIMessage and the provider-reported
+    input of its whole context, in the new model's tokenizer."""
 
+    idx: int
     input_tokens: int
-    extra_tokens: int = 0
-    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,11 +85,14 @@ class SegmentTokens:
     """Per-message tokens of one compaction segment. `head` is the segment's
     SystemMessage (None when the snapshot had none); `messages` aligns with the
     segment body. `last_input_tokens` is the `input_tokens` of the segment's
-    last request that reported usage."""
+    last request that reported usage. `switches` are the model switches inside the
+    segment (see `context_through`): each message keeps the value it had when its
+    own request read it, and a switch only matters to a context drawn after it."""
 
     head: MessageTokens | None
     messages: tuple[MessageTokens, ...]
     last_input_tokens: int | None
+    switches: tuple[ModelSwitch, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -176,11 +179,18 @@ def split_parts(
 
 
 def ai_message_parts(msg: AIMessage, record: MessageTokens) -> dict[str, PartTokens]:
-    """An AIMessage's reasoning / output / tool_call split of its `record`
-    (which must be in context)."""
+    """An AIMessage's reasoning / output / tool_call split of its `record` (which must be in
+    context). Only non-empty parts share the tokens; an empty part is 0, and a message with a
+    single non-empty part (or none: its tokens are framing, kept as output) keeps the whole's
+    source."""
     if record.context_tokens is None or record.source is None:
         raise ValueError("message is not in context yet; it has no tokens to split")
-    return split_parts(ai_message_texts(msg), record.context_tokens, record.source)
+    texts = ai_message_texts(msg)
+    present = {kind: text for kind, text in texts.items() if text}
+    if not present:
+        present = {"output": ""}
+    shared = split_parts(present, record.context_tokens, record.source)
+    return {kind: shared.get(kind, PartTokens(0, record.source)) for kind in texts}
 
 
 def _usage(msg: BaseMessage, key: str) -> int | None:
@@ -206,7 +216,8 @@ class _Anchor:
     out: int
     model: str | None
     inexact: bool = False  # input is provider total minus an estimated extra
-    rebase: bool = False  # re-anchors the whole context before it
+    rebase: bool = False  # re-anchors the whole context before it (history was rewritten)
+    switch: bool = False  # first request on a new model
 
 
 def _candidates(body: Sequence[BaseMessage], closing: ClosingRequest | None) -> list[_Anchor]:
@@ -240,7 +251,7 @@ def _chain(candidates: Sequence[_Anchor]) -> list[_Anchor]:
                 break
             a = chain[-1]
             if a.model is not None and b.model is not None and a.model != b.model:
-                chain.append(replace(b, rebase=True))
+                chain.append(replace(b, switch=True))
                 break
             if b.input - a.input - a.out >= 0:
                 chain.append(b)
@@ -290,15 +301,36 @@ def _fill_prefix(
     return head_rec
 
 
+def _prefix_shares(
+    head: SystemMessage | None, body: Sequence[BaseMessage], upto: int, total: int
+) -> list[int]:
+    """`total` shared among head + body[:upto] by the estimator, head first when there is one."""
+    members: list[BaseMessage] = ([head] if head is not None else []) + list(body[:upto])
+    return apportion([round(estimate_message_tokens(m) * _WEIGHT_SCALE) for m in members], total)
+
+
 def _fill_interval(
-    out: list[MessageTokens], body: Sequence[BaseMessage], here: _Anchor, there: _Anchor
+    out: list[MessageTokens],
+    head: SystemMessage | None,
+    body: Sequence[BaseMessage],
+    here: _Anchor,
+    there: _Anchor,
 ) -> None:
-    """Share the growth between two anchors among the messages between them."""
+    """Share the growth between two anchors among the messages between them. Across a model
+    switch the growth is not comparable (two tokenizers): the messages between get their
+    estimated share of the new model's whole-context input, and everything before keeps the
+    value it was read with."""
     out[here.idx] = MessageTokens(here.out, here.out, "exact")
     between = range(here.idx + 1, there.idx)
-    if between:
-        total = there.input - here.input - here.out
-        _fill(out, between, _allocate([body[i] for i in between], total, inexact=there.inexact))
+    if not between:
+        return
+    if there.switch:
+        shares = _prefix_shares(head, body, there.idx, there.input)
+        offset = 1 if head is not None else 0
+        _fill(out, between, [(shares[offset + i], "estimated") for i in between])
+        return
+    total = there.input - here.input - here.out
+    _fill(out, between, _allocate([body[i] for i in between], total, inexact=there.inexact))
 
 
 def segment_tokens(
@@ -306,7 +338,7 @@ def segment_tokens(
     body: Sequence[BaseMessage],
     closing: ClosingRequest | None = None,
 ) -> SegmentTokens:
-    """Per-message tokens of one segment: its head and its body messages.
+    """Per-message tokens of one segment, each as it was read: its head and its body messages.
 
     `closing` is the request that read the whole segment when it was sealed by a
     compaction LLM call; without it the tail after the last request stays None."""
@@ -322,21 +354,42 @@ def segment_tokens(
     start = max(i for i, a in enumerate(chain) if a.rebase)
     head_rec = _fill_prefix(out, head, body, chain[start])
     for here, there in zip(chain[start:], chain[start + 1 :], strict=False):
-        _fill_interval(out, body, here, there)
+        _fill_interval(out, head, body, here, there)
     final = chain[-1]
     if final.idx < len(body):
         out[final.idx] = MessageTokens(final.out, final.out, "exact")
-    return SegmentTokens(head_rec, tuple(out), last_input)
+    switches = tuple(ModelSwitch(a.idx, a.input) for a in chain[start + 1 :] if a.switch)
+    return SegmentTokens(head_rec, tuple(out), last_input, switches)
 
 
-def history_segment_tokens(
-    history: FullHistory, closings: Sequence[ClosingRequest | None] = ()
-) -> tuple[SegmentTokens, ...]:
-    """`segment_tokens` for every segment of a stitched history, in order.
-    `closings[k]` is segment k's closing request when known (segments beyond the
-    sequence have none)."""
+def context_through(
+    head: SystemMessage | None, body: Sequence[BaseMessage], segment: SegmentTokens, upto: int
+) -> tuple[MessageTokens | None, list[MessageTokens]]:
+    """The head and body[:upto] as the context of the request at body index `upto`.
+
+    Values are the ones each message was read with, except that a model switch inside the
+    span re-splits everything before the last switch by the estimator against that request's
+    whole-context input (the new tokenizer's total), marked estimated; messages from the
+    switch on keep their own values, so the context still sums to the request's input."""
+    records = list(segment.messages[:upto])
+    head_rec = segment.head
+    switch = next((sw for sw in reversed(segment.switches) if sw.idx <= upto), None)
+    if switch is None:
+        return head_rec, records
+    shares = _prefix_shares(head, body, switch.idx, switch.input_tokens)
+    if head is not None:
+        head_rec = MessageTokens(shares.pop(0), None, "estimated")
+    for i, share in enumerate(shares):
+        records[i] = MessageTokens(share, records[i].generation_tokens, "estimated")
+    return head_rec, records
+
+
+def history_segment_tokens(history: FullHistory) -> tuple[SegmentTokens, ...]:
+    """`segment_tokens` for every segment of a stitched history, in order; a sealed segment's
+    closing request (`history.segment_closings`) anchors its tail."""
     starts = history.segment_starts
     ends = [*starts[1:], len(history.messages)][: len(starts)]
+    closings = history.segment_closings
     return tuple(
         segment_tokens(
             head,
@@ -350,11 +403,17 @@ def history_segment_tokens(
 
 
 def history_message_tokens(
-    history: FullHistory, closings: Sequence[ClosingRequest | None] = ()
+    history: FullHistory, segments: Sequence[SegmentTokens] | None = None
 ) -> list[MessageTokens]:
-    """One record per `history.messages` entry (segment heads excluded; read them
-    from `history_segment_tokens`)."""
-    return [m for seg in history_segment_tokens(history, closings) for m in seg.messages]
+    """One record per `history.messages` entry. The stitched list keeps segment 0's own head as
+    its first message (`segment_starts[0] == 1`); it takes that head's record. Pass `segments`
+    when already computed."""
+    computed = history_segment_tokens(history) if segments is None else segments
+    if not computed:
+        return []
+    lead = history.segment_starts[0]
+    head = computed[0].head or MessageTokens(None, None, None)
+    return [head] * lead + [m for seg in computed for m in seg.messages]
 
 
 def summarize_segment(segment: SegmentTokens) -> SegmentSummary:
@@ -384,8 +443,6 @@ def summarize_segment(segment: SegmentTokens) -> SegmentSummary:
     )
 
 
-def summarize_segments(
-    history: FullHistory, closings: Sequence[ClosingRequest | None] = ()
-) -> tuple[SegmentSummary, ...]:
+def summarize_segments(history: FullHistory) -> tuple[SegmentSummary, ...]:
     """Per-segment totals of a stitched history."""
-    return tuple(summarize_segment(s) for s in history_segment_tokens(history, closings))
+    return tuple(summarize_segment(s) for s in history_segment_tokens(history))

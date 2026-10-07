@@ -48,6 +48,7 @@ from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.agents.history.closing_request import METADATA_KEY, ClosingRequest
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.db import Database
 from base.db.transaction import async_write_transaction
@@ -359,11 +360,16 @@ class FullHistory(NamedTuple):
     snapshot had none); `segment_starts[k]` is the index in `messages` of
     segment k's first body message, so the body is
     `messages[segment_starts[k]:segment_starts[k + 1]]`.
+
+    `segment_closings[k]` is the compaction LLM call that read segment k whole when it was
+    sealed (`ClosingRequest`), None where the compaction left no anchor; empty for a history
+    read without boundaries.
     """
 
     messages: list[BaseMessage]
     segment_heads: tuple[SystemMessage | None, ...]
     segment_starts: tuple[int, ...]
+    segment_closings: tuple[ClosingRequest | None, ...] = ()
 
 
 def load_checkpoint_messages_full(db: Database, agent_id: int) -> list[BaseMessage]:
@@ -412,12 +418,12 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
             reconstruct_delta_messages(saver, latest_tuple)
             latest = latest_tuple.checkpoint
             boundaries = cast(
-                list[dict[str, str]],
+                list[dict[str, Any]],
                 conn.execute(
-                    "SELECT checkpoint_id FROM checkpoints"
+                    "SELECT checkpoint_id, metadata -> %s::text AS anchor FROM checkpoints"
                     " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
                     " ORDER BY checkpoint_id ASC",
-                    (str(agent_id),),
+                    (METADATA_KEY, str(agent_id)),
                 ).fetchall(),
             )
             if not boundaries:
@@ -464,7 +470,13 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
         heads.append(head)
         starts.append(len(full_history))
         full_history.extend(remainder)
-    return FullHistory(full_history, tuple(heads), tuple(starts))
+    return FullHistory(full_history, tuple(heads), tuple(starts), _closings(boundaries, len(heads)))
+
+
+def _closings(boundaries: list[dict[str, Any]], segments: int) -> tuple[ClosingRequest | None, ...]:
+    """Each segment's closing request from its boundary's metadata; the open segment has none."""
+    closings = [ClosingRequest.from_metadata(row.get("anchor")) for row in boundaries]
+    return tuple(closings + [None] * (segments - len(closings)))
 
 
 def load_checkpoint_messages_by_trace(

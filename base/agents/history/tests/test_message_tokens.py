@@ -5,11 +5,13 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from base.agents.history.checkpoint import FullHistory, single_segment_history
+from base.agents.history.closing_request import ClosingRequest
 from base.agents.history.message_tokens import (
-    ClosingRequest,
     MessageTokens,
+    ModelSwitch,
     PartTokens,
     ai_message_parts,
+    context_through,
     history_message_tokens,
     history_segment_tokens,
     segment_tokens,
@@ -17,7 +19,7 @@ from base.agents.history.message_tokens import (
     summarize_segments,
     total_of,
 )
-from base.agents.messages.text_chars import estimate_message_tokens
+from base.agents.messages.token_estimate import estimate_message_tokens
 
 
 def _est(msg: BaseMessage) -> int:
@@ -138,7 +140,45 @@ def test_negative_everywhere_reanchors_the_whole_context() -> None:
     assert seg.messages[3] == MessageTokens(1000 - 900 - 20, None, "exact")
 
 
-def test_model_switch_reanchors_the_context_before_the_new_model_request() -> None:
+def test_model_switch_keeps_the_values_messages_were_read_with() -> None:
+    t1, t2 = _tool(400, "1"), _tool(40, "2")
+    body = [
+        _ai("a", inp=1000, out=50, model="m1"),
+        t1,
+        _ai("b", inp=5000, out=20, model="m2"),
+        t2,
+        _ai("c", inp=5300, out=10, model="m2"),
+    ]
+    seg = segment_tokens(None, body)
+    # t1 was first read by the m2 request: an estimated share of its whole-context input.
+    assert seg.messages[0] == MessageTokens(50, 50, "exact")  # a keeps its own output
+    assert seg.messages[1].source == "estimated"
+    want = (
+        5000
+        * estimate_message_tokens(t1)
+        / (estimate_message_tokens(body[0]) + estimate_message_tokens(t1))
+    )
+    assert abs((seg.messages[1].context_tokens or 0) - want) <= 1
+    # After the switch, intervals subtract as usual.
+    assert seg.messages[3] == MessageTokens(5300 - 5000 - 20, None, "exact")
+    assert seg.switches == (ModelSwitch(2, 5000),)
+
+
+def test_context_before_a_switch_is_unchanged() -> None:
+    body = [
+        _ai("a", inp=1000, out=50, model="m1"),
+        _tool(400, "1"),
+        _ai("b", inp=1300, out=20, model="m1"),
+        _tool(40, "2"),
+        _ai("c", inp=9000, out=10, model="m2"),
+    ]
+    seg = segment_tokens(SYS, body)
+    head_rec, records = context_through(SYS, body, seg, 2)  # the m1 request `b`
+    assert head_rec == seg.head
+    assert records == list(seg.messages[:2])
+
+
+def test_context_after_a_switch_resplits_the_earlier_messages_by_the_new_total() -> None:
     body = [
         _ai("a", inp=1000, out=50, model="m1"),
         _tool(400, "1"),
@@ -147,9 +187,12 @@ def test_model_switch_reanchors_the_context_before_the_new_model_request() -> No
         _ai("c", inp=5300, out=10, model="m2"),
     ]
     seg = segment_tokens(None, body)
-    assert sum(m.context_tokens or 0 for m in seg.messages[0:2]) == 5000
-    assert seg.messages[0].source == seg.messages[1].source == "estimated"
-    assert seg.messages[3] == MessageTokens(5300 - 5000 - 20, None, "exact")
+    _, records = context_through(None, body, seg, 4)  # the request `c`
+    assert sum(r.context_tokens or 0 for r in records[:2]) == 5000
+    assert {r.source for r in records[:2]} == {"estimated"}
+    # Messages from the switch on keep their values, so the context sums to c's input.
+    assert sum(r.context_tokens or 0 for r in records) == 5300
+    assert records[0].generation_tokens == 50
 
 
 def test_same_model_keeps_exact() -> None:
@@ -247,8 +290,10 @@ def test_stitched_history_restarts_anchor_at_each_segment() -> None:
         _ai("c", inp=950, out=5),
     ]
     head0, head1 = SystemMessage(content="x" * 400), SystemMessage(content="y" * 400)
-    history = FullHistory([*seg0, *seg1], (head0, head1), (0, 2))
-    segs = history_segment_tokens(history, [ClosingRequest(input_tokens=700), None])
+    history = FullHistory(
+        [*seg0, *seg1], (head0, head1), (0, 2), (ClosingRequest(input_tokens=700), None)
+    )
+    segs = history_segment_tokens(history)
     assert len(segs) == 2
     assert segs[0].head is not None and segs[1].head is not None
     assert (segs[0].head.context_tokens or 0) + _ctx(segs[0].messages, 0, 1) == 500
@@ -285,7 +330,9 @@ def test_segment_summary_carries_the_marker_and_unread_count() -> None:
     (summary,) = summarize_segments(open_tail)
     assert summary.unread_messages == 1
     assert summary.context_tokens == 5
-    (sealed,) = summarize_segments(open_tail, [ClosingRequest(input_tokens=900)])
+    (sealed,) = summarize_segments(
+        open_tail._replace(segment_closings=(ClosingRequest(input_tokens=900),))
+    )
     assert sealed.unread_messages == 0
     assert sealed.context_tokens == 900 - 500  # the AI's 5 plus the 395 the closing request adds
 

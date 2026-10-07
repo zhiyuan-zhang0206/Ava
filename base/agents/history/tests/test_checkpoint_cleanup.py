@@ -32,6 +32,7 @@ from base.agents.history.checkpoint_cleanup import (
     mark_compact_boundary,
     trim_checkpoints,
 )
+from base.agents.history.closing_request import ClosingRequest
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
@@ -358,6 +359,35 @@ async def test_mark_compact_boundary_stamps_newest(aops_pool: AsyncConnectionPoo
         rows = await cur.fetchall()
     stamped = [r[0] for r in rows if (r[1] or {}).get("compact_boundary")]
     assert stamped == [ids[-1]]  # exactly the newest, stamped once
+
+
+async def test_mark_compact_boundary_records_the_closing_request(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """The compaction LLM call's input size, model and instruction size ride in the boundary's
+    metadata; a stamp without one leaves no anchor."""
+    ids = await _put_turns(aops_pool, "1", 3)
+    closing = ClosingRequest(input_tokens=4321, extra_tokens=77, model="m1")
+    assert await mark_compact_boundary(aops_pool, "1", closing=closing) == ids[-1]
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT metadata FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",
+            ("1", ids[-1]),
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0]["compact_boundary"] is True
+    assert ClosingRequest.from_metadata(row[0]["compact_anchor"]) == closing
+
+    other = await _put_turns(aops_pool, "2", 2)
+    await mark_compact_boundary(aops_pool, "2")
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT metadata FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",
+            ("2", other[-1]),
+        )
+        row = await cur.fetchone()
+    assert row is not None and "compact_anchor" not in row[0]
 
 
 async def test_trim_keeps_compaction_boundary(aops_pool: AsyncConnectionPool) -> None:

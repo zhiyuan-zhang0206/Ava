@@ -12,7 +12,7 @@
   "sections": "System prompt sections",
   "expand": "Expand {target}",
   "collapse": "Collapse {target}",
-  "estimateNote": "* Total is an estimate",
+  "estimatedSuffix": "(estimated)",
   "categories": {
     "system_prompt": "System prompt",
     "compact_summary": "Compact summary",

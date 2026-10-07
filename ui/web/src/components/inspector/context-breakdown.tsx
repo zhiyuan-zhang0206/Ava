@@ -315,12 +315,10 @@ function BreakdownContent({
   categoryHighlight?: CategoryHighlight;
 }) {
   const t = useTranslations("contextBreakdown");
-  // The anchor the percentages are relative to: the provider truth when a call
-  // has run, else the chars/4 estimate.
-  const total = data.total_input_tokens > 0 ? data.total_input_tokens : data.estimated_total;
-  // The estimate footnote covers the whole card and only renders while the
-  // anchor is the chars/4 fallback (P4-5 review ruling).
-  const isEstimate = !(data.total_input_tokens > 0);
+  // The anchor the percentages are relative to: the real/anchored input total
+  // (0 while no LLM request has run).
+  const total = data.total_input_tokens;
+  const estimatedSuffix = (estimated: boolean) => (estimated ? ` ${t("estimatedSuffix")}` : "");
   const categoryName = (kind: string) => {
     const messageKey = CATEGORY_MESSAGE_KEY[kind];
     return messageKey ? t(messageKey as Parameters<typeof t>[0]) : kind;
@@ -332,17 +330,19 @@ function BreakdownContent({
   // two kinds, only the legend merges them. The merged row participates in the
   // share sort like any other — descending, stable, so equal shares keep the
   // backend's canonical CATEGORY_ORDER.
-  const categories: { key: string; tokens: number }[] = [];
+  const categories: { key: string; tokens: number; estimated: boolean }[] = [];
   let systemNotesTokens = 0;
+  let systemNotesEstimated = false;
   for (const c of data.categories) {
     if (c.kind === "context_note" || c.kind === "automation") {
       systemNotesTokens += c.tokens;
+      systemNotesEstimated ||= c.estimated;
     } else {
-      categories.push({ key: c.kind, tokens: c.tokens });
+      categories.push({ key: c.kind, tokens: c.tokens, estimated: c.estimated });
     }
   }
   if (systemNotesTokens > 0) {
-    categories.push({ key: "system_notes", tokens: systemNotesTokens });
+    categories.push({ key: "system_notes", tokens: systemNotesTokens, estimated: systemNotesEstimated });
   }
   categories.sort((a, b) => b.tokens - a.tokens);
   // Thresholds come from the response itself (the endpoint mirrors the
@@ -370,6 +370,7 @@ function BreakdownContent({
           {formatTokens(total)}
           {data.max_input_tokens > 0 ? ` / ${formatTokens(data.max_input_tokens)}` : ""}{" "}
           {t("tokensUnit")}
+          {estimatedSuffix(data.estimated)}
         </span>
         {hasThresholds ? (
           <span className="block">
@@ -393,6 +394,7 @@ function BreakdownContent({
               <span className={cn("truncate", FLEX_1, "text-left")}>{categoryName(c.key)}</span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
                 {formatTokens(c.tokens)}
+                {estimatedSuffix(c.estimated)}
                 {total > 0 ? ` · ${((c.tokens / total) * 100).toFixed(2)}%` : ""}
               </span>
             </>
@@ -451,14 +453,6 @@ function BreakdownContent({
           </div>
           {sectionsOpen ? <SectionRows nodes={data.sections} depth={0} /> : null}
         </div>
-      ) : null}
-
-      {/* One footnote covers the whole card — only while the anchor is the
-          chars/4 estimate (no provider truth). */}
-      {isEstimate ? (
-        <p className="text-muted-foreground text-xs" data-testid="context-breakdown-estimate-note">
-          {t("estimateNote")}
-        </p>
       ) : null}
     </div>
   );
