@@ -130,4 +130,4 @@ standard gateway authentication, returns `expired` or `not_open`, and returns
   observed input-token ratio. It is a pure one-read view in
   `gateway/agents/context_breakdown.py`.
 
-System-note receipt and retry semantics: [[system-note.ava.okf.md]].
+Receipt and retry contracts: [[system-note.ava.okf.md]], [[launch-retry.ava.okf.md]].
