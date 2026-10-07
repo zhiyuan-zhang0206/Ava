@@ -1,5 +1,3 @@
 {
-  "ambient_state": {
-    "base/daemon/health.py::ambient-container:_warned_windows_8106": 1
-  }
+  "ambient_state": {}
 }

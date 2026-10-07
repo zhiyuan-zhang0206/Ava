@@ -70,7 +70,6 @@ _RUNNING_JOB = """gui/501/com.ava.test.f5-lwcr-stub = {
 @pytest.fixture(autouse=True)
 def _macos_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hc, "IS_MACOS", True)
-    monkeypatch.setattr(hc, "_reported_unhealthy", False)
 
 
 class _Recorder:
@@ -201,12 +200,13 @@ def test_ping_alive_short_circuits_to_healthy() -> None:
 def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
     from base.daemon.health import DaemonProbe
 
+    report = hc.episode_reporter()
     bad = DaemonProbe.down("lwcr-stuck; needs LWCR update")
-    hc.report(bad)
-    hc.report(bad)
+    report(bad)
+    report(bad)
     assert len(recorder.events("permissions_helper_unhealthy")) == 1
-    hc.report(DaemonProbe.up("ping answered"))
-    hc.report(bad)
+    report(DaemonProbe.up("ping answered"))
+    report(bad)
     assert len(recorder.events("permissions_helper_unhealthy")) == 2
     assert not hasattr(hc, "repair_unresponsive_helper")
     assert not hasattr(hc, "main")
@@ -281,3 +281,18 @@ def test_connected_helper_peer_must_be_root_native_parent(
     monkeypatch.setattr("base.native_process.root_control.client.peer_pid", _fake_peer_pid)
     with pytest.raises(hc._ParentEvidenceError, match="not the captured root parent"):
         hc._helper_parent(cast(socket.socket, object()))
+
+
+def test_episode_reporting_memory_is_local_to_each_diagnostic(recorder: _Recorder) -> None:
+    from base.daemon.health import DaemonProbe
+
+    first = hc.episode_reporter()
+    second = hc.episode_reporter()
+    bad = DaemonProbe.down("spawn-failed; helper unavailable")
+    first(bad)
+    second(bad)
+    assert len(recorder.events("permissions_helper_unhealthy")) == 2
+    first(DaemonProbe.up("ping answered"))
+    first(bad)
+    second(bad)
+    assert len(recorder.events("permissions_helper_unhealthy")) == 3
