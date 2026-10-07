@@ -89,11 +89,22 @@ def _wait_counts(pages: list[Page], expected: list[int], what: str, *, sorted_co
 
 
 def _assert_requests(pages: list[Page], requests: dict[Page, list[str]]) -> None:
-    for channel in _CHANNEL_PATHS.values():
-        assert sum(requests[page].count(channel) for page in pages) == 1, (
-            channel,
-            {index: requests[page] for index, page in enumerate(pages)},
-        )
+    def delivered() -> tuple[bool, object]:
+        # Constructors are synchronous; Playwright dispatches request events later.
+        for page in pages:
+            page.evaluate("() => 1")
+        observed = {
+            channel: sum(requests[page].count(channel) for page in pages)
+            for channel in _CHANNEL_PATHS.values()
+        }
+        for channel, count in observed.items():
+            assert count <= 1, (
+                channel,
+                {index: requests[page] for index, page in enumerate(pages)},
+            )
+        return all(count == 1 for count in observed.values()), observed
+
+    poll_until(delivered, timeout=15.0, interval=0.1, what="one request per SSE channel")
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_terminate:build")
@@ -129,9 +140,7 @@ def test_without_web_locks_keeps_per_page_streams_and_navigation(e2e_env: E2EEnv
     pages = _open_pages(e2e_env, requests, without_locks=True, count=2)
     _wait_counts(pages, [3, 3], "two independent fallback stream sets", sorted_counts=False)
     for page in pages:
-        assert requests[page].count("system") == 1
-        assert requests[page].count("alerts") == 1
-        assert requests[page].count("systemAll") == 1
+        _assert_requests([page], requests)
 
     navigated = pages[0]
     navigated.get_by_role("button", name="Fleet").first.click()
