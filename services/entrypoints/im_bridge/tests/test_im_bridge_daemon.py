@@ -77,6 +77,7 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
         **_kwargs: Any,
     ) -> _FakeServer:
         assert liveness is not None
+        created_cores[-1].notice_bridge.initialize_poll.assert_called_once()
         captured.append(liveness)
         send_auth.append(auth_digests)
         return _FakeServer()
@@ -101,7 +102,8 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
             self.outbox_replay_started = False
             from unittest.mock import MagicMock
 
-            self.timeline_worker = MagicMock()
+            self.outbound_worker = MagicMock()
+            self.notice_bridge = MagicMock()
             created_cores.append(self)
 
         async def restore_subscriptions(self) -> None:

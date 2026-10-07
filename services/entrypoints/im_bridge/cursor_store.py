@@ -1,7 +1,7 @@
 """Durable im-bridge cursors in Postgres (`im_bridge_cursors`).
 
 Two positions that used to live in process memory, so a restart lost them: the
-push acceptance watermark and Feishu's inbound poll cursor. TimelineOutboxStore
+push acceptance watermark and Feishu's inbound poll cursor. IMOutboxStore
 owns live push acceptance and chat selection in the same cursor row; this
 compatibility owner reads positions and seeds legacy fixtures. The daemon owns
 the pool. Feishu's independent inbound poll contract remains unchanged.

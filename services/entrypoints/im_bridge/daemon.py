@@ -199,7 +199,7 @@ async def _notice_loop(core: Any) -> None:
 
 async def _timeline_outbound_loop(core: Any) -> None:
     """One service-owned dispatcher and periodic committed-tail wakeup."""
-    core.timeline_worker.validate_pool()
+    core.outbound_worker.validate_pool()
     while True:
         if not admission.quiesced():
             try:
@@ -261,6 +261,7 @@ async def run() -> None:
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint()
     try:
+        await asyncio.to_thread(core.notice_bridge.initialize_poll)
         health = await start_health_server(
             "im_bridge",
             endpoint.health_port,
@@ -271,6 +272,7 @@ async def run() -> None:
             auth_digests=daemon_acceptance(),
         )
     except Exception:
+        db_pool.close()
         _remove_pidfile()
         raise
     _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)
@@ -294,7 +296,7 @@ async def run() -> None:
             loops.create_task(_contained(_notice_loop(core), "notice loop"))
             await asyncio.gather(*(a.start() for a in adapters))
             if adapters:
-                core.timeline_worker.validate_pool()
+                core.outbound_worker.validate_pool()
                 loops.create_task(_timeline_outbound_loop(core))
             # Every adapter's start() returns once its connection loop is launched
             # (long polls / ws threads run in the background). The daemon now stays

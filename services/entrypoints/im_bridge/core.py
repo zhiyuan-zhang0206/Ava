@@ -1,6 +1,6 @@
 """IM Bridge command routing, chat selection and committed timeline acceptance.
 
-Channel adapters own provider rendering; the timeline outbox owns delivery.
+Channel adapters own provider rendering; the IM outbox owns durable delivery.
 """
 
 from __future__ import annotations
@@ -23,14 +23,14 @@ from services.entrypoints.im_bridge.cursor_store import (
     item_key as _item_key,
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
-from services.entrypoints.im_bridge.outbound_store import TimelineOutboxStore
+from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound_types import (
+    OutboundIntent,
     TimelineAcceptance,
     TimelineCandidate,
-    TimelineIntent,
     timeline_source,
 )
-from services.entrypoints.im_bridge.outbound_worker import TimelineOutboxWorker
+from services.entrypoints.im_bridge.outbound_worker import IMOutboxWorker
 from services.entrypoints.im_bridge.spawn_menu import SpawnMenuMixin
 from services.entrypoints.im_bridge.state import (
     _load_outbox,
@@ -95,10 +95,10 @@ class IMBridgeCore(SpawnMenuMixin):
         self.config = config
         self.gateway = gateway
         self.cursor_store = CursorStore(db_pool)
-        self.timeline_outbox = TimelineOutboxStore(db_pool)
+        self.outbound_store = IMOutboxStore(db_pool)
         self.notice_bridge = notice_bridge.NoticeBridge(self, config, db_pool=db_pool)
         self.adapters: dict[str, IMAdapter] = {}
-        self.timeline_worker = TimelineOutboxWorker(self.timeline_outbox, self.adapters)
+        self.outbound_worker = IMOutboxWorker(self.outbound_store, self.adapters)
         self.chats: dict[tuple[str, str], ChatState] = {}
         self._selection_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
@@ -401,9 +401,9 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _sync_selection(self, state: ChatState) -> int | None:
         if admission.quiesced():
             raise RuntimeError("IM selection is held during maintenance")
-        account = await self.adapters[state.channel].timeline_account_id()
+        account = await self.adapters[state.channel].outbound_account_id()
         selected = await asyncio.to_thread(
-            self.timeline_outbox.selection,
+            self.outbound_store.selection,
             state.channel,
             account,
             state.chat_id,
@@ -422,9 +422,9 @@ class IMBridgeCore(SpawnMenuMixin):
         if admission.quiesced():
             raise RuntimeError("IM switch acceptance is held during maintenance")
         replay_id = replay_id or uuid.uuid4().hex
-        account = await self.adapters[state.channel].timeline_account_id()
+        account = await self.adapters[state.channel].outbound_account_id()
         recovered = await asyncio.to_thread(
-            self.timeline_outbox.lookup_replay,
+            self.outbound_store.lookup_replay,
             state.channel,
             account,
             state.chat_id,
@@ -483,9 +483,9 @@ class IMBridgeCore(SpawnMenuMixin):
             return Reply(copy.NO_AGENT_SWITCHED)
         a = await self.gateway.get_agent(state.current_agent_id)
         if a is None:
-            account = await self.adapters[state.channel].timeline_account_id()
+            account = await self.adapters[state.channel].outbound_account_id()
             await asyncio.to_thread(
-                self.timeline_outbox.clear_selection,
+                self.outbound_store.clear_selection,
                 state.channel,
                 account,
                 state.chat_id,
@@ -612,7 +612,7 @@ class IMBridgeCore(SpawnMenuMixin):
             for channel, separator, chat in [key.partition(":")]
             if separator and channel and chat
         }
-        candidates = await asyncio.to_thread(self.timeline_outbox.restore_candidates, legacy)
+        candidates = await asyncio.to_thread(self.outbound_store.restore_candidates, legacy)
         for (channel, chat_id), agent_id in candidates.items():
             if channel not in self.adapters or channel in self._disabled_channels:
                 continue
@@ -727,14 +727,14 @@ class IMBridgeCore(SpawnMenuMixin):
         if admission.quiesced():
             return TimelineAcceptance((), None, blocked=True)
         adapter = self.adapters[state.channel]
-        account = await adapter.timeline_account_id()
+        account = await adapter.outbound_account_id()
         candidates: list[TimelineCandidate] = []
         for item in items:
             source = timeline_source(item)
             intent = None
             if source is not None:
                 prepared = await adapter.prepare_timeline(_render_item(item, agent_id))
-                intent = TimelineIntent(
+                intent = OutboundIntent(
                     channel=state.channel,
                     chat_id=state.chat_id,
                     agent_id=agent_id,
@@ -744,7 +744,7 @@ class IMBridgeCore(SpawnMenuMixin):
                 )
             candidates.append(TimelineCandidate(item, intent))
         acceptance = await asyncio.to_thread(
-            self.timeline_outbox.accept,
+            self.outbound_store.accept,
             state.channel,
             account,
             state.chat_id,
@@ -773,7 +773,7 @@ class IMBridgeCore(SpawnMenuMixin):
                     state.channel,
                     type(exc).__name__,
                 )
-        await self.timeline_worker.run_once()
+        await self.outbound_worker.run_once()
 
 
 def _truncate(text: str, limit: int) -> str:

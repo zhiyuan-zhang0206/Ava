@@ -53,5 +53,5 @@ async def test_timeline_acceptance_and_dispatch_loop_hold_during_maintenance(
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-    core.timeline_worker.validate_pool.assert_called_once()
+    core.outbound_worker.validate_pool.assert_called_once()
     assert core.poll_timeline_outbound.called is (not quiesced)
