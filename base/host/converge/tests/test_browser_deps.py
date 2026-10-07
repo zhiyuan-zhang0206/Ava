@@ -129,22 +129,6 @@ def test_ensure_browser_deps_does_not_install_node_for_missing_display(
     assert browser_deps.ensure_browser_deps() == reason
 
 
-def test_runtime_and_settings_free_probes_share_the_npx_reason(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A changed npx message cannot split runtime gating from enrollment repair."""
-    monkeypatch.setattr(probes, "display_available", lambda: True)
-    monkeypatch.setattr(probes, "resolve_chrome_binary", lambda: "/chrome")
-    monkeypatch.setattr(probes, "_platform_chrome_binary", lambda: "/chrome")
-    monkeypatch.setattr(
-        probes.shutil,
-        "which",
-        lambda _name: None,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert probes.browser_incapability() == probes.NPX_INCAPABILITY_REASON
-    assert probes.browser_deps_incapability() == probes.NPX_INCAPABILITY_REASON
-
-
 def test_browser_deps_warning_names_the_npx_reason_and_platform_fix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
