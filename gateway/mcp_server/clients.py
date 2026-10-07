@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from enum import StrEnum
 from typing import Any
 
 import psycopg
+from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base.db.transaction import write_transaction
+
+
+class McpClientScope(StrEnum):
+    """Supported credential privileges; stored and wire values remain stable."""
+
+    READ = "read"
+    WRITE = "write"
 
 
 def _token_hash(token: str) -> str:
@@ -19,19 +28,31 @@ def _token_hash(token: str) -> str:
 
 def create_client(pool: ConnectionPool[Any], name: str, scope: str) -> tuple[int, str]:
     """Create a client and return its id plus the plaintext token shown once."""
-    token = secrets.token_urlsafe(32)
     try:
-        with write_transaction(pool) as conn, conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO mcp_clients (name, token_hash, scope) "
-                "VALUES (%s, %s, %s) RETURNING id",
-                (name, _token_hash(token), scope),
-            )
-            row = cur.fetchone()
-            assert row is not None  # noqa: S101 — INSERT ... RETURNING always yields a row
+        with write_transaction(pool) as conn:
+            row, token = create_client_in_transaction(conn, name, scope)
     except psycopg.errors.UniqueViolation as exc:
         raise ValueError(f"MCP client named {name!r} already exists") from exc
-    return int(row[0]), token
+    return int(row["id"]), token
+
+
+def create_client_in_transaction(
+    conn: psycopg.Connection, name: str, scope: str
+) -> tuple[dict[str, Any], str]:
+    """Insert a credential inside the caller's transaction; never commit or log its token."""
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise RuntimeError("MCP credential creation requires an active transaction")
+    scope = McpClientScope(scope)
+    token = secrets.token_urlsafe(32)
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "INSERT INTO mcp_clients (name, token_hash, scope) VALUES (%s,%s,%s) "
+            "RETURNING id, name, scope, created_at",
+            (name, _token_hash(token), scope),
+        )
+        row = cur.fetchone()
+    assert row is not None  # noqa: S101 -- INSERT ... RETURNING always yields a row
+    return row, token
 
 
 def lookup_client_by_token(pool: ConnectionPool[Any], token: str) -> dict[str, Any] | None:

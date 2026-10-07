@@ -233,7 +233,7 @@ def _require_write_scope(tool: str) -> None:
     client = _CURRENT_MCP_CLIENT.get()
     if client is None:
         raise ToolError("authenticated MCP client context is missing")
-    if client["scope"] != "write":
+    if clients.McpClientScope(client["scope"]) != clients.McpClientScope.WRITE:
         raise ToolError(f"tool {tool!r} requires write scope")
 
 
