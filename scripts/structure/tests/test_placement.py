@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from scripts.structure import locality, placement
+from scripts.structure import locality, patch_targets, placement
 from scripts.structure.tests.patch_repo import make_repo, write
 
 
@@ -333,3 +333,42 @@ def test_units_no_contract_or_source_edge_relates_are_ambiguous_and_the_filename
     assert (named.home, named.unit, named.ambiguous) == ("services/beta", "services.beta", True)
     other = _place(root, "tests/test_run_alpha.py", both)
     assert (other.home, other.unit, other.ambiguous) == ("services/alpha", "services.alpha", True)
+
+
+@pytest.mark.parametrize("top", ["schedules", "commands", "demos"])
+def test_runnable_template_paths_have_their_code_owner(root: pathlib.Path, top: str) -> None:
+    write(root, f"{top}/daily-run.py", "from base.net import retry\nretry.backoff()\n")
+    text = (
+        "from pathlib import Path\nfrom base.net import retry\n"
+        f"SOURCE = Path(__file__).resolve().parents[1] / '{top}' / 'daily-run.py'\n"
+        "retry.backoff()\n"
+    )
+    found = _place(root, "tests/test_template.py", text)
+    assert (found.home, found.unit, found.ambiguous) == (top, top, False)
+
+
+@pytest.mark.parametrize("top", ["schedules", "commands", "demos"])
+def test_runnable_imports_have_the_same_home_after_test_moves(root: pathlib.Path, top: str) -> None:
+    write(root, f"{top}/run.py", "def main():\n    return None\n")
+    text = f"from {top} import run\nrun.main()\n"
+    before = _place(root, "tests/test_template.py", text)
+    after = _place(root, f"{top}/tests/test_template.py", text)
+    assert before == after
+    assert (before.home, before.unit) == (top, top)
+
+
+@pytest.mark.parametrize("top", ["schedules", "commands", "demos"])
+def test_runnable_tests_do_not_gain_access_to_dependency_private_names(
+    root: pathlib.Path, top: str
+) -> None:
+    write(root, f"{top}/run.py", "from base.net import retry\n\ndef main():\n    retry.backoff()\n")
+    text = (
+        f"from {top} import run\nfrom base.net import retry\n"
+        "def test_run(monkeypatch):\n"
+        "    monkeypatch.setattr(retry, '_sleep', lambda seconds: None)\n"
+        "    run.main()\n"
+    )
+    rel = f"{top}/tests/test_run.py"
+    result = patch_targets.analyze(rel, text, patch_targets.Classifier(placement.ModuleIndex(root)))
+    assert result.home == top
+    assert patch_targets.violations(rel, result) == {f"{rel}::base.net.retry._sleep": [4]}
