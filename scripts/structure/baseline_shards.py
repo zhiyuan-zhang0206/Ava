@@ -5,8 +5,8 @@ lives in that shard's directory: the entry's directory cut to its first two
 components (`agent/graph` -> `agent.graph.json`, `cli/commands/_x.py` ->
 `cli.commands.json`, `scripts/lint_x.py` -> `scripts.json`). A shard maps
 section names to their entries and omits empty sections. One file per area
-keeps concurrent PRs off each other's lines; an entry filed under the wrong
-shard is an error, so every entry has exactly one home.
+keeps concurrent PRs off each other's lines. Existing entries can stay in their
+original shard when their files move; duplicate section/key pairs are errors.
 
 `rules.json` is not a shard: it names the rule version each section was frozen under
 (`{"patch_targets": 2}`; a section it does not list is at version 1). A change to how a
@@ -69,8 +69,8 @@ def render(shard: dict[str, dict[str, int]]) -> str:
 def merge(texts: dict[str, str], sections: Iterable[str]) -> dict[str, dict[str, int]]:
     """Merge shard texts (name -> JSON) into one baseline carrying every section.
 
-    Raises ValueError on a malformed shard, an unknown section, an entry filed
-    under the wrong shard, or an entry present in two shards.
+    Raises ValueError on a malformed shard, an unknown section, or an entry
+    present in two shards. Shard names do not grant additional permissions.
     """
     merged: dict[str, dict[str, int]] = {kind: {} for kind in sections}
     for name, text in sorted(texts.items()):
@@ -83,10 +83,9 @@ def merge(texts: dict[str, str], sections: Iterable[str]) -> dict[str, dict[str,
             if not isinstance(entries, dict):
                 raise ValueError(f"shard {name}.json section {kind!r} must be an object")  # noqa: TRY004
             for key, count in entries.items():
-                home = shard_of(kind, key)
-                if home != name:
+                if key in merged[kind]:
                     raise ValueError(
-                        f"shard {name}.json holds {kind} entry {key!r}, which belongs in {home}.json"
+                        f"shard {name}.json duplicates {kind} entry {key!r} from another shard"
                     )
                 merged[kind][key] = count
     return merged

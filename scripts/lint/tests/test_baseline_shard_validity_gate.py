@@ -1,5 +1,5 @@
 """Gate-level coverage for malformed or missing scripts/structure/baseline/
-shards, through lcs.main(): a malformed or misfiled shard is an actionable
+shards, through lcs.main(): a malformed or duplicate shard is an actionable
 error, and so is a missing shard directory — its README.md is what keeps git
 tracking it (and comparable as a base revision) even with zero shards, so an
 absent directory can only be an accidental deletion, not a legitimate empty
@@ -84,17 +84,20 @@ def test_malformed_baseline_shard_is_an_actionable_error(
     assert f"{baseline_shards.SHARD_DIR}: invalid baseline" in capsys.readouterr().err
 
 
-def test_baseline_entry_filed_under_the_wrong_shard_is_an_actionable_error(
+def test_duplicate_baseline_entry_across_shards_is_an_actionable_error(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     directory = _clear_baseline_dir(tmp_path)
     (directory / "base.json").write_text(
         json.dumps({"files": {"tests/big.py": 801}}), encoding="utf-8"
     )
+    (directory / "tests.json").write_text(
+        json.dumps({"files": {"tests/big.py": 801}}), encoding="utf-8"
+    )
     assert lcs.main([]) == 1
     captured = capsys.readouterr()
     assert f"{baseline_shards.SHARD_DIR}: invalid baseline" in captured.err
-    assert "belongs in tests.json" in captured.err
+    assert "duplicates files entry 'tests/big.py'" in captured.err
 
 
 def test_missing_baseline_directory_is_an_actionable_error(
