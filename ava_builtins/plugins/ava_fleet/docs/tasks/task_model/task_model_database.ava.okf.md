@@ -13,13 +13,16 @@ tags:
 
 ## Database Mapping
 
-Table name `agent_tasks`, column order corresponds one-to-one with `Task` fields, kept in sync via the `_COLS` constant:
+Table name `agent_tasks`; `base.agents.tasks.model.Task` owns the field order.
+`TASK_COLUMNS` is derived from `dataclasses.fields(Task)`, and the fleet SDK
+retains `_COLS` as a compatibility alias:
 
 ```python
 _COLS = "id, parent_id, title, description, results, status, owner, created_by, created_at, updated_at, remind_interval_seconds, last_reminded_at, reminder_count, priority"
 ```
 
-`_row_to_task(row)` unpacks in this order into `Task(*row)`.
+`task_from_row(row)` renders the established cluster-zone timestamps and unpacks
+in this order into `Task(*row)`. The SDK retains `_row_to_task` as its alias.
 
 ## Parent-Child Task Tree
 

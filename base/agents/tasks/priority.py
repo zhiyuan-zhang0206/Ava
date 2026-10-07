@@ -38,3 +38,25 @@ def validate_priority(priority: str) -> None:
         raise ValueError(
             f"priority must be one of {[p.value for p in Priority]}, got {priority!r}"
         ) from None
+
+
+DEFAULT_PRIORITY = Priority.P2.value
+MAX_REMIND_INTERVAL_SECONDS = 86400
+
+
+def validate_remind_interval_seconds(seconds: int) -> None:
+    """Reject reminders outside the existing positive, at-most-one-day range."""
+    if not 0 < seconds <= MAX_REMIND_INTERVAL_SECONDS:
+        raise ValueError(
+            f"remind_interval_seconds must be a positive number of seconds <= {MAX_REMIND_INTERVAL_SECONDS} "
+            f"(24h) -- reminders cannot be disabled, got {seconds!r}"
+        )
+
+
+def resolve_create_args(remind_interval_seconds: int | None, priority: str) -> tuple[int, str]:
+    """Resolve the priority default only for a fresh task creation."""
+    validate_priority(priority)
+    if remind_interval_seconds is None:
+        remind_interval_seconds = DEFAULT_REMIND_INTERVAL_SECONDS[Priority(priority)]
+    validate_remind_interval_seconds(remind_interval_seconds)
+    return remind_interval_seconds, priority
