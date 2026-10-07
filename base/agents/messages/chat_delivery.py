@@ -223,7 +223,7 @@ def _insert_chat_inbound_once(
                 target_agent_id=sender_id,
                 attributes={"inbound_id": receipt.inbound_id, "content": content},
             )
-            from base.agents.impersonation_manifest import record_central_event
+            from base.agents.impersonation.manifest import record_central_event
             from base.telemetry.audit_events import record_audit
 
             prepared_event = record_audit(db, record_central_event(db, prepared_event))

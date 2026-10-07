@@ -8,7 +8,7 @@ tags: []
 # Schedule Manager — resident schedule sessions
 
 ## What is it
-The service that supervises the `schedules` table: one session `ava-schedule-<id>` per enabled row, running `gateway.schedule_runner`. It runs once per cluster on the gateway side (`ServiceSpec.capabilities=_GATEWAY`, health port slot `schedule_manager` = 8122) as its own root unit. Stopping or restarting it never touches the HTTP gateway, and the schedule sessions survive it: the next start re-adopts the live ones. The full behavior (state machine, breaker, runner) is in [[gateway/schedules/docs/schedules.ava.okf.md]].
+The service that supervises the `schedules` table: one session `ava-schedule-<id>` per enabled row, running `gateway.schedules.runner`. It runs once per cluster on the gateway side (`ServiceSpec.capabilities=_GATEWAY`, health port slot `schedule_manager` = 8122) as its own root unit. Stopping or restarting it never touches the HTTP gateway, and the schedule sessions survive it: the next start re-adopts the live ones. The full behavior (state machine, breaker, runner) is in [[gateway/schedules/docs/schedules.ava.okf.md]].
 
 ## Loops
 Two resident sequential loops under one `TaskGroup` (`services/wake/schedule_manager/daemon.py`, on `base/daemon/round_loop.py`). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. Each loop reports its own progress to `/healthz`.

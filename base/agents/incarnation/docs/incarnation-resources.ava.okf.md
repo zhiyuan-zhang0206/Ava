@@ -53,14 +53,14 @@ remain unknown and cannot become empty through admission.
 Admission runs under the least-privilege `ava_runner` database identity, which
 holds no write privilege on `deployment_state`.
 
-Managed exec launches the fixed isolated read-only `agent.exec_domain_owner`
+Managed exec launches the fixed isolated read-only `agent.execution.domain_owner`
 entry (`-I -B -X utf8`) behind a permit gate, validates its captured launcher birth and
 direct root, and then registers and attaches the allocation atomically under the
 metadata lock. Only that committed transaction permits user code. Force winning
 before the transaction leaves no database allocation; the host closes the gated
 owner and requires its exact `host_eof` receipt before clearing the in-process
 scope. An ambiguous commit remains unresolved. The root is gated by
-`agent.exec_owner_child`; after the permit it rechecks the reserved request digest
+`agent.execution.owner_child`; after the permit it rechecks the reserved request digest
 and exact request/result paths. Neither child inherits the host's control write
 end. The managed host poll loop publishes pending output incrementally and sends
 keepalives while the owner remains live; completion flushes only the unpublished

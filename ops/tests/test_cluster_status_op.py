@@ -1,4 +1,4 @@
-"""`ops.cluster.cluster_status_op` returns the status snapshot of its pool."""
+"""`ops.cluster.operations.cluster_status_op` returns the status snapshot of its pool."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 
 from base.db import Database
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
-from ops import cluster
+from ops.cluster import operations as cluster
 
 
 def test_cluster_status_op_returns_snapshot(

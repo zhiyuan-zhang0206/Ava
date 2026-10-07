@@ -68,7 +68,7 @@ from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import ClusterStatus
 
 _log = logging.getLogger("services.wake.heartbeat.liveness")

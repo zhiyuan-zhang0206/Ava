@@ -295,13 +295,13 @@ def _resolve_module_file(name: str) -> Path | None:
 
 # Import edges the closure walk does not follow because the importing function never runs in a
 # gateway process: (importing file, imported module) -> (function holding the import, why). Narrow
-# on purpose: one edge, one function. `ava/_settings.py` reaches `ava.shell.sessions` (and through
+# on purpose: one edge, one function. `ava/sdk_surface/settings.py` reaches `ava.shell.sessions` (and through
 # it ava.security's `settings.agent` read) only inside `shell_sessions()`. The gateway reaches
-# `ava._settings` solely because `ava.skills` imports it to record `skill_invoked`, which the
+# `ava.sdk_surface.settings` solely because `ava.skills` imports it to record `skill_invoked`, which the
 # gateway never does (it imports `ava.skills.composer_commands` for /api/commands). Pinned below:
 # the import must still sit in that function and no gateway-side source may name the function.
 _GATEWAY_UNREACHABLE_EDGES: dict[tuple[str, str], tuple[str, str]] = {
-    ("ava/_settings.py", "ava.shell.sessions"): (
+    ("ava/sdk_surface/settings.py", "ava.shell.sessions"): (
         "shell_sessions",
         "agent-process shell sessions; the gateway never asks for an agent's shell",
     ),

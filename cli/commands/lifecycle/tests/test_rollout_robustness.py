@@ -106,7 +106,7 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
     monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: None)
     unpaused: list[bool] = []
     monkeypatch.setattr(
-        "ops.cluster_pause.unpause_local_cluster",
+        "ops.cluster.pause.unpause_local_cluster",
         lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -133,7 +133,7 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
     monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: held)
     unpaused: list[bool] = []
     monkeypatch.setattr(
-        "ops.cluster_pause.unpause_local_cluster",
+        "ops.cluster.pause.unpause_local_cluster",
         lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
     )
 

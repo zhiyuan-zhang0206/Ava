@@ -14,7 +14,7 @@ from base.lm.attach import (
     AttachEntry,
     pack_attachments,
 )
-from base.lm.attach_constants import (
+from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_FILES_PER_TURN,
     ATTACH_MAX_TOTAL_BYTES,

@@ -43,7 +43,7 @@ blocks with signature, echoed transparently) — ChatAnthropic handles it out
 of the box, bypassing the broken reasoning_content roundtrip entirely.
 
 Adding a provider means adding a `provider.py` beside a plugin's `plugin.py`
-(`base/lm/model-providers-as-plugins.md`; contract in
+(`base/lm/docs/model-providers-as-plugins.md`; contract in
 `base/lm/provider_api.py`, loaded by `base/lm/plugin_providers.py`).
 
 **`max_tokens` + reasoning effort dispatching** — per-model facts (output caps,

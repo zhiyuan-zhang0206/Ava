@@ -1,6 +1,6 @@
 # The only modules here that may call `ServiceEndpoints.from_settings()`; the rest takes its
 # daemon's `ServiceEndpoint` (or the table) from them.
-endpoints = ["alerts.py"]
+endpoints = ["alerts/__init__.py"]
 
 # The only modules here that may build the `db` handle from the live settings; the rest takes it
 # from them.

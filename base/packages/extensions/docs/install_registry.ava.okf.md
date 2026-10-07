@@ -52,7 +52,7 @@ lazy-migration shim is retired — every writer has been v2-only since #2355),
 and a file carrying a *newer* version is refused as before — no build guesses
 at another shape; `load()` itself never writes.
 The surface over all of it: `ava packages status`
-([[../../../../cli/commands/extensions/docs/packages.ava.okf.md|the package commands]]).
+([[../../../../cli/commands/extensions/packages/docs/packages.ava.okf.md|the package commands]]).
 
 ## Trust tiers
 
@@ -139,7 +139,7 @@ projects.
 
 ## Key Dependencies
 
-- [[cli/commands/extensions/docs/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` operator surface
+- [[cli/commands/extensions/packages/docs/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` operator surface
 - [[enable_config.ava.okf.md]] — the sibling per-machine plugin enable config
 - [[okf/skills/skills.ava.okf.md|Skills]] — what a skill is and how the scanner loads one
 - [[okf/mcps/mcps.ava.okf.md|MCP integration]] — MCP server merge layers and launch form

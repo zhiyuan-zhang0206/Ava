@@ -94,9 +94,9 @@ def _watchers_dir() -> _pl.Path:
 
 
 def _agent_id() -> int:
-    import ava.agent_identity
+    import ava.sdk_surface.agent_identity
 
-    return ava.agent_identity.require_agent_id()
+    return ava.sdk_surface.agent_identity.require_agent_id()
 
 
 _SCRIPT_FILE_RE = _re.compile(r"^watcher_(\d+)\.py$")
@@ -161,7 +161,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     generated code and the id is the agent's own, so nothing sensitive leaks.
     Overwrite, not setdefault: the watcher belongs to the spawning agent, so
     a stale env value (e.g. a parent-shell id accidentally forwarded) must
-    not win. ``ava.agent_identity`` then lazily establishes identity from the env var
+    not win. ``ava.sdk_surface.agent_identity`` then lazily establishes identity from the env var
     on first use (``owns_loop=False``).
 
     Plugin namespaces are loaded explicitly (``ava.ensure_plugins_loaded()``)

@@ -370,7 +370,7 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   private file the gateway home's start writes. A remote-managed data plane keeps the human secret
   (it issues no token), in `daemon_acceptance` and `gateway_bearer` only.
 - **Root-local bundles**: a root may gather what it wires into a frozen dataclass marked
-  `base.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
+  `base.config.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
   its defining module, so the bundle stays a local variable of the root and never becomes a
   parameter type (a function handed the whole bundle can reach any member).
 - **Not yet**: the agent-side per-turn slices carried in `AvaContext`.

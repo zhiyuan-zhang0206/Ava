@@ -41,7 +41,7 @@ from base.clock import Clock
 from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoints
-from base.telemetry.alerts_copy import (
+from base.telemetry.alerts.copy import (
     ALERT_GROUP_COUNT,
     ALERT_GROUP_MORE,
     ALERT_HEAD,
@@ -433,7 +433,7 @@ def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
     variant. Every severity pushes
     (critical/warning/error — no severity gate).
 
-    Templates live in ``base/telemetry/alerts_copy.py`` — the single source of
+    Templates live in ``base/telemetry/alerts/copy.py`` — the single source of
     user-visible IM copy (governance ruling 2026-08-08; moved down from
     services/entrypoints/im_bridge/copy.py by the 2026-08-25 tech-audit P1 so shared does
     not import up into services). ``lang`` picks the template language

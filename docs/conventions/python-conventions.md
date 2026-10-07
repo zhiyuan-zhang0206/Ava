@@ -31,11 +31,10 @@ siblings is refused by Rule 6 below. Moving implementation into a governed
 package does not make it a public SDK capability; see [SDK and skill ownership](#sdk-and-skill-ownership).
 
 Existing over-limit files are frozen in the structure baseline,
-`scripts/structure/baseline/*.json`: one shard per directory area, named after
-the first two components of the entry's directory (`agent/graph/x.py` lives in
-`agent.graph.json`, `scripts/lint_x.py` in `scripts.json`), so changes to
-unrelated areas edit different files. An entry filed in the wrong shard fails
-the gate. New violations and growth above a frozen value fail the gate. The baseline is
+`scripts/structure/baseline/*.json`: storage shards let unrelated areas edit different files. A module move may
+keep its existing debt in the same shard while updating its path; the storage
+filename does not define ownership. Duplicate section/key entries are refused.
+New violations and growth above a frozen value fail the gate. The baseline is
 shrink-only: a guard compares it with the base revision described below and
 rejects added file entries or raised values. After splitting a file, lower
 its baseline value by hand to its current line count, or remove its entry
@@ -393,7 +392,7 @@ So a name that a test would stub is **reached through the module that owns it**:
 
 ```python
 import base.cluster
-from ops import cluster_pause
+from ops.cluster.operations import pause as cluster_pause
 
 base.cluster.session_name(service)      # not: session_name(...)
 cluster_pause.unpause_local_cluster()     # not: unpause_local_cluster()
@@ -422,7 +421,7 @@ def is_paused():
 ```
 
 Runtime only, on that branch only, and neither ruff nor pyright reports it.
-`ops/cluster_pause.py` was exactly this shape, so its conversion had to hoist
+`ops/cluster/pause.py` was exactly this shape, so its conversion had to hoist
 `import base.db` to module level first. Hit blind, it reads as the whole approach
 being unworkable rather than as one import in the wrong place. A function-local
 `from base.x import y` is safe — it binds `y`, not `base`.

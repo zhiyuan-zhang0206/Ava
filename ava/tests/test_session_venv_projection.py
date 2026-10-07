@@ -96,7 +96,7 @@ def test_watcher_override_reaches_backend_without_changing_generic_sessions(
     monkeypatch.setattr(sessions, "workspace_dir", workspace_for_test)
     monkeypatch.setattr(sessions, "repo_root", lambda: tmp_path / "checkout")
     backend = _CapturingBackend()
-    monkeypatch.setattr("ava._settings.shell_sessions", lambda: _handle(backend))
+    monkeypatch.setattr("ava.sdk_surface.settings.shell_sessions", lambda: _handle(backend))
 
     class _CapturedSessionError(RuntimeError):
         pass

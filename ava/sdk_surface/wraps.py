@@ -102,7 +102,7 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
     import keeps this leaf free of an `ava -> shared` load-order dependency; the emit path
     itself swallows its own failures."""
     try:
-        from ava import _settings
+        from ava.sdk_surface import settings as _settings
         from base.packages.plugins import activation
 
         model = _settings.agent_setting("llm_model")

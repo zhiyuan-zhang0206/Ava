@@ -307,7 +307,8 @@ def _exec_watcher(
     with fakes before exec — the template itself stays untouched. `_wake`'s delivery
     is stubbed through ava.gateway_client; pass `send` to script a failing stub
     (the wake-retry tests, task #3525)."""
-    from ava import agent_identity, gateway_client
+    from ava import gateway_client
+    from ava.sdk_surface import agent_identity
 
     script = script.replace("import datetime as _dt\n", "_dt = _FakeDT\n").replace(
         "import time as _time\n", "_time = _fake_time\n"

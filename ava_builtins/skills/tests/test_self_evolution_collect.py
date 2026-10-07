@@ -487,7 +487,7 @@ def test_fetch_client_disables_env_proxy(collect_mod: Any, monkeypatch: pytest.M
     """2026-09-12 regression: httpx honored the env proxy for cluster-internal
     reads (a no_proxy form it does not match), so /api/events went to a local
     forward proxy and came back 502 while the gateway was healthy. The client
-    must be built with trust_env=False, like ops/cluster_rpc.py."""
+    must be built with trust_env=False, like ops/cluster/rpc.py."""
     client = _FakeClient([])
     _patch_client(collect_mod, monkeypatch, client)
 

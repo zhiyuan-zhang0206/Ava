@@ -34,7 +34,7 @@ text always carries.
   e.g. `ui/web/messages/{en,zh}/<namespace>.json`).
 - `**/locales/**` and `**/*.po` — gettext-style locale trees, should they
   ever appear.
-- `base/telemetry/alerts_copy.py`, `base/packages/docs/pages_copy.py` — the Python locale
+- `base/telemetry/alerts/copy.py`, `base/packages/docs/pages_copy.py` — the Python locale
   modules: IM alert-push copy and the page-expired page copy, both zh/en
   variants selected by `user_settings.display.language`, the same
   language-switching mechanism as the frontend catalogs (documented as
@@ -93,7 +93,7 @@ def _is_locale_path(rel_path: str) -> bool:
 # The Python locale modules (zh/en by user_settings display.language, the
 # same language-switching mechanism as the frontend catalogs): the IM
 # alert-push copy and the page-expired page copy.
-_LOCALE_PY_FILES = frozenset({"base/telemetry/alerts_copy.py", "base/packages/docs/pages_copy.py"})
+_LOCALE_PY_FILES = frozenset({"base/telemetry/alerts/copy.py", "base/packages/docs/pages_copy.py"})
 
 
 def _tracked_files() -> list[str]:

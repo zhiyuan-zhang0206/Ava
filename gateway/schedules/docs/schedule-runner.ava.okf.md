@@ -9,7 +9,7 @@ tags: []
 
 Launched by the `schedule-manager` service ([[schedules.ava.okf.md]]) inside the session `ava-schedule-<id>`.
 
-- **In-session entrypoint**: `.venv/bin/python -m gateway.schedule_runner <id>`
+- **In-session entrypoint**: `.venv/bin/python -m gateway.schedules.runner <id>`
 - Loads the schedule's script + command from the DB
 - Materializes the script to `$AVA_HOME/schedules/<id>/`
 - Binds the `schedule:<id>` actor identity (so `ava.agents.*` invocations are attributed to the schedule)

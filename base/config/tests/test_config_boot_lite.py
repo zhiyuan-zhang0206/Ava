@@ -110,8 +110,8 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(tmp_path: Path) -> None
     )
     driver = (
         "import runpy, sys\n"
-        "sys.argv = ['agent.exec_child']\n"
-        "runpy.run_module('agent.exec_child', run_name='__main__')\n"
+        "sys.argv = ['agent.execution.child']\n"
+        "runpy.run_module('agent.execution.child', run_name='__main__')\n"
     )
     proc = _spawn(
         driver,

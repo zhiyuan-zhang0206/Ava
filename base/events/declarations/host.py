@@ -38,7 +38,7 @@ class HostDispatcherScanFailed(TypedDict):
 
 
 class ImpersonationEventLogIncomplete(TypedDict):
-    """`impersonation_event_log_incomplete` payload — base/agents/impersonation_event_signals.py.
+    """`impersonation_event_log_incomplete` payload — base/agents/impersonation/event_signals.py.
 
     One event per lease and condition on every TTL-reaper pass while the row
     fact holds (state, not edge): `seal_stuck` is an ended lease still waiting

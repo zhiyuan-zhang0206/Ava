@@ -182,7 +182,7 @@ PROVIDER = ProviderContribution(
         # Removed 2026-09-23 (task #4508): gpt-5.5 and gpt-5.4-mini
         # were never selectable here (implicit spawnable=False) and have no
         # live references. Historical prices remain in
-        # base/lm/pricing_catalog_archive.json.
+        # base/lm/pricing/pricing_catalog_archive.json.
     },
     pricing={
         "gpt-6-astra": PriceRates(
@@ -224,7 +224,7 @@ PROVIDER = ProviderContribution(
             # model page, checked 2026-09-06). On promo expiry, restore the
             # standard rates — tier1 5.0 / 0.5 / 30.0, tier2 (>272K input)
             # 10.0 / 1.0 / 45.0 — here AND in
-            # base/lm/pricing_catalog_archive.json; a deliberate manual
+            # base/lm/pricing/pricing_catalog_archive.json; a deliberate manual
             # flip, not an automatic revert (405 ruling 2026-09-07).
             cache_miss=4.0,
             cache_hit=0.4,

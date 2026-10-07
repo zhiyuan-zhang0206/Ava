@@ -35,7 +35,7 @@ def _stub(_db: Database, _bus: EventBus, *args: object, **kwargs: object) -> Non
 
 def test_alias_scan_does_not_probe_module_getattr(monkeypatch: pytest.MonkeyPatch) -> None:
     """A PEP 562 module `__getattr__` must not run during the alias scan."""
-    import ops.cluster_pause
+    import ops.cluster.pause
 
     touched: list[str] = []
 
@@ -47,7 +47,7 @@ def test_alias_scan_does_not_probe_module_getattr(monkeypatch: pytest.MonkeyPatc
     dynamic.__getattr__ = _dynamic
     monkeypatch.setitem(sys.modules, dynamic.__name__, dynamic)
 
-    _stub_everywhere(monkeypatch, ops.cluster_pause, "unpause_local_cluster", _stub)
+    _stub_everywhere(monkeypatch, ops.cluster.pause, "unpause_local_cluster", _stub)
 
     assert touched == []
 
@@ -59,7 +59,7 @@ def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
     `__getattr__` — every unit of the #3950 telemetry burst came from this
     probe."""
     import ava.mcps
-    import ops.cluster_pause
+    import ops.cluster.pause
 
     calls: list[str] = []
     real_servers = ava.mcps.servers
@@ -69,7 +69,7 @@ def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
         return real_servers()
 
     monkeypatch.setattr(ava.mcps, "servers", _spy)
-    _stub_everywhere(monkeypatch, ops.cluster_pause, "unpause_local_cluster", _stub)
+    _stub_everywhere(monkeypatch, ops.cluster.pause, "unpause_local_cluster", _stub)
 
     assert calls == []
 
@@ -77,13 +77,13 @@ def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
 def test_alias_scan_still_rebinds_a_frozen_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     """The other half of the contract: a module that holds the real function
     object is still found and rebound — the scan's whole purpose."""
-    import ops.cluster_pause
+    import ops.cluster.pause
 
-    real = ops.cluster_pause.unpause_local_cluster
+    real = ops.cluster.pause.unpause_local_cluster
     holder = types.ModuleType("_stub_everywhere_alias_scan_holder")
     holder.__dict__["unpause_local_cluster"] = real
     monkeypatch.setitem(sys.modules, holder.__name__, holder)
 
-    _stub_everywhere(monkeypatch, ops.cluster_pause, "unpause_local_cluster", _stub)
+    _stub_everywhere(monkeypatch, ops.cluster.pause, "unpause_local_cluster", _stub)
 
     assert holder.__dict__["unpause_local_cluster"] is _stub

@@ -19,7 +19,7 @@ the loop. This router is the only way alerts enter the store: no other process w
 every other condition is an event plus a Grafana rule
 ([decision](../../../docs/decisions/2026-10-04-alerting-on-grafana-alerting.md)).
 One row per episode, with another IM when severity increases. The store/IM core
-lives in `base/telemetry/alerts.py`. Three HTTP surfaces plus one background
+lives in `base/telemetry/alerts/__init__.py`. Three HTTP surfaces plus one background
 reconciler:
 
 - `POST /api/alerts` — the webhook (Grafana embedded-Alertmanager contact

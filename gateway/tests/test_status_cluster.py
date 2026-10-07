@@ -21,7 +21,7 @@ from gateway.cluster import roster_probe
 from gateway.cluster import status as status_router
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 
 _OPS_URL = "http://wsl:18121"
 

@@ -1,7 +1,7 @@
 """The bundle-leak rule: a `@root_bundle` class never leaves the module that defines it.
 
 A composition root may gather what it wires into one frozen dataclass marked
-`base.wiring.root_bundle` and unpack it locally. Annotating that class anywhere else, as a
+`base.config.wiring.root_bundle` and unpack it locally. Annotating that class anywhere else, as a
 parameter, a return value or an attribute, hands library code the whole bundle, so it can reach
 any member: a service locator under another name. In every module but the defining one, such an
 annotation (resolved through the module's `from ... import`) is a site, frozen like the other

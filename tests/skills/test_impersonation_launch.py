@@ -353,7 +353,7 @@ def test_launch_requires_native_identity_before_creating_workspace(
     def no_identity() -> None:
         raise RuntimeError("No launching Ava identity")
 
-    monkeypatch.setattr("ava.agent_identity.require_agent_id", no_identity)
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", no_identity)
     with pytest.raises(RuntimeError, match="No launching Ava identity"):
         module.main()
     assert not target.exists()

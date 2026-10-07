@@ -1932,7 +1932,7 @@
    },
    "title": "LLM cost (per minute)",
    "type": "timeseries",
-   "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in base/lm/pricing.py, unpriced models carry no cost_usd and are skipped); 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
+   "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in base/lm/pricing/__init__.py, unpriced models carry no cost_usd and are skipped); 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
    "targets": [
     {
      "datasource": {

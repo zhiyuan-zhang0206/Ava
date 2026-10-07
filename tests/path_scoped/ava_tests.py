@@ -51,7 +51,7 @@ def _ensure_agents_meta_row(agent_id: int | None = None) -> None:
     """
     import psycopg
 
-    from ava._settings import DB_URL
+    from ava.sdk_surface.settings import DB_URL
     from base.db.test_db_guard import assert_test_db_url
 
     # Guard: refuse to write to anything but a throwaway test database. This

@@ -83,7 +83,7 @@ def _install_sessions(monkeypatch: pytest.MonkeyPatch, backend: Any) -> None:
     """This agent's sessions over `backend`, which holds one session: id 1."""
     handle = sessions.ShellSessions(backend=backend, database=None, agent_id=1)
     backend.list_sessions = lambda: [f"{handle._shell_prefix()}1"]
-    monkeypatch.setattr("ava._settings.shell_sessions", lambda: handle)
+    monkeypatch.setattr("ava.sdk_surface.settings.shell_sessions", lambda: handle)
 
 
 def test_capture_is_scanned(monkeypatch: pytest.MonkeyPatch, findings: list[Any]) -> None:

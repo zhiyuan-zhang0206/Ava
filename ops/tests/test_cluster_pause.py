@@ -20,8 +20,9 @@ from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.deploy.state.host_deploy_state import HostDeployState
 from base.events.live.bus import EventBus
-from ops import agent_pause, cluster_pause
-from ops.cluster_pause import unpause_local_cluster as _real_unpause_local_cluster
+from ops import agent_pause
+from ops.cluster import pause as cluster_pause
+from ops.cluster.pause import unpause_local_cluster as _real_unpause_local_cluster
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ def local_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _StubBacke
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)
     # The real unpause is safe here: the backend records every possible spawn.
-    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", _real_unpause_local_cluster)
+    monkeypatch.setattr("ops.cluster.pause.unpause_local_cluster", _real_unpause_local_cluster)
     return backend
 
 

@@ -354,7 +354,7 @@ async def _pull_uploads_to_agent_machine(
         # Same host — the gateway path IS the agent's local path.
         return machine, {name: str(agent_upload_dir(agent_id) / name) for name in names}
 
-    from ops import cluster_rpc
+    from ops.cluster import rpc as cluster_rpc
 
     pulled: dict[str, str] = {}
     for name in names:

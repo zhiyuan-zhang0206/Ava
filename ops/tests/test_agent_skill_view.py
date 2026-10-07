@@ -20,7 +20,7 @@ from ava.skills import composer_commands
 from base.db import create_agent
 from base.packages.plugins import mcp_enabled
 from base.paths import skills_dir
-from ops import cluster
+from ops.cluster import operations as cluster
 
 
 def _write_skill(root: Path, name: str, description: str = "project skill") -> None:

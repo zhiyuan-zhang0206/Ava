@@ -36,7 +36,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
-import ava.agent_identity
+import ava.sdk_surface.agent_identity
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
 from base.config import settings
@@ -244,7 +244,7 @@ class _FakeGraph:
         agent = context.require_agent()
         plugin_cfg = cast(_HostPluginConfig, agent.plugin_config("hostplug"))
         return _Observation(
-            agent_id=ava.agent_identity.agent_id(),
+            agent_id=ava.sdk_surface.agent_identity.agent_id(),
             model=agent.brain.llm_model,
             plugin_marker=plugin_cfg.marker,
             llm=cast(_Model, context.llm),
@@ -671,7 +671,7 @@ class TestConcurrentAgentIsolation:
         stats route, the daemon's own logging) would attribute itself to whoever
         ran last.
 
-        Asserted on the turn contextvar rather than `ava.agent_identity.agent_id()`,
+        Asserted on the turn contextvar rather than `ava.sdk_surface.agent_identity.agent_id()`,
         because that read legitimately falls through to the process bootstrap
         slot — which tests/fixtures/env_bootstrap.py pins to 1 for the whole session, and which
         the real host never sets at all (it never calls `establish`).

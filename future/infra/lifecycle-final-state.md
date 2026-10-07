@@ -139,7 +139,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 - Boundary discipline: the adapter **does not manage units** and holds no lifecycle logic — it is only responsible for getting "the tree planted".
 
 **3) unit (a tree node)**
-- Types (closed enumeration): service (gateway/page_server/watchdog/agent_host/agent_ops/mcp_daemons…), session shells (held by the pty-sessions service, spawned inside the tree by it), turn child processes (agent.exec_child, turn lifetime, parent = agent_host).
+- Types (closed enumeration): service (gateway/page_server/watchdog/agent_host/agent_ops/mcp_daemons…), session shells (held by the pty-sessions service, spawned inside the tree by it), turn child processes (agent.execution.child, turn lifetime, parent = agent_host).
 - Every unit has a declarative manifest; the tree's shape = the direct result of manifests (no implicit members).
 
 ## B2 · Contracts (three, all stable across platforms)
@@ -302,7 +302,7 @@ Ran the level-by-level probe chain: helper→L1→L2→L3→L4 (4 fork+exec hops
 
 ### F2 result (measured 2026-09-12, macmini)
 
-Full enumeration across 16 scenarios x 3 requests: parent exit / launchd adoption (ppid=1) / setsid / double-fork (hand-written and the real base._reparent primitive) / SIGHUP single and process-group / PTY close / bash exec — **no trigger changes the attribution resolution**. The helper lineage held responsible=com.ava.permissions-helper 30/30; the non-helper control lineage self-anchored 18/18. Conclusion: the anchor is decided **statically at spawn** by the lineage's spawn-root class, robust to every later topology change; the 2026-09-04 "reparent resets" observation is refuted (it was the non-helper lineage's own anchoring, not an effect of reparent). XPC could not be minimally reproduced within constraints (deferred to F5/F12); the helper-death path remains the only open reset candidate (F12). Zero prompts across the suite. Evidence record: workspaces/6127/F2-findings.md.
+Full enumeration across 16 scenarios x 3 requests: parent exit / launchd adoption (ppid=1) / setsid / double-fork (hand-written and the real base.native_process.reparent primitive) / SIGHUP single and process-group / PTY close / bash exec — **no trigger changes the attribution resolution**. The helper lineage held responsible=com.ava.permissions-helper 30/30; the non-helper control lineage self-anchored 18/18. Conclusion: the anchor is decided **statically at spawn** by the lineage's spawn-root class, robust to every later topology change; the 2026-09-04 "reparent resets" observation is refuted (it was the non-helper lineage's own anchoring, not an effect of reparent). XPC could not be minimally reproduced within constraints (deferred to F5/F12); the helper-death path remains the only open reset candidate (F12). Zero prompts across the suite. Evidence record: workspaces/6127/F2-findings.md.
 
 ## G0 · User touchpoint list (the "you'll need to act" summary along the final-state path)
 

@@ -36,10 +36,10 @@ def isolated_registry():
 
 
 def test_ava_settings_plugins_attribute_access(isolated_registry, unit_home):
-    """`ava._settings.plugins.<n>` returns instance; unregistered plugin name raise + lists known plugins."""
+    """`ava.sdk_surface.settings.plugins.<n>` returns instance; unregistered plugin name raise + lists known plugins."""
     bind_plugin_config("test_plugin", _FixtureConfig)
 
-    import ava._settings as _ava_settings
+    import ava.sdk_surface.settings as _ava_settings
 
     cfg = _ava_settings.plugins.test_plugin
     assert isinstance(cfg, _FixtureConfig)

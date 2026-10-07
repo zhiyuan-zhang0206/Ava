@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 import ava
-import ava.agent_identity
+import ava.sdk_surface.agent_identity
 from ava import agents, gateway_client
 
 
@@ -17,7 +17,7 @@ class TestAgentsEntries:
     ) -> None:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 1)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava.agent_identity, "require_actor", lambda: "agent:1")
+        monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "agent:1")
 
         agents.spawn(prompt=("hello",))  # pyright: ignore[reportArgumentType]
         assert seen["prompt"] == "hello"

@@ -30,7 +30,7 @@ is built-in; anything else is external.
 Load order is the `config.plugins` dict order (alphabetical), one by one —
 **no dependency declaration, no topological sort**. Configs are bound by the SDK install (`bind_plugin_config`)
 only after every import has completed, so a hook firing later always finds
-`ava._settings.plugins.<n>` populated.
+`ava.sdk_surface.settings.plugins.<n>` populated.
 
 ## Two faces: `plugin.py` surface, `agent_runtime.py` face
 A plugin loads in up to two faces, and each load form picks which run: the

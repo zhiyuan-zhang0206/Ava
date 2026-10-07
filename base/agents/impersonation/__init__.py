@@ -475,7 +475,7 @@ def release(
 ) -> dict[str, Any]:
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
-    from base.agents import impersonation_manifest as capture
+    from base.agents.impersonation import manifest as capture
     from base.agents.impersonation.event_log import is_log_native
 
     # Keep the admission fence durable when a live participant delays release.

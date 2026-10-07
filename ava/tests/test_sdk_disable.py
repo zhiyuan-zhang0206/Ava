@@ -327,7 +327,7 @@ def test_env_disable_refuses_a_framework_module() -> None:
     framework, not scope the agent's view — the SDK install fails fast instead."""
     code, _out, err = _run("", env_disable="agent_identity")
     assert code != 0
-    assert "ValueError" in err and "framework module ava.agent_identity" in err, err
+    assert "ValueError" in err and "framework module ava.sdk_surface.agent_identity" in err, err
 
 
 def test_runtime_disable_refuses_a_framework_module_and_its_members() -> None:

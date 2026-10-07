@@ -170,9 +170,8 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
 
 def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> None:
     """`plugin.py` declares nothing about config; `default_config.py` does, and the install binds it."""
-    import ava
     from agent.extensions import load_extensions
-    from ava.sdk_surface import install
+    from ava.sdk_surface import install, settings
 
     _write_plugin(
         paths.plugins_dir(),
@@ -192,6 +191,6 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
     try:
         loaded = load_extensions()
         assert [name for name, _ in loaded.registry.plugins] == ["faced"]
-        assert ava._settings.plugins.faced.knob == 7  # pyright: ignore[reportAttributeAccessIssue]
+        assert settings.plugins.faced.knob == 7
     finally:
         install.uninstall()

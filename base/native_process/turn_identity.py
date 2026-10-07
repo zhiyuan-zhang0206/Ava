@@ -15,14 +15,14 @@ parent's contextvar — so agent code in the child sees the same identity.
 
 Resolution order everywhere identity is read:
 
-    turn contextvar  >  process bootstrap slot (`ava.agent_identity`)  >  AVA_AGENT_ID env
+    turn contextvar  >  process bootstrap slot (`ava.sdk_surface.agent_identity`)  >  AVA_AGENT_ID env
 
 Outside a bound turn (services, the exec child) nothing binds here, the
 contextvar stays None, and every read falls through to the process slot / env.
 
 This lives in `base/` (not `ava/`) because identity consumers exist below
 the `ava` layer (`base/lm/_providers.py` cache affinity, `base/host/net/resilience.py`
-retry de-phasing) and the import layering is `base < ava`. `ava.agent_identity`
+retry de-phasing) and the import layering is `base < ava`. `ava.sdk_surface.agent_identity`
 layers its process slot on top of this module's read.
 
 `TurnScopedAgentId` at the bottom is the same resolution deferred to *render*
@@ -125,7 +125,7 @@ def effective_agent_id() -> int | None:
     de-phasing) that previously read the env var directly: in the hosted
     runner the env var is one value for the whole process, so the turn
     contextvar must win. Code above the `ava` layer should prefer
-    `ava.agent_identity.agent_id()`, which also consults the process bootstrap slot.
+    `ava.sdk_surface.agent_identity.agent_id()`, which also consults the process bootstrap slot.
     """
     bound = _TURN_AGENT_ID.get()
     if bound is not None:

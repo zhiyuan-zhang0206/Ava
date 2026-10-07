@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psutil
 import pytest
@@ -116,8 +116,10 @@ def captured_argv(
 
     def fake_run(args: Any, **_kwargs: Any) -> Any:
         if isinstance(args, (list, tuple)):
-            calls.append([str(a) for a in args])  # pyright: ignore[reportUnknownArgumentType]
-        if isinstance(args, (list, tuple)) and "base._reparent" in [str(a) for a in args]:  # pyright: ignore[reportUnknownArgumentType]
+            calls.append([str(a) for a in cast(list[object] | tuple[object, ...], args)])
+        if isinstance(args, (list, tuple)) and "base.native_process.reparent" in [
+            str(a) for a in cast(list[object] | tuple[object, ...], args)
+        ]:
             # The native supervisor's reparent helper reports the child pid on
             # stdout; the launch continues past it with a fake pid.
             pid_line = f"{_FAKE_CHILD_PID}\n"
@@ -282,7 +284,7 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     def fake_run(args: Any, **_kw: Any) -> Any:
-        calls.append([str(a) for a in args])
+        calls.append([str(a) for a in cast(list[object] | tuple[object, ...], args)])
         return subprocess.CompletedProcess(args, returncode=0, stdout="PONG", stderr="")
 
     monkeypatch.setattr(ci.subprocess, "run", fake_run)

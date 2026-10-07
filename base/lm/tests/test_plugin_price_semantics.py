@@ -11,7 +11,7 @@ from base.lm import pricing
 from base.lm.plugin_providers import model_catalog
 from base.lm.pricing import CostQuote, Rates, _parse_catalog, quote, rates_at
 
-_ARCHIVE_PATH = Path(__file__).resolve().parents[3] / "base/lm/pricing_catalog_archive.json"
+_ARCHIVE_PATH = Path(__file__).resolve().parents[3] / "base/lm/pricing/pricing_catalog_archive.json"
 _HISTORICAL = datetime(2026, 8, 1, tzinfo=UTC)
 _CURRENT = datetime(2026, 9, 5, tzinfo=UTC)
 _PEAK_WINDOW = datetime(2026, 9, 5, 2, tzinfo=UTC)

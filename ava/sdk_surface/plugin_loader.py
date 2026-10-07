@@ -39,7 +39,7 @@ def register_plugin_parent_packages(pkg: str, name: str, plugin_dir: Path) -> No
     External plugins load under the dotted prefix ``plugins.<name>``, and
     resolving that prefix through the normal import machinery requires
     ``$AVA_HOME`` to be on sys.path. It is not in the exec child (``python -I
-    -m agent.exec_child`` boots with cwd=$AVA_HOME/source): ``import plugins``
+    -m agent.execution.child`` boots with cwd=$AVA_HOME/source): ``import plugins``
     there resolves to the checkout's own legacy ``plugins/`` directory when one
     exists, or to nothing — either way ``from . import _sibling`` inside
     plugin.py raises ModuleNotFoundError and took ``import ava`` down with it

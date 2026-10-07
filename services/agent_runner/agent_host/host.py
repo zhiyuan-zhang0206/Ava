@@ -104,7 +104,6 @@ from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
 from services.agent_runner.agent_host import maintenance as maintenance_receipts
-from services.agent_runner.agent_host.admission import TurnAdmission
 from services.agent_runner.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_runner.agent_host.db_recovery import database_phase, recover_database
 from services.agent_runner.agent_host.dispatcher import PendingInboundWake
@@ -113,13 +112,14 @@ from services.agent_runner.agent_host.force_termination import (
     force_termination_stop,
     kill_terminating_agent_shells,
 )
-from services.agent_runner.agent_host.pending_wakes import scan_rows
 from services.agent_runner.agent_host.runtime import (
     HostStats,
     TurnOutcome,
     _AgentRuntime,
     admit_stored_model,
 )
+from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
+from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.stall_guard import run_invocation_with_stall_guard
 from services.agent_runner.agent_host.wake_screening import _is_runnable, _read_stored_config

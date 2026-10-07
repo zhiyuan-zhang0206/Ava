@@ -407,7 +407,7 @@ _CHILD_STATE_LAZY = """
 from pathlib import Path
 
 import ava
-from agent import exec_child
+from agent.execution import child as exec_child
 from agent.graph.exec.protocol import read_request
 
 child = exec_child._import_runtime(0.0)  # the child boot's step that binds the SDK (mirrors `_run`)
@@ -466,7 +466,7 @@ _CHILD_CWD_SET_FIRST_TOUCH = """
 from pathlib import Path
 
 import ava
-from agent import exec_child
+from agent.execution import child as exec_child
 from agent.graph.exec.protocol import read_request
 
 child = exec_child._import_runtime(0.0)  # the child boot's step that binds the SDK (mirrors `_run`)

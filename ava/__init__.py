@@ -8,7 +8,7 @@ from typing import Any
 # (AGENT_ID) lives under ava.self alongside ava.self.MACHINE_SPEC, not here.
 #
 # DB_URL / REDIS_URL / GATEWAY_URL are *not* re-exported here as module
-# attributes — they live on ava._settings as lazy __getattr__ entries that
+# attributes — they live on ava.sdk_surface.settings as lazy __getattr__ entries that
 # read the current settings.X on each access. This module's own __getattr__
 # (defined below) forwards `ava.DB_URL` etc. to _settings, preserving the
 # external API while removing the "must mutate settings before import"
@@ -53,7 +53,7 @@ from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
 # Lifecycle (framework side):
 #   Before agent code runs, the exec child (after loading plugins) sets
 #   `ava.state = <snapshot validated from the request envelope>` +
-#   `ava.state_update = {}` (`agent/exec_child.py:_build_state_slot`).
+#   `ava.state_update = {}` (`agent/execution/child.py:_build_state_slot`).
 #   handle.read reads ava.state; handle.update synchronously mutates the
 #   ava.state working copy + accumulates raw delta into ava.state_update.
 #   When the child exits it writes state_update into its result envelope; exec_node
@@ -327,7 +327,7 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
 
     if _sdk_install.installed() is not None or _sdk_install.load_attempted():
         return False
-    from . import agent_identity
+    from .sdk_surface import agent_identity
 
     if not agent_identity.is_launched_child():
         return False
@@ -342,7 +342,7 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
 # files that reference plugin-registered names (e.g. `ava.cwd` from the
 # ava_code plugin) don't trip `reportAttributeAccessIssue`.
 #
-# DB_URL / REDIS_URL / GATEWAY_URL forward to ava._settings (which in turn
+# DB_URL / REDIS_URL / GATEWAY_URL forward to ava.sdk_surface.settings (which in turn
 # reads the live `settings.X`). Putting the forward here rather than copying
 # into the module dict keeps every access fresh — code that mutates
 # settings.data_plane.db_url at runtime (test conftest, eval driver) is immediately
@@ -365,7 +365,7 @@ def __getattr__(name: str) -> Any:
         setattr(_sys.modules[__name__], name, module)
         return module
     if name in ("DB_URL", "REDIS_URL", "GATEWAY_URL"):
-        from . import _settings
+        from .sdk_surface import settings as _settings
 
         return getattr(_settings, name)
     if _maybe_load_plugins_for_missing(name):
@@ -386,7 +386,6 @@ def __getattr__(name: str) -> Any:
 # down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection
 from . import agents as agents
-from . import attachment_transport as attachment_transport
 from . import files as files
 from . import impersonation as impersonation
 from . import mcps as mcps
@@ -396,6 +395,7 @@ from . import skills as skills
 from . import ui as ui
 from . import watcher as watcher
 from . import web as web
+from .sdk_surface import attachment_transport as attachment_transport
 from .sdk_surface import wraps as _wraps
 from .understand import understand as understand
 
@@ -459,7 +459,7 @@ _init_complete = True
 # Only an agent-launched child reaches this load — the one import-time trigger
 # the ambient-state lint keeps for the ava package. Metering installs with the
 # SDK surface (`ava.sdk_surface.install.install`), not here.
-from . import agent_identity
+from .sdk_surface import agent_identity
 
 if agent_identity.is_launched_child():
     ensure_plugins_loaded()

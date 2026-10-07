@@ -1,4 +1,4 @@
-"""Tests for gateway/schedule_runner.py — the session schedule entrypoint.
+"""Tests for gateway/schedules/runner.py — the session schedule entrypoint.
 
 Exercises the runner mechanics against the real test DB + a per-test $AVA_HOME:
 materialize the script, bind the schedule actor, run it, capture a crash. The
@@ -21,7 +21,7 @@ import pytest
 
 from base.config import settings
 from base.db import Database
-from gateway.schedule_runner import _script_filename, run
+from gateway.schedules.runner import _script_filename, run
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +65,7 @@ def test_run_materializes_and_executes_and_binds_actor(
     marker = unit_home / "ran.txt"
     # The script records the actor it runs under — proving establish_actor fired
     # before the script executed.
-    script = f"import ava.agent_identity, pathlib\npathlib.Path({str(marker)!r}).write_text(ava.agent_identity.require_actor())\n"
+    script = f"import ava.sdk_surface.agent_identity, pathlib\npathlib.Path({str(marker)!r}).write_text(ava.sdk_surface.agent_identity.require_actor())\n"
     sid = _insert_schedule(db_conn, script=script)
 
     rc = run(sid)
@@ -292,7 +292,7 @@ def test_run_loads_plugins_for_py_script(
 def test_run_hands_py_script_a_clean_argv(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The gateway launches the runner as `python -m gateway.schedule_runner <id>`,
+    # The gateway launches the runner as `python -m gateway.schedules.runner <id>`,
     # so this process's sys.argv carries the schedule id. A .py script runs
     # in-process and must see the argv `python <script>` would give it — just its
     # own path — not the runner's (2026-09-22: the daily debt sweep's argparse
@@ -335,7 +335,7 @@ def test_run_record_failure_does_not_break_the_run(
     # writes must not affect the schedule itself (clean exit still marks
     # completed, rc still 0). Only the schedule_runs statements fail — the
     # schedules-row writes (status/last_error) keep working.
-    import gateway.schedule_runner as sr
+    import gateway.schedules.runner as sr
 
     real_connect = sr.Database.connect
 
@@ -408,7 +408,7 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
     # the bookkeeping lost a write. The run row reads ok=true with a note;
     # the manager still relaunches (status is not 'completed'), which is the
     # same safe side as before, just without a false crash record.
-    import gateway.schedule_runner as sr
+    import gateway.schedules.runner as sr
 
     real_connect = sr.Database.connect
 
@@ -503,7 +503,7 @@ def _watch_stalls(
     monkeypatch: pytest.MonkeyPatch, *, patch_sleep: bool = False
 ) -> Generator[list[str], None, None]:
     """Record real guard verdicts without exiting the test process."""
-    import gateway.schedule_runner as sr
+    import gateway.schedules.runner as sr
 
     monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.1)
@@ -548,7 +548,7 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     the design, not a stall, so the guard must stay quiet."""
     import time
 
-    import gateway.schedule_runner as sr
+    import gateway.schedules.runner as sr
 
     monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.05)
@@ -770,7 +770,7 @@ def test_stall_verdict_closes_run_row(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # QA P2-1: a stall closes its run row as failed instead of forever in-progress.
-    import gateway.schedule_runner as sr
+    import gateway.schedules.runner as sr
 
     sid = _insert_schedule(db_conn, script="x = 1\n")
     run_id = sr._record_run_start(Database.from_settings(), sid)
@@ -786,7 +786,7 @@ def test_stall_verdict_closes_run_row(
 
 def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
     """issue #194: the runner refuses to start from a worktree-anchored checkout."""
-    import gateway.schedule_runner as runner
+    from gateway.schedules import runner
 
     monkeypatch.setattr(sys, "argv", ["schedule_runner", "1"])
     monkeypatch.setattr(runner, "prod_service_checkout_error", _refuse_foreign_checkout)

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: LLM Billing Catalog
-description: '`base/lm/pricing.py` + the archive and plugin rates — deterministic, network-free pricing behind every cost figure.'
+description: '`base/lm/pricing/__init__.py` + the archive and plugin rates — deterministic, network-free pricing behind every cost figure.'
 tags:
 - base
 - library
@@ -11,13 +11,13 @@ tags:
 
 # LLM Billing Catalog
 
-`base/lm/pricing.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `pricing_catalog.json` remains an empty placeholder that runtime never loads; `load_archive` reads `pricing_catalog_archive.json`.
+`base/lm/pricing/__init__.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `pricing_catalog.json` remains an empty placeholder that runtime never loads; `load_archive` reads `pricing_catalog_archive.json`.
 
 ## Selection
 
 - The reviewed archive is the reconciliation ledger: every model has official-source provenance (`source_url` + `source_checked_at`) plus gapless effective periods, input-token tiers, and optional recurring UTC rate windows. It is the input for bot synchronization and retains catalog-only services.
 - Provider plugins are the runtime source for chat prices and declare the complete period/tier/window lattice. Registration parses that declaration through the archive parser, then intentionally removes the overlapping archive row from the in-memory runtime catalog. Catalog-only services such as `gemini-embedding-2`, plus removed chat models, select the archive directly. Frozen-instant tests require all 31 repository plugin prices to equal the archive across historical, current, daily-window, and future instants.
-- Every archive and plugin price carries a stable `vendor`; its separation from the bare model key matches the cross-line billing-event schema ([`pricing_catalog_schema.md`](../pricing_catalog_schema.md)).
+- Every archive and plugin price carries a stable `vendor`; its separation from the bare model key matches the cross-line billing-event schema ([`pricing_catalog_schema.md`](pricing_catalog_schema.md)).
 - `rates_at(model, at, input_tokens)` selects one exact 3-rate tuple `(cache_miss, cache_hit, out)` USD/M. `quote()` returns those rates and the computed cost atomically, so a scheduled boundary cannot split the event snapshot; `cost_usd()` remains the compatibility reader and returns `None` for unknown models.
 - Cache-hit and cache-miss input are priced separately on purpose — a 2-tuple once overestimated a 30-case batch by ~70x ($56.38 against $0.8).
 - Date-only future increases with no provider timezone use the documented conservative UTC+14 boundary and carry an `effective_time_note`; exact published instants are used unchanged.

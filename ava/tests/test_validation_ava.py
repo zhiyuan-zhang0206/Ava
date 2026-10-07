@@ -10,10 +10,10 @@ from typing import Any
 import pytest
 
 import ava
-import ava.agent_identity
 from ava import files as _files
 from ava import ui as _ui
 from ava import watcher as _watcher
+from ava.sdk_surface import agent_identity
 
 
 class TestFilesEntries:
@@ -271,7 +271,11 @@ class TestSelfEntries:
         from ava import self as self_mod
 
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(ava.agent_identity, "assert_self_action", lambda _action: None)  # pyright: ignore[reportUnknownArgumentType]
+
+        def allow_self_action(_action: str) -> None:
+            pass
+
+        monkeypatch.setattr(agent_identity, "assert_self_action", allow_self_action)
 
         class _FakeCur:
             connection = None
@@ -286,7 +290,7 @@ class TestSelfEntries:
             def __exit__(self, *exc: object) -> None:
                 return None
 
-        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
+        monkeypatch.setattr(ava.sdk_surface.agent_identity, "agent_id", lambda: 900001)
         monkeypatch.setattr(ava.DB, "cursor", _FakeCursor)
         monkeypatch.setattr(ava.DB, "transaction", contextlib.nullcontext)
         monkeypatch.setattr(self_mod, "_publish_self_inbound_wake", lambda: None)

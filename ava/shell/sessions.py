@@ -74,7 +74,7 @@ def _renewal_update(cur: Any, agent_id: int, session_id: int, ttl: float) -> dat
 class ShellSessions:
     """One agent's persistent shell sessions on a backend and a database.
 
-    Built by `ava._settings.shell_sessions()` from this process's settings and agent identity
+    Built by `ava.sdk_surface.settings.shell_sessions()` from this process's settings and agent identity
     (the same SDK root as `database()` / `bus()`); the module functions below delegate to it.
     A test builds one over a fake backend and database.
     """
@@ -399,7 +399,7 @@ class ShellSessions:
 
 
 def _handle() -> ShellSessions:
-    from ava._settings import shell_sessions
+    from ava.sdk_surface.settings import shell_sessions
 
     return shell_sessions()
 

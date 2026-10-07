@@ -54,8 +54,8 @@ from gateway.cluster.schemas import (
 )
 from gateway.cluster.snapshots import Snapshot, read_all
 from gateway.schemas.stats import StatsWindowHours, window_delta
-from ops import cluster_rpc as _cluster_rpc
-from ops.cluster_pause import is_paused as cluster_is_paused
+from ops.cluster import rpc as _cluster_rpc
+from ops.cluster.pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, check_pidfile
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 
@@ -360,7 +360,7 @@ async def _probe_agent_runner(
     """Probe an agent-runner now, by POSTing a `status_probe` op to its ops server.
 
     The machine is reached at its ava-ops server (services/agent_runner/agent_ops), which
-    dispatches `status_probe` via `ops.cluster.cluster_status_op` in-process and
+    dispatches `status_probe` via `ops.cluster.operations.cluster_status_op` in-process and
     returns the snapshot. Same path the heartbeat liveness pass uses. The local
     machine is no special case — its ops server is dialed at its registered
     localhost URL, keeping one uniform probe path.

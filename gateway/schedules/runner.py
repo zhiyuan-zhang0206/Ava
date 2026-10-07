@@ -1,4 +1,4 @@
-"""Session entrypoint for a gateway-hosted schedule: ``python -m gateway.schedule_runner <id>``.
+"""Session entrypoint for a gateway-hosted schedule: ``python -m gateway.schedules.runner <id>``.
 
 Loads schedule ``<id>`` from the DB, materializes its script under
 ``$AVA_HOME/schedules/<id>/``, binds a ``schedule:<id>`` actor identity (so the
@@ -229,7 +229,7 @@ def _restore_park_detection() -> None:
     The wrapper exists only for the stall guard's judgment window; leaving it
     installed past the guard's stop swaps `time.sleep` for a Python function
     process-wide in this runner (the runner is its own process — one schedule
-    per `python -m gateway.schedule_runner <id>` session — but a
+    per `python -m gateway.schedules.runner <id>` session — but a
     ``.py`` schedule script runs in-process here, so the swap would leak into
     the rest of its run), which a later ``assert time.sleep is _REAL_SLEEP``
     guard in the test suite trips on. Idempotent and safe to call without a
@@ -445,7 +445,7 @@ def _run(database: Database, schedule_id: int) -> int:
             # so a clean return cannot be overtaken by a spurious kill.
             _patch_park_detection()
             stop_guard = _start_stall_guard(database, schedule_id, run_id)
-            # The gateway launches this runner as `python -m gateway.schedule_runner
+            # The gateway launches this runner as `python -m gateway.schedules.runner
             # <id>`, so sys.argv carries the schedule id. The script must not
             # inherit that runner-only argv: hand it the argv `python <script>`
             # would produce — just its own path — and restore the runner's argv
@@ -515,13 +515,13 @@ def _run(database: Database, schedule_id: int) -> int:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        logger.error("Usage: python -m gateway.schedule_runner <schedule_id>")
+        logger.error("Usage: python -m gateway.schedules.runner <schedule_id>")
         raise SystemExit(2)
     # issue #194: refuse to run from a foreign checkout (a dev worktree
     # against the prod home) — the runner's own repo root anchors every
     # subprocess it spawns, so a worktree-anchored runner executes un-reviewed
     # code and dies silently when the worktree is removed.
-    refusal = prod_service_checkout_error(Path(__file__).resolve().parents[1])
+    refusal = prod_service_checkout_error(Path(__file__).resolve().parents[2])
     if refusal is not None:
         logger.error("schedule runner refused: {}", refusal)
         raise SystemExit(3)

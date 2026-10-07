@@ -25,9 +25,9 @@ from base.agents.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.telemetry import Event
-from ops import cluster_rpc
 from ops.agents import wake
 from ops.agents.wake import resurrect_agent
+from ops.cluster import rpc as cluster_rpc
 from ops.lifecycle import billing_recovery
 from ops.lifecycle.billing_recovery import (
     enumerate_candidates,

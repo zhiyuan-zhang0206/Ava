@@ -646,16 +646,16 @@ def _record_skill_invoked(skill: Skill) -> None:
     kind: a failed write logs an error with its traceback and emits an
     `audit_write_failed` anomaly event instead of raising.
     """
-    from ava.agent_identity import require_agent_id
+    from ava.sdk_surface.agent_identity import require_agent_id
 
     try:
         agent = require_agent_id()
     except RuntimeError:
         return
 
-    # Function-local: ava._settings is the composition root and pulls the shell stack; only
+    # Function-local: ava.sdk_surface.settings is the composition root and pulls the shell stack; only
     # recording needs it, and the gateway's import closure must not (test_gateway_consumer_guard).
-    from ava._settings import database
+    from ava.sdk_surface.settings import database
     from base.telemetry.audit_events import (
         SkillInvokedPayload,
         prepare_event_log,

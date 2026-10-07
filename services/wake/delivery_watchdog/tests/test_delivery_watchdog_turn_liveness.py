@@ -326,7 +326,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     marker row), the REAL `resurrect_if_terminated` and the REAL guard read;
     only the below-dispatch machinery is stubbed — a guard that wrongly
     matched would reach no dispatch and fail the assert."""
-    from ops import cluster_rpc
+    from ops.cluster import rpc as cluster_rpc
 
     agent_id = _make_hosted_running_agent(db_conn)
     _silence_recovery_side_effects(monkeypatch)

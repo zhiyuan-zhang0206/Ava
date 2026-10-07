@@ -137,7 +137,7 @@ def _fetch_events_window(
     # HTTP(S)_PROXY / NO_PROXY, and a no_proxy form it does not match hands
     # these requests to a local forward proxy that cannot reach the gateway
     # — which answered 502 while the gateway was healthy. Same pattern as
-    # ops/cluster_rpc.py and cli/commands/observability/trace.py, for the same reason.
+    # ops/cluster/rpc.py and cli/commands/observability/trace.py, for the same reason.
     with httpx.Client(timeout=_HTTP_TIMEOUT_S, trust_env=False) as client:
 
         def rec(start: datetime, end: datetime) -> None:

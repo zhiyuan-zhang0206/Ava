@@ -18,7 +18,7 @@ from base.db import Database
 from gateway.agents import forward
 from gateway.agents import router as app_module
 from gateway.app import app
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
 
@@ -304,7 +304,7 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
 ) -> None:
     from uuid import uuid4
 
-    from ops.cluster_rpc import ClusterOpUnreachable
+    from ops.cluster.rpc import ClusterOpUnreachable
 
     seen: list[tuple[str, dict[str, object]]] = []
     attempt_id = uuid4()
@@ -330,7 +330,7 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
 async def test_spawn_forward_preserves_runner_rejection_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ops.cluster_rpc import ClusterOpFailed
+    from ops.cluster.rpc import ClusterOpFailed
 
     async def _fail(_db: object, **_kwargs: object) -> dict[str, object]:
         raise ClusterOpFailed(

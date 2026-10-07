@@ -42,7 +42,7 @@ def _pricing_catalog_raw() -> dict[str, Any]:
         dict[str, Any],
         json.loads(
             (
-                Path(__file__).resolve().parents[3] / "base/lm/pricing_catalog_archive.json"
+                Path(__file__).resolve().parents[3] / "base/lm/pricing/pricing_catalog_archive.json"
             ).read_text()
         ),
     )
@@ -58,7 +58,9 @@ def _runtime_pricing_catalog_raw() -> dict[str, Any]:
     return cast(
         dict[str, Any],
         json.loads(
-            (Path(__file__).resolve().parents[3] / "base/lm/pricing_catalog.json").read_text()
+            (
+                Path(__file__).resolve().parents[3] / "base/lm/pricing/pricing_catalog.json"
+            ).read_text()
         ),
     )
 

@@ -6,7 +6,7 @@ Covers:
 - install: a plugin whose config does not bind is refused whole and reported while others install
 - merge_disk_image_schema: new fields fill default, removed fields dropped, unchanged no-op
 - is_per_agent_field: json_schema_extra={"per_agent": True} recognition
-- ava._settings.plugins.<n> attribute access wrong name raise + list known plugins
+- ava.sdk_surface.settings.plugins.<n> attribute access wrong name raise + list known plugins
 """
 
 import json

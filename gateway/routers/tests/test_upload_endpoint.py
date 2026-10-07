@@ -559,7 +559,7 @@ class TestRemoteAgentPull:
             assert payload == {"agent_id": agent_id, "name": "hello.txt"}
             return {"path": runner_path}
 
-        from ops import cluster_rpc
+        from ops.cluster import rpc as cluster_rpc
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -590,7 +590,7 @@ class TestRemoteAgentPull:
         async def fake_dispatch(_db: object, target_machine: str, kind: str, payload: dict, **kw):
             raise RuntimeError("runner unreachable")
 
-        from ops import cluster_rpc
+        from ops.cluster import rpc as cluster_rpc
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -627,7 +627,7 @@ class TestRemoteAgentPull:
             called.append((target_machine, kind))  # pyright: ignore[reportUnknownMemberType]
             raise AssertionError("should not dispatch for a local agent")
 
-        from ops import cluster_rpc
+        from ops.cluster import rpc as cluster_rpc
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -672,7 +672,7 @@ class TestRemoteAgentPull:
                 raise RuntimeError(f"runner unreachable for {name}")
             return {"path": f"/Users/runner/Downloads/AvaAgent-{agent_id}/{name}"}
 
-        from ops import cluster_rpc
+        from ops.cluster import rpc as cluster_rpc
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)
 

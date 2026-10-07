@@ -126,7 +126,7 @@ def test_new_session_reparents_to_init_no_zombie(
         # The record is written the instant the reparent helper reports the
         # grandchild pid, which can be microseconds BEFORE that grandchild
         # execvp's into /bin/sleep — until then psutil reads the pre-exec
-        # `python -m base._reparent` image. Wait for the exec to land instead
+        # `python -m base.native_process.reparent` image. Wait for the exec to land instead
         # of sampling the name once (that one-shot read flakes on a loaded runner).
         poll_until(
             lambda: (child.name() == "sleep", child.name()),

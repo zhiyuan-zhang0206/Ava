@@ -295,7 +295,7 @@ def cmd_packages_refresh(
     recorded in the registry and shown here."""
     import json
 
-    from cli.commands.extensions.packages_refresh import run_refresh
+    from cli.commands.extensions.packages.refresh import run_refresh
 
     report = run_refresh(check_only=check_only, only=only, from_job=from_job)
     if json_output:
@@ -427,7 +427,7 @@ def cmd_packages_rollback(name: str) -> int:
 
 def _policy_interval(update_mode: str | None, check_every: str | None) -> int | None:
     """Validate a policy request; the new check interval in seconds, if one was given."""
-    from cli.commands.extensions.packages_refresh import parse_duration
+    from cli.commands.extensions.packages.refresh import parse_duration
 
     if update_mode is None and check_every is None:
         raise ValueError("pass --update-mode and/or --check-every")

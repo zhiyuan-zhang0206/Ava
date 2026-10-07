@@ -129,6 +129,6 @@ rather than the bulk of the value.
   auto-update) — a separate product decision, not this.
 - Windows — the `gateway` capability is POSIX-only by decision, so there is no
   native Windows pg/redis to vendor. Redis is the binding constraint and it is
-  the first item in [`windows-gateway.md`](../../gateway/windows-gateway.md).
+  the first item in [`windows-gateway.md`](../../gateway/docs/windows-gateway.md).
 - Distribution to third parties — the vendored binaries make it *possible* later,
   but the goal here is the operator's own machines.

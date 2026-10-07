@@ -9,7 +9,7 @@ from base.agents import AgentNotFound, MachinePaused, ResurrectError, ResurrectR
 from base.agents.incarnation.resources import ResourceBirth, ResourceShapeError, decode_resources
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from ops.cluster_rpc import ClusterOpFailed
+from ops.cluster.rpc import ClusterOpFailed
 from ops.rpc_schemas import OpFailure
 
 # The ops server's wire form of an exception it returns as a failed result.

@@ -205,7 +205,7 @@ SURFACES: tuple[Surface, ...] = (
         protocol=None,
         note=(
             "`config`: a frozen BaseModel bound once from $AVA_HOME/configs/<plugin>/config.json and "
-            "read as ava._settings.plugins.<plugin>; schema drift points at `ava plugins update`"
+            "read as ava.sdk_surface.settings.plugins.<plugin>; schema drift points at `ava plugins update`"
         ),
     ),
 )

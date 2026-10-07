@@ -10,7 +10,7 @@ tags:
 
 # Language Model Provider Layer
 
-`base/lm/` — provider-neutral contracts above LangChain, below the agent kernel. Core registers no providers or chat models; enabled plugins own every chat binding and model fact. The repository's eight `lm_*` plugins are enabled by default. Mechanics: [[base/lm/docs/provider-plugins.ava.okf.md]]; design: [model-providers-as-plugins](../model-providers-as-plugins.md).
+`base/lm/` — provider-neutral contracts above LangChain, below the agent kernel. Core registers no providers or chat models; enabled plugins own every chat binding and model fact. The repository's eight `lm_*` plugins are enabled by default. Mechanics: [[base/lm/docs/provider-plugins.ava.okf.md]]; design: [model-providers-as-plugins](model-providers-as-plugins.md).
 
 ## Core Responsibilities
 

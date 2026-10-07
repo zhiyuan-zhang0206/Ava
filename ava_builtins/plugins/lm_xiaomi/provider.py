@@ -131,7 +131,7 @@ PROVIDER = ProviderContribution(
         ),
         # Removed 2026-09-23: mimo-v2.5-pro-ultraspeed returns "Unsupported
         # model" (checked 2026-09-22). Historical prices remain in
-        # base/lm/pricing_catalog_archive.json; stale configs fail validation.
+        # base/lm/pricing/pricing_catalog_archive.json; stale configs fail validation.
         "mimo-v2.6-pro": ModelSpec(
             provider="mimo",
             spawnable=True,

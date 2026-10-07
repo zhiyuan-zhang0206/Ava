@@ -11,7 +11,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 _GIT_DRIVING_MODULES = (
-    "ops/cluster.py",
+    "ops/cluster/operations.py",
     "base/deploy/git/cluster_drift.py",
 )
 

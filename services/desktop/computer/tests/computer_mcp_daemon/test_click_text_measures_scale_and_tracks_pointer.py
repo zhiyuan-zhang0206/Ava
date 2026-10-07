@@ -374,7 +374,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
             }
         )  # pyright: ignore[reportUnknownMemberType]
 
-    monkeypatch.setattr("base.agents.impersonation_manifest.emit_recorded_central_event", _stage)
+    monkeypatch.setattr("base.agents.impersonation.manifest.emit_recorded_central_event", _stage)
     d = _daemon()
     resp = await _call(d, "click", {"x": 1, "y": 2, "task_id": 42})
     assert resp["ok"] is True  # the action itself executed

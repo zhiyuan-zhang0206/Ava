@@ -14,7 +14,7 @@ handles namespace isolation + disk persistence. Differences:
 
 `ava.sdk_surface.install` binds each declared class through `bind_plugin_config(plugin, cls)`, which
 reads `~/.ava/configs/<plugin>/config.json`, validates it against the class schema, instantiates it and
-stores it for `ava._settings.plugins.<plugin>` (the returned undo drops it on uninstall); a missing
+stores it for `ava.sdk_surface.settings.plugins.<plugin>` (the returned undo drops it on uninstall); a missing
 image is written with the defaults first. Mismatch raises `SchemaDriftError`, guiding the user to run
 `ava plugins update` (reconciles the disk image to the current schema — adds new defaults, drops
 removed fields — fully automatic; also run by the `ava start` converge step). The install treats a
@@ -77,7 +77,7 @@ class InvalidConfigOverlay(PluginConfigError):  # noqa: N818
 
 # Two-layer dict, written only by `bind_plugin_config` (the installer):
 #   _PLUGIN_CONFIG_CLASSES: plugin → Cls
-#   _PLUGIN_CONFIGS:       plugin → instance (agent reads via `ava._settings.plugins.<n>`)
+#   _PLUGIN_CONFIGS:       plugin → instance (agent reads via `ava.sdk_surface.settings.plugins.<n>`)
 
 _PLUGIN_CONFIG_CLASSES: dict[str, type[BaseModel]] = {}
 _PLUGIN_CONFIGS: dict[str, BaseModel] = {}

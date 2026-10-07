@@ -1,7 +1,7 @@
 """ScheduleManager x real pty-sessions service integration.
 
 A real pty-sessions service + real DB + real backend + the real
-`gateway.schedule_runner` entrypoint: `_launch` creates a session in the service,
+`gateway.schedules.runner` entrypoint: `_launch` creates a session in the service,
 `_live_ids` / `capture_blocking` see it, `_reap` tears it down, reconcile rebuilds
 after a crash, and the breaker trips after repeated crashes.
 
@@ -142,7 +142,7 @@ def _wait_session_gone(name: str, timeout_s: float = 20.0) -> None:
 
 def test_launch_cwd_is_the_checkout_root() -> None:
     """Schedule sessions start in the checkout root, where `python -m
-    gateway.schedule_runner` and the relative `.venv/bin/python` resolve."""
+    gateway.schedules.runner` and the relative `.venv/bin/python` resolve."""
     assert sm.REPO_ROOT == REPO
 
 

@@ -68,8 +68,8 @@ a module that merely carries a `test_` prefix outside a `tests/` directory
 
 The map AST-parses every Python file under any `tests/` directory, except files named
 conftest.py, and walks imports in every scope. It includes both module imports
-and absolute from-import targets; for example, from agent import exec_child
-reaches agent/exec_child.py, and from base import lm reaches
+and absolute from-import targets; for example, from agent.execution import child as exec_child
+reaches agent/execution/child.py, and from base import lm reaches
 base/lm/__init__.py when those paths exist. Relative imports and unresolved
 modules are omitted.
 

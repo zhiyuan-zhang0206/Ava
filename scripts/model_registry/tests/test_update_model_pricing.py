@@ -135,7 +135,7 @@ def _sync_fixture(
                 ],
             }
         )
-    archive_path = repo_root / "base/lm/pricing_catalog_archive.json"
+    archive_path = repo_root / "base/lm/pricing/pricing_catalog_archive.json"
     archive_path.parent.mkdir(parents=True)
     archive_path.write_text(
         json.dumps(

@@ -8,6 +8,6 @@ Package door — no imports, no re-exports; callers use the modules below:
   - `session_control.py` — queued sync requests + log capture (the service itself
     is `services/wake/schedule_manager`)
 
-The in-session entrypoint stays `gateway/schedule_runner.py`
-(`python -m gateway.schedule_runner <id>`, a cross-version launch contract).
+The in-session entrypoint stays `gateway/schedules/runner.py`
+(`python -m gateway.schedules.runner <id>`, a cross-version launch contract).
 """
