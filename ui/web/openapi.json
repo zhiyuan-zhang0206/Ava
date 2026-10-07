@@ -7354,6 +7354,8 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
               "title": "Agent Id"
             }
           },
@@ -7423,6 +7425,8 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
               "title": "Agent Id"
             }
           },
@@ -7472,6 +7476,8 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
               "title": "Agent Id"
             }
           },

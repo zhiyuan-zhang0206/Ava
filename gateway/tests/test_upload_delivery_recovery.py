@@ -285,3 +285,16 @@ def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers
     assert served.headers["x-content-type-options"] == "nosniff"
     assert served.headers["content-disposition"] == "attachment; filename*=utf-8''" + quote(name)
     assert served.content == b"<script>bad()</script>"
+
+
+@pytest.mark.parametrize("invalid_agent", [-1, 0, 2**63, 2**70])
+def test_guarded_routes_reject_invalid_agent_paths_before_native_effects(
+    uploaded_agent, db_conn, invalid_agent
+):
+    client, _agent = uploaded_agent
+    assert post(client, invalid_agent).status_code == 422
+    path = f"/api/keyed/v1/agents/{invalid_agent}/uploads/" + "a" * 32
+    assert client.get(path).status_code == 422
+    assert client.get(path + "/objects/0").status_code == 422
+    assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (0,)
+    assert not source.agent_upload_dir(invalid_agent, create=False).exists()

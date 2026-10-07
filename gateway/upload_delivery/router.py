@@ -39,7 +39,7 @@ def operation_key(
 
 @router.post("/api/keyed/v1/agents/{agent_id}/uploads", status_code=202)
 async def upload(
-    agent_id: int,
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)],
     request: Request,
     key: Annotated[str, Depends(operation_key)],
     files: Annotated[list[UploadFile], File()],
@@ -66,7 +66,9 @@ async def upload(
 
 @router.get("/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}")
 async def status(
-    agent_id: int, request: Request, batch_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")]
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)],
+    request: Request,
+    batch_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")],
 ) -> DeliveryStatus:
     return await request.app.state.upload_recovery.native(
         source.status, request.app.state.db_pool, agent_id, batch_id
@@ -75,7 +77,7 @@ async def status(
 
 @router.get("/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}/objects/{ordinal}")
 async def object_file(
-    agent_id: int,
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)],
     request: Request,
     batch_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")],
     ordinal: Annotated[int, Path(ge=0)],

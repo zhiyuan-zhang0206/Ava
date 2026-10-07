@@ -11,7 +11,8 @@ tags: [gateway, uploads]
 `principal-v1` and caller `Idempotency-Key`. It always promises one user chat
 **after** confirmed copy. No Browser/SDK/MCP activation or automatic legacy retry
 is included. Old gateways have no such write route; do not downgrade this intent
-onto synchronous legacy `POST /api/agents/{id}/uploads`.
+onto synchronous legacy `POST /api/agents/{id}/uploads`. Agent IDs must be
+positive signed BIGINT values, validated before native storage or database work.
 
 The original ordered display names, bytes/SHA-256, sizes and content types identify
 the request. Same key with different valid input returns 409. A fresh manifest
