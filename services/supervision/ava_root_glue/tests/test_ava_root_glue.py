@@ -8,7 +8,7 @@ import time
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -264,3 +264,10 @@ async def test_glue_uses_shared_readiness_tiers_for_native_startup(
             assert health[name]["consecutive_failures"] == 0
     finally:
         await context.supervisor.shutdown()
+
+
+def test_static_probe_references_are_read_only() -> None:
+    import operator
+
+    with pytest.raises(TypeError):
+        operator.setitem(cast(Any, glue.STATIC_PROBES), "svc-host", "wiring_fixture_probe:probe")
