@@ -27,6 +27,11 @@ import httpx
 from base.log import logger
 from base.paths import ava_home
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
+from services.entrypoints.im_bridge.outbound_types import (
+    PreparedTimelineSend,
+    TimelineAdapterKind,
+    TimelineChunk,
+)
 from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
 
 # Telegram's per-message cap for plain-text messages.
@@ -115,6 +120,8 @@ class TelegramAdapter(IMAdapter):
         self._owns_client = client is None
         self._poll_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
+        self._bot_id: str | None = None
+        self._identity_lock = asyncio.Lock()
         # message_ids delivered in this process — a re-fetched update (the
         # offset only advances after a message is handled) must not deliver twice.
         self._handled_message_ids: set[str] = set()
@@ -324,6 +331,52 @@ class TelegramAdapter(IMAdapter):
                 f"telegram typing failed: HTTP {resp.status_code} - {resp.text[:200]}"
             )
 
+    async def timeline_account_id(self) -> str:
+        if not self._token or self._owner_id == 0:
+            raise RuntimeError("telegram timeline account is not configured")
+        async with self._identity_lock:
+            if self._bot_id is None:
+                try:
+                    response = await self._http.get(
+                        f"https://api.telegram.org/bot{self._token}/getMe", timeout=10.0
+                    )
+                except httpx.HTTPError as exc:
+                    raise RuntimeError(
+                        f"telegram identity request failed: {type(exc).__name__}"
+                    ) from None
+                if response.status_code != 200:
+                    raise RuntimeError(f"telegram identity failed: HTTP {response.status_code}")
+                body = response.json()
+                bot_id = body.get("result", {}).get("id")
+                if (
+                    body.get("ok") is not True
+                    or not isinstance(bot_id, int)
+                    or isinstance(bot_id, bool)
+                    or bot_id <= 0
+                ):
+                    raise ValueError("telegram getMe returned no valid bot identity")
+                self._bot_id = str(bot_id)
+            return self._bot_id
+
+    async def prepare_timeline(self, text: str) -> PreparedTimelineSend:
+        return PreparedTimelineSend(
+            adapter_kind=TimelineAdapterKind.TELEGRAM,
+            account_id=await self.timeline_account_id(),
+            chunks=tuple(
+                TimelineChunk(text=_to_html(chunk), fallback_text=chunk, html=True)
+                for chunk in _split_text(text)
+            ),
+            markdown=True,
+        )
+
+    async def send_prepared_timeline(self, chat_id: str, prepared: PreparedTimelineSend) -> None:
+        if (
+            prepared.adapter_kind != TimelineAdapterKind.TELEGRAM
+            or prepared.account_id != await self.timeline_account_id()
+        ):
+            raise SendNotStartedError("telegram prepared account or adapter mismatch")
+        await self._send_chunks(chat_id, prepared.chunks, buttons=None)
+
     async def send(
         self,
         chat_id: str,
@@ -335,14 +388,33 @@ class TelegramAdapter(IMAdapter):
         """Send text as HTML (buttons as an inline keyboard); fall back to
         plain text if Telegram rejects the markup."""
 
-        for index, chunk in enumerate(_split_text(text)):
-            rendered = _to_html(chunk) if markdown else _escape_html(chunk)
+        chunks = tuple(
+            TimelineChunk(
+                text=_to_html(chunk) if markdown else _escape_html(chunk),
+                fallback_text=chunk,
+                html=True,
+            )
+            for chunk in _split_text(text)
+        )
+        await self._send_chunks(chat_id, chunks, buttons=buttons)
+
+    async def _send_chunks(
+        self,
+        chat_id: str,
+        chunks: tuple[TimelineChunk, ...],
+        *,
+        buttons: list[tuple[str, str]] | None,
+    ) -> None:
+        for index, chunk in enumerate(chunks):
             try:
                 try:
-                    await self._send_message(chat_id, rendered, buttons=buttons, html=True)
+                    await self._send_message(chat_id, chunk.text, buttons=buttons, html=chunk.html)
                 except _MarkupRejectedError:
-                    # A confirmed markup rejection has no effect; fallback is safe.
-                    await self._send_message(chat_id, chunk, buttons=buttons, html=False)
+                    if chunk.fallback_text is None:
+                        raise
+                    await self._send_message(
+                        chat_id, chunk.fallback_text, buttons=buttons, html=False
+                    )
             except SendNotStartedError:
                 if index == 0:
                     raise
