@@ -60,11 +60,6 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("INSERT, UPDATE", ("agent_tasks", "agent_impersonation_messages")),
     # The understanding tree: chunk and group writers (and their pruning of superseded rows).
     ("SELECT, INSERT, UPDATE, DELETE", ("understanding_nodes",)),
-    # The retired hierarchy worker's queue: nothing writes it any more, but the table stays until
-    # a later migration drops it and the migration that granted this (20260924T071500) still runs
-    # on every cluster, so the matrix keeps the entry or birth and migration would disagree.
-    # Removed together with the table.
-    ("INSERT", ("hierarchy_jobs",)),
     # Chunk-triggered understanding queue: enqueued by the llm node and compact
     # paths, claimed and finished by the agent-host loop.
     ("SELECT, INSERT, UPDATE", ("understanding_chunk_jobs",)),

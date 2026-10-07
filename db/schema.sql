@@ -2014,62 +2014,6 @@ BEGIN
     END IF;
 END $$;
 
--- ─────────────── hierarchy_jobs ───────────────
--- Understanding-tree build queue (task #3704 P2b): one row per execution
--- attempt of one agent build, enqueued by the compact-driven worker, claimed
--- atomically, executed in a child process. Hash-idempotent retries (the
--- generation reuse cache lives in understanding_nodes), crash-recoverable via
--- the stale-running sweep, scope+token stats for cost observability.
-CREATE TABLE hierarchy_jobs (
-    id BIGSERIAL PRIMARY KEY,
-    agent_id BIGINT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('compact', 'tail')),
-    trigger_boundary TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed')),
-    include_tail BOOLEAN NOT NULL,
-    model TEXT,
-    engine_version TEXT,
-    prompt_version TEXT,
-    stretches INTEGER,
-    nodes INTEGER,
-    generated INTEGER,
-    reused INTEGER,
-    failed INTEGER,
-    skipped INTEGER,
-    src_tokens BIGINT,
-    out_tokens BIGINT,
-    error TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ
-);
--- Enqueue de-dup: at most one live job per (agent, kind).
-CREATE UNIQUE INDEX hierarchy_jobs_live
-    ON hierarchy_jobs (agent_id, kind) WHERE status IN ('pending', 'running');
--- The claim/recovery paths read pending/running rows.
-CREATE INDEX hierarchy_jobs_live_status
-    ON hierarchy_jobs (status) WHERE status IN ('pending', 'running');
--- Per-agent attempt history (scan reads the last finished attempt).
-CREATE INDEX hierarchy_jobs_agent
-    ON hierarchy_jobs (agent_id, id DESC);
-
-COMMENT ON TABLE hierarchy_jobs IS
-    'Understanding-tree build queue (task #3704 P2b): one row per execution attempt; hash-idempotent retries, crash-recoverable, scope+token stats.';
-
--- ava_runner surface: the compact-boundary event enqueue (task #4674) inserts
--- one build job per new boundary from the agent process
--- (`mark_compact_boundary`'s async twin) — idempotent via the live partial
--- unique index, best-effort by design. Gated on the role's existence (fresh
--- bootstrap applies this baseline before install birth creates ava_runner),
--- and base/cluster/authority/groups.py's ensure_groups grants the same
--- surface at birth.
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT INSERT ON hierarchy_jobs TO ava_runner;
-    END IF;
-END $$;
-
 -- ─────────────── understanding_chunk_jobs ───────────────
 -- Chunk-triggered understanding queue (see migrations/20261007T045501_understanding-chunk-tree.sql):
 -- one row per context stretch the understanding layer must describe; claimed
@@ -2202,44 +2146,6 @@ BEGIN
         GRANT USAGE, SELECT ON SEQUENCE understanding_group_calls_id_seq TO ava_runner;
     END IF;
 END $$;
-
--- ─────────────── hierarchy_worker_state ───────────────
--- Per-agent scan cursor of the hierarchy worker: the newest compact boundary
--- fully covered. First sight records it without building (silent baseline);
--- a job advances it only when the run skipped nothing. last_tail_seal_cp_id
--- is the tail channel's delta gate (task #3981 C): the newest checkpoint id a
--- tail seal has covered; null until the first tail seal.
-CREATE TABLE hierarchy_worker_state (
-    agent_id BIGINT PRIMARY KEY,
-    last_processed_boundary TEXT NOT NULL,
-    last_tail_seal_cp_id TEXT,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE hierarchy_worker_state IS
-    'Per-agent scan cursor of the understanding-tree worker (task #3704 P2b): newest fully covered compact boundary; the row itself is the silent baseline.';
-
--- ─────────────── hierarchy_worker_breaker ───────────────
--- The worker's regeneration circuit breaker (task #4674 guardrail): a
--- singleton row recording the last trip and its operator reset. The 24h
--- generated-node budget trips it and the worker stops claiming; resuming is
--- an explicit, auditable operator act:
---   UPDATE hierarchy_worker_breaker SET reset_at = now(), reset_note = '<who/why>'
---    WHERE id = 1;
--- Active trip = reset_at IS NULL; after a reset the first cooled (<= budget)
--- window reading sets rearmed_at, and only then may a new excursion trip.
--- The row exists only once a trip happened; its absence means armed.
-CREATE TABLE hierarchy_worker_breaker (
-    id             INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    tripped_at     TIMESTAMPTZ,
-    tripped_reason TEXT,
-    reset_at       TIMESTAMPTZ,
-    reset_note     TEXT,
-    rearmed_at     TIMESTAMPTZ
-);
-
-COMMENT ON TABLE hierarchy_worker_breaker IS
-    'Regeneration circuit breaker (task #4674): singleton row; active trip = reset_at IS NULL; operators reset with reset_at + reset_note; re-arms (rearmed_at) only after a reset and a cooled window.';
 
 -- ─────────────── audit_events ───────────────
 -- The system of record for category=audit events: who did what to whom, kept
@@ -2478,6 +2384,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260923T175411_agent-creation-ava
 INSERT INTO schema_migrations (name) VALUES ('20260923T195300_agent-launch-failure');
 INSERT INTO schema_migrations (name) VALUES ('20260923T205208_impersonation-event-manifest');
 INSERT INTO schema_migrations (name) VALUES ('20260924T070003_hierarchy-worker-breaker');
+INSERT INTO schema_migrations (name) VALUES ('20260924T071500_hierarchy-jobs-runner-grant');
 INSERT INTO schema_migrations (name) VALUES ('20260924T150840_impersonation-receipt-lock-door');
 INSERT INTO schema_migrations (name) VALUES ('20260924T193804_task-escalation-marker');
 INSERT INTO schema_migrations (name) VALUES ('20260926T135638_impersonation-dsh-relay');
