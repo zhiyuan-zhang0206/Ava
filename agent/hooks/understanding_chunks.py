@@ -10,7 +10,7 @@ loop):
   become the reference, so the fixed head never counts as material. After
   that, once the provider-reported `input_tokens` exceed those at the
   segment's previous cut by
-  `settings.agent.understanding_chunk_tokens`, enqueue
+  `chunk_threshold` (`AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold), enqueue
   `[cut index, request length)` and return the `compact` update that moves
   the cut. A failed enqueue leaves the cut where it was, so the next turn
   covers the same stretch again.
@@ -34,6 +34,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.state_channels import CompactState
 from base import telemetry
 from base.agents.history.hierarchy.chunks import (
+    chunk_threshold,
     enqueue_chunk,
     plan_chunk,
     plan_closing_chunk,
@@ -42,6 +43,7 @@ from base.agents.history.hierarchy.chunks import (
 )
 from base.agents.messages.kwargs import message_read_time
 from base.config import settings
+from base.host.env.agent_slices import ModelOverrides
 from base.log import logger
 
 
@@ -52,6 +54,8 @@ async def due_chunk_update(
     *,
     pool: AsyncConnectionPool | None,
     agent_id: int,
+    model: str,
+    overrides: ModelOverrides | None,
 ) -> dict[str, Any]:
     """The state update after one llm turn: `{}`, or the moved cut once a chunk is enqueued.
 
@@ -80,7 +84,7 @@ async def due_chunk_update(
         cut_tokens=compact.understanding_cut_tokens,
         input_tokens=input_tokens,
         request_len=len(request),
-        threshold=settings.agent.understanding_chunk_tokens,
+        threshold=chunk_threshold(model, overrides, settings.agent.understanding_chunk_ratio),
     )
     if chunk is None:
         return {}

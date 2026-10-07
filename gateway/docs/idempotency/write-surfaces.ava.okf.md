@@ -55,7 +55,7 @@ Domain evidence:
 | `POST /api/agents/{agent_id}/resurrect` | one-shot | resurrection is not bound to the observed incarnation |
 | `POST /api/agents/resurrect-billing` | one-shot | billing resurrection has no durable operation receipt; preview alone is read-only |
 | `POST /api/agents/{agent_id}/restart` | one-shot | a repeat dispatches another restart; HTTP intent has no durable receipt |
-| `POST /api/agents/{agent_id}/understanding/close` | natural | plans one closing job from stored state; a repeat finds the active job or an empty stretch |
+| `POST /api/agents/{agent_id}/understanding/build` | natural | jobs and the pending rebuild merge into live ones; a repeat only records a build |
 | `POST /api/mcp/clients` | one-shot | client creation — plaintext token is revealed once |
 | `POST /api/mcp/clients/{client_id}/revoke` | natural | client revocation — guarded update; repeats cannot revoke twice |
 | `POST /api/memory/refresh` | natural | re-scan — repeats are harmless |

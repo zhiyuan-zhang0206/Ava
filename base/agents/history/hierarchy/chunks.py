@@ -16,6 +16,7 @@ is described on its own: jobs of one agent do not depend on each other.
 
 This module holds the pure pieces and the queue SQL (`understanding_chunk_jobs`):
 
+- `chunk_threshold` — the chunk size, a ratio of the model's soft compaction threshold;
 - `plan_chunk` / `plan_closing_chunk` — the trigger rule and the chunk cut;
 - `enqueue_chunk` — best-effort enqueue (never raises, never blocks the turn);
 - `claim_job` / `finish_job` / `release_job` / `backlog` — the consumer's queue;
@@ -52,6 +53,8 @@ from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.store import SCHEMA_VERSION
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.db.transaction import async_write_transaction
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.context_budget import resolve_context_budget
 from base.log import logger
 
 # Stored on the node rows a chunk produces, so a text traces to its rules.
@@ -73,6 +76,18 @@ MAX_ATTEMPTS = 20
 # attempt) is failed after waiting this long; the clock starts when it first waits, so a job that
 # sits in the queue while the feature is off is not timed.
 GIVE_UP_AFTER_SECONDS = 6 * 3600.0
+
+
+def chunk_threshold(model: str, overrides: ModelOverrides | None, ratio: float) -> int:
+    """The chunk size in tokens: `ratio` x the model's soft compaction threshold.
+
+    The one definition of the size, shared by the llm node's hook, the manual build and the replay
+    tool. `overrides` is the agent's own tuning (a soft threshold it set wins over the model's).
+
+    Raises:
+        UnknownModelWindowError: `model` has no context window in the registry.
+    """
+    return max(1, round(ratio * resolve_context_budget(model, overrides).soft_compact_tokens))
 
 
 @dataclass(frozen=True)
@@ -241,7 +256,8 @@ class ChunkJob:
 # next chunk starts where the previous one left an open group, so one agent's jobs
 # never run side by side or out of order). SKIP LOCKED lets several runners poll
 # one queue without ever taking the same row, and one runner's concurrent claims
-# likewise. A replay (`segment_parallel`) narrows "oldest of its agent" to "oldest of
+# likewise. An agent whose upper-level rebuild is running (`rebuild.py`) has no job claimed: the
+# rebuild owns its tree. A replay (`segment_parallel`) narrows "oldest of its agent" to "oldest of
 # its compaction segment": a closing chunk seals every open group, so segments carry
 # nothing across; `agent_id` confines the claim to one agent.
 _CLAIM_SQL = """
@@ -256,6 +272,10 @@ WHERE id = (
         WHERE o.agent_id = j.agent_id AND o.id < j.id AND o.status IN ('pending', 'running')
           AND (NOT %(per_segment)s OR o.compact_version = j.compact_version))
       AND (%(agent)s::bigint IS NULL OR j.agent_id = %(agent)s::bigint)
+      AND NOT EXISTS (
+        SELECT 1 FROM understanding_rebuilds r
+        WHERE r.agent_id = j.agent_id AND r.status = 'running'
+          AND r.claimed_at >= now() - make_interval(secs => %(lease)s))
     ORDER BY j.id
     FOR UPDATE OF j SKIP LOCKED
     LIMIT 1
