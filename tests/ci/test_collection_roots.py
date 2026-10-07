@@ -43,6 +43,7 @@ _HOSTS = (
     "gateway",
     "ops",
     "scripts",
+    "schedules",
     "services",
 )
 

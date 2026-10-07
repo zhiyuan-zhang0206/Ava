@@ -302,33 +302,9 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "checks the shipped plugin metrics against the deploy/lgtm dashboard queries",
     ),
-    "tests/schedules/test_adversarial_eval_weekly.py": (
-        "contract",
-        "tests schedules/adversarial-eval-weekly-schedule.py and schedules/manifest.json",
-    ),
-    "tests/schedules/test_agent_directory_consumers.py": (
-        "contract",
-        "scans the schedules/ templates for directory-search paging",
-    ),
-    "tests/schedules/test_agent_status_guard.py": (
-        "contract",
-        "scans the schedules/ templates for AgentStatus dependency guards",
-    ),
     "tests/schedules/test_c9_daily_report.py": (
         "contract",
         "tests schedules/c9-daily-report-schedule.py and schedules/manifest.json",
-    ),
-    "tests/schedules/test_catchup.py": (
-        "contract",
-        "tests the schedules/ templates and schedules/daily_host.py catch-up behavior",
-    ),
-    "tests/schedules/test_debt_sweep_daily.py": (
-        "contract",
-        "tests schedules/debt-sweep-daily-schedule.py",
-    ),
-    "tests/schedules/test_dev_ci_metrics.py": (
-        "contract",
-        "tests schedules/dev-ci-metrics-schedule.py",
     ),
     "tests/scripts/structure/test_lint_common_contract.py": (
         "contract",
