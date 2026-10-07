@@ -7,7 +7,6 @@
     "services/agent_runner/agent_ops/daemon.py::global-rebind:_db_pool": 1,
     "services/agent_runner/agent_ops/daemon.py::global-rebind:_op_executor": 2
   },
-  "files": {},
   "patch_targets": {
     "services/agent_runner/agent_host/tests/test_hosted_force_quiescence.py::agent.graph.exec._process": 1,
     "services/agent_runner/agent_host/tests/test_hosted_force_quiescence.py::agent.graph.exec._subprocess": 1,
