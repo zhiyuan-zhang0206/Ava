@@ -107,7 +107,7 @@ class TestReadUpdateDelete:
         async def _record_sync(pool: object, schedule_id: int) -> None:
             synced.append(schedule_id)
 
-        monkeypatch.setattr(session_control, "request_sync", _record_sync)
+        monkeypatch.setattr(session_control, "wait_consumed", _record_sync)
         with TestClient(app) as client:
             sid = _create(client, name="e").json()["id"]
             stopped = client.put(f"/api/schedules/{sid}", json={"enabled": False})
@@ -127,7 +127,7 @@ class TestReadUpdateDelete:
         async def _record_sync(pool: object, schedule_id: int) -> None:
             synced.append(schedule_id)
 
-        monkeypatch.setattr(session_control, "request_sync", _record_sync)
+        monkeypatch.setattr(session_control, "wait_consumed", _record_sync)
         with TestClient(app) as client:
             sid = _create(client, name="e").json()["id"]
             enabled = client.put(f"/api/schedules/{sid}", json={"enabled": True})
@@ -183,7 +183,7 @@ class TestControl:
         async def _record_sync(pool: object, schedule_id: int) -> None:
             synced.append(schedule_id)
 
-        monkeypatch.setattr(session_control, "request_sync", _record_sync)
+        monkeypatch.setattr(session_control, "wait_consumed", _record_sync)
         with TestClient(app) as client:
             sid = _create(client, name="c", enabled=False).json()["id"]
             assert client.post(f"/api/schedules/{sid}/start").json()["enabled"] is True
