@@ -26,12 +26,15 @@ from base.api_contracts.contracts import Idempotency, PauseSemantics
 
 def test_sdk_inherits_idempotency_from_contracts() -> None:
     """The three semantics resolve where the SDK looks them up."""
-    assert contracts.idempotency_for("POST", "/api/agents") is Idempotency.NON_IDEMPOTENT
+    assert contracts.idempotency_for("POST", "/api/agents") is Idempotency.AT_LEAST_ONCE_WITH_KEY
     assert (
         contracts.idempotency_for("POST", "/api/agents/7/messages")
         is Idempotency.AT_LEAST_ONCE_WITH_KEY
     )
     assert contracts.idempotency_for("GET", "/api/agents/7") is Idempotency.IDEMPOTENT
+    creation_contract = contracts.contract_for("POST", "/api/agents")
+    assert creation_contract is not None and creation_contract.transactional_idempotency
+    assert not creation_contract.legacy_keyed_retry
     message_contract = contracts.contract_for("POST", "/api/agents/7/messages")
     assert message_contract is not None and message_contract.transactional_idempotency
     reconcile_contract = contracts.contract_for("POST", "/api/agents/7/messages/reconcile")

@@ -104,7 +104,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="live agent cards and required ancestor links in one snapshot"
     ),
     ("POST", "/api/agents"): RouteContract(
-        Idempotency.NON_IDEMPOTENT, note="spawn — pure INSERT; a retry twins the agent (#698)"
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="spawn — keyed identity commits with birth and first prompt",
+        transactional_idempotency=True,
     ),
     ("POST", "/api/agents/{agent_id}/retry-launch"): RouteContract(
         Idempotency.NON_IDEMPOTENT,

@@ -167,11 +167,9 @@ def spawn(
         body["config"] = config
     if label is not None:
         body["label"] = label
-    # Non-idempotent create (doorplate: POST /api/agents = NON_IDEMPOTENT):
-    # a ReadTimeout or an HTTP 5xx means the gateway may have already spawned
-    # the agent (response lost, not request lost) — retrying could produce a
-    # phantom-twin agent, so the retry is limited to connect-family failures
-    # (task #698 G7 + task #960). Inherited from the contract — no override.
+    # The transport supplies one creation key across connect-family retries.
+    # Ambiguous outcomes stay terminal until gateway capability is negotiated:
+    # an older gateway may ignore the key and create another agent.
     resp = post("/api/agents", body)
     raise_from_response(resp)
     data = resp.json()
