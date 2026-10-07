@@ -340,3 +340,28 @@ def test_interrupted_database_with_unknown_objects_is_preserved(_provisioned_db:
             )
     finally:
         _drop_db_and_role(admin_url, identity)
+
+
+def test_default_schema_check_never_setup_after_concurrent_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent repair between both reads cannot grant this call DDL authority."""
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    from base.cluster import provision
+
+    expected = frozenset(range(len(PostgresSaver.MIGRATIONS)))
+    observed = iter((expected - {9}, expected))
+
+    def checkpoint_versions(_db_url: str, *, expected_data_dir: object = None) -> frozenset[int]:
+        return next(observed)
+
+    def setup_must_not_run(_self: PostgresSaver) -> None:
+        raise AssertionError("a successful read-only recheck must return before setup")
+
+    monkeypatch.setattr(provision, "_checkpoint_schema_versions", checkpoint_versions)
+    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
+
+    provision.ensure_checkpoint_schema("ava_repaired", base_admin_url=_admin_url())
+    with pytest.raises(StopIteration):
+        next(observed)
