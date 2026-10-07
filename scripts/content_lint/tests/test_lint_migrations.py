@@ -398,6 +398,33 @@ def test_merged_migration_rename_fails(monkeypatch, tmp_path):
     assert lint.main("HEAD") == 1
 
 
+def test_merged_migration_can_move_without_changing_name_or_sql(monkeypatch, tmp_path):
+    lint, d = _merged_repo(monkeypatch, tmp_path)
+    group = d / "2026/07/19"
+    group.mkdir(parents=True)
+    (d / f"{_TS}_add-foo.sql").rename(group / f"{_TS}_add-foo.sql")
+    assert lint.main("HEAD") == 0
+
+
+def test_relocated_merged_migration_cannot_change_sql(monkeypatch, tmp_path):
+    lint, d = _merged_repo(monkeypatch, tmp_path)
+    group = d / "2026/07/19"
+    group.mkdir(parents=True)
+    moved = group / f"{_TS}_add-foo.sql"
+    (d / moved.name).rename(moved)
+    moved.write_text("SELECT 2;")
+    assert lint.main("HEAD") == 1
+
+
+def test_duplicate_name_across_directories_fails(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path)
+    for group in ("one", "two"):
+        folder = d / group
+        folder.mkdir()
+        (folder / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
+    assert lint.main() == 1
+
+
 def test_new_migration_beside_a_merged_one_passes(monkeypatch, tmp_path):
     lint, d = _merged_repo(monkeypatch, tmp_path)
     (d / f"{_TS2}_add-bar.sql").write_text("SELECT 1;")

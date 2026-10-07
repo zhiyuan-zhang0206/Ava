@@ -126,7 +126,7 @@ def _list_migration_files() -> list[tuple[str, Path]]:
 
     files: list[tuple[str, Path]] = []
     skipped: list[Path] = []
-    for path in sorted(migrations_dir.iterdir()):
+    for path in sorted(migrations_dir.rglob("*.sql")):
         if path.name.startswith(".") or not path.is_file():
             continue
         if not path.name.endswith(".sql"):
@@ -171,7 +171,7 @@ def untracked_migration_files() -> list[str]:
         return []
     return sorted(
         path.name
-        for path in migrations_dir.iterdir()
+        for path in migrations_dir.rglob("*.sql")
         if path.is_file()
         and not path.name.startswith(".")
         and path.name.endswith(".sql")

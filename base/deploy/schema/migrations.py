@@ -13,7 +13,7 @@ switches.
 Migrations are applied as a step of `ava start`.
 
 Identity model (2026-07-19 timestamp-id + re-baseline cutover):
-- File layout: `<repo-root>/migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` — a
+- File layout: `<repo-root>/migrations/YYYY/MM/DD/YYYYMMDDTHHMMSS_<kebab-name>.sql` — a
   second-precision UTC timestamp prefix + a kebab-case name, body is raw SQL
   (`apply_pending_migrations` auto-wraps in a transaction). There is no down
   migration: a mistake is fixed forward by a new migration. The timestamp makes names collision-free without a

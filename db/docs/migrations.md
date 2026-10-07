@@ -32,11 +32,12 @@ the drift gate refuses unmirrored dependency changes before DB mutation.
 
 ## Adding a new migration
 
-1. Write `migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` — the prefix is a
+1. Write `migrations/YYYY/MM/DD/YYYYMMDDTHHMMSS_<kebab-name>.sql` — the prefix is a
    second-precision UTC timestamp (`date -u +%Y%m%dT%H%M%S`), pure SQL, don't INSERT
    schema_migrations (the runner does it)
 2. There is no down migration. A mistake in a merged migration is fixed forward by a new
-   migration; the merged file is never edited, deleted or renamed (lint check 4). Lossy
+   migration; its SQL bytes and migration name never change (lint check 4). Directory-only
+   moves retain the same applied-set identity. Lossy
    operations go expand-contract: ship the code that stops using the object first, drop it in
    a later migration
 3. Sync the corresponding schema change into `db/schema.sql` (the baseline stays current).
@@ -51,7 +52,7 @@ the drift gate refuses unmirrored dependency changes before DB mutation.
 
 In CI, `scripts/content_lint/lint_migrations.py` statically checks the timestamp filename format
 (`YYYYMMDDTHHMMSS_<kebab-name>.sql`, a real datetime), name uniqueness, that no migration already on main (against the merge-base with `origin/main`,
-or `--base` in CI) is modified, deleted or renamed, that
+or `--base` in CI) is modified, deleted or renamed (directory-only moves preserve the name and bytes), that
 `db/schema.sql` stamps the baseline sentinel and no longer carries a `generate_series` seed,
 and that a migration whose strict (non-idempotent) DDL is already folded into the baseline
 is stamped in the seed — an unstamped strict delta dies on the first fresh-DB bootstrap, so

@@ -250,7 +250,10 @@ def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices(
     from base.deploy.tests.migration_support import _SCHEMA_SQL, _throwaway_database
 
     root = Path(__file__).resolve().parents[3]
-    delta = root / "migrations/20261005T095252_separate-impersonation-transport-lifecycle.sql"
+    delta = (
+        root
+        / "migrations/2026/10/05/20261005T095252_separate-impersonation-transport-lifecycle.sql"
+    )
     with (
         _throwaway_database("impersonation_transport") as url,
         psycopg.connect(url, autocommit=True) as conn,
