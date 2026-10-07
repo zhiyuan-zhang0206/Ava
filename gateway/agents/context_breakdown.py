@@ -20,7 +20,7 @@ share of its tokens.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from langchain_core.messages import (
     AIMessage,
@@ -322,11 +322,25 @@ def request_breakdown(
     head: SystemMessage | None, body: Sequence[BaseMessage], segment: SegmentTokens, upto: int
 ) -> RequestBreakdown:
     """The breakdown of the request at body index `upto`: the segment's head and `body[:upto]`,
-    as that request's context (a model switch before it re-splits what preceded it)."""
+    as that request's context (a model switch before it re-splits what preceded it).
+
+    The request's own `input_tokens` is the provider's number: when the parts add up to it, the
+    total is exact however the parts were obtained (the categories stay as they are)."""
     head_rec, records = context_through(head, body, segment, upto)
     messages: list[BaseMessage] = ([head] if head is not None else []) + list(body[:upto])
     counted = ([head_rec] if head is not None and head_rec is not None else []) + records
-    return compute_breakdown(messages, counted)
+    found = compute_breakdown(messages, counted)
+    request = body[upto]
+    reported = (
+        request.usage_metadata["input_tokens"]
+        if isinstance(request, AIMessage) and request.usage_metadata
+        else None
+    )
+    if reported == found.total.tokens:
+        found = replace(
+            found, total=TokenTotal(tokens=reported, estimated=False, exact_fraction=1.0)
+        )
+    return found
 
 
 def latest_request_breakdown(messages: Sequence[BaseMessage]) -> RequestBreakdown:

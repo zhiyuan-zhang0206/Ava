@@ -76,7 +76,7 @@ def get_run_timeline_context(
         agent_id,
         request_breakdown(
             history.segment_heads[found.session],
-            history.messages[start : found.idx],
+            history.messages[start : found.idx + 1],
             view.segments[found.session],
             found.idx - start,
         ),
