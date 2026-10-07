@@ -147,11 +147,12 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
-    understanding_chunk_tokens: int = Field(
-        default=60000,
-        alias="AVA_UNDERSTANDING_CHUNK_TOKENS",
-        description="Understanding chunk size: a chunk is enqueued when a request's provider-reported input tokens exceed those at the previous cut of the same compaction segment by at least this many. A segment's closing remainder is enqueued at compaction regardless of size.",
+    understanding_chunk_ratio: float = Field(
+        default=0.5,
+        alias="AVA_UNDERSTANDING_CHUNK_RATIO",
+        description="Understanding chunk size as a fraction of the agent model's soft compaction threshold (its compact-reminder tokens, with the agent's own overrides): a chunk is enqueued when a request's provider-reported input tokens exceed those at the previous cut of the same compaction segment by at least ratio x that threshold. A segment's closing remainder is enqueued at compaction regardless of size. A small ratio speeds up verification.",
         gt=0,
+        le=1,
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
