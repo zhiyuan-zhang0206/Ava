@@ -145,9 +145,11 @@ def test_chat_typing_starts_and_stops_on_agent_reply(
             }
         ]
         await core._push_snapshot(("telegram", "12345"), state, {"items": []})
-        await core.outbound_worker.run_once()
+        calls_after_acceptance = len(adapter.typing_calls)
+        assert ("telegram", "12345") not in core._typing_tasks
         await asyncio.sleep(0.06)
-        assert len(adapter.typing_calls) == calls_before  # stopped by the reply
+        assert len(adapter.typing_calls) == calls_after_acceptance  # stopped by committed reply
+        await core.outbound_worker.run_once()
         assert adapter.sent == [("12345", "[Ava #405] answer")]
 
     asyncio.run(scenario())
