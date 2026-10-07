@@ -387,6 +387,9 @@ class TelegramAdapter(IMAdapter):
         )
         return recipient, prepared
 
+    async def prepare_alert_owner(self, text: str) -> tuple[str, PreparedOutboundSend]:
+        return await self.prepare_notice_owner(text, ())
+
     async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
         if (
             prepared.adapter_kind != OutboundAdapterKind.TELEGRAM
