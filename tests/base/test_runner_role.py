@@ -340,9 +340,20 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
         Database.from_settings(), 73, trace_id
     )
 
-    assert current == [HumanMessage(content="runtime read")]
+    # This legacy checkpoint bypasses Pregel's ID assignment. Reading it
+    # records provenance without requiring DDL or rewriting stored data.
+    expected = HumanMessage(
+        content="runtime read", additional_kwargs={"ava_ephemeral_message_id": True}
+    )
+    assert current == [expected]
     assert checkpoint_id == saved["configurable"]["checkpoint_id"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-    assert traced == [HumanMessage(content="runtime read")]
+    assert traced == [expected]
+    with PostgresSaver.from_conn_string(_runner_url(runner_db)) as saver:
+        original = saver.get_tuple(saved)
+    assert original is not None
+    assert original.checkpoint["channel_values"]["messages"] == [
+        HumanMessage(content="runtime read")
+    ]
 
 
 def test_current_checkpoint_schema_skips_setup(
