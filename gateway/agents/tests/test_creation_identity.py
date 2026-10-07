@@ -2,11 +2,13 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import LiteralString, cast
 from uuid import uuid4
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg import sql
 
 from gateway.agents import router as agent_router
 from gateway.app import app
@@ -103,7 +105,10 @@ def test_creation_replay_precedes_mutable_spawn_validation(
     first = client.post("/api/agents", json=body, headers={"Idempotency-Key": key})
     assert first.status_code == 201
 
-    monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: True)
+    def paused(_db: object, _name: str) -> bool:
+        return True
+
+    monkeypatch.setattr("base.cluster.machines.is_paused", paused)
     fresh = client.post("/api/agents", json=body)
     assert fresh.status_code == 409
     retry = client.post("/api/agents", json=body, headers={"Idempotency-Key": key})
@@ -123,7 +128,7 @@ def test_migration_preserves_existing_keyless_birth(
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("ALTER TABLE agents_meta DROP COLUMN creation_key CASCADE")
         db_conn.execute("ALTER TABLE agents_meta DROP COLUMN creation_request_hash CASCADE")
-        db_conn.execute(migration.read_text())
+        db_conn.execute(sql.SQL(cast(LiteralString, migration.read_text())))
         assert db_conn.execute(
             "SELECT creation_key, creation_request_hash FROM agents_meta WHERE id=%s", (agent_id,)
         ).fetchone() == (None, None)
