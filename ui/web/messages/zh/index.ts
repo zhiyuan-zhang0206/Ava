@@ -25,6 +25,7 @@ import openTasksNotice from "./interface/openTasksNotice.json";
 import pendingStrip from "./agents/pendingStrip.json";
 import presets from "./agents/presets.json";
 import runTimeline from "./agents/runTimeline.json";
+import runTimelineSessions from "./agents/runTimelineSessions.json";
 import schedules from "./operations/schedules.json";
 import sidebar from "./agents/sidebar.json";
 import skills from "./operations/skills.json";
@@ -56,6 +57,7 @@ const messages = {
   pendingStrip,
   presets,
   runTimeline,
+  runTimelineSessions,
   schedules,
   sidebar,
   skills,
