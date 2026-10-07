@@ -88,28 +88,31 @@ def test_push_snapshot_watermark_is_per_chat() -> None:
     state_b = ChatState("weixin", "wx123")
     state_b.current_agent_id = 405
 
-    def snapshot(*item_ids: str) -> dict[str, Any]:
-        return {
-            "items": [{"item_id": i, "kind": "agent_chat", "payload": f"p{i}"} for i in item_ids]
-        }
+    def committed(*item_ids: str) -> None:
+        gateway.timeline = [
+            {
+                "item_id": item_id,
+                "kind": "agent_chat",
+                "payload": f"p{item_id}",
+                "source_message_id": "stored-" + item_id,
+                "source_block_idx": 0,
+            }
+            for item_id in item_ids
+        ]
 
     async def scenario() -> None:
-        # Both chats receive the same snapshot (same agent); each must push
-        # every item — a shared watermark would make the second chat stale.
-        await core._push_snapshot(("telegram", "12345"), state_a, snapshot("1.1", "2.1"))
-        await core._push_snapshot(("weixin", "wx123"), state_b, snapshot("1.1", "2.1"))
-        assert adapter.sent == [
-            ("12345", "[Ava #405] p1.1"),
-            ("12345", "[Ava #405] p2.1"),
-        ]
-        assert plain.sent == [
-            ("wx123", "[Ava #405] p1.1"),
-            ("wx123", "[Ava #405] p2.1"),
-        ]
-        # A new item for chat A alone must not be suppressed by chat B's
-        # watermark (and vice versa).
-        await core._push_snapshot(("telegram", "12345"), state_a, snapshot("3.1"))
-        await core._push_snapshot(("weixin", "wx123"), state_b, snapshot("4.1"))
+        committed("1.1", "2.1")
+        await core._push_snapshot(("telegram", "12345"), state_a, {})
+        await core._push_snapshot(("weixin", "wx123"), state_b, {})
+        await core.timeline_worker.run_once()
+        await core.timeline_worker.run_once()
+        assert adapter.sent == [("12345", "[Ava #405] p1.1"), ("12345", "[Ava #405] p2.1")]
+        assert plain.sent == [("wx123", "[Ava #405] p1.1"), ("wx123", "[Ava #405] p2.1")]
+        committed("3.1")
+        await core._push_snapshot(("telegram", "12345"), state_a, {})
+        committed("4.1")
+        await core._push_snapshot(("weixin", "wx123"), state_b, {})
+        await core.timeline_worker.run_once()
         assert adapter.sent[-1:] == [("12345", "[Ava #405] p3.1")]
         assert plain.sent[-1:] == [("wx123", "[Ava #405] p4.1")]
         assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(None, "3.1")
