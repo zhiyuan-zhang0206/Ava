@@ -227,15 +227,22 @@ def _cost_totals(rows: Iterable[tuple[str, LlmCostSums]]) -> tuple[float, int]:
     """Sum immutable cost snapshots, retaining the pre-snapshot compatibility path."""
     cost = 0.0
     unpriced = 0
+    legacy: dict[str, list[int]] = {}
     for model, row in rows:
         cost += row.cost
         unpriced += row.unpriced
         if row.legacy_calls:
-            price = cost_usd(model, row.legacy_in, row.legacy_out, row.legacy_cached)
-            if price is None:
-                unpriced += row.legacy_calls
-            else:
-                cost += price
+            totals = legacy.setdefault(model, [0, 0, 0, 0])
+            for index, count in enumerate(
+                (row.legacy_calls, row.legacy_in, row.legacy_out, row.legacy_cached)
+            ):
+                totals[index] += count
+    for model, (calls, tin, tout, cached) in legacy.items():
+        price = cost_usd(model, tin, tout, cached)
+        if price is None:
+            unpriced += calls
+        else:
+            cost += price
     return cost, unpriced
 
 
