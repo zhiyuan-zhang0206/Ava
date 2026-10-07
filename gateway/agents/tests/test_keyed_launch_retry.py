@@ -88,10 +88,11 @@ def test_lost_response_concurrency_and_deliberate_new_attempt(
 
 
 def test_replay_survives_mutable_config_admission_and_target_deletion(
-    client: TestClient, db_conn: psycopg.Connection[Any]
+    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
+    monkeypatch.setattr(settings.lm, "llm_model", "changed-after-acceptance")
     snapshot = db_conn.execute(
         "SELECT config_overlay, birth_config FROM agent_launch_retry_receipts"
     ).fetchone()
@@ -349,3 +350,17 @@ def test_receipt_insert_and_pointer_rotation_roll_back_together(
         "SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (UUID(prior),)
     assert submit(client, agent_id, prior).status_code == 200
+
+
+def test_distinct_concurrent_intents_cannot_reuse_the_same_observation(
+    client: TestClient, db_conn: psycopg.Connection[Any]
+) -> None:
+    agent_id, prior = birth(client)
+
+    def submit_intent(index: int) -> httpx.Response:
+        return submit(client, agent_id, prior, f"intent-{index}")
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(submit_intent, range(4)))
+    assert sorted(result.status_code for result in results) == [200, 409, 409, 409]
+    assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (1,)
