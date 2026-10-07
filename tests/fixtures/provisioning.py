@@ -252,6 +252,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "schedule_operation_receipts",
     "notice_operation_receipts",
     "agent_control_receipts",
+    "agent_upload_batches",
     "resource_creation_receipts",
 )
 

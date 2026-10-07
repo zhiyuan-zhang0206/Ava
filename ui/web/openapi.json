@@ -16962,7 +16962,7 @@
           "content_type"
         ],
         "title": "UploadedFile",
-        "description": "Single file upload result.\n\n`url` is the HTTP path the saved file is served back at\n(`/api/agents/{id}/uploads/<name>`) — the frontend uses it as an image\nthumbnail src and, for a native image attachment, as the `image_url.url`\nreference it sends in the next multimodal message."
+        "description": "Single file upload result.\n\n`filename` is display metadata; keyed silent uploads use a separate immutable\nstored object name in `path` and `url`.\n\n`url` is the HTTP path the saved file is served back at\n(`/api/agents/{id}/uploads/<name>`) — the frontend uses it as an image\nthumbnail src and, for a native image attachment, as the `image_url.url`\nreference it sends in the next multimodal message."
       },
       "UserSettingListResponse": {
         "properties": {

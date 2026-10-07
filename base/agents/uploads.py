@@ -33,9 +33,10 @@ IMAGE_MIME: dict[str, str] = {
 }
 
 
-def agent_upload_dir(agent_id: int) -> Path:
-    """Directory holding agent `agent_id`'s uploaded files."""
-    return ensure_private_dir(Path.home() / "Downloads" / f"AvaAgent-{agent_id}")
+def agent_upload_dir(agent_id: int, *, create: bool = True) -> Path:
+    """Directory holding agent uploads; receipt lookup can omit filesystem creation."""
+    directory = Path.home() / "Downloads" / f"AvaAgent-{agent_id}"
+    return ensure_private_dir(directory) if create else directory
 
 
 def sanitize_upload_name(filename: str) -> str:

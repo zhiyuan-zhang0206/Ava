@@ -732,7 +732,13 @@ export const api = {
     files: File[],
     onProgress?: (pct: number) => void,
     deliver = true,
+    operationKey?: string,
   ): Promise<UploadedBatch> => {
+    if (operationKey !== undefined && (typeof operationKey !== "string" || !operationKey || operationKey.length > 128)) {
+      throw new Error("idempotency key must contain 1 to 128 characters");
+    }
+    if (deliver && operationKey !== undefined) throw new Error("keyed uploads currently require deliver=false");
+    const uploadKey = deliver ? undefined : (operationKey ?? crypto.randomUUID());
     const formData = new FormData();
     for (const file of files) {
       formData.append("files", file, file.name);
@@ -741,6 +747,7 @@ export const api = {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", url(`/api/agents/${agentId}/uploads?deliver=${deliver}`));
       xhr.withCredentials = true;
+      if (uploadKey !== undefined) xhr.setRequestHeader("Idempotency-Key", uploadKey);
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && onProgress) {
           onProgress(Math.round((e.loaded / e.total) * 100));
