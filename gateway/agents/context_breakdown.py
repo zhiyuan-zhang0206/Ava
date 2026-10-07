@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -37,7 +36,7 @@ from langchain_core.messages import (
 
 from agent.messages import COMPACT_SUMMARY_HEADER
 from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
-from base.lm.content import content_blocks
+from base.agents.messages.text_chars import ai_message_chars, text_chars
 
 # Bucket kinds — the canonical enumeration, and the stable tie-break order when
 # two categories share the same token count (the frontend legend renders them
@@ -82,49 +81,6 @@ def _inbound_bucket(source: str) -> str:
 # ava_note_tag values that map to their own bucket; every other note tag
 # (agent_id / exec_timeout / compact_reminder / lifecycle_* / ...) is a
 # `context_note` (see the system_note branch of `bucket_messages`).
-
-
-def _text_chars(content: object) -> int:
-    """Char count of a message's renderable text. A block list (multimodal
-    inbound, AIMessage content blocks) counts only its text/thinking text — never
-    the base64 of an image block (that becomes image tokens, not char tokens, and
-    would wildly inflate a chars/4 estimate)."""
-    if isinstance(content, str):
-        return len(content)
-    if isinstance(content, list):
-        total = 0
-        for b in content_blocks(cast(list[Any], content)):
-            if isinstance(b, dict):
-                d = cast(dict[str, Any], b)
-                if isinstance(text := d.get("text"), str):
-                    total += len(text)
-                elif isinstance(thinking := d.get("thinking"), str):
-                    total += len(thinking)
-            elif isinstance(b, str):
-                total += len(b)
-        return total
-    return len(str(content))
-
-
-def _ai_message_chars(msg: AIMessage) -> dict[str, int]:
-    """Split one AIMessage's chars into reasoning / output / tool_call buckets."""
-    out = {"reasoning": 0, "output": 0, "tool_call": 0}
-    content: Any = msg.content  # pyright: ignore[reportUnknownMemberType]
-    if isinstance(content, str):
-        out["output"] += len(content)
-    elif isinstance(content, list):
-        for b in content_blocks(cast(list[Any], content)):
-            if not isinstance(b, dict):
-                continue
-            d = cast(dict[str, Any], b)
-            if isinstance(thinking := d.get("thinking"), str):
-                out["reasoning"] += len(thinking)
-            elif b.get("type") == "text" and isinstance(text := b.get("text"), str):
-                out["output"] += len(text)
-    for tc in msg.tool_calls:
-        if isinstance(code := tc["args"].get("code"), str):
-            out["tool_call"] += len(code)
-    return out
 
 
 def _note_bucket(tag: object) -> str:
@@ -172,14 +128,14 @@ def bucket_messages(messages: Sequence[BaseMessage]) -> tuple[dict[str, int], st
             add("system_prompt", len(text))
             continue
         if isinstance(msg, ToolMessage):
-            add("tool_response", _text_chars(msg.content))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            add("tool_response", text_chars(msg.content))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
             continue
         if isinstance(msg, AIMessage):
-            for kind, chars in _ai_message_chars(msg).items():
+            for kind, chars in ai_message_chars(msg).items():
                 add(kind, chars)
             continue
         if isinstance(msg, HumanMessage):
-            add(_human_bucket(msg), _text_chars(msg.content))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            add(_human_bucket(msg), text_chars(msg.content))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     return buckets, system_prompt_content
 
 
