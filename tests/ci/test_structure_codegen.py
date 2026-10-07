@@ -578,4 +578,7 @@ def test_prepush_migration_keeps_direct_ci_owners() -> None:
     assert any(step.get("run") == "uv run pyright" for step in backend)
     assert any(step.get("run") == "npx tsc --noEmit" for step in frontend)
     assert any(step.get("run") == "npm run lint" for step in frontend)
-    assert any(step.get("run") == "npx vitest run --coverage" for step in frontend)
+    assert any(
+        step.get("run") == "npx vitest run --config tests/vitest.config.mts --coverage"
+        for step in frontend
+    )
