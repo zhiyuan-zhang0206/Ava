@@ -9,17 +9,16 @@ tags:
 
 # Write retry surface inventory
 
-Non-GET snapshot; live policy: `base/api_contracts/contracts.py`.
-`natural` means repeatable effects/CAS;
+Non-GET policy: `base/api_contracts/contracts.py`.
+`natural` means repeatable effects;
 `keyed` requires a business receipt; `one-shot` forbids ambiguous automatic retries.
-Login intentionally mints sessions; telemetry inserts events; upstream writes
-inherit no safe-retry promise. Machine control has a separate operator boundary.
+Login mints sessions; telemetry inserts events; upstream writes have no retry promise. Machine control has a separate operator boundary.
 
 Preset/schedule creation and schedule mutations now have optional transactional
 keyed receipts, but their routes conservatively remain `NON_IDEMPOTENT` (`one-shot`
 below). Keyless calls retain legacy semantics. Positive server negotiation and
 ambiguous retry activation remain future work; older gateways may ignore keys.
-Domain evidence:
+Owners:
 [[gateway/routers/docs/resource-creation.ava.okf.md]] and
 [[gateway/schedules/docs/schedule-convergence.ava.okf.md]].
 
@@ -65,8 +64,8 @@ Domain evidence:
 | `PATCH /api/agents/{agent_id}/notices/current` | natural | edit current open notice — repeats are harmless |
 | `POST /api/agents/{agent_id}/notices/current/dismiss` | natural | withdraw current open notice — CAS, repeats are harmless |
 | `POST /api/packages/draft` | one-shot | LLM generation incurs a fresh external request and token cost |
-| `POST /api/agents/{agent_id}/pages` | natural | register page — upsert, repeats are harmless |
-| `DELETE /api/agents/{agent_id}/pages/{name}` | natural | close page — CAS, repeats are harmless |
+| `POST /api/agents/{agent_id}/pages` | one-shot | replaces current page; replay may close newer work; no receipt |
+| `DELETE /api/agents/{agent_id}/pages/{name}` | one-shot | name-based close can affect a later registration |
 | `POST /api/presets` | one-shot | optional keyed creation receipt commits with the resource; replay returns original identity after rename/delete |
 | `PATCH /api/presets/{preset_id}` | natural | update — repeats are harmless |
 | `DELETE /api/presets/{preset_id}` | natural | delete — repeats are harmless |
