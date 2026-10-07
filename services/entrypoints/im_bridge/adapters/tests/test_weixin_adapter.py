@@ -519,3 +519,73 @@ async def test_creation_uses_provider_event_identity_across_adapter_restart(env:
     assert keys[0] == keys[1]
     assert keys[0] != keys[2]
     assert all(key is not None and key.startswith("weixin-spawn:") for key in keys)
+
+
+@pytest.mark.parametrize("text", ["same intent text", "spawn:go"])
+async def test_distinct_provider_ids_preserve_identical_content(env: Any, text: str) -> None:
+    core = FakeCore()
+    adapter = WeixinAdapter(core)
+    await adapter._handle_message(_message(text=text, message_id="event-one"))
+    await adapter._handle_message(_message(text=text, message_id="event-two"))
+    await adapter._handle_message(_message(text=text, message_id="event-one"))
+    assert [message.message_id for message in core.inbound] == ["event-one", "event-two"]
+    if text == "spawn:go":
+        keys = [message.idempotency_key for message in core.inbound]
+        assert all(key is not None and key.startswith("weixin-spawn:") for key in keys)
+        assert keys[0] != keys[1]
+
+
+async def test_provider_identity_retains_sender_scope(env: Any) -> None:
+    core = FakeCore()
+    adapter = WeixinAdapter(core)
+    for peer in ("peer-one", "peer-two", "peer-one"):
+        await adapter._handle_message(_message(text="same", from_user_id=peer, message_id="event"))
+    assert [message.chat_id for message in core.inbound] == ["peer-one", "peer-two"]
+
+
+@pytest.mark.parametrize("identified_first", [True, False])
+async def test_missing_id_heuristic_does_not_share_provider_identity(
+    env: Any, identified_first: bool
+) -> None:
+    core = FakeCore()
+    adapter = WeixinAdapter(core)
+    ids = ["event", ""] if identified_first else ["", "event"]
+    for message_id in [*ids, *ids]:
+        await adapter._handle_message(_message(text="same", message_id=message_id))
+    assert [message.message_id for message in core.inbound] == [value or None for value in ids]
+    assert all(message.idempotency_key is None for message in core.inbound)
+
+
+@pytest.mark.parametrize("text", ["same chat", "spawn:go"])
+async def test_poll_replay_deduplicates_events_without_merging_identical_text(
+    env: Any, text: str
+) -> None:
+    core = FakeCore()
+    first = _message(text=text, message_id="one")
+    second = _message(text=text, message_id="two")
+    transport, requests = _transport(
+        [
+            httpx.Response(200, json=_updates(first, second, sync_buf="after-one")),
+            httpx.Response(200, json=_updates(first, second, sync_buf="after-two")),
+        ]
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = WeixinAdapter(core, client=client)
+        cursor, timeout = await adapter._poll_once("", weixin.LONG_POLL_TIMEOUT_MS)
+        cursor, _ = await adapter._poll_once(cursor, timeout)
+    assert cursor == "after-two"
+    assert len(requests) == 2
+    assert [message.message_id for message in core.inbound] == ["one", "two"]
+    if text == "spawn:go":
+        assert core.inbound[0].idempotency_key != core.inbound[1].idempotency_key
+
+
+async def test_missing_id_heuristic_is_memory_only_across_restart(env: Any) -> None:
+    core = FakeCore()
+    message = _message(text="same", message_id="")
+    adapter = WeixinAdapter(core)
+    await adapter._handle_message(message)
+    await adapter._handle_message(message)
+    await WeixinAdapter(core)._handle_message(message)
+    assert len(core.inbound) == 2
+    assert all(item.message_id is None and item.idempotency_key is None for item in core.inbound)
