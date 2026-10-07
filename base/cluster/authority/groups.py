@@ -66,8 +66,11 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     # Raw record of each provider call the same loop makes.
     ("INSERT", ("understanding_chunk_calls",)),
     # Upper-level grouping: the per-level check cursor (with its lease) and the raw record of its calls.
-    ("SELECT, INSERT, UPDATE", ("understanding_group_state",)),
+    # DELETE: a rebuild lifts the cursor with the nodes above level 1.
+    ("SELECT, INSERT, UPDATE, DELETE", ("understanding_group_state",)),
     ("INSERT", ("understanding_group_calls",)),
+    # The upper-level rebuild queue: enqueued by the gateway's build, claimed and finished by the loop.
+    ("SELECT, UPDATE", ("understanding_rebuilds",)),
     # Page close at exit.
     ("UPDATE", ("agent_pages",)),
     # Shell TTL deadlines and their append-only renewal trail.
