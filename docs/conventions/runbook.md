@@ -24,7 +24,7 @@ For an upstream checkpoint dependency change, follow the
 [checkpoint migration rule](../../db/docs/migrations.md#checkpoint-dependency-upgrades).
 The interval's replay contract belongs to the agent startup owner above; its
 operator verification and rollback protocol remains
-[checkpoint interval canary](checkpoint-interval-canary.md).
+[checkpoint interval canary](agents/checkpoint-interval-canary.md).
 
 Remote runners receive class DB/API credentials through a sealed bundle, not
 the gateway's human secret. Guard the bundle and transport key as credentials;
@@ -149,7 +149,7 @@ The recovery points are the daily encrypted logical dumps (`pg-backup`, due at
 `AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
 `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` are set through `ava config set`), proved
 by the weekly isolated logical restore drill. The self-written PITR stack was
-deleted (`docs/decisions/2026-10-02-delete-the-self-written-pitr-stack.md`). Point-in-time
+deleted (`docs/decisions/data/backup/2026-10-02-delete-the-self-written-pitr-stack.md`). Point-in-time
 recovery exists only while WAL-G is on (["WAL-G archiving"](#wal-g-archiving) below):
 `ava backup walg restore`, proved weekly by the recovery drill. Never state a
 recovery point newer than the last published dump unless the latest drill has passed.
@@ -178,7 +178,7 @@ PTY closure is best effort: known shells/terminals close with bounded signals;
 background or detached processes can remain. Known job leftovers are diagnostic.
 Inspect residual processes and OS stalls before explicit operational action;
 there is no automatic host-wide kill or reboot. See the
-[closure decision](../decisions/2026-10-07-pty-best-effort-closure.md).
+[closure decision](../decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md).
 
 ### Emergency PTY allocation freeze
 
@@ -226,13 +226,13 @@ while per-agent model/runtime caches remain bounded.
   idle threshold (`AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`, default 300s) nudges
   idling agents; agents that paused their own heartbeat
   (`ava.self.pause_heartbeat`) simply stop being nudged.
-  [`docs/decisions/2026-06-22-heartbeat-opt-out-over-escalation.md`](../decisions/2026-06-22-heartbeat-opt-out-over-escalation.md).
+  [`docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md`](../decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md).
 - **Per-cluster data plane is sized to be noise, not a multiplier** — every
   cluster (including each dev worktree) runs its own Postgres + Redis instance
   for isolation, but each instance costs only ~100-150MB RAM (`shared_buffers`
   tuned down + Redis ~5MB) — roughly one agent's own resident cost, not a
   per-cluster tax that compounds with fleet size.
-  [`future/infra/embedded-per-cluster-data-plane.md`](../../future/infra/embedded-per-cluster-data-plane.md).
+  [`future/infra/data/embedded-per-cluster-data-plane.md`](../../future/infra/data/embedded-per-cluster-data-plane.md).
 - **Shared browser, not one Chrome per agent** — the `browser` /
   `browser-mcp` services above own ONE headed Chrome + ONE
   `chrome-devtools-mcp` upstream, multiplexed to every agent over a Unix
@@ -402,10 +402,10 @@ Restart retains infrastructure and persistent PTYs; default stop closes those lo
 resources. Durable agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
 Normal `ava start` resumes only after readiness. See the
-[stop procedure](graceful-maintenance.md) for partial stop, coordinated
+[stop procedure](operations/graceful-maintenance.md) for partial stop, coordinated
 multi-machine ordering, failure recovery and the first-deployment limitation.
 
-Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](graceful-maintenance.md).
+Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](operations/graceful-maintenance.md).
 
 Merging a PR does not deploy it. `ava stop` asks for confirmation unless `-y` is supplied.
 
@@ -414,7 +414,7 @@ Merging a PR does not deploy it. `ava stop` asks for confirmation unless `-y` is
 
 A cluster whose units span machines, each running from `$HOME/.ava/source`, is
 updated by stopping every unit, switching every checkout and starting again
-([decision](../decisions/2026-09-30-networked-cluster-stays-on-source-updates.md)).
+([decision](../decisions/runtime/updates/release/2026-09-30-networked-cluster-stays-on-source-updates.md)).
 `python -m cli.fleet_update` runs it from the operator's development checkout
 over key-based SSH, in two halves; any manual step the release needs goes in
 between. When the operator's Mac is itself a host, it must be able to `ssh` to
@@ -546,7 +546,7 @@ the PITR step below in the same window, is unchanged by a second run.
 ### Release steps: retiring the PITR stack (one-time)
 
 The release that deletes the self-written PITR stack
-([decision](../decisions/2026-10-02-delete-the-self-written-pitr-stack.md)) needs
+([decision](../decisions/data/backup/2026-10-02-delete-the-self-written-pitr-stack.md)) needs
 three manual steps per gateway home, because the upgrade cannot do them itself.
 The last commit that still carries the stack is the tag `pitr-stack-final`. The
 daily dump, its off-site publish and the weekly restore drill import none of the
@@ -647,7 +647,7 @@ and needs nothing. The step is idempotent (it pops a key only when present).
    EOF
    ```
 2. **Nothing else is required.** `AVA_MILVUS_PORT` / `AVA_MILVUS_URI` are retired settings
-   ([decision](../decisions/2026-10-03-memory-search-drop-milvus.md)): their `.env` lines are
+   ([decision](../decisions/data/memory/2026-10-03-memory-search-drop-milvus.md)): their `.env` lines are
    removed by the 2026-10-03 env sweep, and a leftover `.env` line is ignored — every
    settings model ignores a key it does not declare. A `~/.ava/milvus-data/` directory, if
    the home ever ran milvus, is dead data and may be deleted.
@@ -685,7 +685,7 @@ a per-agent human decision (`ava agents resurrect <id>`). Audit lands on the `bi
 (balance readout + candidate / resurrected / refused / deferred / failed sets)
 plus `billing_resurrect_run` telemetry; each resurrected agent's own
 `resurrect` event carries `via='billing_recovery'`. Rationale and rejected
-alternatives: [billing batch resurrect decision](../decisions/2026-09-18-billing-batch-resurrect.md).
+alternatives: [billing batch resurrect decision](../decisions/agents/lifecycle/2026-09-18-billing-batch-resurrect.md).
 
 
 ## Private-network deployment (phone / multi-device access)
@@ -712,7 +712,7 @@ human or operator presents the cluster secret (`AVA_CLUSTER_SECRET`, gateway
 only); services, agents and remote units present their write generation's
 machine API token (`AVA_API_TOKEN`: the gateway admits the active
 generation's, a unit's `/ops` its own generation's). See
-[`docs/decisions/2026-06-11-multihost-deployment.md`](../decisions/2026-06-11-multihost-deployment.md)
+[`docs/decisions/runtime/updates/release/2026-06-11-multihost-deployment.md`](../decisions/runtime/updates/release/2026-06-11-multihost-deployment.md)
 (explicitly flags its own §4/§5/§9 "no auth" description as superseded history)
 and [`Credential rotation`](#credential-rotation) below for the bearer and
 data-plane procedures. The user opens the UI / API at the gateway's private-network
@@ -772,7 +772,7 @@ empty-secret home carries a minted one instead). The script verifies the pin bef
 writes the new secret, and journals each step with fingerprints, never secrets.
 **The pinned file is backup-critical material**: nothing re-derives it, and losing it
 makes every logical backup of the home unreadable; escrow a copy with the gateway's
-backup keys ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md),
+backup keys ([decision](../decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md),
 [passphrase](../../services/backup/artifact/docs/passphrase.ava.okf.md)). Restart the
 gateway, then issue every remote unit a new capability bundle (its telemetry token
 derives from the secret). It does not change Postgres, Redis, ACLs, or PgBouncer.
@@ -788,17 +788,17 @@ Routine data-plane rotation is independent and uses
 
 Run this script in a gateway context, not an agent shell: agent contexts see the
 runner-projected `AVA_DB_URL` and agent-profile environment hygiene, so the script
-refuses them. See [Data-plane credential split](data-plane-secret-split.md#routine-data-plane-rotation)
+refuses them. See [Data-plane credential split](data/data-plane-secret-split.md#routine-data-plane-rotation)
 for the exact invocation command.
 
 Both scripts are gateway-home scoped, default to read-only, and save 0600 resume
 state on failure. The complete upgrade, verification, runner-restart, and
-recovery procedure is [Data-plane credential split](data-plane-secret-split.md).
+recovery procedure is [Data-plane credential split](data/data-plane-secret-split.md).
 
 **Provider API key rotation** — mint the new key in each console, then
 `ava config set KEY=VALUE` (a merge patch over just that key; it prints
 whether a restart is required — see
-[`docs/decisions/2026-07-17-config-reducer-semantics.md`](../decisions/2026-07-17-config-reducer-semantics.md)):
+[`docs/decisions/runtime/config/2026-07-17-config-reducer-semantics.md`](../decisions/runtime/config/2026-07-17-config-reducer-semantics.md)):
 
 | `.env` key | Console |
 |---|---|
@@ -823,7 +823,7 @@ programmatic rotation API at all.
 
 The [database code-version gate](../../base/db/docs/code-version-gate.ava.okf.md)
 owns the process version, pooled-session admission, minimum update and exit
-contract. Its [decision](../decisions/2026-09-30-client-side-code-version-gate.md)
+contract. Its [decision](../decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md)
 records the boundary. The coordinated recovery order below remains an operator
 procedure; it does not redefine the gate.
 
@@ -1022,7 +1022,7 @@ environment:
 ```
 
 The [testing guide](testing.md) describes explicit local test paths. The
-[historical Vitest placement decision](../decisions/2026-09-24-vitest-prepush-selection.md)
+[historical Vitest placement decision](../decisions/engineering/tooling/2026-09-24-vitest-prepush-selection.md)
 retains its measurements and selection limitations; its full-local-suite policy
 is superseded by the current scoped-local rule.
 
@@ -1125,6 +1125,6 @@ platform ancestry and actual application execution. There is no local branch-pre
 controller: validate a branch with CI, the throwaway test clusters, and the Linux
 verification container (`python3 scripts/verify/container.py --ref <ref>`: a fresh
 container, the commit cloned to `~/.ava/source`, `ava init` and the first `ava start`, a scripted agent;
-[verification boundaries](../../future/infra/verification-boundaries.md)); what only macOS can show
+[verification boundaries](../../future/infra/engineering/verification-boundaries.md)); what only macOS can show
 (the signed helper chain, the desktop grants) runs in a throwaway Tart VM cloned from the golden
 image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the helper chain check).

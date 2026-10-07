@@ -1,9 +1,9 @@
 import { Loader2, RotateCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import type { AgentRow } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import type { PendingAction } from "../agent-row";
+import type { AgentRow } from "@/lib/contracts/types";
+import { cn } from "@/lib/format/utils";
+import type { PendingAction } from "../agents/agent-row";
 
 // On-row feedback for in-flight actions (resurrect / restart / terminate /
 // compact / force-expire). Ending a takeover is a context-menu-only action

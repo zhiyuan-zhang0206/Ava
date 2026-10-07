@@ -61,7 +61,7 @@ EVENTS: dict[str, EventSpec] = {
         payload=ImpersonationEventLogIncomplete,
         tier="anomaly",
     ),
-    # Hosted runner dispatcher and turns (future/infra/agent-runner-as-server.md).
+    # Hosted runner dispatcher and turns (future/infra/lifecycle/agent-runner-as-server.md).
     "host_stale_running_settled": telemetry_event(
         "host_stale_running_settled",
         "hosted boot settle restored rows a previous host instance left running "

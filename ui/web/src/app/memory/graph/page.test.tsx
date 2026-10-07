@@ -5,13 +5,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { MemoryGraphResponse, MemoryNoteResponse } from "@/lib/types";
+import type { MemoryGraphResponse, MemoryNoteResponse } from "@/lib/contracts/types";
 
 const { mockGetMemoryGraph, mockGetMemoryNote } = vi.hoisted(() => ({
   mockGetMemoryGraph: vi.fn<() => Promise<MemoryGraphResponse>>(),
   mockGetMemoryNote: vi.fn<(path: string) => Promise<MemoryNoteResponse>>(),
 }));
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: {
     getMemoryGraph: mockGetMemoryGraph,
     getMemoryNote: mockGetMemoryNote,
@@ -19,7 +19,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 // Breakpoint — desktop by default (horizontal side-by-side split).
-vi.mock("@/lib/breakpoint", () => ({
+vi.mock("@/lib/layout/breakpoint", () => ({
   useBreakpoint: () => ({ isLarge: true, isNarrow: false, tier: "xl" }),
 }));
 

@@ -4,7 +4,7 @@
 // The page composes sections; this module owns their presentational rows.
 
 import { Switch } from "@/components/ui/switch";
-import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
+import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import {
   COLOR_FAMILIES,
   COLOR_FAMILY_LABELS,
@@ -14,9 +14,9 @@ import {
   TIMELINE_COLOR_ITEMS,
   isColorFamily,
   type ColorFamily,
-} from "@/lib/timeline-colors";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { cn } from "@/lib/utils";
+} from "@/lib/timeline/timeline-colors";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { cn } from "@/lib/format/utils";
 
 // ── Setting row components ──
 

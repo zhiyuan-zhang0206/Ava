@@ -7,7 +7,7 @@ import type {
   RunTimelineMessages,
   RunTimelineResponse,
   UserSettingListResponse,
-} from "@/lib/types";
+} from "@/lib/contracts/types";
 
 const { getRunTimeline, getRunTimelineMessages, getSettings, getContextBreakdown, useMediaQuery } =
   vi.hoisted(() => ({
@@ -27,9 +27,9 @@ const { getRunTimeline, getRunTimelineMessages, getSettings, getContextBreakdown
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
   }));
 
-vi.mock("@/lib/use-media-query", () => ({ useMediaQuery }));
+vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: { getRunTimeline, getRunTimelineMessages, getSettings, getContextBreakdown },
 }));
 

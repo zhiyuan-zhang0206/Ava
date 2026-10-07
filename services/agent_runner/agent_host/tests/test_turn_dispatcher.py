@@ -1,6 +1,6 @@
 """Hosted-runner wake dispatch — `services/agent_runner/agent_host/dispatcher.py`.
 
-Phase 1 work item (a) of `future/infra/agent-runner-as-server.md`. The contracts
+Phase 1 work item (a) of `future/infra/lifecycle/agent-runner-as-server.md`. The contracts
 locked here are the ones the hosted model cannot be correct without:
 
 1. **A wake starts a turn** — and an idle agent has no task at all, which is the

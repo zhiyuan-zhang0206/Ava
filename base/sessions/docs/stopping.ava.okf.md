@@ -20,7 +20,7 @@ reports an incomplete stop if resources remain. Persistent terminals are the
 exception: a stop closes known shells/terminals with bounded known-group
 signaling; job leftovers are diagnostic, while surviving shells fail closure
 ([[base/sessions/pty/docs/session-kill.ava.okf.md|session kill]];
-docs/decisions/2026-10-07-pty-best-effort-closure.md). Explicit force may use a
+docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md). Explicit force may use a
 backend's `kill_session`; non-session processes use `base/host/proc.py` primitives.
 The lower-level escalating APIs below retain their own explicit contracts.
 

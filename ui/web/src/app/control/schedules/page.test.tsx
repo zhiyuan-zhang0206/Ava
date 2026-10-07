@@ -8,8 +8,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
-import type { ScheduleSummary, ScheduleView } from "@/lib/types";
+import { api } from "@/lib/transport/api";
+import type { ScheduleSummary, ScheduleView } from "@/lib/contracts/types";
 
 // Mock PythonCode — avoid running Prism syntax highlighting in tests
 //
@@ -18,7 +18,7 @@ import type { ScheduleSummary, ScheduleView } from "@/lib/types";
 // python-code.tsx) — a vi.fn() here (not a plain no-op) so the "intent
 // prefetch wiring" test below can assert it's actually invoked.
 const preloadPythonCodeHighlighter = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-vi.mock("@/components/python-code", () => ({
+vi.mock("@/components/content/python-code", () => ({
   PythonCode: ({ code }: { code: string }) => (
     <pre data-testid="python-code">{code}</pre>
   ),

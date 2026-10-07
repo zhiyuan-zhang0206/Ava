@@ -7,7 +7,7 @@ import type {
   RunTimelineNode,
   RunTimelineUnit,
   RunTimelineUsage,
-} from "@/lib/types";
+} from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
 
 export interface TimelineWindow {

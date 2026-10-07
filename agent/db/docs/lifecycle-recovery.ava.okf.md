@@ -32,13 +32,13 @@ state has a lifecycle origin. That origin is the spawn's birth epoch
 (`last_resurrect_inbound_id = 0`), or a `lifecycle_release` receipt on the
 resurrection or applied restart that left the row unowned. The receipt must
 belong to the current life, that is, have an id above the epoch fence
-(`docs/decisions/2026-09-29-unowned-termination-resurrects.md`).
+(`docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md`).
 Historical process runtimes, unknown runtime kinds, incomplete hosted
 identities and resources the current model cannot decode refuse resurrection
 (`runtime_cutover_required`); no code reconciles them. A terminated row with
 NULL resources passes this gate only with a minted hosted identity (a hosted
 kind and a fresh generation and owner), which the resurrection CAS clears
-(`docs/decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
+(`docs/decisions/agents/lifecycle/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
 Every other such row keeps refusing, and so does a legacy unowned row this
 runtime force-terminated without having released it first.
 An automatic resurrection that meets such a refusal leaves its inbound queued

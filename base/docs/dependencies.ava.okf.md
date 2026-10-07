@@ -18,7 +18,7 @@ The base-layer domain map below complements the public
 - [[base/agents/messages/docs/inbound-provenance.ava.okf.md]] — non-enforcing credential, transport, content-hash, and source-assertion facts on gateway inbounds
 - [[log.ava.okf.md]] — structured logging, feeds the unified event emitter (`base/telemetry/emitter.py`)
 - [[metrics.ava.okf.md]] — system-level metrics computation core
-- [[db.ava.okf.md]] — base/db/__init__.py provides database connection pool, depended on by services and gateway
+- [[agent/db/docs/db.ava.okf.md]] — base/db/__init__.py provides database connection pool, depended on by services and gateway
 - [[gateway-cli.ava.okf.md]] — gateway communicates with agent processes via the contracts in base/agents/contract.py
 - [[base/events/live/docs/live.ava.okf.md]] — `ava:events` live pub/sub payload union
 - [[base/cluster/docs/machine.ava.okf.md]] — machine name + capability set, `machines` table, spawn-target invariant

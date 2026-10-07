@@ -3,12 +3,12 @@
 import { AppWindow } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { STATUS_DOT } from "@/components/agent-row";
-import { PRIORITY_BG } from "@/lib/notices";
-import { formatRelativeTime } from "@/lib/sidebar";
-import type { PublicAgentStatus, OpenNotice, PageRow } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
+import { STATUS_DOT } from "@/components/agents/agent-row";
+import { PRIORITY_BG } from "@/lib/notifications/notices";
+import { formatRelativeTime } from "@/lib/agents/sidebar";
+import type { PublicAgentStatus, OpenNotice, PageRow } from "@/lib/contracts/types";
+import { cn } from "@/lib/format/utils";
+import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 
 export function PriorityBadge({ priority, muted }: { priority: OpenNotice["priority"]; muted?: boolean }) {
   return (

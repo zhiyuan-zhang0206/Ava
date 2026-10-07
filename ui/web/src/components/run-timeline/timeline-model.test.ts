@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { categoryColor } from "@/lib/context-colors";
-import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineUnit } from "@/lib/types";
+import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
   axisTicks,

@@ -17,10 +17,10 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { PluginNavIcons } from "@/components/plugin-nav";
-import { WindowSelect } from "@/components/window-select";
-import { errMsg as formatErrMsg } from "@/lib/errors";
-import { formatTokensCompact } from "@/lib/format-number";
+import { PluginNavIcons } from "@/components/plugins/plugin-nav";
+import { WindowSelect } from "@/components/agents/window-select";
+import { errMsg as formatErrMsg } from "@/lib/contracts/errors";
+import { formatTokensCompact } from "@/lib/format/format-number";
 import {
   formatRelativeTime,
   STATS_WINDOW_LABELS,
@@ -28,14 +28,14 @@ import {
   useStatsDashboard,
   useStatsWindow,
   type StatsWindowHours,
-} from "@/lib/sidebar";
+} from "@/lib/agents/sidebar";
 import {
   usePluginStatCards,
   type PluginStatCard as PluginStatCardModel,
-} from "@/lib/plugin-stats";
-import type { StatsDashboard } from "@/lib/types";
-import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+} from "@/lib/plugins/plugin-stats";
+import type { StatsDashboard } from "@/lib/contracts/types";
+import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 import { AlertClassList } from "./alert-classes";
 import { fleetHref } from "./links";

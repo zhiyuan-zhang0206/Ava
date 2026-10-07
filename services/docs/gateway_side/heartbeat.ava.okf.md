@@ -32,7 +32,7 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
   fleet-sized first-pass burst would carry no visible change.
 
 ## Key Dependencies
-- [[db.ava.okf.md]] — reads `agents_meta` table + writes `inbound_messages` table
+- [[agent/db/docs/db.ava.okf.md]] — reads `agents_meta` table + writes `inbound_messages` table
 - [[loop.ava.okf.md]] — after receiving a heartbeat, the agent appends a system note and decides to continue working / wait / terminate
 
 ## Entry Points

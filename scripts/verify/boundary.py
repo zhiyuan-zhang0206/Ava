@@ -5,7 +5,7 @@ runs one cluster through `ava init` and `ava start`, is observed, and is destroy
 every recipe shares lives here: the start profile (a scripted model, no key of any
 kind), the init and start argv, the refusal to let host state in, the commit
 resolution, and the evidence directory with its bounded, logged steps. The design is
-future/infra/verification-boundaries.md.
+future/infra/engineering/verification-boundaries.md.
 
 Stdlib-only and host-side, like the recipes that import it.
 """

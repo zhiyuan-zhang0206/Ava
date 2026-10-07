@@ -181,7 +181,7 @@ layers = [
 
 # A supervision daemon never imports the kernel, so a daemon's crash surface
 # stays its own. `services.agent_runner.agent_host` is the single deliberate exception: the
-# hosted agent-runner (future/infra/agent-runner-as-server.md) exists precisely
+# hosted agent-runner (future/infra/lifecycle/agent-runner-as-server.md) exists precisely
 # to run agents' turns INSIDE a supervised daemon, so being the kernel is its
 # job description rather than a coupling that crept in. Scoped to that one
 # package so the rule keeps biting everywhere else — a second service reaching
@@ -442,7 +442,7 @@ check-typed-exception = true
 "ava/sdk_surface/help.py" = ["TID251"]
 "ava/sdk_surface/discovery.py" = ["TID251"]
 "services/agent_runner/agent_host/runtime.py" = ["TID251"]
-# The process's AvaContext: the one in-process entry to the run's context (docs/decisions/2026-10-04-ava-state-and-context.md).
+# The process's AvaContext: the one in-process entry to the run's context (docs/decisions/agents/context/2026-10-04-ava-state-and-context.md).
 "ava/sdk_surface/process_context.py" = ["TID251"]
 # An operator CLI: its report on stdout is the contract.
 "services/derived/memory_indexer/memory_search_reconcile.py" = ["T201"]

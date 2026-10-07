@@ -99,7 +99,7 @@ MAX_LINES = 200
 # distribution showed nodes stacked in the last few characters below it — the
 # fingerprint of trimming facts away to fit rather than of content that had
 # genuinely outgrown one topic. Rationale + the rejected alternatives:
-# docs/decisions/2026-07-29-okf-node-ceiling.md.
+# docs/decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md.
 MAX_CHARS = 8000
 # Remaining room below MAX_CHARS at which W010 starts reporting. Sized at a
 # couple of the corpus's larger paragraphs, so an author is told about the wall

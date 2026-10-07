@@ -3,7 +3,7 @@
 The read side of `base/packages/extensions/registry.py`, and the step that makes a
 machine fungible: whatever the cluster says should be here is here, and a
 machine that was down during an install catches up the next time anything on it
-starts. Slice S2 of `future/infra/extension-ownership.md`; skills only for now,
+starts. Slice S2 of `future/infra/extensions/extension-ownership.md`; skills only for now,
 which is the whole point of doing skills first — pure text, no runtime, no host
 requirements, so the row -> blob -> tree chain is exercised end to end at
 minimum risk.
