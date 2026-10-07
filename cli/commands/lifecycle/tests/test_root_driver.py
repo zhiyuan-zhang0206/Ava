@@ -15,8 +15,7 @@ from base.daemon.health import DaemonProbe
 from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import root_driver as driver
 
-# The repo-wide readiness guard replaces `_wait_for_root_services_ready` itself;
-# without this opt-out every readiness test here would assert on that stub.
+# Keep the public readiness entry point real when this owner suite reaches it.
 pytestmark = pytest.mark.real_service_readiness_gate
 
 
