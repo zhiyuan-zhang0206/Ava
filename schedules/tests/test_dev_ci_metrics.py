@@ -119,7 +119,7 @@ def test_report_failure_uses_exact_label_and_existing_message(
 
 
 def test_load_exporter_resolves_under_scripts_ci() -> None:
-    """The loader must resolve runs_export.py from its post-move home (scripts/ci/)."""
+    """The loader must resolve runs_export.py from its post-move home (scripts/ci/pull_requests/)."""
     module = _load()
     saved_path = list(sys.path)
     try:
