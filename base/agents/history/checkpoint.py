@@ -44,7 +44,7 @@ from typing import Any, NamedTuple, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from psycopg import Connection
+from psycopg import AsyncConnection, Connection
 from psycopg.rows import DictRow, dict_row
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
@@ -53,6 +53,18 @@ from base.db import Database
 from base.db.transaction import async_write_transaction
 
 _log = logging.getLogger(__name__)
+
+
+async def latest_checkpoint_id_in_transaction(conn: AsyncConnection, agent_id: int) -> str | None:
+    """Read the root checkpoint head for an owner-fenced evidence transaction."""
+    row = await (
+        await conn.execute(
+            "SELECT checkpoint_id FROM checkpoints WHERE thread_id=%s AND checkpoint_ns='' "
+            "ORDER BY checkpoint_id DESC LIMIT 1",
+            (str(agent_id),),
+        )
+    ).fetchone()
+    return None if row is None else row[0]
 
 
 class CheckpointReadError(RuntimeError):

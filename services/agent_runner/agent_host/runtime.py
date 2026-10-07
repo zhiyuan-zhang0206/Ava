@@ -6,12 +6,17 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from psycopg_pool import AsyncConnectionPool
 
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.lm.factory import validate_model_config
 from base.lm.registry import resolve_available_model
 from base.log import logger
@@ -192,6 +197,9 @@ class TurnOutcome:
     reconcile the abort's claimed inbounds. Unclassified exceptions end
     `crashed` without it — their checkpoint was never settled.
 
+    `native_held` skips inbound repair when an accepted native cancel lacks
+    checkpoint/resource proof. It never labels that proof gap a healthy abort.
+
     `truncated` marks a deliberate external end of the turn, classified bound
     to the turn's own incarnation: an applied force terminate (task #4180; the
     watchdog wedge recovery / a CLI force / a machine pause, whose command
@@ -201,12 +209,94 @@ class TurnOutcome:
     rows.
     """
 
-    __slots__ = ("aborted", "crashed", "exited", "truncated")
+    __slots__ = ("aborted", "crashed", "exited", "native_held", "truncated")
 
     def __init__(
-        self, *, exited: bool, crashed: bool, aborted: bool = False, truncated: bool = False
+        self,
+        *,
+        exited: bool,
+        crashed: bool,
+        aborted: bool = False,
+        truncated: bool = False,
+        native_held: bool = False,
     ) -> None:
         self.exited = exited
         self.crashed = crashed
         self.aborted = aborted
         self.truncated = truncated
+        self.native_held = native_held
+
+
+async def cached_runtime(
+    runtimes: OrderedDict[int, _AgentRuntime],
+    stats: HostStats,
+    agent_id: int,
+    fingerprint: str,
+    slices: AgentSlices,
+    build: Callable[[int, str, AgentSlices], Awaitable[_AgentRuntime]],
+    evict: Callable[[], None],
+) -> _AgentRuntime:
+    """Build and retain the existing cache entry; the host owns its lifetime."""
+    cached = runtimes.get(agent_id)
+    if cached is not None and cached.fingerprint == fingerprint:
+        cached.last_used = time.monotonic()
+        runtimes.move_to_end(agent_id)
+        stats.cache_hits += 1
+        return cached
+
+    reason = "cold" if cached is None else "config_changed"
+    stats.cache_misses += 1
+    started = time.monotonic()
+    runtime = await build(agent_id, fingerprint, slices)
+    runtimes[agent_id] = runtime
+    runtimes.move_to_end(agent_id)
+    logger.info(
+        "hosted runtime for agent {agent_id} built ({reason})",
+        event="host_agent_prepared",
+        agent_id=agent_id,
+        reason=reason,
+        duration_ms=round((time.monotonic() - started) * 1000),
+    )
+    evict()
+    return runtime
+
+
+def evict_runtimes(runtimes: OrderedDict[int, _AgentRuntime], in_flight: set[int]) -> None:
+    """Evict idle runtimes by age and least-recent use; misses rebuild on wake.
+
+    Active runtimes survive both bounds, including turns longer than the
+    idle TTL. Completion refreshes idle time and LRU position before eviction.
+    Active-agent admission can exceed the cache budget; completion returns
+    the warm cache to its configured size as active runtimes settle.
+    """
+    cutoff = time.monotonic() - settings.daemon.host_agent_idle_ttl_seconds
+    aged = [a for a, r in runtimes.items() if r.last_used < cutoff and a not in in_flight]
+    for agent_id in aged:
+        del runtimes[agent_id]
+    cap = settings.daemon.host_agent_cache_size
+    for agent_id in list(runtimes):
+        if len(runtimes) <= cap:
+            break
+        if agent_id not in in_flight:
+            del runtimes[agent_id]
+
+
+async def read_last_active_at(pool: AsyncConnectionPool, agent_id: int) -> datetime | None:
+    """This agent's real activity clock — `agents_meta.last_active_at`.
+
+    Handed to `TurnScheduler` so an uncancellable-turn report can say how
+    long the agent has actually been silent. Deliberately THIS column and not
+    the `/api/agents` field of the same name: that one is
+    `MAX(inbound_messages.created_at)` (`base/agents/observation/snapshot.py`) and goes
+    stale during exactly the long turns where "is it wedged?" is a real
+    question — issue #183. This column is written on every completed LLM step
+    (`agent/graph/llm/node.py:_persist_last_active`).
+
+    Returns None when the row is gone; raising is left to the caller's
+    best-effort wrapper, which runs on the shutdown path.
+    """
+    async with pool.connection() as conn:
+        row = await (
+            await conn.execute("SELECT last_active_at FROM agents_meta WHERE id = %s", (agent_id,))
+        ).fetchone()
+    return None if row is None else row[0]

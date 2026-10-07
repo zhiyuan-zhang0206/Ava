@@ -96,6 +96,13 @@ class RouteContract:
 # start needs. Everything else is data-plane.
 # ─────────────────────────────────────────────────────────────────────
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
+    # Native work commands have their own durable domain owner, never generic inbound.
+    ("GET", "/api/keyed/v1/agents/{agent_id}/native-work"): RouteContract(),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/cancel-work"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        note="original managed work receipt and checkpoint/resource execution proof",
+    ),
     # ── gateway/agents/router.py ───────────────────────────────────
     ("PATCH", "/api/agents/{agent_id}"): RouteContract(note="label patch — CAS update"),
     ("GET", "/api/models"): RouteContract(),

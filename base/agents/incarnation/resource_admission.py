@@ -13,6 +13,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from base.agents.incarnation.resource_transfer import ResourceTransferProof, ResourceTransferReason
 from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceBirth,
@@ -27,7 +28,7 @@ _LOCK = "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_k
 # owner) — the applied restart still held as the lifecycle pointer, or an
 # applied and observed terminate. Aliases: i = inbound_messages, m = agents_meta.
 PREDECESSOR_RECEIPT = "i.agent_id=%s AND i.target_generation=%s AND i.target_owner=%s AND i.applied_at IS NOT NULL AND ((i.kind='restart' AND i.status='claimed' AND m.lifecycle_command_id=i.id) OR (i.kind='terminate' AND i.status='done' AND i.observed_at IS NOT NULL))"
-_PREDECESSOR = f"SELECT i.id FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id WHERE {PREDECESSOR_RECEIPT} LIMIT 1"  # noqa: S608 -- constant SQL fragment
+_PREDECESSOR = f"SELECT i.id,i.kind,i.observed_at FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id WHERE {PREDECESSOR_RECEIPT} LIMIT 1"  # noqa: S608 -- constant SQL fragment
 _STORE = "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s"
 # What a drained restart leaves: protocol-zero NULL, or the complete recorded
 # set of exactly the incarnation restart `i` released, empty and unfrozen.
@@ -47,6 +48,40 @@ def _require_same_host(state: IncarnationResources, host: ResourceProcess) -> No
         raise ResourceEvidenceError("same owner changed its actual host process")
 
 
+def _record_transfer(
+    state: IncarnationResources,
+    target: RuntimeIncarnation,
+    host: ResourceProcess,
+    predecessor_command_id: int | None,
+    *,
+    predecessor_observed_terminate: bool,
+    transfers: list[ResourceTransferProof] | None,
+) -> None:
+    """Collect only the actual predecessor evidence allowed by admission."""
+    if transfers is not None and (
+        state.frozen_by is None
+        or (state.frozen_by == predecessor_command_id and predecessor_observed_terminate)
+    ):
+        reason = (
+            ResourceTransferReason.LIFECYCLE_RECEIPT
+            if predecessor_command_id is not None
+            else ResourceTransferReason.EXACT_HOST_EXIT
+        )
+        transfers.append(
+            ResourceTransferProof(
+                agent_id=target.agent_id,
+                source_generation=state.generation,
+                source_owner=state.owner,
+                target_generation=target.generation,
+                target_owner=target.owner,
+                predecessor_process=state.host_process,
+                successor_process=host,
+                reason=reason,
+                lifecycle_command_id=predecessor_command_id,
+            )
+        )
+
+
 def _next(
     row: tuple[Any, ...],
     target: RuntimeIncarnation,
@@ -54,6 +89,9 @@ def _next(
     *,
     predecessor: bool,
     exited_predecessor: ResourceProcess | None = None,
+    predecessor_command_id: int | None = None,
+    predecessor_observed_terminate: bool = False,
+    transfers: list[ResourceTransferProof] | None = None,
 ) -> IncarnationResources | None:
     if row[0] is None:
         if row[6] != 0:
@@ -77,6 +115,14 @@ def _next(
             raise ResourceEvidenceError(
                 "successor lacks complete predecessor resource/lifecycle closure"
             )
+        _record_transfer(
+            state,
+            target,
+            host,
+            predecessor_command_id,
+            predecessor_observed_terminate=predecessor_observed_terminate,
+            transfers=transfers,
+        )
     return IncarnationResources(
         generation=target.generation, owner=target.owner, host_process=host, requests={}
     )
@@ -109,31 +155,38 @@ async def admit_resources_async(
     host: ResourceProcess,
     *,
     exited_predecessor: ResourceProcess | None = None,
-) -> None:
+) -> ResourceTransferProof | None:
     row = await (await conn.execute(_LOCK, (target.agent_id,))).fetchone()
     if row is None:
         raise ResourceEvidenceError("resource admission target does not exist")
     predecessor = False
+    predecessor_command_id = None
+    predecessor_observed_terminate = False
     if row[0] is not None:
         state = decode_resources(row[0])
         if isinstance(state, IncarnationResources):
-            predecessor = (
-                await (
-                    await conn.execute(
-                        _PREDECESSOR, (target.agent_id, state.generation, state.owner)
-                    )
-                ).fetchone()
-                is not None
+            receipt = await (
+                await conn.execute(_PREDECESSOR, (target.agent_id, state.generation, state.owner))
+            ).fetchone()
+            predecessor = receipt is not None
+            predecessor_command_id = None if receipt is None else receipt[0]
+            predecessor_observed_terminate = (
+                receipt is not None and receipt[1] == "terminate" and receipt[2] is not None
             )
+    transfers: list[ResourceTransferProof] = []
     value = _next(
         row,
         target,
         host,
         predecessor=predecessor,
         exited_predecessor=exited_predecessor,
+        predecessor_command_id=predecessor_command_id,
+        predecessor_observed_terminate=predecessor_observed_terminate,
+        transfers=transfers,
     )
     if value is not None:
         await conn.execute(_STORE, (Jsonb(value.model_dump(mode="json")), target.agent_id))
+    return transfers[0] if transfers else None
 
 
 async def require_resources_closed_async(conn: psycopg.AsyncConnection, agent_id: int) -> None:

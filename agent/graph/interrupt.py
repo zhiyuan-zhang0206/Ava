@@ -46,6 +46,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import pending_interrupt_reason
 from agent.graph.node_log import awaiter_chain_lines
+from agent.ownership.native_cancel import observe_bound_cancel
+from base.agents.incarnation.native_work_models import NativeCancelMarker
 from base.agents.messages.inbound import InterruptReason
 from base.log import logger
 
@@ -60,10 +62,17 @@ class InterruptEvent(asyncio.Event):
     def __init__(self) -> None:
         super().__init__()
         self.reason = InterruptReason.USER
+        self.native_cancel: NativeCancelMarker | None = None
 
-    def set(self, reason: InterruptReason = InterruptReason.USER) -> None:
+    def set(
+        self,
+        reason: InterruptReason = InterruptReason.USER,
+        *,
+        native_cancel: NativeCancelMarker | None = None,
+    ) -> None:
         if not self.is_set():
             self.reason = reason
+            self.native_cancel = native_cancel
             super().set()
 
 
@@ -119,6 +128,11 @@ async def _watch_for_interrupt(
     watcher holds no shared resource, even that lingering poll is harmless.
     """
     while not stop.is_set():
+        marker = await observe_bound_cancel(pool, agent_id)
+        if marker is not None:
+            if not stop.is_set():
+                event.set(InterruptReason.USER, native_cancel=marker)
+            return
         reason = await pending_interrupt_reason(pool, agent_id)
         if reason is not None:
             if not stop.is_set():

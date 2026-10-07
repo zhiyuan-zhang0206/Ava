@@ -111,9 +111,13 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
     ) as control:
         invocations: list[int] = []
+        work_entered, exhaust_control = asyncio.Event(), asyncio.Event()
 
         async def work(_state: states.AgentState) -> dict[str, Any]:
             invocations.append(id(asyncio.current_task()))
+            if len(invocations) == 1:
+                work_entered.set()
+                await exhaust_control.wait()
             async with control.connection(timeout=0.03) as conn:
                 await conn.execute("SELECT 1")
             return {"halted": True, "turn_idle": True, "messages": [AIMessage(content="Resumed")]}
@@ -128,10 +132,14 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
             db=Database.from_settings(),
         )
         with bind_turn_identity(agent, incarnation=incarnation):
+            original = asyncio.create_task(
+                host._invoke_until_done(agent, AvaContext(agent=AgentSlices.resolve()))
+            )
+            await asyncio.wait_for(work_entered.wait(), 3)
             async with control.connection():
-                original = asyncio.create_task(
-                    host._invoke_until_done(agent, AvaContext(agent=AgentSlices.resolve()))
-                )
+                # Preparation uses the same real control owner; begin the
+                # outage only after that preparation and original graph entry.
+                exhaust_control.set()
                 try:
                     await asyncio.wait_for(recovering.wait(), 3)
                     assert not original.done()

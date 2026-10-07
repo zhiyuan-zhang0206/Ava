@@ -25,13 +25,26 @@ from pydantic import BaseModel, Field
 from base.agents import AgentNotFound
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
+from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
 from base.agents.messages.control_delivery import ControlConflictError, accept_control
 from base.agents.messages.inbound import InboundKind
+from base.agents.messages.native_cancel import (
+    NativeCancelConflictError,
+    accept_native_cancel,
+    observe_native_work,
+)
 from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from gateway.agents.forward import forward_to_home_machine
 from gateway.agents.schemas import CancelRequest, CompactEnqueued
-from gateway.auth.request_principal import PrincipalScopeError, optional_request_key
+from gateway.auth.request_principal import (
+    PRINCIPAL_SCOPE,
+    SCOPE_HEADER,
+    AuthPrincipal,
+    PrincipalScopeError,
+    optional_request_key,
+    request_key,
+)
 from ops import lifecycle as _ops
 from ops.rpc_schemas import (
     BillingResurrectRequest,
@@ -375,3 +388,38 @@ async def post_agent_restart(
         agent_id, f"/api/agents/{agent_id}/restart", body.model_dump()
     )
     return RestartAgentResponse.model_validate(forwarded)
+
+
+@router.get("/api/keyed/v1/agents/{agent_id}/native-work")
+async def native_work(agent_id: int, request: Request) -> NativeWorkTarget:
+    """Expose only eligible ACTIVE work backed by actual managed-owner evidence."""
+    target = await asyncio.to_thread(observe_native_work, request.app.state.db_pool, agent_id)
+    if target is None:
+        raise HTTPException(status_code=409, detail="no eligible active native work")
+    return target
+
+
+@router.post("/api/keyed/v1/agents/{agent_id}/cancel-work")
+async def native_cancel(
+    agent_id: int, body: NativeWorkTarget, request: Request
+) -> NativeCancelAcceptance:
+    """Accept one exact work intent; acceptance does not prove checkpoint execution."""
+    key = request.headers.get("Idempotency-Key")
+    if (
+        key is None
+        or request.headers.get(SCOPE_HEADER) != PRINCIPAL_SCOPE
+        or not isinstance(getattr(request.state, "auth_principal", None), AuthPrincipal)
+    ):
+        raise HTTPException(
+            status_code=400, detail="native cancel requires a key and verified principal-v1 scope"
+        )
+    try:
+        scoped = request_key(request, key, method="POST", path=request.url.path)
+    except PrincipalScopeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        return await asyncio.to_thread(
+            accept_native_cancel, request.app.state.db_pool, scoped, agent_id, body
+        )
+    except NativeCancelConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

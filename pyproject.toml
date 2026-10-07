@@ -222,6 +222,8 @@ ignore_imports = [
     # Database recovery retains and repairs the original fenced continuation.
     "services.agent_runner.agent_host.db_recovery -> agent.impersonation",
     "services.agent_runner.agent_host.db_recovery -> agent.ownership.inbound",
+    # DB recovery must preserve an accepted original native halt before startup repair.
+    "services.agent_runner.agent_host.db_recovery -> agent.ownership.native_cancel",
     # The settlement boundary catches the inbound-owner fence's refusal at a
     # settled abort, so a replaced runtime makes the reconcile pass a logged
     # no-op instead of a second turn failure.
@@ -230,7 +232,8 @@ ignore_imports = [
     # Completed invocation recovery reads its original lifecycle receipt and
     # handles the typed owner refusal without retargeting a replacement.
     "services.agent_runner.agent_host.host -> agent.ownership.hosted_completion",
-    "services.agent_runner.agent_host.host -> agent.ownership.inbound",
+    "services.agent_runner.agent_host.invocation -> agent.ownership.inbound",
+    "services.agent_runner.agent_host.invocation -> agent.ownership.hosted_completion",
     # The corpse reaper is the other half of the hosted ownership machinery
     # (split out of agent.ownership.hosted at its 800-line budget ceiling):
     # the host's beat runs the grace reap, and the settlement boundary runs
@@ -241,6 +244,9 @@ ignore_imports = [
     "services.agent_runner.agent_host.host -> agent.impersonation",
     # Failure recovery preserves the same pre-settlement takeover preparation.
     "services.agent_runner.agent_host.invocation -> agent.impersonation",
+    # The original native work boundary writes and flushes an attributed halt.
+    "services.agent_runner.agent_host.native_work -> agent.impersonation",
+    "services.agent_runner.agent_host.native_work -> agent.ownership.native_cancel",
     "services.agent_runner.agent_host.* -> agent.startup",
     "services.agent_runner.agent_host.* -> agent.state",
 ]

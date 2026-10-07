@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.impersonation import flush_checkpoint
 from agent.ownership.inbound import RuntimeOwnershipLostError
+from agent.ownership.native_cancel import observe_bound_cancel
 from agent.startup import (
     reconcile_claimed_inbounds_at_startup,
     repair_dangling_tool_use_at_startup,
@@ -265,6 +266,12 @@ async def recover_database(
                     attempt,
                     flushed_generation,
                 )
+                # An accepted strong command belongs to the interrupted original
+                # work. The host must settle its exact marker before startup repair
+                # can change channels or dispose claimed rows.
+                if await observe_bound_cancel(pool, incarnation.agent_id) is not None:
+                    waiting.complete()
+                    return
                 phase = "inbound_reconciliation"
                 await _run_bounded_stage(
                     waiting,

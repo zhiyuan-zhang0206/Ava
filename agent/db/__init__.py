@@ -12,6 +12,8 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.ownership.inbound import lock_inbound_owner
+from agent.ownership.native_cancel import bound_native_cancel
+from base.agents.incarnation.native_work_models import NativeCancelPendingError
 from base.agents.messages.inbound import InterruptReason
 from base.config import settings
 from base.db import ALIVE_STATUSES, Database, InboundRow, publish_inbound_wake
@@ -322,6 +324,9 @@ async def claim_inbound_batch(
             "SELECT set_config('lock_timeout', %s, true)", (f"{acquire_timeout_s:g}s",)
         )
         await lock_inbound_owner(conn, agent_id)
+        native_cancel = await bound_native_cancel(conn, agent_id)
+        if native_cancel is not None:
+            raise NativeCancelPendingError(native_cancel)
         await cur.execute("SELECT runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
         runtime = await cur.fetchone()
         runtime_owned = runtime in (("process",), ("hosted",))
@@ -567,6 +572,8 @@ async def pending_interrupt_reason(
     self row is still dispatched normally at claim.
     """
     async with pool.connection() as conn, conn.cursor() as cur:
+        if await bound_native_cancel(conn, agent_id) is not None:
+            return InterruptReason.USER
         await cur.execute(
             "SELECT i.source FROM inbound_messages i WHERE i.agent_id=%s "
             "AND i.source <> 'self' AND i.kind IN ('cancel','terminate') AND "

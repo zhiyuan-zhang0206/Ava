@@ -39,3 +39,10 @@ without requiring an independently resident agent process.
 - `base/native_process/runtime_incarnation.py` — context-bound execution identity
 
 Related: [[../../startup/docs/admission.ava.okf.md]] and [[../../docs/lifecycle.ava.okf.md]].
+
+A runtime generation is not a graph work identity. The native work owner retains
+one invocation UUID across database recovery, dedicated cancel acceptance and
+committed halt/certified-stop proof. Hosted admission appends an actual resource
+transfer in its successful metadata transaction; later startup cannot manufacture
+that certificate from mutable status. See
+[[../../../base/agents/incarnation/docs/native-work-cancel.ava.okf.md|guarded native work cancellation]].
