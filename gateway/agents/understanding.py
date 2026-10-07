@@ -108,7 +108,8 @@ def _live_segment_state(
             (agent_id,),
         ).fetchone()
     covered_to = 0 if newest is None or newest[0] is None else int(newest[0]) + 1 - base
-    for version, status, start_index, end_index, end_msg_id in jobs:
+    for version, status, start_index, end_at, end_msg_id in jobs:
+        end_index = int(end_at)
         if 0 < end_index <= len(request) and request[end_index - 1].id == end_msg_id:
             # A failed job left its stretch undescribed: the close takes it up again.
             return int(version), int(start_index if status == "failed" else end_index), covered_to
