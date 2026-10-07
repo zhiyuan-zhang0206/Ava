@@ -99,6 +99,24 @@ def require_agent_id() -> int:
     return resolved
 
 
+def require_lease_free_agent_id() -> int:
+    """Require an agent context without a borrowed lease for remote admission.
+
+    A live ExternalLease is an in-process callback, not an HTTP credential or
+    serializable authority. Remote compound acceptance cannot revalidate it
+    after its own transaction lock wait. This guard makes no server ACL claim.
+    """
+    identity = _bound()
+    if identity is not None and identity.lease is not None:
+        raise ValueError("strong task assignment does not support a borrowed lease")
+    actor = require_agent_id()
+    if isinstance(actor, bool) or not isinstance(actor, int):
+        raise TypeError("actor agent id must be an integer")
+    if actor <= 0:
+        raise ValueError("actor agent id must be positive")
+    return actor
+
+
 def require_actor() -> str:
     """Return this process's asserted provenance, validating a borrowed lease first.
 
