@@ -4,8 +4,9 @@ A test may replace a name in its own package, a public name anywhere, the proces
 environment, or a third-party / runtime boundary. It may not reach into a private name of a
 package it does not belong to. This module classifies every patch point of a test file
 (`scripts/structure/patch_points.py`) against the file's home package
-(`scripts/structure/placement.py`) and freezes today's violations in the `patch_targets`
-baseline section as `path::target -> site count`, matched exactly like Rules 4 and 5.
+(`scripts/structure/placement.py`). Existing exemptions in the `patch_targets`
+baseline section use `path::target -> site count`, matched exactly like Rules 4 and 5.
+New violations must be fixed; introducing the lint cannot freeze new exemptions.
 
 Classes (each patch point lands in exactly one):
 
