@@ -52,6 +52,7 @@ from base.telemetry.alerts import (
     stamp_notified,
     upsert_alert,
 )
+from base.telemetry.alerts.shadow import AlertShadowBatch
 from gateway.alerts.publish import ALERTS_CHANNEL, publish_alert_rows
 from gateway.alerts.schemas import (
     AlertIngestResult,
@@ -122,8 +123,15 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
     with write_transaction(request.app.state.db_pool) as conn:
         lang = display_language(conn)
-        for alert in body.flattened():
-            key, did_insert, should_notify, row = upsert_alert(conn, alert, source=body.source)
+        alerts = body.flattened()
+        shadow = AlertShadowBatch(conn, alerts, lang)
+        for alert in shadow.items:
+            instance_key, previous = shadow.observe(alert)
+            if instance_key is None:
+                continue
+            key, did_insert, should_notify, row = upsert_alert(
+                conn, alert, source=body.source, instance_key=instance_key
+            )
             if not row:
                 continue
             if did_insert:
@@ -131,12 +139,14 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
             else:
                 updated += 1
             rows.append(row)
+            shadow.record(alert, row, previous, should_notify=should_notify)
             if should_notify:
                 group = (
                     normalize_status(str(alert.get("status") or "")),
                     parse_alertname(alert.get("labels") or {}),
                 )
                 pending.setdefault(group, []).append((key, alert))
+        shadow.freeze()
         conn.commit()
 
     publish_alert_rows(request.app.state.bus, rows)
