@@ -160,7 +160,7 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     config = tmp_path / "collector.yaml"
     config.write_text("receivers: {otlp: {}}\n")
     monkeypatch.setattr(roster, "otel_collector_config", lambda: config)
-    monkeypatch.setattr(roster, "_plugin_services", tuple)
+    monkeypatch.setattr("ops.spec.plugin_services", tuple)
     collector = next(s for s in roster.build_services() if s.session == "otel-collector")
     before = driver.tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
     rows = cast("list[dict[str, object]]", before["units"])
