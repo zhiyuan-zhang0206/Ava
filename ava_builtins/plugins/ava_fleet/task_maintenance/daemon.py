@@ -39,7 +39,6 @@ identity probe of the plugin's `services()` entry — so the schema-drift exit i
 """
 
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -78,48 +77,6 @@ def _pidfile() -> Path:
 
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
-
-
-def deliver_message(
-    pool: ConnectionPool,
-    db: Database,
-    bus: EventBus,
-    agent_id: int,
-    message: str,
-    *,
-    escalate_task_ids: list[int] | None = None,
-) -> None:
-    """Insert a task-reminder system-note inbound, refresh its badge, then wake.
-
-    A reminder is a system notification, not peer chatter: kind='system_note'
-    with the `task` note tag, so the claim node renders it as a system note
-    (system_marker) in the timeline. Direct delivery intentionally cannot
-    resurrect a terminated agent; its inbound row remains inspectable while
-    escalation directs the work onward (user ruling 2026-08-27 -- plain
-    notifications never resurrect).
-
-    `escalate_task_ids` is set by the delegator escalation pass: the stalled
-    subtasks the digest covers. The same transaction stamps their
-    `escalated_at` after the insert, making the escalation at-most-once per
-    overdue window — either the message and its marker commit together, or
-    neither lands and the next sweep retries. Any update() clears the marker
-    with the reminder counters, re-arming the task's next window."""
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, %s, 'system_note', 'system', %s::jsonb) RETURNING id",
-            (agent_id, message, json.dumps({"note_tag": "task"})),
-        )
-        inbound_id = int(cur.fetchone()[0])  # type: ignore[index]
-        if escalate_task_ids:
-            cur.execute(
-                "UPDATE agent_tasks SET escalated_at = now() WHERE id = ANY(%s)",
-                (escalate_task_ids,),
-            )
-    publish_agent_updated_sync(bus, agent_id)
-    # The connection context commits before the best-effort wake. A missing
-    # subscriber is expected for a terminated agent and does not resurrect it.
-    publish_inbound_wake(db, bus, agent_id, str(inbound_id))
 
 
 # ── Reminder pass ──────────────────────────────────────────────────────────────
@@ -236,184 +193,32 @@ def announce_reminder(
 
 # ── Escalate pass ────────────────────────────────────────────────────────────
 
-# Tasks whose reminder_count reached (>=) the escalation threshold, joined to their
-# parent's owner (the delegator). p.owner is NULL for a top-level task (its
-# parent is the ownerless system root) — those escalate to the user instead of
-# a delegator (see _run_escalate). The >= here surfaces every
-# at-or-past-threshold task; _run_escalate then applies the per-branch gate (the
-# delegator branch fires once per overdue window — at-or-past threshold and
-# not yet `escalated_at`; the user branch is >= and retry-eligible until its
-# notice is posted).
-_ESCALATE_SQL = """
-    SELECT t.id, t.title, t.owner, t.reminder_count, t.escalated_at, t.priority,
-           p.owner AS parent_owner
-    FROM agent_tasks t
-    JOIN agent_tasks p ON p.id = t.parent_id
-    WHERE t.status = 'in_progress'
-      AND t.reminder_count >= %s
-      AND NOT t.is_root
-"""
-
-
-def _escalate_to_user_queue(
-    bus: EventBus, pool: ConnectionPool, task_id: int, owner: int, priority: str, title: str
-) -> bool:
-    """Surface a stalled top-level task in the human queue by posting a
-    require_response notice on the stalled owner agent.
-
-    The notice hangs off the owner agent but its audience is the user: a
-    require_response notice rides the agent snapshot's notices_awaiting_response
-    into the "needs response" queue, grouped under the task via `task_id`. It
-    inherits the task's `priority`. Skipped (returns False) when the owner
-    already has an open notice — the human already has that agent flagged, and
-    the one-open-notice-per-agent invariant that ava.ui.notify keeps must hold;
-    this also makes the escalation self-idempotent, since a later sweep sees the
-    still-open notice and skips. Returns True when a notice was posted."""
-    notice_title = (
-        f'Task #{task_id} "{title}" stalled after repeated reminders — reassign or cancel'
-    )
-    notice_content = (
-        f"Agent #{owner} has not updated this task after repeated reminders, and no "
-        "delegating agent owns its parent to catch it. Reassign it to another agent, "
-        "cancel it, or reply to remind the owner once more."
-    )
-    with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-        conn.execute("SET TRANSACTION READ WRITE")
-        cur.execute(
-            "SELECT 1 FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL LIMIT 1",
-            (owner,),
-        )
-        if cur.fetchone() is not None:
-            return False
-        cur.execute(
-            "INSERT INTO agent_notices "
-            "(agent_id, local_id, task_id, title, content, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-            "%s, %s, %s, %s, TRUE, FALSE, now() + make_interval(secs => %s))",
-            (
-                owner,
-                owner,
-                task_id,
-                notice_title,
-                notice_content,
-                priority,
-                settings.daemon.notice_ttl_limit_seconds,
-            ),
-        )
-    # Reconcile the notice queue only after the escalation has committed.
-    publish_agent_updated_sync(bus, owner)
-    return True
-
-
-def _delegator_digest_message(tasks: list[tuple[int, str, int, int]]) -> str:
-    """Format one delegator's stalled subtasks without a per-task path."""
-    lines = ["Stalled subtasks — owner(s) unresponsive after repeated reminders:"]
-    for task_id, title, owner, reminder_count in tasks:
-        lines.append(f'- #{task_id} "{title}" — owner #{owner}, {reminder_count} reminders')
-    return "\n".join(lines)
-
 
 def _run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: int) -> int:
-    """Escalate unresponsive subtask owners.
+    """Accept current escalation state atomically, then announce committed work."""
+    from ava_builtins.plugins.ava_fleet.task_maintenance.escalation import accept_escalations
 
-    A delegated subtask (its parent has an owner) escalates to that parent
-    owner — the delegator — with a chat message. A top-level task (its parent
-    is the ownerless system root, parent_owner NULL) has no delegator to catch
-    it, so it escalates to the user: a require_response notice on the stalled
-    owner that surfaces in the human queue."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(_ESCALATE_SQL, (escalate_n,))
-        rows = cur.fetchall()
-
-    escalated = 0
-    stalled_by_delegator: dict[int, list[tuple[int, str, int, int]]] = defaultdict(list)
-    for task_id, title, owner, reminder_count, escalated_at, priority, parent_owner in rows:
-        try:
-            if parent_owner is not None:
-                # Delegated subtask -> tell the delegator once per overdue
-                # window. >= (not ==): a sweep whose escalation failed or was
-                # missed must still fire later, never losing the window.
-                # `escalated_at`, stamped by deliver_message in the digest's
-                # own transaction, is what makes it at-most-once; any update()
-                # clears it with the reminder counters, re-arming the task's
-                # next window.
-                if reminder_count < escalate_n or escalated_at is not None:
-                    continue
-                stalled_by_delegator[parent_owner].append((task_id, title, owner, reminder_count))
-            else:
-                # Top-level task -> surface in the human queue. Use
-                # >= (not ==): a sweep that cannot post yet (the owner already
-                # holds an open notice) must retry on later sweeps rather than
-                # permanently miss this overdue window once the counter climbs
-                # past the threshold. The escalation notice itself is the
-                # idempotency marker — _escalate_to_user_queue skips while one is
-                # open, so >= never double-posts.
-                if reminder_count < escalate_n:
-                    continue
-                if _escalate_to_user_queue(bus, pool, task_id, owner, priority, title):
-                    telemetry.emit(
-                        "telemetry",
-                        "task_escalation",
-                        agent_id=owner,
-                        source="system",
-                        attributes={
-                            "owner_id": owner,
-                            "task_count": 1,
-                            "task_ids": [task_id],
-                            "leg": "user",
-                        },
-                    )
-                    _log.info(
-                        "[task-maintenance] escalated user task %s to the human queue "
-                        "(owner %s unresponsive after %d reminders)",
-                        task_id,
-                        owner,
-                        reminder_count,
-                    )
-                    escalated += 1
-        except Exception as exc:
-            _log.error(
-                "[task-maintenance] escalation for task %s failed: %r",
-                task_id,
-                exc,
-            )
-    for delegator, tasks in stalled_by_delegator.items():
-        task_ids = [task_id for task_id, _, _, _ in tasks]
-        try:
-            deliver_message(
-                pool,
-                db,
-                bus,
-                delegator,
-                _delegator_digest_message(tasks),
-                escalate_task_ids=task_ids,
-            )
-            telemetry.emit(
-                "telemetry",
-                "task_escalation",
-                agent_id=delegator,
-                source="system",
-                attributes={
-                    "owner_id": delegator,
-                    "task_count": len(tasks),
-                    "task_ids": task_ids,
-                    "leg": "delegator",
-                },
-            )
-            _log.info(
-                "[task-maintenance] escalated tasks %s to delegator %s",
-                task_ids,
-                delegator,
-            )
-            escalated += 1
-        except Exception as exc:
-            _log.error(
-                "[task-maintenance] escalation digest for delegator %s (tasks %s) failed: %r",
-                delegator,
-                task_ids,
-                exc,
-            )
-    return escalated
+    receipts = accept_escalations(pool, escalate_n)
+    for receipt in receipts:
+        if receipt.inbound_id is not None:
+            announce_reminder(db, bus, receipt.recipient, receipt.inbound_id, receipt.content)
+        else:
+            publish_agent_updated_sync(bus, receipt.recipient)
+        telemetry.emit(
+            "telemetry",
+            "task_escalation",
+            agent_id=receipt.recipient,
+            source="system",
+            attributes={
+                "owner_id": receipt.recipient,
+                "task_count": len(receipt.task_ids),
+                "task_ids": receipt.task_ids,
+                "leg": receipt.leg,
+            },
+        )
+    if receipts:
+        _log.info("[task-maintenance] accepted %d escalation digests/notices", len(receipts))
+    return len(receipts)
 
 
 # ── Daemon lifecycle ─────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
+from ava_builtins.plugins.ava_fleet.task_maintenance import escalation
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate
 from base.config import settings
 from base.db import Database
@@ -149,27 +149,17 @@ def test_delegator_escalation_retries_after_delivery_failure(
     """A failed digest leaves no marker (no message landed), so the next sweep
     retries; once it lands, later sweeps stay quiet."""
     parent_owner, _owner, tid = _stalled_subtask(db_conn)
-    real = daemon.deliver_message
-    attempts = {"n": 0}
+    real = escalation.insert_inbound_message_in_transaction
 
-    def _flaky(
-        pool_: ConnectionPool,
-        db_: Database,
-        bus_: EventBus,
-        agent_id: int,
-        message: str,
-        *,
-        escalate_task_ids: list[int] | None = None,
-    ) -> None:
-        attempts["n"] += 1
-        if attempts["n"] == 1:
-            raise psycopg.OperationalError("db blip")
-        real(pool_, db_, bus_, agent_id, message, escalate_task_ids=escalate_task_ids)
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise psycopg.OperationalError("queue unavailable")
 
-    monkeypatch.setattr(daemon, "deliver_message", _flaky)
-    assert _run_escalate(pool, database, event_bus, 3) == 0  # delivery failed: nothing was sent
+    monkeypatch.setattr(escalation, "insert_inbound_message_in_transaction", unavailable)
+    with pytest.raises(psycopg.OperationalError):
+        _run_escalate(pool, database, event_bus, 3)
     assert _inbound_messages(db_conn, parent_owner) == []
     assert _escalated_at(db_conn, tid) is None
+    monkeypatch.setattr(escalation, "insert_inbound_message_in_transaction", real)
     assert _run_escalate(pool, database, event_bus, 3) == 1  # retried and delivered
     assert len(_inbound_messages(db_conn, parent_owner)) == 1
     assert _run_escalate(pool, database, event_bus, 3) == 0  # marker holds: no third send

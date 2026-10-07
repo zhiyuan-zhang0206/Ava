@@ -53,18 +53,6 @@ def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     responsibility — digest recipients, content, and counter updates."""
     calls: list[tuple[int, str]] = []
 
-    def _fake(
-        pool_: ConnectionPool,
-        _db: object,
-        _bus: object,
-        agent_id: int,
-        message: str,
-        **_kwargs: object,
-    ) -> None:
-        calls.append((agent_id, message))
-
-    monkeypatch.setattr(daemon, "deliver_message", _fake)
-
     def _accepted(_db: object, _bus: object, owner: int, _inbound_id: int, content: str) -> None:
         calls.append((owner, content))
 
@@ -209,12 +197,13 @@ class TestRemind:
 
         monkeypatch.setattr(daemon, "publish_agent_updated_sync", _capture_publish)
 
-        daemon.deliver_message(pool, database, event_bus, owner, "reminder")
+        _make_task(db_conn, owner=owner, updated_s_ago=7200)
+        assert daemon._run_reminders(pool, database, event_bus, 3600) == 1
 
         # This separate connection must already see the committed inbound
         # when its invalidation hint is published.
         assert published == [(owner, 1)]
-        assert _inbound_messages(db_conn, owner) == [("reminder", "system_note", "system")]
+        assert _inbound_messages(db_conn, owner)[0][1:] == ("system_note", "system")
 
     def test_single_overdue_task_delivers_single_task_digest(
         self,
