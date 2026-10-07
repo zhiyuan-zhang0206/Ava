@@ -1,7 +1,5 @@
 {
   "ambient_state": {},
   "files": {},
-  "patch_targets": {
-    "services/derived/memory_indexer/tests/test_memory_indexer.py::services.derived.memory_indexer.embeddings.gemini._EMBED_POLICY": 1
-  }
+  "patch_targets": {}
 }

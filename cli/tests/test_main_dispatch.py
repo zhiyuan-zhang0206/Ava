@@ -3,9 +3,8 @@
 main() builds the argparse parser, parses argv, then calls `args.func(args)`
 where `func` was bound at parser-build time via `set_defaults(func=...)`,
 referring to the `_h_*` handler defined in its owning parser module. Each handler
-lazy-imports the cmd_X impl; this test patches the
-handler binding (on the module that defines it, before the parser is built)
-to record routing without invoking real cmd_start / cmd_cluster_status / etc.
+lazy-imports the cmd_X impl; tests replace selected handlers on the real parser
+bindings to record routing without invoking real cmd_start / cmd_cluster_status.
 """
 
 from __future__ import annotations
@@ -14,13 +13,13 @@ import argparse
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
 import pytest
 
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
-from base.native_process import code_version
 from cli import main as _main
 from cli.commands.agents import parsers as _agents
 from cli.commands.extensions.parsers import mcp as _mcp
@@ -94,6 +93,18 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
             assert module.startswith("cli.parsers."), (leaf.prog, module)
 
 
+def _run_isolated_program(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
+        [sys.executable, "-B", "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+
 def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
     """A settings-free entry can import the parser before choosing its path."""
     code = """
@@ -108,15 +119,7 @@ assert not any(name in sys.modules for name in (
     'cli.commands.agents.codex_app_server',
 ))
 """
-    result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
-        [sys.executable, "-B", "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
-        env={**os.environ, "HOME": str(tmp_path)},
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
+    result = _run_isolated_program(code, tmp_path)
     assert result.returncode == 0, result.stderr
 
 
@@ -165,6 +168,18 @@ def test_dispatch_invokes_per_subcommand_handler(
     assert "args" in captured
 
 
+def _stub_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    handler: Callable[[argparse.Namespace], int],
+) -> None:
+    """Use the real parser tree and replace only this entry-point test's dispatch."""
+    parser = build_parser()
+    leaf = next(item for item in _iter_leaf_parsers(parser) if item.prog == f"ava {command}")
+    leaf.set_defaults(func=handler)
+    monkeypatch.setattr(_main, "_build_parser", lambda: parser)
+
+
 def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI always constructs the full settings domain set."""
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
@@ -177,7 +192,7 @@ def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPat
     def _fake(_args: argparse.Namespace) -> int:
         return 0
 
-    monkeypatch.setattr(_host, "_h_status", _fake)
+    _stub_dispatch(monkeypatch, "status", _fake)
 
     assert _main.main(["status"]) == 0
     assert "AVA_PROCESS_PROFILE" not in os.environ
@@ -355,7 +370,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
         captured["args"] = args
         return 7
 
-    monkeypatch.setattr(_host, "_h_start", _fake)
+    _stub_dispatch(monkeypatch, "start", _fake)
     # `start` is the one verb with a pre-dispatch side effect (the settings-free
     # installed-home gate), which this test neutralizes — it asserts flag
     # forwarding, not bring-up behaviour.
@@ -440,7 +455,7 @@ def test_settings_load_failure_prints_env_template(
     def _boom(_args: argparse.Namespace) -> int:
         raise err
 
-    monkeypatch.setattr(_host, "_h_status", _boom)
+    _stub_dispatch(monkeypatch, "status", _boom)
     rc = _main.main(["status"])
     captured = capsys.readouterr()
     assert rc == 1
@@ -712,11 +727,21 @@ assert 'base.config' not in sys.modules
 
 
 def test_main_declares_the_cli_exempt_from_the_database_code_gate(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """`ava stop` writes to the database to drain agents, so a host left on stale
     code must still be able to run it: the CLI entry point exempts itself first."""
-    monkeypatch.setattr(code_version, "_db_gate_exempt", False)
-    with pytest.raises(SystemExit):
-        _main.main(["--help"])
-    assert code_version.db_gate_applies() is False
+    code = """
+from base.native_process import code_version
+from cli import main
+assert code_version.db_gate_applies() is True
+try:
+    main.main(['--help'])
+except SystemExit as exc:
+    assert exc.code == 0
+else:
+    raise AssertionError('help must exit')
+assert code_version.db_gate_applies() is False
+"""
+    result = _run_isolated_program(code, tmp_path)
+    assert result.returncode == 0, result.stderr

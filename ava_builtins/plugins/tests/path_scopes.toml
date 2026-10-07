@@ -4,7 +4,3 @@
     "test_ava_sdk_reminder_plugin.py",
     "test_sysprompt_verbosity_regression.py",
 ]
-"tests.path_scoped.gateway_tests" = [
-    "test_agent_inspect_metrics.py",
-    "test_agent_inspect_widgets.py",
-]

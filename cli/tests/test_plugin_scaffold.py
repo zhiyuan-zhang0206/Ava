@@ -16,7 +16,7 @@ from base.host import proc
 from base.packages.plugins.enable_config import write_local
 from cli.commands.converge import host as converge_host
 from cli.commands.extensions import memory
-from cli.commands.extensions._plugin_scaffold import ScaffoldResult, run_plugin_scaffolds
+from cli.commands.extensions._plugin_scaffold import run_plugin_scaffolds
 
 
 @pytest.fixture(autouse=True)
@@ -254,24 +254,13 @@ def test_memory_init_returns_a_clean_error_for_the_wrong_branch_guard(
     _install_memory_plugin()
     set_identity(role="agent-runner", name="test-runner")
     _make_dirty_memory_repo(paths.memory_dir(), "main")
-    branch_mismatches: list[memory_repo.MemoryBranchMismatch] = []
-
-    def _record_branch_mismatch() -> ScaffoldResult:
-        try:
-            return run_plugin_scaffolds()
-        except memory_repo.MemoryBranchMismatch as exc:
-            branch_mismatches.append(exc)
-            raise
-
-    monkeypatch.setattr(
-        "cli.commands.extensions._plugin_scaffold.run_plugin_scaffolds", _record_branch_mismatch
-    )
-
     assert memory.cmd_memory_init() == 1
 
     stderr = capsys.readouterr().err
-    assert len(branch_mismatches) == 1
-    assert f"✗ {branch_mismatches[0]}" in stderr
+    assert (
+        f"✗ {paths.memory_dir()} is already a git repo but on branch 'main', "
+        "expected 'machine-test-runner'."
+    ) in stderr
     assert "Manually switch:" in stderr
     assert "Traceback" not in stderr
 
@@ -298,15 +287,20 @@ def test_memory_init_seeds_a_dirty_correct_branch_pool(capsys: pytest.CaptureFix
     assert "scaffolded: ava_memory" in capsys.readouterr().out
 
 
-def test_memory_init_reports_scaffolded_plugins(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(
-        "cli.commands.extensions._plugin_scaffold.run_plugin_scaffolds",
-        lambda: ScaffoldResult(ran=["example"]),
+def test_memory_init_reports_scaffolded_plugins(capsys: pytest.CaptureFixture[str]) -> None:
+    plugin = paths.plugins_dir() / "example"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.py").write_text("__description__ = 'test scaffold'\n", encoding="utf-8")
+    (plugin / "setup.py").write_text(
+        "from pathlib import Path\n"
+        "def scaffold():\n"
+        "    Path(__file__).with_name('scaffolded.marker').write_text('ready')\n",
+        encoding="utf-8",
     )
+    write_local({"plugins": {"example": {"enabled": True}}})
 
     assert memory.cmd_memory_init() == 0
+    assert (plugin / "scaffolded.marker").read_text(encoding="utf-8") == "ready"
     assert "scaffolded: example" in capsys.readouterr().out
 
 

@@ -7,8 +7,6 @@
   "files": {},
   "patch_targets": {
     "ava_builtins/plugins/ava_code/tests/test_ava_code_plugin.py::agent.graph.exec.output._overflow_dir": 1,
-    "ava_builtins/plugins/lm_google/tests/test_llm_decode_ms.py::agent.graph.llm._stream": 1,
-    "ava_builtins/plugins/tests/test_agent_inspect_metrics.py::gateway.inspect._plugin_metrics": 2,
-    "ava_builtins/plugins/tests/test_agent_inspect_widgets.py::gateway.inspect._plugin_widgets": 6
+    "ava_builtins/plugins/lm_google/tests/test_llm_decode_ms.py::agent.graph.llm._stream": 1
   }
 }

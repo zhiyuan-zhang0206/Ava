@@ -364,3 +364,19 @@ def _settings_for(monkeypatch: pytest.MonkeyPatch):
     from base.config import settings
 
     return settings.services
+
+
+def test_runtime_and_settings_free_probes_share_the_npx_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A changed npx message cannot split runtime gating from enrollment repair."""
+    monkeypatch.setattr(pp, "display_available", lambda: True)
+    monkeypatch.setattr(pp, "resolve_chrome_binary", lambda: "/chrome")
+    monkeypatch.setattr(pp, "_platform_chrome_binary", lambda: "/chrome")
+    monkeypatch.setattr(
+        pp.shutil,
+        "which",
+        lambda _name: None,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert pp.browser_incapability() == pp.NPX_INCAPABILITY_REASON
+    assert pp.browser_deps_incapability() == pp.NPX_INCAPABILITY_REASON

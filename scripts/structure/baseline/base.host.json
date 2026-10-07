@@ -5,7 +5,5 @@
     "base/host/net/__init__.py::import-time-call:base.host.net.httpx_cli_guard.block_httpx_cli": 1
   },
   "files": {},
-  "patch_targets": {
-    "base/host/converge/tests/test_browser_deps.py::base.host.system.probes._platform_chrome_binary": 1
-  }
+  "patch_targets": {}
 }

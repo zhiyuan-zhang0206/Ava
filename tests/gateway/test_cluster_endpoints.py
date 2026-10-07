@@ -21,6 +21,7 @@ from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
+from base.native_process.root_control import client as root_client
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
 from gateway.events import telemetry_rows
@@ -421,7 +422,13 @@ class TestStatusSnapshot:
     ) -> None:
         del fake_flag
         set_machine_identity(role="agent-runner", name="test-host")
-        monkeypatch.setattr(cluster_status, "_supervisor_online", lambda: online)
+
+        def inspect_root() -> object | None:
+            if online is None:
+                raise RuntimeError("native root inspection unavailable")
+            return object() if online else None
+
+        monkeypatch.setattr(root_client, "root_process", inspect_root)
         assert cluster_status.status_snapshot(database).supervisor_online is online
 
 
