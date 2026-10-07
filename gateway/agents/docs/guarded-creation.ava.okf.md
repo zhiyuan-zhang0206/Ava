@@ -30,10 +30,9 @@ namespaces, and an older gateway may ignore a key on the legacy path. A cached
 capability GET or observed generation cannot prove the backend serving a later
 write supports keyed admission.
 
-The default creation helper namespace remains `/api/agents`, including MCP's
-existing canonical principal-scoped keys. Existing HTTP and MCP requests keep
-their identities across this addition. This server-only change does not
-activate clients, add capability discovery, or change the legacy route's
-conservative retry gate. The guarded route declares transactional keyed
-idempotency while keeping automatic legacy keyed retries disabled. SDK strong
-mode and additional creation surfaces remain follow-up work.
+The SDK can explicitly opt in with `require_idempotency=True` and a caller key;
+see the SDK owner at `ava/agents/docs/strong-creation.ava.okf.md`. It keeps the
+same guarded path, scope and key for every attempt without capability discovery
+or fallback. The default SDK helper and MCP continue to use `/api/agents`,
+including MCP's canonical principal-scoped keys. Existing HTTP and MCP identities
+remain intact. Automatic ambiguous keyed retries remain disabled on both paths.
