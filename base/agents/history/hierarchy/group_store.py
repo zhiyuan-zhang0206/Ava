@@ -45,16 +45,23 @@ async def load_last_checked(pool: AsyncConnectionPool, agent_id: int, level: int
     return 0 if row is None else int(row[0])
 
 
-async def load_open_nodes(pool: AsyncConnectionPool, agent_id: int, level: int) -> list[OpenNode]:
-    """The level's timed nodes that have no parent yet, oldest first."""
+async def load_open_nodes(
+    pool: AsyncConnectionPool, agent_id: int, level: int, *, upto: int | None = None
+) -> list[OpenNode]:
+    """The level's timed nodes that have no parent yet, oldest first.
+
+    `upto` (a rebuild's replay) hides the nodes that end past that message index, as if they had
+    not landed yet.
+    """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT id, span_start, span_end, start_ts, end_ts, text FROM understanding_nodes"
             " WHERE agent_id = %s AND depth = %s AND parent_id IS NULL"
             " AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')"
             " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
+            " AND (%s::bigint IS NULL OR span_end <= %s::bigint)"
             " ORDER BY span_start",
-            (agent_id, level),
+            (agent_id, level, upto, upto),
         )
         rows = await cur.fetchall()
     return [OpenNode(int(r[0]), int(r[1]), int(r[2]), r[3], r[4], str(r[5])) for r in rows]
@@ -120,6 +127,7 @@ async def write_groups(
     *,
     model: str,
     check_key: str,
+    upto: int | None = None,
 ) -> int:
     """Store the closed `groups` over the level's open `nodes`; the new open count.
 
@@ -168,8 +176,9 @@ async def write_groups(
         await cur.execute(
             "SELECT count(*) FROM understanding_nodes WHERE agent_id = %s AND depth = %s"
             " AND parent_id IS NULL AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')"
-            " AND start_ts IS NOT NULL AND end_ts IS NOT NULL",
-            (agent_id, level),
+            " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
+            " AND (%s::bigint IS NULL OR span_end <= %s::bigint)",
+            (agent_id, level, upto, upto),
         )
         row = await cur.fetchone()
         assert row is not None, "an aggregate query always returns one row"  # noqa: S101
