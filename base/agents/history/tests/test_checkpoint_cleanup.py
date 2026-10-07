@@ -380,7 +380,7 @@ async def test_mark_compact_boundary_records_the_closing_request(
     assert ClosingRequest.from_metadata(row[0]["compact_anchor"]) == closing
 
     other = await _put_turns(aops_pool, "2", 2)
-    await mark_compact_boundary(aops_pool, "2")
+    await mark_compact_boundary(aops_pool, "2", closing=None)
     async with aops_pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT metadata FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",

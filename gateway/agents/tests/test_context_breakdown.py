@@ -289,7 +289,10 @@ def test_latest_request_breakdown_anchors_categories_to_the_requests_input() -> 
     kinds = {c.kind for c in breakdown.categories}
     assert {"system_prompt", "cluster_memory", "agent_memory", "user_input", "automation"} <= kinds
     assert "tool_response" not in kinds  # read only by a later request
-    assert breakdown.total.estimated is True
+    # The total is the request's own input_tokens, the provider's number: exact, though every
+    # category in it is a share.
+    assert (breakdown.total.estimated, breakdown.total.exact_fraction) == (False, 1.0)
+    assert all(c.total.estimated for c in breakdown.categories)
     system_tokens = next(c.total.tokens for c in breakdown.categories if c.kind == "system_prompt")
     assert sum(n.tokens for n in breakdown.sections) == system_tokens
     for n in breakdown.sections:
@@ -382,8 +385,8 @@ def test_endpoint_returns_the_breakdown_of_the_latest_request(
     body = resp.json()
     assert body["total_input_tokens"] == 1000  # the AIMessage's real input_tokens
     assert sum(c["tokens"] for c in body["categories"]) == 1000
-    assert body["estimated"] is True
-    assert body["exact_fraction"] == 0  # several messages shared the request input
+    assert body["estimated"] is False and body["exact_fraction"] == 1.0  # the provider's number
+    assert all(c["estimated"] for c in body["categories"])  # several messages shared it
     kinds = {c["kind"] for c in body["categories"]}
     assert {"system_prompt", "cluster_memory", "user_input"} <= kinds
     assert all({"estimated", "exact_fraction"} <= set(c) for c in body["categories"])
@@ -406,3 +409,28 @@ def test_endpoint_no_checkpoint_is_empty(
     assert body["total_input_tokens"] == 0
     assert body["categories"] == []
     assert body["sections"] == []
+
+
+def test_a_total_that_is_not_the_requests_reported_input_stays_estimated() -> None:
+    """A request the token chain dropped (its input contradicted a later one) is not an anchor:
+    its context sums to something else, so the total is an accumulation, not the provider's number."""
+    from base.agents.history.message_tokens import segment_tokens
+    from gateway.agents.context_breakdown import request_breakdown
+
+    def reply(inp: int, out: int) -> AIMessage:
+        return AIMessage(
+            content="r",
+            usage_metadata={"input_tokens": inp, "output_tokens": out, "total_tokens": inp + out},
+        )
+
+    body: list[BaseMessage] = [
+        reply(1000, 50),
+        ToolMessage(content="one", tool_call_id="a"),
+        reply(1100, 20),  # dropped as an anchor by the later, smaller request
+        ToolMessage(content="two", tool_call_id="b"),
+        reply(1110, 5),
+    ]
+    head = SystemMessage(content="prompt")
+    found = request_breakdown(head, body, segment_tokens(head, body), 2)
+    assert found.total.tokens != 1100
+    assert found.total.estimated is True
