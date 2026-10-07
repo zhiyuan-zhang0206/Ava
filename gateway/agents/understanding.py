@@ -50,9 +50,39 @@ from base.agents.history.hierarchy.sessions import (
 from base.agents.history.hierarchy.units import read_times
 from base.agents.observation.snapshot import agent_model_target
 from base.config import settings
+from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.db import Database, agent_exists
+from base.host.env.runtime_config import read_env_aliases
 
 router = APIRouter()
+
+_ENABLED_ALIAS = "AVA_UNDERSTANDING_ENABLED"
+_CHUNK_TOKENS_ALIAS = "AVA_UNDERSTANDING_CHUNK_TOKENS"
+
+
+def chunk_threshold() -> int:
+    """`AVA_UNDERSTANDING_CHUNK_TOKENS`, as the agent host that consumes the jobs reads it.
+
+    The gateway profile does not construct the `agent` config domain (the cluster's value lives in
+    the unit's `.env`, which the gateway pops from its environment), so outside a process that has
+    the domain the value is read from that file, else the field's default.
+    """
+    if settings.has_domain("agent"):
+        return settings.agent.understanding_chunk_tokens
+    raw = read_env_aliases().get(_CHUNK_TOKENS_ALIAS)
+    if raw:
+        return int(raw)
+    return AgentRuntimeSettings.model_fields["understanding_chunk_tokens"].default
+
+
+def feature_enabled() -> bool:
+    """`AVA_UNDERSTANDING_ENABLED`, read like `chunk_threshold` (the field's default when unset)."""
+    if settings.has_domain("agent"):
+        return settings.agent.understanding_enabled
+    raw = read_env_aliases().get(_ENABLED_ALIAS)
+    if raw is None:
+        return AgentRuntimeSettings.model_fields["understanding_enabled"].default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class SessionCoverage(BaseModel):
@@ -285,13 +315,11 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
     history, sessions = _load(db, agent_id)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
     model = build_model(db, agent_id)
-    jobs = plan_jobs(
-        history, sessions, covered, threshold=settings.agent.understanding_chunk_tokens
-    )
+    jobs = plan_jobs(history, sessions, covered, threshold=chunk_threshold())
     return SessionsResponse(
         agent_id=agent_id,
         model=model,
-        understanding_enabled=settings.agent.understanding_enabled,
+        understanding_enabled=feature_enabled(),
         cost_basis=COST_BASIS,
         sessions=[
             SessionOut(
@@ -350,12 +378,10 @@ def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> Buil
     history, sessions = _load(db, agent_id)
     chosen = _select(sessions, body)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
-    planned = plan_jobs(
-        history, chosen, covered, threshold=settings.agent.understanding_chunk_tokens
-    )
+    planned = plan_jobs(history, chosen, covered, threshold=chunk_threshold())
     estimate = _estimate_out(estimate_cost(build_model(db, agent_id), planned))
     numbers = [s.number for s in chosen]
-    enabled = settings.agent.understanding_enabled
+    enabled = feature_enabled()
     if body.dry_run:
         return BuildResponse(
             agent_id=agent_id,

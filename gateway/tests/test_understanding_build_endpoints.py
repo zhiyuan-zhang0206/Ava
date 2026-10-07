@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import psycopg
@@ -430,3 +431,22 @@ def test_the_close_endpoint_is_gone(db_conn: psycopg.Connection) -> None:
     agent = _seed_agent(db_conn)
     with _client() as client:
         assert client.post(f"/api/agents/{agent}/understanding/close").status_code in (404, 405)
+
+
+def test_a_process_without_the_agent_domain_reads_the_switch_and_chunk_size_from_the_env_file(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gateway profile does not construct the agent config domain: the cluster's values are
+    read from the unit's `.env`, the field defaults when it does not set them."""
+    agent = _seed_agent(db_conn)
+    monkeypatch.setattr(module, "settings", SimpleNamespace(has_domain=lambda _name: False))
+    file_values = {"AVA_UNDERSTANDING_ENABLED": "true", "AVA_UNDERSTANDING_CHUNK_TOKENS": "1000"}
+    monkeypatch.setattr(module, "read_env_aliases", lambda: file_values)
+    with _client() as client:
+        body = _build(client, agent, sessions=[1], dry_run=True)
+    assert body["understanding_enabled"] is True
+    assert [(j["start_index"], j["end_index"]) for j in body["jobs"]] == [(1, 8), (8, 13)]
+
+    file_values.clear()
+    assert module.feature_enabled() is False
+    assert module.chunk_threshold() == 60000
