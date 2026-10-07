@@ -52,18 +52,6 @@ def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     responsibility — digest recipients, content, and counter updates."""
     calls: list[tuple[int, str]] = []
 
-    def _fake(
-        pool_: ConnectionPool,
-        _db: object,
-        _bus: object,
-        agent_id: int,
-        message: str,
-        **_kwargs: object,
-    ) -> None:
-        calls.append((agent_id, message))
-
-    monkeypatch.setattr(daemon, "deliver_message", _fake)
-
     def _accepted(_db: object, _bus: object, owner: int, _inbound_id: int, content: str) -> None:
         calls.append((owner, content))
 
