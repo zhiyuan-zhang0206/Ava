@@ -54,8 +54,12 @@ def test_all_plugin_models_match_archive_at_four_instant_classes() -> None:
 
 
 def test_new_model_rates_and_272k_boundary() -> None:
-    assert rates_at("claude-opus-5-5", _FUTURE, 1_000_000) == Rates(4.0, 0.20, 20.0)
-    assert rates_at("claude-sonnet-5-5", _FUTURE, 1_000_000) == Rates(2.0, 0.20, 10.0)
+    assert rates_at("claude-opus-5-5", _FUTURE, 1_000_000) == Rates(
+        4.0, 0.20, 20.0, cache_write_5m=5, cache_write_1h=8
+    )
+    assert rates_at("claude-sonnet-5-5", _FUTURE, 1_000_000) == Rates(
+        2.0, 0.20, 10.0, cache_write_5m=2.5, cache_write_1h=4
+    )
     for model, tier1, tier2 in (
         ("gpt-6-sol", Rates(2.0, 0.20, 10.0), Rates(4.0, 0.40, 15.0)),
         ("gpt-6.1-sol", Rates(2.0, 0.10, 10.0), Rates(4.0, 0.20, 15.0)),

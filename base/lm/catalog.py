@@ -198,6 +198,8 @@ class CatalogBuilder:
                 source_checked_at=price.source_checked_at,
                 vendor=price.vendor,
                 periods=price.periods,
+                cache_write_5m=price.cache_write_5m,
+                cache_write_1h=price.cache_write_1h,
                 plugin=plugin,
             )
             for model_id, price in pricing.items()

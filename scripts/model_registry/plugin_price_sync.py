@@ -19,17 +19,15 @@ import json
 import sys
 from collections.abc import Set
 from datetime import UTC, date, datetime, time
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
-
-class FlatRates(NamedTuple):
-    """Flat cache-miss, cache-hit, and output rates in exact decimal form."""
-
-    cache_miss: Decimal
-    cache_hit: Decimal
-    output: Decimal
+from scripts.model_registry.plugin_price_rates import (
+    FlatRates,
+    archive_rates,
+    cache_write_lines,
+    rates_from_nodes,
+)
 
 
 class _WindowDeclaration(NamedTuple):
@@ -115,31 +113,6 @@ def _optional_string_literal(node: ast.expr, *, context: str) -> str | None:
     return value
 
 
-def _decimal_node(node: ast.expr, *, context: str) -> Decimal:
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "Decimal"
-        and len(node.args) == 1
-        and not node.keywords
-    ):
-        raw: object = _literal(node.args[0], str, context=context)
-    else:
-        try:
-            raw = ast.literal_eval(node)
-        except (ValueError, TypeError) as exc:
-            raise RuntimeError(f"{context} must be a numeric literal") from exc
-    if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
-        raise TypeError(f"{context} must be a numeric literal")
-    try:
-        value = Decimal(str(raw))
-    except InvalidOperation as exc:
-        raise RuntimeError(f"{context} must be a decimal literal") from exc
-    if not value.is_finite() or value < 0:
-        raise RuntimeError(f"{context} must be finite and non-negative")
-    return value
-
-
 def _integer_literal(node: ast.expr, *, context: str) -> int:
     value = _literal(node, int, context=context)
     if isinstance(value, bool):
@@ -192,25 +165,18 @@ def _tuple_items(node: ast.expr, *, context: str) -> tuple[ast.expr, ...]:
     return tuple(node.elts)
 
 
-def _rates_from_nodes(fields: dict[str, ast.expr], *, context: str) -> FlatRates:
-    return FlatRates(
-        cache_miss=_decimal_node(fields["cache_miss"], context=f"{context} cache_miss"),
-        cache_hit=_decimal_node(fields["cache_hit"], context=f"{context} cache_hit"),
-        output=_decimal_node(fields["output"], context=f"{context} output"),
-    )
-
-
 def _window_declaration(node: ast.expr, *, context: str) -> _WindowDeclaration:
     _call, fields = _call_fields(
         node,
         "PriceWindow",
-        required={"start", "end", *FlatRates._fields},
+        required={"start", "end", "cache_miss", "cache_hit", "output"},
+        optional={"cache_write_5m", "cache_write_1h"},
         context=context,
     )
     return _WindowDeclaration(
         start=_literal(fields["start"], str, context=f"{context} start"),
         end=_literal(fields["end"], str, context=f"{context} end"),
-        rates=_rates_from_nodes(fields, context=context),
+        rates=rates_from_nodes(fields, context=context),
     )
 
 
@@ -218,8 +184,8 @@ def _tier_declaration(node: ast.expr, *, context: str) -> _TierDeclaration:
     _call, fields = _call_fields(
         node,
         "PriceTier",
-        required={"input_tokens_min", "input_tokens_max", *FlatRates._fields},
-        optional={"windows"},
+        required={"input_tokens_min", "input_tokens_max", "cache_miss", "cache_hit", "output"},
+        optional={"windows", "cache_write_5m", "cache_write_1h"},
         context=context,
     )
     window_nodes = (
@@ -236,7 +202,7 @@ def _tier_declaration(node: ast.expr, *, context: str) -> _TierDeclaration:
         input_tokens_max=_optional_integer_literal(
             fields["input_tokens_max"], context=f"{context} input_tokens_max"
         ),
-        rates=_rates_from_nodes(fields, context=context),
+        rates=rates_from_nodes(fields, context=context),
         windows=windows,
     )
 
@@ -267,7 +233,7 @@ def _price_declaration(call: ast.expr, *, context: str) -> tuple[_PriceDeclarati
         call,
         "PriceRates",
         required={"cache_miss", "cache_hit", "output", "source_url", "source_checked_at"},
-        optional={"vendor", "periods"},
+        optional={"vendor", "periods", "cache_write_5m", "cache_write_1h"},
         context=context,
     )
     source_url = _literal(fields["source_url"], str, context=f"{context} source_url")
@@ -292,7 +258,7 @@ def _price_declaration(call: ast.expr, *, context: str) -> tuple[_PriceDeclarati
     )
     return (
         _PriceDeclaration(
-            rates=_rates_from_nodes(fields, context=context),
+            rates=rates_from_nodes(fields, context=context),
             source_url=source_url,
             source_checked_at=checked_at,
             vendor=vendor,
@@ -435,28 +401,6 @@ def _clock(value: object, *, context: str) -> str:
     return value
 
 
-def _archive_decimal(value: object, *, context: str) -> Decimal:
-    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
-        raise TypeError(f"{context} must be a decimal value")
-    try:
-        parsed = Decimal(str(value))
-    except InvalidOperation as exc:
-        raise RuntimeError(f"{context} must be a decimal value") from exc
-    if not parsed.is_finite() or parsed < 0:
-        raise RuntimeError(f"{context} must be finite and non-negative")
-    return parsed
-
-
-def _archive_rates(raw: object, *, context: str) -> FlatRates:
-    if not isinstance(raw, dict):
-        raise TypeError(f"{context} must be a rates object")
-    return FlatRates(
-        cache_miss=_archive_decimal(raw["input"], context=f"{context} input"),
-        cache_hit=_archive_decimal(raw["cache_read"], context=f"{context} cache_read"),
-        output=_archive_decimal(raw["output"], context=f"{context} output"),
-    )
-
-
 def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[_WindowDeclaration, ...]:
     if not isinstance(windows_raw, list):
         raise TypeError(f"{tier_context} utc_daily_overrides must be an array")
@@ -464,7 +408,7 @@ def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[_Window
         _WindowDeclaration(
             start=_clock(window["start"], context=f"{tier_context} window {index} start"),
             end=_clock(window["end"], context=f"{tier_context} window {index} end"),
-            rates=_archive_rates(window["rates"], context=f"{tier_context} window {index} rates"),
+            rates=archive_rates(window["rates"], context=f"{tier_context} window {index} rates"),
         )
         for index, window in enumerate(windows_raw)
         if isinstance(window, dict)
@@ -491,7 +435,7 @@ def _archive_tier(
     return _TierDeclaration(
         input_tokens_min=lower,
         input_tokens_max=upper,
-        rates=_archive_rates(tier_raw["rates"], context=f"{tier_context} rates"),
+        rates=archive_rates(tier_raw["rates"], context=f"{tier_context} rates"),
         windows=windows,
     )
 
@@ -585,6 +529,7 @@ def _render_window(window: _WindowDeclaration, indent: int) -> list[str]:
         f"{inner}cache_miss={json.dumps(str(window.rates.cache_miss))},",
         f"{inner}cache_hit={json.dumps(str(window.rates.cache_hit))},",
         f"{inner}output={json.dumps(str(window.rates.output))},",
+        *cache_write_lines(window.rates, inner),
         f"{outer}),",
     ]
 
@@ -599,6 +544,7 @@ def _render_tier(tier: _TierDeclaration, indent: int) -> list[str]:
         f"{inner}cache_miss={json.dumps(str(tier.rates.cache_miss))},",
         f"{inner}cache_hit={json.dumps(str(tier.rates.cache_hit))},",
         f"{inner}output={json.dumps(str(tier.rates.output))},",
+        *cache_write_lines(tier.rates, inner),
     ]
     if tier.windows:
         lines.append(f"{inner}windows=(")
@@ -636,6 +582,7 @@ def _render_price(price: _PriceDeclaration, indent: int) -> str:
         f"{inner}cache_miss={price.rates.cache_miss},",
         f"{inner}cache_hit={price.rates.cache_hit},",
         f"{inner}output={price.rates.output},",
+        *cache_write_lines(price.rates, inner, quoted=False),
         f"{inner}source_url={json.dumps(price.source_url)},",
         f"{inner}source_checked_at={json.dumps(price.source_checked_at)},",
         f"{inner}vendor={_string_or_none_literal(price.vendor)},",

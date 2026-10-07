@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import type { ModelsResponse } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
+import { formatModelPrice } from "@/lib/format/format-price";
 
 export const MODEL_PICKER_COLUMNS = "grid grid-cols-[minmax(0,1fr)_8.5rem_3rem] sm:grid-cols-[minmax(0,1fr)_10.5rem_3.5rem] items-center gap-2 sm:gap-3";
 
@@ -17,6 +18,16 @@ export function ModelPickerRow({ model, info, selected, onSelect }: Props) {
   const t = useTranslations("spawn");
   const price = info?.pricing;
   const tps = info?.reference_tps;
+  const priceTitle = price ? [
+    t("priceBreakdown"),
+    t("pricingConditions"),
+    ...(price.cache_write_5m != null ? [t("cacheWritePrice", {
+      duration: "5m", price: formatModelPrice(price.cache_write_5m),
+    })] : []),
+    ...(price.cache_write_1h != null ? [t("cacheWritePrice", {
+      duration: "1h", price: formatModelPrice(price.cache_write_1h),
+    })] : []),
+  ].join("\n") : undefined;
   return (
     <button
       type="button"
@@ -28,9 +39,9 @@ export function ModelPickerRow({ model, info, selected, onSelect }: Props) {
       )}
     >
       <span className="truncate font-medium" title={model}>{model}</span>
-      <span className="text-[11px] sm:text-xs text-right text-muted-foreground tabular-nums">
+      <span className="text-[11px] sm:text-xs text-right text-muted-foreground tabular-nums" title={priceTitle}>
         {price
-          ? `$${price.input.toFixed(2)}\u2009/\u2009$${price.cache_read.toFixed(2)}\u2009/\u2009$${price.output.toFixed(2)}`
+          ? `${formatModelPrice(price.input)}\u2009/\u2009${formatModelPrice(price.cache_read)}\u2009/\u2009${formatModelPrice(price.output)}`
           : "—"}
       </span>
       <span
