@@ -36,3 +36,10 @@ The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat
 
 ## Notes
 - Bridge ↔ agent dialog is human messages in, agent text out — tool execution / reasoning / other agents' messages are never pushed to IM
+
+## Weixin inbound identity
+
+Provider IDs dedup by sender/ID for 300s; only missing IDs use legacy
+sender/text. Spawn keys survive restarts. Ordinary chat lacks provider keys.
+Seen-before-core and caught errors can advance cursors without Gateway
+acceptance; durable recovery remains open.

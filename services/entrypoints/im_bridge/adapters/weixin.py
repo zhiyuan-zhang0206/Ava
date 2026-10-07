@@ -484,7 +484,13 @@ class WeixinAdapter(IMAdapter):
             return
         text, sender_id = text_sender
         message_id = str(message.get("message_id") or "").strip()
-        keys = [k for k in (message_id, _content_key(sender_id, text)) if k]
+        # Provider identity separates deliberate identical messages. Content is
+        # only a legacy heuristic when the provider supplied no identity.
+        keys = (
+            ["message:" + json.dumps([sender_id, message_id])]
+            if message_id
+            else [_content_key(sender_id, text)]
+        )
         if any(self._is_duplicate(k) for k in keys):
             return
         for key in keys:
