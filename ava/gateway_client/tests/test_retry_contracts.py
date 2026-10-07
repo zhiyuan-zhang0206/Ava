@@ -15,8 +15,10 @@ from base.agents import GatewayUnavailable
         ("POST", "/api/agents/7/restart"),
         ("POST", "/api/agents/7/compact"),
         ("POST", "/api/agents/7/notices/1/resolve"),
+        ("POST", "/api/agents/7/notices/current/dismiss"),
         ("POST", "/api/schedules/1/restart"),
         ("PATCH", "/api/tasks/1"),
+        ("PATCH", "/api/agents/7/notices/current"),
         ("PATCH", "/api/unknown"),
         ("DELETE", "/api/cluster/machines/host"),
         ("DELETE", "/api/unknown"),
@@ -156,3 +158,36 @@ def test_task_patch_rejects_invalid_caller_key_before_network(key: object) -> No
     ):
         transport.patch("/api/tasks/1", idempotency_key=key)  # type: ignore[arg-type]
     assert requests == []
+
+
+@pytest.mark.parametrize("operation", ["edit", "dismiss"])
+@pytest.mark.parametrize("failure", ["timeout", "server_error"])
+@pytest.mark.usefixtures("retry_waits")
+def test_fleet_current_notice_call_does_not_repeat_old_intent(operation: str, failure: str) -> None:
+    from ava_builtins.plugins.ava_fleet.plugin import dismiss_notice, edit_notice
+    from tests.fixtures.pin_agent import pin_agent
+
+    pin_agent(7)
+    requests: list[httpx.Request] = []
+
+    def response_lost(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("old notice changed; response lost", request=request)
+        return httpx.Response(503)
+
+    with (
+        httpx.Client(
+            transport=httpx.MockTransport(response_lost), base_url="http://gateway"
+        ) as client,
+        transport.use_client(client),
+    ):
+        error = GatewayUnavailable if failure == "timeout" else httpx.HTTPStatusError
+        with pytest.raises(error):
+            if operation == "edit":
+                edit_notice(title="Original edit")
+            else:
+                dismiss_notice()
+    assert len(requests) == 1
+    assert requests[0].method == ("PATCH" if operation == "edit" else "POST")
+    assert "Idempotency-Key" not in requests[0].headers
