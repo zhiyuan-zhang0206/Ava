@@ -8,7 +8,7 @@ on:
       - '.github/workflows/exec-domain-owner.yml'
       - 'agent/graph/exec/_process.py'
       - 'agent/graph/exec/tests/test_exec_domain_confirmation.py'
-      - 'agent/exec*owner*.py'
+      - 'agent/execution/*.py'
       - 'agent/graph/exec/_owned_run.py'
       - 'base/agents/incarnation/exec_owner*.py'
       - 'base/agents/incarnation/resource_admission.py'
@@ -28,6 +28,7 @@ jobs:
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
+      AVA_GATEWAY_URL: http://127.0.0.1:1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -61,6 +62,7 @@ jobs:
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
+      AVA_GATEWAY_URL: http://127.0.0.1:1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
