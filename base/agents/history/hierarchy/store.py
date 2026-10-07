@@ -8,8 +8,9 @@ stitched full history is append-only and message indices never shift.
 Read paths:
 - `load_nodes(agent_id)`, every node of the agent for the run-timeline serving merge (the window
   is applied there, on the read times);
-- `load_call_records(agent_id)`, the cost-relevant slice of every understanding call
-  (`understanding_chunk_calls`), for the per-node generation cost.
+- `load_generation_costs(agent_id)`, what each chunk job's and each grouping check's calls cost
+  (from `understanding_chunk_calls` / `understanding_group_calls`), joined to nodes by `job_id` /
+  `check_key`.
 
 Nodes without timestamps are not served — they stay stored, just unservable until their time is
 known.
@@ -25,7 +26,7 @@ from typing import Any
 
 from psycopg import Connection
 
-from base.agents.history.hierarchy.usage import CallRecord
+from base.agents.history.hierarchy.usage import GenerationUsage
 from base.db import Database
 
 # The stored row shape's version; bump with a migration when columns change.
@@ -46,6 +47,8 @@ class StoredNode:
     parent_id: int | None
     engine_version: str
     prompt_version: str
+    job_id: int | None = None
+    check_key: str | None = None
 
 
 @contextmanager
@@ -65,7 +68,7 @@ def load_nodes(db: Database, agent_id: int) -> list[StoredNode]:
         rows = conn.execute(
             """
             SELECT id, depth, span_start, span_end, start_ts, end_ts, text, parent_id,
-                   engine_version, prompt_version
+                   engine_version, prompt_version, job_id, check_key
             FROM understanding_nodes
             WHERE agent_id = %s
             ORDER BY depth, span_start
@@ -75,16 +78,36 @@ def load_nodes(db: Database, agent_id: int) -> list[StoredNode]:
     return [StoredNode(*row) for row in rows]
 
 
-def load_call_records(db: Database, agent_id: int) -> list[CallRecord]:
-    """Every understanding call of one agent, as the cost read needs it (no reply text)."""
+def _costs(rows: list[Any]) -> dict[Any, GenerationUsage]:
+    return {
+        key: GenerationUsage(int(calls), int(inp), int(cache), int(out), float(ms) / 1000)
+        for key, calls, inp, cache, out, ms in rows
+    }
+
+
+def load_generation_costs(
+    db: Database, agent_id: int
+) -> tuple[dict[int, GenerationUsage], dict[str, GenerationUsage]]:
+    """What generating the agent's nodes cost, from the raw record of every understanding call:
+    by chunk job id (the level-1 nodes of that job share it) and by grouping check key (the
+    nodes that check wrote share it)."""
     with _read_connection(db) as conn:
-        rows = conn.execute(
+        jobs = conn.execute(
             """
-            SELECT j.compact_version, c.start_offset, c.prefix_len, c.usage_metadata, c.duration_ms
-            FROM understanding_chunk_calls c
-            JOIN understanding_chunk_jobs j ON j.id = c.job_id
-            WHERE c.agent_id = %s
+            SELECT job_id, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
+                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
+                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
+            FROM understanding_chunk_calls WHERE agent_id = %s GROUP BY job_id
             """,
             (agent_id,),
         ).fetchall()
-    return [CallRecord(int(v), int(so), int(pl), usage, float(ms)) for v, so, pl, usage, ms in rows]
+        checks = conn.execute(
+            """
+            SELECT check_key, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
+                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
+                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
+            FROM understanding_group_calls WHERE agent_id = %s GROUP BY check_key
+            """,
+            (agent_id,),
+        ).fetchall()
+    return _costs(jobs), _costs(checks)

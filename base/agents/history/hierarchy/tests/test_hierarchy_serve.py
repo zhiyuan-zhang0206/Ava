@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
 from base.agents.history.hierarchy.serve import serve_nodes
@@ -33,6 +32,8 @@ def node(
     start: datetime | None = T0,
     end: datetime | None = T1,
     parent_id: int | None = None,
+    job_id: int | None = None,
+    check_key: str | None = None,
 ) -> StoredNode:
     return StoredNode(
         id=node_id,
@@ -45,6 +46,8 @@ def node(
         parent_id=parent_id,
         engine_version="0.3",
         prompt_version="0.3",
+        job_id=job_id,
+        check_key=check_key,
     )
 
 
@@ -54,7 +57,7 @@ def test_every_level_is_served_finest_first_with_stable_levels() -> None:
         node(2, level=1, span=(3, 5), parent_id=3),
         node(1, level=1, span=(0, 2), parent_id=3),
     ]
-    served = serve_nodes(nodes, MessageUsage(MESSAGES), {}, READ)
+    served = serve_nodes(nodes, MessageUsage(MESSAGES), {}, {}, READ)
     assert [(n.id, n.level, n.parent) for n in served] == [
         ("1", 1, "3"),
         ("2", 1, "3"),
@@ -63,26 +66,40 @@ def test_every_level_is_served_finest_first_with_stable_levels() -> None:
 
 
 def test_a_node_carries_the_agent_cost_over_its_span() -> None:
-    (served,) = serve_nodes([node(1, level=1, span=(1, 2))], MessageUsage(MESSAGES), {}, READ)
+    (served,) = serve_nodes([node(1, level=1, span=(1, 2))], MessageUsage(MESSAGES), {}, {}, READ)
     assert (served.usage.calls, served.usage.input, served.usage.output) == (2, 50, 5)
 
 
-def test_only_a_leaf_with_a_call_record_carries_generation_cost() -> None:
-    gen = GenerationUsage(calls=2, input=300, cache_read=250, output=40, seconds=12.5)
-    nodes = [node(1, level=1, span=(0, 2)), node(2, level=2, span=(0, 2))]
-    leaf, parent = serve_nodes(nodes, MessageUsage(MESSAGES), {(0, 2): gen}, READ)
-    assert leaf.generation == gen
-    assert parent.generation is None
+def test_a_node_carries_the_cost_of_the_job_or_check_that_wrote_it() -> None:
+    job = GenerationUsage(calls=2, input=300, cache_read=250, output=40, seconds=12.5)
+    check = GenerationUsage(calls=1, input=50, cache_read=0, output=9, seconds=3.0)
+    nodes = [
+        node(1, level=1, span=(0, 2), job_id=7),
+        node(2, level=1, span=(3, 4), job_id=7),  # a second group of the same job
+        node(3, level=1, span=(5, 5)),  # written before the link existed
+        node(4, level=2, span=(0, 4), check_key="ck"),
+    ]
+    first, second, unlinked, parent = serve_nodes(
+        nodes, MessageUsage(MESSAGES), {7: job}, {"ck": check}, READ
+    )
+    assert first.generation == job and second.generation == job
+    assert unlinked.generation is None and parent.generation == check
 
 
 def test_a_node_with_unknown_time_is_not_served() -> None:
     nodes = [node(1, level=1, span=(0, 1), start=None, end=None)]
-    assert serve_nodes(nodes, MessageUsage(MESSAGES), {}, READ) == []
+    assert serve_nodes(nodes, MessageUsage(MESSAGES), {}, {}, READ) == []
 
 
-def test_a_span_beyond_the_history_is_an_error() -> None:
-    with pytest.raises(IndexError):
-        serve_nodes([node(1, level=1, span=(4, 9))], MessageUsage(MESSAGES), {}, READ)
+def test_a_span_beyond_the_history_is_left_out_not_an_error() -> None:
+    served = serve_nodes(
+        [node(1, level=1, span=(4, 9)), node(2, level=1, span=(0, 1))],
+        MessageUsage(MESSAGES),
+        {},
+        {},
+        READ,
+    )
+    assert [n.id for n in served] == ["2"]
 
 
 def test_a_node_is_placed_on_the_read_times_of_its_first_and_last_message() -> None:
@@ -96,6 +113,7 @@ def test_a_node_is_placed_on_the_read_times_of_its_first_and_last_message() -> N
             node(3, level=2, span=(0, 3)),
         ],
         MessageUsage(MESSAGES),
+        {},
         {},
         read,
     )

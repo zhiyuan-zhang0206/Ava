@@ -17,15 +17,14 @@ the message history does not say better: the exact `usage_metadata` of every
 AIMessage sums to the provider's `in_total`. A view whose navigation structure
 is the understanding tree and whose bottom layer is the messages needs neither.
 Costs are now plain sums over a node's message span, plus the node's own
-generation cost from `understanding_chunk_calls`.
+generation cost, joined by the id each node records (`job_id` of its chunk job or `check_key` of its grouping check) to `understanding_chunk_calls` / `understanding_group_calls`.
 
 Audit events stay as optional lifecycle markers (spawn, restart, terminate); they
 never decide the window. Nothing reads Loki.
 
 Rejected: keeping the event waterfall as a second row set beside the tree (two
-sources that disagree on what a "turn" is); linking a node to its generation
-calls with a new `job_id` column (the call's request already records where the
-chunk sat, so the node's stitched span is derivable and no migration is needed).
+sources that disagree on what a "turn" is); deriving a node's generation cost from where each call's request put the chunk (it matched only
+chunks of a single group and keyed segments by a counter that a failed boundary stamp throws off).
 Cost accepted: a window read loads the stitched history (cached 5 seconds per
 agent), and the whole-lifetime read of a very long-lived agent carries every
 unit; narrowing the window is the relief.

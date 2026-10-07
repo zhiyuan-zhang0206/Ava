@@ -27,6 +27,7 @@ from datetime import datetime
 
 from base.agents.history.hierarchy.store import StoredNode
 from base.agents.history.hierarchy.usage import GenerationUsage, MessageUsage, Usage
+from base.log import logger
 
 
 @dataclass(frozen=True)
@@ -45,10 +46,22 @@ class ServedNode:
     generation: GenerationUsage | None
 
 
+def _generation(
+    node: StoredNode,
+    job_costs: Mapping[int, GenerationUsage],
+    check_costs: Mapping[str, GenerationUsage],
+) -> GenerationUsage | None:
+    """The cost of the call that wrote `node`: its chunk job's (level 1) or grouping check's."""
+    if node.depth == 1:
+        return None if node.job_id is None else job_costs.get(node.job_id)
+    return None if node.check_key is None else check_costs.get(node.check_key)
+
+
 def serve_nodes(
     nodes: Sequence[StoredNode],
     usage: MessageUsage,
-    generation: Mapping[tuple[int, int], GenerationUsage],
+    job_costs: Mapping[int, GenerationUsage],
+    check_costs: Mapping[str, GenerationUsage],
     read: Sequence[datetime | None],
 ) -> list[ServedNode]:
     """The timed nodes, finest level first then in message order, each with its two cost figures.
@@ -57,12 +70,22 @@ def serve_nodes(
     message of its span, so a level's nodes never overlap in time and a parent spans exactly its
     children; the stored `start_ts` / `end_ts` are only used to tell a timed node from an untimed one.
 
-    Raises:
-        IndexError: a node's span lies outside the history `usage` was built over.
+    A node whose span lies outside the history (an orphan: its checkpoints were rolled back or
+    restored) is left out with a warning instead of failing the whole read.
     """
     served: list[ServedNode] = []
     for node in sorted(nodes, key=lambda node: (node.depth, node.span_start)):
         if node.start_ts is None or node.end_ts is None:
+            continue
+        if node.span_end >= len(read):
+            logger.warning(
+                "understanding node {node} spans messages {first}-{last}, past the history's "
+                "{count}: left out of the run timeline",
+                node=node.id,
+                first=node.span_start,
+                last=node.span_end,
+                count=len(read),
+            )
             continue
         start, end = read[node.span_start], read[node.span_end]
         if start is None or end is None:
@@ -78,9 +101,7 @@ def serve_nodes(
                 span_end=node.span_end,
                 summary=node.text,
                 usage=usage.span(node.span_start, node.span_end),
-                generation=(
-                    generation.get((node.span_start, node.span_end)) if node.depth == 1 else None
-                ),
+                generation=_generation(node, job_costs, check_costs),
             )
         )
     return served

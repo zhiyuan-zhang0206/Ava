@@ -20,8 +20,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.agents.history.hierarchy.serve import ServedNode, serve_nodes
-from base.agents.history.hierarchy.store import load_call_records, load_nodes
-from base.agents.history.hierarchy.usage import generation_by_span
+from base.agents.history.hierarchy.store import load_generation_costs, load_nodes
 from base.db import Database
 from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
@@ -95,15 +94,12 @@ def get_run_timeline(
     views: HistoryViewCache = request.app.state.run_timeline_views
     view = views.get(db, agent_id)
     stored = load_nodes(db, agent_id)
-    if any(node.span_end >= len(view.history.messages) for node in stored):
-        # A node written after the cached view was built.
-        view = views.get(db, agent_id, fresh=True)
-    served = serve_nodes(
-        stored,
-        view.usage,
-        generation_by_span(view.history, load_call_records(db, agent_id)),
-        view.read,
-    )
+    reach = max((node.span_end + 1 for node in stored), default=0)
+    if reach > len(view.history.messages):
+        # A node written after the cached view was built (or an orphan, which serve_nodes skips).
+        view = views.get(db, agent_id, needs=reach)
+    job_costs, check_costs = load_generation_costs(db, agent_id)
+    served = serve_nodes(stored, view.usage, job_costs, check_costs, view.read)
     lifetime = _lifetime(view, served)
     start, end = _window(lifetime, from_, to, datetime.now(UTC))
     nodes = [node for node in served if node.start <= end and node.end >= start]
