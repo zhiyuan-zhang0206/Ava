@@ -68,7 +68,7 @@ def cmd_skill_install(
     records which rules were waived.
     """
     from ._pkg_source import SourcePathNotFoundError, acquire_source, cleanup_temp
-    from .packages_refresh import parse_duration
+    from .packages.refresh import parse_duration
     from .skill_package import SkillPackageError, SkillScanRefused, discover, install
 
     try:
