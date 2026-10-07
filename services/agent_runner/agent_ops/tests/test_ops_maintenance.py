@@ -15,7 +15,6 @@ from typing import Any
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
 from base.daemon.health import stop_health_server
 from base.daemon.http_transport import start_daemon_http
 from base.db import Database
@@ -32,6 +31,7 @@ from tests.agent.test_maintenance import isolate as isolate
 async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     requests: activity.RequestTokens = set()
     workers: activity.WorkerFutures = set()
     finishes = [asyncio.Event(), asyncio.Event()]
@@ -61,6 +61,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
                 dispatch_sem=dispatch_sem,
                 workers=workers,
                 requests=requests,
+                pool=dispatch_pool,
             )
         )
         for _ in range(2)
@@ -80,6 +81,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
             dispatch_sem=dispatch_sem,
             workers=workers,
             requests=requests,
+            pool=dispatch_pool,
         )
         assert status == 200
         assert b'"status": "failed"' in body
@@ -95,13 +97,17 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
 async def test_cancelled_same_kind_await_does_not_hide_running_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     requests: activity.RequestTokens = set()
     workers: activity.WorkerFutures = set()
     active_ops: daemon.ActiveOps = {}
     entered = [threading.Event(), threading.Event()]
     finish = [threading.Event(), threading.Event()]
 
-    def arm(_kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
+    def arm(
+        _kind: str, payload: dict[str, Any], *, pool: ConnectionPool
+    ) -> tuple[str, dict[str, object]]:
+        assert pool is dispatch_pool
         index = int(payload["index"])
         entered[index].set()
         if not finish[index].wait(5):
@@ -113,7 +119,13 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
         monkeypatch.setattr(daemon, "_dispatch_sync", arm)
         tasks = [
             asyncio.create_task(
-                daemon._run_arm("same", {"index": index}, active_ops=active_ops, workers=workers)
+                daemon._run_arm(
+                    "same",
+                    {"index": index},
+                    active_ops=active_ops,
+                    workers=workers,
+                    pool=dispatch_pool,
+                )
             )
             for index in range(2)
         ]
@@ -195,10 +207,10 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
     requests: activity.RequestTokens = set()
     workers: activity.WorkerFutures = set()
     with (
-        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool,
+        Database.from_settings().pool(min_size=1, max_size=2) as pool,
         ThreadPoolExecutor(max_workers=2) as executor,
     ):
-        monkeypatch.setattr(daemon, "_db_pool", pool)
+        dispatch_pool: ConnectionPool = pool
         monkeypatch.setattr(daemon, "_op_executor", executor)
         dispatch_sem = asyncio.Semaphore(2)
 
@@ -209,6 +221,7 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
                 dispatch_sem=dispatch_sem,
                 workers=workers,
                 requests=requests,
+                pool=dispatch_pool,
             )
             assert status == 200
             return json.loads(raw)
@@ -222,13 +235,17 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
 async def test_active_ops_share_health_and_cleanup_within_one_daemon(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     workers: activity.WorkerFutures = set()
     active_ops: daemon.ActiveOps = {}
     other_daemon: daemon.ActiveOps = {}
     entered = [threading.Event(), threading.Event()]
     finish = [threading.Event(), threading.Event()]
 
-    def arm(_kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
+    def arm(
+        _kind: str, payload: dict[str, Any], *, pool: ConnectionPool
+    ) -> tuple[str, dict[str, object]]:
+        assert pool is dispatch_pool
         index = int(payload["index"])
         entered[index].set()
         if not finish[index].wait(5):
@@ -242,7 +259,13 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
         monkeypatch.setattr(daemon, "_dispatch_sync", arm)
         tasks = [
             asyncio.create_task(
-                daemon._run_arm(kind, {"index": index}, active_ops=active_ops, workers=workers)
+                daemon._run_arm(
+                    kind,
+                    {"index": index},
+                    active_ops=active_ops,
+                    workers=workers,
+                    pool=dispatch_pool,
+                )
             )
             for index, kind in enumerate(("config_read", "inventory_read"))
         ]
