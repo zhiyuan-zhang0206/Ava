@@ -56,7 +56,7 @@ Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*`
 - **memory** (`/api/memory/search`, `/refresh`, `/graph`) — Memory pool search/refresh/graph
 - **commands** (`/api/commands`) — slash command list acceptable by composer
 - **auth** (`/api/auth/login|logout|check|sessions`) — opaque server-side session login, validation, listing, and per-session revocation
-- **uploads** (`/api/agents/{id}/uploads`) — file upload; notifications name the machine owning each path. Remote runner pulls are tracked per filename; a failed pull retains the gateway location and authenticated download route without shifting another file's path.
+- **uploads** (`/api/agents/{id}/uploads`) — [[upload-batches.ava.okf.md|keyed silent batch acceptance]] and legacy file upload; notifications name the machine owning each path. Remote runner pulls are tracked per filename; a failed pull retains the gateway location and authenticated download route without shifting another file's path.
 
 ## Design principles
 

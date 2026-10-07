@@ -645,6 +645,7 @@ describe("stats / config / timeline / system status", () => {
 
 describe("uploadFiles", () => {
   interface XhrInstance {
+    setRequestHeader: ReturnType<typeof vi.fn>;
     open: ReturnType<typeof vi.fn>;
     send: ReturnType<typeof vi.fn>;
     upload: { onprogress: ((e: ProgressEvent) => void) | null };
@@ -659,6 +660,7 @@ describe("uploadFiles", () => {
 
   function makeXhr(): XhrInstance {
     return {
+      setRequestHeader: vi.fn(),
       open: vi.fn(),
       send: vi.fn(),
       upload: { onprogress: null },
@@ -711,6 +713,47 @@ describe("uploadFiles", () => {
     expect(result).toEqual({
       files: [{ filename: "test.txt", path: "/tmp/test.txt", size: 5, content_type: "text/plain" }],
     });
+  });
+
+  it("uses an explicit silent upload identity across invocations without retrying", async () => {
+    const file = new File(["image"], "photo.png");
+    const failed = api.uploadFiles(7, [file], undefined, false, "same-batch");
+    expect(inst.setRequestHeader.mock.calls).toEqual([["Idempotency-Key", "same-batch"]]);
+    inst.onerror?.();
+    await expect(failed).rejects.toThrow("Upload failed");
+    expect(inst.send).toHaveBeenCalledTimes(1);
+    const replay = api.uploadFiles(7, [file], undefined, false, "same-batch");
+    expect(inst.setRequestHeader.mock.calls).toEqual([["Idempotency-Key", "same-batch"]]);
+    inst.responseText = '{"files":[]}';
+    inst.onload?.();
+    await replay;
+  });
+
+  it("mints once per silent invocation and leaves delivering uploads unkeyed", async () => {
+    const file = new File(["image"], "photo.png");
+    const first = api.uploadFiles(7, [file], undefined, false);
+    const key = inst.setRequestHeader.mock.calls[0][1] as string;
+    expect(key).toBeTruthy();
+    inst.responseText = '{"files":[]}';
+    inst.onload?.();
+    await first;
+    const second = api.uploadFiles(7, [file], undefined, false);
+    expect(inst.setRequestHeader.mock.calls[0][1]).not.toBe(key);
+    inst.responseText = '{"files":[]}';
+    inst.onload?.();
+    await second;
+    const ordinary = api.uploadFiles(7, [file]);
+    expect(inst.setRequestHeader).not.toHaveBeenCalled();
+    inst.responseText = '{"files":[]}';
+    inst.onload?.();
+    await ordinary;
+  });
+
+  it("fails malformed supplied keys before starting an upload", () => {
+    const file = new File([], "photo.png");
+    expect(() => api.uploadFiles(7, [file], undefined, false, "")).toThrow("idempotency key");
+    expect(() => api.uploadFiles(7, [file], undefined, false, "x".repeat(129))).toThrow("idempotency key");
+    expect(() => api.uploadFiles(7, [file], undefined, true, "batch")).toThrow("deliver=false");
   });
 
   it("appends every file under the 'files' field for a batch", () => {

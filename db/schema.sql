@@ -2490,3 +2490,20 @@ COMMENT ON TABLE agent_control_receipts IS
     'Immutable cancel/compact acceptance snapshots, not execution receipts or a queue; no expiry or foreign key may turn a retained retry into fresh work or pin queue retention.';
 
 INSERT INTO schema_migrations (name) VALUES ('20261007T172200_agent-control-acceptance');
+
+CREATE TABLE agent_upload_batches (
+    operation_key text PRIMARY KEY,
+    agent_id bigint NOT NULL,
+    request_fingerprint text NOT NULL,
+    manifest jsonb NOT NULL,
+    receipt jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    ready_at timestamptz,
+    CHECK ((receipt IS NULL) = (ready_at IS NULL))
+);
+CREATE INDEX agent_upload_batches_receiving_agent_idx
+    ON agent_upload_batches (agent_id) WHERE receipt IS NULL;
+COMMENT ON TABLE agent_upload_batches IS
+    'Silent upload identities; receiving manifests reserve quota without expiry, ready receipts replay acceptance.';
+
+INSERT INTO schema_migrations (name) VALUES ('20261007T181501_silent-upload-batches');

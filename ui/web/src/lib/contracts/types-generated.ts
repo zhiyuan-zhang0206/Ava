@@ -8169,6 +8169,9 @@ export interface components {
          * UploadedFile
          * @description Single file upload result.
          *
+         *     `filename` is display metadata; keyed silent uploads use a separate immutable
+         *     stored object name in `path` and `url`.
+         *
          *     `url` is the HTTP path the saved file is served back at
          *     (`/api/agents/{id}/uploads/<name>`) — the frontend uses it as an image
          *     thumbnail src and, for a native image attachment, as the `image_url.url`
