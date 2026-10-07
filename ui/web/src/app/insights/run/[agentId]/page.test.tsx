@@ -539,7 +539,8 @@ describe("failure and loading", () => {
   it("draws every block on one lane and lists the block colors in a legend", async () => {
     render();
     const blocks = await screen.findAllByTestId("run-timeline-unit");
-    expect(blocks.every((block) => block.style.top === "")).toBe(true);
+    // Block bodies share the one lane; only a marker (a point with no room) sits in a lane strip.
+    expect(blocks.filter((block) => !block.hasAttribute("data-marker")).every((block) => block.style.top === "")).toBe(true);
     const legend = screen.getByTestId("run-timeline-legend");
     expect(within(legend).getAllByRole("listitem")).toHaveLength(7);
   });
