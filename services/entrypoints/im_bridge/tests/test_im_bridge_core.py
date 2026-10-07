@@ -18,7 +18,7 @@ from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
-from services.entrypoints.im_bridge.types import ChatState, IMAdapter, Reply
+from services.entrypoints.im_bridge.types import ChatState, IMAdapter, Reply, SendNotStartedError
 
 
 def _row(
@@ -682,7 +682,7 @@ class FakeFlakyWeixinAdapter(FakePlainAdapter):
         if self.send_attempts == 1:
             self.push_failures += 1
             self.push_failed_at = time.time()
-            raise RuntimeError("iLink sendmessage error: ret=-2 errmsg=prepare failed")
+            raise SendNotStartedError("connection failed before any send")
         if self.push_failures > 0:
             self.push_recovered_at = time.time()  # the real adapter's reset path
         self.push_failures = 0

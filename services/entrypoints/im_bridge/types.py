@@ -7,6 +7,14 @@ from dataclasses import dataclass
 from typing import Any, TypedDict
 
 
+class SendNotStartedError(RuntimeError):
+    """Adapter proof that this logical send has no accepted or ambiguous chunks.
+
+    Only pre-send transport failures may carry this marker. A send that has
+    already acknowledged an earlier chunk must not propagate it to the core.
+    """
+
+
 @dataclass
 class Reply:
     """One outbound message. ``buttons`` are tap targets the adapter may
@@ -123,7 +131,8 @@ class IMAdapter(ABC):
 
         ``buttons`` are optional tap targets ((label, command) pairs) the
         platform may render; ``markdown`` marks agent content that may carry
-        markdown. Raise on failure (core logs and retries once)."""
+        markdown. Raise on failure. Core retries only SendNotStartedError, which proves
+        no earlier chunk was accepted; all ambiguous/partial sends stop."""
 
     async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
         """Send ``text`` to the user's private chat on this channel.

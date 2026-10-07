@@ -1,11 +1,7 @@
-"""`services.entrypoints.im_bridge.adapters.weixin` — the first regression net for the
-largest adapter (audit round 2, P2 noted it had zero test files).
+"""Weixin logical sends must never share a heuristic chat/chunk identity.
 
-Covered here: the outbound idempotency key. iLink dedups sendmessage by
-``client_id``; a timed-out send (server processed, response lost) is
-retried by ``push_watchdog.send_with_retry`` with a fresh ``send()`` call —
-the retry must reuse the failed attempt's client_id or the user sees the
-message twice (audit round 2, P1).
+A direct send() call is a new intent even immediately after an unknown outcome.
+Only a future durable outbound record can identify a retry of an old intent.
 """
 
 from __future__ import annotations
@@ -60,10 +56,10 @@ def _client_ids(http: _FakeHTTP) -> list[str]:
     ]
 
 
-def test_retry_reuses_client_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Regression (audit round 2, P1): the retry of a timed-out send reuses
-    the failed attempt's client_id — iLink dedups by it, so without the
-    reuse the user would see the message twice."""
+def test_new_message_after_unknown_outcome_gets_fresh_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """An immediate different send cannot reuse the previous failed identity."""
     http = _FakeHTTP(
         [
             httpx.TimeoutException("timed out"),  # first attempt: response lost
@@ -75,12 +71,12 @@ def test_retry_reuses_client_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) 
     async def scenario() -> None:
         with pytest.raises(RuntimeError, match="timed out"):
             await a.send("peer-1", "hello")
-        await a.send("peer-1", "hello")  # the retry
+        await a.send("peer-1", "another message")  # a deliberate new intent
 
     asyncio.run(scenario())
     ids = _client_ids(http)
     assert len(ids) == 2
-    assert ids[0] == ids[1], "the retry must reuse the failed attempt's client_id"
+    assert ids[0] != ids[1], "different intents must never share a client_id"
 
 
 def test_success_clears_pending_and_new_send_gets_fresh_id(
@@ -105,7 +101,7 @@ def test_success_clears_pending_and_new_send_gets_fresh_id(
 
     asyncio.run(scenario())
     ids = _client_ids(http)
-    assert ids[0] == ids[1]
+    assert ids[0] != ids[1]
     assert ids[1] != ids[2], "a new message must get a fresh client_id"
 
 

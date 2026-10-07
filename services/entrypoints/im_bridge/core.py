@@ -34,6 +34,7 @@ from services.entrypoints.im_bridge.types import (
     IMAdapter,
     InboundMessage,
     Reply,
+    SendNotStartedError,
     SpawnDraft,
 )
 
@@ -122,10 +123,11 @@ class IMBridgeCore(SpawnMenuMixin):
         ``/send`` RPC): the user gets the alert on whichever IM channels are
         actually connected. A channel that fails (unconfigured, no known
         chat, platform error) is logged and skipped — one broken channel must
-        not stop the others. A failing channel gets one retry after the same
-        bounded jitter backoff as the push path (task #4252); an adapter that
+        not stop the others. A proven unstarted send gets one retry after the
+        shared bounded jitter backoff; an adapter that
         cannot resolve an owner chat (``NotImplementedError``) is skipped
-        without a retry — no retry can change that."""
+        without a retry — no retry can change that. Only SendNotStartedError proves
+        the whole message is safe to retry; ambiguous or partial sends stop."""
 
         results: dict[str, str] = {}
         for channel, adapter in self.adapters.items():
@@ -134,8 +136,8 @@ class IMBridgeCore(SpawnMenuMixin):
                 results[channel] = "ok"
             except NotImplementedError:
                 results[channel] = "skipped"
-            except Exception as exc:  # fan-out must not break
-                _log.warning("notify_user: %s send_to_owner failed: %r", channel, exc)
+            except SendNotStartedError as exc:
+                _log.warning("notify_user: %s send_to_owner failed before send: %r", channel, exc)
                 try:
                     # partial, not a lambda: this iteration's adapter is bound
                     # now, so the retry call can never read a loop variable late.
@@ -148,6 +150,9 @@ class IMBridgeCore(SpawnMenuMixin):
                         "notify_user: %s send_to_owner retry failed: %r", channel, retry_exc
                     )
                     results[channel] = f"error: {type(retry_exc).__name__}"
+            except Exception as exc:  # isolate this uncertain channel from the fan-out
+                _log.warning("notify_user: %s outcome uncertain; no retry: %r", channel, exc)
+                results[channel] = f"error: {type(exc).__name__}"
         return results
 
     # -- inbound -------------------------------------------------------------

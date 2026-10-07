@@ -27,6 +27,7 @@ from typing import Any
 from base.log import logger
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
+from services.entrypoints.im_bridge.types import SendNotStartedError
 
 _log = logging.getLogger("services.entrypoints.im_bridge.core.push_watchdog")
 
@@ -63,19 +64,16 @@ async def retry_once_after_backoff(
 
 
 async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, adapter: Any) -> None:
-    """Send once, retry once after a bounded jitter backoff; on the retry
-    failure emit the ``im_push_failed`` event."""
+    """Retry only an adapter-proven unstarted send, never an ambiguous prefix."""
 
     async def attempt() -> None:
         await adapter.send(chat_id, reply.text, buttons=reply.buttons, markdown=reply.markdown)
 
     try:
         await attempt()
-    except Exception as exc:
-        # The first failure is the transient norm (the measured ~0.65s connect
-        # window, a flaky link): WARNING with the one-line cause, no traceback.
-        # The single retry decides whether it was real — its failure logs at
-        # ERROR and escalates (2026-10-03 triage, E3).
+    except SendNotStartedError as exc:
+        # The adapter guarantees no chunk was accepted. Only this explicit
+        # boundary proof permits retrying the entire logical message.
         _log.warning("send failed channel=%s chat=%s: %r — retrying once", channel, chat_id, exc)
         try:
             await retry_once_after_backoff(attempt, core.config)
@@ -87,6 +85,14 @@ async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, ada
                 channel=channel,
                 failures=getattr(adapter, "push_failures", 0),
             )
+    except Exception:
+        _log.exception("send outcome uncertain channel=%s chat=%s; no retry", channel, chat_id)
+        logger.warning(
+            "push outcome uncertain: {channel}",
+            event="im_push_failed",
+            channel=channel,
+            failures=getattr(adapter, "push_failures", 0),
+        )
 
 
 async def hint_recovered(core: Any, msg: Any) -> None:
