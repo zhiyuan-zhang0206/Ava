@@ -21,6 +21,7 @@ from typing import Any
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Request
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
@@ -130,6 +131,17 @@ def _validate_script(script: str) -> None:
         ) from exc
 
 
+def _changed_fields(previous: tuple[Any, ...], fields: dict[str, Any]) -> dict[str, Any]:
+    current = dict(
+        zip(
+            _UPDATABLE,
+            (previous[1], previous[2], previous[9], previous[3], previous[4]),
+            strict=True,
+        )
+    )
+    return {col: fields[col] for col in _UPDATABLE if col in fields and fields[col] != current[col]}
+
+
 def _update_blocking(
     pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any]
 ) -> tuple[tuple[Any, ...], bool]:
@@ -137,42 +149,45 @@ def _update_blocking(
     if "script" in fields:
         _validate_script(fields["script"])
 
-    set_parts = [f"{col} = %s" for col in _UPDATABLE if col in fields]
-    values = [fields[col] for col in _UPDATABLE if col in fields]
-    set_parts.append("updated_at = now()")
-
     try:
-        with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-            cur.execute("SET TRANSACTION READ WRITE")
-            previous_enabled: bool | None = None
-            if "enabled" in fields:
-                cur.execute(
-                    "SELECT enabled FROM schedules WHERE id = %s FOR UPDATE", (schedule_id,)
-                )
-                previous = cur.fetchone()
-                if previous is None:
-                    raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-                previous_enabled = previous[0]
+        with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
-                f"UPDATE schedules SET {', '.join(set_parts)} "  # noqa: S608 — set_parts from the _UPDATABLE whitelist
-                f"WHERE id = %s RETURNING {_FULL_COLS}",
-                (*values, schedule_id),
+                f"SELECT {_FULL_COLS} FROM schedules WHERE id = %s FOR UPDATE",  # noqa: S608
+                (schedule_id,),
+            )
+            previous = cur.fetchone()
+            if previous is None:
+                raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
+            changed = _changed_fields(previous, fields)
+            if not changed:
+                return previous, False
+            assignments: list[sql.Composable] = [
+                sql.SQL("{} = %s").format(sql.Identifier(col)) for col in changed
+            ]
+            assignments.append(sql.SQL("updated_at = now()"))
+            cur.execute(
+                sql.SQL("UPDATE schedules SET {} WHERE id = %s RETURNING {}").format(
+                    sql.SQL(", ").join(assignments), sql.SQL(_FULL_COLS)
+                ),
+                (*changed.values(), schedule_id),
             )
             row = cur.fetchone()
-            if row is None:
-                raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-            code_changed = "script" in fields or "command" in fields
+            assert row is not None  # noqa: S101 — locked row exists
+            code_changed = "script" in changed or "command" in changed
             if code_changed:
                 cur.execute(
                     "INSERT INTO schedule_versions (schedule_id, script, command, note) "
                     "VALUES (%s, %s, %s, %s)",
                     (schedule_id, row[9], row[3], "edit"),
                 )
+            needs_sync = (code_changed and row[4]) or "enabled" in changed
+            if needs_sync:
+                session_control.enqueue_in_transaction(conn, schedule_id)
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
             status_code=409, detail=f"schedule named {fields['name']!r} already exists"
         ) from exc
-    return row, previous_enabled is not None and row[4] != previous_enabled
+    return row, needs_sync
 
 
 def _list_blocking(pool: ConnectionPool[Any]) -> list[ScheduleSummary]:
@@ -242,14 +257,11 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
     if not fields:
         raise HTTPException(status_code=400, detail="no fields to update")
 
-    row, enabled_changed = await asyncio.to_thread(
+    row, needs_sync = await asyncio.to_thread(
         _update_blocking, request.app.state.db_pool, schedule_id, fields
     )
-    code_changed = "script" in fields or "command" in fields
-    # row[4] = enabled. Reload changed code for a running schedule, and
-    # converge only an enabled value change so a no-op PUT cannot restart it.
-    if (code_changed and row[4]) or enabled_changed:
-        await session_control.request_sync(request.app.state.db_pool, schedule_id)
+    if needs_sync:
+        await session_control.wait_consumed(request.app.state.db_pool, schedule_id)
     return _view(row)
 
 
@@ -436,21 +448,35 @@ def _fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[A
     return row
 
 
-def _set_enabled_blocking(pool: ConnectionPool[Any], schedule_id: int, *, enabled: bool) -> None:
-    """Sync enabled-flag UPDATE + 404 guard — via to_thread."""
+def _set_enabled_blocking(pool: ConnectionPool[Any], schedule_id: int, *, enabled: bool) -> bool:
+    """Persist the enabled choice and convergence work together; skip healthy no-ops.
+
+    Explicit start still reruns a completed or breaker-tripped schedule. Stable
+    operation receipts for those deliberate reruns are a separate control contract.
+    """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE schedules SET enabled = %s, updated_at = now() WHERE id = %s RETURNING id",
-            (enabled, schedule_id),
+            "SELECT enabled, status FROM schedules WHERE id = %s FOR UPDATE", (schedule_id,)
         )
-        if cur.fetchone() is None:
+        previous = cur.fetchone()
+        if previous is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
+        if previous[0] == enabled and not (enabled and previous[1] in ("completed", "error")):
+            return False
+        if previous[0] != enabled:
+            cur.execute(
+                "UPDATE schedules SET enabled = %s, updated_at = now() WHERE id = %s",
+                (enabled, schedule_id),
+            )
+        session_control.enqueue_in_transaction(conn, schedule_id)
+    return True
 
 
 async def _set_enabled_and_sync(
     request: Request, schedule_id: int, *, enabled: bool
 ) -> ScheduleView:
     pool = request.app.state.db_pool
-    await asyncio.to_thread(_set_enabled_blocking, pool, schedule_id, enabled=enabled)
-    await session_control.request_sync(request.app.state.db_pool, schedule_id)
+    needs_sync = await asyncio.to_thread(_set_enabled_blocking, pool, schedule_id, enabled=enabled)
+    if needs_sync:
+        await session_control.wait_consumed(pool, schedule_id)
     return _view(await asyncio.to_thread(_fetch_full_blocking, pool, schedule_id))
