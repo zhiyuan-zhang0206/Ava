@@ -94,11 +94,13 @@ async def apply_hosted_lifecycle(
     *,
     bus: EventBus,
     kill_shell_sessions: Callable[[int], None] | None = None,
+    expected_command_id: int | None = None,
 ) -> str | None:
     """Apply after the existing single-flight continuation has safely ended.
 
     The durable pointer, not a graph boolean or cache entry, identifies the
-    command. Restart releases ownership atomically with its decision, so any
+    command. An optional expected ID fences a completed invocation to its original
+    command across database recovery. Restart releases ownership atomically, so any
     successor admission must create a new incarnation before observing it.
     Termination is observed in this same transaction: the caller has already
     returned from the real continuation and dropped its non-authoritative cache.
@@ -119,8 +121,15 @@ async def apply_hosted_lifecycle(
         cursor = await conn.execute(
             "SELECT lifecycle_command_id,lease_expires_at FROM agents_meta WHERE id=%s "
             "AND runtime_generation=%s AND runtime_owner=%s AND runtime_kind='hosted' "
-            "AND status IN ('running','idling') FOR UPDATE",
-            (incarnation.agent_id, incarnation.generation, incarnation.owner),
+            "AND status IN ('running','idling') "
+            "AND (%s::bigint IS NULL OR lifecycle_command_id=%s) FOR UPDATE",
+            (
+                incarnation.agent_id,
+                incarnation.generation,
+                incarnation.owner,
+                expected_command_id,
+                expected_command_id,
+            ),
         )
         row = await cursor.fetchone()
         if row is None or row[0] is None or row[1] is None:

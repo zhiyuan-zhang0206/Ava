@@ -216,6 +216,8 @@ ignore_imports = [
     "services.agent_runner.agent_host.host -> agent.hooks.compact",
     # The host owns the final durable checkpoint/trace link and the node-log tail.
     "services.agent_runner.agent_host.host -> agent.turn.trace_checkpoint",
+    # The extracted failure boundary retains the same final trace correlation.
+    "services.agent_runner.agent_host.invocation -> agent.turn.trace_checkpoint",
     "services.agent_runner.agent_host.host -> agent.graph.node_log",
     # Database recovery retains and repairs the original fenced continuation.
     "services.agent_runner.agent_host.db_recovery -> agent.impersonation",
@@ -225,6 +227,10 @@ ignore_imports = [
     # no-op instead of a second turn failure.
     "services.agent_runner.agent_host.settlement -> agent.ownership.inbound",
     "services.agent_runner.agent_host.* -> agent.ownership.hosted",
+    # Completed invocation recovery reads its original lifecycle receipt and
+    # handles the typed owner refusal without retargeting a replacement.
+    "services.agent_runner.agent_host.host -> agent.ownership.hosted_completion",
+    "services.agent_runner.agent_host.host -> agent.ownership.inbound",
     # The corpse reaper is the other half of the hosted ownership machinery
     # (split out of agent.ownership.hosted at its 800-line budget ceiling):
     # the host's beat runs the grace reap, and the settlement boundary runs
