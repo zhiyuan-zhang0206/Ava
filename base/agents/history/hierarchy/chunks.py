@@ -42,7 +42,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
@@ -58,11 +58,20 @@ from base.log import logger
 CHUNK_ENGINE_VERSION = "chunk-0.2"
 CHUNK_PROMPT_VERSION = "chunk-0.13"
 
-# A retry of a not-yet-checkpointed chunk waits this long after the last claim,
-# and a `running` claim older than the lease is taken over (a crashed host).
+# A job handed back to the queue is retried this long after it was handed back (`release_job`
+# stamps the time), and a `running` claim older than the lease is taken over (a crashed host).
+# The lease is not renewed while a job runs, so it is set well above the slowest honest job: three
+# model rounds (the answer and two corrections), each up to five rate-limit retries of up to 30 s
+# plus a reasoning call of a few minutes, come to well under half an hour. A takeover of a live
+# job costs a second run of its model calls; a crash only delays the retry by the lease, which
+# makes the long lease the cheaper side (and simpler than a heartbeat task per job).
 RETRY_SPACING_SECONDS = 30.0
-CLAIM_LEASE_SECONDS = 900.0
+CLAIM_LEASE_SECONDS = 3600.0
+# Claims of one job (generation retries and crashed-claim takeovers) before it is given up on.
 MAX_ATTEMPTS = 20
+# A job whose chunk the checkpoint never reaches (waiting is free: it does not count as an
+# attempt) is failed once it is this old.
+GIVE_UP_AFTER_SECONDS = 6 * 3600.0
 
 
 @dataclass(frozen=True)
@@ -223,6 +232,7 @@ class ChunkJob:
     end_msg_id: str
     boundary_checkpoint_id: str | None
     attempts: int
+    age_seconds: float = 0.0
 
 
 # Claim: a pending row not retried within the spacing, or a running row whose
@@ -250,7 +260,7 @@ WHERE id = (
     LIMIT 1
 )
 RETURNING id, agent_id, compact_version, start_index, end_index, end_msg_id,
-          boundary_checkpoint_id, attempts
+          boundary_checkpoint_id, attempts, extract(epoch FROM now() - created_at)
 """
 
 
@@ -284,6 +294,7 @@ async def claim_job(
         end_msg_id=str(row[5]),
         boundary_checkpoint_id=None if row[6] is None else str(row[6]),
         attempts=int(row[7]),
+        age_seconds=float(row[8]),
     )
 
 
@@ -301,12 +312,20 @@ async def finish_job(
         )
 
 
-async def release_job(pool: AsyncConnectionPool, job_id: int, *, error: str) -> None:
-    """Hand a claimed job back to the queue; it is retried after the spacing."""
+async def release_job(
+    pool: AsyncConnectionPool, job_id: int, *, error: str, count_attempt: bool = True
+) -> None:
+    """Hand a claimed job back to the queue; it is retried after the spacing, counted from now.
+
+    A generation failure counts as an attempt; a wait (the checkpoint has not caught up, the
+    database blinked) does not, so the generation budget is spent only on generation.
+    """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
-            "UPDATE understanding_chunk_jobs SET status = 'pending', error = %s WHERE id = %s",
-            (error, job_id),
+            "UPDATE understanding_chunk_jobs SET status = 'pending', error = %s, claimed_at = now(),"
+            " attempts = CASE WHEN %s THEN attempts ELSE greatest(attempts - 1, 0) END"
+            " WHERE id = %s",
+            (error, count_attempt, job_id),
         )
 
 
@@ -342,6 +361,11 @@ class ChunkDriftError(Exception):
     """The chunk's end message is not where the job recorded it: indices drifted."""
 
 
+class ChunkTruncatedError(Exception):
+    """A closing chunk reaches past what its boundary snapshot kept: the segment's last turns
+    are in no checkpoint, so the stretch cannot be described and the gap must be reported."""
+
+
 class ChunkEmptyError(Exception):
     """Nothing is left of the chunk after the SystemMessage head is excluded."""
 
@@ -353,14 +377,12 @@ class LocatedChunk:
     `prefix` is the request the agent itself would have sent up to the chunk's
     end (the segment's head, then its messages); the chunk is
     `prefix[start_offset:]`. `span` is the stitched, inclusive message-index
-    span the node row stores. `truncated` marks a closing chunk cut short by
-    its boundary snapshot.
+    span the node row stores.
     """
 
     prefix: tuple[BaseMessage, ...]
     start_offset: int
     span: tuple[int, int]
-    truncated: bool
 
     @property
     def messages(self) -> tuple[BaseMessage, ...]:
@@ -378,48 +400,67 @@ def locate_chunk(
 ) -> LocatedChunk:
     """Find a job's chunk in the stitched history.
 
-    A live chunk (`closing_segment` None) is searched newest segment first and
-    verified by `end_msg_id` at its recorded position; a closing chunk is read
-    from the named segment (the one its boundary checkpoint holds) and cut to
-    what that snapshot kept.
+    A live chunk (`closing_segment` None) is searched newest segment first; a closing chunk is
+    read from the named segment (the one its boundary checkpoint holds). Both are verified by
+    `end_msg_id` at the recorded position.
 
     Raises:
         ChunkNotReadyError: the newest segment is shorter than the chunk's end.
         ChunkDriftError: no segment holds `end_msg_id` where the job recorded it.
+        ChunkTruncatedError: a closing chunk's end lies past what its snapshot kept.
         ChunkEmptyError: nothing of the chunk remains past the head.
     """
-    starts = history.segment_starts
-    count = len(starts)
+    count = len(history.segment_starts)
     candidates = range(count - 1, -1, -1) if closing_segment is None else (closing_segment,)
     not_ready = False
     for k in candidates:
-        head = history.segment_heads[k]
-        offset = 1 if head is not None else 0
-        seg_end = starts[k + 1] if k + 1 < count else len(history.messages)
-        body = history.messages[starts[k] : seg_end]
-        end_body = end_index - offset
-        truncated = False
-        if closing_segment is not None:
-            if end_body > len(body):
-                end_body, truncated = len(body), True
-        elif len(body) < end_body:
-            not_ready = not_ready or k == count - 1
-            continue
-        elif end_body < 1 or body[end_body - 1].id != end_msg_id:
-            continue
-        start_body = max(start_index - offset, 0)
-        if end_body <= start_body:
-            raise ChunkEmptyError(f"segment {k}: chunk [{start_index}, {end_index}) is empty")
-        prefix = (*((head,) if head is not None else ()), *body[:end_body])
-        return LocatedChunk(
-            prefix=prefix,
-            start_offset=offset + start_body,
-            span=(starts[k] + start_body, starts[k] + end_body - 1),
-            truncated=truncated,
+        found = _in_segment(
+            history, k, start_index, end_index, end_msg_id, closing=closing_segment is not None
         )
+        if found == "not_ready":
+            not_ready = not_ready or k == count - 1
+        elif found is not None:
+            return found
     if not_ready:
         raise ChunkNotReadyError(f"the newest segment is shorter than index {end_index}")
     raise ChunkDriftError(f"no segment holds message {end_msg_id!r} at index {end_index - 1}")
+
+
+def _in_segment(
+    history: FullHistory,
+    k: int,
+    start_index: int,
+    end_index: int,
+    end_msg_id: str,
+    *,
+    closing: bool,
+) -> LocatedChunk | Literal["not_ready"] | None:
+    """The chunk inside segment `k`: located, "not_ready" (the live segment is shorter than its
+    end), or None (the end message is not there)."""
+    starts = history.segment_starts
+    head = history.segment_heads[k]
+    offset = 1 if head is not None else 0
+    seg_end = starts[k + 1] if k + 1 < len(starts) else len(history.messages)
+    body = history.messages[starts[k] : seg_end]
+    end_body = end_index - offset
+    if closing and end_body > len(body):
+        raise ChunkTruncatedError(
+            f"segment {k}: the closing chunk ends at {end_index}, but its boundary snapshot "
+            f"holds {len(body) + offset} messages: the last turns of the segment are in no "
+            "checkpoint"
+        )
+    if not closing and len(body) < end_body:
+        return "not_ready"
+    if end_body < 1 or body[end_body - 1].id != end_msg_id:
+        return None
+    start_body = max(start_index - offset, 0)
+    if end_body <= start_body:
+        raise ChunkEmptyError(f"segment {k}: chunk [{start_index}, {end_index}) is empty")
+    return LocatedChunk(
+        prefix=(*((head,) if head is not None else ()), *body[:end_body]),
+        start_offset=offset + start_body,
+        span=(starts[k] + start_body, starts[k] + end_body - 1),
+    )
 
 
 def message_time(messages: Sequence[BaseMessage], *, last: bool) -> datetime | None:
@@ -439,8 +480,8 @@ _UPSERT_NODE_SQL = """
 INSERT INTO understanding_nodes (
     agent_id, depth, span_start, span_end, start_ts, end_ts, segment_key, text,
     text_hash, input_hash, children_count, model, engine_version, prompt_version,
-    schema_version
-) VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, %s)
+    schema_version, job_id
+) VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, %s, %s)
 ON CONFLICT (agent_id, depth, span_start, span_end) DO UPDATE SET
     start_ts = EXCLUDED.start_ts,
     end_ts = EXCLUDED.end_ts,
@@ -452,6 +493,7 @@ ON CONFLICT (agent_id, depth, span_start, span_end) DO UPDATE SET
     engine_version = EXCLUDED.engine_version,
     prompt_version = EXCLUDED.prompt_version,
     schema_version = EXCLUDED.schema_version,
+    job_id = EXCLUDED.job_id,
     updated_at = now()
 """
 
@@ -464,6 +506,25 @@ class GroupNode:
     start: datetime | None
     end: datetime | None
     text: str
+
+
+async def covered_end(
+    pool: AsyncConnectionPool, agent_id: int, span: tuple[int, int]
+) -> int | None:
+    """The last message index covered by an existing level-1 node that overlaps `span`, or None.
+
+    Two jobs can describe overlapping stretches (a manual close and the producers' next size cut,
+    a replay after a restart that lost the cut state, a retry of a job that had written its nodes):
+    nodes of one level never overlap, so the later chunk is shortened to what is still undescribed.
+    """
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT max(span_end) FROM understanding_nodes"
+            " WHERE agent_id = %s AND depth = 1 AND span_start <= %s AND span_end >= %s",
+            (agent_id, span[1], span[0]),
+        )
+        row = await cur.fetchone()
+    return None if row is None or row[0] is None else int(row[0])
 
 
 async def write_group_nodes(
@@ -500,6 +561,7 @@ async def write_group_nodes(
                     CHUNK_ENGINE_VERSION,
                     CHUNK_PROMPT_VERSION,
                     SCHEMA_VERSION,
+                    job.id,
                 ),
             )
 

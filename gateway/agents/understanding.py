@@ -11,11 +11,13 @@ leaves a tail nobody describes; this module enqueues that tail on demand
 
 `close_segment` plans one job from the stored state alone, the way the producers would have:
 
-- the segment is the newest of the checkpoint history; its version is its index (the producers'
-  `compact_version`);
+- the segment is the newest of the checkpoint history; its jobs are recognised by message id (the
+  request holds a job's `end_msg_id` where it recorded it), and the job's `compact_version` is
+  reused, so a boundary stamp that failed once does not make the close a segment of its own;
 - the chunk starts where the last job of that segment left off — that job's end, else the
   segment's first message past its head (a failed job's stretch is taken up again, a skipped
-  one's is not) — and ends at the last request the agent sent (`sendable_len`);
+  one's is not) — and never before the end of a level-1 node the segment already has, so the
+  nodes of one level cannot overlap; it ends at the last request the agent sent (`sendable_len`);
 - the consumer reads it from the live checkpoint rather than a compaction boundary.
 
 The call answers with a status and writes nothing unless it is `enqueued`: `active_job` (a job of the agent is pending or running — the queue keeps one
@@ -30,6 +32,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from langchain_core.messages import BaseMessage
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
@@ -77,19 +80,40 @@ def _active_job(pool: ConnectionPool, agent_id: int) -> tuple[int, str] | None:
     return None if row is None else (int(row[0]), str(row[1]))
 
 
-def _start_index(pool: ConnectionPool, agent_id: int, version: int, head_len: int) -> int:
-    """Where the segment's undescribed part begins."""
+def _live_segment_state(
+    pool: ConnectionPool, agent_id: int, request: list[BaseMessage], base: int
+) -> tuple[int | None, int | None, int]:
+    """`(version, start, covered_to)` of the live segment from what is stored about it.
+
+    The segment's jobs are recognised by message id (a job belongs to the live segment when
+    the request holds its `end_msg_id` at the position it recorded), not by a version number, so
+    one failed boundary stamp cannot put the close in a segment of its own. `version` and `start`
+    come from the newest such job (None, None when there is none: the segment has no job yet);
+    `covered_to` is the first request index past the last level-1 node the segment already has
+    (`base` converts request positions to stitched message indices).
+    """
     with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT status, start_index, end_index FROM understanding_chunk_jobs"
-            " WHERE agent_id = %s AND compact_version = %s ORDER BY id DESC LIMIT 1",
-            (agent_id, version),
+        jobs = conn.execute(
+            "SELECT compact_version, status, start_index, end_index, end_msg_id"
+            " FROM understanding_chunk_jobs WHERE agent_id = %s ORDER BY id DESC",
+            (agent_id,),
+        ).fetchall()
+        newest = conn.execute(
+            "SELECT max(span_end) FROM understanding_nodes"
+            " WHERE agent_id = %s AND depth = 1 AND span_end >= %s AND span_end < %s",
+            (agent_id, base, base + len(request)),
         ).fetchone()
-    if row is None:
-        return head_len
-    status, start_index, end_index = row
-    # A failed job left its stretch undescribed: the close takes it up again.
-    return int(start_index if status == "failed" else end_index)
+        top_version = conn.execute(
+            "SELECT max(compact_version) FROM understanding_chunk_jobs WHERE agent_id = %s",
+            (agent_id,),
+        ).fetchone()
+    covered_to = 0 if newest is None or newest[0] is None else int(newest[0]) + 1 - base
+    for version, status, start_index, end_index, end_msg_id in jobs:
+        if 0 < end_index <= len(request) and request[end_index - 1].id == end_msg_id:
+            # A failed job left its stretch undescribed: the close takes it up again.
+            return int(version), int(start_index if status == "failed" else end_index), covered_to
+    next_version = 0 if top_version is None or top_version[0] is None else int(top_version[0]) + 1
+    return next_version, None, covered_to
 
 
 def close_segment(db: Database, pool: ConnectionPool, agent_id: int) -> CloseResult:
@@ -102,13 +126,18 @@ def close_segment(db: Database, pool: ConnectionPool, agent_id: int) -> CloseRes
     history = load_checkpoint_history_full(db, agent_id)
     if not history.segment_starts:
         return CloseResult("empty", detail="the agent has no stored history")
-    version = len(history.segment_starts) - 1
-    head = history.segment_heads[version]
+    live = len(history.segment_starts) - 1
+    head = history.segment_heads[live]
     request = [
         *([head] if head is not None else []),
-        *history.messages[history.segment_starts[version] :],
+        *history.messages[history.segment_starts[live] :],
     ]
-    start = _start_index(pool, agent_id, version, segment_head_len(request))
+    base = history.segment_starts[live] - (1 if head is not None else 0)
+    version, job_start, covered_to = _live_segment_state(pool, agent_id, request, base)
+    start = max(
+        segment_head_len(request) if job_start is None else job_start,
+        covered_to,  # never re-describe what a node already covers (no overlapping level-1 nodes)
+    )
     end = sendable_len(request)
     if end <= start:
         return CloseResult(

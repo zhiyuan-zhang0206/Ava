@@ -14,7 +14,7 @@ holds, so the TTL reaper, the schedule manager, the ops delivery-outbox
 redelivery and the delivery watchdog's recovery loops are gated by construction;
 the hand-written loops (host daemon ownership renewal, the watchdog
 scan, heartbeat, events-maintenance, labeler, page-server, the IM bridge's
-notice poll, the memory indexer, the hierarchy tick, the gateway flushers)
+notice poll, the memory indexer, the understanding consumer loops, the gateway flushers)
 check it themselves, and `scripts/content_lint/lint_quiesced_loops.py` requires
 every resident periodic loop in `services/`, `gateway/` and `ops/` to gate or
 carry a reasoned `# quiesce-exempt:` marker.

@@ -161,7 +161,9 @@ async def _check_level(
         finally:
             await write_group_calls(pool, agent_id, level, check_key, [n.id for n in nodes], calls)
         if groups:
-            await write_groups(pool, agent_id, level, nodes, groups, model=model)
+            await write_groups(
+                pool, agent_id, level, nodes, groups, model=model, check_key=check_key
+            )
             settled = True
             return True
         await release_check(pool, agent_id, level, last_checked_open=len(nodes))

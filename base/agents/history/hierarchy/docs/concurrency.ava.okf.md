@@ -20,7 +20,7 @@ therefore claims every due job and runs it at once; there is no cap setting.
 - The loop owns one `TaskGroup`. While a job is due it claims and starts the job as a task of that
   group; a finishing job wakes the loop (else it polls every 2 s). A job is in flight from claim
   through its upper-level checks. Nothing is spawned outside the group; cancelling the loop cancels the
-  jobs (their rows stay `running` and are retaken after the 15-minute lease).
+  jobs (their rows stay `running` and are retaken after the 60-minute lease).
 - Per-agent order is the claim's, not the loop's: `_CLAIM_SQL` hands out an agent's oldest live job
   only, so the next job of an agent is not claimable until the previous is `done`, `failed` or
   `skipped`, on this runner or any other (a chunk no longer depends on the previous one, so this
@@ -35,7 +35,7 @@ therefore claims every due job and runs it at once; there is no cap setting.
 - Rate limiting is the provider's: a 429 or a 5xx is retried inside `invoke_response` (five retries,
   `UNDERSTANDING_RETRY_ATTEMPTS`, the shared exponential backoff 2 s doubling to 30 s with jitter, honouring `Retry-After`); a call
   that still fails ends the attempt as a generation failure, the job goes back to the queue after
-  30 s and fails for good at its third attempt (`understanding_chunk_failed`). `AVA_LLM_MAX_CONCURRENT`
+  30 s (counted from the requeue) and fails for good at its third attempt; a wait (the checkpoint not caught up, a database error) spends no attempt (`understanding_chunk_failed`). `AVA_LLM_MAX_CONCURRENT`
   still applies inside each call when set.
 - `understanding_backlog` carries `in_flight` (this runner) beside the cluster's `pending` / `running`.
 
