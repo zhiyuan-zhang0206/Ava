@@ -22,6 +22,16 @@ a crumb restores its viewport). A selection lights itself and every ancestor abo
 splits main and side with the shared resizable wrapper at >=1280px (side panel 300-760px,
 keyboard-resizable separator, ratio in localStorage `ava.run-timeline.split` through the
 guarded `panelLayoutStorage`); below that the panel stacks under the chart. The
-`ContextBreakdownCard` follows the chart unchanged.
+`ContextBreakdownCard` follows the chart.
+
+**Legend highlight.** Each legend entry is a toggle (`run-timeline-legend.tsx`): pressing it highlights every block of that class (`Highlight`: class plus optional source) and fades the rest — other blocks and all summary blocks drop to 0.12 opacity (a selected block keeps its ring). The state lives on the page, so zoom, pan and drill keep it. While an inbound class (human / agent) is highlighted and its blocks come from several senders, a select narrows it to one source (`agent:N` reads "Inbound from agent N"). The context breakdown card's category rows that stand for a block class (user input, agent messages, thinking, text output, tool calls, tool responses, system notes) are the same toggle (`classCategory` / `categoryClass`).
+
+**Hover.** A one-line readout above the rows (`run-timeline-readout.ts`) shows what the pointer is over: for a block its kind, message span, read time, source and an 80-character preview; for a node its level, time and message span, summary first line and the agent's own usage (calls, input, output); for a context-size bar the request. Hovering a block softly lights its ancestor chain; hovering a node lights its chain and the blocks its message span covers (`hoverLit`). A selection's own lighting wins over hover.
+
+**Context size row.** `run-timeline-context-row.tsx` draws one bar per LLM request (`requests` of the response), as tall as its input tokens relative to the largest loaded; sessions alternate in color, so a compaction reads as a drop.
+
+**Side panel links.** A node's detail lists its loaded ancestors and child nodes as chips, a block's detail the summary block that covers it; a chip selects that node.
+
+**Context card follows the point.** The card is not the agent's current context here: `contextPoint` picks a message index — a selected block's `i0`, a selected node's `span_start`, with nothing selected the last request sent inside the viewport (else the last before it) — and the card reads `GET .../run-timeline/context?at=` for the request at or after it, titled with its request, session and time (`placeholderData` keeps the last numbers while panning). The composer's panel still reads the current context.
 
 - [[ui/web/src/docs/frontend-components/frontend-components.ava.okf.md|Frontend Components]] — the catalog this node was split out of.

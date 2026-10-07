@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gateway.agents.schemas import ContextBreakdownResponse
+
 
 class RunTimelineWindow(BaseModel):
     """The inclusive time window one response covers."""
@@ -99,6 +101,23 @@ class RunTimelineEvent(BaseModel):
     label: str | None
 
 
+class RunTimelineRequest(BaseModel):
+    """One LLM request of the agent: an AIMessage carrying `usage_metadata`.
+
+    `idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent
+    (the read time of the message before it, the start of the turn's thinking block);
+    `session` the zero-based compaction segment it was sent in; `input_tokens` the provider's
+    total input tokens of that request, the size of its context.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    idx: int
+    ts: datetime
+    session: int
+    input_tokens: int
+
+
 class RunTimelineResponse(BaseModel):
     """GET /api/agents/{agent_id}/run-timeline response.
 
@@ -106,7 +125,8 @@ class RunTimelineResponse(BaseModel):
     messages and understanding nodes — and the default window; None when it has
     neither. `nodes` are the tree's nodes intersecting the window, every level;
     `units` are layer 0 intersecting it. `events` are optional lifecycle markers
-    in the window; they play no part in the extent.
+    in the window; they play no part in the extent. `requests` are the agent's LLM requests
+    sent in the window (the context-size row).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -117,6 +137,7 @@ class RunTimelineResponse(BaseModel):
     nodes: list[RunTimelineNode]
     units: list[RunTimelineUnit]
     events: list[RunTimelineEvent]
+    requests: list[RunTimelineRequest]
 
 
 RunTimelinePartKind = Literal[
@@ -157,3 +178,16 @@ class RunTimelineMessages(BaseModel):
 
     messages: list[RunTimelineMessage]
     next_start: int | None
+
+
+class RunTimelineContext(ContextBreakdownResponse):
+    """GET /api/agents/{agent_id}/run-timeline/context — what one LLM request's context held.
+
+    The breakdown of the request `request` (`categories` sum to its `input_tokens`), plus where
+    it sits: `session` of `sessions` compaction segments (zero-based) and the time it was sent.
+    """
+
+    request: int
+    session: int
+    sessions: int
+    ts: datetime

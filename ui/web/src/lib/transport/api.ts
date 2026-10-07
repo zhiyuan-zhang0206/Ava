@@ -57,6 +57,7 @@ import type { NoticesFeed,
   ResolvedConfigView,
   RestartAgentResponse,
   ResurrectAgentResponse,
+  RunTimelineContext,
   RunTimelineMessages,
   RunTimelineResponse,
   ShellCapture,
@@ -280,6 +281,12 @@ export const api = {
     return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
       ok<RunTimelineResponse>,
     );
+  },
+
+  // The context breakdown of the LLM request at (or next after) message `at`:
+  // what that request's context held, with its session and time.
+  getRunTimelineContext: (agentId: number, at: number): Promise<RunTimelineContext> => {
+    return f(`/api/agents/${agentId}/run-timeline/context?at=${at}`).then(ok<RunTimelineContext>);
   },
 
   // Raw messages `start..end` (inclusive stitched indices, the spans nodes and
