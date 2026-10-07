@@ -109,26 +109,16 @@ parent's budget, and a `tests/` layer has no entry cap of its own (see
 `scripts/structure/directory_budget.py`); its files keep the 800-line ceiling.
 AST rules retain their governed-package scope.
 
-scripts/structure/baseline/*.json freezes existing over-limit counts, one shard per
-directory area (scripts/structure/baseline_shards.py: an entry lives in the shard of
-its directory's first two path components). New or growing
-violations fail; the baseline itself may only lose entries or lower values versus
-the configured base (or merge-base with origin/main, falling back to HEAD).
-A rule change to a section raises its version in `scripts/structure/baseline/rules.json`;
-the guard still checks every key and count. A rule upgrade cannot add exemptions.
-After splitting, shrink the relevant baseline values or remove fixed entries
-by hand. Explicit targets restrict budget checks to the selected files/directories;
-a file also checks its parent directory. The baseline guard always runs.
+File, directory, complexity and nesting budgets have no exemptions. Every
+selected violation fails, including after a file or function rename.
 
-Function budgets: Radon 6.0.1 CC >=15 is hard, 10-14 warns; control-flow nesting
->5 is hard. The complexity/nesting baseline sections use path::qualname keys.
-Same-file one-to-one removals may cover renamed keys with equal or lower values.
-Renames git -M detects carry their frozen keys: migrate the baseline entries to
-the new path — remove the old key, add the new one with the same value — and the
-guard accepts the edit. The frozen values still cap the new path: a raise, or an
-unpaired new key, stays a violation. Moves whose edit breaks rename detection (a
-rewrite, not an import-path touch-up) are evaluated fresh under the new path.
-Use --complexity-warnings-full anywhere in argv to unfold all warning file counts.
+scripts/structure/baseline/*.json temporarily tracks remaining site exemptions.
+The guard compares them with the base revision and forbids added keys or raised
+counts, including when a lint rule version changes. Delete resolved entries.
+An explicit file target also checks its parent directory. The guard always runs.
+Function quality covers the budget scope: CC >=15 is hard, CC 10-14 warns,
+and control-flow nesting >5 is hard.
+
 """
 
 from __future__ import annotations
@@ -379,23 +369,21 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
 
 
 def _parse_baseline(
-    shards: dict[str, str], *, renames: dict[str, str] | None = None
+    shards: dict[str, str], *, renames: dict[str, str] | None = None, historical: bool = False
 ) -> dict[str, dict[str, int]]:
-    """Merge the baseline shards (name -> JSON text) and validate every entry.
+    """Validate remaining site exemptions; retired budgets cannot be reintroduced.
 
-    `renames` (the base revision's baseline only) widens the scopes by the
-    top-level directories a detected rename carries into them, so a renamed
-    governed package still validates under its old name.
+    The comparison revision may still contain empty budget sections from before
+    retirement. They convey no allowance and are discarded after validation.
     """
-    sections = ("directories", "files", *quality.QUALITY_SECTIONS, *_SITE_SECTIONS)
-    baseline = baseline_shards.merge(shards, sections)
-    structure_dirs = _carried_scope(_STRUCTURE_DIRS, renames or {})
-    for kind in quality.QUALITY_SECTIONS:
-        quality.validate_quality_entries(kind, baseline[kind], structure_dirs)
+    retired = ("directories", "files", *quality.QUALITY_SECTIONS) if historical else ()
+    baseline = baseline_shards.merge(shards, (*_SITE_SECTIONS, *retired))
+    for kind in retired:
+        if baseline.pop(kind):
+            raise ValueError(f"retired {kind} baseline must be empty")
     for kind in _SITE_SECTIONS:
         scope = ambient_state.SCOPE if kind == ambient_state.SECTION else _SCAN_DIRS
         locality.validate_entries(kind, baseline[kind], _carried_scope(scope, renames or {}))
-    _validate_structure_entries(baseline, structure_dirs)
     return baseline
 
 
@@ -405,31 +393,6 @@ def _carried_scope(scope: tuple[str, ...], renames: dict[str, str]) -> tuple[str
         PurePosixPath(old).parts[0] for old, new in renames.items() if new.split("/")[0] in scope
     }
     return tuple(sorted(set(scope) | carried))
-
-
-def _validate_structure_entries(
-    baseline: dict[str, dict[str, int]], structure_dirs: tuple[str, ...]
-) -> None:
-    for kind, ceiling in (("directories", _DIRECTORY_CEILING), ("files", _HARD_CEILING)):
-        entries = baseline[kind]
-        if not isinstance(entries, dict):
-            raise ValueError(f"'{kind}' must be an object")  # noqa: TRY004 — invalid JSON schema
-        for name, count in entries.items():
-            path = Path(name)
-            if (
-                not name
-                or not path.parts
-                or path.is_absolute()
-                or path.as_posix() != name
-                or ".." in path.parts
-                or path.parts[0] not in structure_dirs
-                or (kind == "files" and path.suffix != ".py")
-                or type(count) is not int
-                or count <= ceiling
-            ):
-                raise ValueError(
-                    f"invalid {kind} entry {name!r}: expected a scoped path and integer > {ceiling}"
-                )
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -460,7 +423,7 @@ def _baseline_base() -> str:
 def _rename_map(base: str) -> dict[str, str]:
     """Old -> new paths for the renames git -M detects between `base` and the working tree.
 
-    A detected rename carries its frozen baseline keys to the new path: move the
+    A detected rename carries remaining frozen site keys to the new path: move the
     baseline entries with it — remove the old key, add the new one with the same
     value — and the guard accepts the edit. The frozen values still cap the new
     path: a raise stays a violation and a new key without a paired removal stays
@@ -494,58 +457,17 @@ def _rename_map_or_empty() -> dict[str, str]:
         return {}
 
 
-def _directory_renames(renames: dict[str, str]) -> dict[str, str]:
-    """Old -> new directories the detected file renames move wholesale.
-
-    `a/x/y.py -> b/x/y.py` carries `a -> b` and `a/x -> b/x`, every directory
-    along the unchanged tail. A directory whose files disagree on the target, or
-    one that still exists (a split, not a move), is not carried.
-    """
-    targets: dict[str, set[str]] = {}
-    for old, new in renames.items():
-        src, dst = PurePosixPath(old).parts[:-1], PurePosixPath(new).parts[:-1]
-        tail = 0
-        while tail < min(len(src), len(dst)) and src[-1 - tail] == dst[-1 - tail]:
-            tail += 1
-        for keep in range(tail + 1):
-            before, after = src[: len(src) - tail + keep], dst[: len(dst) - tail + keep]
-            if before and before != after:
-                targets.setdefault("/".join(before), set()).add("/".join(after))
-    return {
-        before: next(iter(after))
-        for before, after in targets.items()
-        if len(after) == 1 and not (_REPO_ROOT / before).is_dir()
-    }
-
-
-def _remap_renamed_keys(
-    kind: str, entries: dict[str, int], renames: dict[str, str]
-) -> dict[str, int]:
-    """Carry each renamed file's entry over to its new path (a moved directory's too)."""
-    if not renames:
-        return entries
-    directories = _directory_renames(renames) if kind == "directories" else {}
+def _remap_renamed_keys(entries: dict[str, int], renames: dict[str, str]) -> dict[str, int]:
+    """Carry remaining site keys when Git detects a file move."""
     remapped: dict[str, int] = {}
     for name, value in entries.items():
-        if kind == "directories":
-            target = directories.get(name, name)
-        elif kind == "files":
-            target = renames.get(name, name)
-        else:
-            path, separator, qualname = name.partition("::")
-            target = f"{renames.get(path, path)}{separator}{qualname}"
-        if target in remapped:
-            # Unreachable for a valid baseline; keep the stricter (smaller) cap.
-            remapped[target] = min(remapped[target], value)
-        else:
-            remapped[target] = value
+        path, separator, target_name = name.partition("::")
+        target = f"{renames.get(path, path)}{separator}{target_name}"
+        remapped[target] = min(remapped.get(target, value), value)
     return remapped
 
 
-def _renamed_to(kind: str, name: str, renames: dict[str, str]) -> str | None:
-    """The new path of a stale entry's renamed file (files/complexity/nesting), if known."""
-    if kind == "files":
-        return renames.get(name)
+def _renamed_to(name: str, renames: dict[str, str]) -> str | None:
     return renames.get(name.partition("::")[0])
 
 
@@ -558,13 +480,11 @@ def _section_guard(
 ) -> list[str]:
     errors: list[str] = []
     additions = current.keys() - previous.keys()
-    paired = kind in quality.QUALITY_SECTIONS or kind in locality.SECTIONS
-    if kind in quality.QUALITY_SECTIONS:
-        additions = set(quality.unpaired_additions(current, previous))
-    elif kind in locality.SECTIONS:
+    paired = kind in locality.SECTIONS
+    if paired:
         additions = set(locality.unpaired_additions(current, previous))
     for name in sorted(additions):
-        moved_to = _renamed_to(kind, name, renames or {})
+        moved_to = _renamed_to(name, renames or {})
         if moved_to is not None:
             new_key = moved_to + name[len(name.partition("::")[0]) :]
             errors.append(
@@ -576,8 +496,6 @@ def _section_guard(
         rule = (
             "baseline is shrink-only"
             if not paired
-            else "added key without a paired same-file removal of equal or greater value"
-            if kind in quality.QUALITY_SECTIONS
             else "added key without a same-file removal of the same private name: a split, "
             "move or swap cannot carry a frozen site — route it through the door or owner"
         )
@@ -608,7 +526,7 @@ def _baseline_guard(
         )
         return []
     try:
-        previous = _parse_baseline(shards, renames=renames)
+        previous = _parse_baseline(shards, renames=renames, historical=True)
     except ValueError as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
     try:
@@ -627,24 +545,14 @@ def _baseline_guard(
             _section_guard(
                 kind,
                 entries,
-                _remap_renamed_keys(kind, previous[kind], renames or {}),
+                _remap_renamed_keys(previous[kind], renames or {}),
                 renames=renames,
             )
         )
     return errors
 
 
-def _budget_error(value: int, ceiling: int, name: str, baseline: dict[str, int]) -> str | None:
-    if value <= ceiling:
-        return None
-    if name not in baseline:
-        return "new violation, not in the baseline — split it"
-    if value > baseline[name]:
-        return f"grew above its frozen baseline value ({baseline[name]}) — split it"
-    return None
-
-
-def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> list[str]:
+def _check_budgets(targets: list[Path]) -> list[str]:
     files, directories = _budget_targets(targets)
     errors: list[str] = []
     for path in sorted(files):
@@ -653,10 +561,9 @@ def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> 
         except (OSError, UnicodeDecodeError):
             continue  # Preserve the shared lint contract for unreadable members.
         name = path.relative_to(_REPO_ROOT).as_posix()
-        error = _budget_error(count, _HARD_CEILING, name, baseline["files"])
-        if error:
+        if count > _HARD_CEILING:
             errors.append(
-                f"{name}:{count}: file is {count} lines, over the {_HARD_CEILING}-line hard ceiling: {error}"
+                f"{name}:{count}: file is {count} lines, over the {_HARD_CEILING}-line hard ceiling — split it"
             )
     for path in sorted(directories):
         if directory_budget.is_tests_layer(path):
@@ -665,10 +572,9 @@ def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> 
             directory_budget.counts_toward_budget(entry) for entry in directory_budget.entries(path)
         )
         name = path.relative_to(_REPO_ROOT).as_posix()
-        error = _budget_error(count, _DIRECTORY_CEILING, name, baseline["directories"])
-        if error:
+        if count > _DIRECTORY_CEILING:
             errors.append(
-                f"{name}: directory has {count} direct entries, over the {_DIRECTORY_CEILING}-entry cap: {error}"
+                f"{name}: directory has {count} direct entries, over the {_DIRECTORY_CEILING}-entry cap — split it"
             )
     return errors
 
@@ -732,7 +638,7 @@ def _check_ast_and_quality(
         if path in files:
             for kind, values in quality.measure_quality(tree, rel).items():
                 measurements[kind].update(values)
-    errors.extend(quality.quality_errors(measurements, baseline, renames=renames))
+    errors.extend(quality.quality_errors(measurements))
     errors.extend(
         locality.site_errors(
             sites, baseline, scanned=scanned, repo_root=_REPO_ROOT, renames=renames
@@ -779,7 +685,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     renames = _rename_map_or_empty()
     errors = _baseline_guard(baseline, renames=renames)
-    errors.extend(_check_budgets(targets, baseline))
+    errors.extend(_check_budgets(targets))
     errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full, renames=renames))
     for error in errors:
         print(error)

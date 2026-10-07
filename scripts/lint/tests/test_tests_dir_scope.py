@@ -3,7 +3,7 @@
 Tests live either in the top-level `tests/` or beside the code they prove, in
 `<pkg>/**/tests/`. Every rule that treats `tests/` specially must treat both
 places alike, or the tests that move into a package silently change what the
-gate does to them: budgets, the AST rules, and the rename-carried baseline keys.
+gate does to them: strict budgets and the AST rules.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import pytest
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards, path_imports
 
-_SECTIONS = ("directories", "files", "complexity", "nesting", *lcs._SITE_SECTIONS)
+_SECTIONS = lcs._SITE_SECTIONS
 
 
 @pytest.fixture(autouse=True)
@@ -200,82 +200,23 @@ def test_path_import_rule_skips_test_files_at_any_depth() -> None:
     }
 
 
-# ── frozen baseline keys follow a test into its package ─────────────────────
-
-
-def _freeze_big_test(tmp_path: pathlib.Path, path: str) -> None:
-    """Commit a repo whose baseline freezes one test file: its length and one complexity key."""
+def test_test_module_move_still_enforces_file_and_function_budgets(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    old, new = "tests/agent/test_big.py", "agent/graph/tests/test_big.py"
     body = "def f(x):\n" + "    if x: pass\n" * 15 + "    return x\n" + "y = 1\n" * 800
-    _module(tmp_path / path, body)
-    _write_baseline(
-        tmp_path,
-        {
-            "directories": {},
-            "files": {path: 817},
-            "complexity": {f"{path}::f": 16},
-            "nesting": {},
-            "private_imports": {},
-            "owner_bypasses": {},
-            "path_imports": {},
-        },
-    )
+    _module(tmp_path / old, body)
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "--quiet", "-m", "Freeze one test file")
-
-
-def test_a_test_moved_into_its_package_carries_its_frozen_keys(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Moving `tests/agent/test_big.py` to `agent/graph/tests/` needs its keys in the same commit."""
-    old, new = "tests/agent/test_big.py", "agent/graph/tests/test_big.py"
-    _freeze_big_test(tmp_path, old)
+    _git(tmp_path, "commit", "--quiet", "-m", "Commit an over-budget test module")
     (tmp_path / new).parent.mkdir(parents=True)
     _git(tmp_path, "mv", old, new)
 
     assert lcs.main([]) == 1
-    out = capsys.readouterr().out
-    assert f"entry {old} was not migrated after its file moved to {new}" in out
-    assert f"entry {old}::f was not migrated after its file moved to {new}" in out
+    output = capsys.readouterr().out
+    assert f"{new}:817:" in output
+    assert f"{new}::f: complexity 16" in output
 
-    _write_baseline(
-        tmp_path,
-        {
-            "directories": {},
-            "files": {new: 817},
-            "complexity": {f"{new}::f": 16},
-            "nesting": {},
-            "private_imports": {},
-            "owner_bypasses": {},
-            "path_imports": {},
-        },
-    )
-    capsys.readouterr()
+    (tmp_path / new).write_text("def f(x):\n    return x\n", encoding="utf-8")
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
-
-
-def test_a_migrated_key_cannot_grow_at_the_new_location(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The frozen value still caps the moved file: moving it is not a way to raise it."""
-    old, new = "tests/agent/test_big.py", "agent/graph/tests/test_big.py"
-    _freeze_big_test(tmp_path, old)
-    (tmp_path / new).parent.mkdir(parents=True)
-    _git(tmp_path, "mv", old, new)
-    with (tmp_path / new).open("a", encoding="utf-8") as handle:
-        handle.write("z = 1\n" * 5)
-    _write_baseline(
-        tmp_path,
-        {
-            "directories": {},
-            "files": {new: 822},
-            "complexity": {f"{new}::f": 16},
-            "nesting": {},
-            "private_imports": {},
-            "owner_bypasses": {},
-            "path_imports": {},
-        },
-    )
-    assert lcs.main([]) == 1
-    assert f"raised files entry {new} from 817 to 822" in capsys.readouterr().out
