@@ -53,8 +53,8 @@ from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.auth.request_principal import PrincipalScopeError, optional_request_key
 from gateway.routers.upload_batches import (
-    RESERVED_PREFIX,
     check_quota,
+    is_reserved_upload_name,
     lock_agent,
     save_keyed_batch,
 )
@@ -148,7 +148,7 @@ def _per_file_quota_error(safe_name: str) -> HTTPException:
     )
 
 
-async def _read_upload_batch(files: list[UploadFile]) -> tuple[list[_UploadBatchItem], int]:
+async def read_upload_batch(files: list[UploadFile]) -> tuple[list[_UploadBatchItem], int]:
     """Read and size-check every file before the batch can write a final name."""
     batch_bytes = 0
     batch: list[_UploadBatchItem] = []
@@ -244,7 +244,7 @@ async def upload_files(
     if key is None:
         await asyncio.to_thread(_agent_exists_blocking, request.app.state.db_pool, agent_id)
     dest_dir = agent_upload_dir(agent_id, create=key is None)
-    batch, batch_bytes = await _read_upload_batch(files)
+    batch, batch_bytes = await read_upload_batch(files)
     if key is not None:
         return await asyncio.to_thread(
             save_keyed_batch,
@@ -258,7 +258,7 @@ async def upload_files(
             max_bytes=MAX_AGENT_UPLOAD_BYTES,
             max_files=MAX_AGENT_UPLOAD_FILES,
         )
-    if any(name.startswith(RESERVED_PREFIX) for name, _, _ in batch):
+    if any(is_reserved_upload_name(name) for name, _, _ in batch):
         raise HTTPException(
             409, "upload filename belongs to the reserved immutable object namespace"
         )

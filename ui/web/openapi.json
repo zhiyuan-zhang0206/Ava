@@ -7342,10 +7342,218 @@
           }
         }
       }
+    },
+    "/api/keyed/v1/agents/{agent_id}/uploads": {
+      "post": {
+        "summary": "Upload",
+        "operationId": "upload_api_keyed_v1_agents__agent_id__uploads_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_api_keyed_v1_agents__agent_id__uploads_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acceptance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}": {
+      "get": {
+        "summary": "Status",
+        "operationId": "status_api_keyed_v1_agents__agent_id__uploads__batch_id__get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}/objects/{ordinal}": {
+      "get": {
+        "summary": "Object File",
+        "operationId": "object_file_api_keyed_v1_agents__agent_id__uploads__batch_id__objects__ordinal__get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "Batch Id"
+            }
+          },
+          {
+            "name": "ordinal",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Ordinal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "Acceptance": {
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id"
+          },
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/Object"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "status_url": {
+            "type": "string",
+            "title": "Status Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "batch_id",
+          "agent_id",
+          "files",
+          "status_url"
+        ],
+        "title": "Acceptance",
+        "description": "Historical source acceptance; not copy readiness or agent execution."
+      },
       "AdmissionOutcome": {
         "type": "string",
         "enum": [
@@ -9461,6 +9669,23 @@
         "title": "BillingResurrectResponse",
         "description": "POST /api/agents/resurrect-billing response — the run-level summary.\n\n`preview`: dry-run. `executed`: the run acted (a no-op when the whitelist\nwas already empty — also audited). `refused`: the run did not act;\n`refusal_reason` names the gate ('balance gate not satisfied: ...' or a\nconcurrent run holding the single-flight lock).\n\n`agents` carries the candidates (preview) or the per-agent outcomes;\n`halted_alive` is the report-only survey of billing-halted rows that are\nstill alive — never actioned."
       },
+      "Body_upload_api_keyed_v1_agents__agent_id__uploads_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_api_keyed_v1_agents__agent_id__uploads_post"
+      },
       "Body_upload_files_api_agents__agent_id__uploads_post": {
         "properties": {
           "files": {
@@ -10709,6 +10934,88 @@
         ],
         "title": "DefaultModelWrite",
         "description": "PUT /api/config/default-model body. `model` must be a spawnable id from the\nregistry roster; anything else is rejected rather than stored."
+      },
+      "DeliveryStatus": {
+        "properties": {
+          "acceptance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Acceptance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "receiving",
+              "pending",
+              "accepted",
+              "hold"
+            ],
+            "title": "State"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Id"
+          },
+          "source": {
+            "$ref": "#/components/schemas/UnitIdentity"
+          },
+          "target": {
+            "$ref": "#/components/schemas/UnitIdentity"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Attempts"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "acceptance",
+          "state",
+          "reason",
+          "inbound_id",
+          "source",
+          "target",
+          "attempts",
+          "next_attempt_at"
+        ],
+        "title": "DeliveryStatus"
       },
       "EventResolutionCreate": {
         "properties": {
@@ -13775,6 +14082,56 @@
         ],
         "title": "NoticesFeed",
         "description": "GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,\ndecision Q1=A). One request carries the whole Inbox panel: the OPEN\nqueue split by kind (open = FYI notices that need no response, awaiting\n= require_response notices that ride the agent snapshot today) plus one\nkeyset page of the RESOLVED history.\n\nThe contract shape was chosen so a panel = one request = one hook:\nthe client no longer merges three independent pipes (agent snapshot +\n/api/notices/open + the resolved history). `next_cursor` is None when\n`resolved_page` is the last page (short page or exhausted); pass it back\nas before_at/before_id for the next strictly-older page."
+      },
+      "Object": {
+        "properties": {
+          "ordinal": {
+            "type": "integer",
+            "exclusiveMaximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Ordinal"
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Filename"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}-[0-9]+(?:\\.[^/\\\\\\x00-\\x1f\\x7f?#%]+)?$",
+            "title": "Name"
+          },
+          "size": {
+            "type": "integer",
+            "maximum": 52428800.0,
+            "minimum": 0.0,
+            "title": "Size"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "content_type": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "title": "Content Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ordinal",
+          "filename",
+          "name",
+          "size",
+          "sha256",
+          "content_type"
+        ],
+        "title": "Object"
       },
       "ObservedNotice": {
         "properties": {
@@ -18183,6 +18540,31 @@
         ],
         "title": "UiThemeContribution",
         "description": "One named token pack a plugin offers the theme picker.\n\n`tokens` is a partial map of the console's own `:root` custom properties to\ncolor literals — validated at manifest load, so the console applies the\nvalues as given. Unset tokens keep the console default, which is why a pack\nthat names three colors is a legitimate skin rather than a broken one.\n\n`dark_tokens` is the pack's dark-mode half, and `null` is a MEANINGFUL\nvalue rather than a missing one: it declares that the pack deliberately\npins both modes to `tokens`. That distinction has to survive onto the wire\nbecause it is what the picker tells the user — a pack applied over both\npalettes silently disables the light/dark toggle for every color it sets,\nand a skin and a mode that fight is the failure this field exists to make\nvisible. With it set, `tokens` is the light half and the two stay\northogonal."
+      },
+      "UnitIdentity": {
+        "properties": {
+          "machine": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Machine"
+          },
+          "home": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Home"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "machine",
+          "home"
+        ],
+        "title": "UnitIdentity",
+        "description": "One unit: its machine name and its home path on that machine (data)."
       },
       "UploadedBatch": {
         "properties": {

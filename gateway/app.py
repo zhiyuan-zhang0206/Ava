@@ -170,6 +170,8 @@ from gateway.routers import (
 from gateway.run_timeline import history as run_timeline_history
 from gateway.run_timeline import router as run_timeline_router
 from gateway.schedules import router as schedules_router
+from gateway.upload_delivery import router as upload_delivery_router
+from gateway.upload_delivery.worker import UploadRecovery
 
 _log = logging.getLogger(__name__)
 
@@ -260,6 +262,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         rejection_log.auth401_flusher(app.state.auth401_log)
     )
     app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
+    app.state.upload_recovery = UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
     # lifespan — StreamableHTTPSessionManager.run() can only be entered once
@@ -272,25 +275,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         app.state.mcp_manager = mcp_manager
 
-    try:
-        if mcp_manager is not None:
-            async with mcp_manager.run():
+    async with asyncio.TaskGroup() as upload_tasks:
+        app.state.upload_recovery.start(upload_tasks)
+        try:
+            if mcp_manager is not None:
+                async with mcp_manager.run():
+                    yield
+            else:
                 yield
-        else:
-            yield
-    finally:
-        app.state.mcp_manager = None
-        app.state.runtime_metrics.stop()
-        await app.state.grafana_client.aclose()
-        for flusher in (
-            app.state.latency_flusher,
-            app.state.auth401_flusher,
-        ):
-            flusher.cancel()
-            with suppress(asyncio.CancelledError):
-                await flusher
-        app.state.db_pool.close()
-        app.state.control_db_pool.close()
+        finally:
+            app.state.mcp_manager = None
+            try:
+                await app.state.upload_recovery.close()
+            finally:
+                app.state.runtime_metrics.stop()
+                await app.state.grafana_client.aclose()
+                for flusher in (
+                    app.state.latency_flusher,
+                    app.state.auth401_flusher,
+                ):
+                    flusher.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await flusher
+                app.state.db_pool.close()
+                app.state.control_db_pool.close()
 
 
 app = FastAPI(
@@ -602,6 +610,7 @@ app.include_router(task_assignments_router.router)
 app.include_router(plugin_ui_router.router)
 app.include_router(ui_contributions_router.router)
 app.include_router(uploads_router.router)
+app.include_router(upload_delivery_router.router)
 
 # /mcp — MCP control plane (design task #1212 step 1). Mounted always; the
 # wrapper answers 404 while settings.gateway.mcp_endpoint_enabled is off, so
