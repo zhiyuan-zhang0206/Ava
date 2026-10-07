@@ -64,8 +64,8 @@ class LoginRateLimiter:
     """Per-IP consecutive-failure lockout, safe for concurrent requests.
 
     The gateway is single-process, so one instance covers the whole cluster;
-    ``login_limiter`` below is the process-wide singleton the login endpoint
-    uses. Methods are idempotent under races: a lock guards the dict, and
+    the application lifespan owns the instance shared by its login requests.
+    Methods are idempotent under races: a lock guards the dict, and
     worst-case concurrent failures just count a couple of attempts early.
     """
 
@@ -142,7 +142,3 @@ class LoginRateLimiter:
             oldest = sorted(self._entries, key=lambda ip: self._entries[ip].last_failure_at)[:over]
             for ip in oldest:
                 del self._entries[ip]
-
-
-login_limiter = LoginRateLimiter()
-"""Process-wide limiter for the login endpoint (the gateway is single-process)."""

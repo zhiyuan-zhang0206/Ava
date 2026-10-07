@@ -68,6 +68,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents import AvaAgentError
 from base.cluster.auth import cookie_name
+from base.cluster.rate_limit import LoginRateLimiter
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -180,6 +181,7 @@ def _build_request_resources(app: FastAPI) -> None:
     app.state.memory_search_gate = memory_router.build_search_gate()
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.auth401_log = rejection_log.AuthRejectionLog()
+    app.state.login_limiter = LoginRateLimiter()
     app.state.run_timeline_views = run_timeline_history.HistoryViewCache()
     app.state.fleet_graph_stale_emitter = fleet_graph_router.FleetGraphStaleEmitter()
 
