@@ -22,7 +22,10 @@ chat can clear a halt. Metadata ownership locks precede work locks throughout.
 ## Guarded HTTP contract
 
 GET `/api/keyed/v1/agents/{agent_id}/native-work` exposes only ACTIVE work with
-an actual admitted managed resource set and live exact hosted owner. Installed
+an actual admitted managed resource set and live exact hosted owner whose
+metadata is still running. A crashed turn settled to idling is not newly
+eligible even if its historical work fact remains ACTIVE. Running status is
+only a negative eligibility gate, never resource-closure evidence. Installed
 code, a version column, PREPARING work, empty idle preparation, legacy NULL
 resources and an active external impersonation lease do not qualify.
 
