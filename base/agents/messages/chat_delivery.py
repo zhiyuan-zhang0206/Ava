@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import psycopg
+from psycopg.pq import TransactionStatus
 
 from base import telemetry
 from base.agents.messages.caller_identity import caller_payload
@@ -131,8 +132,7 @@ def insert_chat_inbound_once(
     `publish_wake(agent_id, payload)` is the best-effort wake for a newly inserted inbound
     (`base.db.publish_inbound_wake` bound to the caller's handles)."""
     with db.transaction():
-        require_caller_protocol(db, agent_id, source)
-        receipt, prepared_event = _insert_chat_inbound_once(
+        receipt, prepared_event = insert_chat_inbound_in_transaction(
             db,
             agent_id=agent_id,
             content=content,
@@ -149,7 +149,7 @@ def insert_chat_inbound_once(
     return receipt
 
 
-def _insert_chat_inbound_once(
+def insert_chat_inbound_in_transaction(
     db: psycopg.Connection,
     *,
     agent_id: int,
@@ -157,9 +157,17 @@ def _insert_chat_inbound_once(
     source: str,
     payload: dict[str, object] | None,
     client_message_id: str | None,
-    provenance: InboundProvenance | None,
+    provenance: InboundProvenance | None = None,
 ) -> tuple[ChatInboundReceipt, telemetry.Event | None]:
-    """The locked INSERT body; ownership cannot change before commit."""
+    """Write the chat identity and audit facts in an active caller transaction.
+
+    The caller owns commit or rollback and any post-commit emission/wake.
+    No connection is opened, transaction committed or event dispatched here.
+    Return the receipt and optional recorded event for post-commit emission.
+    """
+    if db.info.transaction_status != TransactionStatus.INTRANS:
+        raise RuntimeError("chat inbound writer requires an active caller-owned transaction")
+    require_caller_protocol(db, agent_id, source)
     payload = caller_payload(source, payload)
     encoded_payload = json.dumps(payload) if payload else None
     source_verified_by = provenance.source_verified_by if provenance is not None else None
