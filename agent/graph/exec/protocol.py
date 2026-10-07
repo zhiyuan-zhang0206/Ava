@@ -40,7 +40,6 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from base.log import logger
-from base.native_process.exec_domain import KILL_GRACE_S as KILL_GRACE_S
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 # Envelope schema versions — bumped only on a breaking shape change.
