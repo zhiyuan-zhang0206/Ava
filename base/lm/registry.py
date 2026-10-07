@@ -180,11 +180,11 @@ class ModelSpec:
     """
 
     provider: str  # supported-models group key == build_chat_model prefix
-    fast_of: str | None = None
+    fast_of: str | None = field(default=None, kw_only=True)
     """Registered standard service this Fast ID accelerates. Its ID is also
     the provider wire model. Providers own the Fast request and receipt mapping;
     selection, prices, tuning and usage keep the distinct Ava ID."""
-    reference_tps: ReferenceTps | None = None
+    reference_tps: ReferenceTps | None = field(default=None, kw_only=True)
     """Official output TPS only; None means no reliable absolute figure.
     A Fast service must declare its own reference rather than inherit Standard."""
     spawnable: bool = False  # offered in the frontend spawn dropdown

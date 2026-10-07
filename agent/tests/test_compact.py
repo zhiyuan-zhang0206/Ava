@@ -210,17 +210,18 @@ async def test_generate_summary_emits_agent_billing_span(
         },
     )
     llm = _fake_llm(response=response)
-    llm.model_name = "deepseek-v4-pro"
+    llm.model_name = "deepseek-flash"
+    slices = AgentSlices.resolve({"llm_model": "deepseek-flash"})
 
     assert (
-        await generate_summary([HumanMessage(content="conversation")], llm, AgentSlices.resolve())
+        await generate_summary([HumanMessage(content="conversation")], llm, slices)
         == "a complete summary"
     )
 
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
     assert span.name == "ava.billing.call"
-    assert span.attributes["ava.billing.model"] == "deepseek-v4-pro"
+    assert span.attributes["ava.billing.model"] == "deepseek-flash"
     assert span.attributes["ava.billing.vendor"] == "deepseek"
     assert span.attributes["ava.billing.usage_kind"] == "agent"
     assert span.attributes["ava.billing.tokens_in"] == 1_000

@@ -29,7 +29,9 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
         "claude-sonnet-5-5",
         "claude-haiku-4-5-20251001",
         "claude-opus-5",
+        "claude-opus-5-fast",
         "claude-opus-5-5",
+        "claude-opus-5-5-fast",
         "claude-fable-5",
         "claude-fable-5-1",
     }
@@ -131,12 +133,19 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
     assert gpt_models <= model_catalog().models.keys()
     assert set(model_catalog().supported_models["gpt"]) == {
         "gpt-6-astra",
+        "gpt-6-astra-fast",
         "gpt-5.6-sol",
+        "gpt-5.6-sol-fast",
         "gpt-5.6-terra",
+        "gpt-5.6-terra-fast",
         "gpt-5.6-luna",
+        "gpt-5.6-luna-fast",
         "gpt-6-sol",
+        "gpt-6-sol-fast",
         "gpt-6.1-sol",
+        "gpt-6.1-sol-fast",
         "gpt-6-luna",
+        "gpt-6-luna-fast",
     }
     assert pricing.model_vendor("gpt-5.6-sol") == "openai"
 
