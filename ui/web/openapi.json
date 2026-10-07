@@ -847,11 +847,11 @@
         }
       }
     },
-    "/api/agents/{agent_id}/understanding/close": {
-      "post": {
-        "summary": "Post Understanding Close",
-        "description": "Describe the part of the agent's live compaction segment that no chunk has covered yet.\n\nEnqueues one understanding job from the end of the last chunk job (or the first message\npast the segment's head) to the last request the agent sent, like the closing chunk of a\ncompaction. Short-lived agents never reach a size cut, so this is how their tail gets a\nnode; nothing calls it automatically.\n\nThe job runs on the existing consumer of the agent's host: the request is the agent's own\nconversation read from the stored checkpoint plus one instruction. Unlike the producers'\nchunks, which are sent while the agent's own requests keep the provider cache warm, the\nprefix of a manual close is usually cold, so the whole prefix is billed at the full input\nprice (at DeepSeek's standard rate about $0.06 for a 390K-token segment), plus the\nmodel's reasoning output (about $0.008 per call).\n\nThe answer is a status; nothing is written unless it is `enqueued`. `empty`: nothing lies\npast the last cut (or that stretch was already described). `active_job`: a\njob of this agent is pending or running (its id is returned); the queue keeps an agent's\njobs in order, so wait for it and ask again. `compact_version`, `start_index` and `end_index`\nname the stretch (request-list indices of the live segment, head at 0). 404 when the agent\ndoes not exist; 503 when the stored history cannot be read. The job is described only where\n`AVA_UNDERSTANDING_ENABLED` is on (the consumer idles otherwise, and the job waits).",
-        "operationId": "post_understanding_close_api_agents__agent_id__understanding_close_post",
+    "/api/agents/{agent_id}/sessions": {
+      "get": {
+        "summary": "Get Agent Sessions",
+        "description": "The agent's sessions (the stretches between two compactions), oldest first, with their coverage by the understanding tree and what building the rest would cost.\n\nNumbers are 1-based, grow with time and are stable: a new session is only ever added at the\nend. The last session has no boundary checkpoint while it is still in progress. Times are the\nmessages' read times; `peak_input_tokens` is the largest provider-reported input of any\nrequest in the session. `coverage` counts the session's describable material (past its\nframework head, up to the last request the agent sent) that level-1 nodes already describe;\n`estimate` prices building what is still missing, on a cold cache and at full input price (see\n`cost_basis`: it is an estimate from the stored history, not a quote). 404 when the agent does\nnot exist; 503 when the stored history cannot be read.",
+        "operationId": "get_agent_sessions_api_agents__agent_id__sessions_get",
         "parameters": [
           {
             "name": "agent_id",
@@ -869,7 +869,106 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UnderstandingCloseResponse"
+                  "$ref": "#/components/schemas/SessionsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/understanding/build": {
+      "post": {
+        "summary": "Post Understanding Build",
+        "description": "Build the understanding tree of chosen sessions by hand, then rebuild the levels above.\n\nChoose sessions by number (`sessions`) or by a `from` / `to` range (every session whose\nread-time extent intersects it). Each chosen session is cut into chunks by the live rule\n(a chunk per `AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold of\ngrowth in the provider-reported input, the session's remainder last); what level-1 nodes already cover is skipped exactly, a chunk that\noverlaps it is cut to its uncovered runs. The jobs run on the agent hosts' consumer in order,\none agent at a time; the session still in progress is built to the last request the agent has\nsent. Once the agent's chunk jobs have all ended, every node above level 1 and the grouping\ncursor are dropped and the levels above are rebuilt over all of the agent's level-1 nodes in\nmessage order; builds of one agent in flight merge into one rebuild. A job that fails leaves\nits stretch undescribed and the rebuild runs anyway.\n\nCost warning: these calls are NOT warm. A manual build reads a stored history long after the\nagent's last request, so every job's whole conversation prefix is billed at the full\n(cache-miss) input price; a 390K-token session costs that much input once per chunk. Always run\nwith `dry_run=true` first: it returns the chunk jobs that would be queued and the estimated\ncost (`cost_basis` says how) without writing anything, and it works whatever the feature switch.\n\nThe feature switch: with `AVA_UNDERSTANDING_ENABLED` off the build is still queued (jobs and\nrebuild) and waits, undescribed, until the switch is turned on; `understanding_enabled` in the\nresponse says which it is. A repeat request merges into the jobs and the pending rebuild already\nqueued and only records another build. Returns the jobs queued and a `build_id` for\n`GET .../understanding/builds/{build_id}`. 404 when the agent does not exist; 422 for an\nunknown session number, an empty selection or a range no session intersects; 503 when the\nstored history cannot be read.",
+        "operationId": "post_understanding_build_api_agents__agent_id__understanding_build_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/understanding/builds/{build_id}": {
+      "get": {
+        "summary": "Get Understanding Build",
+        "description": "A build's progress: each job's status and actual cost, then the rebuild of the upper levels.\n\n`phase` runs `chunks` (jobs live) then `rebuild_pending` (the rebuild waits for the agent's\nchunk jobs to end or is running) then `done`, or `failed` when the rebuild failed. Costs are\nsummed from the raw record of the provider calls so far at the price book's rates; a stalled\nbuild with `AVA_UNDERSTANDING_ENABLED` off stays in `chunks` with its jobs `pending`. 404 when\nthe agent or the build (of this agent) does not exist.",
+        "operationId": "get_understanding_build_api_agents__agent_id__understanding_builds__build_id__get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "build_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Build Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildProgressResponse"
                 }
               }
             }
@@ -8683,6 +8782,363 @@
         "title": "BornChainRow",
         "description": "One ancestor in GET /api/agents/{id}/born-chain — the immutable birth\nchain above the queried agent, nearest ancestor first (1 = direct birth\nparent). Carries what the inherited-memory context note needs (`machine`\ndecides which ancestors it can read locally); no tie score, because this\nroute reads no tie graph."
       },
+      "BuildJobOut": {
+        "properties": {
+          "session": {
+            "type": "integer",
+            "title": "Session"
+          },
+          "start_index": {
+            "type": "integer",
+            "title": "Start Index"
+          },
+          "end_index": {
+            "type": "integer",
+            "title": "End Index"
+          },
+          "first_message": {
+            "type": "integer",
+            "title": "First Message"
+          },
+          "last_message": {
+            "type": "integer",
+            "title": "Last Message"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "enqueued",
+              "merged"
+            ],
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session",
+          "start_index",
+          "end_index",
+          "first_message",
+          "last_message",
+          "input_tokens",
+          "job_id",
+          "state"
+        ],
+        "title": "BuildJobOut",
+        "description": "One chunk job of a build. `state`: `planned` (a dry run), `enqueued` (new, or an ended job of\nthe same stretch taken up again) or `merged` (a pending or running job of the same stretch).\n`start_index` / `end_index` are request-list indices of the session's segment (head at 0);\n`first_message` / `last_message` the inclusive stitched message span the job describes."
+      },
+      "BuildJobProgress": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "session": {
+            "type": "integer",
+            "title": "Session"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status"
+          },
+          "start_index": {
+            "type": "integer",
+            "title": "Start Index"
+          },
+          "end_index": {
+            "type": "integer",
+            "title": "End Index"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "seconds": {
+            "type": "number",
+            "title": "Seconds"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "session",
+          "status",
+          "start_index",
+          "end_index",
+          "attempts",
+          "error",
+          "calls",
+          "input_tokens",
+          "cache_read_tokens",
+          "output_tokens",
+          "seconds",
+          "cost_usd"
+        ],
+        "title": "BuildJobProgress",
+        "description": "A build's job as it stands. Token counts and `cost_usd` are summed over its provider calls so\nfar (`cost_usd` None when the model has no price)."
+      },
+      "BuildProgressResponse": {
+        "properties": {
+          "build_id": {
+            "type": "integer",
+            "title": "Build Id"
+          },
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "sessions": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Sessions"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "chunks",
+              "rebuild_pending",
+              "done",
+              "failed"
+            ],
+            "title": "Phase"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/BuildJobProgress"
+            },
+            "type": "array",
+            "title": "Jobs"
+          },
+          "rebuild": {
+            "$ref": "#/components/schemas/RebuildProgressOut"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "build_id",
+          "agent_id",
+          "created_at",
+          "sessions",
+          "phase",
+          "jobs",
+          "rebuild",
+          "cost_usd"
+        ],
+        "title": "BuildProgressResponse",
+        "description": "GET /api/agents/{agent_id}/understanding/builds/{build_id} response.\n\n`phase`: `chunks` (jobs still live), `rebuild_pending` (jobs ended; the rebuild waits for the\nagent's chunk jobs to end or is running), `done`, `failed` (the rebuild failed). A job that failed\nleaves its stretch undescribed; the build still completes. `cost_usd` is the actual total so far."
+      },
+      "BuildRequest": {
+        "properties": {
+          "sessions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessions"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "BuildRequest",
+        "description": "What to build: `sessions` (numbers from the sessions list) or a `from` / `to` time range\n(every session whose read-time extent intersects it), exactly one of the two."
+      },
+      "BuildResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run"
+          },
+          "understanding_enabled": {
+            "type": "boolean",
+            "title": "Understanding Enabled"
+          },
+          "sessions": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Sessions"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/BuildJobOut"
+            },
+            "type": "array",
+            "title": "Jobs"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "merged": {
+            "type": "integer",
+            "title": "Merged"
+          },
+          "estimate": {
+            "$ref": "#/components/schemas/CostEstimateOut"
+          },
+          "cost_basis": {
+            "type": "string",
+            "title": "Cost Basis"
+          },
+          "build_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "rebuild_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebuild Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "dry_run",
+          "understanding_enabled",
+          "sessions",
+          "jobs",
+          "queued",
+          "merged",
+          "estimate",
+          "cost_basis",
+          "build_id",
+          "rebuild_id"
+        ],
+        "title": "BuildResponse",
+        "description": "POST /api/agents/{agent_id}/understanding/build response.\n\n`build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs\nnewly on the queue, `merged` those of the same stretch already live. `jobs` may be empty\n(everything chosen is covered): the rebuild of the upper levels is still queued."
+      },
       "CancelRequest": {
         "properties": {
           "agent_id": {
@@ -9332,6 +9788,42 @@
         ],
         "title": "ConversationSnapshotResponse",
         "description": "The selected agent's three conversation read models, one point in time.\n\n`timeline` carries the same head window `GET .../timeline` serves (no\ncursor); `token_usage` and `pending` mirror their standalone endpoints\nsection-for-section (drift is caught by the side-by-side contract test)."
+      },
+      "CostEstimateOut": {
+        "properties": {
+          "jobs": {
+            "type": "integer",
+            "title": "Jobs"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobs",
+          "input_tokens",
+          "output_tokens",
+          "cost_usd"
+        ],
+        "title": "CostEstimateOut",
+        "description": "The cold-cache price of building what a session (or a request) still lacks.\n\n`cost_usd` is None when the agent's model has no price. See `cost_basis` of the response."
       },
       "DefaultModelView": {
         "properties": {
@@ -13012,6 +13504,98 @@
         "title": "Priority",
         "description": "Stakes rung: P0 (highest) through P3 (lowest)."
       },
+      "RebuildProgressOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "leaves": {
+            "type": "integer",
+            "title": "Leaves"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "seconds": {
+            "type": "number",
+            "title": "Seconds"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "levels": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Levels"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "attempts",
+          "error",
+          "leaves",
+          "calls",
+          "input_tokens",
+          "cache_read_tokens",
+          "output_tokens",
+          "seconds",
+          "cost_usd",
+          "levels"
+        ],
+        "title": "RebuildProgressOut",
+        "description": "The build's rebuild of the upper levels. `leaves` is the level-1 nodes it replayed; the usage\nis that of the grouping calls since it started (or, before it starts, since the build); `levels`\ncounts the agent's nodes per level above 1 right now."
+      },
       "ReferenceTps": {
         "properties": {
           "display": {
@@ -14388,6 +14972,147 @@
         ],
         "title": "ServicesStatus",
         "description": "GET /api/status services sub-section."
+      },
+      "SessionCoverage": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "none",
+              "partial",
+              "full"
+            ],
+            "title": "Status"
+          },
+          "ratio": {
+            "type": "number",
+            "title": "Ratio"
+          },
+          "covered_messages": {
+            "type": "integer",
+            "title": "Covered Messages"
+          },
+          "total_messages": {
+            "type": "integer",
+            "title": "Total Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "ratio",
+          "covered_messages",
+          "total_messages"
+        ],
+        "title": "SessionCoverage",
+        "description": "How much of a session's describable material the level-1 nodes cover.\n\n`none` / `partial` / `full`; `ratio` is `covered_messages / total_messages`. Runs that hold only\nframework notes count as covered. A session with nothing to describe is `full`."
+      },
+      "SessionOut": {
+        "properties": {
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "boundary_checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boundary Checkpoint Id"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          },
+          "peak_input_tokens": {
+            "type": "integer",
+            "title": "Peak Input Tokens"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/SessionCoverage"
+          },
+          "estimate": {
+            "$ref": "#/components/schemas/CostEstimateOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "number",
+          "boundary_checkpoint_id",
+          "start",
+          "end",
+          "messages",
+          "peak_input_tokens",
+          "coverage",
+          "estimate"
+        ],
+        "title": "SessionOut",
+        "description": "One session. `number` 1 is the oldest. `boundary_checkpoint_id` is None for the session in\nprogress. `start` / `end` are the first and last message read times (None when no message has one)."
+      },
+      "SessionsResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "understanding_enabled": {
+            "type": "boolean",
+            "title": "Understanding Enabled"
+          },
+          "cost_basis": {
+            "type": "string",
+            "title": "Cost Basis"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionOut"
+            },
+            "type": "array",
+            "title": "Sessions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "model",
+          "understanding_enabled",
+          "cost_basis",
+          "sessions"
+        ],
+        "title": "SessionsResponse",
+        "description": "GET /api/agents/{agent_id}/sessions response.\n\n`model` is the agent's model, the one the build's jobs run and are priced for. `cost_basis`\nstates how every `estimate` is computed."
       },
       "ShellCaptureResponse": {
         "properties": {
@@ -15973,82 +16698,6 @@
         ],
         "title": "UiThemeContribution",
         "description": "One named token pack a plugin offers the theme picker.\n\n`tokens` is a partial map of the console's own `:root` custom properties to\ncolor literals — validated at manifest load, so the console applies the\nvalues as given. Unset tokens keep the console default, which is why a pack\nthat names three colors is a legitimate skin rather than a broken one.\n\n`dark_tokens` is the pack's dark-mode half, and `null` is a MEANINGFUL\nvalue rather than a missing one: it declares that the pack deliberately\npins both modes to `tokens`. That distinction has to survive onto the wire\nbecause it is what the picker tells the user — a pack applied over both\npalettes silently disables the light/dark toggle for every color it sets,\nand a skin and a mode that fight is the failure this field exists to make\nvisible. With it set, `tokens` is the light half and the two stay\northogonal."
-      },
-      "UnderstandingCloseResponse": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "enqueued",
-              "empty",
-              "active_job"
-            ],
-            "title": "Status"
-          },
-          "job_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Job Id"
-          },
-          "compact_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Compact Version"
-          },
-          "start_index": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start Index"
-          },
-          "end_index": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "End Index"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "status",
-          "job_id",
-          "compact_version",
-          "start_index",
-          "end_index",
-          "detail"
-        ],
-        "title": "UnderstandingCloseResponse"
       },
       "UploadedBatch": {
         "properties": {

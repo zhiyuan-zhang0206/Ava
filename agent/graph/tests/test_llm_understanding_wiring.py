@@ -84,7 +84,7 @@ def _turn(input_tokens: int, *, tool: bool) -> list[AIMessageChunk]:
 @pytest.fixture
 def enqueued(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(settings.agent, "understanding_chunk_tokens", 1000)
+    monkeypatch.setattr(uc, "chunk_threshold", lambda *_a: 1000)
     calls: list[dict] = []
 
     async def fake(pool: object, agent_id: int, **kwargs: object) -> bool:
