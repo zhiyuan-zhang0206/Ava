@@ -626,7 +626,7 @@ class TestSendSystemNote:
         assert kind == "system_note"
         assert source == f"agent:{ava.self.AGENT_ID}"
         assert "assigned to you" in content
-        assert payload == {"note_tag": "task"}
+        assert payload == {"note_tag": "task", "delivery_resurrect": True}
 
     def test_send_system_note_preserves_explicit_task_id(self, db_conn: psycopg.Connection) -> None:
         pin_agent(_spawn_agent())
@@ -650,7 +650,7 @@ class TestSendSystemNote:
             cur.execute("SELECT payload FROM inbound_messages WHERE agent_id = %s", (peer_id,))
             row = cur.fetchone()
         assert row is not None
-        assert row[0] == {"note_tag": "task", "task_id": task_id}
+        assert row[0] == {"note_tag": "task", "task_id": task_id, "delivery_resurrect": True}
 
     def test_send_system_note_to_terminated_is_fine(self, db_conn: psycopg.Connection) -> None:
         """A note with resurrect=True (task assignment) reaches a terminated
