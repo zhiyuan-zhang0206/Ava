@@ -496,7 +496,9 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
     agent_package = source_root / "agent"
     agent_package.mkdir(parents=True)
     (agent_package / "__init__.py").write_text("")
-    (agent_package / "exec_child.py").write_text("VALUE = 'source'\n")
+    (agent_package / "execution").mkdir()
+    (agent_package / "execution" / "__init__.py").write_text("")
+    (agent_package / "execution" / "child.py").write_text("VALUE = 'source'\n")
     subprocess.run(  # noqa: S603 — test-owned interpreter and venv path
         [sys.executable, "-m", "venv", str(source_root / ".venv")],
         check=True,
@@ -519,7 +521,9 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
     allowed_agent = allowed_root / "agent"
     allowed_agent.mkdir(parents=True)
     (allowed_agent / "__init__.py").write_text("")
-    (allowed_agent / "exec_child.py").write_text("VALUE = 'allowed'\n")
+    (allowed_agent / "execution").mkdir()
+    (allowed_agent / "execution" / "__init__.py").write_text("")
+    (allowed_agent / "execution" / "child.py").write_text("VALUE = 'allowed'\n")
     pth.write_text(str(allowed_root))
 
     assert (
@@ -537,14 +541,16 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
     decoy = neutral_dir / "agent"
     decoy.mkdir(parents=True)
     (decoy / "__init__.py").write_text("")
-    (decoy / "exec_child.py").write_text("VALUE = 'decoy'\n")
+    (decoy / "execution").mkdir()
+    (decoy / "execution" / "__init__.py").write_text("")
+    (decoy / "execution" / "child.py").write_text("VALUE = 'decoy'\n")
     pth.write_text(f"{neutral_dir}\n")
     monkeypatch.setattr(editable_install.tempfile, "gettempdir", lambda: str(neutral_dir))
     violations = editable_install.editable_import_gate(source_root)
 
     assert len(violations) == 1
     assert "path=" in violations[0]
-    assert str(decoy / "exec_child.py") in violations[0]
+    assert str(decoy / "execution" / "child.py") in violations[0]
 
     for candidate in (
         source_root / ".venv" / "bin" / "python3",
