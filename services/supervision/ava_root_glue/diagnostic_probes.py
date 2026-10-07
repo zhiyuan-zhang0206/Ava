@@ -193,12 +193,6 @@ class LokiReport:
         )
 
 
-def helper_report(result: DaemonProbe) -> None:
-    from services.supervision.healthchecks import permissions_helper
-
-    permissions_helper.report(result)
-
-
 def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
     from base.cluster.machine import is_gateway
@@ -208,9 +202,9 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
         checks.append(Diagnostic("brew-pin", brew_pins))
     checks.append(Diagnostic("venv", venv))
     if IS_MACOS:
-        from services.supervision.healthchecks.permissions_helper import probe
+        from services.supervision.healthchecks.permissions_helper import episode_reporter, probe
 
-        checks.append(Diagnostic("permissions-helper", probe, report=helper_report))
+        checks.append(Diagnostic("permissions-helper", probe, report=episode_reporter()))
     if is_gateway():
         if not settings.data_plane.is_remote:
             checks.append(Diagnostic("redis-acl", redis_acl))
