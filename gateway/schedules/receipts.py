@@ -7,28 +7,15 @@ from fastapi import HTTPException, Request
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
-from gateway.auth.request_principal import PrincipalScopeError, request_key
+from gateway.auth.request_principal import PrincipalScopeError, optional_request_key
 
 
 def operation_key(request: Request) -> str | None:
-    key = request.headers.get("Idempotency-Key")
-    if key is None:
-        if request.headers.get("Idempotency-Scope") is not None:
-            raise HTTPException(
-                status_code=400, detail="Idempotency-Scope requires Idempotency-Key"
-            )
-        return None
-    if not key or len(key) > 128:
-        raise HTTPException(
-            status_code=400, detail="idempotency key must contain 1 to 128 characters"
-        )
     try:
-        scoped = request_key(request, key, method=request.method, path=request.url.path)
+        key = optional_request_key(request)
     except PrincipalScopeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # Legacy key space must still distinguish routes, unlike a principal-v1
-    # key which already includes this identity. No caller-controlled labels.
-    return f"{request.method}:{request.url.path}:{scoped}"
+    return None if key is None else f"{request.method}:{request.url.path}:{key}"
 
 
 def begin(

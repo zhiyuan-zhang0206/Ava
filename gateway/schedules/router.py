@@ -30,6 +30,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
+from gateway import creation_receipts
 from gateway.agents.router import create_and_launch_agent
 from gateway.schedules import receipts, session_control
 from ops.rpc_schemas import SpawnAgentRequest
@@ -221,12 +222,29 @@ async def list_schedules(request: Request) -> list[ScheduleSummary]:
     return await asyncio.to_thread(_list_blocking, request.app.state.db_pool)
 
 
-def _create_blocking(pool: ConnectionPool[Any], body: ScheduleCreate) -> tuple[Any, ...]:
+def _create_blocking(
+    pool: ConnectionPool[Any], body: ScheduleCreate, key: str | None = None
+) -> tuple[Any, ...]:
     """Sync create (syntax check + INSERT + version snapshot) — via to_thread."""
     _validate_script(body.script)
     try:
-        with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-            cur.execute("SET TRANSACTION READ WRITE")
+        with write_transaction(pool) as conn, conn.cursor() as cur:
+            created = creation_receipts.begin(
+                conn, key, {"resource": "schedule", "body": body.model_dump()}
+            )
+            if created is not None:
+                return (
+                    created.resource_id,
+                    body.name,
+                    body.description,
+                    body.command,
+                    body.enabled,
+                    "stopped",
+                    None,
+                    created.created_at,
+                    created.updated_at,
+                    body.script,
+                )
             cur.execute(
                 f"INSERT INTO schedules (name, description, script, command, enabled) "  # noqa: S608
                 f"VALUES (%s, %s, %s, %s, %s) RETURNING {_FULL_COLS}",
@@ -239,6 +257,7 @@ def _create_blocking(pool: ConnectionPool[Any], body: ScheduleCreate) -> tuple[A
                 "VALUES (%s, %s, %s, %s)",
                 (row[0], body.script, body.command, "initial"),
             )
+            creation_receipts.finish(conn, key, creation_receipts.Creation(row[0], row[7], row[8]))
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
             status_code=409, detail=f"schedule named {body.name!r} already exists"
@@ -249,7 +268,9 @@ def _create_blocking(pool: ConnectionPool[Any], body: ScheduleCreate) -> tuple[A
 @router.post("/api/schedules", status_code=201)
 async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleView:
     """Create a schedule. 400 on a script syntax error, 409 on a name clash."""
-    row = await asyncio.to_thread(_create_blocking, request.app.state.db_pool, body)
+    row = await asyncio.to_thread(
+        _create_blocking, request.app.state.db_pool, body, creation_receipts.operation_key(request)
+    )
     # A newly-created enabled schedule is launched by the reconcile loop within a
     # poll interval; no explicit sync needed here.
     return _view(row)

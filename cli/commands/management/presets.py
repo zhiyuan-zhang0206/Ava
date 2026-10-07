@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
-from typing import Any
+from typing import Any, cast
 
 _TIMEOUT_S = 15.0
 
@@ -96,6 +96,8 @@ def cmd_presets_create(
     name: str, label: str, description: str | None, config_json: str | None
 ) -> int:
     """`ava presets create --name N --label L [--description D] [--config JSON]`."""
+    from uuid import uuid4
+
     from base.cluster.machine import gateway_auth_headers
     from base.host.net.http_dial import post as dial_post
 
@@ -109,14 +111,19 @@ def cmd_presets_create(
         if not isinstance(parsed, dict):
             print('config must be a JSON object, e.g. {"llm_model":"..."}', file=sys.stderr)
             return 1
-        config = parsed
+        config = cast(dict[str, object], parsed)
 
     body: dict[str, object] = {"name": name, "label": label, "config": config}
     if description is not None:
         body["description"] = description
 
     url = f"{_gateway_base()}/api/presets"
-    resp = dial_post(url, json=body, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    resp = dial_post(
+        url,
+        json=body,
+        timeout=_TIMEOUT_S,
+        headers={**gateway_auth_headers(), "Idempotency-Key": str(uuid4())},
+    )
     if resp.status_code == 409:
         print(f"preset named {name!r} already exists", file=sys.stderr)
         return 1
