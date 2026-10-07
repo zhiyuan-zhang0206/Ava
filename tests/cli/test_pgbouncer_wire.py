@@ -651,7 +651,7 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        monkeypatch.setattr(code_version, "_version", 4321)
+        monkeypatch.setattr(code_version, "get", lambda: 4321)
         monkeypatch.setattr(code_version, "_db_gate_exempt", False)
         monkeypatch.setattr(gate, "_last_read_at", None)  # the minimum is read on this dial
 

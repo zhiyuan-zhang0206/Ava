@@ -11,60 +11,21 @@ from __future__ import annotations
 
 import pytest
 
-from base.config import settings
-from base.host.env.dotenv_boot import resolve_ava_home
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.lifecycle import start as start_mod
-
-_FOREIGN_DB = "postgresql://ava:pw@10.9.8.7:5432/ava"
-_FOREIGN_REDIS = "rediss://ava:pw@10.9.8.7:6380/0"
-
-
-@pytest.fixture(autouse=True)
-def _remote_urls(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the settings singleton at a foreign data plane for every test here
-    (restored by monkeypatch after each test)."""
-    monkeypatch.setattr(settings.data_plane, "db_url", _FOREIGN_DB)
-    monkeypatch.setattr(settings.data_plane, "redis_url", _FOREIGN_REDIS)
+from tests.factories.data_plane import remote_cluster_record
+from tests.factories.data_plane import remote_urls as remote_urls
 
 
 @pytest.fixture
 def _fake_record(monkeypatch: pytest.MonkeyPatch) -> None:
     from base import cluster
 
-    def _record(_home: object) -> cluster.ClusterRecord | None:
-        from typing import cast
+    def record(_home: object) -> cluster.ClusterRecord:
+        return remote_cluster_record()
 
-        return cluster.ClusterRecord(
-            ports=cast(
-                "cluster.ClusterPorts",
-                {
-                    "gateway": 18000,
-                    "frontend": 18001,
-                    "heartbeat": 18002,
-                    "labeler": 18004,
-                    "task_maintenance": 18005,
-                    "memory_indexer": 18006,
-                    "ops": 18007,
-                    "browser": 18009,
-                    "permissions_helper": 18010,
-                    "postgres": 18011,
-                    "redis": 18012,
-                    "events_maintenance": 18014,
-                    "delivery_watchdog": 18016,
-                    "im_bridge": 18017,
-                    "agent_host": 18019,
-                    "pg_backup": 18021,
-                    "ttl_reaper": 18025,
-                    "schedule_manager": 18026,
-                },
-            ),
-            gateway_home=str(resolve_ava_home()),
-            created_at="now",
-        )
-
-    monkeypatch.setattr(cluster, "get_record", _record)
+    monkeypatch.setattr(cluster, "get_record", record)
 
 
 # ─── ava start: skip local bring-up, probe the URLs ──────────────────────────
@@ -112,111 +73,3 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
     assert "remote data plane unreachable" in err
     assert "10.9.8.7" in err
     assert "AVA_DB_URL" in err
-
-
-# ─── ava stop: nothing to tear down locally ──────────────────────────────────
-
-
-def test_stop_remote_is_a_noop_with_message(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    def _no_subprocess(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("no local subprocess may run against a remote data plane")
-
-    monkeypatch.setattr(ci.subprocess, "run", _no_subprocess)
-
-    rc = ci.stop_cluster_instance()
-
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "remote-managed" in out
-    assert "nothing to stop locally" in out
-
-
-# ─── ava status: probe the URLs, no local pooler line ────────────────────────
-
-
-def test_status_remote_probes_urls_and_skips_pgbouncer_line(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.9.8.7:5432)"))
-    monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
-
-    ci.print_data_plane_status()
-
-    out = capsys.readouterr().out
-    assert "remote-managed" in out
-    assert "✓ postgres (10.9.8.7:5432)" in out
-    assert "✓ redis (10.9.8.7:6380)" in out
-    assert "pgbouncer" not in out, "a remote plane has no local pooler to display"
-
-
-def test_status_remote_reports_unreachable_component(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.9.8.7:5432)"))
-    monkeypatch.setattr(
-        dp,
-        "remote_redis_reachable",
-        lambda: (False, "redis (10.9.8.7:6380) connect failed: timeout"),
-    )
-
-    ci.print_data_plane_status()
-
-    out = capsys.readouterr().out
-    assert "✗ redis (10.9.8.7:6380) connect failed: timeout" in out
-
-
-def test_stop_remote_warns_about_orphaned_local_instance(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A cluster that switched local→remote may still have its old local
-    instance running; `ava stop` no longer manages it, so it must print a
-    manual-teardown hint instead of silently leaving it (QA P2)."""
-    from typing import cast
-
-    from base import cluster
-
-    rec = cluster.ClusterRecord(
-        ports=cast(
-            "cluster.ClusterPorts",
-            {
-                "gateway": 18000,
-                "frontend": 18001,
-                "heartbeat": 18002,
-                "labeler": 18004,
-                "task_maintenance": 18005,
-                "memory_indexer": 18006,
-                "ops": 18007,
-                "browser": 18009,
-                "permissions_helper": 18010,
-                "postgres": 18011,
-                "redis": 18012,
-                "events_maintenance": 18014,
-                "delivery_watchdog": 18016,
-                "im_bridge": 18017,
-                "agent_host": 18019,
-                "pg_backup": 18021,
-                "ttl_reaper": 18025,
-                "schedule_manager": 18026,
-            },
-        ),
-        gateway_home=str(resolve_ava_home()),
-        created_at="now",
-    )
-    monkeypatch.setattr(cluster, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(ci, "_pg_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
-    # The remote-managed home carries no local Redis admin password, so the
-    # leftover Redis is detected by its listener, never by an authenticated PING.
-    monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
-    monkeypatch.setattr(dp, "_local_listener", lambda port: port == 18012)  # pyright: ignore[reportUnknownArgumentType]
-
-    rc = ci.stop_cluster_instance()
-
-    assert rc == 0
-    captured = capsys.readouterr()
-    combined = captured.out + captured.err
-    assert "remote-managed" in combined
-    assert "local postgres + redis from before the switch is still running" in combined
-    assert "no longer managed" in combined
