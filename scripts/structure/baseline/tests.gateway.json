@@ -1,6 +1,4 @@
 {
   "files": {},
-  "patch_targets": {
-    "tests/gateway/test_cluster_endpoints.py::ops.cluster_status._supervisor_online": 1
-  }
+  "patch_targets": {}
 }
