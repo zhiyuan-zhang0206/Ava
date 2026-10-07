@@ -1,10 +1,11 @@
 """Native readiness never authorizes changes to a foreign data-plane listener."""
 
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import DEFAULT, Mock
 from urllib.parse import urlsplit
 
 import pytest
@@ -178,6 +179,23 @@ def _assert_pg_birth(data: Path, port: int) -> tuple[OwnedProcess, bytes]:
     return owner, pg.receipt_path(data).read_bytes()
 
 
+def _forbid_new_pg_admission(patch: pytest.MonkeyPatch) -> None:
+    """A retained birth must neither prepare a pending receipt nor launch a child."""
+    write = pg.write_text_atomic
+
+    def retained_receipt(path: Path, text: str, *, sync_parent: bool = False) -> None:
+        receipt = pg.Receipt.model_validate_json(text)
+        assert receipt.state != "pending", "retained startup prepared a new admission"
+        write(path, text, sync_parent=sync_parent)
+
+    def retained_process(argv: list[str], **_kwargs: object) -> object:
+        assert Path(argv[0]).name != "postgres", "birth replacement"
+        return DEFAULT
+
+    patch.setattr(pg, "write_text_atomic", retained_receipt)
+    patch.setattr(subprocess, "Popen", Mock(wraps=subprocess.Popen, side_effect=retained_process))
+
+
 def _assert_warm_pg_repeat(data: Path, port: int, first: OwnedProcess, persisted: bytes) -> None:
     assert instance._start_pg(port, "") == 0
     repeated = ownership.postgres(data)
@@ -273,7 +291,9 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
     local.parent.mkdir()
     local.symlink_to(foreign, target_is_directory=True)
     monkeypatch.setattr(instance, "_pg_data_dir", lambda: local)
-    monkeypatch.setattr(pg, "_read", Mock(side_effect=AssertionError("foreign receipt read")))
+    monkeypatch.setattr(
+        pg, "regular_bytes", Mock(side_effect=AssertionError("foreign receipt read"))
+    )
     monkeypatch.setattr(
         instance, "_ensure_pg_data", Mock(side_effect=AssertionError("initdb effect"))
     )
@@ -296,7 +316,7 @@ def test_real_stopped_postmaster_cannot_pass_warm_readiness(
             with monkeypatch.context() as context:
                 context.setattr(instance, "_PG_START_TIMEOUT_S", 0.25)
                 context.setattr(instance, "_PG_PROBE_TIMEOUT_S", 0.1)
-                context.setattr(pg, "_spawn", Mock(side_effect=AssertionError("birth replacement")))
+                _forbid_new_pg_admission(context)
                 with pytest.raises(RuntimeError, match="did not become ready"):
                     instance._start_pg(port, "")
             assert owner.live() and pg.receipt_path(data).read_bytes() == before
@@ -329,7 +349,7 @@ def test_real_interrupted_admission_completes_same_postmaster(
         assert captured is not None and captured.state == "captured"
         owner = captured.process()
         with monkeypatch.context() as context:
-            context.setattr(pg, "_spawn", Mock(side_effect=AssertionError("birth replacement")))
+            _forbid_new_pg_admission(context)
             assert instance._start_pg(port, "") == 0
         admitted, persisted = _assert_pg_birth(data, port)
         assert owner.same_birth(admitted)
