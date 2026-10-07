@@ -2728,3 +2728,17 @@ COMMENT ON TABLE im_bridge_notice_acceptances IS
     'Normal-poll notice source receipts with immutable destination/rendering or deliberate filter decision. No foreign-key pin or expiry; explicit listing is a separate producer.';
 
 INSERT INTO schema_migrations (name) VALUES ('20261007T194939_im-notice-poll-acceptance');
+CREATE TABLE agent_launch_retry_receipts (
+    operation_key text PRIMARY KEY,
+    agent_id bigint NOT NULL,
+    prior_attempt_id uuid NOT NULL,
+    launch_attempt_id uuid NOT NULL UNIQUE,
+    machine text NOT NULL,
+    config_overlay jsonb,
+    birth_config jsonb,
+    acceptance jsonb NOT NULL
+);
+COMMENT ON TABLE agent_launch_retry_receipts IS
+'Immutable guarded retry-launch intents; retain after target deletion, no TTL.';
+
+INSERT INTO schema_migrations (name) VALUES ('20261008T021500_agent-launch-retry-receipts');
