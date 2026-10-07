@@ -17,7 +17,7 @@ one per **group of layer-0 message units** (`units.py`: inbound, text, reasoning
 result) the model splits a chunk into by meaning. The levels above:
 [[base/agents/history/hierarchy/docs/groups.ava.okf.md|Upper-level Grouping]].
 
-Off by default (`AVA_UNDERSTANDING_ENABLED`); `AVA_UNDERSTANDING_CHUNK_TOKENS` is the chunk size (60000).
+Off by default (`AVA_UNDERSTANDING_ENABLED`). `AVA_UNDERSTANDING_CHUNK_RATIO` (default 0.5, in (0, 1]) sets the chunk size: ratio x the agent model's soft compaction threshold (`chunk_threshold`, with agent overrides), ~187K on DeepSeek; shared by hook, build, replay.
 
 ## Trigger (`agent/hooks/understanding_chunks.py`, `agent/graph/llm/node.py`)
 
@@ -32,11 +32,25 @@ zeroing it.
 **Compaction closes the segment**: `stamp_compact_boundary` enqueues the remainder from the
 last cut to the segment's end, with the boundary checkpoint id it stamped.
 
-**Manual close**: `POST /api/agents/{id}/understanding/close` (`gateway/agents/understanding.py`)
-enqueues the live segment's undescribed tail (from the last job's end or a failed job's start to
-the last sendable request), read from the live checkpoint. Statuses `enqueued` / `empty` /
-`active_job`; the gateway reads no `agent` settings, so with the feature off the job waits.
-Nothing calls it automatically; its prefix is usually cold (full input price).
+**Manual build, session by session**: `GET /api/agents/{id}/sessions` and
+`POST /api/agents/{id}/understanding/build` (`gateway/agents/understanding.py`;
+`sessions.py`, `build.py`, `chunk_plan.py`). A *session* is one compaction segment (1 = oldest, stable; the unclosed newest has no boundary). `build.plan_jobs` replays the live
+trigger rule over the chosen sessions (`chunk_plan.plan_replay`, threshold
+`chunk_threshold`, as the hook), cuts every chunk down to the runs no level-1 node covers (one job per
+run; a run of framework notes only is dropped) and enqueues ordinary chunk jobs (a closed session's
+name its boundary checkpoint; an ended job of the same stretch is revived, a live one merged into).
+The session in progress is built to the last request sent, which is what closing the live segment
+was. `dry_run` plans and prices only. Estimates are cold-cache (`build.COST_BASIS`). A build
+is recorded in `understanding_builds` (its jobs, its rebuild) and read back by
+`GET .../understanding/builds/{build_id}`.
+
+**Rebuild of the upper levels** (`rebuild.py`, table `understanding_rebuilds`): a build also queues
+one rebuild for its agent (builds merge into the agent's pending row under an advisory lock). The consumer loop claims it only when the agent has no chunk
+job pending or running; while it runs, the agent's chunk jobs are not claimed. It drops every node
+above level 1 and the agent's `understanding_group_state`, then replays the level-1 nodes in
+message order, running the grouping checks after each with that leaf as the horizon
+(`run_group_checks(upto=...)`), as live leaves grow it. An interrupted rebuild
+restarts from the lifted state; chunk jobs finishing while one is pending skip their grouping checks.
 
 ## Queue (`chunks.py`, table `understanding_chunk_jobs`)
 
