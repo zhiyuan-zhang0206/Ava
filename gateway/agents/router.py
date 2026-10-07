@@ -117,6 +117,8 @@ def get_models() -> ModelsResponse:
                 input=rates.cache_miss,
                 cache_read=rates.cache_hit,
                 output=rates.output,
+                cache_write_5m=rates.cache_write_5m,
+                cache_write_1h=rates.cache_write_1h,
             )
             # The model's default effort: the per-model tuning layer, resolved
             # through the registry's layering (NOT the raw field — same code

@@ -32,6 +32,7 @@ Currently 5: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `plugin_activa
 
 ## Notes
 
+- `/api/metrics` and `/api/metrics/agents` sum usage-time `cost_usd` snapshots, including cache-write costs and the served Standard/Fast rates. Recorded zero is priced; `unpriced=1` is counted without fabricating a cost. Only older rows lacking both fields retain the legacy token-based price calculation. Token totals and monetary totals are reduced independently within the same agent/window/since-compact scope.
 - Unlike the reverted `base/agent_perf` (agent-level profiling, introduced in #50, reverted in #76) — this is a system-level, event-driven metric, the only existing metrics module.
 - Helper pure functions: `group_by_agent` / `filter_since_compact` (only after the most recent compact) / `pctiles` / `agent_rollup` / `render_bar` / `render_pctiles` etc.
 

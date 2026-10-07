@@ -11926,6 +11926,28 @@
           "output": {
             "type": "number",
             "title": "Output"
+          },
+          "cache_write_5m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 5M"
+          },
+          "cache_write_1h": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H"
           }
         },
         "type": "object",

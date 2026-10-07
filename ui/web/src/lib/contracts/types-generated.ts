@@ -6131,6 +6131,10 @@ export interface components {
             cache_read: number;
             /** Output */
             output: number;
+            /** Cache Write 5M */
+            cache_write_5m?: number | null;
+            /** Cache Write 1H */
+            cache_write_1h?: number | null;
         };
         /**
          * ModelsResponse

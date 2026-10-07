@@ -19,3 +19,12 @@ def test_fast_services_have_separate_picker_prices_and_tps() -> None:
     assert fast.reasoning_effort_options == standard.reasoning_effort_options
     wire = catalog.model_dump(mode="json")
     assert wire["models"]["gpt-5.6-sol-fast"]["reference_tps"]["display"] == ">80"
+
+
+def test_picker_exposes_served_service_cache_write_rates() -> None:
+    catalog = get_models()
+    standard = catalog.models["claude-opus-5-5"].pricing
+    fast = catalog.models["claude-opus-5-5-fast"].pricing
+    assert standard is not None and fast is not None
+    assert (standard.cache_write_5m, standard.cache_write_1h) == (5, 8)
+    assert (fast.cache_write_5m, fast.cache_write_1h) == (10, 16)

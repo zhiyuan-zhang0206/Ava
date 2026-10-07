@@ -20,6 +20,8 @@ class ModelPricing(BaseModel):
     input: float  # cache-miss input rate
     cache_read: float  # cached input rate
     output: float  # output rate
+    cache_write_5m: float | None = None
+    cache_write_1h: float | None = None
 
 
 class ModelInfo(BaseModel):

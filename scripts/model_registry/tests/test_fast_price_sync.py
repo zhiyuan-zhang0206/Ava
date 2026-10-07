@@ -83,3 +83,28 @@ def test_fast_manifest_rejects_missing_base_model(tmp_path: Path) -> None:
     )
     with pytest.raises(RuntimeError, match="invalid or duplicate Fast model"):
         sync._provider_manifest(source, tmp_path / "provider.py")
+
+
+def test_cache_write_dimensions_survive_sync_at_every_rate_level(tmp_path: Path) -> None:
+    path = tmp_path / "provider.py"
+    manifest = sync._provider_manifest(_SOURCE, path)
+    fast = manifest.prices["fixture-fast"]
+    rates = sync.FlatRates(Decimal("4"), Decimal("0.4"), Decimal("12"), Decimal("5"), Decimal("8"))
+    window = sync._WindowDeclaration("01:00:00", "03:00:00", rates)
+    tier = sync._TierDeclaration(0, None, rates, (window,))
+    period = sync._PeriodDeclaration(None, None, (tier,))
+    target = fast._replace(rates=rates, periods=(period,))
+    rewritten, changed, _ = sync._rewrite_provider(
+        _SOURCE, path, manifest, {**manifest.prices, "fixture-fast": target}
+    )
+    assert changed == ("fixture-fast",)
+    assert sync._provider_manifest(rewritten, path).prices["fixture-fast"] == target
+    assert "cache_write_5m=5," in rewritten
+    assert 'cache_write_1h="8",' in rewritten
+
+
+@pytest.mark.parametrize("value", ["-1", 'float("nan")', "True"])
+def test_cache_write_source_rejects_invalid_or_executing_rates(tmp_path: Path, value: str) -> None:
+    source = _SOURCE.replace("cache_miss=2,", f"cache_miss=2, cache_write_5m={value},")
+    with pytest.raises((RuntimeError, TypeError)):
+        sync._provider_manifest(source, tmp_path / "provider.py")

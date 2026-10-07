@@ -19,7 +19,7 @@ envelope and boot events are not outcomes.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, LiteralString, cast
+from typing import Any, LiteralString, NamedTuple, cast
 
 import psycopg
 
@@ -202,6 +202,46 @@ def _llm_sums(
     return per_agent
 
 
+class LlmCostSums(NamedTuple):
+    """Recorded USD and explicitly unpriced calls, plus legacy-only tokens."""
+
+    cost: float
+    unpriced: int
+    legacy_calls: int
+    legacy_in: int
+    legacy_out: int
+    legacy_cached: int
+
+
+def _llm_cost_sums(
+    scope: _Scope, conn: psycopg.Connection[Any]
+) -> dict[int | None, dict[str, LlmCostSums]]:
+    """Keep recorded costs authoritative; only pre-snapshot rows need pricing."""
+    cost = _n(LLM_USAGE_KEYS["cost_usd"])
+    unpriced = _n(LLM_USAGE_KEYS["unpriced"], "integer")
+    legacy = f"{cost} IS NULL AND COALESCE({unpriced}, 0) <> 1"
+    sums = scope.run(
+        conn,
+        f"t.agent_id, COALESCE({LLM_USAGE_KEYS['model']}, ''), "
+        f"COALESCE(sum({cost}), 0), "
+        f"count(*) FILTER (WHERE {cost} IS NULL AND {unpriced} = 1), "
+        f"count(*) FILTER (WHERE {legacy}), "
+        + ", ".join(
+            f"COALESCE(sum({_n(LLM_USAGE_KEYS[key])}) FILTER (WHERE {legacy}), 0)::bigint"
+            for key in ("in_total", "out_total", "cache_read")
+        ),
+        "t.event_name = 'llm_usage'",
+        "GROUP BY t.agent_id, 2",
+    ).fetchall()
+    result: dict[int | None, dict[str, LlmCostSums]] = {}
+    for agent, model, recorded, missing, calls, tin, tout, cached in sums:
+        aid = int(agent) if agent is not None else None
+        result.setdefault(aid, {})[str(model)] = LlmCostSums(
+            float(recorded), int(missing), int(calls), int(tin), int(tout), int(cached)
+        )
+    return result
+
+
 def _llm_position(scope: _Scope, conn: psycopg.Connection[Any]) -> dict[str, tuple[int, int]]:
     """Cache-read and input sums in the early, mid and late thirds of each agent's `llm_usage`
     rows in time order (the buckets `third_of` defines, as integer arithmetic)."""
@@ -311,6 +351,7 @@ def read_window(
         "failure_types": _failure_types(scope, conn),
         "lengths": _lengths(scope, conn),
         "llm_per_agent": llm_per_agent,
+        "llm_costs": _llm_cost_sums(scope, conn),
         "llm_position": _llm_position(scope, conn),
         "fix_events": _fix_events(scope, conn),
         "spawners": spawners,
@@ -333,4 +374,5 @@ def read_agent_window(
     return {
         "per_agent": _per_agent_counters(scope, conn),
         "llm_per_agent": _llm_sums(scope, conn),
+        "llm_costs": _llm_cost_sums(scope, conn),
     }
