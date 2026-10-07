@@ -123,7 +123,7 @@ class GatewaySettings(EnvSettings):
     cluster_rpc_timeout_seconds: float = Field(
         default=30.0,
         alias="AVA_CLUSTER_RPC_TIMEOUT_SECONDS",
-        description="Default deadline (seconds) for one gateway -> agent-runner cluster op (ops/cluster_rpc.py dispatch_to_machine). Spawn typically finishes in <5s; lifecycle / config / inventory ops are quick. status_probe passes its own shorter timeout (task #698 G8).",
+        description="Default deadline (seconds) for one gateway -> agent-runner cluster op (ops/cluster/rpc.py dispatch_to_machine). Spawn typically finishes in <5s; lifecycle / config / inventory ops are quick. status_probe passes its own shorter timeout (task #698 G8).",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,

@@ -13,7 +13,7 @@ this unit's daemon or exec child — and two shapes are checked:
 - another agent-host daemon of this exact home (``-m services.agent_runner.agent_host.daemon``,
   home from its own environment; a daemon whose home cannot be read counts as
   this home, the rule the ops-side local host probe already uses);
-- a live managed exec child of the requested agent (``-m agent.exec_child``,
+- a live managed exec child of the requested agent (``-m agent.execution.child``,
   attributed through its ``AVA_EXEC_REQUEST_FILE`` envelope; ``AVA_AGENT_ID``
   is the fallback only when no envelope path is present).
 
@@ -37,7 +37,7 @@ from base.paths import exec_run_dir
 _DAEMON = "agent-host daemon"
 _EXEC_CHILD = "exec child"
 _DAEMON_ARGV = ("-m", "services.agent_runner.agent_host.daemon")
-_EXEC_CHILD_ARGV = ("-m", "agent.exec_child")
+_EXEC_CHILD_ARGV = ("-m", "agent.execution.child")
 
 
 @dataclass(frozen=True)

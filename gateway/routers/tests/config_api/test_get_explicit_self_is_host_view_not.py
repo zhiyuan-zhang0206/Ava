@@ -22,7 +22,7 @@ from gateway.routers.tests.test_config_api import (
 from gateway.routers.tests.test_config_api import (
     _stub_browser_capability as _stub_browser_capability,
 )
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult
 
 

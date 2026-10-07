@@ -150,7 +150,7 @@ def _recover_crash_marked_blocking(
             source="system",
             payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
         )
-        from base.agents.impersonation_manifest import record_central_event
+        from base.agents.impersonation.manifest import record_central_event
 
         prepared_event = record_audit(conn, record_central_event(conn, prepared_event))
     telemetry.emit_prepared(prepared_event)

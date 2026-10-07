@@ -40,7 +40,7 @@ startup does not grant permission to repair another installation. The
 acquisition and editable builds.
 
 The import proof runs the selected virtualenv interpreter in isolated mode from
-a temporary directory and checks the actual `agent.exec_child` path. A successful
+a temporary directory and checks the actual `agent.execution.child` path. A successful
 package-manager exit alone does not prove that the install is usable. Discovery
 covers POSIX `lib`/`lib64` and Windows `Lib` layouts. Inspection and repair must
 name the intended checkout and virtualenv explicitly;

@@ -4,7 +4,7 @@ LangChain and below the agent kernel, consolidated into one package.
 LangChain normalizes tool calls (`tool_calls`), usage, and content blocks, but
 not everything; the rest is collected here so the kernel, gateway, and the
 callers stay provider-agnostic. Plan for onboarding providers as
-plugins: `base/lm/model-providers-as-plugins.md`.
+plugins: `base/lm/docs/model-providers-as-plugins.md`.
 - `factory`   — `build_chat_model` (prefix dispatch to a plugin binding).
 - `provider_api` — the provider-plugin contract (`ProviderBinding`,
                 `BuildContext`, `ProviderContribution`).

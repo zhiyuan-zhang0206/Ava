@@ -252,7 +252,7 @@ class _OwnedRun:
                 "-X",
                 "utf8",
                 "-m",
-                "agent.exec_domain_owner",
+                "agent.execution.domain_owner",
                 "--context",
                 str(self.context_path),
             ],

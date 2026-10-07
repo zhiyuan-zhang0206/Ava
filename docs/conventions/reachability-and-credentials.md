@@ -19,7 +19,7 @@ addresses for the same unit.
 | Capability set | Advertised url | Dialers |
 |---|---|---|
 | gateway (with or without station) | `http://<reachable_host()>:<gateway port>` | informational; the page proxy's SSRF allowlist |
-| agent-runner (split or co-located) | `http://<reachable_host()>:<ops port>` | gateway cluster RPC (`ops/cluster_rpc.py`), spawn/lifecycle, roster + heartbeat probes |
+| agent-runner (split or co-located) | `http://<reachable_host()>:<ops port>` | gateway cluster RPC (`ops/cluster/rpc.py`), spawn/lifecycle, roster + heartbeat probes |
 | observability-station (pure) | `http://<reachable_host()>:<OTLP ingress port>` | remote gateway collector relay, the station health probe |
 
 Three rules:

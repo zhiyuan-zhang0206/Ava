@@ -39,7 +39,7 @@ from base.db import Database
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
 from base.sessions.page_session import is_page_label
-from ops import cluster_pause
+from ops.cluster import pause as cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 

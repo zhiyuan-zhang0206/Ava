@@ -332,7 +332,7 @@ def test_building_the_prompt_records_no_skill_attribution(
     # audit-event writer — so any regression that routes prompt assembly (or an
     # index render) into a skill_invoked write fails this test.
     monkeypatch.setattr(audit_events, "record_audit_reported", _record)
-    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
 
     prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 

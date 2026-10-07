@@ -85,7 +85,7 @@ def validate_native_ready(
             "-X",
             "utf8",
             "-m",
-            "agent.exec_domain_owner",
+            "agent.execution.domain_owner",
             "--context",
             str(context_path),
         ]

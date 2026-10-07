@@ -218,7 +218,7 @@ def test_agent_identity_holds_no_process_global_slot() -> None:
     """The identity is the bound context's, restored through its context variable. A slot added
     to the module would leak again, unnamed: the module annotates each process-global slot it
     holds, and it holds none."""
-    assert importlib.import_module("ava.agent_identity").__annotations__ == {}
+    assert importlib.import_module("ava.sdk_surface.agent_identity").__annotations__ == {}
 
 
 @pytest.mark.parametrize(("module", "name"), identity_restore.IDENTITY_CONTEXTVARS)

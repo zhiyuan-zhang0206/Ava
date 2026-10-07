@@ -182,7 +182,7 @@ def _stage_termination_event(
     event = prepare_event_log(
         event_type="terminate", agent_id=agent_id, source=source, payload=payload
     )
-    from base.agents.impersonation_manifest import record_central_event
+    from base.agents.impersonation.manifest import record_central_event
 
     return record_audit(conn, record_central_event(conn, event))
 

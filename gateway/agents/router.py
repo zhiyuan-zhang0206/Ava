@@ -30,7 +30,7 @@ from base.agents import (
     InvalidModelConfig,
     SpawnTargetNotAgentRunner,
 )
-from base.agents.impersonation_manifest import record_central_event
+from base.agents.impersonation.manifest import record_central_event
 from base.agents.labels import publish_label_updated, spawn_prompt_with_label
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module

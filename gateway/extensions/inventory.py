@@ -37,7 +37,7 @@ from gateway.extensions.schemas import (
     InventoryMachineView,
     InventoryWriteResult,
 )
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import InventoryReadItem, InventoryReadResult, InventoryWriteOpResult
 
 router = APIRouter()

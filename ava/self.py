@@ -4,8 +4,8 @@ import json as _json
 from typing import NoReturn
 
 import ava
-from ava import _settings
-from ava.attachment_transport import attach as attach
+from ava.sdk_surface import settings as _settings
+from ava.sdk_surface.attachment_transport import attach as attach
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 
@@ -28,7 +28,7 @@ __all_for_ava__ = [
 ]
 
 # AGENT_ID is the agent-facing read of this process's identity. The canonical
-# slot lives framework-internally in `ava.agent_identity` (set once by the bootstrap at
+# slot lives framework-internally in `ava.sdk_surface.agent_identity` (set once by the bootstrap at
 # process startup); this is a re-export served by the module `__getattr__`
 # below, NOT a stored attribute — so the kernel never reaches through this
 # disable-able `ava.self` module to learn who it is, and `AVA_SDK_DISABLE` can
@@ -54,9 +54,9 @@ def __getattr__(name: str) -> object:
         # routes through the doc-carrying constant renderer there.
         # Local import: the MACHINE_SPEC branch's `import ava` makes `ava` a
         # function-local name, so reach the bootstrap slot explicitly here.
-        import ava.agent_identity
+        import ava.sdk_surface.agent_identity
 
-        return ava.agent_identity.agent_id()
+        return ava.sdk_surface.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
         import ava
         from base.cluster.machine import machine_description, machine_name
@@ -135,7 +135,7 @@ def _publish_self_inbound_wake() -> None:
     `RedisInboundListener` and stays inside the ACL grant."""
     from redis.exceptions import ResponseError
 
-    from ava import agent_identity
+    from ava.sdk_surface import agent_identity
     from base.cluster import inbound_channel
     from base.log import logger
 
@@ -166,7 +166,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     `config_overlay` is a flat `{field_name: value}` mapping merged into your
     persistent per-agent settings."""
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
-    from ava import agent_identity
+    from ava.sdk_surface import agent_identity
 
     agent_identity.assert_self_action("restart")
     payload_json: str | None = None
@@ -221,7 +221,7 @@ def terminate() -> NoReturn:
 
     A new message, including one from background work, can wake you again. Stop
     background work that should no longer wake you before calling this."""
-    from ava import agent_identity
+    from ava.sdk_surface import agent_identity
 
     agent_identity.assert_self_action("terminate")
     with ava.DB.cursor() as cur:
@@ -247,7 +247,7 @@ def pause_heartbeat(duration: float) -> None:
             ava.self.restart(config_overlay=...)).
     """
     duration = coerce_typed(duration, "duration", (int, float))
-    from ava import agent_identity
+    from ava.sdk_surface import agent_identity
 
     if not duration > 0:
         raise ValueError(f"duration must be greater than 0 seconds, got {duration!r}")
@@ -297,7 +297,7 @@ def compact(summary: str) -> NoReturn:
     Verbatim tail (exclude the compaction request that triggered this).
     """
     summary = coerce_str(summary, "summary")
-    from ava import agent_identity
+    from ava.sdk_surface import agent_identity
 
     agent_identity.assert_self_action("compact")
     from base import telemetry

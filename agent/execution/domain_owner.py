@@ -180,7 +180,7 @@ def run(context_path: Path) -> None:
         "-X",
         "utf8",
         "-m",
-        "agent.exec_owner_child",
+        "agent.execution.owner_child",
         "--context",
         str(context_path),
     ]

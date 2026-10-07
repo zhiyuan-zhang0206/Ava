@@ -15,9 +15,8 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import event_log
 from base.agents.impersonation import history as history
-from base.agents.impersonation.tests import test_history as history_cases
-from base.agents.impersonation_event_signals import emit_incomplete_event_logs
-from base.agents.impersonation_manifest import (
+from base.agents.impersonation.event_signals import emit_incomplete_event_logs
+from base.agents.impersonation.manifest import (
     LocalParticipant,
     bind_local_participant,
     capture_local_event,
@@ -27,6 +26,7 @@ from base.agents.impersonation_manifest import (
     seal_local_participant,
     unbind_local_participant,
 )
+from base.agents.impersonation.tests import test_history as history_cases
 from base.cluster.machine import machine_name
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus

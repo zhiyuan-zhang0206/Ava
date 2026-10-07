@@ -70,7 +70,7 @@ existing clusters.
 
 A `.py` template is executed in-process by the runner, which hands it a clean
 `sys.argv` — just its own path, exactly what `python <script>` would give it; the
-runner's own argv (`python -m gateway.schedule_runner <id>`) never reaches the
+runner's own argv (`python -m gateway.schedules.runner <id>`) never reaches the
 script, so a template's CLI takes its own flags only (keep them usable for
 manual runs). On deploy, new manifest entries are
 provisioned and changed templates are resynced at the next `schedule-manager`

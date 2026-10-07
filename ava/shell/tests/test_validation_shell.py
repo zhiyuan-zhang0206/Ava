@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 import ava
-import ava.agent_identity
+import ava.sdk_surface.agent_identity
 from ava import shell as _shell
 
 
@@ -42,7 +42,7 @@ class TestShellEntries:
             "send",
             lambda sid, line: sent.update(sid=sid, line=line),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
+        monkeypatch.setattr(ava.sdk_surface.agent_identity, "agent_id", lambda: 900001)
 
         run = _shell.run_background(("echo hi",), name=("bg",), ttl=60)  # pyright: ignore[reportArgumentType]
         assert run.session_id == 42

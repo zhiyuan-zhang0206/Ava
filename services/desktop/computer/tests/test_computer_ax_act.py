@@ -159,7 +159,7 @@ def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     def record(_db: object, event: Any) -> None:
         log.append({"event_type": event.event_name, "payload": event.attributes})
 
-    monkeypatch.setattr("base.agents.impersonation_manifest.emit_recorded_central_event", record)
+    monkeypatch.setattr("base.agents.impersonation.manifest.emit_recorded_central_event", record)
     return log
 
 

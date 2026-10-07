@@ -247,7 +247,7 @@ def test_every_consumption_records_one_event_and_nothing_is_remembered(
     import ava
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
 
     written: list[Any] = []
 
@@ -371,7 +371,7 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     agent_id = spawn_agent()
-    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: agent_id)
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: agent_id)
 
     skills_mod.read("alpha")
     skills_mod.read("alpha")
@@ -395,7 +395,7 @@ def test_a_failed_write_is_reported_and_does_not_fail_the_read(
     reported through the audit module's loud path (error log with traceback plus
     an `audit_write_failed` anomaly event)."""
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
 
     def _boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("database down")

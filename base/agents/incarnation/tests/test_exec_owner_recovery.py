@@ -246,7 +246,7 @@ def test_windows_redirector_still_requires_exact_owner_ancestry(
         "-X",
         "utf8",
         "-m",
-        "agent.exec_domain_owner",
+        "agent.execution.domain_owner",
         "--context",
         str(context),
     ]

@@ -188,11 +188,11 @@ def test_shell_session_index_passes_the_resilience_kwargs(
     """Configuration pin, not a behavioural assertion: `ava.shell.sessions.new()`'s
     session-index allocation hands libpq `PG_KEEPALIVE_KWARGS` and never
     prepares (`prepare_threshold=None`)."""
-    import ava.agent_identity
-    from ava._settings import shell_sessions
+    import ava.sdk_surface.agent_identity
+    from ava.sdk_surface.settings import shell_sessions
     from ava.shell.sessions import ShellSessions
 
-    monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 1)
+    monkeypatch.setattr(ava.sdk_surface.agent_identity, "agent_id", lambda: 1)
     handle = cast("ShellSessions", shell_sessions())
     seen = _record_connect_kwargs(monkeypatch)
     with pytest.raises(psycopg.OperationalError):
@@ -222,11 +222,11 @@ def test_shell_session_ttl_sites_never_prepare(monkeypatch: pytest.MonkeyPatch) 
     everywhere."""
     from datetime import UTC, datetime
 
-    import ava.agent_identity
-    from ava._settings import shell_sessions
+    import ava.sdk_surface.agent_identity
+    from ava.sdk_surface.settings import shell_sessions
     from ava.shell.sessions import ShellSessions
 
-    monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 1)
+    monkeypatch.setattr(ava.sdk_surface.agent_identity, "agent_id", lambda: 1)
     handle = cast("ShellSessions", shell_sessions())
     dials: list[Callable[[], object]] = [
         lambda: handle.record_ttl(1, 60.0),

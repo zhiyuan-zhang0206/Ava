@@ -2,7 +2,7 @@
 
 A provider plugin makes one more vendor's models *nameable*. It never decides
 which model an agent runs on — no routing, no fallback, no per-turn hook
-(``base/lm/model-providers-as-plugins.md``,
+(``base/lm/docs/model-providers-as-plugins.md``,
 ``docs/decisions/2026-07-29-no-runtime-model-routing.md``). A ``provider.py`` registers nothing: it
 exports ``contribute()`` returning a ``PluginContributions`` whose ``providers`` hold one
 ``ProviderContribution`` each (the binding, the model rows and the prices). The process's model
@@ -127,7 +127,7 @@ class PriceRates:
     (``docs/decisions/2026-07-29-skill-trust-tiers-and-install-scan.md``). The
     flat fields are a readable shortcut for one unbounded base tier. ``periods``
     carries history, tiers, and recurring windows when present; its shape mirrors
-    ``base/lm/pricing_catalog_archive.json`` so runtime and archive selection
+    ``base/lm/pricing/pricing_catalog_archive.json`` so runtime and archive selection
     share one parser (``docs/decisions/2026-08-18-versioned-model-pricing-catalog.md``).
     """
 

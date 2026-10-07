@@ -702,7 +702,7 @@ def emit_prepared(event: Event) -> None:
         # The external-controller recorder is deliberately at the producer
         # seam, before this bounded queue can shed the event.  Its import stays
         # lazy to preserve telemetry's standalone startup path.
-        from base.agents.impersonation_manifest import capture_local_event
+        from base.agents.impersonation.manifest import capture_local_event
 
         event = capture_local_event(event)
         pipeline = _ensure_pipeline()

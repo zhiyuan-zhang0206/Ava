@@ -62,11 +62,11 @@ def shell_sessions() -> "ShellSessions":  # noqa: F821  # pyright: ignore[report
     Raises RuntimeError when this process has no agent identity: shell sessions are an agent's,
     so a standalone script that imports ava gets an explicit refusal, never another agent's or
     a global's sessions."""
-    import ava.agent_identity
+    import ava.sdk_surface.agent_identity
     from ava.shell.sessions import ShellSessions
     from base.sessions.backend import get_shell_backend
 
-    agent_id = ava.agent_identity.agent_id()
+    agent_id = ava.sdk_surface.agent_identity.agent_id()
     if agent_id is None:
         raise RuntimeError(
             "Cannot use shell sessions: this process has no agent identity. "
@@ -81,11 +81,13 @@ def shell_sessions() -> "ShellSessions":  # noqa: F821  # pyright: ignore[report
 def page_host() -> "PageHost":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """The page host this agent's `ava.ui` calls run against: this machine's reachable host and
     the agent's identity (RuntimeError when the process has none), read per call."""
-    import ava.agent_identity
+    import ava.sdk_surface.agent_identity
     from ava.ui import PageHost
     from base.cluster.machine import reachable_host
 
-    return PageHost(host=reachable_host(), agent_id=ava.agent_identity.require_agent_id())
+    return PageHost(
+        host=reachable_host(), agent_id=ava.sdk_surface.agent_identity.require_agent_id()
+    )
 
 
 def _attached() -> tuple[Mapping[str, Any], Any] | None:
@@ -109,7 +111,7 @@ def agent_setting(name: str) -> Any:
 
 # ── Plugin config hierarchical view ──
 #
-# `ava._settings.plugins.<plugin_name>` dynamically resolves the frozen Pydantic
+# `ava.sdk_surface.settings.plugins.<plugin_name>` dynamically resolves the frozen Pydantic
 # BaseModel instance for the current turn's agent (bound in by
 # the SDK install from the plugin's declared config; an attached agent's overrides by
 # `base/packages/plugins/config_view.py`).
@@ -124,7 +126,7 @@ def agent_setting(name: str) -> Any:
 
 
 class _PluginsView:
-    """`ava._settings.plugins` — attribute access routes to the turn's config
+    """`ava.sdk_surface.settings.plugins` — attribute access routes to the turn's config
     for that plugin (`base/packages/plugins/config_view.py`).
 
     Plugins not registered raise AttributeError listing known plugin names,
@@ -142,7 +144,7 @@ class _PluginsView:
         known = registered_plugin_config_names()
         if name not in known:
             raise AttributeError(
-                f"ava._settings.plugins.{name} does not exist — plugin {name!r} declares no "
+                f"ava.sdk_surface.settings.plugins.{name} does not exist — plugin {name!r} declares no "
                 f"config, or the SDK surface is not installed yet. "
                 f"Known plugins: {known or '<empty>'}"
             )

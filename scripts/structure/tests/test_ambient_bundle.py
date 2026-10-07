@@ -11,7 +11,7 @@ from scripts.structure import ambient_state
 from scripts.structure.ambient_state import bundle
 
 _BUNDLE_SOURCE = """
-    from base.wiring import root_bundle
+    from base.config.wiring import root_bundle
 
     @root_bundle
     class GatewayWiring:

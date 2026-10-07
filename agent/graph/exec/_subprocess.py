@@ -5,7 +5,7 @@ The parent polls every 50ms and owns teardown through direct-child reap,
 root-independent process-domain close, and a bounded output-reader join. POSIX
 owns a new process group. The child's result
 envelope stays advisory except for lifecycle outcomes. It spawns
-`python -I -B -X utf8 -m agent.exec_child`: isolated mode keeps the inherited cwd
+`python -I -B -X utf8 -m agent.execution.child`: isolated mode keeps the inherited cwd
 and Python environment out of bootstrap import resolution, and explicit UTF-8
 mode keeps output portable after isolated mode ignores encoding environment
 variables.
@@ -193,7 +193,7 @@ def _spawn(
         config_overlay=config_overlay,
         birth_config=birth_config,
     )
-    argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.exec_child"]
+    argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.execution.child"]
     try:
         return _process.ExecProcessDomain.launch_posix(
             argv,

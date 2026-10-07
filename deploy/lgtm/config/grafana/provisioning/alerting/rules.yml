@@ -4068,7 +4068,7 @@ groups:
       # so it stays true for 15m after the last failure and then resolves. One
       # episode = one firing IM + one resolved IM, the same dedup semantics the
       # siblings get from their `for` window (alerts are deduped on
-      # fingerprint x starts_at by base/telemetry/alerts.py, not on `for`).
+      # fingerprint x starts_at by base/telemetry/alerts/__init__.py, not on `for`).
       #
       # `billing` is emitted by base/lm/errors.py from its cross-provider
       # predicate (HTTP 402, plus a

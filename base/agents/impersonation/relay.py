@@ -275,7 +275,7 @@ def abort_lease(
     """
     from base.agents.impersonation import wake_agent
     from base.agents.impersonation.event_log import is_log_native
-    from base.agents.impersonation_manifest import close_event_admission
+    from base.agents.impersonation.manifest import close_event_admission
 
     detail = detail.strip()
     if not detail:

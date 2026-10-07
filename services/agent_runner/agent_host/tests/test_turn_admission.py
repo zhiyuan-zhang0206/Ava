@@ -1,4 +1,4 @@
-"""The hosted turn admission gate — services/agent_runner/agent_host/admission.py (#3584).
+"""The hosted turn admission gate — services/agent_runner/agent_host/scheduling/admission.py (#3584).
 
 `test_agent_host.py` locks that a configured cap queues excess turns and
 `test_turn_dispatcher.py` locks WHEN agents run. This file locks the gate's own
@@ -25,12 +25,12 @@ from contextlib import suppress
 from typing import cast
 
 from base.events.live.bus import EventBus
-from services.agent_runner.agent_host.admission import TurnAdmission
 from services.agent_runner.agent_host.dispatcher import (
     InboundWakeDispatcher,
     PendingInboundWake,
     TurnScheduler,
 )
+from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
 
 
 async def _until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:

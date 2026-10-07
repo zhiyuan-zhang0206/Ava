@@ -17,7 +17,7 @@ import pytest
 
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered
 from base.db import Database
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 
 
 def _db() -> Database:
@@ -140,7 +140,7 @@ async def test_status_probe_unreachable_logs_debug(
 
     _patch(monkeypatch, handler=_boom)
     with (
-        caplog.at_level(logging.DEBUG, logger="ops.cluster_rpc"),
+        caplog.at_level(logging.DEBUG, logger="ops.cluster.rpc"),
         pytest.raises(cluster_rpc.ClusterOpUnreachable),
     ):
         await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=0)
@@ -160,7 +160,7 @@ async def test_non_probe_unreachable_stays_warning(
 
     _patch(monkeypatch, handler=_boom)
     with (
-        caplog.at_level(logging.DEBUG, logger="ops.cluster_rpc"),
+        caplog.at_level(logging.DEBUG, logger="ops.cluster.rpc"),
         pytest.raises(cluster_rpc.ClusterOpUnreachable),
     ):
         await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch", {}, retries=0)
@@ -362,7 +362,7 @@ async def test_retries_exhausted_raises_after_all_attempts(
 async def test_retry_delay_is_bounded_and_jittered(monkeypatch: pytest.MonkeyPatch) -> None:
     """The raw (un-jittered) schedule is bounded: 0.5 · 2**attempt, capped at
     4s — a long outage never grows the gap unboundedly."""
-    from ops import cluster_rpc as cr
+    from ops.cluster import rpc as cr
 
     monkeypatch.setattr(
         cr.random,

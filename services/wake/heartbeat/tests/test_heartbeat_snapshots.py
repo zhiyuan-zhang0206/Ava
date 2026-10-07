@@ -15,7 +15,7 @@ import base.db
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
-from ops.cluster_rpc import ClusterOpUnreachable
+from ops.cluster.rpc import ClusterOpUnreachable
 from services.wake.heartbeat import daemon as heartbeat_daemon
 from services.wake.heartbeat.liveness import _probe_machine, run_liveness_pass
 

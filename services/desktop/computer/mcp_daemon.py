@@ -508,7 +508,7 @@ class ComputerMcpDaemon:
                 "task_id": args.get("task_id"),
             },
         )
-        from base.agents.impersonation_manifest import emit_recorded_central_event
+        from base.agents.impersonation.manifest import emit_recorded_central_event
 
         emit_recorded_central_event(self._db, event)
 
@@ -521,7 +521,7 @@ class ComputerMcpDaemon:
             source=f"agent:{agent_id}",
             payload=payload,
         )
-        from base.agents.impersonation_manifest import emit_recorded_central_event
+        from base.agents.impersonation.manifest import emit_recorded_central_event
 
         emit_recorded_central_event(self._db, event)
 

@@ -77,7 +77,7 @@ class TestAgentMachineList:
         # its own ops server like any other (status_probe), so stub the op
         # dispatch; the row survives the agent-view filter (only agent-runner
         # machines run agents).
-        from ops import cluster_rpc
+        from ops.cluster import rpc as cluster_rpc
 
         set_machine_identity(role="agent-runner", name="wsl-test")
 

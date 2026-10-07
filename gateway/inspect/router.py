@@ -30,7 +30,7 @@ from gateway.inspect.schemas import (
     PluginMetricResult,
 )
 from gateway.schemas.stats import StatsWindowHours
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import ShellInfo
 
 router = APIRouter()

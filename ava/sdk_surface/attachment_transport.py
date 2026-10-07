@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ava.files import resolve
 from ava.sdk_surface.validation import coerce_str
-from base.lm.attach_constants import (
+from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_LABEL_CHARS,
     ATTACH_MEDIA_MIME,
@@ -47,7 +47,7 @@ def _current_model() -> str:
 
     Capability gates judge the model that will actually run, so a withdrawn id
     is gated as its fallback (task #3212)."""
-    from ava import _settings
+    from ava.sdk_surface import settings as _settings
     from base.lm.registry import resolve_available_model
 
     return resolve_available_model(_settings.agent_setting("llm_model"))

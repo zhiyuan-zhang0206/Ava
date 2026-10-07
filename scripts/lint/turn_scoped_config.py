@@ -18,7 +18,7 @@ read path for turn-scoped code is the agent's slices
 
 The exec child and the SDK run one agent per process, so their settings carry
 that agent's overlay (boot applied it onto the singleton); the SDK reads a
-per-agent setting through `ava._settings.agent_setting`.
+per-agent setting through `ava.sdk_surface.settings.agent_setting`.
 
 ## Rules
 
@@ -40,7 +40,7 @@ auto-extends the ban with no manual list to maintain.
 map that boot rebuilds from the agent's overlay, so subscripting it in turn
 code returns whichever agent booted the process. Reads go through
 `get_plugin_config(plugin, slices)` (host side) or
-`process_plugin_config` (this process's own instance; `ava._settings.plugins`). Membership tests
+`process_plugin_config` (this process's own instance; `ava.sdk_surface.settings.plugins`). Membership tests
 (`name in _PLUGIN_CONFIGS`) are untouched — they ask whether a plugin is
 registered, which is not per-agent.
 
@@ -201,7 +201,7 @@ def main(argv: list[str]) -> int:
     _report(
         "per-agent config read through the bare settings singleton in turn-scoped code — read "
         "it from the agent's slices (base/host/env/agent_slices.py) or "
-        "`ava._settings.agent_setting`; in hosted mode the singleton holds the CLUSTER default, "
+        "`ava.sdk_surface.settings.agent_setting`; in hosted mode the singleton holds the CLUSTER default, "
         "not this agent's overlay:",
         errors,
     )

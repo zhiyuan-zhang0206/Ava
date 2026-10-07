@@ -275,7 +275,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     if args.impersonate_self:
-        from ava.agent_identity import require_agent_id
+        from ava.sdk_surface.agent_identity import require_agent_id
 
         require_agent_id()
         if args.status or args.cancel_generation:

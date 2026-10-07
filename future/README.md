@@ -7,6 +7,7 @@
 
 Organized by **direction**:
 
+- **agent/** — agent runtime and onboarding plans
 - **coding/** — coding agent ceiling, benchmark performance, coding-related follow-ups
 - **infra/** — infrastructure (data plane / config / ops / tests / toolchain)
 - **roadmap/** — the strategic capability roadmap
@@ -14,15 +15,16 @@ Organized by **direction**:
 Every row below states what is **left**, not what the doc is about — a doc with
 nothing left does not belong here.
 
-## coding — moved beside their modules (agent/ + ava_builtins/)
+## Agent plans and prompt documentation
 
-These four plans co-locate with the code they plan for, per the 2026-08-12 doc ruling; the rows keep tracking what is left.
+Unimplemented agent work lives in `future/agent/`. The prompt architecture document
+lives with the current agent documentation; these rows track its remaining work.
 
 | File | What's left |
 |------|------|
-| [Ava / Ava Code prompt architecture](../agent/prompt-architecture.md) | Living doc; the core-vs-`ava_code` responsibility split + the mechanics-vs-behavior axis. Open: malicious-code refusal stance (pending a threat-model call), a minor whitespace nudge. The `ava_code` memory layer was **rejected**, not deferred |
-| [Compaction redesign](../agent/compaction-redesign.md) | Forced / command / spontaneous compact mechanics |
-| [Import an existing agent's history](../agent/import-existing-agent-history.md) | Onboarding demo script — distil a new user's Claude Code / Codex history into the memory pool. Gated on going public |
+| [Ava / Ava Code prompt architecture](../agent/docs/prompt-architecture.md) | Living doc; the core-vs-`ava_code` responsibility split + the mechanics-vs-behavior axis. Open: malicious-code refusal stance (pending a threat-model call), a minor whitespace nudge. The `ava_code` memory layer was **rejected**, not deferred |
+| [Compaction redesign](agent/compaction-redesign.md) | Forced / command / spontaneous compact mechanics |
+| [Import an existing agent's history](agent/import-existing-agent-history.md) | Onboarding demo script — distil a new user's Claude Code / Codex history into the memory pool. Gated on going public |
 
 ## infra/
 
@@ -33,7 +35,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [Embedded per-cluster data plane](infra/embedded-per-cluster-data-plane.md) | Retained design evidence; no independent implementation work. The Redis remainder is tracked only in the vendored-binaries row above |
 | [Auth / TLS design](infra/auth-tls-design.md) | **Phase 3 (TLS) only** — Phase 1 (fail-closed gateway auth) and Phase 2 (cookie session auth) are deployed |
 | [Cluster consistency: commit-level pinning](infra/commit-pinned-cluster.md) | **Superseded evidence, not an implementation backlog.** The pin/refusal proposal has no current writer or consumer; any new consistency work starts from the existing lifecycle and fail-fast-vs-reconcile owners, not this checklist |
-| [Ops module](../ops/ops-module.md) | Spec / Status built. Native maintenance drain and the source-mode fleet update own lifecycle; pg-backup is a supervised scheduler service |
+| [Ops module](../ops/docs/ops-module.md) | Spec / Status built. Native maintenance drain and the source-mode fleet update own lifecycle; pg-backup is a supervised scheduler service |
 | [Extension ownership](infra/extension-ownership.md) | **S2's sync event, then S3–S5** (design for issue #39): S1 done (decision + spec revision); S2 mostly built (cluster rows + blobs, converge/boot materialization, adoption sweep); S3 onward untouched |
 | [Decentralized install + local config](infra/decentralized-install-and-config.md) | **Hooks-only plugin bundles only** — everything else (install registry, CC plugin materialization, `type="mcp"` packages, the cross-machine inventory UI) landed. The per-machine enable-state direction is proposed to be reversed by [extension-ownership](infra/extension-ownership.md) |
 | [Core package update channel](infra/core-package-update-channel.md) | **P2 core-plugin materialization** (P0+P1 landed — PRs #2355/#2368): collision rule, module-identity verification, isolation gates; then P3 alignment with [extension-ownership](infra/extension-ownership.md) |
@@ -48,7 +50,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [Checkpoint storage rebuild](infra/checkpoint-storage-rebuild.md) | **Observation-window calibrations (Section 7)** — delta-channel storage, keep-everything retention (R1–R4), read-time fold, and the reader-first write switch are all landed and deployed (write switch 2026-09-14, task #3180) |
 | [Heartbeat design](infra/heartbeat-design.md) | Original research evidence for the rejected two-tier proposal; the opt-out decision and current heartbeat implementation own behavior, with no remaining work assigned to this source |
 | [Process / service lifecycle final state](infra/lifecycle-final-state.md) | Superseded source evidence: preserve permission-ancestry measurements and the original P1–P7 checklist. Current runtime belongs to the component lifecycle docs; no migration window is pending from this draft |
-| [Model providers as plugins](../base/lm/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
+| [Model providers as plugins](../base/lm/docs/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
 
 ## Top level
 

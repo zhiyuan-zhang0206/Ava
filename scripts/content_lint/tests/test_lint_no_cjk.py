@@ -23,7 +23,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         gate,
         "_LOCALE_PY_FILES",
-        frozenset({"base/telemetry/alerts_copy.py", "base/packages/docs/pages_copy.py"}),
+        frozenset({"base/telemetry/alerts/copy.py", "base/packages/docs/pages_copy.py"}),
     )
     return tmp_path
 
@@ -93,10 +93,10 @@ def test_locales_dir_and_po_exempt(repo: Path) -> None:
 
 
 def test_alerts_copy_locale_module_exempt(repo: Path) -> None:
-    """base/telemetry/alerts_copy.py is the IM alert copy locale module (zh/en by
+    """base/telemetry/alerts/copy.py is the IM alert copy locale module (zh/en by
     display.language) - the one Python locale file, documented in the gate."""
-    _write(repo, "base/telemetry/alerts_copy.py", 'ALERT_HEAD = {"zh": "\u544a\u8b66"}\n')
-    assert gate._scan_file("base/telemetry/alerts_copy.py") == []
+    _write(repo, "base/telemetry/alerts/copy.py", 'ALERT_HEAD = {"zh": "\u544a\u8b66"}\n')
+    assert gate._scan_file("base/telemetry/alerts/copy.py") == []
 
 
 def test_pages_copy_locale_module_exempt(repo: Path) -> None:

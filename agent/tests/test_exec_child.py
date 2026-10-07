@@ -1,4 +1,4 @@
-"""Direct-spawn tests for the exec child entry (`agent/exec_child.py`) —
+"""Direct-spawn tests for the exec child entry (`agent/execution/child.py`) —
 child-side behaviors the parent machinery cannot observe on its own: the
 SIGTERM -> TimeoutError -> timed_out envelope path, the watchdog hard-exit,
 the state-slot injection (plugin namespace reads the snapshot), the
@@ -84,7 +84,7 @@ def _spawn(
         desc = context or exec_context(_AGENT_ID).describe()
         write_request(request_path, code=code, context=desc, timeout_s=timeout_s, state=state)
     proc = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
+        [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
         capture_output=True,
         text=True,
         env=_child_env(
@@ -210,7 +210,7 @@ def test_boot_config_failure_writes_crashed_envelope(
     assert payload.kind == "crashed"
     assert payload.exc_type == "ValidationError"
     assert "exec_timeout_seconds" in (payload.exc_msg or "")
-    assert "exec_child" in (payload.full_traceback or "")
+    assert "child.py" in (payload.full_traceback or "")
     assert result.stat().st_mode & 0o777 == 0o600
     assert payload.code_reached is False  # P0 #2100: boot crash, the code never ran
 
@@ -253,7 +253,7 @@ def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Pa
     payload = read_result(result)
     assert payload.kind == "crashed"
     assert payload.exc_type == "FileNotFoundError"
-    assert "exec_child" in (payload.full_traceback or "")
+    assert "child.py" in (payload.full_traceback or "")
     assert payload.code_reached is False  # request-read failure precedes user code
 
 
@@ -261,7 +261,7 @@ def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failed protocol writer cannot erase an already-caught child crash."""
-    from agent import exec_child
+    from agent.execution import child as exec_child
     from agent.graph.exec import protocol
 
     result = tmp_path / "result.json"
@@ -497,7 +497,7 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     )
     env = _child_env(tmp_path, request_path, result_path)
     proc = subprocess.Popen(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
+        [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -526,7 +526,7 @@ def test_child_installs_signal_handlers_before_reading_request(
 ) -> None:
     """A signal arriving during request decoding must become an in-band result,
     so SIGTERM's child handler is installed before the read begins."""
-    from agent import exec_child
+    from agent.execution import child as exec_child
     from agent.graph.exec import protocol
     from agent.graph.exec.protocol import RequestPayload, ResultPayload
 
@@ -581,7 +581,7 @@ def test_child_boot_timing_emits_ready_duration(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
     """The child emits its own ready boundary, separating bootstrap cost from user code."""
-    from agent import exec_child
+    from agent.execution import child as exec_child
 
     monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
 
@@ -641,7 +641,7 @@ def test_child_overlay_phases_framework_then_plugin(
     INSTALLED surface (after the load: the installation records its applied set),
     right before the eval-isolation boundary, which works on the live surface for
     the same reason."""
-    from agent import exec_child
+    from agent.execution import child as exec_child
     from agent.graph.exec import protocol
     from agent.graph.exec.protocol import RequestPayload, ResultPayload
 

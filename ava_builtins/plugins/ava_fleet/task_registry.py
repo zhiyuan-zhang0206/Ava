@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeGuard
 
 import ava
-import ava.agent_identity
 import ava.agents
+import ava.sdk_surface.agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents.tasks.owner_notifications import owner_change_notifications
 from base.agents.tasks.reparent import resolve_reparent
@@ -240,7 +240,7 @@ def create(
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     priority = coerce_str(priority, "priority")
     remind_interval_seconds, priority = _resolve_create_args(remind_interval_seconds, priority)
-    actor = ava.agent_identity.require_agent_id()
+    actor = ava.sdk_surface.agent_identity.require_agent_id()
     effective_owner = owner if owner is not None else actor
     with ava.DB.transaction(), ava.DB.cursor() as cur:
         # parent is required: only the system root task (id 1) may parent the
@@ -408,7 +408,7 @@ def update(
     sets.append("reminder_count = 0")
     sets.append("escalated_at = NULL")
 
-    actor = ava.agent_identity.agent_id()
+    actor = ava.sdk_surface.agent_identity.agent_id()
     with ava.DB.transaction(), ava.DB.cursor() as cur:
         if parent_id is not _UNSET:
             sets.append("parent_id = %s")

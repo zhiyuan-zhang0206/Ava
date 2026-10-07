@@ -8,7 +8,7 @@ import psycopg
 import pytest
 
 import ava
-import ava.agent_identity
+import ava.sdk_surface.agent_identity
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -92,7 +92,7 @@ class TestNoticeEntries:
             lambda *_a, **_kw: seen.update(body=_a[1]) or _FakeResp(),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(gateway_client, "raise_from_response", lambda _resp: None)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
+        monkeypatch.setattr(ava.sdk_surface.agent_identity, "agent_id", lambda: 900001)
 
         notice = fleet_plugin.notify(("Hi",), ("detail",), priority=("P2",))  # pyright: ignore[reportArgumentType]
         body = seen["body"]

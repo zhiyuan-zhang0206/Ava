@@ -261,7 +261,7 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
     drained()
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     unpause = MagicMock()
-    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
+    monkeypatch.setattr("ops.cluster.pause.unpause_local_cluster", unpause)
 
     def child() -> int:
         assert not admission.start_authorized()
@@ -320,7 +320,7 @@ def test_failed_flush_cannot_be_released_by_a_bare_resume(
         MaintenancePhase.DRAINING, commands={42: 7}, failures={42: "final flush failed"}
     )
     pause_owner.change_maintenance("local", WHEN, current.maintenance, failed)
-    from ops.cluster_pause import unpause_local_cluster
+    from ops.cluster.pause import unpause_local_cluster
 
     with pytest.raises(RuntimeError, match="failed continuation/flush"):
         unpause_local_cluster(database, event_bus)
@@ -658,7 +658,7 @@ def test_stop_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch, leg
     group, and a stop (a restart's stop leg too) closes this unit's persistent
     terminals — the refusal points at a shell no ava session hosts."""
     dependencies(monkeypatch)
-    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: "agent.exec_child")
+    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: "agent.execution.child")
 
     with pytest.raises(RuntimeError, match="login shell"):
         if leg == "stop":

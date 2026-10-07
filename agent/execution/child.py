@@ -1,4 +1,4 @@
-"""Exec subprocess entry — `python -I -X utf8 -m agent.exec_child`.
+"""Exec subprocess entry — `python -I -X utf8 -m agent.execution.child`.
 
 Each execute_code call runs here, in a fresh process the exec node spawns, so
 a stuck native call (numpy / ctypes / an `except BaseException` swallow loop)
@@ -583,7 +583,7 @@ def main() -> None:
     result_path = os.environ.get("AVA_EXEC_RESULT_FILE")
     if not request_path or not result_path:
         sys.stderr.write(
-            "agent.exec_child needs AVA_EXEC_REQUEST_FILE and AVA_EXEC_RESULT_FILE "
+            "agent.execution.child needs AVA_EXEC_REQUEST_FILE and AVA_EXEC_RESULT_FILE "
             "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)

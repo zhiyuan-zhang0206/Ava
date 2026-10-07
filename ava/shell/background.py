@@ -27,7 +27,7 @@ import shlex
 import sys
 from pathlib import Path
 
-import ava.agent_identity
+import ava.sdk_surface.agent_identity
 from base.paths import workspace_dir
 
 # Background command output is teed to `.shell_logs/` inside the agent's
@@ -50,7 +50,7 @@ _NOTIFY_POLICIES = ("always",)
 
 def output_dir() -> Path:
     """This agent's background-run log dir (`.shell_logs/` in its workspace)."""
-    return workspace_dir(ava.agent_identity.require_agent_id()) / _OUTPUT_DIRNAME
+    return workspace_dir(ava.sdk_surface.agent_identity.require_agent_id()) / _OUTPUT_DIRNAME
 
 
 def allocate_output_path(session_id: int, name: str) -> Path:

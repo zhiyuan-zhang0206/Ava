@@ -144,7 +144,9 @@ def test_repo_plugin_prices_equal_archive_at_frozen_instant(
 ) -> None:
     plugin_prices = dict(model_catalog().prices.plugin)
     archive_raw = json.loads(
-        (Path(__file__).resolve().parents[3] / "base/lm/pricing_catalog_archive.json").read_text()
+        (
+            Path(__file__).resolve().parents[3] / "base/lm/pricing/pricing_catalog_archive.json"
+        ).read_text()
     )
     archive_models = archive_raw["models"]
     archive_only = pricing.PriceBook(pricing._parse_catalog(archive_raw), {})

@@ -132,7 +132,7 @@ def applied_entries() -> frozenset[str]:
 
 def _refuse_framework_module(entry: str) -> None:
     """Fail fast when an entry names a framework module rather than a piece of
-    the agent-facing SDK: disabling `ava.agent_identity` or `ava.sdk_surface`
+    the agent-facing SDK: disabling `ava.sdk_surface.agent_identity` or `ava.sdk_surface`
     would break the framework itself, not scope what the agent sees. A name that
     is on the surface, or not a real `ava` submodule at all (a plugin namespace
     registered later), stays disable-able."""

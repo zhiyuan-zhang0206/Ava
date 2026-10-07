@@ -8,24 +8,24 @@ Naming: <SURFACE>_<WHAT>. Values are plain strings; f-string composition
 happens at the call site with copy constants as the template.
 """
 
-from base.telemetry.alerts_copy import (
+from base.telemetry.alerts.copy import (
     ALERT_HEAD as ALERT_HEAD,
 )
-from base.telemetry.alerts_copy import (
+from base.telemetry.alerts.copy import (
     ALERT_JUMP_LINK as ALERT_JUMP_LINK,
 )
-from base.telemetry.alerts_copy import (
+from base.telemetry.alerts.copy import (
     ALERT_LANGUAGE_DEFAULT as ALERT_LANGUAGE_DEFAULT,
 )
-from base.telemetry.alerts_copy import (
+from base.telemetry.alerts.copy import (
     ALERT_LANGUAGES as ALERT_LANGUAGES,
 )
-from base.telemetry.alerts_copy import (
+from base.telemetry.alerts.copy import (
     ALERT_TRIGGERED_AT as ALERT_TRIGGERED_AT,
 )
 
-# -- alert push (base/telemetry/alerts.py notifies through the IM bridge) -------------
-# The alert templates live in base/telemetry/alerts_copy.py (tech-audit P1, 2026-08-25:
+# -- alert push (base/telemetry/alerts/__init__.py notifies through the IM bridge) -------------
+# The alert templates live in base/telemetry/alerts/copy.py (tech-audit P1, 2026-08-25:
 # base.telemetry.alerts must not import up into services) and are re-exported above so
 # the IM bridge and its consumers keep one import path — the definitions are
 # never duplicated. `X as X` is the repo's re-export idiom: pyright treats the

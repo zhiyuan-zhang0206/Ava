@@ -64,7 +64,7 @@ def main() -> None:
         os.dup2(empty.fileno(), 0)
     # The actual old child entry, not a second execution engine. Its request
     # and result environment is prepared by the original runtime as before.
-    runpy.run_module("agent.exec_child", run_name="__main__")
+    runpy.run_module("agent.execution.child", run_name="__main__")
 
 
 if __name__ == "__main__":

@@ -247,7 +247,7 @@ ignore_imports = [
 # The one reverse edge base must never grow: `base` is the bottom layer,
 # and `services` sits above it (daemons that import gateway). The alerts
 # module used to import services.entrypoints.im_bridge.copy for its IM templates — moved
-# down to base/telemetry/alerts_copy.py (tech audit 2026-08-24 P1); this contract
+# down to base/telemetry/alerts/copy.py (tech audit 2026-08-24 P1); this contract
 # locks the direction so no new base -> services edge can creep back in.
 [[tool.importlinter.contracts]]
 name = "base must not import services"
@@ -279,7 +279,7 @@ forbidden_modules = ["cli"]
 # downshifted to `base.api_contracts` — below both ops and gateway — so cli
 # decodes a gateway response without importing up; ops keeps only the
 # gateway<->runner RPC-shared closure (ops/rpc_schemas/__init__.py). See
-# ops/ops-module.md.
+# ops/docs/ops-module.md.
 [[tool.importlinter.contracts]]
 name = "Ops layer (base < ops < {gateway, cli})"
 type = "layers"

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from ava.skills import composer_commands as ava_commands
 from gateway.app import app
 from gateway.routers import commands as commands_router
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 
 
 def _runner_a(_request: Request, _agent_id: int) -> str:

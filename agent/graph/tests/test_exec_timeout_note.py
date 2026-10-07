@@ -46,7 +46,7 @@ def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hosted runner pins the identity in a turn contextvar and leaves the
-    process slot None; the note must resolve through `ava.agent_identity.agent_id()`
+    process slot None; the note must resolve through `ava.sdk_surface.agent_identity.agent_id()`
     (task #3939)."""
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)

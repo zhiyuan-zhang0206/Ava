@@ -16,7 +16,7 @@ it disposable:
 - no live process references the request — the direct child and every
   env-inheriting descendant carry ``AVA_EXEC_REQUEST_FILE``, and a process
   whose environment this kernel will not show is never excluded while it looks
-  like an ``agent.exec_child`` root born inside the request's own lifetime;
+  like an ``agent.execution.child`` root born inside the request's own lifetime;
 - the row's stored host identity, when one exists, is not a live process — a
   reused PID means the recorded boot ended, never that a replacement is the old
   host (the same identity check exec-owner recovery uses).
@@ -81,7 +81,7 @@ _REQUEST_VERSION = 1
 _BIRTH_FLOOR_SLACK_S = 5.0
 _CHILD_LIFETIME_SLACK_S = 60.0
 
-_EXEC_CHILD_MODULE = "agent.exec_child"
+_EXEC_CHILD_MODULE = "agent.execution.child"
 _REQUEST_REFERENCE_ENV = "AVA_EXEC_REQUEST_FILE"
 
 
@@ -225,7 +225,7 @@ def live_domain_pids(path: Path, *, born_from: float, born_before: float) -> tup
     Strong proof: a readable environment naming this exact request — the direct
     child and every env-inheriting descendant. Processes this kernel will not
     show an environment for are never excluded while they look like an
-    ``agent.exec_child`` root born inside the request's own lifetime window; a
+    ``agent.execution.child`` root born inside the request's own lifetime window; a
     readable non-match is excluded the same way. Unreadable is never absence.
     """
     target = os.path.realpath(path)
@@ -540,7 +540,7 @@ def _read_attribution(path: Path, agent_id: int) -> _Attribution:
 
 
 def _is_exec_child_argv(argv: Sequence[str] | None) -> bool:
-    """True when argv is the isolated `-m agent.exec_child` launch shape."""
+    """True when argv is the isolated `-m agent.execution.child` launch shape."""
     if argv is None:
         return False
     return any(

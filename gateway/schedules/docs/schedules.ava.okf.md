@@ -22,8 +22,8 @@ A **schedule** is a resident process supervised by the `schedule-manager` servic
 - **Distinguishes clean exit from crash**: each tick reads liveness before status. When a session disappears, it reads its terminal state—`status='completed'` (written by the runner before exiting with rc=0) = the resident process finished on its own, **terminal state, no restart, not counted toward circuit breaker**; no completed marker = crash (non-zero rc / signal / hard kill), brought up according to crash handling
 - **Alerts on prolonged silence**: an enabled schedule with no live session for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event. `status='error'` remains eligible even though the breaker will not relaunch it. The first sessionless observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the session live again clears both and rearms a later outage; completed and disabled schedules are excluded.
 
-### ScheduleRunner (`gateway/schedule_runner.py`)
-- The in-session entrypoint `.venv/bin/python -m gateway.schedule_runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.ava.okf.md]].
+### ScheduleRunner (`gateway/schedules/runner.py`)
+- The in-session entrypoint `.venv/bin/python -m gateway.schedules.runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.ava.okf.md]].
 
 ### Built-in Cron Slot Claims (`schedules/catchup.py`)
 
@@ -59,4 +59,4 @@ Only applies to **crashes** (not clean exits) looping—clean exits go to `compl
 
 - `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`: the service, its two loops and the checkout guard
 - `services/wake/schedule_manager/manager.py:ScheduleManager` — reconcile logic
-- `gateway/schedule_runner.py:run()` — loads and runs a single schedule (the in-session entrypoint of `main()` → `.venv/bin/python -m gateway.schedule_runner <id>`)
+- `gateway/schedules/runner.py:run()` — loads and runs a single schedule (the in-session entrypoint of `main()` → `.venv/bin/python -m gateway.schedules.runner <id>`)

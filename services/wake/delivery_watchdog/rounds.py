@@ -13,7 +13,7 @@ def rpc_deadline_s() -> float:
     dispatches (hosted-turn recovery: terminate, then resurrect), each bounded by
     the RPC client's own timeout and retry budget, so the deadline is twice the
     client's worst case: it only cuts a job the client's budgets did not."""
-    from ops.cluster_rpc import worst_case_dispatch_seconds
+    from ops.cluster.rpc import worst_case_dispatch_seconds
 
     return 2 * worst_case_dispatch_seconds()
 

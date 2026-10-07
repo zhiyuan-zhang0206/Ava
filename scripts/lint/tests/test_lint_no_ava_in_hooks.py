@@ -27,7 +27,7 @@ def _write(repo: Path, rel: str, text: str) -> None:
     "statement",
     [
         "import ava",
-        "import ava.agent_identity as ident",
+        "import ava.sdk_surface.agent_identity as ident",
         "from ava import skills",
         "from ava.sdk_surface import install",
     ],

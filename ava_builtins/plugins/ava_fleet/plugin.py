@@ -43,8 +43,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
 
 import ava
-import ava.agent_identity
 import ava.agents
+import ava.sdk_surface.agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents.tasks.priority import validate_priority
 from base.packages.plugins.extensions import PluginContributions, SdkMember, SdkNamespace, SdkWrap
@@ -54,7 +54,7 @@ from . import task_registry
 
 def set_label(text: str) -> None:
     text = coerce_str(text, "text", allow_none=True)
-    agent_id = ava.agent_identity.require_agent_id()
+    agent_id = ava.sdk_surface.agent_identity.require_agent_id()
     from ava import gateway_client
 
     gateway_client.patch_label(agent_id, text or "", source="self")
@@ -189,7 +189,7 @@ def notify(
             )
         expire_at_iso = due_at.isoformat()
 
-    aid = ava.agent_identity.require_agent_id()
+    aid = ava.sdk_surface.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway performs the whole
     # lifecycle atomically — supersede the previous open notice + insert the
@@ -266,7 +266,7 @@ def edit_notice(
     if not body:
         raise ValueError("edit_notice needs at least one field to change")
 
-    aid = ava.agent_identity.require_agent_id()
+    aid = ava.sdk_surface.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway edits the agent's
     # current open notice and re-publishes the posted event.
@@ -282,7 +282,7 @@ def edit_notice(
 def dismiss_notice() -> None:
     """Withdraw the open notice. At most one notice is open per agent (notify
     auto-resolves the previous one), so no id is needed."""
-    aid = ava.agent_identity.require_agent_id()
+    aid = ava.sdk_surface.agent_identity.require_agent_id()
     # One unified write path (R3 door ④): the gateway withdraws the agent's
     # current open notice and publishes the resolve + agent-updated events.
     from ava import gateway_client

@@ -36,9 +36,9 @@ from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
 from gateway.cluster.status import gather_cluster_status
 from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
-from ops import cluster as _ops
-from ops import cluster_rpc as _cluster_rpc
-from ops.cluster_pause import is_paused as cluster_is_paused
+from ops.cluster import operations as _ops
+from ops.cluster import rpc as _cluster_rpc
+from ops.cluster.pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 

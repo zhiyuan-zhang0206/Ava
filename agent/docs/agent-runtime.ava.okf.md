@@ -20,7 +20,7 @@ in `agent/startup/__init__.py` still serializes writes and flushes for the same 
 
 Active agents have no default admission limit: `AVA_HOST_MAX_CONCURRENT_TURNS=0`
 allows another agent to start while existing agents wait on models or tools.
-A positive value opts into the host limit; `services/agent_runner/agent_host/admission.py`
+A positive value opts into the host limit; `services/agent_runner/agent_host/scheduling/admission.py`
 (`TurnAdmission`) then serves excess continuations as a fair queue: one ticket
 per agent (`TurnScheduler`'s single flight), arrival-order FIFO, a completed
 turn's next request taken at the tail — ticket rotation, no starvation. Queue

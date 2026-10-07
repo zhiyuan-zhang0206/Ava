@@ -141,7 +141,7 @@ patched and the test homes that patch them. This is the injection-seam work list
 | `env:AVA_*` | env-var | 411 | 40 |
 | `base.paths` | paths | 375 | 55 |
 | `base.cluster.machine` | identity | 236 | 29 |
-| `ava.agent_identity` | identity | 99 | 14 |
+| `ava.sdk_surface.agent_identity` | identity | 99 | 14 |
 | `base.log` | ambient-service | 87 | 18 |
 | `base.telemetry` | ambient-service | 84 | 31 |
 | `base.db` | ambient-service | 81 | 31 |

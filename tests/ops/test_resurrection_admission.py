@@ -29,11 +29,12 @@ from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
-from ops import cluster_rpc, lifecycle
+from ops import lifecycle
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
-from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
+from ops.cluster import rpc as cluster_rpc
+from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.lifecycle import termination
 from services.agent_runner.agent_host.tests.test_predecessor_closure import _closed_form, _retired
 

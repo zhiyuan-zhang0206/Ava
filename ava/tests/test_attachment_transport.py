@@ -9,8 +9,8 @@ from typing import cast
 import pytest
 
 import ava
-from ava.attachment_transport import attach
-from base.lm.attach_constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
+from ava.sdk_surface.attachment_transport import attach
+from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
 from tests.fixtures.model_catalog import AddModels
 
 

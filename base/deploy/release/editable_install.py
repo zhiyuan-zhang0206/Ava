@@ -37,7 +37,7 @@ from base.log import logger
 EDITABLE_PTH_NAME = "_editable_impl_ava.pth"
 EDITABLE_DIST_INFO_GLOB = "ava-*.dist-info/direct_url.json"
 _IMPORT_GATE_TIMEOUT_S = 60
-_IMPORT_GATE_CODE = "import agent.exec_child; print(agent.exec_child.__file__)"
+_IMPORT_GATE_CODE = "import agent.execution.child; print(agent.execution.child.__file__)"
 
 
 @dataclass(frozen=True)
@@ -557,7 +557,7 @@ def editable_import_gate(
     *,
     allowed_roots: Iterable[Path] = (),
 ) -> tuple[str, ...]:
-    """Prove the checkout venv imports ``agent.exec_child`` through its pointer.
+    """Prove the checkout venv imports ``agent.execution.child`` through its pointer.
 
     The probe deliberately starts in the platform temp directory and removes
     ``VIRTUAL_ENV``/``PYTHONPATH`` from its environment. Neither the checkout

@@ -5,7 +5,7 @@ config-field change; ``--check`` fails on drift. It is JSON, not a generated
 Python module, because the all-field faces alone (512 fields x several columns)
 exceed the repo's 800-line hard ceiling (``scripts/lint/code_structure.py``, no
 exemption), and a data table is what JSON is for (precedent:
-``base/lm/pricing_catalog_archive.json``). This module is the only reader; it
+``base/lm/pricing/pricing_catalog_archive.json``). This module is the only reader; it
 materializes the named surfaces every consumer imports:
 
 - ``LITE_FIELDS`` — the boot-path fields ``base/config/_lite.py`` resolves

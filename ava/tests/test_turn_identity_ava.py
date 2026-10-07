@@ -1,5 +1,5 @@
 """Turn-scoped agent identity (base/native_process/turn_identity.py) and its layering into
-`ava.agent_identity` — Phase 1 of future/infra/agent-runner-as-server.md.
+`ava.sdk_surface.agent_identity` — Phase 1 of future/infra/agent-runner-as-server.md.
 
 Locks the resolution order `turn contextvar > process slot > AVA_AGENT_ID env`
 at every identity read, the copied-context handoff to worker threads, and the
@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from ava import agent_identity
+from ava.sdk_surface import agent_identity
 from base.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 

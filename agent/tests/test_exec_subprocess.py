@@ -189,7 +189,7 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
 
     result = await _run(
         tmp_path,
-        ("import agent.exec_child as entry\nprint('exec-child', entry.__file__)\n"),
+        ("import agent.execution.child as entry\nprint('exec-child', entry.__file__)\n"),
     )
 
     assert isinstance(result, _ExecDone)

@@ -10,7 +10,7 @@ from tests.fixtures.pin_agent import pin_agent
 def test_sdk_external_profile_overrides_inherited_agent_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ava import agent_identity
+    from ava.sdk_surface import agent_identity
 
     monkeypatch.setattr(agent_identity, "current_turn_agent_id", lambda: None)
     pin_agent(405)
@@ -20,7 +20,7 @@ def test_sdk_external_profile_overrides_inherited_agent_identity(
 
 
 def test_actual_hosted_turn_context_remains_authoritative(monkeypatch: pytest.MonkeyPatch) -> None:
-    from ava import agent_identity
+    from ava.sdk_surface import agent_identity
 
     monkeypatch.setattr(agent_identity, "current_turn_agent_id", lambda: 405)
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')

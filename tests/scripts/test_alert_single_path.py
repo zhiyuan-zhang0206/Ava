@@ -18,7 +18,7 @@ _REPO = Path(__file__).resolve().parents[2]
 _ROOTS = ("agent", "ava", "ava_builtins", "base", "cli", "gateway", "ops", "services", "schedules")
 
 # The only module that writes alert rows and fans them out: the ingest core and its one router.
-_INGEST = {"base/telemetry/alerts.py", "gateway/alerts/router.py"}
+_INGEST = {"base/telemetry/alerts/__init__.py", "gateway/alerts/router.py"}
 _WRITERS = {"upsert_alert", "stamp_notified", "notify_im"}
 
 

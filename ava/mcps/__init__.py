@@ -421,7 +421,7 @@ def _list_tools(server: str) -> list[ToolInfo]:
 
 def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
     """Call tool, return the full result dict ({content, isError, structuredContent})."""
-    from ava import agent_identity
+    from ava.sdk_surface import agent_identity
 
     agent_identity.validate_external_identity()
     remote = _get_remote_client()

@@ -15,7 +15,7 @@ import glob as _glob
 import os
 from pathlib import Path
 
-from ava import agent_identity
+from ava.sdk_surface import agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import is_flagged, scan_content
 from base.log import logger

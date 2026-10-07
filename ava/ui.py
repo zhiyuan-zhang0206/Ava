@@ -18,7 +18,7 @@ from pathlib import Path
 
 import ava
 from ava import gateway_client
-from ava._settings import page_host
+from ava.sdk_surface.settings import page_host
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.log import logger
 
@@ -137,7 +137,7 @@ class PageHost:
     """What a page call runs against: this machine's page host, the agent it acts for and how
     it probes ports.
 
-    Built per call by `ava._settings.page_host()` from this process's settings and agent
+    Built per call by `ava.sdk_surface.settings.page_host()` from this process's settings and agent
     identity; the module functions below delegate to it. A test builds one with the probes it
     needs.
     """

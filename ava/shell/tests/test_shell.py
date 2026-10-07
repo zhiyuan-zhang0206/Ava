@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 import ava
-import ava.agent_identity
+import ava.sdk_surface.agent_identity
 from ava import shell
 from ava.sdk_surface import process_context
 from base.native_process.os_platform import IS_WINDOWS
@@ -163,7 +163,7 @@ def test_run_default_cwd_is_workspace(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     out = ava.shell.run("pwd")
-    expected = tmp_path / "workspaces" / str(ava.agent_identity.agent_id())
+    expected = tmp_path / "workspaces" / str(ava.sdk_surface.agent_identity.agent_id())
     assert Path(out.strip()).resolve() == expected.resolve()
     assert expected.is_dir()  # workspace_dir mkdir on demand
 

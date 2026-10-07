@@ -1,6 +1,6 @@
 """exec node: agent-written code runs in a disposable subprocess.
 
-Each execute_code call runs in a fresh child process (`agent/exec_child.py`),
+Each execute_code call runs in a fresh child process (`agent/execution/child.py`),
 so a stuck native call is SIGKILLable without touching the agent process
 (issue #184). Each graph step executes one call and returns its delta to LangGraph.
 Pending calls route back to exec after that commit; the completed batch routes to
@@ -8,7 +8,7 @@ after_exec, then claim, which decides whether to wait or continue the turn.
 
 Core mechanisms:
   - Subprocess backend (`agent/graph/exec/_subprocess.py`): the parent spawns
-    one `python -I -X utf8 -m agent.exec_child` per exec, polls every 50ms, streams
+    one `python -I -X utf8 -m agent.execution.child` per exec, polls every 50ms, streams
     output through the chunk pipeline. Cancel/timeout sends a signal then
     closes the process group after a grace period. Natural root exit also closes
     the domain, so an `os._exit`
@@ -172,7 +172,7 @@ async def _run_agent_code(
     """Run the agent's code in one disposable child process.
 
     The parent does not touch the ava.state slot — the child rebuilds the
-    snapshot from the request envelope (`agent/exec_child.py`), and the
+    snapshot from the request envelope (`agent/execution/child.py`), and the
     state-update delta (plugin fields, security findings) rides the result
     envelope back. Validation is fail-fast on a tampered slot, and the child
     receives the bound turn's config maps so its SDK calls

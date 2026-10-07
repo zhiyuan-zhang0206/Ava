@@ -45,7 +45,7 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
             result = start(*args, **kwargs)
         if result == 0 and start_serving.is_serving():
             from cli.commands.lifecycle._failed_receipts import settle_failed_receipts
-            from ops.cluster_pause import unpause_local_cluster
+            from ops.cluster.pause import unpause_local_cluster
 
             settle_failed_receipts()
 

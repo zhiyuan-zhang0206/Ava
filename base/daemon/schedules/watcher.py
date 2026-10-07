@@ -281,7 +281,7 @@ import os as _os
 import sys as _sys
 import time as _time
 
-from ava import agent_identity
+from ava.sdk_surface import agent_identity
 from ava import gateway_client
 
 # A wake must survive a gateway restart: until 2026-09-15 the bare

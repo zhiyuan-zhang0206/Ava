@@ -59,14 +59,14 @@ class ContextOutsideProcessError(AttributeError):
 def process_clients(*, gateway_url: str | None = None) -> ClientSet:
     """The clients of a process's own context: its database is the cluster's, as its settings
     name it. The composition root of every context this process builds for itself."""
-    from ava import _settings
+    from ava.sdk_surface import settings as _settings
 
     return ClientSet(gateway_url=gateway_url, database=_settings.database)
 
 
 def context_from_description(description: dict[str, Any]) -> AvaContext:
     """The context an exec child builds from its request envelope's description."""
-    from ava import _settings
+    from ava.sdk_surface import settings as _settings
 
     return AvaContext.from_description(description, database=_settings.database)
 

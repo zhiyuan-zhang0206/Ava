@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from base.config import settings
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 
 _log = logging.getLogger(__name__)
 

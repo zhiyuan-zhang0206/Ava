@@ -24,7 +24,7 @@ and standing context notes) and `recall/` (passive memory recall):
   - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `ava` SDK overview
   - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
   - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
-  - `exec/protocol.py`  — exec child request/result envelopes (shared with `agent/exec_child.py`)
+  - `exec/protocol.py`  — exec child request/result envelopes (shared with `agent/execution/child.py`)
   - `exec/_*.py`        — exec subprocess machinery: spawn, process domain, stream, result, alerts
   - `_build.py`        — build_graph: assemble 8-Node self-cycling topology
   - `node_log.py`      — node enter/exit lifecycle log + publish timeline snapshot

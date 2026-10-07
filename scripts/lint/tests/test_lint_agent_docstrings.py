@@ -288,7 +288,7 @@ def test_is_in_scope_plugin_paths_unchanged(
 def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> None:
     # Regression check against the actual repo tree: `ava/agents/__init__.py`
     # and `ava/shell/__init__.py` were previously excluded by the `_` rule
-    # (`__init__.py` itself starts with an underscore); `ava/agent_identity.py`,
+    # (`__init__.py` itself starts with an underscore); `ava/sdk_surface/agent_identity.py`,
     # `ava/sdk_surface/wraps.py`, and `ava/sdk_surface/plugin_loader.py`
     # declare no marker and are not listed as a namespace, so they stay out
     # under the new rule too — a public name is not by itself agent-visible.
@@ -298,6 +298,6 @@ def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> No
 
     assert (repo_root / "ava/agents/__init__.py").resolve() in surface
     assert (repo_root / "ava/shell/__init__.py").resolve() in surface
-    assert (repo_root / "ava/agent_identity.py").resolve() not in surface
+    assert (repo_root / "ava/sdk_surface/agent_identity.py").resolve() not in surface
     assert (repo_root / "ava/sdk_surface/wraps.py").resolve() not in surface
     assert (repo_root / "ava/sdk_surface/plugin_loader.py").resolve() not in surface

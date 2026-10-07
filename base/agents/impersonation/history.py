@@ -409,7 +409,7 @@ def _event_delivery_statistics(
 
 
 def _pending_delivery_reason(lease: Mapping[str, Any]) -> str:
-    from base.agents.impersonation_manifest import pending_reason
+    from base.agents.impersonation.manifest import pending_reason
 
     result = pending_reason(lease)
     if result is None:

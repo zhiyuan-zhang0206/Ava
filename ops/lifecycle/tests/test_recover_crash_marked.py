@@ -20,8 +20,9 @@ from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.telemetry import Event
-from ops import cluster_rpc, lifecycle
+from ops import lifecycle
 from ops.agents import create_agent_row
+from ops.cluster import rpc as cluster_rpc
 from ops.lifecycle import CrashRecoveryRequestFailure, crash_harvest
 from ops.rpc_schemas import RecoverCrashMarkedResponse
 
