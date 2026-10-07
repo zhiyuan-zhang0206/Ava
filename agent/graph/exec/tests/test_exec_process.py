@@ -11,12 +11,13 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import psutil
 import pytest
 
-from agent.graph.exec import _subprocess
+from agent.graph.exec import _process, _subprocess
 from agent.graph.exec._process import (
     _READER_JOIN_TIMEOUT_S,
     DomainCloseOwner,
@@ -35,6 +36,7 @@ from agent.graph.exec._process import (
 from agent.graph.exec._result import _ExecCrashed
 from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import _collect_child
+from base.db import Database
 from base.native_process.ownership import OwnedProcess
 from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 from base.sessions.posixproc import _group_empty
@@ -581,3 +583,33 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
                 proc.wait(timeout=5)
         runner.join(timeout=5)
         assert not runner.is_alive()
+
+
+async def test_teardown_failure_is_returned_as_crash_with_partial_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_settle_resources = _process.settle_resources
+    teardown_failure = RuntimeError("synthetic reader teardown failure")
+
+    async def _fail_after_settling(
+        *args: Any, **kwargs: Any
+    ) -> tuple[_process.TeardownFailure, ...]:
+        assert not await real_settle_resources(*args, **kwargs)
+        return (_process.TeardownFailure("reader_join", teardown_failure),)
+
+    monkeypatch.setattr(_process, "settle_resources", _fail_after_settling)
+
+    result, _payload = await _subprocess._run_in_subprocess(
+        Database.from_settings(),
+        "print('partial before teardown')",
+        exec_context(_AGENT_ID),
+        asyncio.Event(),
+        30.0,
+        None,
+        exec_dir=tmp_path / "exec",
+    )
+
+    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result.exc, _process.ExecTeardownError)
+    assert "partial before teardown" in result.output
+    assert "reader_join: RuntimeError: synthetic reader teardown failure" in result.output

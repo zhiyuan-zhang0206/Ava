@@ -23,7 +23,6 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
-from agent.graph.exec import _process
 from agent.graph.exec._result import (
     ExecChildError,
     _ExecCancelled,
@@ -193,7 +192,7 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
     )
 
     assert isinstance(result, _ExecDone)
-    expected_entry = Path(__file__).resolve().parents[2] / "agent" / "exec_child.py"
+    expected_entry = Path(__file__).resolve().parents[2] / "agent" / "execution" / "child.py"
     assert str(expected_entry) in result.output
     assert Path.cwd() == old_checkout.resolve()
 
@@ -259,28 +258,6 @@ async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path) -> N
     result = await _run(tmp_path, "import os\nos._exit(5)")
     assert isinstance(result, _ExecCrashed)
     assert "without writing a result envelope" in str(result.exc)
-
-
-async def test_teardown_failure_is_returned_as_crash_with_partial_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    real_settle_resources = _process.settle_resources
-    teardown_failure = RuntimeError("synthetic reader teardown failure")
-
-    async def _fail_after_settling(
-        *args: Any, **kwargs: Any
-    ) -> tuple[_process.TeardownFailure, ...]:
-        assert not await real_settle_resources(*args, **kwargs)
-        return (_process.TeardownFailure("reader_join", teardown_failure),)
-
-    monkeypatch.setattr(_process, "settle_resources", _fail_after_settling)
-
-    result = await _run(tmp_path, "print('partial before teardown')")
-
-    assert isinstance(result, _ExecCrashed)
-    assert isinstance(result.exc, _process.ExecTeardownError)
-    assert "partial before teardown" in result.output
-    assert "reader_join: RuntimeError: synthetic reader teardown failure" in result.output
 
 
 @pytest.mark.parametrize("exit_code", [5, 124])
