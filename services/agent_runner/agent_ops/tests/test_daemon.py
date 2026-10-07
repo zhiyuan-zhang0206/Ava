@@ -87,7 +87,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         return SpawnedAgent(id=777)
 
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_launch)  # pyright: ignore[reportUnknownArgumentType]
-    status, result = await daemon._dispatch("spawn-launch", {"agent_id": 777})
+    status, result = await daemon._dispatch("spawn-launch", {"agent_id": 777}, active_ops={})
     assert status == "completed"
     assert result == {"id": 777}
     assert captured["agent_id"] == 777
@@ -108,7 +108,7 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         return ShellProbeResult(shells=[ShellInfo(id=5, name="build", uptime_seconds=42)])
 
     monkeypatch.setattr(daemon.cluster, "shell_probe_op", _fake_probe)
-    status, result = await daemon._dispatch("shell_probe", {"agent_id": 42})
+    status, result = await daemon._dispatch("shell_probe", {"agent_id": 42}, active_ops={})
     assert status == "completed"
     assert seen == {"agent_id": 42}
     assert result == {
@@ -135,7 +135,7 @@ async def test_dispatch_shell_probe_bad_payload_fails(
         "shell_probe_op",
         lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    status, result = await daemon._dispatch("shell_probe", {})
+    status, result = await daemon._dispatch("shell_probe", {}, active_ops={})
     assert status == "failed"
     assert "agent_id" in str(result["error"])
 
@@ -155,7 +155,9 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         return ShellKillResult(mode=ShellKillMode.KILLED)
 
     monkeypatch.setattr(daemon.cluster, "shell_kill_op", _fake_kill)
-    status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 5})
+    status, result = await daemon._dispatch(
+        "shell_kill", {"agent_id": 42, "session_id": 5}, active_ops={}
+    )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 5}
     assert result == {"mode": "killed", "interrupted": False, "name": None}
@@ -174,7 +176,9 @@ async def test_dispatch_shell_kill_reports_absent(
         "shell_kill_op",
         lambda _agent_id, _session_id: ShellKillResult(mode=ShellKillMode.ABSENT),  # pyright: ignore[reportUnknownArgumentType]
     )
-    status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 999})
+    status, result = await daemon._dispatch(
+        "shell_kill", {"agent_id": 42, "session_id": 999}, active_ops={}
+    )
     assert status == "completed"
     assert result == {"mode": "absent", "interrupted": False, "name": None}
 
@@ -198,7 +202,7 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
         )
 
     monkeypatch.setattr(daemon.cluster, "agent_skill_view_op", _fake_view)
-    status, result = await daemon._dispatch("agent_skill_view", {"agent_id": 42})
+    status, result = await daemon._dispatch("agent_skill_view", {"agent_id": 42}, active_ops={})
     assert status == "completed"
     assert seen == {"agent_id": 42, "pool": pool}
     assert result == {
@@ -218,7 +222,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
         "agent_skill_view_op",
         lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    status, result = await daemon._dispatch("agent_skill_view", {})
+    status, result = await daemon._dispatch("agent_skill_view", {}, active_ops={})
     assert status == "failed"
     assert "agent_id" in str(result["error"])
 
@@ -241,7 +245,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
 
     monkeypatch.setattr(daemon.cluster, "shell_capture_op", _fake_capture)
     status, result = await daemon._dispatch(
-        "shell_capture", {"agent_id": 42, "session_id": 3, "lines": 500}
+        "shell_capture", {"agent_id": 42, "session_id": 3, "lines": 500}, active_ops={}
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 3, "lines": 500}
@@ -268,7 +272,9 @@ async def test_dispatch_shell_capture_defaults_lines(
         return ShellCaptureResult(session_name="n", lines=[])
 
     monkeypatch.setattr(daemon.cluster, "shell_capture_op", _fake_capture)
-    status, _ = await daemon._dispatch("shell_capture", {"agent_id": 1, "session_id": 2})
+    status, _ = await daemon._dispatch(
+        "shell_capture", {"agent_id": 1, "session_id": 2}, active_ops={}
+    )
     assert status == "completed"
     assert seen == {"lines": 200}
 
@@ -292,7 +298,7 @@ async def test_dispatch_upload_receive_calls_upload_receive_op(
 
     monkeypatch.setattr(daemon.uploads, "upload_receive_op", _fake_receive)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(
-        "upload_receive", {"agent_id": 42, "name": "report.pdf"}
+        "upload_receive", {"agent_id": 42, "name": "report.pdf"}, active_ops={}
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "name": "report.pdf"}
@@ -305,7 +311,9 @@ async def test_dispatch_upload_receive_bad_payload_fails(
 ) -> None:
     """upload_receive with a malformed payload -> failed (not a crash)."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    status, result = await daemon._dispatch("upload_receive", {"agent_id": "not-an-int"})
+    status, result = await daemon._dispatch(
+        "upload_receive", {"agent_id": "not-an-int"}, active_ops={}
+    )
     assert status == "failed"
     assert "error" in result
 
@@ -343,6 +351,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(monkeypatch: pytest.MonkeyP
             "trigger_inbound_id": 123,
             "trigger_inbound_kind": "chat",
         },
+        active_ops={},
     )
     assert status == "completed"
     # _dispatch serializes the lifecycle response model to a JSON dict for the wire.
@@ -362,7 +371,7 @@ async def test_dispatch_lifecycle_missing_path_fails(monkeypatch: pytest.MonkeyP
         raise AssertionError("lifecycle_op should not be invoked on missing path")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _should_not_be_called)  # pyright: ignore[reportUnknownArgumentType]
-    status, result = await daemon._dispatch("lifecycle", {})
+    status, result = await daemon._dispatch("lifecycle", {}, active_ops={})
     assert status == "failed"
     # LifecyclePayload validation rejects a missing 'path' before lifecycle_op runs.
     assert "path" in str(result["error"])
@@ -372,7 +381,7 @@ async def test_dispatch_lifecycle_missing_path_fails(monkeypatch: pytest.MonkeyP
 async def test_dispatch_unknown_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unknown kind returns failed; routing table is exhaustive."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    status, result = await daemon._dispatch("bogus_kind", {})
+    status, result = await daemon._dispatch("bogus_kind", {}, active_ops={})
     assert status == "failed"
     assert "unknown kind" in str(result["error"])
 
@@ -395,7 +404,9 @@ async def test_dispatch_unparseable_lifecycle_path(monkeypatch: pytest.MonkeyPat
         raise ValueError(f"lifecycle path not recognized: {path!r}")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
-    status, result = await daemon._dispatch("lifecycle", {"path": "/garbage", "body": {}})
+    status, result = await daemon._dispatch(
+        "lifecycle", {"path": "/garbage", "body": {}}, active_ops={}
+    )
     assert status == "failed"
     assert "not recognized" in str(result["error"])
 
@@ -414,7 +425,9 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
     monkeypatch.setattr(daemon.cluster, "shell_capture_op", _raises)
-    status, result = await daemon._dispatch("shell_capture", {"agent_id": 42, "session_id": 9})
+    status, result = await daemon._dispatch(
+        "shell_capture", {"agent_id": 42, "session_id": 9}, active_ops={}
+    )
     assert status == "failed"
     assert "ShellNotFoundError" in str(result["error"])
     assert "no live shell" in str(result["error"])
@@ -444,7 +457,7 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(
-        "lifecycle", {"path": "/api/agents/7/resurrect-explicit-v2", "body": {}}
+        "lifecycle", {"path": "/api/agents/7/resurrect-explicit-v2", "body": {}}, active_ops={}
     )
     assert (status, result) == ("failed", {"error": "ResurrectRefused: runtime_cutover_required"})
 
@@ -471,7 +484,7 @@ async def test_dispatch_wire_error_carries_reason(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(
-        "lifecycle", {"path": "/api/agents/999/terminate", "body": {}}
+        "lifecycle", {"path": "/api/agents/999/terminate", "body": {}}, active_ops={}
     )
     assert status == "failed"
     assert "AgentNotFound" in str(result["error"])
@@ -482,7 +495,7 @@ async def test_dispatch_wire_error_carries_reason(monkeypatch: pytest.MonkeyPatc
 async def test_dispatch_no_db_pool_fails_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
     """_db_pool unset (e.g. test bypasses _main) returns failed, not an attribute error."""
     monkeypatch.setattr(daemon, "_db_pool", None)
-    status, result = await daemon._dispatch("status_probe", {})
+    status, result = await daemon._dispatch("status_probe", {}, active_ops={})
     assert status == "failed"
     assert "_db_pool" in str(result["error"])
 
@@ -509,7 +522,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
 
     monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
 
-    status, result = await daemon._dispatch("status_probe", {})
+    status, result = await daemon._dispatch("status_probe", {}, active_ops={})
 
     assert status == "completed"
     assert result["machine_name"] == "win"
@@ -522,18 +535,19 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
 @pytest.mark.asyncio
 async def test_ops_route_wraps_dispatch_in_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     """A valid body returns 200 with {status, result} from _dispatch."""
-    daemon._dispatch_sem = asyncio.Semaphore(4)
+    dispatch_sem = asyncio.Semaphore(4)
 
-    async def _fake_dispatch(kind, payload):  # type: ignore[no-untyped-def]
+    async def _fake_dispatch(kind, payload, *, active_ops: daemon.ActiveOps):  # type: ignore[no-untyped-def]
         assert kind == "status_probe"
         return "completed", {"paused": False}
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-    status, body, ctype = await daemon._ops_route(json.dumps({"kind": "status_probe"}).encode())
+    status, body, ctype = await daemon._ops_route(
+        json.dumps({"kind": "status_probe"}).encode(), active_ops={}, dispatch_sem=dispatch_sem
+    )
     assert status == 200
     assert ctype == "application/json"
     assert json.loads(body) == {"status": "completed", "result": {"paused": False}}
-    daemon._dispatch_sem = None
 
 
 @pytest.mark.asyncio
@@ -554,7 +568,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
 
     from ops.cluster_status import ClusterStatus
 
-    daemon._dispatch_sem = asyncio.Semaphore(1)
+    dispatch_sem = asyncio.Semaphore(1)
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     created = datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)
 
@@ -579,7 +593,9 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
         )
 
     monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
-    status, body, ctype = await daemon._ops_route(json.dumps({"kind": "status_probe"}).encode())
+    status, body, ctype = await daemon._ops_route(
+        json.dumps({"kind": "status_probe"}).encode(), active_ops={}, dispatch_sem=dispatch_sem
+    )
     assert status == 200
     assert ctype == "application/json"
     parsed = json.loads(body)
@@ -587,7 +603,6 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     shell = parsed["result"]["agent_groups"][0]["shells"][0]
     assert shell["name"] == "ava-agent-7"
     assert shell["created_at"] == "2026-06-11T08:30:00Z"
-    daemon._dispatch_sem = None
 
 
 @pytest.mark.asyncio
@@ -598,7 +613,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     from ops.cluster_status import ClusterStatus
 
     pool = _stub_pool()
-    daemon._dispatch_sem = asyncio.Semaphore(1)
+    dispatch_sem = asyncio.Semaphore(1)
     monkeypatch.setattr(daemon, "_db_pool", pool)
 
     def _degraded_status(_db: Database, probe_pool: object) -> ClusterStatus:
@@ -613,7 +628,9 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
 
     monkeypatch.setattr(daemon.cluster, "cluster_status_op", _degraded_status)
 
-    status, body, ctype = await daemon._ops_route(json.dumps({"kind": "status_probe"}).encode())
+    status, body, ctype = await daemon._ops_route(
+        json.dumps({"kind": "status_probe"}).encode(), active_ops={}, dispatch_sem=dispatch_sem
+    )
 
     assert status == 200
     assert ctype == "application/json"
@@ -623,7 +640,6 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     assert "current_orchestration" not in parsed["result"]
     assert "last_updater_outcome" not in parsed["result"]
     assert parsed["result"]["resource"] is None
-    daemon._dispatch_sem = None
 
 
 # ─── main top-level crash handling ─────────────────────────────────────────────
