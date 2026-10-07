@@ -252,3 +252,27 @@ def test_pty_breaker_trips_after_repeated_crashes(
     before = backend.has_session(name)
     mgr.reconcile()
     assert not backend.has_session(name) or before
+
+
+def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
+    db_conn: psycopg.Connection, pool: ConnectionPool, _pty_home: str
+) -> None:
+    from services.wake.schedule_manager import revisions
+
+    sid = _insert_schedule(
+        db_conn, "pty-revision", "import time; time.sleep(30)", "python schedule.py"
+    )
+    db_conn.execute("UPDATE schedules SET desired_revision = 1 WHERE id = %s", (sid,))
+    db_conn.commit()
+    name = session_name(f"schedule-{sid}")
+    mgr = sm.ScheduleManager(pool)
+    try:
+        assert mgr.sync_one(sid)
+        assert revisions.launched_revision(sid) == 1, repr(client.live_sessions(name))
+        before = get_shell_backend().session_started_at(name)
+        assert before is not None
+        assert sm.ScheduleManager(pool).sync_one(sid)
+        assert get_shell_backend().session_started_at(name) == before
+    finally:
+        mgr._reap(sid)
+        _wait_session_gone(name)

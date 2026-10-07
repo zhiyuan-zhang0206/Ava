@@ -107,15 +107,27 @@ def _script_filename(command: str) -> str:
     return "schedule.py"
 
 
-def _load(database: Database, schedule_id: int) -> tuple[str, str] | None:
+def _load(
+    database: Database, schedule_id: int, revision: int | None = None
+) -> tuple[str, str] | None:
     """Return (script, command) for an enabled schedule, or None if it is gone /
     disabled (a benign race: the manager launched it, then it was deleted)."""
-    with database.connect(autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT script, command FROM schedules WHERE id = %s AND enabled = true",
-            (schedule_id,),
-        )
-        row = cur.fetchone()
+    if revision is None:
+        with database.connect(autocommit=True) as conn:
+            row = conn.execute(
+                "SELECT script, command FROM schedules WHERE id = %s AND enabled = true",
+                (schedule_id,),
+            ).fetchone()
+    else:
+        # Admission fences a delayed runner from executing a newer script under
+        # an old command identity. Mark applied before any user code so a quick
+        # completion survives the manager's post-launch acknowledgement crash.
+        with database.write_transaction() as conn:
+            row = conn.execute(
+                "UPDATE schedules SET applied_revision = %s, status = 'running', last_error = NULL "
+                "WHERE id = %s AND enabled AND desired_revision = %s RETURNING script, command",
+                (revision, schedule_id, revision),
+            ).fetchone()
     return (row[0], row[1]) if row is not None else None
 
 
@@ -382,9 +394,9 @@ def _record_script_exit(
     return code
 
 
-def run(schedule_id: int) -> int:
+def run(schedule_id: int, revision: int | None = None) -> int:
     """Materialize + run the schedule. Returns a process exit code."""
-    return _run(Database.from_settings(), schedule_id)
+    return _run(Database.from_settings(), schedule_id, revision)
 
 
 def _bind_schedule_actor(schedule_id: int) -> None:
@@ -402,8 +414,8 @@ def _bind_schedule_actor(schedule_id: int) -> None:
     )
 
 
-def _run(database: Database, schedule_id: int) -> int:
-    loaded = _load(database, schedule_id)
+def _run(database: Database, schedule_id: int, revision: int | None = None) -> int:
+    loaded = _load(database, schedule_id, revision)
     if loaded is None:
         logger.warning("Schedule {} is gone or disabled; nothing to run", schedule_id)
         return 0
@@ -514,8 +526,8 @@ def _run(database: Database, schedule_id: int) -> int:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        logger.error("Usage: python -m gateway.schedules.runner <schedule_id>")
+    if len(sys.argv) not in (2, 3):
+        logger.error("Usage: python -m gateway.schedules.runner <schedule_id> [revision]")
         raise SystemExit(2)
     # issue #194: refuse to run from a foreign checkout (a dev worktree
     # against the prod home) — the runner's own repo root anchors every
@@ -525,7 +537,10 @@ def main() -> None:
     if refusal is not None:
         logger.error("schedule runner refused: {}", refusal)
         raise SystemExit(3)
-    raise SystemExit(run(int(sys.argv[1])))
+    revision = int(sys.argv[2]) if len(sys.argv) == 3 else None
+    if revision is not None and revision < 0:
+        raise SystemExit(2)
+    raise SystemExit(run(int(sys.argv[1]), revision))
 
 
 if __name__ == "__main__":

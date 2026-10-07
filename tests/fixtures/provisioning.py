@@ -247,6 +247,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     # Queued schedule-manager sync requests: no FK (a delete queues one for a
     # row that is gone); a leaked row would be consumed by the next test.
     "schedule_sync_requests",
+    "schedule_operation_receipts",
 )
 
 

@@ -422,6 +422,10 @@ def test_sync_recovers_errored_schedule(
     backend, launched = fake_session
     sid = _insert(db_conn, "err-b")
     _set_status(db_conn, sid, "error")
+    db_conn.execute(
+        "UPDATE schedules SET desired_revision = desired_revision + 1 WHERE id = %s", (sid,)
+    )
+    db_conn.commit()
 
     sm.ScheduleManager(pool).sync_one(sid)
 

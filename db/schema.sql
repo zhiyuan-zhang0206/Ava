@@ -1234,9 +1234,20 @@ CREATE TABLE schedules (
     launch_count     INT NOT NULL DEFAULT 0,  -- crash-backoff launch counter (schedule-manager)
     next_launch_at   TIMESTAMPTZ,             -- no relaunch before this
     not_live_since   TIMESTAMPTZ,             -- first sessionless observation of the current outage
-    stall_alerted_at TIMESTAMPTZ              -- the two-hour no-session alert fired for this outage
+    stall_alerted_at TIMESTAMPTZ,             -- the two-hour no-session alert fired for this outage
+    desired_revision BIGINT NOT NULL DEFAULT 0,
+    applied_revision BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX ON schedules (enabled);
+
+CREATE TABLE schedule_operation_receipts (
+    operation_key TEXT PRIMARY KEY,
+    request JSONB NOT NULL,
+    response JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE schedule_operation_receipts IS
+    'Immutable schedule mutation receipts, committed with desired state and sync work; retained without expiry so old retries cannot become new restart intents.';
 
 CREATE TABLE schedule_sync_requests (
     schedule_id  BIGINT PRIMARY KEY,
@@ -1244,7 +1255,7 @@ CREATE TABLE schedule_sync_requests (
 );
 
 COMMENT ON TABLE schedule_sync_requests IS
-    'Pending API requests for the schedule-manager service to converge one schedule''s session now (kill, relaunch if enabled). The consumer deletes a row after the sync ran, only if requested_at is unchanged.';
+    'Pending desired-state convergence. Matching revision/session provenance is adopted. The consumer deletes a row after convergence, only if requested_at is unchanged.';
 
 CREATE TABLE schedule_versions (
     id          BIGSERIAL PRIMARY KEY,

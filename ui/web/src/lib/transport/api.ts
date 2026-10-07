@@ -862,10 +862,10 @@ export const api = {
     return f("/api/schedules", POST_JSON(body)).then(ok<ScheduleView>);
   },
 
-  updateSchedule: (id: number, body: ScheduleUpdate): Promise<ScheduleView> => {
+  updateSchedule: (id: number, body: ScheduleUpdate, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
     return f(`/api/schedules/${id}`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "Idempotency-Key": operationKey },
       body: JSON.stringify(body),
     }).then(ok<ScheduleView>);
   },
@@ -874,16 +874,16 @@ export const api = {
     return f(`/api/schedules/${id}`, { method: "DELETE" }).then(ok<{ status: string }>);
   },
 
-  startSchedule: (id: number): Promise<ScheduleView> => {
-    return f(`/api/schedules/${id}/start`, POST).then(ok<ScheduleView>);
+  startSchedule: (id: number, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+    return f(`/api/schedules/${id}/start`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
   },
 
-  stopSchedule: (id: number): Promise<ScheduleView> => {
-    return f(`/api/schedules/${id}/stop`, POST).then(ok<ScheduleView>);
+  stopSchedule: (id: number, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+    return f(`/api/schedules/${id}/stop`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
   },
 
-  restartSchedule: (id: number): Promise<ScheduleView> => {
-    return f(`/api/schedules/${id}/restart`, POST).then(ok<ScheduleView>);
+  restartSchedule: (id: number, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+    return f(`/api/schedules/${id}/restart`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
   },
 
   scheduleLogs: (id: number, lines = 200): Promise<ScheduleLogsView> => {

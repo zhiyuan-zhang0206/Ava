@@ -201,6 +201,9 @@ class PtyService:
         prefix = req.get("prefix", "")
         if not isinstance(prefix, str):
             raise RequestError(protocol.BAD_REQUEST, "prefix must be a string")
+        include_command = req.get("include_initial_command", False)
+        if not isinstance(include_command, bool):
+            raise RequestError(protocol.BAD_REQUEST, "include_initial_command must be a boolean")
         with self._lock:
             candidates = [s for n, s in sorted(self._sessions.items()) if n.startswith(prefix)]
         rows = [
@@ -213,6 +216,7 @@ class PtyService:
                 "cwd": s.record.cwd,
                 "started_at": s.record.started_at,
                 "generation": s.record.generation,
+                **({"initial_command": s.initial_command} if include_command else {}),
             }
             for s in candidates
             if not s.dead and s.pid_matches()
@@ -302,6 +306,7 @@ class PtyService:
             with contextlib.suppress(ChildProcessError, OSError):
                 os.waitpid(pid, 0)
             raise
+        created.initial_command = cmd
         with self._lock:
             self._sessions[name] = created
             self._persist()

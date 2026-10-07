@@ -321,9 +321,13 @@ def test_sync_clears_backoff(
     _backend, _launched = fake_session
     sid = _insert(db_conn, "sync-b")
     _set_backoff(db_conn, sid, sm._BREAKER_MAX, seconds_ahead=3600)  # pretend it tripped
-    sm.ScheduleManager(pool).sync_one(sid)
-    # a deliberate sync resets the crash backoff, then its launch is the first attempt
+    from gateway.schedules import router
+
+    router._control_blocking(pool, sid, "restart", None)
     assert _backoff_state(db_conn, sid) == (0, False)
+    sm.ScheduleManager(pool).sync_one(sid)
+    # One new intent resets the budget; its first launch then claims an attempt.
+    assert _backoff_state(db_conn, sid) == (1, True)
 
 
 def test_the_crash_backoff_survives_a_restart(
