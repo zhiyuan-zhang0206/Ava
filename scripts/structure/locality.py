@@ -1,9 +1,8 @@
 """Locality rules for the structure gate: package doors and single decision owners.
 
-Both rules measure `path::target -> [line, ...]` sites per module; the frozen
-counts live in the `private_imports` / `owner_bypasses` sections of
-scripts/structure/baseline/*.json shards, and the rules themselves are documented in the
-scripts/lint/code_structure.py header (Rules 4 and 5).
+Both rules measure `path::target -> [line, ...]` sites per module and reject every
+measured site without baseline allowances. The rules themselves are documented
+in scripts/lint/code_structure.py (Rules 4 and 5).
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from typing import cast
 from scripts.structure import ambient_state, baseline_shards, path_imports
 
 SECTIONS = ("private_imports", "owner_bypasses", "patch_targets")
+STRICT_SECTIONS = ("private_imports", "owner_bypasses", path_imports.SECTION)
 # section -> the lint that measures it. Frozen and guarded like the others, but measured over
 # the test files by its own script; the structure gate only parses and guards them.
 EXTERNAL_SECTIONS = {"patch_targets": "scripts/lint/patch_targets.py"}
@@ -401,14 +401,14 @@ def site_errors(
     repo_root: Path,
     renames: dict[str, str] | None = None,
 ) -> list[str]:
-    """Frozen counts must match reality: growth is a violation, shrinkage a stale entry.
-
-    Covers every measured section: the two locality sections and `path_imports`.
-    """
+    """Reject every locality/path-import site; guard remaining ambient-state debt."""
     sources = {new: old for old, new in (renames or {}).items()}
     errors: list[str] = []
     for kind, sites in measured.items():
         if kind in EXTERNAL_SECTIONS:
+            continue
+        if kind in STRICT_SECTIONS:
+            errors.extend(_growth_errors(kind, sites, {}, {}))
             continue
         errors.extend(_growth_errors(kind, sites, baseline[kind], sources))
         errors.extend(_stale_errors(kind, sites, baseline[kind], scanned, repo_root))
