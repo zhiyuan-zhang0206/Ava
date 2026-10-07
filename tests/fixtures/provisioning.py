@@ -210,6 +210,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "schedule_runs",
     "agent_presets",
     "mcp_clients",
+    "mcp_credential_creation_receipts",
     "api_idempotency",
     "checkpoint_blobs",
     "checkpoint_writes",
