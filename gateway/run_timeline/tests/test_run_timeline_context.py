@@ -120,6 +120,7 @@ def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
     assert (result.request, result.session, result.sessions) == (4, 1, 2)
     assert result.ts == T0 + timedelta(minutes=10)
     assert result.total_input_tokens == 40
+    assert result.estimated is False  # the request's own input_tokens
     kinds = {c.kind: c.tokens for c in result.categories}
     assert set(kinds) == {"system_prompt", "user_input"}
     assert sum(kinds.values()) == 40
