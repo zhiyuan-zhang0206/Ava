@@ -9,6 +9,7 @@ import { ContextBreakdownCard, type CategoryHighlight } from "@/components/inspe
 import { RunTimelineCrumbs } from "@/components/run-timeline/run-timeline-crumbs";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { RunTimelineRows } from "@/components/run-timeline/run-timeline-rows";
+import { RunTimelineSessions } from "@/components/run-timeline/run-timeline-sessions";
 import { RunTimelineChartSkeleton } from "@/components/run-timeline/run-timeline-skeleton";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import {
@@ -201,6 +202,13 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
           </button>
         </div>
       )}
+      {agentId !== null && data ? (
+        <RunTimelineSessions
+          agentId={agentId}
+          onZoom={(window, label) => pushCrumb({ ...window, label })}
+          onBuildEnded={() => void query.refetch()}
+        />
+      ) : null}
       {/* Agent-scoped context details follow the timeline. */}
       {agentId !== null && contextAt !== undefined ? (
         <ContextBreakdownCard agentId={agentId} at={contextAt} categoryHighlight={categoryHighlight} />

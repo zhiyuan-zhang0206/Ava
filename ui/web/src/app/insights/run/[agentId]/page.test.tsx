@@ -7,6 +7,7 @@ import type {
   RunTimelineContext,
   RunTimelineMessages,
   RunTimelineResponse,
+  SessionsResponse,
   UserSettingListResponse,
 } from "@/lib/contracts/types";
 
@@ -14,6 +15,7 @@ const {
   getRunTimeline,
   getRunTimelineMessages,
   getRunTimelineContext,
+  getAgentSessions,
   getSettings,
   getContextBreakdown,
   useMediaQuery,
@@ -34,12 +36,13 @@ const {
     getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
     getRunTimelineContext: vi.fn<(agentId: number, at: number) => Promise<RunTimelineContext>>(),
+    getAgentSessions: vi.fn<(agentId: number) => Promise<SessionsResponse>>(),
   }));
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getSettings, getContextBreakdown },
+  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getAgentSessions, getSettings, getContextBreakdown },
 }));
 
 import RunTimelinePage from "./page";
@@ -825,5 +828,36 @@ describe("context size row", () => {
     render();
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
+  });
+});
+
+describe("sessions panel", () => {
+  it("is collapsed under the chart and zooms the timeline to a session", async () => {
+    getAgentSessions.mockResolvedValue({
+      agent_id: 42,
+      model: "m",
+      understanding_enabled: true,
+      cost_basis: "basis",
+      sessions: [
+        {
+          number: 1,
+          boundary_checkpoint_id: null,
+          start: "2026-10-04T12:00:00.000000Z",
+          end: "2026-10-04T13:00:00.000000Z",
+          messages: 9,
+          peak_input_tokens: 1000,
+          coverage: { status: "none", ratio: 0, covered_messages: 0, total_messages: 9 },
+          estimate: { jobs: 1, input_tokens: 10, output_tokens: 1, cost_usd: null },
+        },
+      ],
+    });
+    render();
+    await screen.findByTestId("run-timeline-chart");
+    expect(getAgentSessions).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("run-timeline-sessions-toggle"));
+    const whole = summaryText();
+    fireEvent.click(await screen.findByTestId("run-timeline-session-zoom"));
+    expect(screen.getByTestId("run-timeline-crumbs").textContent).toContain("Sessions 1");
+    expect(summaryText()).not.toBe(whole);
   });
 });
