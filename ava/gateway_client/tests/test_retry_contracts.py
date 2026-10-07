@@ -50,7 +50,7 @@ def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) ->
         else:
             assert send().status_code == 503
     assert len(requests) == 1
-    if path in ("/api/agents", "/api/cancel", "/api/agents/7/compact"):
+    if path in ("/api/agents", "/api/cancel", "/api/agents/7/compact", "/api/tasks/1"):
         assert requests[0].headers["Idempotency-Key"]
 
 
@@ -110,3 +110,49 @@ def test_new_keyed_route_does_not_activate_ambiguous_retry(
             assert transport.post(path, idempotency_key="intent-1").status_code == 503
     assert len(requests) == 1
     assert requests[0].headers["Idempotency-Key"] == "intent-1"
+
+
+@pytest.mark.parametrize("failure", ["timeout", "server_error"])
+def test_task_patch_caller_key_survives_explicit_replay(failure: str) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("old gateway ignored key", request=request)
+        return httpx.Response(503)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        transport.use_client(client),
+    ):
+        for _ in range(2):
+            if failure == "timeout":
+                with pytest.raises(GatewayUnavailable, match="result unknown"):
+                    transport.patch("/api/tasks/1", {"priority": "P1"}, idempotency_key="original")
+            else:
+                assert (
+                    transport.patch(
+                        "/api/tasks/1", {"priority": "P1"}, idempotency_key="original"
+                    ).status_code
+                    == 503
+                )
+    assert len(requests) == 2
+    assert [request.headers["Idempotency-Key"] for request in requests] == ["original", "original"]
+
+
+@pytest.mark.parametrize("key", ["", "x" * 129, 17])
+def test_task_patch_rejects_invalid_caller_key_before_network(key: object) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        transport.use_client(client),
+        pytest.raises((TypeError, ValueError), match="idempotency key"),
+    ):
+        transport.patch("/api/tasks/1", idempotency_key=key)  # type: ignore[arg-type]
+    assert requests == []

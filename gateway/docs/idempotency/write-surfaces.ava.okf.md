@@ -82,5 +82,5 @@ Domain evidence:
 | `POST /api/agents/{agent_id}/messages` | keyed | enqueue chat inbound — one logical message must land exactly once; clients retry with an Idempotency-Key |
 | `POST /api/agents/{agent_id}/messages/reconcile` | natural | idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery |
 | `POST /api/agents/{agent_id}/system-note` | keyed | optional principal-scoped identity reuses one system-note inbound; changed payload or resurrection policy conflicts |
-| `PATCH /api/tasks/{task_id}` | one-shot | task effect and notification share a transaction; request has no replay receipt |
+| `PATCH /api/tasks/{task_id}` | keyed / transactional | original response commits with task and notification; replay skips writes and wakes |
 | `POST /api/agents/{agent_id}/uploads` | one-shot | save files to disk + enqueue inbound; a retry duplicates files |

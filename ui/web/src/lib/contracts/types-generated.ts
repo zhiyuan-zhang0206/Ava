@@ -3425,6 +3425,10 @@ export interface paths {
          *     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
          *     reassigned, completed, cancelled, or otherwise edited.
          *
+         *     An optional Idempotency-Key commits an immutable response with the write.
+         *     Reusing that key with different fields returns 409; replay returns the original
+         *     task snapshot without another update or wake, even if the task later changes.
+         *
          *     A status change to done or cancelled is rejected with 422 while any direct
          *     child remains in progress. Close or cancel those children first.
          */

@@ -17,6 +17,7 @@ from base.agents.messages.delivery_outbox import (
 )
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
+from base.api_contracts.idempotency import validate_idempotency_key
 from base.config import settings
 from base.host.net.resilience import Policy, http_classifier, retry
 
@@ -382,14 +383,30 @@ def get(
     return _request_with_retry(lambda: _http().get(path, params=params, timeout=per_call), retries)
 
 
-def patch(path: str, json: dict[str, Any] | None = None) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
+def patch(
+    path: str, json: dict[str, Any] | None = None, *, idempotency_key: str | None = None
+) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Retry ambiguous failures only when the route declares natural idempotency.
     A PATCH verb alone does not prove its business effects are repeatable.
+    Newly keyed routes send a stable key but do not retry ambiguous failures:
+    an older gateway may ignore the header. Pass the original key to replay.
     """
+    contract = contracts.contract_for("PATCH", path)
+    keyed = contract is not None and contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
+    key = (
+        validate_idempotency_key(idempotency_key)
+        if idempotency_key is not None
+        else _uuid.uuid4().hex
+    )
+    headers = {"Idempotency-Key": key} if keyed else None
     return _request_with_retry(
-        lambda: _http().patch(path, json=json or {}),
+        lambda: (
+            _http().patch(path, json=json or {}, headers=headers)
+            if keyed
+            else _http().patch(path, json=json or {})
+        ),
         _max_retries(),
         retryable=contracts.idempotency_for("PATCH", path) is Idempotency.IDEMPOTENT,
     )
