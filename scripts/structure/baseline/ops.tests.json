@@ -1,6 +1,3 @@
 {
-  "patch_targets": {
-    "ops/tests/test_agent_skill_view.py::ava.skills.composer_commands._command_dirs": 1,
-    "ops/tests/test_inventory_ops.py::ava.mcp_config._plugin_config_paths": 1
-  }
+  "patch_targets": {}
 }
