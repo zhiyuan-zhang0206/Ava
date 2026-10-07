@@ -35,7 +35,7 @@ ENTRIES: dict[str, tuple[tuple[str, ...], str]] = {
     "heartbeat": (("services.wake.heartbeat.daemon",), "gateway"),
     "memory-indexer": (("services.derived.memory_indexer.daemon",), "gateway"),
     "memory-search": (("services.derived.memory_search.daemon",), "gateway"),
-    "gateway": (("gateway._server", "gateway.app"), "gateway"),
+    "gateway": (("gateway.cluster.server", "gateway.app"), "gateway"),
     "ops": (("services.agent_runner.agent_ops.daemon",), "runner"),
     "browser-mcp": (("services.desktop.browser.mcp_daemon",), "runner"),
     "agent-host": (("services.agent_runner.agent_host.daemon",), "agent"),

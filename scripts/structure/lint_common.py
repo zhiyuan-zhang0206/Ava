@@ -72,7 +72,7 @@ LINT_TOOLING = (
     "scripts/lint/",
     "scripts/structure/",
     "scripts/content_lint/",
-    "scripts/lint_pool_keepalives.py",
+    "scripts/lint/pool_keepalives.py",
 )
 
 

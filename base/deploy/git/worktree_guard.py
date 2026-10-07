@@ -19,7 +19,7 @@ production schedule with no warning and no obviously-broken signal afterwards
   and process group (issue #3685: cleanup normally runs from inside the
   target, `cd <worktree> && check … | tail`).
 
-The guard lives in `scripts/check_worktree_remove.py` as the step the
+The guard lives in `scripts/host_ops/check_worktree_remove.py` as the step the
 `ship-a-change` skill runs before `git worktree remove`; git itself offers no
 hook for that operation, so the check has to sit in the tooling.
 """

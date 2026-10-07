@@ -6,10 +6,10 @@ draft-skipped or unexecuted workflow evidence is never green. Limbo diagnostics
 name aged queued runs without changing that verdict.
 
 Usage:
-    .venv/bin/python scripts/ci_utils.py PR [--repo owner/repo] [--json]
-    .venv/bin/python scripts/ci_utils.py PR --wait [--timeout N]
-    .venv/bin/python scripts/ci_utils.py PR --diagnose [--json]
-    .venv/bin/python scripts/ci_utils.py PR --merge [--queue trunk]
+    .venv/bin/python scripts/ci/cli.py PR [--repo owner/repo] [--json]
+    .venv/bin/python scripts/ci/cli.py PR --wait [--timeout N]
+    .venv/bin/python scripts/ci/cli.py PR --diagnose [--json]
+    .venv/bin/python scripts/ci/cli.py PR --merge [--queue trunk]
 
 One-shot queries retain their reporting contract: pending/errors print a structured
 verdict and exit 0; settled failures exit 1. Waiting exits 0 only for ALL_PASSED,
@@ -24,9 +24,9 @@ import argparse
 import json
 import os
 
-from scripts.ci import monitor
-from scripts.ci.accounting import DEFAULT_LEDGER, load_ledger, report_rows
-from scripts.ci.status import DEFAULT_REPO, POLL_INTERVAL
+from scripts.ci.pull_requests import monitor
+from scripts.ci.pull_requests.accounting import DEFAULT_LEDGER, load_ledger, report_rows
+from scripts.ci.pull_requests.status import DEFAULT_REPO, POLL_INTERVAL
 
 # CLI metadata does not import the queue operations module.
 _QUEUE_CHOICES = ("trunk",)
@@ -45,7 +45,7 @@ def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentPar
 
 def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
     """Dispatch --ci-usage when set; None when not set.
-    Reads the repo ledger (scripts/ci/ci_usage/ledger.jsonl, produced by scripts/ci/accounting.py
+    Reads the repo ledger (scripts/ci/ci_usage/ledger.jsonl, produced by scripts/ci/pull_requests/accounting.py
     --append-ledger) and prints per-agent rollups — the read side of the CI cost attribution
     pipeline (task #2575).
     """
@@ -93,7 +93,7 @@ def _diagnose_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
         )
     if args.pr is None:
         parser.error("PR number is required with --diagnose")
-    from scripts.ci.ci_diagnose import diagnose_pr, print_diagnosis
+    from scripts.ci.pull_requests.diagnose import diagnose_pr, print_diagnosis
 
     diag = diagnose_pr(args.pr, args.repo, token=os.environ.get("TRUNK_API_TOKEN"))
     if args.json:
@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         return diagnose_rc
 
     if args.merge or args.queue_status or args.evict or args.rerun_failed_jobs:
-        from scripts.ci.owner_operations import dispatch
+        from scripts.ci.pull_requests.owner_operations import dispatch
 
         return dispatch(args, p)
     if args.pr is None:

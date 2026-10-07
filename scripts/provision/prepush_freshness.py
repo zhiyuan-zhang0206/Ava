@@ -5,7 +5,7 @@ pre-commit never hands a deleted path to a hook, on any compared range, so a hoo
 event registry, the config table or an OKF link target goes stale and nothing local notices.
 Only a whole-repository run of the hook can see what a deletion left behind.
 
-The nested branch-diff run (scripts/prepush-branch-lint.sh) already executes every commit-stage
+The nested branch-diff run (scripts/hooks/prepush-branch-lint.sh) already executes every commit-stage
 hook whose inputs the branch added or changed, and a whole-repository hook (`pass_filenames:
 false`) judges the deletion along with it. This covers the rest: a whole-repository hook whose
 `files:` pattern matches a deleted path and no added or changed one, and a per-file hook (which
@@ -51,7 +51,7 @@ def branch_paths() -> tuple[set[str], set[str]]:
     pattern counts as deleting it.
     """
     base = subprocess.run(  # noqa: S603 — fixed repo-local range owner
-        ["bash", str(_ROOT / "scripts/prepush-base.sh")],
+        ["bash", str(_ROOT / "scripts/hooks/prepush-base.sh")],
         cwd=_ROOT,
         capture_output=True,
         text=True,

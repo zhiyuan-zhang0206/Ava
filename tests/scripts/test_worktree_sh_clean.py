@@ -159,7 +159,7 @@ def test_unusable_checker_environment_refuses_and_force_overrides(tmp_path: Path
 def test_missing_checker_refuses_and_force_overrides(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     target = _add_worktree(repo)
-    (repo / "scripts" / "check_worktree_remove.py").unlink()
+    (repo / "scripts" / "host_ops" / "check_worktree_remove.py").unlink()
     home = _fake_home(tmp_path)
 
     refused = _clean(repo, home, "t1")
@@ -179,7 +179,7 @@ def test_crashed_checker_refuses_and_force_overrides(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     target = _add_worktree(repo)
     _plant_usable_python(repo)
-    (repo / "scripts" / "check_worktree_remove.py").write_text("raise SystemExit(2)\n")
+    (repo / "scripts" / "host_ops" / "check_worktree_remove.py").write_text("raise SystemExit(2)\n")
     home = _fake_home(tmp_path)
 
     refused = _clean(repo, home, "t1")

@@ -25,7 +25,7 @@ from base.host.system import cron, logs_job, packages_job, pr_flow_job, walg_job
 _OLD_CRONTAB = """\
 40 4 * * * AVA_HOME=/home/operator/.ava /bin/sh -c '/home/operator/.ava/source/.venv/bin/ava logs rotate && /home/operator/.ava/source/.venv/bin/ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3'  # ava-logs-maintenance.ava-0a1b2c3d
 */15 * * * * AVA_HOME=/home/operator/.ava /bin/sh -c '/home/operator/.ava/source/.venv/bin/ava packages refresh --from-job' >> /home/operator/.ava/logs/packages-refresh.log 2>&1  # ava-packages-refresh.ava-0a1b2c3d
-25 0 * * * AVA_HOME=/home/operator/.ava /bin/sh -c '/home/operator/.ava/source/.venv/bin/python /home/operator/.ava/source/scripts/pr_flow_export.py' >> /home/operator/.ava/logs/pr-flow.out.log 2>&1  # # ava-pr-flow  # ava-pr-flow.ava-0a1b2c3d
+25 0 * * * AVA_HOME=/home/operator/.ava /bin/sh -c '/home/operator/.ava/source/.venv/bin/python /home/operator/.ava/source/scripts/ci/pull_requests/pr_flow_export.py' >> /home/operator/.ava/logs/pr-flow.out.log 2>&1  # # ava-pr-flow  # ava-pr-flow.ava-0a1b2c3d
 */5 * * * * AVA_HOME=/home/operator/.ava /home/operator/.ava/source/.venv/bin/ava cluster health-probe # ava-health-probe.ava-0a1b2c3d
 """
 

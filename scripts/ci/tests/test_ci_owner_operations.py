@@ -8,8 +8,8 @@ from typing import Any, cast
 
 import pytest
 
-from scripts.ci import commands as ci_utils
-from scripts.ci import monitor, owner_operations, status
+from scripts.ci.pull_requests import commands as ci_utils
+from scripts.ci.pull_requests import monitor, owner_operations, status
 
 
 def _no_cooldown(_: str, __: str) -> int:

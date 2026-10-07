@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run scripts/test_migrations_apply.sh against a throwaway native Postgres.
+"""Run scripts/ci/test_migrations_apply.sh against a throwaway native Postgres.
 
 The migration smoke applies baseline-pending migrations in order + exercises
 trigger paths on a fresh DB (catches migration bodies referencing wrong columns
@@ -33,7 +33,7 @@ def main() -> int:
             "PGDATABASE": u.path.lstrip("/"),
         }
         proc = subprocess.run(
-            ["bash", "scripts/test_migrations_apply.sh"], cwd=_REPO_ROOT, env=env, check=False
+            ["bash", "scripts/ci/test_migrations_apply.sh"], cwd=_REPO_ROOT, env=env, check=False
         )
         return proc.returncode
 

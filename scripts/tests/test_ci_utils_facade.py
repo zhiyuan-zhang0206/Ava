@@ -3,8 +3,8 @@
 import subprocess
 import sys
 
-from scripts import ci_utils
-from scripts.ci import commands, status
+from scripts.ci import cli as ci_utils
+from scripts.ci.pull_requests import commands, status
 
 
 def test_public_ci_symbols_keep_their_single_owner() -> None:

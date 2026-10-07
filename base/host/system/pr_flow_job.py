@@ -1,6 +1,6 @@
 """Daily OS job for the PR-flow sampler (task #2139).
 
-One daily job hands `scripts/pr_flow_export.py` to the platform scheduler
+One daily job hands `scripts/ci/pull_requests/pr_flow_export.py` to the platform scheduler
 (launchd / crontab) at 00:25 host-local time: the previous cluster-tz day is
 complete by then, so the run aggregates it — and re-emits the whole trailing
 window — with the day's data final.
@@ -15,7 +15,7 @@ network: the checks are `shutil.which` plus one file read, so converge
 stays cheap.
 
 The job command runs the checkout's own venv python against the checkout's
-`scripts/pr_flow_export.py` (same checkout rule as
+`scripts/ci/pull_requests/pr_flow_export.py` (same checkout rule as
 `base.host.system.cron.ava_binary_path`), so a worktree's converge — should the gate
 ever pass there — would register its own pair, never prod's.
 
@@ -66,7 +66,7 @@ def _python_path() -> str:
 def _script_path() -> str:
     from base.paths import repo_root
 
-    return str(repo_root() / "scripts" / "pr_flow_export.py")
+    return str(repo_root() / "scripts" / "ci" / "pull_requests" / "pr_flow_export.py")
 
 
 def _shell_command() -> str:

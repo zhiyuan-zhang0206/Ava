@@ -11,12 +11,12 @@ Screen Recording and Accessibility require System Settings when missing.
 The helper must support the nursery spawn wire method.
 
 Usage:
-  .venv/bin/python scripts/tcc-onboard-helper-grants.py            # interactive, all items
-  .venv/bin/python scripts/tcc-onboard-helper-grants.py --check    # inventory only (no dialogs)
-  .venv/bin/python scripts/tcc-onboard-helper-grants.py --tier L2  # target tier (design v1)
-  .venv/bin/python scripts/tcc-onboard-helper-grants.py --items folders
-  .venv/bin/python scripts/tcc-onboard-helper-grants.py --timeout 180
-  .venv/bin/python scripts/tcc-onboard-helper-grants.py --fill-pending --confirm-user-present
+  .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py            # interactive, all items
+  .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --check    # inventory only (no dialogs)
+  .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --tier L2  # target tier (design v1)
+  .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --items folders
+  .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --timeout 180
+  .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --fill-pending --confirm-user-present
 
 Tiers: --tier names the machine's target authorization set (design v1). L0
 refuses to probe or trigger at all (maintenance windows); L1..L3 grow the
@@ -50,7 +50,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -274,7 +274,7 @@ def helper_client() -> Any:
     except ImportError as exc:
         raise OnboardError(
             "run this script with the repository venv "
-            "(e.g. .venv/bin/python scripts/tcc-onboard-helper-grants.py)"
+            "(e.g. .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py)"
         ) from exc
     return client
 

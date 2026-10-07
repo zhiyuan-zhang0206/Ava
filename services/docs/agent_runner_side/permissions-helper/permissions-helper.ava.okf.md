@@ -58,7 +58,7 @@ The helper also seeds `ava-root` (`root_seed` / `root_status` / `root_stop`): [[
 - `services/desktop/permissions_helper/launchd_job.py` — the launchd job surface (label/plist/`launchctl print` read + parse, retirement, replacement guard) shared by lifecycle and the helper healthcheck
 - `services/desktop/permissions_helper/client.py` — Python-side call entry
 - `services/desktop/permissions_helper/helper/main.swift` — Swift daemon
-- `scripts/tcc-preauth.sh` — read-only helper/TCC diagnostics and manual grant list
+- `scripts/host_ops/tcc/preauth.sh` — read-only helper/TCC diagnostics and manual grant list
 
 ## Notes
 - macOS only; configuration gate `AVA_PERMISSIONS_HELPER_ENABLED`, capability probe `base.host.system.probes.permissions_helper_incapability` (swift/codesign/display).

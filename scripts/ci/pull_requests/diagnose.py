@@ -8,8 +8,8 @@ import subprocess
 import sys
 from typing import Any
 
-from scripts.ci import trunk_api
-from scripts.ci.job_rerun import FAILING, CiJobRerunError, list_failed_jobs
+from scripts.ci.pull_requests import trunk_api
+from scripts.ci.pull_requests.job_rerun import FAILING, CiJobRerunError, list_failed_jobs
 
 _DIAGNOSE_LOG_TAIL = 4000
 _DIAGNOSE_MAX_JOB_LOGS = 8

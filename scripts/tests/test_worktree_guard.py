@@ -16,7 +16,9 @@ from tests.path_scoped.pty_service import FakePtyService
 def _run_guard(target: Path) -> subprocess.CompletedProcess[str]:
     """Invoke the real guard script the way cleanup does — from inside the
     target, through a transient shell (the #3685 habit)."""
-    script = Path(__file__).resolve().parents[2] / "scripts" / "check_worktree_remove.py"
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "host_ops" / "check_worktree_remove.py"
+    )
     return subprocess.run(  # noqa: S603 — test-owned interpreter, fixture path, no untrusted input
         ["/bin/sh", "-c", f'cd "{target}" && "{sys.executable}" "{script}" "{target}"'],
         capture_output=True,
@@ -45,7 +47,9 @@ def test_pipeline_sibling_consumer_is_not_an_anchor(tmp_path: Path) -> None:
     the pipe."""
     target = tmp_path / "worktrees" / "wt-under-test"
     target.mkdir(parents=True)
-    script = Path(__file__).resolve().parents[2] / "scripts" / "check_worktree_remove.py"
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "host_ops" / "check_worktree_remove.py"
+    )
     result = subprocess.run(  # noqa: S603 — test-owned interpreter, fixture path, no untrusted input
         [
             "/bin/sh",
@@ -83,7 +87,9 @@ def test_a_python_without_psutil_gets_its_own_exit_code_and_says_what_to_run(
 ) -> None:
     """A system python lacks psutil. That is no verdict: exit 1 reads as REFUSE, which
     is what the crash used to look like."""
-    script = Path(__file__).resolve().parents[2] / "scripts" / "check_worktree_remove.py"
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "host_ops" / "check_worktree_remove.py"
+    )
     launch = (
         "import runpy, sys; sys.modules['psutil'] = None; "
         "sys.argv = [sys.argv[1], sys.argv[2]]; "
@@ -98,7 +104,7 @@ def test_a_python_without_psutil_gets_its_own_exit_code_and_says_what_to_run(
     assert result.returncode == 3, result.stdout + result.stderr
     assert result.stdout == ""
     assert "MISSING DEPENDENCY psutil" in result.stderr
-    assert ".venv/bin/python scripts/check_worktree_remove.py" in result.stderr
+    assert ".venv/bin/python scripts/host_ops/check_worktree_remove.py" in result.stderr
 
 
 # Runs the real script with every outbound channel replaced by a recorder that
@@ -193,7 +199,9 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
     home. The home here is deliberately not owner-only and holds an unreadable `.env`
     naming a database; any attempt to open the home as the owner's (`ensure_private_dir`)
     or to boot the cluster config from it changes or breaks something."""
-    script = Path(__file__).resolve().parents[2] / "scripts" / "check_worktree_remove.py"
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "host_ops" / "check_worktree_remove.py"
+    )
     home = tmp_path / "ava-home"
     (home / "run").mkdir(parents=True)
     target = tmp_path / "worktrees" / "wt-under-test"

@@ -1,6 +1,6 @@
 """Forbid decorative emoji in core Python — keep agent / backend code glyph-free.
 
-Run: `.venv/bin/python scripts/lint/no_emoji.py [path ...]` (defaults to scanning
+Run: `.venv/bin/python scripts/lint/diagnostics/no_emoji.py [path ...]` (defaults to scanning
 the in-scope dirs below; an explicit path that does not exist is an error
 (stderr + exit 1) rather than a silent no-op). Also run automatically via
 pre-commit hook.
@@ -49,7 +49,7 @@ import tokenize
 from pathlib import Path
 
 # Project root (this script lives under scripts/)
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import lint_common  # noqa: E402 - standalone script
@@ -214,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"\n{total} emoji found in core code. Remove them, or if a line genuinely "
             f"needs the character add an inline `{_INLINE_EXEMPT}: <reason>`. See the "
-            "docstring at the top of scripts/lint/no_emoji.py for scope and rationale.",
+            "docstring at the top of scripts/lint/diagnostics/no_emoji.py for scope and rationale.",
             file=sys.stderr,
         )
         return 1

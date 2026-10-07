@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from scripts.ci import status
+from scripts.ci.pull_requests import status
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning

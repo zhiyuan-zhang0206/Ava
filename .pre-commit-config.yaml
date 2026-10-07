@@ -73,7 +73,7 @@ repos:
         # stays CI-only (`uv run pyright` in backend-static). always_run
         # because the scoping is internal to the script, not pre-commit's
         # own (differently-computed) push-time file selection.
-        entry: bash scripts/prepush-pyright-files.sh
+        entry: bash scripts/hooks/prepush-pyright-files.sh
         stages: [pre-push]
         verbose: true  # Successful skips must stay visible.
         language: system
@@ -165,7 +165,7 @@ repos:
       # Python on the branch cannot move a test's home, so it skips the scan.
       - id: lint-patch-targets-full
         name: lint patch targets, full scan (a production import change moves other tests' homes)
-        entry: bash scripts/prepush-if-changed.sh '\.py$' -- .venv/bin/python scripts/lint/patch_targets.py
+        entry: bash scripts/hooks/prepush-if-changed.sh '\.py$' -- .venv/bin/python scripts/lint/patch_targets.py
         language: system
         stages: [pre-push]
         verbose: true  # A skip must stay visible.
@@ -199,10 +199,10 @@ repos:
 
       # Ban building a psycopg pool without TCP keepalives where the structure
       # gate's `postgres-dial` rule cannot see it: scripts/ and the modules that
-      # decision allows. See scripts/lint_pool_keepalives.py header.
+      # decision allows. See scripts/lint/pool_keepalives.py header.
       - id: lint-pool-keepalives
         name: lint pool keepalives (no pool without PG_KEEPALIVE_KWARGS outside Rule 5)
-        entry: .venv/bin/python scripts/lint_pool_keepalives.py --only
+        entry: .venv/bin/python scripts/lint/pool_keepalives.py --only
         language: system
         types: [python]
 
@@ -283,10 +283,10 @@ repos:
       # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
       # (cli/, ui/) and prose/content (skills/, docs/, ui/web/) are exempt and
       # not scanned. A line that genuinely needs the character uses an inline
-      # `# emoji-ok: <reason>`; see scripts/lint/no_emoji.py header for scope.
+      # `# emoji-ok: <reason>`; see scripts/lint/diagnostics/no_emoji.py header for scope.
       - id: lint-no-emoji
         name: lint no emoji (core code stays glyph-free)
-        entry: .venv/bin/python scripts/lint/no_emoji.py --only
+        entry: .venv/bin/python scripts/lint/diagnostics/no_emoji.py --only
         language: system
         types: [python]
 
@@ -521,10 +521,10 @@ repos:
       # parameter must thread it into fixed-instant window boundaries, and the
       # test side against fixed calendar fixtures bound to window-shaped names
       # (a pinned date rots the day the window rolls past it). See
-      # scripts/lint/time_bomb.py.
+      # scripts/lint/diagnostics/time_bomb.py.
       - id: lint-time-bomb
         name: lint time bombs (fixed instant x real clock)
-        entry: .venv/bin/python scripts/lint/time_bomb.py --only
+        entry: .venv/bin/python scripts/lint/diagnostics/time_bomb.py --only
         language: system
         types: [python]
 
@@ -533,7 +533,7 @@ repos:
       # error instead of a grandfathered exception.
       - id: lint-zombie-pyright-ignores
         name: lint zombie Pyright ignores (zero warning-tier ignores)
-        entry: .venv/bin/python scripts/lint/zombie_pyright_ignores.py --check --only
+        entry: .venv/bin/python scripts/lint/diagnostics/zombie_pyright_ignores.py --check --only
         language: system
         files: ^(.*\.py|pyproject\.toml)$
 
@@ -621,7 +621,7 @@ repos:
       # CI's frontend job lints the whole project.
       - id: frontend-eslint
         name: frontend eslint (changed files)
-        entry: bash scripts/precommit-eslint.sh
+        entry: bash scripts/hooks/precommit-eslint.sh
         language: system
         files: ^ui/web/(.*\.(ts|tsx|js|mjs)|package(-lock)?\.json|tsconfig\.json|scripts/eslint-warning-baseline\.json)$
 
@@ -659,8 +659,8 @@ repos:
       # inbound_compact_prompt) went uncaught — switched to single-source codegen,
       # and now any schema change without running codegen turns this hook red.
       - id: types-codegen-fresh
-        name: "types-generated.ts in sync with Pydantic schema (drift: run ./scripts/codegen-types.sh)"
-        entry: ./scripts/check-types-fresh.sh
+        name: "types-generated.ts in sync with Pydantic schema (drift: run ./scripts/codegen/codegen-types.sh)"
+        entry: ./scripts/codegen/check-types-fresh.sh
         language: system
         # base/agents/tasks/priority.py + base/agents/tasks/status.py carry the shared enums the
         # wire schemas reference, and ops/rpc_schemas/terminate.py defines the terminate
@@ -674,7 +674,7 @@ repos:
         pass_filenames: false
       - id: constants-codegen-fresh
         name: "constants-generated.ts in sync with base/events/live/projection.py (drift: run ./scripts/codegen/dump_frontend_constants.py)"
-        entry: ./scripts/check-constants-fresh.sh
+        entry: ./scripts/codegen/check-constants-fresh.sh
         language: system
         files: ^(base/events/live/projection\.py$|scripts/codegen/dump_frontend_constants\.py$|ui/web/src/lib/constants-generated\.ts$)
         pass_filenames: false
@@ -686,7 +686,7 @@ repos:
       # without regenerating turns this hook red.
       - id: events-registry-fresh
         name: "base/events/registry.md in sync with EVENTS registry (drift: run .venv/bin/python scripts/codegen/gen_event_registry.py)"
-        entry: ./scripts/check-events-registry-fresh.sh
+        entry: ./scripts/codegen/check-events-registry-fresh.sh
         language: system
         # The EVENTS domain modules feed the registry too: a spec added/edited in
         # base/events/declarations/ (one module per domain, discovered by
@@ -732,10 +732,10 @@ repos:
       # HEAD)..HEAD so every hook's normal files: filter still applies, just
       # against the correct range. Companion to
       # lint-prepush-artifact-freshness below for the separate delete-only
-      # gap a range fix cannot close. See scripts/prepush-branch-lint.sh.
+      # gap a range fix cannot close. See scripts/hooks/prepush-branch-lint.sh.
       - id: lint-prepush-branch-diff
         name: "lint prepush branch diff (re-run pre-commit stage over merge-base..HEAD)"
-        entry: bash scripts/prepush-branch-lint.sh
+        entry: bash scripts/hooks/prepush-branch-lint.sh
         stages: [pre-push]
         verbose: true  # Successful skips must stay visible.
         language: system

@@ -5,7 +5,7 @@ gateway endpoint; this script is the "first time starting up / no root
 agent running" bootstrap entry (chicken-and-egg solution — how do you
 start the first agent when the agents_meta table is empty).
 
-    .venv/bin/python scripts/start_agent.py
+    .venv/bin/python scripts/entrypoints/agent.py
 
 Only launches the process; **does not deliver an inbound** — after spawn,
 the agent idles waiting for inbound. To make it do work, use the web UI
@@ -21,7 +21,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.host.net.http_dial import post as dial_post

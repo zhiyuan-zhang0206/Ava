@@ -1,4 +1,4 @@
-"""scripts/tcc-onboard-helper-grants.py: the tier model is data, and it stays honest.
+"""scripts/host_ops/tcc/onboard-helper-grants.py: the tier model is data, and it stays honest.
 
 The tier table is the machine-facing contract from design v1 (user decisions
 2026-09-17): L2 is macmini's target, L3 gained Full Disk Access, and extended
@@ -13,7 +13,13 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "tcc-onboard-helper-grants.py"
+_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "host_ops"
+    / "tcc"
+    / "onboard-helper-grants.py"
+)
 _spec = importlib.util.spec_from_file_location("tcc_onboard_under_test", _SCRIPT)
 assert _spec is not None and _spec.loader is not None
 _mod = importlib.util.module_from_spec(_spec)

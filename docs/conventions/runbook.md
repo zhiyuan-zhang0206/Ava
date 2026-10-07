@@ -983,11 +983,11 @@ and what widens the run to a full scan, is the
 [changed-files mode](../../scripts/lint/docs/changed-files-mode.ava.okf.md)). The
 code-generation freshness hooks, whose check needs the whole project, run only
 when one of the inputs in their `files:` filter changed. ESLint lints the changed
-frontend files (`scripts/precommit-eslint.sh`) and the whole project when the
+frontend files (`scripts/hooks/precommit-eslint.sh`) and the whole project when the
 lint setup itself changed. A hook that scans the whole repository on every
 commit regardless of the diff is a design error, not a price of the check; CI's
 `pre-commit run --all-files` is the full scan of every hook and the merge gate.
-Pre-push selectors share `scripts/prepush-base.sh`: the contribution is
+Pre-push selectors share `scripts/hooks/prepush-base.sh`: the contribution is
 `merge-base(origin/main, HEAD)..HEAD`, independent of a force-push's old remote
 tip. Missing `origin/main` or a missing merge-base fails explicitly; fetch the
 base before pushing. Frontend hooks always enter the selector, so deletions and
@@ -1009,7 +1009,7 @@ and run explicit affected tests; do not turn on `passWithNoTests` to certify
 an empty collection.
 
 Pyright checks the branch's surviving changed `.py` paths only
-(`scripts/prepush-pyright-files.sh`); full-repository pyright and test suites
+(`scripts/hooks/prepush-pyright-files.sh`); full-repository pyright and test suites
 remain CI-only. Tool availability/load/lock skips still report missing evidence
 through the existing guard; they are not proof that a check ran.
 Other local hooks default to pre-commit; upstream hooks may also declare
@@ -1056,7 +1056,7 @@ create), and one that a per-file verdict cannot see:
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
 - `lint-patch-targets-full` runs the patch-target lint over every test file
   when the branch touches any `.py` path, deleted ones included
-  (`scripts/prepush-if-changed.sh`; a push with no Python cannot move a test's
+  (`scripts/hooks/prepush-if-changed.sh`; a push with no Python cannot move a test's
   home). A test's home follows what its subject's package imports, so a
   production import change can move the home of a test the commit-time
   `lint-patch-targets` never receives; CI's structure job scans everything too.
@@ -1066,7 +1066,7 @@ create), and one that a per-file verdict cannot see:
   `lint-tests-location`, so its stale registry entry is found here; CI's structure job
   checks everything too.
 
-`scripts/prepush-guard.sh` holds a separate lock for each of `pyright`,
+`scripts/hooks/prepush-guard.sh` holds a separate lock for each of `pyright`,
 `tsc`, `eslint` (the whole-project run), and `vitest` across all worktrees on the host.
 The lock is `fcntl.flock(2)` on the fd bash opens via `exec 9<lock_file`, run
 from a fresh `python3 -c` subprocess per attempt — not the `flock(1)` binary,

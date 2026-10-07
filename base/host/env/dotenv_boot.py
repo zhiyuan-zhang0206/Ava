@@ -17,7 +17,7 @@ checkout guard (`home_checkout_error`): a home that carries its own
 
 Callers:
     base/config.py            - before importing Settings
-    scripts/start_agent.py      - bootstrap root agent
+    scripts/entrypoints/agent.py      - bootstrap root agent
 
 `load_dotenv` itself is idempotent + does not overwrite already-set
 os.environ keys; repeated calls have no side effects.

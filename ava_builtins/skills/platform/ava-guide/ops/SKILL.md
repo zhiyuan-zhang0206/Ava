@@ -75,7 +75,7 @@ For coordinated downtime and recovery, use the shared
 
 **Bring-up ordering is strict.** Agent processes are never started directly —
 they are always created through the gateway (`POST /api/agents`, which
-`ava.agents.spawn` / the frontend / `scripts/start_agent.py` all share). So
+`ava.agents.spawn` / the frontend / `scripts/entrypoints/agent.py` all share). So
 **start the gateway first, then start agents**; a spawn issued before the
 gateway is up has nowhere to land.
 

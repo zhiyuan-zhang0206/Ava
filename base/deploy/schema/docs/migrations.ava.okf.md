@@ -105,7 +105,7 @@ retransmission timeout.
   a step of `ava start`, early in boot — after Postgres is up and before the
   assertion — so any restart crossing a schema change catches the DB up.
 - A migration that changes a trigger or function body must add an exercise line
-  to `scripts/test_migrations_apply.sh`: `CREATE OR REPLACE FUNCTION` does **not**
+  to `scripts/ci/test_migrations_apply.sh`: `CREATE OR REPLACE FUNCTION` does **not**
   validate PL/pgSQL column references at apply time, so a body bug surfaces only
   when the trigger actually fires — one such bug passed lint, pytest, and the
   apply itself, and was caught only by a real cross-machine force-terminate in

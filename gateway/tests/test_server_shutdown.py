@@ -6,7 +6,7 @@
 a forced kill. That defect lives below the request handlers, so it needs a real
 server, a real stream and a real signal: these tests start genuine child
 processes from the production launch assembly
-(``gateway._server.serve_kwargs``) and only swap the bind address, the port and
+(``gateway.cluster.server.serve_kwargs``) and only swap the bind address, the port and
 the ASGI app. Removing ``timeout_graceful_shutdown`` from the assembly makes the
 stuck-stream test fail through the parent's own deadline (the child is killed —
 the suite never hangs).
@@ -50,7 +50,7 @@ from starlette.responses import PlainTextResponse, StreamingResponse
 
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
-from gateway import _server
+from gateway.cluster import server as _server
 from gateway.events import sse
 from gateway.middleware import stopping
 

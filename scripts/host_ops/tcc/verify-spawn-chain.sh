@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PYTHON="$REPO_ROOT/.venv/bin/python"
 REQUESTED_WORKDIR="${1:-/tmp/tcc-spawn-chain-verify}"
 
