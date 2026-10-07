@@ -20,7 +20,7 @@ import psutil
 
 from agent.graph.exec._result import _ExecCrashed, _ExecResult
 from agent.graph.exec._stream import ExecOutputChunkPublisher, StreamingTextIO
-from agent.graph.exec.protocol import KILL_GRACE_S, ResultPayload, write_request
+from agent.graph.exec.protocol import ResultPayload, write_request
 from base.agents.context import AvaContext
 from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
@@ -42,6 +42,7 @@ from base.agents.incarnation.resources import (
     register_exec,
 )
 from base.db import Database
+from base.native_process.exec_domain import KILL_GRACE_S
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from base.native_process.turn_identity import current_hosted_resources
