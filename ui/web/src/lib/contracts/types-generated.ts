@@ -580,7 +580,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/understanding/close": {
+    "/api/agents/{agent_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Sessions
+         * @description The agent's sessions (the stretches between two compactions), oldest first, with their coverage by the understanding tree and what building the rest would cost.
+         *
+         *     Numbers are 1-based, grow with time and are stable: a new session is only ever added at the
+         *     end. The last session has no boundary checkpoint while it is still in progress. Times are the
+         *     messages' read times; `peak_input_tokens` is the largest provider-reported input of any
+         *     request in the session. `coverage` counts the session's describable material (past its
+         *     framework head, up to the last request the agent sent) that level-1 nodes already describe;
+         *     `estimate` prices building what is still missing, on a cold cache and at full input price (see
+         *     `cost_basis`: it is an estimate from the stored history, not a quote). 404 when the agent does
+         *     not exist; 503 when the stored history cannot be read.
+         */
+        get: operations["get_agent_sessions_api_agents__agent_id__sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/understanding/build": {
         parameters: {
             query?: never;
             header?: never;
@@ -590,30 +619,61 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Post Understanding Close
-         * @description Describe the part of the agent's live compaction segment that no chunk has covered yet.
+         * Post Understanding Build
+         * @description Build the understanding tree of chosen sessions by hand, then rebuild the levels above.
          *
-         *     Enqueues one understanding job from the end of the last chunk job (or the first message
-         *     past the segment's head) to the last request the agent sent, like the closing chunk of a
-         *     compaction. Short-lived agents never reach a size cut, so this is how their tail gets a
-         *     node; nothing calls it automatically.
+         *     Choose sessions by number (`sessions`) or by a `from` / `to` range (every session whose
+         *     read-time extent intersects it). Each chosen session is cut into chunks by the live rule
+         *     (a chunk per `AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold of
+         *     growth in the provider-reported input, the session's remainder last); what level-1 nodes already cover is skipped exactly, a chunk that
+         *     overlaps it is cut to its uncovered runs. The jobs run on the agent hosts' consumer in order,
+         *     one agent at a time; the session still in progress is built to the last request the agent has
+         *     sent. Once the agent's chunk jobs have all ended, every node above level 1 and the grouping
+         *     cursor are dropped and the levels above are rebuilt over all of the agent's level-1 nodes in
+         *     message order; builds of one agent in flight merge into one rebuild. A job that fails leaves
+         *     its stretch undescribed and the rebuild runs anyway.
          *
-         *     The job runs on the existing consumer of the agent's host: the request is the agent's own
-         *     conversation read from the stored checkpoint plus one instruction. Unlike the producers'
-         *     chunks, which are sent while the agent's own requests keep the provider cache warm, the
-         *     prefix of a manual close is usually cold, so the whole prefix is billed at the full input
-         *     price (at DeepSeek's standard rate about $0.06 for a 390K-token segment), plus the
-         *     model's reasoning output (about $0.008 per call).
+         *     Cost warning: these calls are NOT warm. A manual build reads a stored history long after the
+         *     agent's last request, so every job's whole conversation prefix is billed at the full
+         *     (cache-miss) input price; a 390K-token session costs that much input once per chunk. Always run
+         *     with `dry_run=true` first: it returns the chunk jobs that would be queued and the estimated
+         *     cost (`cost_basis` says how) without writing anything, and it works whatever the feature switch.
          *
-         *     The answer is a status; nothing is written unless it is `enqueued`. `empty`: nothing lies
-         *     past the last cut (or that stretch was already described). `active_job`: a
-         *     job of this agent is pending or running (its id is returned); the queue keeps an agent's
-         *     jobs in order, so wait for it and ask again. `compact_version`, `start_index` and `end_index`
-         *     name the stretch (request-list indices of the live segment, head at 0). 404 when the agent
-         *     does not exist; 503 when the stored history cannot be read. The job is described only where
-         *     `AVA_UNDERSTANDING_ENABLED` is on (the consumer idles otherwise, and the job waits).
+         *     The feature switch: with `AVA_UNDERSTANDING_ENABLED` off the build is still queued (jobs and
+         *     rebuild) and waits, undescribed, until the switch is turned on; `understanding_enabled` in the
+         *     response says which it is. A repeat request merges into the jobs and the pending rebuild already
+         *     queued and only records another build. Returns the jobs queued and a `build_id` for
+         *     `GET .../understanding/builds/{build_id}`. 404 when the agent does not exist; 422 for an
+         *     unknown session number, an empty selection or a range no session intersects; 503 when the
+         *     stored history cannot be read.
          */
-        post: operations["post_understanding_close_api_agents__agent_id__understanding_close_post"];
+        post: operations["post_understanding_build_api_agents__agent_id__understanding_build_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/understanding/builds/{build_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Understanding Build
+         * @description A build's progress: each job's status and actual cost, then the rebuild of the upper levels.
+         *
+         *     `phase` runs `chunks` (jobs live) then `rebuild_pending` (the rebuild waits for the agent's
+         *     chunk jobs to end or is running) then `done`, or `failed` when the rebuild failed. Costs are
+         *     summed from the raw record of the provider calls so far at the price book's rates; a stalled
+         *     build with `AVA_UNDERSTANDING_ENABLED` off stays in `chunks` with its jobs `pending`. 404 when
+         *     the agent or the build (of this agent) does not exist.
+         */
+        get: operations["get_understanding_build_api_agents__agent_id__understanding_builds__build_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4515,6 +4575,150 @@ export interface components {
             depth: number;
         };
         /**
+         * BuildJobOut
+         * @description One chunk job of a build. `state`: `planned` (a dry run), `enqueued` (new, or an ended job of
+         *     the same stretch taken up again) or `merged` (a pending or running job of the same stretch).
+         *     `start_index` / `end_index` are request-list indices of the session's segment (head at 0);
+         *     `first_message` / `last_message` the inclusive stitched message span the job describes.
+         */
+        BuildJobOut: {
+            /** Session */
+            session: number;
+            /** Start Index */
+            start_index: number;
+            /** End Index */
+            end_index: number;
+            /** First Message */
+            first_message: number;
+            /** Last Message */
+            last_message: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "enqueued" | "merged";
+        };
+        /**
+         * BuildJobProgress
+         * @description A build's job as it stands. Token counts and `cost_usd` are summed over its provider calls so
+         *     far (`cost_usd` None when the model has no price).
+         */
+        BuildJobProgress: {
+            /** Job Id */
+            job_id: number;
+            /** Session */
+            session: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "skipped";
+            /** Start Index */
+            start_index: number;
+            /** End Index */
+            end_index: number;
+            /** Attempts */
+            attempts: number;
+            /** Error */
+            error: string | null;
+            /** Calls */
+            calls: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Seconds */
+            seconds: number;
+            /** Cost Usd */
+            cost_usd: number | null;
+        };
+        /**
+         * BuildProgressResponse
+         * @description GET /api/agents/{agent_id}/understanding/builds/{build_id} response.
+         *
+         *     `phase`: `chunks` (jobs still live), `rebuild_pending` (jobs ended; the rebuild waits for the
+         *     agent's chunk jobs to end or is running), `done`, `failed` (the rebuild failed). A job that failed
+         *     leaves its stretch undescribed; the build still completes. `cost_usd` is the actual total so far.
+         */
+        BuildProgressResponse: {
+            /** Build Id */
+            build_id: number;
+            /** Agent Id */
+            agent_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Sessions */
+            sessions: number[];
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "chunks" | "rebuild_pending" | "done" | "failed";
+            /** Jobs */
+            jobs: components["schemas"]["BuildJobProgress"][];
+            rebuild: components["schemas"]["RebuildProgressOut"];
+            /** Cost Usd */
+            cost_usd: number | null;
+        };
+        /**
+         * BuildRequest
+         * @description What to build: `sessions` (numbers from the sessions list) or a `from` / `to` time range
+         *     (every session whose read-time extent intersects it), exactly one of the two.
+         */
+        BuildRequest: {
+            /** Sessions */
+            sessions?: number[] | null;
+            /** From */
+            from?: string | null;
+            /** To */
+            to?: string | null;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+        };
+        /**
+         * BuildResponse
+         * @description POST /api/agents/{agent_id}/understanding/build response.
+         *
+         *     `build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs
+         *     newly on the queue, `merged` those of the same stretch already live. `jobs` may be empty
+         *     (everything chosen is covered): the rebuild of the upper levels is still queued.
+         */
+        BuildResponse: {
+            /** Agent Id */
+            agent_id: number;
+            /** Dry Run */
+            dry_run: boolean;
+            /** Understanding Enabled */
+            understanding_enabled: boolean;
+            /** Sessions */
+            sessions: number[];
+            /** Jobs */
+            jobs: components["schemas"]["BuildJobOut"][];
+            /** Queued */
+            queued: number;
+            /** Merged */
+            merged: number;
+            estimate: components["schemas"]["CostEstimateOut"];
+            /** Cost Basis */
+            cost_basis: string;
+            /** Build Id */
+            build_id: number | null;
+            /** Rebuild Id */
+            rebuild_id: number | null;
+        };
+        /**
          * CancelRequest
          * @description POST /api/cancel request body — pause/stop the agent, addressed by id.
          */
@@ -4875,6 +5079,22 @@ export interface components {
             token_usage: components["schemas"]["TokenUsageResponse"];
             /** Pending */
             pending: components["schemas"]["PendingInbound"][];
+        };
+        /**
+         * CostEstimateOut
+         * @description The cold-cache price of building what a session (or a request) still lacks.
+         *
+         *     `cost_usd` is None when the agent's model has no price. See `cost_basis` of the response.
+         */
+        CostEstimateOut: {
+            /** Jobs */
+            jobs: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Cost Usd */
+            cost_usd: number | null;
         };
         /**
          * DefaultModelView
@@ -6640,6 +6860,43 @@ export interface components {
          */
         Priority: "P0" | "P1" | "P2" | "P3";
         /**
+         * RebuildProgressOut
+         * @description The build's rebuild of the upper levels. `leaves` is the level-1 nodes it replayed; the usage
+         *     is that of the grouping calls since it started (or, before it starts, since the build); `levels`
+         *     counts the agent's nodes per level above 1 right now.
+         */
+        RebuildProgressOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed";
+            /** Attempts */
+            attempts: number;
+            /** Error */
+            error: string | null;
+            /** Leaves */
+            leaves: number;
+            /** Calls */
+            calls: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Seconds */
+            seconds: number;
+            /** Cost Usd */
+            cost_usd: number | null;
+            /** Levels */
+            levels: {
+                [key: string]: number;
+            };
+        };
+        /**
          * ReferenceTps
          * @description Vendor-published output speed, preserving its qualifier and conditions.
          */
@@ -7286,6 +7543,66 @@ export interface components {
         ServicesStatus: {
             /** Items */
             items: components["schemas"]["ServiceItem"][];
+        };
+        /**
+         * SessionCoverage
+         * @description How much of a session's describable material the level-1 nodes cover.
+         *
+         *     `none` / `partial` / `full`; `ratio` is `covered_messages / total_messages`. Runs that hold only
+         *     framework notes count as covered. A session with nothing to describe is `full`.
+         */
+        SessionCoverage: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "partial" | "full";
+            /** Ratio */
+            ratio: number;
+            /** Covered Messages */
+            covered_messages: number;
+            /** Total Messages */
+            total_messages: number;
+        };
+        /**
+         * SessionOut
+         * @description One session. `number` 1 is the oldest. `boundary_checkpoint_id` is None for the session in
+         *     progress. `start` / `end` are the first and last message read times (None when no message has one).
+         */
+        SessionOut: {
+            /** Number */
+            number: number;
+            /** Boundary Checkpoint Id */
+            boundary_checkpoint_id: string | null;
+            /** Start */
+            start: string | null;
+            /** End */
+            end: string | null;
+            /** Messages */
+            messages: number;
+            /** Peak Input Tokens */
+            peak_input_tokens: number;
+            coverage: components["schemas"]["SessionCoverage"];
+            estimate: components["schemas"]["CostEstimateOut"];
+        };
+        /**
+         * SessionsResponse
+         * @description GET /api/agents/{agent_id}/sessions response.
+         *
+         *     `model` is the agent's model, the one the build's jobs run and are priced for. `cost_basis`
+         *     states how every `estimate` is computed.
+         */
+        SessionsResponse: {
+            /** Agent Id */
+            agent_id: number;
+            /** Model */
+            model: string;
+            /** Understanding Enabled */
+            understanding_enabled: boolean;
+            /** Cost Basis */
+            cost_basis: string;
+            /** Sessions */
+            sessions: components["schemas"]["SessionOut"][];
         };
         /**
          * ShellCaptureResponse
@@ -8133,26 +8450,6 @@ export interface components {
                 [key: string]: string;
             } | null;
         };
-        /** UnderstandingCloseResponse */
-        UnderstandingCloseResponse: {
-            /** Agent Id */
-            agent_id: number;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "enqueued" | "empty" | "active_job";
-            /** Job Id */
-            job_id: number | null;
-            /** Compact Version */
-            compact_version: number | null;
-            /** Start Index */
-            start_index: number | null;
-            /** End Index */
-            end_index: number | null;
-            /** Detail */
-            detail: string;
-        };
         /**
          * UploadedBatch
          * @description Result of one upload request — the files saved in a single batch.
@@ -8863,7 +9160,7 @@ export interface operations {
             };
         };
     };
-    post_understanding_close_api_agents__agent_id__understanding_close_post: {
+    get_agent_sessions_api_agents__agent_id__sessions_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -8880,7 +9177,74 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UnderstandingCloseResponse"];
+                    "application/json": components["schemas"]["SessionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_understanding_build_api_agents__agent_id__understanding_build_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BuildRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_understanding_build_api_agents__agent_id__understanding_builds__build_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+                build_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildProgressResponse"];
                 };
             };
             /** @description Validation Error */
