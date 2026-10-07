@@ -345,7 +345,7 @@ def test_report_failure_uses_exact_label_and_existing_message(
 
 
 def test_load_accounting_resolves_under_scripts_ci() -> None:
-    """The loader must resolve accounting.py from its post-move home (scripts/ci/)."""
+    """The loader must resolve accounting.py from its post-move home (scripts/ci/pull_requests/)."""
     module = _load_schedule_module()
     saved_path = list(sys.path)
     try:

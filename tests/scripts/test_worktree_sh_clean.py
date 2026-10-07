@@ -41,8 +41,8 @@ def _clean(repo: Path, home: Path, *extra: str) -> subprocess.CompletedProcess[s
 def _make_repo(tmp_path: Path) -> Path:
     """A throwaway repo shaped like the dev clone: the script + its checker."""
     repo = tmp_path / "repo"
-    (repo / "scripts").mkdir(parents=True)
-    for name in ("worktree.sh", "check_worktree_remove.py"):
+    (repo / "scripts" / "host_ops").mkdir(parents=True)
+    for name in ("worktree.sh", "host_ops/check_worktree_remove.py"):
         (repo / "scripts" / name).write_bytes((_REPO_ROOT / "scripts" / name).read_bytes())
     _git(repo, "init", "-q", "-b", "main")
     _git(
