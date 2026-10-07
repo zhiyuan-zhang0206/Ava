@@ -15,7 +15,7 @@ from services.agent_runner.agent_ops import daemon
 async def test_reconcile_dispatch_and_old_consumer_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     from ops.lifecycle import launch_reconcile
 
-    pool = ConnectionPool(open=False)
+    pool: ConnectionPool = ConnectionPool(open=False)
     calls: list[tuple[UUID, object]] = []
     attempt = uuid4()
 
