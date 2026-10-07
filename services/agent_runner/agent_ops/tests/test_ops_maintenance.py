@@ -2,10 +2,12 @@
 generation still answers a status probe through the real dispatch."""
 
 import asyncio
+import gc
 import json
 import socket
 import struct
 import threading
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -27,15 +29,11 @@ from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
 
-@pytest.fixture(autouse=True)
-def isolate_activity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(activity, "_requests", set[object]())
-    monkeypatch.setattr(activity, "_workers", set[asyncio.Future[Any]]())
-
-
 async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    requests: activity.RequestTokens = set()
+    workers: activity.WorkerFutures = set()
     finishes = [asyncio.Event(), asyncio.Event()]
     entered = asyncio.Event()
     count = 0
@@ -58,22 +56,30 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
     tasks = [
         asyncio.create_task(
             daemon._ops_route(
-                b'{"kind":"config_read","payload":{}}', active_ops={}, dispatch_sem=dispatch_sem
+                b'{"kind":"config_read","payload":{}}',
+                active_ops={},
+                dispatch_sem=dispatch_sem,
+                workers=workers,
+                requests=requests,
             )
         )
         for _ in range(2)
     ]
     try:
         await asyncio.wait_for(entered.wait(), 2)
-        assert activity.progress()["requests"] == 2
+        assert activity.progress(requests=requests, workers=workers)["requests"] == 2
         finishes[0].set()
         await tasks[0]
-        assert activity.progress()["requests"] == 1
+        assert activity.progress(requests=requests, workers=workers)["requests"] == 1
         pause_owner.change_maintenance(
             "ops", WHEN, draining, MaintenanceHold(MaintenancePhase.STOPPING)
         )
         status, body, _ = await daemon._ops_route(
-            b'{"kind":"config_read","payload":{}}', active_ops={}, dispatch_sem=dispatch_sem
+            b'{"kind":"config_read","payload":{}}',
+            active_ops={},
+            dispatch_sem=dispatch_sem,
+            workers=workers,
+            requests=requests,
         )
         assert status == 200
         assert b'"status": "failed"' in body
@@ -83,12 +89,14 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
         for event in finishes:
             event.set()
         await asyncio.gather(*tasks)
-    assert activity.progress()["requests"] == 0
+    assert activity.progress(requests=requests, workers=workers)["requests"] == 0
 
 
 async def test_cancelled_same_kind_await_does_not_hide_running_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    requests: activity.RequestTokens = set()
+    workers: activity.WorkerFutures = set()
     active_ops: daemon.ActiveOps = {}
     entered = [threading.Event(), threading.Event()]
     finish = [threading.Event(), threading.Event()]
@@ -104,32 +112,36 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
         monkeypatch.setattr(daemon, "_op_executor", executor)
         monkeypatch.setattr(daemon, "_dispatch_sync", arm)
         tasks = [
-            asyncio.create_task(daemon._run_arm("same", {"index": index}, active_ops=active_ops))
+            asyncio.create_task(
+                daemon._run_arm("same", {"index": index}, active_ops=active_ops, workers=workers)
+            )
             for index in range(2)
         ]
         try:
             async with asyncio.timeout(2):
                 while not all(event.is_set() for event in entered):
                     await asyncio.sleep(0.01)
-            assert activity.progress()["workers"] == 2
+            assert activity.progress(requests=requests, workers=workers)["workers"] == 2
             tasks[0].cancel()
             with pytest.raises(asyncio.CancelledError):
                 await tasks[0]
-            assert activity.progress()["workers"] == 2
+            assert activity.progress(requests=requests, workers=workers)["workers"] == 2
         finally:
             for event in finish:
                 event.set()
             await asyncio.gather(*tasks, return_exceptions=True)
             async with asyncio.timeout(2):
-                while activity.progress()["workers"]:
+                while activity.progress(requests=requests, workers=workers)["workers"]:
                     await asyncio.sleep(0.01)
 
 
 async def test_server_close_after_client_reset_is_not_request_completion() -> None:
+    requests: activity.RequestTokens = set()
+    workers: activity.WorkerFutures = set()
     entered, finish, returned = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def route(_body: bytes) -> tuple[int, bytes, str]:
-        with activity.admission("probe"):
+        with activity.admission("probe", requests=requests):
             entered.set()
             await finish.wait()
             returned.set()
@@ -154,13 +166,13 @@ async def test_server_close_after_client_reset_is_not_request_completion() -> No
         peer.close()
         await asyncio.wait_for(stop_health_server(server), 2)
         assert not returned.is_set()
-        assert activity.progress()["requests"] == 1
+        assert activity.progress(requests=requests, workers=workers)["requests"] == 1
     finally:
         peer.close()
         finish.set()
         await asyncio.wait_for(returned.wait(), 2)
         await stop_health_server(server)
-    assert activity.progress()["requests"] == 0
+    assert activity.progress(requests=requests, workers=workers)["requests"] == 0
 
 
 @pytest.fixture
@@ -180,6 +192,8 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Real dispatch, executor, PostgreSQL posture and journal; no service is launched.
+    requests: activity.RequestTokens = set()
+    workers: activity.WorkerFutures = set()
     with (
         ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool,
         ThreadPoolExecutor(max_workers=2) as executor,
@@ -193,6 +207,8 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
                 json.dumps({"kind": kind, "payload": payload}).encode(),
                 active_ops={},
                 dispatch_sem=dispatch_sem,
+                workers=workers,
+                requests=requests,
             )
             assert status == 200
             return json.loads(raw)
@@ -206,6 +222,7 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
 async def test_active_ops_share_health_and_cleanup_within_one_daemon(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    workers: activity.WorkerFutures = set()
     active_ops: daemon.ActiveOps = {}
     other_daemon: daemon.ActiveOps = {}
     entered = [threading.Event(), threading.Event()]
@@ -224,7 +241,9 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
         monkeypatch.setattr(daemon, "_op_executor", executor)
         monkeypatch.setattr(daemon, "_dispatch_sync", arm)
         tasks = [
-            asyncio.create_task(daemon._run_arm(kind, {"index": index}, active_ops=active_ops))
+            asyncio.create_task(
+                daemon._run_arm(kind, {"index": index}, active_ops=active_ops, workers=workers)
+            )
             for index, kind in enumerate(("config_read", "inventory_read"))
         ]
         try:
@@ -248,3 +267,21 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
             for event in finish:
                 event.set()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_worker_future_is_retained_until_completion_and_isolated_per_daemon() -> None:
+    requests: activity.RequestTokens = set()
+    workers: activity.WorkerFutures = set()
+    other_workers: activity.WorkerFutures = set()
+    future: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+    reference = weakref.ref(future)
+    activity.track_worker(future, workers=workers)
+    del future
+    gc.collect()
+    retained = reference()
+    assert retained is not None
+    assert activity.progress(requests=requests, workers=workers)["workers"] == 1
+    assert activity.progress(requests=requests, workers=other_workers)["workers"] == 0
+    retained.set_result(None)
+    await asyncio.sleep(0)
+    assert activity.progress(requests=requests, workers=workers)["workers"] == 0

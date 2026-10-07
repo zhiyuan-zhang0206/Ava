@@ -37,7 +37,7 @@ async def test_replay_returns_canonical_status_without_reexecution(
 ) -> None:
     _record(db_conn, status.value)
     actual, result = await daemon._dispatch_idempotent_pass(
-        "status_probe", {}, "status-test", pool, active_ops={}
+        "status_probe", {}, "status-test", pool, active_ops={}, workers=set()
     )
     assert actual is status
     assert result == {}
@@ -52,7 +52,7 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
     _record(db_conn, status)
     with pytest.raises(ValueError, match="OpStatus"):
         await daemon._dispatch_idempotent_pass(
-            "status_probe", {}, "status-test", pool, active_ops={}
+            "status_probe", {}, "status-test", pool, active_ops={}, workers=set()
         )
     assert db_conn.execute(
         "SELECT op_status FROM api_idempotency WHERE key='status-test'"
@@ -72,7 +72,7 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
 
     monkeypatch.setattr(daemon, "_sleep", sleep)
     status, result = await daemon._dispatch_idempotent_pass(
-        "status_probe", {}, "status-test", pool, active_ops={}
+        "status_probe", {}, "status-test", pool, active_ops={}, workers=set()
     )
     assert status is OpStatus.FAILED
     assert "never completed" in str(result["error"])
