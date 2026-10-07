@@ -140,9 +140,11 @@ def _refuse_framework_module(entry: str) -> None:
     surface = getattr(ava_module(), "__all_for_ava__", None) or []
     if name in surface or isinstance(_sys.modules.get(f"ava.{name}"), _DisabledSDKModule):
         return  # agent-facing, or already disabled by an earlier entry
-    if importlib.util.find_spec(f"ava.{name}") is not None:
+    bound = getattr(ava_module(), name, None)
+    owner = bound.__name__ if inspect.ismodule(bound) else f"ava.{name}"
+    if importlib.util.find_spec(owner) is not None:
         raise ValueError(
-            f"AVA_SDK_DISABLE entry {entry!r} names the framework module ava.{name}, "
+            f"AVA_SDK_DISABLE entry {entry!r} names the framework module {owner}, "
             "which is not part of the agent-facing SDK (`ava.__all_for_ava__`); "
             "only agent-facing namespaces and their members can be disabled"
         )

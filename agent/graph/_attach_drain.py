@@ -21,7 +21,7 @@ from langchain_core.messages import HumanMessage
 from agent.messages import attach_message
 from agent.state import AttachState, BaseAgentState
 from base.agents.context import AvaContext
-from base.lm.attach import AttachEntry, pack_attachments
+from base.lm.attach.packing import AttachEntry, pack_attachments
 
 
 def build_attach_message(pending: AttachState, model: str) -> HumanMessage | None:

@@ -4,8 +4,8 @@ The constants below are read by paths that must not pull the provider stack:
 the SDK registration/validation surface (`ava.sdk_surface.attachment_transport`), the SDK media
 classification (`ava.understand`), the exec merge validator
 (`agent.graph._attach_merge`), and the turn-boundary packer
-(`base.lm.attach`) itself. Keep this module import-free; anything that needs
-LangChain belongs one level up in `base.lm.attach` (startup-laziness
+(`base.lm.attach.packing`) itself. Keep this module import-free; anything that needs
+LangChain belongs in `base.lm.attach.packing` (startup-laziness
 invariant, task #3587).
 """
 
