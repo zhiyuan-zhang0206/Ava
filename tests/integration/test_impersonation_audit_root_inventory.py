@@ -36,7 +36,7 @@ _INVENTORY: dict[str, str] = {
     "ops/lifecycle/crash_harvest.py::_recover_crash_marked_blocking": "central",
     "services/desktop/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": "central",
     "services/desktop/computer/mcp_daemon.py::ComputerMcpDaemon._emit_session_event": "central",
-    "base/agents/messages/chat_delivery.py::_insert_chat_inbound_once": "central",
+    "base/agents/messages/chat_delivery.py::insert_chat_inbound_in_transaction": "central",
     "base/db/__init__.py::insert_inbound_message_in_transaction": "central",
     "base/db/__init__.py::insert_spawn_prompt_in_transaction": "central",
     "base/db/__init__.py::insert_restart_completed_inbound": "central",
