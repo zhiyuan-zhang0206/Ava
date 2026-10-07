@@ -6,7 +6,5 @@
     "services/supervision/ava_root/supervisor.py::asyncio-task:Supervisor._spawn": 1,
     "services/supervision/ava_root_glue/diagnostics.py::asyncio-task:RootHealthRounds.start": 1
   },
-  "patch_targets": {
-    "services/supervision/ava_root/tests/test_ava_root_ipc.py::base.deploy.lifecycle.start_serving._lock_path": 1
-  }
+  "patch_targets": {}
 }
