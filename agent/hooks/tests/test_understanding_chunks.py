@@ -55,14 +55,20 @@ _BASELINED = CompactState(understanding_cut_index=1, understanding_cut_tokens=50
 @pytest.fixture(autouse=True)
 def _enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(settings.agent, "understanding_chunk_tokens", 1000)
+    monkeypatch.setattr(uc, "chunk_threshold", lambda *_a: 1000)
 
 
 async def test_turn_below_the_threshold_enqueues_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     queue = _Queue()
     monkeypatch.setattr(uc, "enqueue_chunk", queue)
     update = await uc.due_chunk_update(
-        _BASELINED, _request(10), _reply(1499), pool=MagicMock(), agent_id=3
+        _BASELINED,
+        _request(10),
+        _reply(1499),
+        pool=MagicMock(),
+        agent_id=3,
+        model="m",
+        overrides=None,
     )
     assert update == {} and queue.calls == []
 
@@ -73,7 +79,13 @@ async def test_a_segments_first_turn_only_records_the_baseline_past_the_head(
     queue = _Queue()
     monkeypatch.setattr(uc, "enqueue_chunk", queue)
     fresh = await uc.due_chunk_update(
-        CompactState(), _request(2), _reply(30_000), pool=MagicMock(), agent_id=3
+        CompactState(),
+        _request(2),
+        _reply(30_000),
+        pool=MagicMock(),
+        agent_id=3,
+        model="m",
+        overrides=None,
     )
     assert queue.calls == []
     assert (
@@ -91,7 +103,13 @@ async def test_a_segments_first_turn_only_records_the_baseline_past_the_head(
         HumanMessage(content="next", id="n"),
     ]
     after = await uc.due_chunk_update(
-        CompactState(version=2), compacted, _reply(40_000), pool=MagicMock(), agent_id=3
+        CompactState(version=2),
+        compacted,
+        _reply(40_000),
+        pool=MagicMock(),
+        agent_id=3,
+        model="m",
+        overrides=None,
     )
     assert after["compact"].understanding_cut_index == 2
 
@@ -103,7 +121,7 @@ async def test_turn_past_the_threshold_enqueues_and_moves_the_cut(
     monkeypatch.setattr(uc, "enqueue_chunk", queue)
     compact = _BASELINED.model_copy(update={"version": 4})
     update = await uc.due_chunk_update(
-        compact, _request(10), _reply(1500), pool=MagicMock(), agent_id=3
+        compact, _request(10), _reply(1500), pool=MagicMock(), agent_id=3, model="m", overrides=None
     )
     assert queue.calls == [
         (3, {"compact_version": 4, "chunk": Chunk(1, 10), "end_msg_id": "m9"}),
@@ -116,7 +134,15 @@ async def test_turn_past_the_threshold_enqueues_and_moves_the_cut(
     )
     # The next chunk needs another threshold of growth past the new cut.
     assert (
-        await uc.due_chunk_update(moved, _request(14), _reply(2499), pool=MagicMock(), agent_id=3)
+        await uc.due_chunk_update(
+            moved,
+            _request(14),
+            _reply(2499),
+            pool=MagicMock(),
+            agent_id=3,
+            model="m",
+            overrides=None,
+        )
         == {}
     )
 
@@ -127,7 +153,13 @@ async def test_failed_enqueue_keeps_the_cut_so_the_stretch_is_retried(
     monkeypatch.setattr(uc, "enqueue_chunk", _Queue(ok=False))
     assert (
         await uc.due_chunk_update(
-            _BASELINED, _request(10), _reply(5000), pool=MagicMock(), agent_id=3
+            _BASELINED,
+            _request(10),
+            _reply(5000),
+            pool=MagicMock(),
+            agent_id=3,
+            model="m",
+            overrides=None,
         )
         == {}
     )
@@ -137,13 +169,27 @@ async def test_disabled_or_poolless_turns_do_nothing(monkeypatch: pytest.MonkeyP
     queue = _Queue()
     monkeypatch.setattr(uc, "enqueue_chunk", queue)
     assert (
-        await uc.due_chunk_update(CompactState(), _request(10), _reply(5000), pool=None, agent_id=3)
+        await uc.due_chunk_update(
+            CompactState(),
+            _request(10),
+            _reply(5000),
+            pool=None,
+            agent_id=3,
+            model="m",
+            overrides=None,
+        )
         == {}
     )
     monkeypatch.setattr(settings.agent, "understanding_enabled", False)
     assert (
         await uc.due_chunk_update(
-            _BASELINED, _request(10), _reply(5000), pool=MagicMock(), agent_id=3
+            _BASELINED,
+            _request(10),
+            _reply(5000),
+            pool=MagicMock(),
+            agent_id=3,
+            model="m",
+            overrides=None,
         )
         == {}
     )
@@ -155,7 +201,13 @@ async def test_turn_without_usage_never_triggers(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(uc, "enqueue_chunk", queue)
     assert (
         await uc.due_chunk_update(
-            CompactState(), _request(10), AIMessage(content="x"), pool=MagicMock(), agent_id=3
+            CompactState(),
+            _request(10),
+            AIMessage(content="x"),
+            pool=MagicMock(),
+            agent_id=3,
+            model="m",
+            overrides=None,
         )
         == {}
     )
@@ -329,7 +381,13 @@ def test_head_stops_at_the_first_non_framework_message_and_edge_cases() -> None:
 
 async def test_first_turn_baseline_skips_the_whole_compacted_head() -> None:
     update = await uc.due_chunk_update(
-        CompactState(version=2), _compacted_segment(), _reply(40_000), pool=MagicMock(), agent_id=3
+        CompactState(version=2),
+        _compacted_segment(),
+        _reply(40_000),
+        pool=MagicMock(),
+        agent_id=3,
+        model="m",
+        overrides=None,
     )
     assert update["compact"].understanding_cut_index == 7
 

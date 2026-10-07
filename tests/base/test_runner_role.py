@@ -589,6 +589,13 @@ def _exercise_understanding_queue_grants(conn: psycopg.Connection, agent_id: int
         "SELECT status FROM understanding_chunk_jobs WHERE agent_id = %s", (agent_id,)
     ).fetchone()
     assert row == ("running",)
+    # The upper-level rebuild queue: the gateway enqueues, the runner claims and finishes (SELECT +
+    # UPDATE, no INSERT); a rebuild lifts the grouping cursor (DELETE).
+    conn.execute("SELECT count(*) FROM understanding_rebuilds WHERE agent_id = %s", (agent_id,))
+    conn.execute(
+        "UPDATE understanding_rebuilds SET status = 'running' WHERE agent_id = %s", (agent_id,)
+    )
+    conn.execute("DELETE FROM understanding_group_state WHERE agent_id = %s", (agent_id,))
 
 
 def _assert_alert_writes_denied(conn: psycopg.Connection) -> None:

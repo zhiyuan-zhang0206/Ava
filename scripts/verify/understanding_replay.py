@@ -15,7 +15,8 @@ never enqueue into the host's own cluster):
 `plan` / `enqueue` run the llm node's trigger rule (`agent/hooks/understanding_chunks.py`)
 over the stored history, with the threshold `ratio x` the agent model's compact soft
 threshold (`resolve_context_budget(...).soft_compact_tokens`) in place of
-`AVA_UNDERSTANDING_CHUNK_TOKENS`. Every AI message's `usage_metadata.input_tokens` is the
+`chunk_threshold`'s default; without `--ratio` the configured
+`AVA_UNDERSTANDING_CHUNK_RATIO` applies, as for the live hook. Every AI message's `usage_metadata.input_tokens` is the
 provider-reported figure the live hook reads. A first AI turn records the baseline, a
 chunk fires when the figure has grown by the threshold, and the stretch left after the
 last cut closes the segment (as compaction does). `enqueue` then inserts those chunks into
@@ -39,11 +40,11 @@ Chunk nodes are keyed `(agent_id, depth, span_start, span_end)`, so two ratios o
 overwrite each other wherever spans coincide. Replay each ratio on its own copy of the
 agent; `enqueue` refuses an agent that already has chunk jobs.
 
-`regroup` rebuilds the upper levels of an agent whose leaves are already described: it
-lifts the leaves out, drops every node and the grouping cursor, then puts the leaves back
-one at a time in message order, running the consumer's grouping checks after each — the
-tree grows exactly as it does when leaves land live. The raw `understanding_group_calls`
-rows of earlier runs are kept (they are the comparison).
+`regroup` rebuilds the upper levels of an agent whose leaves are already described
+(`hierarchy/rebuild.py`, the same rebuild a manual build queues): it drops every node above
+level 1 and the grouping cursor, then replays the leaves in message order, running the
+consumer's grouping checks after each — the tree grows exactly as it does when leaves land live. The raw
+`understanding_group_calls` rows of earlier runs are kept (they are the comparison).
 
 ## Multi-segment agents
 
@@ -62,17 +63,14 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from langchain_core.messages import AIMessage, AnyMessage, BaseMessage  # noqa: E402
+from langchain_core.messages import BaseMessage  # noqa: E402
 from psycopg_pool import AsyncConnectionPool  # noqa: E402
 
-from agent.hooks.understanding_chunks import segment_head_len, sendable_len  # noqa: E402
 from agent.llm import execute_code  # noqa: E402
 from base.agents.history.checkpoint import (  # noqa: E402
     FullHistory,
@@ -80,76 +78,23 @@ from base.agents.history.checkpoint import (  # noqa: E402
     load_checkpoint_history_full,
 )
 from base.agents.history.hierarchy.chunk_consumer import ModelCache, replay_jobs  # noqa: E402
+from base.agents.history.hierarchy.chunk_plan import (  # noqa: E402
+    PlannedChunk,
+    plan_history,
+    segment_requests,
+)
 from base.agents.history.hierarchy.chunks import (  # noqa: E402
-    Chunk,
+    chunk_threshold,
     enqueue_chunk,
     message_time,
-    plan_chunk,
-    plan_closing_chunk,
 )
-from base.agents.history.hierarchy.group_consumer import run_group_checks  # noqa: E402
+from base.agents.history.hierarchy.rebuild import run_rebuild  # noqa: E402
 from base.agents.observation.snapshot import agent_model_target  # noqa: E402
+from base.config import settings  # noqa: E402
 from base.db import Database  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
 
 _DOCKERENV = Path("/.dockerenv")
-
-
-@dataclass(frozen=True)
-class PlannedChunk:
-    """One chunk the replay would enqueue; `closing` marks the segment's remainder."""
-
-    chunk: Chunk
-    end_msg_id: str | None
-    input_tokens: int
-    closing: bool
-    segment: int = 0
-    boundary_checkpoint_id: str | None = None
-
-
-def plan_replay(
-    messages: Sequence[AnyMessage], *, threshold: int, close: bool = True
-) -> list[PlannedChunk]:
-    """The chunks the live trigger rule cuts from one segment's request list, then its closing remainder.
-
-    `messages` is the segment as the llm node sees it (SystemMessage head at 0). The
-    walk mirrors `due_chunk_update`: an AI message is a turn whose request is everything
-    before it; the first turn with usage records the baseline past the head. `close` False
-    leaves the stretch after the last cut undescribed (the newest segment's tail).
-    """
-    out: list[PlannedChunk] = []
-    cut_index = 0
-    cut_tokens = 0
-    for i, msg in enumerate(messages):
-        if not isinstance(msg, AIMessage) or not msg.usage_metadata:
-            continue
-        input_tokens = int(msg.usage_metadata["input_tokens"])
-        if input_tokens == 0:
-            continue
-        if cut_tokens == 0:
-            cut_index = max(cut_index, segment_head_len(list(messages[:i])))
-            cut_tokens = input_tokens
-            continue
-        chunk = plan_chunk(
-            cut_index=cut_index,
-            cut_tokens=cut_tokens,
-            input_tokens=input_tokens,
-            request_len=i,
-            threshold=threshold,
-        )
-        if chunk is None:
-            continue
-        out.append(
-            PlannedChunk(chunk, messages[chunk.end_index - 1].id, input_tokens, closing=False)
-        )
-        cut_index, cut_tokens = chunk.end_index, input_tokens
-    closing = plan_closing_chunk(
-        cut_index=max(cut_index, segment_head_len(list(messages))),
-        request_len=sendable_len(list(messages)),
-    )
-    if close and closing is not None:
-        out.append(PlannedChunk(closing, messages[closing.end_index - 1].id, 0, closing=True))
-    return out
 
 
 def _require_preview() -> None:
@@ -166,48 +111,21 @@ def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[str]]:
     return history, boundaries
 
 
-def segment_requests(history: FullHistory) -> list[list[AnyMessage]]:
-    """Each segment as the llm node's request list: its own head, then its body."""
-    count = len(history.segment_starts)
-    out: list[list[AnyMessage]] = []
-    for k in range(count):
-        end = history.segment_starts[k + 1] if k + 1 < count else len(history.messages)
-        head = history.segment_heads[k]
-        body = cast("list[AnyMessage]", history.messages[history.segment_starts[k] : end])
-        out.append([cast("AnyMessage", head), *body] if head is not None else body)
-    return out
-
-
-def plan_history(
-    history: FullHistory, boundaries: Sequence[str], *, threshold: int
-) -> list[PlannedChunk]:
-    """Every segment's chunks; a boundary-closed segment ends in its closing chunk."""
-    segments = segment_requests(history)
-    planned: list[PlannedChunk] = []
-    for k, request in enumerate(segments):
-        closed = k < len(boundaries)
-        keep_closing = closed or len(segments) == 1
-        for p in plan_replay(request, threshold=threshold, close=keep_closing):
-            planned.append(
-                PlannedChunk(
-                    p.chunk,
-                    p.end_msg_id,
-                    p.input_tokens,
-                    p.closing,
-                    segment=k,
-                    boundary_checkpoint_id=boundaries[k] if closed and p.closing else None,
-                )
-            )
-    return planned
-
-
 def _threshold(
-    db: Database, agent_id: int, ratio: float, explicit: int | None
+    db: Database, agent_id: int, ratio: float | None, explicit: int | None
 ) -> tuple[str, int, int]:
     """(model, soft threshold, chunk threshold) for the agent."""
     model, overrides = agent_model_target(db, agent_id, fallback="")
     soft = resolve_context_budget(model, overrides).soft_compact_tokens
-    return model, soft, explicit if explicit is not None else round(soft * ratio)
+    if explicit is not None:
+        return model, soft, explicit
+    return (
+        model,
+        soft,
+        chunk_threshold(
+            model, overrides, settings.agent.understanding_chunk_ratio if ratio is None else ratio
+        ),
+    )
 
 
 def _describe(
@@ -275,37 +193,12 @@ def _report_jobs(db: Database, agent_id: int) -> None:
         print(f"  segment {segment}: {count} {status}")
 
 
-_SELECT_LEAVES = (
-    "SELECT agent_id, depth, span_start, span_end, start_ts, end_ts, segment_key, text, text_hash,"
-    " input_hash, children_count, model, engine_version, prompt_version, schema_version"
-    " FROM understanding_nodes WHERE agent_id = %s AND depth = 1 ORDER BY span_start"
-)
-_INSERT_LEAF = (
-    "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, start_ts, end_ts,"
-    " segment_key, text, text_hash, input_hash, children_count, model, engine_version,"
-    " prompt_version, schema_version) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-)
-
-
 async def _regroup(db: Database, agent_id: int) -> None:
     pool = db.async_pool(AsyncConnectionPool, min_size=1, max_size=3, timeout=30.0)
     await pool.open()
     try:
-        async with pool.connection() as conn:
-            cur = await conn.execute(_SELECT_LEAVES, (agent_id,))
-            leaves = await cur.fetchall()
-            await conn.execute("DELETE FROM understanding_nodes WHERE agent_id = %s", (agent_id,))
-            await conn.execute(
-                "DELETE FROM understanding_group_state WHERE agent_id = %s", (agent_id,)
-            )
-        print(f"agent {agent_id}: {len(leaves)} leaves lifted, upper levels and cursor cleared")
-        models = ModelCache()
-        for n, leaf in enumerate(leaves, 1):
-            async with pool.connection() as conn:
-                await conn.execute(_INSERT_LEAF, leaf)
-            await run_group_checks(pool, db, models, agent_id)
-            if n % 10 == 0 or n == len(leaves):
-                print(f"  {n}/{len(leaves)} leaves back")
+        leaves = await run_rebuild(pool, db, ModelCache(), agent_id)
+        print(f"agent {agent_id}: upper levels rebuilt over {leaves} leaves")
     finally:
         await pool.close()
 
@@ -411,10 +304,8 @@ def main() -> None:
     if args.command == "regroup":
         asyncio.run(_regroup(db, args.agent_id))
         return
-    if args.ratio is None and args.threshold_tokens is None:
-        sys.exit("--ratio or --threshold-tokens is required")
     history, boundaries = _load(db, args.agent_id)
-    model, soft, threshold = _threshold(db, args.agent_id, args.ratio or 0.0, args.threshold_tokens)
+    model, soft, threshold = _threshold(db, args.agent_id, args.ratio, args.threshold_tokens)
     planned = plan_history(history, boundaries, threshold=threshold)
     print(
         f"agent {args.agent_id}: {len(history.messages)} messages in {len(history.segment_starts)}"
