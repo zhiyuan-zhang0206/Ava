@@ -42,9 +42,14 @@ Keyed standalone creation returns the original accepted Task snapshot on replay;
 see [[task_creation_receipts.ava.okf.md|Creation receipts]]. Query `get(task.id)`
 for current state.
 
-### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", remind_interval_seconds=None) -> (Task, int)`
+### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", remind_interval_seconds=None, operation_key=None, require_idempotency=False) -> (Task, int)`
 
 Spawn an agent and create a task assigned to it in one call: spawns per `preset`/`config_overlay` (the agent must exist to be an owner), then `create(owner=that agent)`—the task-tagged system note already carries task id + title + description. Returns `(task, agent_id)`.
+
+`require_idempotency=True` with an `operation_key` accepts birth/task/assignment
+atomically and replays the original pair. It requires a lease-free agent; the
+pair does not prove readiness. A key without opt-in is rejected. See
+[[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|Guarded compound task assignment]].
 
 ### `get(task_id) -> Task`
 

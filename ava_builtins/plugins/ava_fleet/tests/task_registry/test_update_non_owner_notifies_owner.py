@@ -251,7 +251,11 @@ def test_create_and_assign_signature() -> None:
         "parent",
         "remind_interval_seconds",
         "priority",
+        "operation_key",
+        "require_idempotency",
     ]
+    assert params["operation_key"].default is None
+    assert params["require_idempotency"].default is False
     assert params["preset"].default == "coder"
     assert params["label"].default is None
     assert params["config_overlay"].default is None

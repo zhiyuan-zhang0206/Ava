@@ -6577,6 +6577,67 @@
         }
       }
     },
+    "/api/keyed/v1/task-assignments": {
+      "post": {
+        "summary": "Post Task Assignment",
+        "description": "Accept one original pair; this response never asserts runner readiness.",
+        "operationId": "post_task_assignment_api_keyed_v1_task_assignments_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskAssignmentIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAssignmentAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plugin-ui/{plugin}": {
       "get": {
         "summary": "Plugin Ui Root",
@@ -8600,6 +8661,89 @@
         ],
         "title": "AlertsListResponse",
         "description": "Unresolved-first alert history + the count the UI badge shows."
+      },
+      "AssignmentAgentIn": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AssignmentAgentIn"
+      },
+      "AssignmentTaskIn": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "parent": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Parent"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority",
+            "default": "P2"
+          },
+          "remind_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 86400.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remind Interval Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "description",
+          "parent"
+        ],
+        "title": "AssignmentTaskIn"
       },
       "AvailabilityReason": {
         "type": "string",
@@ -16055,6 +16199,199 @@
         ],
         "title": "SystemStatus",
         "description": "GET /api/status response — System Status panel data all in one go."
+      },
+      "Task": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "results": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "remind_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remind Interval Seconds"
+          },
+          "last_reminded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reminded At"
+          },
+          "reminder_count": {
+            "type": "integer",
+            "title": "Reminder Count",
+            "default": 0
+          },
+          "priority": {
+            "type": "string",
+            "title": "Priority",
+            "default": "P2"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "title",
+          "description",
+          "results",
+          "status",
+          "owner",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Task",
+        "description": "remind_interval_seconds is seconds without updates before the owner is\nreminded; reminders cannot be disabled."
+      },
+      "TaskAssignmentAccepted": {
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/Task"
+          },
+          "agent_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Agent Id"
+          },
+          "launch_attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Launch Attempt Id"
+          },
+          "launch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpawnedAgent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "launch_failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launch Failure"
+          },
+          "retry_launch_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Launch Path"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "task",
+          "agent_id",
+          "launch_attempt_id"
+        ],
+        "title": "TaskAssignmentAccepted",
+        "description": "Original pair plus current launch observation; neither proves execution."
+      },
+      "TaskAssignmentIn": {
+        "properties": {
+          "actor_agent_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Actor Agent Id"
+          },
+          "task": {
+            "$ref": "#/components/schemas/AssignmentTaskIn"
+          },
+          "agent": {
+            "$ref": "#/components/schemas/AssignmentAgentIn"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "actor_agent_id",
+          "task",
+          "agent"
+        ],
+        "title": "TaskAssignmentIn"
       },
       "TaskListResponse": {
         "properties": {

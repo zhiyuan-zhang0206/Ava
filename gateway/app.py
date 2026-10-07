@@ -81,6 +81,7 @@ from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
 from gateway.agents import timeline as timeline_router
 from gateway.agents import understanding as agents_understanding_router
+from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.alerts import router as alerts_router
 from gateway.auth import rejection_log
 from gateway.auth import router as auth_router
@@ -593,6 +594,7 @@ app.include_router(frontend_telemetry_router.router)
 app.include_router(grafana_router.router)
 app.include_router(okf_graph_router.router)
 app.include_router(tasks_router.router)
+app.include_router(task_assignments_router.router)
 app.include_router(plugin_ui_router.router)
 app.include_router(ui_contributions_router.router)
 app.include_router(uploads_router.router)
