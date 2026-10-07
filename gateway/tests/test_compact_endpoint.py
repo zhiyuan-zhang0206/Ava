@@ -62,7 +62,9 @@ def test_compact_endpoint_inserts_compact_request_kind(db_conn: psycopg.Connecti
     with TestClient(app) as client:
         resp = client.post(f"/api/agents/{tid}/compact")
     assert resp.status_code == 200
-    assert resp.json() == {"agent_id": tid, "status": "enqueued"}
+    assert resp.json()["agent_id"] == tid
+    assert resp.json()["status"] == "enqueued"
+    assert isinstance(resp.json()["inbound_id"], int)
     assert _pending_rows(db_conn, tid) == [("compact_request", "pending")]
 
 
@@ -77,7 +79,9 @@ def test_compact_accepts_legacy_mode_query_param(
     with TestClient(app) as client:
         resp = client.post(f"/api/agents/{tid}/compact?mode={legacy_mode}")
     assert resp.status_code == 200
-    assert resp.json() == {"agent_id": tid, "status": "enqueued"}
+    assert resp.json()["agent_id"] == tid
+    assert resp.json()["status"] == "enqueued"
+    assert isinstance(resp.json()["inbound_id"], int)
     assert _pending_rows(db_conn, tid) == [("compact_request", "pending")]
 
 

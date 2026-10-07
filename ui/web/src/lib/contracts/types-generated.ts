@@ -4533,6 +4533,8 @@ export interface components {
          */
         CancelRequested: {
             status: components["schemas"]["CancelResult"];
+            /** Inbound Id */
+            inbound_id?: number | null;
         };
         /**
          * CancelResult
@@ -4651,6 +4653,8 @@ export interface components {
              * @constant
              */
             status: "enqueued";
+            /** Inbound Id */
+            inbound_id?: number | null;
         };
         /**
          * ConfigAuditView

@@ -60,6 +60,7 @@ class CompactEnqueued(BaseModel):
 
     agent_id: int
     status: Literal["enqueued"]
+    inbound_id: int | None = None
 
 
 class UserMessageIn(BaseModel):

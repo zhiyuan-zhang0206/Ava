@@ -40,7 +40,8 @@ def test_post_cancel_inserts_durable_cancel_inbound(db_conn: psycopg.Connection)
     with TestClient(app) as client:
         resp = client.post("/api/cancel", json={"agent_id": tid})
     assert resp.status_code == 200
-    assert resp.json() == {"status": "enqueued"}
+    assert resp.json()["status"] == "enqueued"
+    assert isinstance(resp.json()["inbound_id"], int)
     assert _pending_kinds(db_conn, tid) == [("cancel", "pending")]
 
 
@@ -51,7 +52,7 @@ def test_post_cancel_terminated_agent_is_noop(db_conn: psycopg.Connection) -> No
     with TestClient(app) as client:
         resp = client.post("/api/cancel", json={"agent_id": tid})
     assert resp.status_code == 200
-    assert resp.json() == {"status": "already_terminated"}
+    assert resp.json() == {"status": "already_terminated", "inbound_id": None}
     assert _pending_kinds(db_conn, tid) == []
 
 

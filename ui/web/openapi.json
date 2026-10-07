@@ -594,6 +594,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "exclusiveMinimum": 0,
               "title": "Agent Id"
             }
           }
@@ -8701,6 +8702,17 @@
         "properties": {
           "status": {
             "$ref": "#/components/schemas/CancelResult"
+          },
+          "inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Id"
           }
         },
         "type": "object",
@@ -8934,6 +8946,17 @@
             "type": "string",
             "const": "enqueued",
             "title": "Status"
+          },
+          "inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Id"
           }
         },
         "type": "object",

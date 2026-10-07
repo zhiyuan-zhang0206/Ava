@@ -21,7 +21,7 @@ def test_cancel_is_its_own_shared_domain(result: CancelResult) -> None:
     assert CancelRequested.model_fields["status"].annotation is CancelResult
     response = CancelRequested.model_validate({"status": result.value})
     assert response.status is result
-    assert response.model_dump(mode="json") == {"status": result.value}
+    assert response.model_dump(mode="json") == {"status": result.value, "inbound_id": None}
 
 
 @pytest.mark.parametrize("status", list(OpStatus))

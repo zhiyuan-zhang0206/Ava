@@ -30,6 +30,7 @@ events) stay in the `ava.*` SDK and the web UI.
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -333,7 +334,10 @@ def cmd_agents_cancel(agent_id: int) -> int:
 
     url = f"{gateway_api_base()}/api/cancel"
     resp = dial_post(
-        url, json={"agent_id": agent_id}, timeout=_TIMEOUT_S, headers=gateway_auth_headers()
+        url,
+        json={"agent_id": agent_id},
+        timeout=_TIMEOUT_S,
+        headers={**gateway_auth_headers(), "Idempotency-Key": uuid4().hex},
     )
     resp.raise_for_status()
     status = CancelResult(resp.json()["status"])
@@ -548,7 +552,9 @@ def cmd_agents_compact(agent_id: int) -> int:
     from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/compact"
-    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    resp = dial_post(
+        url, timeout=_TIMEOUT_S, headers={**gateway_auth_headers(), "Idempotency-Key": uuid4().hex}
+    )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} compact: {resp.json().get('status')}")
     return 0

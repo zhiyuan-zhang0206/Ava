@@ -25,11 +25,11 @@ plus run-level `BillingRecoveryMode` (`dry_run` / `execute`) and
 lifecycle dispatch translates home verdicts into batch outcomes. Raw RPC values
 are validated by the response models, and JSON wire strings stay unchanged.
 
-`/api/cancel` cancels a running turn. Its acceptance response uses the distinct
-`CancelResult` in `base/agents/contract.py`; cancellation is not process
-termination. The CLI validates raw cancel and billing run values before
-reporting results or choosing a successful exit. `/api/models` exposes available models,
-and `/api/agents/{id}/exited` finalizes an agent exit.
+`/api/cancel` pauses work using `CancelResult` (`base/agents/contract.py`),
+separate from termination. [[control-acceptance.ava.okf.md]] owns keyed cancel
+and compact acceptance; acceptance is not native application. The CLI validates
+cancel and billing results before reporting success. `/api/models` lists models;
+`/api/agents/{id}/exited` finalizes agent exit.
 
 ## Spawn boundary: presets and the fork config rule
 

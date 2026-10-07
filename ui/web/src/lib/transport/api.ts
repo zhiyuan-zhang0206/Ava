@@ -424,16 +424,21 @@ export const api = {
     ).then(ok<{ status: string }>);
   },
 
-  compact: (agentId: number): Promise<CompactEnqueued> => {
-    return f(`/api/agents/${agentId}/compact`, POST).then(ok<CompactEnqueued>);
+  compact: (agentId: number, idempotencyKey: string = crypto.randomUUID()): Promise<CompactEnqueued> => {
+    return f(`/api/agents/${agentId}/compact`, {
+      ...POST, headers: { "Idempotency-Key": idempotencyKey },
+    }).then(ok<CompactEnqueued>);
   },
 
-  cancel: (agentId: number): Promise<CancelRequested> => {
+  cancel: (agentId: number, idempotencyKey: string = crypto.randomUUID()): Promise<CancelRequested> => {
     // Each agent runs its own turn — the gateway watcher dispatches to
     // the corresponding cancel_event. Returns as soon as the signal is
     // sent; the actual kernel response is delivered to the UI via the
     // SSE `cancelled` event.
-    return f("/api/cancel", POST_JSON({ agent_id: agentId })).then(
+    return f("/api/cancel", {
+      ...POST_JSON({ agent_id: agentId }),
+      headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
+    }).then(
       ok<CancelRequested>,
     );
   },

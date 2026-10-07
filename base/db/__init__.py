@@ -659,26 +659,12 @@ def insert_compact_request_inbound(
     path. Agent-initiated compact still goes through
     ava.self.compact() -> kind='compact_summary' (agent writes its
     own summary)."""
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, %s, %s) "
-            "RETURNING id",
-            (agent_id, "", "compact_request"),
-        )
-        row = cur.fetchone()
-        if row is None:
-            raise RuntimeError("compact request inbound INSERT returned no id")
-        inbound_id = row[0]
-        from base.telemetry.audit_events import prepare_event_log, record_audit
+    from base.agents.messages.control_delivery import insert_control_in_transaction
+    from base.agents.messages.inbound import InboundKind
 
-        compact_event = record_audit(
-            db,
-            prepare_event_log(
-                event_type="compact",
-                agent_id=agent_id,
-                source="user",
-                payload={"compact_kind": "request"},
-            ),
+    with db.cursor() as cur:
+        inbound_id, compact_event = insert_control_in_transaction(
+            cur, agent_id, InboundKind.COMPACT_REQUEST
         )
     db.commit()
     _emit_prepared_event(compact_event)
