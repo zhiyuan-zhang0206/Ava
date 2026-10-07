@@ -43,6 +43,7 @@ def _baseline(
     directories: dict[str, int] | None = None,
     complexity: dict[str, int] | None = None,
     nesting: dict[str, int] | None = None,
+    patch_targets: dict[str, int] | None = None,
 ) -> pathlib.Path:
     """Write the baseline as shards under scripts/structure/baseline/."""
     directory = _clear_baseline_dir(root)
@@ -51,6 +52,7 @@ def _baseline(
         "files": files or {},
         "complexity": complexity or {},
         "nesting": nesting or {},
+        "patch_targets": patch_targets or {},
         **{kind: {} for kind in ("private_imports", "owner_bypasses", "path_imports")},
     }
     for name, shard in baseline_shards.split(data).items():
@@ -110,7 +112,7 @@ def test_line_budget_boundary(
     output = capsys.readouterr().out
     if lines > 800:
         assert f"{scope}/example.py:801:" in output
-        assert "new violation, not in the baseline" in output
+        assert "split it" in output
         assert "hard ceiling" in output
     else:
         assert output == ""
@@ -131,7 +133,7 @@ def test_directory_cap_counts_py_pyi_and_subdirectories(
     assert lcs.main([]) == 1
     output = capsys.readouterr().out
     assert "tests/package: directory has 21 direct entries" in output
-    assert "new violation, not in the baseline" in output
+    assert "split it" in output
 
 
 def test_directory_budgets_are_recursive_and_independent(
@@ -189,80 +191,6 @@ def test_docs_and_frontend_are_out_of_scope(
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.parametrize("kind", ["files", "directories"])
-@pytest.mark.parametrize("change", ["unlisted", "equal", "smaller", "larger"])
-def test_baseline_contains_current_violations(
-    tmp_path: pathlib.Path,
-    capsys: pytest.CaptureFixture[str],
-    kind: str,
-    change: str,
-) -> None:
-    if kind == "files":
-        name, frozen = "tests/oversized.py", 805
-        actual = frozen + {"unlisted": 0, "equal": 0, "smaller": -1, "larger": 1}[change]
-        _write(tmp_path, name, actual)
-    else:
-        name, frozen = "tests/package", 25
-        actual = frozen + {"unlisted": 0, "equal": 0, "smaller": -1, "larger": 1}[change]
-        _entries(tmp_path, name, actual)
-    baseline: dict[str, dict[str, int]] = {"files": {}, "directories": {}}
-    if change != "unlisted":
-        baseline[kind][name] = frozen
-    _baseline(tmp_path, **baseline)
-
-    assert lcs.main([]) == (1 if change in {"unlisted", "larger"} else 0)
-    output = capsys.readouterr().out
-    if change == "unlisted":
-        assert name in output
-        assert "new violation, not in the baseline" in output
-    elif change == "larger":
-        assert name in output
-        assert "grew above its frozen baseline value" in output
-        assert str(frozen) in output
-    else:
-        assert output == ""
-
-
-@pytest.mark.parametrize("kind", ["files", "directories"])
-@pytest.mark.parametrize("change", ["added", "raised", "removed", "lowered", "equal"])
-@pytest.mark.parametrize("explicit", [False, True])
-def test_baseline_guard_against_real_git_head(
-    tmp_path: pathlib.Path,
-    capsys: pytest.CaptureFixture[str],
-    kind: str,
-    change: str,
-    explicit: bool,
-) -> None:
-    name, frozen = ("tests/legacy.py", 805) if kind == "files" else ("tests/legacy", 25)
-    baseline: dict[str, dict[str, int]] = {"files": {}, "directories": {}}
-    baseline[kind][name] = frozen
-    _baseline(tmp_path, **baseline)
-    _git(tmp_path, "init", "--quiet")
-    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
-    _git(tmp_path, "commit", "--quiet", "-m", "Freeze baseline")
-    if change == "added":
-        extra = "tests/new.py" if kind == "files" else "tests/new"
-        baseline[kind][extra] = frozen
-    elif change == "removed":
-        del baseline[kind][name]
-    elif change in {"raised", "lowered"}:
-        baseline[kind][name] += 1 if change == "raised" else -1
-    _baseline(tmp_path, **baseline)
-    target = _write(tmp_path, "tests/selected.py", 1)
-
-    assert lcs.main([str(target)] if explicit else []) == (
-        1 if change in {"added", "raised"} else 0
-    )
-    captured = capsys.readouterr()
-    assert "guard skipped" not in captured.err
-    if change in {"added", "raised"}:
-        assert f"{change} {kind} entry" in captured.out
-        assert "shrink-only" in captured.out
-    else:
-        assert captured.out == ""
-        assert captured.err == ""
-
-
 def test_baseline_introduction_skips_guard_when_absent_from_head(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -271,11 +199,11 @@ def test_baseline_introduction_skips_guard_when_absent_from_head(
     _git(tmp_path, "add", "README.md")
     _git(tmp_path, "commit", "--quiet", "-m", "Before baseline introduction")
     _write(tmp_path, "tests/oversized.py", 801)
-    _baseline(tmp_path, files={"tests/oversized.py": 801})
+    _baseline(tmp_path)
 
-    assert lcs.main([]) == 0
+    assert lcs.main([]) == 1
     captured = capsys.readouterr()
-    assert captured.out == ""
+    assert "hard ceiling" in captured.out
     assert "baseline guard skipped" in captured.err
 
 
@@ -330,7 +258,7 @@ def test_explicit_out_of_scope_target_is_silent_but_guard_still_runs(
 
     _baseline(tmp_path, files={"tests/unrelated.py": 801})
     assert lcs.main(args) == 1
-    assert "added files entry tests/unrelated.py" in capsys.readouterr().out
+    assert "unknown section 'files'" in capsys.readouterr().err
 
 
 def test_explicit_file_checks_parent_count_without_scanning_siblings(
@@ -481,57 +409,6 @@ def test_quality_boundaries(
     ) == (kind == "complexity" and value == 14)
 
 
-@pytest.mark.parametrize("kind,frozen", [("complexity", 16), ("nesting", 7)])
-@pytest.mark.parametrize("change", ["new", "equal", "lower", "grow", "stale"])
-def test_quality_containment(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], kind: str, frozen: int, change: str
-) -> None:
-    actual = frozen + {"new": 0, "equal": 0, "lower": -1, "grow": 1, "stale": 0}[change]
-    if change != "stale":
-        _source(tmp_path, _branches(actual) if kind == "complexity" else _nested(actual))
-    _baseline(tmp_path, **{kind: {} if change == "new" else {"tests/q.py::f": frozen}})
-    assert lcs.main([]) == (1 if change in {"new", "grow"} else 0)
-    output = capsys.readouterr().out
-    assert ("new violation, not in the baseline" in output) == (change == "new")
-    assert ("grew above its frozen baseline value" in output) == (change == "grow")
-
-
-@pytest.mark.parametrize("kind,minimum", [("complexity", 15), ("nesting", 6)])
-@pytest.mark.parametrize(
-    "entry,value_offset,valid",
-    [
-        ("tests/q.py::f", 0, True),
-        ("tests/q.py::f", -1, False),
-        ("tests/q.py", 0, False),
-        ("tests/q.py::", 0, False),
-        ("docs/q.py::f", 0, False),
-        ("/tests/q.py::f", 0, False),
-        ("tests/../q.py::f", 0, False),
-        ("tests/q.pyi::f", 0, False),
-    ],
-)
-def test_quality_baseline_entry_validation(
-    tmp_path: pathlib.Path,
-    capsys: pytest.CaptureFixture[str],
-    kind: str,
-    minimum: int,
-    entry: str,
-    value_offset: int,
-    valid: bool,
-) -> None:
-    _baseline(tmp_path, **{kind: {entry: minimum + value_offset}})
-    assert lcs.main([]) == (0 if valid else 1)
-    assert ("invalid baseline" in capsys.readouterr().err) != valid
-
-
-@pytest.mark.parametrize("value", [True, "15", 15.0, None, []])
-@pytest.mark.parametrize("kind", ["complexity", "nesting"])
-def test_quality_baseline_requires_integers(kind: str, value: object) -> None:
-    data = {kind: {"tests/q.py::f": value}}
-    with pytest.raises(ValueError, match=f"invalid {kind} entry"):
-        lcs._parse_baseline({"tests": json.dumps(data)})
-
-
 def test_function_qualnames_duplicates_and_lambda_exclusion() -> None:
     tree = ast.parse(
         "class Outer:\n    class Inner:\n        def method(self): pass\ndef p():\n    def c(): pass\n    def c(): pass\n    return lambda: 1\nasync def p(): pass\n"
@@ -639,54 +516,10 @@ def test_explicit_quality_targets_and_full_flag(
     assert "2 functions in 2 files" in captured.err
 
 
-@pytest.mark.parametrize("kind,minimum", [("complexity", 15), ("nesting", 6)])
-@pytest.mark.parametrize(
-    "scenario,errors",
-    [
-        ("same", 0),
-        ("lower", 0),
-        ("raise", 1),
-        ("elsewhere", 1),
-        ("twice", 1),
-        ("matching", 0),
-        ("retained", 1),
-    ],
-)
-def test_quality_guard_rename_pairing(kind: str, minimum: int, scenario: str, errors: int) -> None:
-    previous = {"tests/q.py::old": minimum + 2}
-    current = {
-        "tests/q.py::new": minimum
-        + {
-            "same": 2,
-            "lower": 0,
-            "raise": 3,
-            "elsewhere": 2,
-            "twice": 2,
-            "matching": 2,
-            "retained": 2,
-        }[scenario]
-    }
-    if scenario == "elsewhere":
-        current = {"tests/elsewhere.py::new": minimum}
-    if scenario == "twice":
-        current["tests/q.py::second"] = minimum
-    if scenario == "matching":
-        previous["tests/q.py::small"] = minimum
-        current["tests/q.py::small_new"] = minimum
-    if scenario == "retained":
-        current.update(previous)
-    output = lcs._section_guard(kind, current, previous)
-    assert len(output) == errors
-    assert all("added key without a paired same-file removal" in line for line in output)
-
-
 @pytest.mark.parametrize(
     "kind,key,value",
     [
-        ("files", "tests/q.py", 805),
-        ("directories", "tests/q", 25),
-        ("complexity", "tests/q.py::f", 16),
-        ("nesting", "tests/q.py::f", 7),
+        ("patch_targets", "base/q.py::base.db._pool", 2),
     ],
 )
 @pytest.mark.parametrize("delta", [-1, 1])
@@ -739,17 +572,19 @@ def test_guard_rejects_an_invalid_base_baseline(
         directory = _clear_baseline_dir(tmp_path)
         (directory / "tests.json").write_text("not JSON", encoding="utf-8")
     else:
-        _baseline(tmp_path, files={"tests/old.py": 805})
+        _baseline(tmp_path, patch_targets={"base/q.py::base.db._pool": 2})
     _git(tmp_path, "init", "--quiet")
     _commit_baseline(tmp_path)
-    _baseline(tmp_path, files={"tests/old.py": 806 if previous == "raised" else 805})
+    _baseline(
+        tmp_path, patch_targets={"base/q.py::base.db._pool": 3 if previous == "raised" else 2}
+    )
 
     assert lcs.main([]) == rc
     captured = capsys.readouterr()
     if previous == "malformed":
         assert "invalid base baseline" in captured.out
     elif previous == "raised":
-        assert "raised files entry tests/old.py" in captured.out
+        assert "raised patch_targets entry base/q.py::base.db._pool" in captured.out
     else:
         assert captured.out == ""
 
@@ -768,3 +603,21 @@ def test_ast_and_radon_share_one_parse(
     assert parse.call_count == 1
     assert visitor.call_count == 1
     assert visitor.call_args.args[0] is measure.call_args.args[0]
+
+
+@pytest.mark.parametrize("kind", ["files", "directories", "complexity", "nesting"])
+@pytest.mark.parametrize("entries", [{}, {"tests/q.py::f": 999}])
+def test_retired_budget_sections_cannot_be_reintroduced(kind: str, entries: dict[str, int]) -> None:
+    with pytest.raises(ValueError, match=f"unknown section '{kind}'"):
+        lcs._parse_baseline({"tests": json.dumps({kind: entries})})
+
+
+def test_zeroed_historical_budgets_do_not_restore_exemptions() -> None:
+    retired: dict[str, dict[str, int]] = {
+        kind: {} for kind in ("files", "directories", "complexity", "nesting")
+    }
+    result = lcs._parse_baseline({"tests": json.dumps(retired)}, historical=True)
+    assert set(result) == set(lcs._SITE_SECTIONS)
+    retired["files"] = {"tests/big.py": 900}
+    with pytest.raises(ValueError, match="retired files baseline must be empty"):
+        lcs._parse_baseline({"tests": json.dumps(retired)}, historical=True)

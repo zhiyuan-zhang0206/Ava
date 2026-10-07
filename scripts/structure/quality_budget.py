@@ -1,11 +1,10 @@
-"""Function quality metrics and frozen-baseline helpers for the structure gate."""
+"""Function quality metrics and strict budgets for the structure gate."""
 
 from __future__ import annotations
 
 import ast
 import sys
-from collections import Counter, defaultdict
-from pathlib import Path
+from collections import Counter
 
 from radon.complexity import ComplexityVisitor
 from radon.visitors import Class, Function
@@ -111,70 +110,14 @@ def measure_quality(tree: ast.AST, path: str) -> dict[str, dict[str, int]]:
     }
 
 
-def validate_quality_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None:
-    if not isinstance(entries, dict):
-        raise ValueError(f"'{kind}' must be an object")  # noqa: TRY004 — invalid JSON schema
-    ceiling = COMPLEXITY_HARD - 1 if kind == "complexity" else NESTING_CEILING
-    for key, count in entries.items():
-        path_text, separator, qualname = key.partition("::")
-        path = Path(path_text)
-        valid_path = (
-            path.parts
-            and not path.is_absolute()
-            and path.as_posix() == path_text
-            and ".." not in path.parts
-            and path.parts[0] in scope
-            and path.suffix == ".py"
-        )
-        if (
-            not valid_path
-            or not separator
-            or not qualname
-            or type(count) is not int
-            or count <= ceiling
-        ):
-            raise ValueError(
-                f"invalid {kind} entry {key!r}: expected a scoped .py path::qualname "
-                f"and integer > {ceiling}"
-            )
-
-
-def _renamed_source_key(key: str, sources: dict[str, str]) -> str | None:
-    """The pre-rename key a file rename carries over, when a rename explains the key."""
-    path, separator, qualname = key.partition("::")
-    source = sources.get(path)
-    return f"{source}{separator}{qualname}" if source is not None else None
-
-
-def quality_errors(
-    measurements: dict[str, dict[str, int]],
-    baseline: dict[str, dict[str, int]],
-    *,
-    renames: dict[str, str] | None = None,
-) -> list[str]:
-    errors: list[str] = []
-    sources = {new: old for old, new in (renames or {}).items()}
-    for kind, ceiling in (("complexity", COMPLEXITY_HARD - 1), ("nesting", NESTING_CEILING)):
-        for key, value in measurements[kind].items():
-            if value <= ceiling:
-                continue
-            if key not in baseline[kind]:
-                inherited = _renamed_source_key(key, sources)
-                if inherited is not None and inherited in baseline[kind]:
-                    reason = (
-                        f"renamed file — migrate the baseline entry {inherited} "
-                        "to this path (same value)"
-                    )
-                else:
-                    reason = "new violation, not in the baseline — refactor it"
-            elif value > baseline[kind][key]:
-                reason = (
-                    f"grew above its frozen baseline value ({baseline[kind][key]}) — refactor it"
-                )
-            else:
-                continue
-            errors.append(f"{key}: {kind} {value}: {reason}")
-    return errors
+def quality_errors(measurements: dict[str, dict[str, int]]) -> list[str]:
+    """Every hard violation fails; no rename or frozen value grants an allowance."""
+    return [
+        f"{key}: {kind} {value}: over the {ceiling} ceiling — refactor it"
+        for kind, ceiling in (("complexity", COMPLEXITY_HARD - 1), ("nesting", NESTING_CEILING))
+        for key, value in measurements[kind].items()
+        if value > ceiling
+    ]
 
 
 def render_warnings(complexity: dict[str, int], *, full: bool = False) -> None:
@@ -200,26 +143,3 @@ def render_warnings(complexity: dict[str, int], *, full: bool = False) -> None:
             f"rest: {len(remaining)} files / {sum(count for _, count in remaining)} functions",
             file=sys.stderr,
         )
-
-
-def unpaired_additions(current: dict[str, int], previous: dict[str, int]) -> list[str]:
-    """Maximum matching in each file's threshold bipartite graph of added/removed keys.
-
-    Candidate neighborhoods are nested by value. Pairing the smallest addition
-    with the smallest sufficient removal preserves every larger candidate, so
-    this greedy matching is maximum without an augmenting-path search.
-    """
-    removals: dict[str, list[int]] = defaultdict(list)
-    for key in previous.keys() - current.keys():
-        removals[key.partition("::")[0]].append(previous[key])
-    for candidates in removals.values():
-        candidates.sort()
-    unmatched: list[str] = []
-    for key in sorted(current.keys() - previous.keys(), key=lambda key: (current[key], key)):
-        candidates = removals[key.partition("::")[0]]
-        match = next((i for i, value in enumerate(candidates) if value >= current[key]), None)
-        if match is None:
-            unmatched.append(key)
-        else:
-            candidates.pop(match)
-    return unmatched
