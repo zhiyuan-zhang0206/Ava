@@ -21,7 +21,7 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
-from services.agent_runner.agent_ops import daemon
+from services.agent_runner.agent_ops import daemon, health
 from services.agent_runner.agent_ops import maintenance as activity
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
@@ -49,14 +49,18 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
         await finishes[index].wait()
         return "completed", {}
 
-    monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(3))
+    dispatch_sem = asyncio.Semaphore(3)
     monkeypatch.setattr(daemon, "_dispatch", dispatch)
     before = pause_owner.begin_maintenance("ops", WHEN).snapshot
     assert before.maintenance is not None
     draining = MaintenanceHold(MaintenancePhase.DRAINING)
     pause_owner.change_maintenance("ops", WHEN, before.maintenance, draining)
     tasks = [
-        asyncio.create_task(daemon._ops_route(b'{"kind":"config_read","payload":{}}'))
+        asyncio.create_task(
+            daemon._ops_route(
+                b'{"kind":"config_read","payload":{}}', active_ops={}, dispatch_sem=dispatch_sem
+            )
+        )
         for _ in range(2)
     ]
     try:
@@ -68,7 +72,9 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
         pause_owner.change_maintenance(
             "ops", WHEN, draining, MaintenanceHold(MaintenancePhase.STOPPING)
         )
-        status, body, _ = await daemon._ops_route(b'{"kind":"config_read","payload":{}}')
+        status, body, _ = await daemon._ops_route(
+            b'{"kind":"config_read","payload":{}}', active_ops={}, dispatch_sem=dispatch_sem
+        )
         assert status == 200
         assert b'"status": "failed"' in body
         assert b"stopping" in body
@@ -83,6 +89,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
 async def test_cancelled_same_kind_await_does_not_hide_running_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    active_ops: daemon.ActiveOps = {}
     entered = [threading.Event(), threading.Event()]
     finish = [threading.Event(), threading.Event()]
 
@@ -97,7 +104,8 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
         monkeypatch.setattr(daemon, "_op_executor", executor)
         monkeypatch.setattr(daemon, "_dispatch_sync", arm)
         tasks = [
-            asyncio.create_task(daemon._run_arm("same", {"index": index})) for index in range(2)
+            asyncio.create_task(daemon._run_arm("same", {"index": index}, active_ops=active_ops))
+            for index in range(2)
         ]
         try:
             async with asyncio.timeout(2):
@@ -178,11 +186,13 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
     ):
         monkeypatch.setattr(daemon, "_db_pool", pool)
         monkeypatch.setattr(daemon, "_op_executor", executor)
-        monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(2))
+        dispatch_sem = asyncio.Semaphore(2)
 
         async def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
             status, raw, _ = await daemon._ops_route(
-                json.dumps({"kind": kind, "payload": payload}).encode()
+                json.dumps({"kind": kind, "payload": payload}).encode(),
+                active_ops={},
+                dispatch_sem=dispatch_sem,
             )
             assert status == 200
             return json.loads(raw)
@@ -191,3 +201,50 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
         assert status["status"] == "completed"
         assert status["result"]["paused"] is True
         assert admission.held()
+
+
+async def test_active_ops_share_health_and_cleanup_within_one_daemon(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_ops: daemon.ActiveOps = {}
+    other_daemon: daemon.ActiveOps = {}
+    entered = [threading.Event(), threading.Event()]
+    finish = [threading.Event(), threading.Event()]
+
+    def arm(_kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
+        index = int(payload["index"])
+        entered[index].set()
+        if not finish[index].wait(5):
+            raise TimeoutError("test worker was not released")
+        if index == 1:
+            raise RuntimeError("operation failed")
+        return "completed", {}
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        monkeypatch.setattr(daemon, "_op_executor", executor)
+        monkeypatch.setattr(daemon, "_dispatch_sync", arm)
+        tasks = [
+            asyncio.create_task(daemon._run_arm(kind, {"index": index}, active_ops=active_ops))
+            for index, kind in enumerate(("config_read", "inventory_read"))
+        ]
+        try:
+            async with asyncio.timeout(2):
+                while not all(event.is_set() for event in entered):
+                    await asyncio.sleep(0.01)
+            assert health.ops_components(active_ops)[1]["progress"] == "2 active"
+            assert health.saturation(active_ops, 2) == 1.0
+            assert health.ops_components(other_daemon)[1]["progress"] == "0 active"
+            finish[0].set()
+            await tasks[0]
+            assert set(active_ops) == {"inventory_read"}
+            assert health.saturation(active_ops, 2) == 0.5
+            finish[1].set()
+            with pytest.raises(RuntimeError, match="operation failed"):
+                await tasks[1]
+            assert active_ops == {}
+            assert health.ops_components(active_ops)[1]["progress"] == "0 active"
+            assert health.saturation(active_ops, 2) == 0.0
+        finally:
+            for event in finish:
+                event.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
