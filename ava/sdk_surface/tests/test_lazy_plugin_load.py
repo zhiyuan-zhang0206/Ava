@@ -13,8 +13,14 @@ into a plugin load.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from types import SimpleNamespace
+import importlib
+import sys
+from collections.abc import Callable, Generator, Iterator, Sequence
+from contextlib import contextmanager
+from importlib.abc import Loader, MetaPathFinder
+from importlib.machinery import ModuleSpec
+from importlib.util import spec_from_loader
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -199,6 +205,62 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
     assert "DuplicatePlugin" in stderr
 
 
+class _ReentrantLoader(Loader):
+    def __init__(self, during_import: Callable[[], None], load: Callable[..., None]) -> None:
+        self.during_import = during_import
+        self.load = load
+
+    def create_module(self, spec: ModuleSpec) -> ModuleType | None:
+        return None
+
+    def exec_module(self, module: ModuleType) -> None:
+        self.during_import()
+        vars(module)["load_extensions"] = self.load
+
+
+class _ExtensionsFinder(MetaPathFinder):
+    def __init__(self, loader: Loader) -> None:
+        self.loader = loader
+
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None = None,
+        target: ModuleType | None = None,
+    ) -> ModuleSpec | None:
+        if fullname == "agent.extensions":
+            return spec_from_loader(fullname, self.loader)
+        return None
+
+
+@contextmanager
+def _partial_extensions(
+    monkeypatch: pytest.MonkeyPatch,
+    during_import: Callable[[], None],
+    load: Callable[..., None],
+) -> Generator[None]:
+    """Let Python mark a real reentrant import, then restore both module bindings."""
+    import agent
+    from agent import extensions
+
+    prior_module = sys.modules["agent.extensions"]
+    prior_parent_binding = vars(agent)["extensions"]
+    prior_finders = sys.meta_path
+    try:
+        with monkeypatch.context() as patch:
+            # Importlib replaces the parent's public binding when the import finishes.
+            patch.setattr(agent, "extensions", extensions)
+            patch.delitem(sys.modules, "agent.extensions")
+            finder = _ExtensionsFinder(_ReentrantLoader(during_import, load))
+            patch.setattr(sys, "meta_path", [finder, *prior_finders])
+            importlib.import_module("agent.extensions")
+            yield
+    finally:
+        assert sys.modules["agent.extensions"] is prior_module
+        assert vars(agent)["extensions"] is prior_parent_binding
+        assert sys.meta_path is prior_finders
+
+
 def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -213,33 +275,23 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     loads normally instead of being blocked by a latch for a load that never
     ran.
     """
-    from agent import extensions
-
     calls: list[int] = []
 
     def fake(*, surface: bool = False) -> None:
         calls.append(1)
 
-    # Mid-import: the loader attribute is not defined yet and CPython marks
-    # the partial-module state (the shape the real circular import hits).
-    monkeypatch.delattr(extensions, "load_extensions")
-    monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
+    def during_import() -> None:
+        ava.ensure_plugins_loaded()  # must not raise
+        assert install.installed() is None and not install.load_attempted()
+        assert calls == []
+        assert "plugin load failed" not in capsys.readouterr().err
+        assert not any("failed in this launched child" in r["message"] for r in loguru_records)
 
-    ava.ensure_plugins_loaded()  # must not raise
-
-    assert install.installed() is None and not install.load_attempted()  # deferred, not latched
-    assert calls == []
-    assert "plugin load failed" not in capsys.readouterr().err
-    assert not any("failed in this launched child" in r["message"] for r in loguru_records)
-
-    # The module finishes initializing; the next call retries and loads.
-    monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
-    monkeypatch.setattr(extensions.__spec__, "_initializing", False)
-
-    ava.ensure_plugins_loaded()
-
-    assert calls == [1]
-    assert install.load_attempted()  # the retry ran the loader; it is not deferred again
+    with _partial_extensions(monkeypatch, during_import, fake):
+        # The module completed; the next call retries a load that never ran.
+        ava.ensure_plugins_loaded()
+        assert calls == [1]
+        assert install.load_attempted()
 
 
 def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
@@ -253,7 +305,6 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
     loader module is complete loads the plugin surface.
     """
     _as_launched_child(monkeypatch)
-    from agent import extensions
 
     calls: list[int] = []
 
@@ -272,21 +323,17 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
             )
         )
 
-    monkeypatch.delattr(extensions, "load_extensions")
-    monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
+    def during_import() -> None:
+        with pytest.raises(AttributeError):
+            _ = ava.deferrednsp  # type: ignore[attr-defined]
+        assert calls == []
+        assert install.installed() is None and not install.load_attempted()
+        assert "plugin load failed" not in capsys.readouterr().err
 
-    with pytest.raises(AttributeError):
-        _ = ava.deferrednsp  # type: ignore[attr-defined]
-    assert calls == []
-    assert install.installed() is None and not install.load_attempted()
-    assert "plugin load failed" not in capsys.readouterr().err
-
-    monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
-    monkeypatch.setattr(extensions.__spec__, "_initializing", False)
-
-    assert ava.deferrednsp.ping() == "pong"  # type: ignore[attr-defined]
-    assert calls == [1]
-    assert install.installed() is not None
+    with _partial_extensions(monkeypatch, during_import, fake):
+        assert ava.deferrednsp.ping() == "pong"  # type: ignore[attr-defined]
+        assert calls == [1]
+        assert install.installed() is not None
 
 
 def _spy_member_loader(

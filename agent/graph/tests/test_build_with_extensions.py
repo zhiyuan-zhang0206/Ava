@@ -10,6 +10,7 @@ Confirms:
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -437,14 +438,12 @@ def test_dangling_config_entry_reported_and_skipped(
     """A config entry whose plugin directory is gone (interrupted upgrade,
     manual rm) must not block the plugin load: reported through the canonical
     fail-soft reporter (loguru ERROR + `plugin_load_failed` event), treated as
-    disabled, the rest of the config intact. The reporter's once-per-process
-    memo is reset so this test does not depend on interpreter run order.
+    disabled, the rest of the config intact. A unique missing name keeps the
+    process-wide once-only reporter independent of other tests.
     """
-    from base.packages.plugins import enable_config
-
-    monkeypatch.setattr(enable_config, "_dangling_reported", set[str]())
+    missing = f"vanished_{uuid4().hex}"
     _make_external_plugin("audit")
-    write_local({"plugins": {"audit": {"enabled": True}, "vanished": {"enabled": True}}})
+    write_local({"plugins": {"audit": {"enabled": True}, missing: {"enabled": True}}})
 
     from agent import extensions as _loader
 
@@ -453,9 +452,9 @@ def test_dangling_config_entry_reported_and_skipped(
     loaded = _loader.load_extensions()  # must not raise
 
     assert "plugins.audit.plugin" in sys.modules
-    assert "vanished" not in loaded.config.plugins
+    assert missing not in loaded.config.plugins
     attrs = [a for n, a in events if n == "plugin_load_failed"]
-    assert [a["plugin"] for a in attrs] == ["vanished"]
+    assert [a["plugin"] for a in attrs] == [missing]
 
 
 def test_dot_prefixed_dirs_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -> None:
