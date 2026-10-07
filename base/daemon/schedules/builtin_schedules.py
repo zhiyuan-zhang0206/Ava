@@ -196,7 +196,7 @@ def provision_builtin_schedules(conn: Any, *, path: Path | None = None) -> Provi
             if _digest(current_script or "", current_command or "") == want:
                 continue
             cur.execute(
-                "UPDATE schedules SET script = %s, command = %s, updated_at = now() WHERE id = %s",
+                "UPDATE schedules SET script = %s, command = %s, desired_revision = desired_revision + 1, launch_count = 0, next_launch_at = NULL, updated_at = now() WHERE id = %s",
                 (script_text, sched.command, schedule_id),
             )
             cur.execute(

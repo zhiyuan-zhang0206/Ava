@@ -31,7 +31,7 @@ from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from gateway.agents.router import create_and_launch_agent
-from gateway.schedules import session_control
+from gateway.schedules import receipts, session_control
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
@@ -142,8 +142,24 @@ def _changed_fields(previous: tuple[Any, ...], fields: dict[str, Any]) -> dict[s
     return {col: fields[col] for col in _UPDATABLE if col in fields and fields[col] != current[col]}
 
 
+def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sql.Composable]:
+    assignments: list[sql.Composable] = [
+        sql.SQL("{} = %s").format(sql.Identifier(col)) for col in changed
+    ]
+    assignments.append(sql.SQL("updated_at = now()"))
+    if code_changed or "enabled" in changed:
+        assignments.extend(
+            [
+                sql.SQL("desired_revision = desired_revision + 1"),
+                sql.SQL("launch_count = 0"),
+                sql.SQL("next_launch_at = NULL"),
+            ]
+        )
+    return assignments
+
+
 def _update_blocking(
-    pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any]
+    pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any], key: str | None = None
 ) -> tuple[tuple[Any, ...], bool]:
     """Sync partial-update (syntax check + UPDATE + version snapshot) — via to_thread."""
     if "script" in fields:
@@ -151,6 +167,9 @@ def _update_blocking(
 
     try:
         with write_transaction(pool) as conn, conn.cursor() as cur:
+            replay = receipts.begin(conn, key, {"schedule_id": schedule_id, "fields": fields})
+            if replay is not None:
+                return replay, False
             cur.execute(
                 f"SELECT {_FULL_COLS} FROM schedules WHERE id = %s FOR UPDATE",  # noqa: S608
                 (schedule_id,),
@@ -160,11 +179,10 @@ def _update_blocking(
                 raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
             changed = _changed_fields(previous, fields)
             if not changed:
+                receipts.finish(conn, key, previous)
                 return previous, False
-            assignments: list[sql.Composable] = [
-                sql.SQL("{} = %s").format(sql.Identifier(col)) for col in changed
-            ]
-            assignments.append(sql.SQL("updated_at = now()"))
+            code_changed = "script" in changed or "command" in changed
+            assignments = _edit_assignments(changed, code_changed=code_changed)
             cur.execute(
                 sql.SQL("UPDATE schedules SET {} WHERE id = %s RETURNING {}").format(
                     sql.SQL(", ").join(assignments), sql.SQL(_FULL_COLS)
@@ -173,7 +191,6 @@ def _update_blocking(
             )
             row = cur.fetchone()
             assert row is not None  # noqa: S101 — locked row exists
-            code_changed = "script" in changed or "command" in changed
             if code_changed:
                 cur.execute(
                     "INSERT INTO schedule_versions (schedule_id, script, command, note) "
@@ -183,6 +200,7 @@ def _update_blocking(
             needs_sync = (code_changed and row[4]) or "enabled" in changed
             if needs_sync:
                 session_control.enqueue_in_transaction(conn, schedule_id)
+            receipts.finish(conn, key, row)
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
             status_code=409, detail=f"schedule named {fields['name']!r} already exists"
@@ -258,7 +276,11 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
         raise HTTPException(status_code=400, detail="no fields to update")
 
     row, needs_sync = await asyncio.to_thread(
-        _update_blocking, request.app.state.db_pool, schedule_id, fields
+        _update_blocking,
+        request.app.state.db_pool,
+        schedule_id,
+        fields,
+        receipts.operation_key(request),
     )
     if needs_sync:
         await session_control.wait_consumed(request.app.state.db_pool, schedule_id)
@@ -271,6 +293,7 @@ def _delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
         cur.execute("DELETE FROM schedules WHERE id = %s RETURNING id", (schedule_id,))
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
+        session_control.enqueue_in_transaction(conn, schedule_id)
 
 
 def _remove_schedule_dir(schedule_id: int) -> None:
@@ -284,9 +307,7 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
     orphaned) session; its work dir is removed."""
     pool = request.app.state.db_pool
     await asyncio.to_thread(_delete_blocking, pool, schedule_id)
-    await session_control.request_sync(
-        request.app.state.db_pool, schedule_id
-    )  # kill the orphan session now
+    await session_control.wait_consumed(pool, schedule_id)
     await asyncio.to_thread(_remove_schedule_dir, schedule_id)
     return {"status": "deleted"}
 
@@ -294,27 +315,20 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
 @router.post("/api/schedules/{schedule_id}/start")
 async def start_schedule(request: Request, schedule_id: int) -> ScheduleView:
     """Enable + launch the schedule now. 404 if missing."""
-    return await _set_enabled_and_sync(request, schedule_id, enabled=True)
+    return await _control_and_sync(request, schedule_id, action="start")
 
 
 @router.post("/api/schedules/{schedule_id}/stop")
 async def stop_schedule(request: Request, schedule_id: int) -> ScheduleView:
     """Disable + kill the schedule's session now. 404 if missing."""
-    return await _set_enabled_and_sync(request, schedule_id, enabled=False)
+    return await _control_and_sync(request, schedule_id, action="stop")
 
 
 @router.post("/api/schedules/{schedule_id}/restart")
 async def restart_schedule(request: Request, schedule_id: int) -> ScheduleView:
     """Relaunch the schedule's session now (reloading its script), clearing crash
     backoff. 404 if missing, 409 if the schedule is disabled."""
-    pool = request.app.state.db_pool
-    row = await asyncio.to_thread(_fetch_full_blocking, pool, schedule_id)
-    if not row[4]:  # enabled
-        raise HTTPException(
-            status_code=409, detail="schedule is disabled; start it instead of restarting"
-        )
-    await session_control.request_sync(request.app.state.db_pool, schedule_id)
-    return _view(await asyncio.to_thread(_fetch_full_blocking, pool, schedule_id))
+    return await _control_and_sync(request, schedule_id, action="restart")
 
 
 def _strip_trailing_blank(lines_list: list[str]) -> list[str]:
@@ -448,35 +462,45 @@ def _fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[A
     return row
 
 
-def _set_enabled_blocking(pool: ConnectionPool[Any], schedule_id: int, *, enabled: bool) -> bool:
-    """Persist the enabled choice and convergence work together; skip healthy no-ops.
-
-    Explicit start still reruns a completed or breaker-tripped schedule. Stable
-    operation receipts for those deliberate reruns are a separate control contract.
-    """
+def _control_blocking(
+    pool: ConnectionPool[Any], schedule_id: int, action: str, key: str | None
+) -> tuple[tuple[Any, ...], bool]:
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT enabled, status FROM schedules WHERE id = %s FOR UPDATE", (schedule_id,)
-        )
-        previous = cur.fetchone()
-        if previous is None:
+        replay = receipts.begin(conn, key, {"schedule_id": schedule_id, "action": action})
+        if replay is not None:
+            return replay, False
+        cur.execute(f"SELECT {_FULL_COLS} FROM schedules WHERE id = %s FOR UPDATE", (schedule_id,))  # noqa: S608
+        row = cur.fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-        if previous[0] == enabled and not (enabled and previous[1] in ("completed", "error")):
-            return False
-        if previous[0] != enabled:
+        enabled = action != "stop"
+        if action == "restart" and not row[4]:
+            raise HTTPException(
+                status_code=409, detail="schedule is disabled; start it instead of restarting"
+            )
+        needs_sync = (
+            action == "restart"
+            or row[4] != enabled
+            or (enabled and row[5] in ("completed", "error"))
+        )
+        if needs_sync:
             cur.execute(
-                "UPDATE schedules SET enabled = %s, updated_at = now() WHERE id = %s",
+                f"UPDATE schedules SET enabled = %s, desired_revision = desired_revision + 1, "  # noqa: S608
+                f"launch_count = 0, next_launch_at = NULL, updated_at = now() WHERE id = %s RETURNING {_FULL_COLS}",
                 (enabled, schedule_id),
             )
-        session_control.enqueue_in_transaction(conn, schedule_id)
-    return True
+            row = cur.fetchone()
+            assert row is not None  # noqa: S101 — locked row exists
+            session_control.enqueue_in_transaction(conn, schedule_id)
+        receipts.finish(conn, key, row)
+    return row, needs_sync
 
 
-async def _set_enabled_and_sync(
-    request: Request, schedule_id: int, *, enabled: bool
-) -> ScheduleView:
+async def _control_and_sync(request: Request, schedule_id: int, *, action: str) -> ScheduleView:
     pool = request.app.state.db_pool
-    needs_sync = await asyncio.to_thread(_set_enabled_blocking, pool, schedule_id, enabled=enabled)
+    row, needs_sync = await asyncio.to_thread(
+        _control_blocking, pool, schedule_id, action, receipts.operation_key(request)
+    )
     if needs_sync:
         await session_control.wait_consumed(pool, schedule_id)
-    return _view(await asyncio.to_thread(_fetch_full_blocking, pool, schedule_id))
+    return _view(row)

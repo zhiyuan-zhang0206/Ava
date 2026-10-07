@@ -67,6 +67,7 @@ class SessionInfo:
     cwd: str
     started_at: float
     generation: str | None
+    initial_command: str | None = None
 
     def record(self) -> SessionRecord:
         return SessionRecord(
@@ -161,10 +162,15 @@ def has_session(name: str) -> bool:
         return False
 
 
-def list_sessions(prefix: str = "", *, socket_path: Path | None = None) -> list[SessionInfo]:
+def list_sessions(
+    prefix: str = "", *, socket_path: Path | None = None, include_initial_command: bool = False
+) -> list[SessionInfo]:
     """Every live session whose name starts with `prefix`, sorted by name."""
     try:
-        rows = request("list", socket_path=socket_path, prefix=prefix)["sessions"]
+        fields: dict[str, Any] = {"prefix": prefix}
+        if include_initial_command:
+            fields["include_initial_command"] = True
+        rows = request("list", socket_path=socket_path, **fields)["sessions"]
     except ServiceDownError:
         return []
     return [SessionInfo(**row) for row in rows]

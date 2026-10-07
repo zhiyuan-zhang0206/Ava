@@ -128,3 +128,5 @@ allocation lock.
   session; the ScheduleManager rebuilds its own, page servers recover via
   heartbeat, and a watcher — no desired-state record — rebuilds nothing
   (docs/decisions/2026-09-27-watchers-are-never-restarted.md).
+
+Initial command metadata is opt-in; see [[initial-command.ava.okf.md]].

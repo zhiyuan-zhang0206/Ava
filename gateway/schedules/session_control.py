@@ -75,8 +75,8 @@ async def wait_consumed(pool: ConnectionPool[Any], schedule_id: int) -> None:
 
 async def request_sync(pool: ConnectionPool[Any], schedule_id: int) -> None:
     """Ask the schedule-manager service to converge one schedule's session to its
-    DB `enabled` state now (kill it, then relaunch if enabled, clearing its crash
-    backoff), and wait a bounded time for it to do so."""
+    latest desired revision now (adopt an applied revision, or replace
+    its predecessor), and wait a bounded time for it to do so."""
     await asyncio.to_thread(enqueue_blocking, pool, schedule_id)
     await wait_consumed(pool, schedule_id)
 
