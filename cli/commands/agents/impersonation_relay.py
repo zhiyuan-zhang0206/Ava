@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import json
 import math
 import shlex
 import subprocess
@@ -32,7 +31,7 @@ from base.agents.impersonation.terminal_notices import notice_text
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from cli.commands.agents.codex_app_server import live_submit, require_control_endpoint
+from cli.commands.agents.impersonation_adapters import resolve_adapter
 
 _CATCHUP_SECONDS = 30.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
@@ -215,48 +214,6 @@ def _ended(
         }
     emit(notice_text(terminal))
     return True
-
-
-def monitor_claude(message: str) -> None:
-    """Each flushed stdout line is a same-session Claude Monitor event."""
-    print(message, flush=True)
-
-
-def plugin_dsh(message: str) -> None:
-    """One JSON string per stdout line: the dsh ava-relay plugin steers each
-    decoded line into the session that started the relay, so a multi-line
-    envelope stays one message."""
-    print(json.dumps(message, ensure_ascii=False), flush=True)
-
-
-def host_emitter(
-    provider: str, thread_id: str | None, *, codex_remote: str | None = None
-) -> Callable[[str], None]:
-    """Resolve an explicit host destination before opening the inbox relay.
-
-    Codex uses Steer delivery on the owning app server. Missing endpoints,
-    refusals and transport failures stop the relay, preserving pending inbox
-    rows for the normal handoff. Pending-mode queue delivery is not equivalent.
-    """
-    if provider == "codex":
-        if thread_id is None:
-            raise ValueError("codex relay requires --thread-id for an existing session")
-        target = UUID(thread_id)
-        endpoint = require_control_endpoint(codex_remote)
-
-        def emit_codex(message: str) -> None:
-            reason = live_submit(str(target), message, endpoint=endpoint)
-            if reason is not None:
-                raise RuntimeError(f"Codex Steer delivery failed: {reason}")
-
-        return emit_codex
-    if provider in ("claude", "dsh"):
-        if codex_remote is not None or thread_id is not None:
-            raise ValueError(
-                f"The {provider} relay routes to its owner; omit --thread-id/--codex-remote"
-            )
-        return monitor_claude if provider == "claude" else plugin_dsh
-    raise ValueError(f"Unknown relay provider: {provider}")
 
 
 def _read_inbox(
@@ -593,7 +550,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
         else:
             token = impersonation.relay_token_from_env()
         session_id = relay_get(db, bus, str(lease_id), token)["session_id"]
-        emit = host_emitter(args.provider, args.thread_id, codex_remote=args.codex_remote)
+        adapter = resolve_adapter(args.provider, args.thread_id, codex_remote=args.codex_remote)
         max_chars = _PUSH_MAX_CHARS
 
         async def run() -> None:
@@ -606,8 +563,8 @@ def cmd_relay(args: argparse.Namespace) -> int:
             if not await asyncio.to_thread(_write_heartbeat, db, lease_id, token):
                 # Termination can win between startup's lease read and beat.
                 # Terminal metadata is readable; ordinary inbox authority stays closed.
-                if args.provider != "codex":
-                    _ended(await read_inbox(), args.agent_id, session_id, emit)
+                if adapter.notify_terminal:
+                    _ended(await read_inbox(), args.agent_id, session_id, adapter.send)
                 return
             heartbeat = asyncio.create_task(_heartbeat_loop(db, lease_id, token))
             try:
@@ -620,10 +577,10 @@ def cmd_relay(args: argparse.Namespace) -> int:
                     read_inbox=read_inbox,
                     reserve=reserve,
                     listener=listener,
-                    emit=emit,
+                    emit=adapter.send,
                     debounce=args.debounce,
                     max_chars=max_chars,
-                    notify_terminal=args.provider != "codex",
+                    notify_terminal=adapter.notify_terminal,
                 )
             finally:
                 heartbeat.cancel()

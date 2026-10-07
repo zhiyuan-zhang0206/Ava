@@ -29,6 +29,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
+from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import (
@@ -369,7 +370,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     def forbidden(_db: object, *_args: Any, **_kwargs: Any) -> Any:
         pytest.fail("A terminal relay must not read/reserve an ordinary inbox or renew its lease")
 
-    monkeypatch.setattr(relay, "monitor_claude", emit)
+    monkeypatch.setattr(adapters, "emit_claude", emit)
     monkeypatch.setattr(cli_impersonation, "relay_token_from_env", lambda: session["relay_token"])
     monkeypatch.setattr(leases, "relay_inbox", forbidden)
     monkeypatch.setattr(leases, "renew", forbidden)
@@ -443,7 +444,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
             self.closed = True
 
     lease_uuid = UUID(session["id"])
-    monkeypatch.setattr(relay, "monitor_claude", emitted.append)
+    monkeypatch.setattr(adapters, "emit_claude", emitted.append)
     listener = Listener()
     await relay.relay_inbox(
         owner.agent_id,
@@ -451,7 +452,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
         read_inbox=read,
         reserve=reserve,
         listener=listener,
-        emit=relay.host_emitter("claude", None),
+        emit=adapters.resolve_adapter("claude", None).send,
     )
     assert len(emitted) == 2
     assert emitted[0].startswith("Handoff brief\n\nAva control active:")
