@@ -27,7 +27,7 @@ due when its open count is at least `check_threshold(level)` above
 the count at its previous check: `AVA_UNDERSTANDING_GROUP_CHECK_OPEN` (60) at level 1, divided by `AVA_UNDERSTANDING_GROUP_CHECK_DECAY` (3) once per level above and never below 6 (60, 20, 7, 6, ...), because a higher level fills far more slowly and one threshold would leave the top days behind — so one call can close several groups; kept durably in `understanding_group_state.last_checked_open`, so
 one count is never checked twice. When groups close, the count that stays open
 becomes the baseline; a declined or failed check records the count it saw. The same
-row carries a lease (`claimed_at`, 15 minutes, taken atomically): one `(agent, level)` is checked
+row carries a lease (`claimed_at`, 60 minutes, taken atomically): one `(agent, level)` is checked
 by one holder at a time, a second caller finds it held and moves on (the durable count makes it due
 again later), and different agents' checks run side by side in their jobs' tasks
 ([[base/agents/history/hierarchy/docs/chunks.ava.okf.md|concurrency]]). A check's write sets the
@@ -51,7 +51,7 @@ parses the groups and enforces:
 - the reply is well formed (every `<group` tag is a complete element; a missing `</group>` would swallow the next group, so it is refused and corrected);
 - every id is a listed node and `last` is not before `first`;
 - the newest open node is never grouped — the last group stays open;
-- group sizes are the model's, with one exception: a group of one summary is dropped by `parse_groups` (no error, no correction, the prompt does not say so) — the node stays open and joins the next check with newer ones, since a level over one node only repeats it; a reply of only such groups under `must_close` closes nothing and is refused like an empty one (corrected, then the check fails and the level waits for more nodes); no maximum;
+- group sizes are the model's, with one exception: a group of one summary at the END of a reply stays open (no error, no correction, the prompt does not say so) and joins the next check with newer nodes; one at the start or in the middle is closed like any other, because the open nodes must stay one contiguous run from the oldest (a parent over a node that stayed open would overlap the parent that later covers it); a reply of only trailing one-node groups under `must_close` closes nothing and is refused like an empty one (corrected, then the check fails and the level waits for more nodes); no maximum;
 - a reply with no group declines (the topic is still going), except when the open nodes number at
   least three times its level's threshold (set by the consumer as `must_close`:
   the prompt says so and code refuses a reply with no group) — the only brake on a level whose model

@@ -11,6 +11,7 @@ from base.agents.history.hierarchy.chunks import (
     ChunkDriftError,
     ChunkEmptyError,
     ChunkNotReadyError,
+    ChunkTruncatedError,
     locate_chunk,
     message_time,
     plan_chunk,
@@ -105,20 +106,30 @@ def test_live_chunk_whose_end_id_moved_is_drift() -> None:
         locate_chunk(_history(), start_index=1, end_index=3, end_msg_id="b0", closing_segment=None)
 
 
-def test_closing_chunk_is_read_from_its_segment_and_cut_to_the_snapshot() -> None:
-    # The boundary snapshot of segment 0 holds a0..a3; the job's end (index 9)
-    # lies past what was persisted, so the chunk ends at a3.
+def test_closing_chunk_is_read_from_its_segment_and_checked_at_its_end() -> None:
+    # The boundary snapshot of segment 0 holds a0..a3; the job's end (index 5) is a3.
     located = locate_chunk(
-        _history(), start_index=2, end_index=9, end_msg_id="gone", closing_segment=0
+        _history(), start_index=2, end_index=5, end_msg_id="a3", closing_segment=0
     )
     assert [m.id for m in located.messages] == ["a1", "a2", "a3"]
-    assert located.truncated
     assert located.span == (1, 3)
+
+
+def test_a_closing_chunk_past_its_snapshot_is_truncated_not_silently_cut() -> None:
+    # The job's end (index 9) lies past what the boundary snapshot persisted: the segment's last
+    # turns are in no checkpoint, so the chunk is refused (the consumer fails the job and reports it).
+    with pytest.raises(ChunkTruncatedError, match="last turns of the segment"):
+        locate_chunk(_history(), start_index=2, end_index=9, end_msg_id="gone", closing_segment=0)
+
+
+def test_a_closing_chunk_whose_end_id_moved_is_drift() -> None:
+    with pytest.raises(ChunkDriftError):
+        locate_chunk(_history(), start_index=2, end_index=5, end_msg_id="a2", closing_segment=0)
 
 
 def test_closing_chunk_with_nothing_left_is_empty() -> None:
     with pytest.raises(ChunkEmptyError):
-        locate_chunk(_history(), start_index=5, end_index=9, end_msg_id="x", closing_segment=0)
+        locate_chunk(_history(), start_index=5, end_index=5, end_msg_id="a3", closing_segment=0)
 
 
 def test_segment_without_a_head_keeps_indices_unshifted() -> None:

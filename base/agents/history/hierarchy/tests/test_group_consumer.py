@@ -10,6 +10,7 @@ import asyncio
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,7 +19,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy import group_consumer as gc
 from base.agents.history.hierarchy.generate import GenerateError
-from base.agents.history.hierarchy.group import Group, GroupCall, OpenNode
+from base.agents.history.hierarchy.group import Group, GroupCall, OpenNode, parse_groups
 from base.agents.history.hierarchy.group_store import (
     claim_check,
     load_last_checked,
@@ -317,7 +318,7 @@ async def test_the_baseline_counts_leaves_that_landed_while_the_call_ran(
     assert await claim_check(aops_pool, AGENT, 1)
     await _add_leaf(aops_pool, 5)  # the same agent's next job landed a leaf meanwhile
     remaining = await write_groups(
-        aops_pool, AGENT, 1, nodes, [Group(ids[0], ids[2], "g")], model="m"
+        aops_pool, AGENT, 1, nodes, [Group(ids[0], ids[2], "g")], model="m", check_key="ck"
     )
     assert remaining == 3  # two of the snapshot plus the newcomer
     assert await load_last_checked(aops_pool, AGENT, 1) == 3
@@ -341,3 +342,56 @@ def test_an_open_set_past_three_checks_must_close_a_group(monkeypatch: pytest.Mo
     gc._generate(MagicMock(), "m", none, 2, nodes[:59], [])  # level 2: 3 x 20 = 60
     gc._generate(MagicMock(), "m", none, 2, nodes * 4, [])
     assert seen == [False, True, False, True]  # 14 < 3 x 5, 15 = 3 x 5; per level: 59 < 60 = 3 x 20
+
+
+async def _tree(pool: AsyncConnectionPool) -> tuple[list[tuple], list[tuple]]:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT id, depth, span_start, span_end, parent_id FROM understanding_nodes"
+            " WHERE agent_id = %s ORDER BY depth, span_start",
+            (AGENT,),
+        )
+        rows = await cur.fetchall()
+    return rows, [r for r in rows if r[1] > 1]
+
+
+async def test_single_groups_in_the_middle_close_and_no_level_ever_overlaps(
+    aops_pool: AsyncConnectionPool, _seams: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review repro: open nodes 1..6, a reply of `1..1`, `2..4`, `5..5`. Closing only the
+    middle group left nodes 1, 5, 6 open, and the next check grouped 1..5 into a parent that
+    contained the already closed 2..4. Now the head single closes, only the trailing single stays
+    open, and over many checks every level stays disjoint with each parent spanning exactly its
+    children."""
+    plans = [[(0, 0), (1, 3), (4, 4)], [(0, 1), (2, 2), (3, 5), (6, 6)], [(0, 0), (1, 1), (2, 4)]]
+    state = {"n": 0}
+
+    def generate(
+        _models: object, model: str, _o: object, _level: int, nodes: list[OpenNode], calls: list
+    ) -> list[Group]:
+        plan = [(a, b) for a, b in plans[state["n"] % len(plans)] if b < len(nodes) - 1]
+        state["n"] += 1
+        text = "".join(
+            f'<group first="{nodes[a].id}" last="{nodes[b].id}">g{nodes[a].id}</group>'
+            for a, b in plan
+        )
+        calls.append(GroupCall(0, model, "prompt", AIMessage(content=text), 5.0, None, None))
+        return parse_groups(text, nodes, must_close=False)
+
+    monkeypatch.setattr(gc, "_generate", generate)
+    for i in range(60):
+        await _add_leaf(aops_pool, i)
+        await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), AGENT)
+    rows, parents = await _tree(aops_pool)
+    assert parents, "the plans must have closed some groups"
+    by_parent: dict[int, list[tuple]] = {}
+    for row in rows:
+        if row[4] is not None:
+            by_parent.setdefault(row[4], []).append(row)
+    for depth in {r[1] for r in rows}:
+        level = [r for r in rows if r[1] == depth]
+        for left, right in pairwise(level):
+            assert left[3] < right[2], f"level {depth}: {left} overlaps {right}"
+    for parent in parents:
+        kids = by_parent[parent[0]]
+        assert (parent[2], parent[3]) == (min(k[2] for k in kids), max(k[3] for k in kids))

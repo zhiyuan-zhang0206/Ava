@@ -90,7 +90,9 @@ def test_the_newest_segment_is_the_one_closed(
         close_module, "load_checkpoint_history_full", lambda *_a: _history(4, segments=3)
     )
     body = _close(tid)
-    assert body["compact_version"] == 2 and (body["start_index"], body["end_index"]) == (1, 5)
+    # The segment has no job yet: the version is the next one after the agent's newest job (none
+    # here), not the segment's index; the stretch is the newest segment's.
+    assert body["compact_version"] == 0 and (body["start_index"], body["end_index"]) == (1, 5)
 
 
 def _insert_job(
@@ -99,12 +101,16 @@ def _insert_job(
     start: int,
     end: int,
     status: str,
+    *,
+    version: int = 0,
 ) -> None:
+    """A job of the live segment of `_history(n)`: its request is [head, m0, m1, ...], so the
+    message at request index `end - 1` is `m{end - 2}`."""
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO understanding_chunk_jobs (agent_id, compact_version, start_index, end_index,"
-            " end_msg_id, status) VALUES (%s, 0, %s, %s, 'x', %s)",
-            (agent_id, start, end, status),
+            " end_msg_id, status) VALUES (%s, %s, %s, %s, %s, %s)",
+            (agent_id, version, start, end, f"m{end - 2}", status),
         )
     conn.commit()
 
@@ -175,3 +181,36 @@ def test_an_unreadable_history_is_503(
     monkeypatch.setattr(close_module, "load_checkpoint_history_full", broken)
     with TestClient(app) as client:
         assert client.post(f"/api/agents/{tid}/understanding/close").status_code == 503
+
+
+def test_the_close_reuses_the_version_of_the_live_segments_own_jobs(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A compaction whose boundary stamp failed leaves the producers' `compact_version` ahead of
+    the segment count. The close finds the segment's jobs by message id and joins their version
+    instead of deriving one from the segment index (which opened a second, overlapping chain)."""
+    tid = _seed_agent(db_conn)
+    monkeypatch.setattr(close_module, "load_checkpoint_history_full", lambda *_a: _history(10))
+    _insert_job(db_conn, tid, 1, 4, "done", version=5)
+    body = _close(tid)
+    assert (body["compact_version"], body["start_index"], body["end_index"]) == (5, 4, 11)
+
+
+def test_the_close_never_starts_before_the_end_of_an_existing_level_one_node(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nodes of one level must not overlap. The producers' next size cut (or a replay) may already
+    have nodes past the last job: the close takes up after them."""
+    tid = _seed_agent(db_conn)
+    monkeypatch.setattr(close_module, "load_checkpoint_history_full", lambda *_a: _history(10))
+    _insert_job(db_conn, tid, 1, 4, "done")
+    with db_conn.cursor() as cur:  # request index 6 is stitched message 5 (head at stitched -1)
+        cur.execute(
+            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
+            " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
+            " schema_version) VALUES (%s, 1, 3, 5, 'k', 't', 'h', 'i', 0, 'm', 'e', 'p', 1)",
+            (tid,),
+        )
+    db_conn.commit()
+    body = _close(tid)
+    assert (body["status"], body["start_index"], body["end_index"]) == ("enqueued", 7, 11)

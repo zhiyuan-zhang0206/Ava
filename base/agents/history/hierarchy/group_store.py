@@ -30,7 +30,7 @@ from base.db.transaction import async_write_transaction
 from base.log import logger
 
 # A claim older than this is a crashed runner's and is taken over.
-CLAIM_LEASE_SECONDS = 900.0
+CLAIM_LEASE_SECONDS = 3600.0
 
 
 async def load_last_checked(pool: AsyncConnectionPool, agent_id: int, level: int) -> int:
@@ -91,8 +91,8 @@ _UPSERT_GROUP_SQL = """
 INSERT INTO understanding_nodes (
     agent_id, depth, span_start, span_end, start_ts, end_ts, segment_key, text,
     text_hash, input_hash, children_count, model, engine_version, prompt_version,
-    schema_version
-) VALUES (%s, %s, %s, %s, %s, %s, 'group', %s, %s, %s, %s, %s, %s, %s, %s)
+    schema_version, check_key
+) VALUES (%s, %s, %s, %s, %s, %s, 'group', %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (agent_id, depth, span_start, span_end) DO UPDATE SET
     start_ts = EXCLUDED.start_ts,
     end_ts = EXCLUDED.end_ts,
@@ -103,6 +103,7 @@ ON CONFLICT (agent_id, depth, span_start, span_end) DO UPDATE SET
     model = EXCLUDED.model,
     engine_version = EXCLUDED.engine_version,
     prompt_version = EXCLUDED.prompt_version,
+    check_key = EXCLUDED.check_key,
     updated_at = now()
 RETURNING id
 """
@@ -116,10 +117,11 @@ async def write_groups(
     groups: Sequence[Group],
     *,
     model: str,
+    check_key: str,
 ) -> int:
     """Store the closed `groups` over the level's open `nodes`; the new open count.
 
-    One parent row per group at `level + 1` (span = first child's start to last
+    One parent row per group at `level + 1` (it records `check_key`, the check that wrote it) (span = first child's start to last
     child's end, times = the children's extremes), the children's `parent_id` set,
     and the level's cursor moved to the open count that remains (read in the transaction) — all in one
     transaction, the lease released with it.
@@ -150,6 +152,7 @@ async def write_groups(
                     GROUP_ENGINE_VERSION,
                     GROUP_PROMPT_VERSION,
                     SCHEMA_VERSION,
+                    check_key,
                 ),
             )
             row = await cur.fetchone()

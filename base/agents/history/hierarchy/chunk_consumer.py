@@ -40,7 +40,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
-from psycopg_pool import AsyncConnectionPool
+import psycopg
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from base import telemetry
 from base.agents.history.checkpoint import (
@@ -51,16 +52,19 @@ from base.agents.history.checkpoint import (
 )
 from base.agents.history.hierarchy.chunk_generate import ChunkResult, generate_chunk
 from base.agents.history.hierarchy.chunks import (
+    GIVE_UP_AFTER_SECONDS,
     MAX_ATTEMPTS,
     ChunkCall,
     ChunkDriftError,
     ChunkEmptyError,
     ChunkJob,
     ChunkNotReadyError,
+    ChunkTruncatedError,
     GroupNode,
     LocatedChunk,
     backlog,
     claim_job,
+    covered_end,
     finish_job,
     locate_chunk,
     message_time,
@@ -86,6 +90,9 @@ POLL_SECONDS = 2.0
 # budget: the same request failing repeatedly is not about to start working.
 GENERATION_MAX_ATTEMPTS = 3
 
+# A database error that a retry can outlive (a restart, a dropped connection, a pool wait).
+_TRANSIENT = (psycopg.OperationalError, psycopg.InterfaceError, PoolTimeout)
+
 # The provider key whose explicit-cache path strips the SystemMessage; only the
 # plain path is supported.
 _GEMINI = "gemini"
@@ -93,7 +100,9 @@ _GEMINI = "gemini"
 
 @dataclass(frozen=True)
 class Outcome:
-    """How one claimed job ended: done / failed / skipped, or `retry` (back to the queue)."""
+    """How one claimed job ended: done / failed / skipped, or back to the queue: `retry` after a
+    generation failure (an attempt spent), `wait` when nothing about the job itself went wrong
+    (the checkpoint has not caught up, the database blinked: no attempt spent)."""
 
     status: str
     error: str | None = None
@@ -181,6 +190,42 @@ def _plan_nodes(result: ChunkResult, located: LocatedChunk) -> list[GroupNode]:
     return nodes
 
 
+def _gave_up(job: ChunkJob) -> Outcome | None:
+    """`failed` for a job claimed too often or waiting too long, else None."""
+    if job.attempts > MAX_ATTEMPTS:
+        return Outcome("failed", f"gave up after {job.attempts - 1} attempts")
+    if job.age_seconds > GIVE_UP_AFTER_SECONDS:
+        hours = job.age_seconds / 3600
+        return Outcome("failed", f"gave up: still not describable after {hours:.0f} h")
+    return None
+
+
+async def _undescribed_part(
+    pool: AsyncConnectionPool,
+    job: ChunkJob,
+    history: FullHistory,
+    closing_segment: int | None,
+    located: LocatedChunk,
+) -> LocatedChunk | None:
+    """`located` shortened to what no level-1 node covers yet; None when nothing is left.
+
+    Raises:
+        ChunkEmptyError: the part that is left is empty once the segment head is excluded.
+    """
+    covered = await covered_end(pool, job.agent_id, located.span)
+    if covered is None:
+        return located
+    if covered >= located.span[1]:
+        return None
+    return locate_chunk(
+        history,
+        start_index=job.start_index + (covered + 1 - located.span[0]),
+        end_index=job.end_index,
+        end_msg_id=job.end_msg_id,
+        closing_segment=closing_segment,
+    )
+
+
 async def _run_job(
     pool: AsyncConnectionPool,
     db: Database,
@@ -190,8 +235,8 @@ async def _run_job(
     executor: ThreadPoolExecutor | None = None,
 ) -> Outcome:
     """Describe one claimed chunk and store its nodes; the outcome says how it ended."""
-    if job.attempts > MAX_ATTEMPTS:
-        return Outcome("failed", f"gave up after {job.attempts - 1} attempts")
+    if (gave_up := _gave_up(job)) is not None:
+        return gave_up
     model, overrides = await asyncio.to_thread(
         agent_model_target, db, job.agent_id, fallback=settings.lm.hierarchy_model
     )
@@ -202,7 +247,7 @@ async def _run_job(
             _load_segments, db, job.agent_id, job.boundary_checkpoint_id
         )
     except CheckpointReadError as exc:
-        return Outcome("retry", f"checkpoint read failed: {exc}")
+        return Outcome("wait", f"checkpoint read failed: {exc}")
     except ValueError:
         return Outcome("failed", f"boundary checkpoint {job.boundary_checkpoint_id} is gone")
     try:
@@ -214,11 +259,18 @@ async def _run_job(
             closing_segment=closing_segment,
         )
     except ChunkNotReadyError as exc:
-        return Outcome("retry", str(exc))
-    except ChunkDriftError as exc:
+        return Outcome("wait", str(exc))
+    except (ChunkDriftError, ChunkTruncatedError) as exc:
+        # Neither heals by waiting: indices drifted, or the snapshot will never hold the turns.
         return Outcome("failed", str(exc))
     except ChunkEmptyError as exc:
         return Outcome("skipped", str(exc))
+    try:
+        located = await _undescribed_part(pool, job, history, closing_segment, located)
+    except ChunkEmptyError as exc:
+        return Outcome("skipped", str(exc))
+    if located is None:
+        return Outcome("skipped", "the chunk is already described")
     if all(unit.kind == "note" for unit in divide_units(list(located.messages))):
         # Nothing but framework-injected notes: there is no matter to describe.
         return Outcome("skipped", "the chunk holds only framework notes")
@@ -246,8 +298,10 @@ async def _run_job(
 
 async def _settle(pool: AsyncConnectionPool, job: ChunkJob, outcome: Outcome) -> None:
     """Record a job's outcome on its row, with the event for the ones that end without a node."""
-    if outcome.status == "retry":
-        await release_job(pool, job.id, error=outcome.error or "")
+    if outcome.status in ("retry", "wait"):
+        await release_job(
+            pool, job.id, error=outcome.error or "", count_attempt=outcome.status == "retry"
+        )
         return
     await finish_job(pool, job.id, status=outcome.status, error=outcome.error)
     if outcome.status == "failed":
@@ -344,6 +398,15 @@ class _Consumer:
         try:
             try:
                 outcome = await _run_job(self.pool, self.db, job, self.tools, self.models, executor)
+            except _TRANSIENT as exc:
+                # The database blinked (a restart during a roll): the job is not at fault.
+                logger.warning(
+                    "understanding chunk {job} (agent {agent}) hit a database error, waiting: {exc!r}",
+                    job=job.id,
+                    agent=job.agent_id,
+                    exc=exc,
+                )
+                outcome = Outcome("wait", f"{type(exc).__name__}: {exc}")
             except Exception as exc:
                 logger.opt(exception=True).warning(
                     "understanding chunk {job} (agent {agent}) crashed",

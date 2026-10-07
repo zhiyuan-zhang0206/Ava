@@ -63,7 +63,7 @@ samples the queue as `understanding_backlog`. A job, claimed:
    retried (`generate._invoke_agent_shaped`);
 4. writes a depth-1 row per group (`write_group_nodes`, one transaction): span in stitched
    indices (first unit's first message to last unit's last), `start_ts` / `end_ts` from the
-   group's first / last `ava_created_at`, engine `chunk-0.2`, prompt `chunk-0.13`. Upper-level checks follow
+   group's first / last `ava_created_at`, engine `chunk-0.2`, prompt `chunk-0.13`, and the `job_id` of the job. Upper-level checks follow
    ([[base/agents/history/hierarchy/docs/groups.ava.okf.md|groups]]).
 
 Raw call record (`understanding_chunk_calls`): one row per provider call — job, attempt, round,
@@ -71,48 +71,25 @@ model, the full instruction (the correction, for one), `prefix_len` / `start_off
 usage, `duration_ms`, `error`, `kind` (`leaf` / `group-correction`), `problem` (why the groups
 were refused). A write failure is the `understanding_call_record_failed` event.
 
-Outcomes: a checkpoint not caught up requeues the job; drifted indices fail it
-(`understanding_chunk_failed`); a Gemini model (its explicit-cache path strips the head) or an
-empty chunk is `skipped`; a generation error (a grouping reply still refused after the
-corrections included) retries up to three attempts, then fails; raw records stay.
+Outcomes: a wait (checkpoint not caught up, a database blink) requeues the job, no attempt spent,
+the spacing counted from the requeue, and fails it after 6 hours; drifted indices (`end_msg_id`
+not where recorded, for a closing chunk too) and a closing chunk past its boundary snapshot (its
+last turns are in no checkpoint) fail it (`understanding_chunk_failed`); a Gemini model (its
+cache path strips the head), an empty chunk or one already covered by nodes is `skipped` (a
+partly covered one is shortened to the undescribed part, so level-1 nodes never overlap); a
+generation error (a reply still refused after the corrections included) retries up to three
+attempts, then fails; raw records stay. The claim lease is 60 minutes, not renewed (longer than
+any honest job; a takeover of a live one costs a second run, a crash only the wait).
 
-## Grouping inside the call (`chunk_generate.py`, `leaf_groups.py`)
+## Grouping inside the call
 
-English instruction after the prefix. It opens with a line setting it apart from the messages
-before it (the prefix can end in a framework reminder that would otherwise read as part of the
-task), then: divide the part listed in the catalog into consecutive groups, keeping consecutive
-units about the same matter together, and summarize each (a node above the raw messages, much
-shorter, not a handoff, in the conversation's language); the catalog is the complete ordered
-list, referred to by number, not to be matched against the messages above, and the summaries
-describe only the listed units; what a unit is; parenthesized lines are framework messages to join
-to a neighbour. The **numbered catalog** has one unit per line: `[number] type: content`
-(`build_catalog`, no time; `units.catalog_line`, whitespace collapsed). The type is code-made:
-inbound the sender (`human message`, `agent N message`, `watcher N`), `agent text`, `work`.
-Inbound and text show 100 characters of content; work shows `reasoning[..] | call[..] |
-output[..]` (corner brackets), each 60 characters, an empty part left out, the call without import lines; a framework **note** shows a label by type (`units.note_label`: `(memory)`,
-`(system note)`, `(compact summary)`, `(attachment)`, a note's tag otherwise). A chunk of only
-notes is `skipped` without a call. Nothing else is prescribed. Every unit is in a group. The reply
-names each group by the numbers of its first and last unit, like the upper levels:
-
-    <group first="1" last="16">summary of units 1 to 16</group>
-    <group first="17" last="30">summary of units 17 to 30</group>
-
-Code looks the numbers up (`leaf_groups.resolve_groups`); no text is matched. Both ends are
-written so the numbers can be checked: the groups must tile the catalog (first group at 1, each
-starting right after the previous `last`, `last` not before `first`, the last group ending at the
-catalog's last unit). A model that numbers its groups 1, 2, 3 instead of naming units cannot end
-its last group at the catalog's end, so it is refused and not stored with every span shifted
-(agent 9, job 149). Other collected problems: a malformed envelope (a `<group` / `<open` tag that
-is not a complete element: a missing `</group>` would merge groups; there is no `<open>`), a
-number not in the catalog, an empty summary. A group starting on a turn's tool calls whose text
-unit comes right before starts at that unit, silently (spans stay unique). A refusal names the
-offending group's first and last catalog lines (40 characters each) and says the numbers are unit
-numbers, not group positions. Problems go back in the same conversation (prefix, instruction, its
-own reply unchanged: cached) for corrected groups, up to `AVA_UNDERSTANDING_GROUP_CORRECTIONS`
-(2); then `GenerateError`.
+The instruction, the numbered catalog and the reply envelope (`<group first last>`, which must tile the
+catalog) are [[base/agents/history/hierarchy/docs/chunk-grouping.ava.okf.md|Chunk Grouping]].
 
 ## Known limits
 
 - Crash repair (`agent/hooks/repair.py`) shifts later indices mid-segment: a job past it fails as drift.
-- A closing chunk is cut to its snapshot, which can lag the live state; that tail is undescribed.
-- `generation_by_span` keys cost by chunk span: group nodes match no call yet.
+- A closing chunk's snapshot may lack the segment's last turns (the checkpoint of the previous
+  super-step may still be in flight when compaction stamps the boundary; not reproduced): the job
+  fails with the event, the gap is visible, and those turns are in no stitched history either.
+- A node's generation cost is its job's (or check's) cost: all the groups of one job share it.

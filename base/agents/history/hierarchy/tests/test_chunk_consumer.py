@@ -11,6 +11,7 @@ import threading
 import time
 from unittest.mock import MagicMock
 
+import psycopg
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
@@ -131,7 +132,7 @@ async def test_chunk_not_yet_checkpointed_goes_back_to_the_queue(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 9), end_msg_id="m8")
     await _run_rounds(aops_pool, 1)
     [(status, attempts, error)] = await _status(aops_pool)
-    assert (status, attempts) == ("pending", 1) and "shorter" in error
+    assert (status, attempts) == ("pending", 0) and "shorter" in error  # waiting spends no attempt
     assert await _nodes(aops_pool) == []
 
 
@@ -145,6 +146,97 @@ async def test_drifted_indices_fail_the_job_with_an_event(
     [(status, _, error)] = await _status(aops_pool)
     assert status == "failed" and "not-m1" in error
     assert "understanding_chunk_failed" in emitted
+
+
+async def test_a_database_blink_puts_the_job_back_without_spending_an_attempt(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restart of the database during a roll must not turn a paid-for job into a permanent
+    failure: it goes back to the queue and the generation budget stays whole."""
+
+    def blink(*_a: object) -> object:
+        raise psycopg.OperationalError("the database closed the connection")
+
+    monkeypatch.setattr(loop, "_load_segments", blink)
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
+    await _run_rounds(aops_pool, 1)
+    [(status, attempts, error)] = await _status(aops_pool)
+    assert (status, attempts) == ("pending", 0) and "closed the connection" in error
+
+
+async def test_a_released_job_waits_its_spacing_from_the_release_not_from_the_claim(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    from base.agents.history.hierarchy.chunks import claim_job, release_job
+
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
+    job = await claim_job(aops_pool)
+    assert job is not None
+    async with aops_pool.connection() as conn:  # a slow attempt: claimed long ago
+        await conn.execute(
+            "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '10 minutes'"
+        )
+    await release_job(aops_pool, job.id, error="generation failed")
+    assert await claim_job(aops_pool) is None  # just released: not due for the spacing
+
+
+async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
+    aops_pool: AsyncConnectionPool, _seams: dict
+) -> None:
+    """A manual close and the producers' next size cut (or a replay after a restart) can cover
+    the same stretch: the later job is shortened to the undescribed part, and skipped when
+    nothing is left."""
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
+            " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
+            " schema_version) VALUES (5, 1, 0, 0, 'k', 'old', 'h', 'i', 0, 'm', 'e', 'p', 1)"
+        )
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
+    await _run_rounds(aops_pool, 1)
+    assert [m.id for m in _seams["described"][0].messages] == ["m1"]  # m0 was already covered
+    assert await _nodes(aops_pool) == [(5, 1, 0, 0, "old"), (5, 1, 1, 1, "what happened")]
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 2), end_msg_id="m0")
+    await _run_rounds(aops_pool, 1)
+    status = (await _status(aops_pool))[-1]
+    assert status[0] == "skipped" and "already described" in status[2]
+
+
+async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 9), end_msg_id="m8")
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "UPDATE understanding_chunk_jobs SET created_at = now() - interval '7 hours'"
+        )
+    monkeypatch.setattr(loop.telemetry, "emit", lambda *_a, **_k: None)
+    await _run_rounds(aops_pool, 1)
+    [(status, _, error)] = await _status(aops_pool)
+    assert status == "failed" and "gave up" in error
+
+
+async def test_a_closing_chunk_past_its_snapshot_fails_loudly_instead_of_being_cut(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch, _seams: dict
+) -> None:
+    """The boundary snapshot of segment 0 holds fewer messages than the closing chunk's end: the
+    last turns are in no checkpoint. The job is failed with the event, never `done` over a gap."""
+    emitted: list[str] = []
+    monkeypatch.setattr(loop.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
+    monkeypatch.setattr(loop, "_load_segments", lambda *_a: (_history(), 0))
+    await enqueue_chunk(
+        aops_pool,
+        5,
+        compact_version=0,
+        chunk=Chunk(1, 9),
+        end_msg_id="m8",
+        boundary_checkpoint_id="cp-1",
+    )
+    await _run_rounds(aops_pool, 1)
+    [(status, _, error)] = await _status(aops_pool)
+    assert status == "failed" and "last turns of the segment" in error
+    assert "understanding_chunk_failed" in emitted
+    assert _seams["described"] == [] and await _nodes(aops_pool) == []
 
 
 async def test_generation_error_retries_then_fails_at_the_cap(

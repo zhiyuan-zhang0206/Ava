@@ -210,7 +210,7 @@ class UnderstandingChunkSkipped(TypedDict):
 class UnderstandingGroupFailed(TypedDict):
     """`understanding_group_failed` payload — an upper-level grouping check
     failed (provider error, or a reply still refused after the configured
-    corrections). The level's open nodes stay ungrouped until five more arrive."""
+    corrections). The level's open nodes stay ungrouped until its next threshold of new nodes arrives."""
 
     agent_id: int
     level: int

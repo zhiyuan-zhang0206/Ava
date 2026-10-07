@@ -127,3 +127,8 @@ BEGIN
         GRANT USAGE, SELECT ON SEQUENCE understanding_group_calls_id_seq TO ava_runner;
     END IF;
 END $$;
+
+-- A node names what produced it, so its generation cost joins by id (a level-1 node: its chunk job;
+-- a node above: its grouping check's `check_key`).
+ALTER TABLE understanding_nodes ADD COLUMN IF NOT EXISTS job_id BIGINT;
+ALTER TABLE understanding_nodes ADD COLUMN IF NOT EXISTS check_key TEXT;
