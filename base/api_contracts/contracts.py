@@ -338,6 +338,18 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         transactional_idempotency=True,
         note="notice creation and superseding effects share one keyed transaction; replays return the original notice result",
     ),
+    ("PATCH", "/api/agents/{agent_id}/notices/current/guarded-v1"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="observed global notice edit and immutable acceptance commit together; no client activation",
+    ),
+    ("POST", "/api/agents/{agent_id}/notices/current/dismiss/guarded-v1"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="withdraw only the observed global notice; keyed replay never selects a later notice",
+    ),
     ("PATCH", "/api/agents/{agent_id}/notices/current"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="current-notice selector can edit a later notice after an ambiguous response",

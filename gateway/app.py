@@ -81,6 +81,7 @@ from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
 from gateway.agents import timeline as timeline_router
 from gateway.agents import understanding as agents_understanding_router
+from gateway.agents.notice_operations import router as guarded_notices_router
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.alerts import router as alerts_router
 from gateway.auth import rejection_log
@@ -566,6 +567,7 @@ app.include_router(timeline_router.router)
 app.include_router(system_router.router)
 app.include_router(pages_router.router)
 app.include_router(notices_router.router)
+app.include_router(guarded_notices_router.router)
 app.include_router(cluster_router.router)
 app.include_router(machine_pause_router.router)
 app.include_router(commands_router.router)

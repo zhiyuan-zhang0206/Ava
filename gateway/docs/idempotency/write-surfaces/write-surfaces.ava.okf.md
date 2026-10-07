@@ -12,7 +12,8 @@ tags:
 Policy: `base/api_contracts/contracts.py`.
 `natural` means repeatable effects; `keyed` requires a receipt;
 `one-shot` forbids ambiguous automatic retries.
-Versioned routes: [[guarded-creation.ava.okf.md]] and [[guarded-pages.ava.okf.md]].
+Versioned routes: [[guarded-creation.ava.okf.md]], [[guarded-pages.ava.okf.md]] and
+[[guarded-notices.ava.okf.md]].
 
 Preset/schedule creation and schedule mutations now have optional transactional
 keyed receipts, but their routes conservatively remain `NON_IDEMPOTENT` (`one-shot`
