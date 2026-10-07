@@ -9,6 +9,7 @@ const availability: NonNullable<WireAgentRow["availability"]> = {
   evidence_at: "2026-09-01T00:00:00Z", admission_outcome: null,
 };
 const detail: Required<WireAgentRow> = {
+  last_launch_attempt_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   agent_id: 7, spawner: "user", fork_source_agent_id: null,
   fork_source_checkpoint_id: "detail-only-checkpoint", status: "idling", pid: 100,
   spawned_at: "2026-09-01T00:00:00Z", started_at: "2026-09-01T00:00:00Z",
