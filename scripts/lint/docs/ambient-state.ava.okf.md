@@ -36,7 +36,7 @@ Governed: the framework packages plus `schedules/`. Out of scope: tests, `__main
 
 ## Library-layer ratchet
 
-Packages outside `DB_HANDLE_PACKAGES` are not policed per site, but `scripts/structure/ambient_state/handle_ratchet.py` counts their shim dials, self-built `Database.from_settings()` calls and self-built `EventBus.from_settings()` calls (outside `BUS_PACKAGES`) per package and freezes the counts in `scripts/structure/ambient_state/handle_ratchet_baseline.json`. A count above its frozen value fails (new code takes a handle); one below it fails until `--write` lowers the baseline; against the base revision a frozen count only falls. Threading a handle into a package lowers its count; a package at zero can join `DB_HANDLE_PACKAGES`.
+Packages outside `DB_HANDLE_PACKAGES` are checked by `scripts/structure/ambient_state/handle_ratchet.py`: every detected shim dial or self-built `Database.from_settings()` call fails, as does each self-built `EventBus.from_settings()` call outside `BUS_PACKAGES`. Library components receive these handles from a composition root. The scanner retains the governed package boundaries; no stored baseline, write mode or count allowance exists.
 
 ## Known gaps
 
