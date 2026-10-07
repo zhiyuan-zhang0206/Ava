@@ -197,12 +197,35 @@ def test_creation_explicit_key_survives_lost_response_and_caller_retry(
         201, json={"id": 42}, request=httpx.Request("POST", "http://gateway/api/agents")
     )
     mock_client.post.side_effect = [httpx.ReadTimeout("reply lost"), response, response]
-    kwargs = {"spawner": "user", "prompt": "hello", "fork_from": None, "prompt_source": "user"}
     with pytest.raises(GatewayUnavailable):
-        spawn(**kwargs, idempotency_key="creation-a")
+        spawn(
+            spawner="user",
+            prompt="hello",
+            fork_from=None,
+            prompt_source="user",
+            idempotency_key="creation-a",
+        )
     assert mock_client.post.call_count == 1
-    assert spawn(**kwargs, idempotency_key="creation-a") == 42
-    assert spawn(**kwargs, idempotency_key="creation-b") == 42
+    assert (
+        spawn(
+            spawner="user",
+            prompt="hello",
+            fork_from=None,
+            prompt_source="user",
+            idempotency_key="creation-a",
+        )
+        == 42
+    )
+    assert (
+        spawn(
+            spawner="user",
+            prompt="hello",
+            fork_from=None,
+            prompt_source="user",
+            idempotency_key="creation-b",
+        )
+        == 42
+    )
     assert _keys(mock_client) == ["creation-a", "creation-a", "creation-b"]
     assert all(
         "Idempotency-Scope" not in call.kwargs["headers"]
@@ -217,6 +240,10 @@ def test_creation_rejects_malformed_key_before_http(mock_client: MagicMock, key:
 
     with pytest.raises((TypeError, ValueError), match="idempotency key"):
         spawn(
-            spawner="user", prompt=None, fork_from=None, prompt_source="user", idempotency_key=key
-        )  # pyright: ignore[reportArgumentType]
+            spawner="user",
+            prompt=None,
+            fork_from=None,
+            prompt_source="user",
+            idempotency_key=key,  # pyright: ignore[reportArgumentType] — invalid runtime input
+        )
     mock_client.post.assert_not_called()
