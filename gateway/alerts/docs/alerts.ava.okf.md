@@ -91,11 +91,11 @@ gap.
 
 ### IM notification
 
-Firing/resolved transitions fan out through the local im_bridge daemon's
-`POST /send` RPC (health port, Bearer = cluster secret, body
-`{"text", "type": "alert"}`): `IMBridgeCore.notify_user` calls each loaded
-adapter's `send_to_owner` (Telegram owner chat / WeChat account user /
-Feishu's last p2p sender; a channel without a resolvable chat is skipped).
+Eligible new firing/resolved groups request durable acceptance through authenticated
+`POST /send/alert-outbound-v1`; the existing IM Outbox sends the frozen available
+owner subset and retains unavailable channel decisions. Acceptance is separate
+from actual provider delivery; legacy `/send` remains for other immediate callers.
+See [[native-alert-outbox]] for recovery, completion and rollout requirements.
 Format: a severity-headed template + summary + generatorURL +
 `→ <fleet UI>/insights/alerts` (recovery swaps the head for the resolved
 variant). Templates live in `services/entrypoints/im_bridge/copy.py` — the single source
@@ -113,12 +113,13 @@ an IM recovery without Grafana's resolved notification payload.
 
 ### Shadow transition facts
 
-The ingest transaction freezes inactive revision/group/member snapshots through
+The ingest transaction freezes immutable revision/group/member snapshots through
 `base.telemetry.alerts.shadow.AlertShadowBatch`; fingerprint gates preserve
 input-order instance resolution. Repeated observations retain the original group.
-Legacy sending and `notified_at` remain unchanged. Shadow history is never proof
-of non-delivery and cannot be automatically dispatched. See
-[[alert-shadow-facts]] for transaction ownership and the future activation boundary.
+Only real native SENT advances `notified_revision`; `notified_at` keeps its
+first-ever timestamp. Shadow history is never proof of non-delivery and cannot
+be automatically dispatched. See
+[[alert-shadow-facts]] for transaction ownership and the retained history boundary.
 
 ### List
 

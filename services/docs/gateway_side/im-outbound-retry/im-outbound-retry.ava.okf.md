@@ -122,10 +122,9 @@ this is not an exactly-once provider guarantee. A multi-chunk uncertain attempt
 may have delivered any prefix; there are no persisted chunk acknowledgements,
 resumable chunk retries or automatic reconciliation yet.
 
-#4477 remains open for explicit notice/ops producer identity and acceptance,
-provider capability verification, chunk acknowledgement/progress and an
-operator-directed reconciliation/retention policy. Their existing immediate
-send paths above remain separate. The pre-existing `state.outbox.jsonl` is the
+Native alerts share this worker: see [[native-alert-outbox]]. #4477 remains open
+for explicit notice/other Ops producers, provider verification, chunk progress
+and reconciliation/retention. Other immediate paths remain separate. The pre-existing `state.outbox.jsonl` is the
 user-to-Gateway inbound journal and is never used to dispatch provider output.
 No client Outbox, resend UI or deployment is introduced. Acceptance is not proof
 of delivery.

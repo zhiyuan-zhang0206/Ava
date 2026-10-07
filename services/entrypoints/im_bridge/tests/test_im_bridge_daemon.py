@@ -25,6 +25,7 @@ from services.entrypoints.im_bridge.config import (
     TelegramCredentialsConfig,
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
+from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
 
 
 class _FakeServer:
@@ -41,7 +42,7 @@ def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> No
     """The beat task keeps a Liveness fresh — the regression guard for the
     503-after-startup bug."""
 
-    async def parked_outbound(_core: Any):
+    async def parked_outbound(_core: Any, _alerts: Any):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(daemon, "_timeline_outbound_loop", parked_outbound)
@@ -99,6 +100,8 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
             self.config = config
             self.gateway = gateway
             self.db_pool = db_pool
+            self.outbound_store = IMOutboxStore(db_pool)
+            self.adapters: dict[str, Any] = {}
             self.outbox_replay_started = False
             from unittest.mock import MagicMock
 
@@ -122,7 +125,7 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(daemon, "_load_adapters", fake_load_adapters)
 
-    async def parked_outbound(_core: Any):
+    async def parked_outbound(_core: Any, _alerts: Any):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(daemon, "_timeline_outbound_loop", parked_outbound)

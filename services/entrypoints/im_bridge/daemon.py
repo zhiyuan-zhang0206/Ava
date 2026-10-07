@@ -30,6 +30,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
+from services.entrypoints.im_bridge.alert_outbound import AlertOutboundBridge
 from services.entrypoints.im_bridge.config import (
     FeishuCredentialsConfig,
     ImBridgeConfig,
@@ -197,12 +198,13 @@ async def _notice_loop(core: Any) -> None:
         await asyncio.sleep(3.0)
 
 
-async def _timeline_outbound_loop(core: Any) -> None:
+async def _timeline_outbound_loop(core: Any, alerts: AlertOutboundBridge) -> None:
     """One service-owned dispatcher and periodic committed-tail wakeup."""
     core.outbound_worker.validate_pool()
     while True:
         if not admission.quiesced():
             try:
+                await alerts.poll_once()
                 await core.poll_timeline_outbound()
             except Exception as exc:
                 _log.warning("im_bridge: outbound round failed class=%s", type(exc).__name__)
@@ -258,6 +260,9 @@ async def run() -> None:
     db_pool = Database.from_settings().pool()
     config = im_bridge_config()
     core = IMBridgeCore(config, gateway_client(config), db_pool=db_pool)
+    alerts = AlertOutboundBridge(
+        core.outbound_store, core.adapters, enabled=settings.alerts.im_notify_enabled
+    )
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint()
     try:
@@ -266,7 +271,10 @@ async def run() -> None:
             "im_bridge",
             endpoint.health_port,
             liveness=liveness,
-            extra_routes={("POST", "/send"): await _handle_send(core)},
+            extra_routes={
+                ("POST", "/send"): await _handle_send(core),
+                ("POST", "/send/alert-outbound-v1"): alerts.handle,
+            },
             # Bearer = a machine API token of the write generation (the gateway's, or this
             # unit's); an open cluster (no secret) gets no auth — consistent with the gateway.
             auth_digests=daemon_acceptance(),
@@ -297,7 +305,7 @@ async def run() -> None:
             await asyncio.gather(*(a.start() for a in adapters))
             if adapters:
                 core.outbound_worker.validate_pool()
-                loops.create_task(_timeline_outbound_loop(core))
+                loops.create_task(_timeline_outbound_loop(core, alerts))
             # Every adapter's start() returns once its connection loop is launched
             # (long polls / ws threads run in the background). The daemon now stays
             # alive forever; SIGTERM/SIGINT unwinds through the finally below.

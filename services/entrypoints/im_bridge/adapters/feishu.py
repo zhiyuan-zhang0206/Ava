@@ -1,5 +1,4 @@
 """Feishu enterprise bot: private text over lark-oapi WS events and REST sends.
-
 Credentials come from FeishuCredentialsConfig; missing credentials skip start.
 The operator enables im.message.receive_v1 long-connection subscriptions and
 makes the bot available in the p2p chat. Polling recovers missed WS events.
@@ -24,7 +23,7 @@ from services.entrypoints.im_bridge.outbound_types import (
     PreparedOutboundSend,
 )
 from services.entrypoints.im_bridge.state import _load_switch_state
-from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage
+from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.
 MAX_SEGMENT_CHARS = 8000
@@ -627,6 +626,11 @@ class FeishuAdapter(IMAdapter):
             chunks=tuple(OutboundChunk(text=part) for part in _segment(text, MAX_SEGMENT_CHARS)),
             markdown=False,
         )
+
+    async def prepare_alert_owner(self, text: str) -> tuple[str, PreparedOutboundSend]:
+        if not self._last_open_id:
+            raise SendNotStartedError("feishu alert owner is unavailable")
+        return self._last_open_id, await self.prepare_timeline(text)
 
     async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
         if (

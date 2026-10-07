@@ -607,6 +607,12 @@ class WeixinAdapter(IMAdapter):
             markdown=False,
         )
 
+    async def prepare_alert_owner(self, text: str) -> tuple[str, PreparedOutboundSend]:
+        recipient = (self._account or {}).get("user_id")
+        if not isinstance(recipient, str) or not recipient.strip():
+            raise SendNotStartedError("weixin alert owner is unavailable")
+        return recipient, await self.prepare_timeline(text)
+
     async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
         if (
             prepared.adapter_kind != OutboundAdapterKind.WEIXIN

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, NamedTuple
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
 
@@ -27,6 +27,7 @@ class OutboundSourceKind(StrEnum):
     MESSAGE = "message"
     INBOUND = "inbound"
     NOTICE = "notice"
+    ALERT_GROUP = "alert_group"
 
 
 class OutboundChunk(BaseModel):
@@ -78,10 +79,22 @@ class OutboundIntent(BaseModel):
 
     channel: str
     chat_id: str
-    agent_id: int
+    agent_id: int | None
     source: OutboundSource
     prepared: PreparedOutboundSend
     replay_id: str = ""
+
+    @model_validator(mode="after")
+    def validate_source_context(self) -> "OutboundIntent":
+        if self.source.kind == OutboundSourceKind.ALERT_GROUP:
+            identity = self.source.identity
+            if not identity.isascii() or not identity.isdecimal() or not 0 < int(identity) < 2**63:
+                raise ValueError("alert source identity requires its positive database group ID")
+            if self.agent_id is not None or self.source.block_idx != 0 or self.replay_id:
+                raise ValueError("alert groups require no agent, block zero and no replay")
+        elif self.agent_id is None or self.agent_id <= 0:
+            raise ValueError("agent sources require a positive agent context")
+        return self
 
 
 class OutboundIdentityConflictError(ValueError):
