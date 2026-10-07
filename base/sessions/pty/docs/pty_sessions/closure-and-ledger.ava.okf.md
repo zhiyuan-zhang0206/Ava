@@ -36,7 +36,7 @@ not keep a terminal-presence gate. Busy closure
 notices describe known lost work, not absence of every background process.
 The instance lock prevents a second start from sweeping a live service's
 sessions. Decision:
-[PTY best-effort closure](../../../../../docs/decisions/2026-10-07-pty-best-effort-closure.md).
+[PTY best-effort closure](../../../../../docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md).
 
 ## Crash notices
 
@@ -52,8 +52,8 @@ it on the same idempotency keys. A database that cannot be reached is still
 never a failed or delayed start. A stop that finds no service closes from the
 ledger and writes the same notices itself. Delivery is idempotent on machine,
 agent, session and shell birth, and a terminated owner is dropped.
-Decisions: `docs/decisions/2026-10-04-pty-crash-notices.md`,
-`docs/decisions/2026-10-04-pty-crash-notices-staged-retry.md`.
+Decisions: `docs/decisions/agents/messages/2026-10-04-pty-crash-notices.md`,
+`docs/decisions/agents/messages/2026-10-04-pty-crash-notices-staged-retry.md`.
 
 ## Dependencies
 

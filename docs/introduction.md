@@ -41,7 +41,7 @@ units start again. An update is an attended, full-cluster outage by design,
 and it never rolls back on its own: a failure stops the half, the operator
 fixes the cause and reruns it — each half is idempotent.
 
-→ [Why: self-rolling release](decisions/2026-05-09-self-rolling-release.md)
+→ [Why: self-rolling release](decisions/runtime/updates/release/2026-05-09-self-rolling-release.md)
 
 ### 2. CodeAct — one tool, the whole Python namespace
 
@@ -66,7 +66,7 @@ research goal into three waves of 18 workers by itself — wave split,
 checkpoint placement, and model tiering were all its own choices — and the
 orchestrator was woken only six times.
 
-→ [Why a single tool](decisions/2026-05-04-single-execute-code-tool.md)
+→ [Why a single tool](decisions/agents/graph/2026-05-04-single-execute-code-tool.md)
 
 ### 3. Fleet — a graph of peers, not a chain
 
@@ -104,7 +104,7 @@ offers idle agents three honest options (working / waiting / done), and
 mechanisms nudge agents that stall, reach for the wrong SDK idiom, or miss a
 newly installed skill. Ambiguous silence becomes supervisable state.
 
-→ [All anti-RL-bias mechanisms](../okf/anti-rl-bias.ava.okf.md)
+→ [All anti-RL-bias mechanisms](../agent/docs/anti-rl-bias.ava.okf.md)
 
 ### 5. Observability — every turn is a trace
 
@@ -125,7 +125,7 @@ form a cluster**. Authentication is always on and fail-closed. macOS, Linux,
 and Windows are all supported — Windows joins natively as an agent-runner, no
 WSL, no Docker. A single box is just the N=1 case: no flag, no opt-in.
 
-→ [How multi-machine deployment works](decisions/2026-06-11-multihost-deployment.md)
+→ [How multi-machine deployment works](decisions/runtime/updates/release/2026-06-11-multihost-deployment.md)
 
 ### 7. Plugins — typed extension points in the runtime
 
@@ -193,7 +193,7 @@ evaluator access, recovery and cost scope from effectiveness claims.
 The gateway `/mcp` endpoint exposes the cluster's control plane as an MCP server over
 Streamable HTTP, so a coding agent can run the fleet: start agents, message them,
 read what they did, stop them. Create a client token and register it once
-(setup: [`docs/conventions/mcp-client-access.md`](conventions/mcp-client-access.md)) —
+(setup: [`docs/conventions/extensions/mcp-client-access.md`](conventions/extensions/mcp-client-access.md)) —
 
 ```bash
 claude mcp add --transport http ava http://<gateway-host>/mcp \

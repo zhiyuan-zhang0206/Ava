@@ -41,7 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 # One SSE event per window: the agent-side publisher coalesces deltas / chunks
 # into this window and the frontend throttles stream parsing to the same value
-# (see ui/web/src/lib/constants-generated.ts, generated from this constant).
+# (see ui/web/src/lib/contracts/constants-generated.ts, generated from this constant).
 EVENT_COALESCE_MS: int = 40
 
 

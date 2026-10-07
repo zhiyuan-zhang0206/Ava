@@ -22,11 +22,11 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { WindowSelect } from "@/components/window-select";
-import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
-import type { PublicAgentStatus } from "@/lib/types";
-import { useFleetGraph } from "@/lib/use-fleet-graph";
-import { useAgentRoster } from "@/lib/use-agents";
+import { WindowSelect } from "@/components/agents/window-select";
+import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/agents/sidebar";
+import type { PublicAgentStatus } from "@/lib/contracts/types";
+import { useFleetGraph } from "@/lib/fleet/use-fleet-graph";
+import { useAgentRoster } from "@/lib/agents/use-agents";
 
 import {
   FORCE_DEFAULTS,
@@ -37,8 +37,8 @@ import {
   type ForceGraphEdge,
   type ForceGraphNode,
 } from "./force-graph";
-import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 // Status -> text-color class; the circle paints with fill="currentColor" so the
 // node palette stays identical to the sidebar's STATUS_DOT (same tokens, just

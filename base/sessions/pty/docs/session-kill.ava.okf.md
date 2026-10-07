@@ -31,7 +31,7 @@ closure and work interruption rather than complete process destruction.
 Residual host processes or OS stalls require agent/user investigation, with
 identity and ownership checked before explicit action. No automatic host-wide
 kill or reboot follows from this result. Decision:
-[PTY best-effort closure](../../../../docs/decisions/2026-10-07-pty-best-effort-closure.md).
+[PTY best-effort closure](../../../../docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md).
 
 ## Dependencies
 

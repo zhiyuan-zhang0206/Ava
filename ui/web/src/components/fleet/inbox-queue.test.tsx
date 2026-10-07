@@ -3,19 +3,19 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/types";
-import type { NoticesFeed } from "@/lib/use-notices";
+import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/contracts/types";
+import type { NoticesFeed } from "@/lib/notifications/use-notices";
 
 // Echo the timestamp back so a test can tell WHICH timestamp a row rendered
 // (created_at vs resolved_at) rather than only that some time was shown.
-vi.mock("@/lib/sidebar", () => ({ formatRelativeTime: (ts: string) => `rel:${ts}` }));
+vi.mock("@/lib/agents/sidebar", () => ({ formatRelativeTime: (ts: string) => `rel:${ts}` }));
 
 // api.resolveNotice is the only network call (the shared OpenNoticeDetail makes
 // it). Mocked.
 const resolveNotice = vi.fn<
   (agentId: number, noticeId: number, body: { action: string; reply?: string }) => Promise<{ status: string }>
 >();
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: {
     resolveNotice: (a: number, n: number, b: { action: string; reply?: string }) => resolveNotice(a, n, b),
   },
@@ -27,7 +27,7 @@ const inboxFeedMock = vi.fn<() => NoticesFeed>();
 // The instant local drop after a resolve (Task #1814) — mocked so a click
 // under test never needs a real query cache.
 const dropOpenNotices = vi.fn<(queryClient: unknown, noticeIds: number[]) => void>();
-vi.mock("@/lib/use-notices", () => ({
+vi.mock("@/lib/notifications/use-notices", () => ({
   useNotices: () => inboxFeedMock(),
   dropOpenNotices: (qc: unknown, ids: number[]) => dropOpenNotices(qc, ids),
 }));
@@ -37,14 +37,14 @@ vi.mock("@/lib/use-notices", () => ({
 const useTasksMock = vi.fn<(window?: string, fields?: string) => { tasks: TaskSummaryRow[]; loading: boolean; error: boolean }>(
   () => ({ tasks: [], loading: false, error: false }),
 );
-vi.mock("@/lib/use-tasks", () => ({
+vi.mock("@/lib/notifications/use-tasks", () => ({
   useTasks: (window?: string, fields?: string) => useTasksMock(window, fields),
 }));
 
 // The fleet-wide open-pages feed drives the "agent's live page" affordances.
 // Stub the hook (default: no pages).
 const useAllPagesMock = vi.fn<() => PageRow[]>(() => []);
-vi.mock("@/lib/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
+vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
 
 import { InboxQueue } from "./inbox-queue";
 

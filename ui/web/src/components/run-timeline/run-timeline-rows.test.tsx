@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/types";
+import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import { RunTimelineRows } from "./run-timeline-rows";
 import type { Selection } from "./timeline-model";

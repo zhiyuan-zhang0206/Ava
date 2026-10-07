@@ -21,14 +21,14 @@ SURFACE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "login-card": ("ui/web/src/app/login/", "ui/web/src/components/auth/"),
     "home-sidebar": (
         "ui/web/src/components/agent-sidebar",
-        "ui/web/src/components/home-layout.tsx",
+        "ui/web/src/components/shell/home-layout.tsx",
     ),
     "home-header": (
-        "ui/web/src/components/header-bar.tsx",
-        "ui/web/src/components/home-layout.tsx",
+        "ui/web/src/components/shell/header-bar.tsx",
+        "ui/web/src/components/shell/home-layout.tsx",
         "ui/web/src/app/page.tsx",
     ),
-    "home-composer": ("ui/web/src/components/composer.tsx", "ui/web/src/app/page.tsx"),
+    "home-composer": ("ui/web/src/components/conversation/composer.tsx", "ui/web/src/app/page.tsx"),
     "control-header": ("ui/web/src/app/control/",),
     "control-nav": ("ui/web/src/app/control/",),
     "fleet-main": ("ui/web/src/app/fleet/", "ui/web/src/components/fleet/"),

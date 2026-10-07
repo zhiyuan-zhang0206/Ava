@@ -34,7 +34,7 @@ def ensure_cluster_redis_acl(
     rotated one actually invalidates the old one.
 
     Redis always authenticates, whatever the control-plane bearer
-    (docs/decisions/2026-09-26-internal-data-plane-always-authenticated.md): an empty
+    (docs/decisions/data/security/2026-09-26-internal-data-plane-always-authenticated.md): an empty
     `runtime_password` is refused rather than creating a password-less user.
 
     redis_admin_url connects as the Redis `default` user with the independent

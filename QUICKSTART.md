@@ -23,7 +23,7 @@ the entire cluster.
 > **Windows users**: Windows runs the `agent-runner` capability natively — no
 > WSL2, no Docker — and enrolls against a gateway on macOS or Linux. It
 > cannot host the cluster itself. Follow the
-> [Windows setup guide](docs/conventions/windows-setup.md) instead of this one.
+> [Windows setup guide](docs/conventions/operations/windows-setup.md) instead of this one.
 
 ---
 
@@ -214,7 +214,7 @@ for the two halves. Never `git pull` + `ava start` by hand on a production check
 ### Windows hardware
 
 Native Windows Ava services are retired. Install Ava inside a WSL2 Linux
-distribution and follow the [Windows host guidance](docs/conventions/windows-setup.md).
+distribution and follow the [Windows host guidance](docs/conventions/operations/windows-setup.md).
 For unattended gateway boot, use the separate WSL distribution anchor described
 there; `ava start` inside Linux uses the Linux service path.
 

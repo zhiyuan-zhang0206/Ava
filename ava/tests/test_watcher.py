@@ -765,7 +765,7 @@ def test_watcher_child_overrides_stale_session_identity(
 
 
 # ─── watchers carry no registry; nothing dedupes or restarts them ───────────
-# (docs/decisions/2026-09-27-watchers-are-never-restarted.md)
+# (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md)
 
 
 def test_cron_registered_twice_yields_two_independent_sessions(_agent_row: int) -> None:

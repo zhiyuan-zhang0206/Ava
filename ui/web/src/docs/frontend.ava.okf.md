@@ -74,7 +74,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 
 - `ui/web/src/app/layout.tsx` — root layout
 - `ui/web/src/app/page.tsx` — homepage (HomePage → HomeShell → HomeContent)
-- `ui/web/src/components/providers.tsx` — Provider composition + QueryClient
-- `ui/web/src/lib/store.ts` — Zustand store (pure UI + cluster coordination, not persisted)
-- `ui/web/src/lib/timeline-store.ts` — Zustand store (SSE-driven timeline state, independent from `store.ts`)
-- `ui/web/src/lib/useEventStream.tsx` — SSE Provider
+- `ui/web/src/components/shell/providers.tsx` — Provider composition + QueryClient
+- `ui/web/src/lib/state/store.ts` — Zustand store (pure UI + cluster coordination, not persisted)
+- `ui/web/src/lib/timeline/timeline-store.ts` — Zustand store (SSE-driven timeline state, independent from `store.ts`)
+- `ui/web/src/lib/transport/useEventStream.tsx` — SSE Provider

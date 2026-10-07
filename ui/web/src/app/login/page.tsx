@@ -7,9 +7,9 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { LoginForm } from "@/components/auth/login-form";
-import { useAuth } from "@/lib/auth-context";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth/auth-context";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export default function LoginPage() {
   const t = useTranslations("login");

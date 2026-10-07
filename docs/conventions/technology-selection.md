@@ -87,6 +87,6 @@ undo? If you cannot answer, that is a gate: ask.
 ## Worked records
 
 Two five-question records written after the fact, as examples of the format:
-[WAL-G over pgBackRest](../decisions/2026-10-02-walg-over-pgbackrest-five-questions.md) (a rung-3
+[WAL-G over pgBackRest](../decisions/data/backup/2026-10-02-walg-over-pgbackrest-five-questions.md) (a rung-3
 choice that replaced rung-4 code) and
-[`ava-root`](../decisions/2026-10-02-ava-root-five-questions.md) (a rung-4 choice kept, with its exit written down).
+[`ava-root`](../decisions/runtime/processes/startup/2026-10-02-ava-root-five-questions.md) (a rung-4 choice kept, with its exit written down).

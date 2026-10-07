@@ -6,8 +6,8 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AlertsSection from "@/components/ops/alerts-section";
-import { api } from "@/lib/api";
-import type { AlertsResponse } from "@/lib/types";
+import { api } from "@/lib/transport/api";
+import type { AlertsResponse } from "@/lib/contracts/types";
 
 afterEach(cleanup);
 

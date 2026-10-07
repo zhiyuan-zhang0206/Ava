@@ -68,14 +68,12 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 - Directory-level fixtures (the former `conftest.py` files of `agent` / `ava` / `cli` / `gateway` / `integration` / `services` / `scripts/structure` / `lifecycle/db_authority`) are modules in `tests/path_scoped/`, registered for the paths named by the `path_scopes.toml` files next to the tests (`PATH_SCOPES`, read by `tests/fixtures/path_scopes.py`) so they follow a test into a package's `tests/` directory. A `conftest.py` remains only in `e2e` (package-scoped real processes), `lifecycle/native_root` (it must run without the repo-root conftest) and `services` (the win32 `collect_ignore`); details: [[test-fixtures.ava.okf.md]]
 
 ### CI integration
-- `.github/workflows/` — GitHub Actions runs the full suite
-- pre-commit lints what the commit changed; pre-push runs pyright (branch-changed `.py` files only, never full-repo locally — user ruling 2026-09-22), frontend tsc, whole-project eslint, **full frontend vitest**, a branch-diff rerun of the pre-commit stage over `merge-base(origin/main,HEAD)..HEAD` (catches rebase/cherry-pick/merge commits that never ran pre-commit), and a re-check of the artifact hooks whose inputs the branch deleted (a delete-only diff never reaches a `files:`-filtered hook) (`.pre-commit-config.yaml`). Neither stage runs pytest.
-- CI runs all non-e2e tests + e2e + coverage thresholds
-- CI owns every local check except the warn-only hook-installation check: `backend-structure` runs structural lints plus a conditional, explicit codegen segment; `backend-static` owns pyright and `frontend` owns tsc, eslint and vitest. The classify-independent `doc-lints` job covers docs-only PRs too. See the [CI runbook](../../docs/conventions/runbook.md#ci-continuous-integration) for ownership and selector safety nets.
+
+Validation ownership across hooks and CI: [[test-ci.ava.okf.md]].
 
 ## Key dependencies
 
-- [[db.ava.okf.md]] — tests use isolated Postgres/Redis
+- [[agent/db/docs/db.ava.okf.md]] — tests use isolated Postgres/Redis
 - [[loop.ava.okf.md]] — system under test
 - [[gateway-cli.ava.okf.md]] — integration tests mount `gateway.app` in-process (TestClient), no separate Gateway process needed
 

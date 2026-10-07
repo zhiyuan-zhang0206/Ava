@@ -81,8 +81,8 @@ def test_non_utf8_file_skipped(repo: Path) -> None:
 
 def test_next_intl_messages_catalog_exempt(repo: Path) -> None:
     """The frontend's zh message catalog is the ruling's explicit exemption."""
-    _write(repo, "ui/web/messages/zh/common.json", '{"save": "\u4fdd\u5b58"}\n')
-    assert gate._scan_file("ui/web/messages/zh/common.json") == []
+    _write(repo, "ui/web/messages/zh/interface/common.json", '{"save": "\u4fdd\u5b58"}\n')
+    assert gate._scan_file("ui/web/messages/zh/interface/common.json") == []
 
 
 def test_locales_dir_and_po_exempt(repo: Path) -> None:

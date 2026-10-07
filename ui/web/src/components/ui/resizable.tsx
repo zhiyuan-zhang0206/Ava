@@ -2,8 +2,8 @@
 
 import * as ResizablePrimitive from "react-resizable-panels"
 
-import { cn } from "@/lib/utils"
-import { FLEX } from "@/lib/layout";
+import { cn } from "@/lib/format/utils"
+import { FLEX } from "@/lib/layout/layout";
 
 function ResizablePanelGroup({
   className,

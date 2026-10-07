@@ -25,7 +25,7 @@ _SNIPPET_PATHS = (
     "ava_builtins/skills/coordination/ava-being-a-long-running-agent/scripts/watch_idle.py",
     "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py",
 )
-_FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "events" / "agent_updated.json"
+_FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "events" / "agent" / "agent_updated.json"
 
 
 def _load_snippet(path: str) -> ModuleType:

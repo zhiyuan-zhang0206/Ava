@@ -70,7 +70,7 @@ audit / telemetry / log). The four legacy mechanisms under the unified event mod
 telemetry + log = the category=telemetry + log parts; SSE = a live projection of the
 latest drops of the event river; OTel trace = the call-chain view of the event
 river** (trace_id ties them together). Full treatment in
-[event-system design decision](../../docs/decisions/2026-08-04-event-system-design.md).
+[event-system design decision](../../docs/decisions/observability/events/2026-08-04-event-system-design.md).
 
 ---
 

@@ -85,30 +85,30 @@ import {
 import { useTranslations } from "next-intl";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useContentToggle, useContentToggleReset } from "@/lib/content-toggle-store";
-import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline";
+import { useContentToggle, useContentToggleReset } from "@/lib/layout/content-toggle-store";
+import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
 import {
   POINTER_STICKY_THRESHOLDS,
   TOUCH_STICKY_THRESHOLDS,
   type StickyController,
   createStickyController,
   isAtBottom,
-} from "@/lib/sticky";
-import type { BackendTimelineItem } from "@/lib/types";
-import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/scroll-memory";
-import { useTimelineStore } from "@/lib/timeline-store";
-import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/compact-transition";
-import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { cn } from "@/lib/utils";
-import { useTimelineColors } from "@/lib/use-timeline-colors";
+} from "@/lib/layout/sticky";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
+import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
+import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
+import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 
-import { ConnectionNotice } from "@/components/connection-notice";
-import { CompactingBlock } from "./compacting-block";
+import { ConnectionNotice } from "@/components/notifications/connection-notice";
+import { CompactingBlock } from "./model/compacting-block";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
-import { classifyItem } from "./runs";
-import { groupTimelineSegments } from "./segments";
-import { useCompactTransitionAnchor } from "./use-compact-transition-anchor";
-import { resolveSavedTimelineAnchor, useTimelineWindow, useTimelineWindowLimits } from "./use-timeline-window";
+import { classifyItem } from "./model/runs";
+import { groupTimelineSegments } from "./model/segments";
+import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
+import { resolveSavedTimelineAnchor, useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
 import { CompactHistoryDivider, LoadOlderSpinner, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
