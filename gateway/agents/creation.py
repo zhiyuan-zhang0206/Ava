@@ -21,11 +21,14 @@ from ops.agents.creation_identity import (
 from ops.rpc_schemas import ConfigNormalization, LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 
-def scoped_creation_key(request: Request, key: str | None) -> str | None:
+def scoped_creation_key(
+    request: Request, key: str | None, *, operation_path: str = "/api/agents"
+) -> str | None:
+    """Preserve the canonical legacy namespace unless a guarded entry names its own."""
     if key is None:
         return None
     try:
-        return request_key(request, key, method="POST", path="/api/agents")
+        return request_key(request, key, method="POST", path=operation_path)
     except PrincipalScopeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
