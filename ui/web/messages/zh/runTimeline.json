@@ -16,6 +16,8 @@
   "empty": "此窗口内没有内容。",
   "lifecycleRow": "生命周期",
   "levelRow": "第 {level} 层",
+  "pending": "尚未汇总",
+  "pendingTitle": "上一层还没有汇总这一段",
   "messagesRow": "消息",
   "eventAria": "{time} {kind}",
   "nodeAria": "第 {level} 层总结：{summary}",
