@@ -401,11 +401,11 @@ def test_unknown_slash_command_without_agent_errors() -> None:
 def test_weixin_push_failure_emits_the_failed_event(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """A weixin send whose single retry also fails emits ``im_push_failed``
-    carrying the adapter's consecutive-failure count — inbound-only failure is
-    invisible to the user otherwise (Task #829); the alert rule tells them.
-    A double failure costs exactly one retry, past the bounded jitter backoff
-    (task #4252)."""
+    """An uncertain Weixin send emits im_push_failed without repeating it.
+
+    The adapter's failure count remains visible to the alert rule; an
+    arbitrary provider error cannot authorize replay of an accepted prefix.
+    """
     gateway = FakeGateway()
     core = _core(gateway)
     wx = FakeFailingWeixinAdapter()
@@ -421,11 +421,8 @@ def test_weixin_push_failure_emits_the_failed_event(
 
     asyncio.run(core._send("weixin", "o9cq804", Reply("hello")))
 
-    assert wx.send_attempts == 2  # exactly one retry
-    assert len(sleeps) == 1
-    base = core.config.im_push_retry_backoff_seconds
-    jitter = core.config.im_push_retry_jitter_seconds
-    assert base <= sleeps[0] <= base + jitter
+    assert wx.send_attempts == 1  # a provider failure does not prove a safe replay
+    assert sleeps == []
     events = [r["extra"] for r in loguru_records if r["extra"].get("event") == "im_push_failed"]
     assert [(e["channel"], e["failures"]) for e in events] == [("weixin", 2)]
 

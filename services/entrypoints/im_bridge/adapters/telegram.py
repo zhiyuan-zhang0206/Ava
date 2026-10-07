@@ -27,7 +27,7 @@ import httpx
 from base.log import logger
 from base.paths import ava_home
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
-from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage
+from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
 
 # Telegram's per-message cap for plain-text messages.
 _MAX_MESSAGE_LEN = 4096
@@ -332,15 +332,18 @@ class TelegramAdapter(IMAdapter):
         """Send text as HTML (buttons as an inline keyboard); fall back to
         plain text if Telegram rejects the markup."""
 
-        for chunk in _split_text(text):
+        for index, chunk in enumerate(_split_text(text)):
             rendered = _to_html(chunk) if markdown else _escape_html(chunk)
             try:
-                await self._send_message(chat_id, rendered, buttons=buttons, html=True)
-            except _MarkupRejectedError:
-                # Telegram 400'd the entities — resend the raw chunk as plain
-                # text so the message still lands (formatting lost, content
-                # kept; no escaped entities shown literally).
-                await self._send_message(chat_id, chunk, buttons=buttons, html=False)
+                try:
+                    await self._send_message(chat_id, rendered, buttons=buttons, html=True)
+                except _MarkupRejectedError:
+                    # A confirmed markup rejection has no effect; fallback is safe.
+                    await self._send_message(chat_id, chunk, buttons=buttons, html=False)
+            except SendNotStartedError:
+                if index == 0:
+                    raise
+                raise RuntimeError("telegram send incomplete after acknowledged chunks") from None
 
     async def send_to_owner(
         self,
@@ -380,6 +383,10 @@ class TelegramAdapter(IMAdapter):
                 timeout=10.0,
             )
         except httpx.HTTPError as exc:
+            if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+                raise SendNotStartedError(
+                    f"telegram send not started: {type(exc).__name__}"
+                ) from None
             raise RuntimeError(f"telegram send failed: {type(exc).__name__}") from None
         if resp.status_code == 400 and html:
             raise _MarkupRejectedError  # bad entities — caller retries without parse_mode

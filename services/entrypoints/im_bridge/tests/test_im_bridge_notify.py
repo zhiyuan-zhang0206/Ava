@@ -4,8 +4,8 @@ The ops-alerts pipeline's IM fan-out: the gateway POSTs one message to the
 im_bridge daemon's health-port `/send` route; the core fans it out to every
 loaded adapter's `send_to_owner`. This module locks the fan-out contract —
 all adapters receive the text, a channel that cannot resolve an owner chat is
-skipped, one failing channel does not stop the others, a failing channel gets
-exactly one retry after the shared bounded jitter backoff (task #4252), and
+skipped, one failing channel does not stop the others, and only a proven
+unstarted send receives one retry after the shared bounded jitter backoff. The
 the `/send` route handler validates the body and returns per-channel results.
 """
 
@@ -19,7 +19,7 @@ import pytest
 from services.entrypoints.im_bridge import push_watchdog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
-from services.entrypoints.im_bridge.types import IMAdapter
+from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 
 
 @pytest.fixture
@@ -110,7 +110,7 @@ def test_notify_user_fans_out_to_all_adapters() -> None:
 def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]) -> None:
     """A channel without an owner chat is skipped; a failing channel does not
     stop the others from receiving the message. The skipped channel pays no
-    retry (a permanent condition), the broken one exactly one."""
+    retry (a permanent condition); the unknown failure is not repeated."""
     core = IMBridgeCore(im_bridge_config(), gateway_client())
     skipped, broken, ok = (
         _RecordingAdapter(skipped=True),
@@ -131,15 +131,15 @@ def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]) -> N
     assert results[skipped.channel] == "skipped"
     assert results[broken.channel].startswith("error:")
     assert skipped.attempts == 1  # NotImplementedError is permanent — never retried
-    assert broken.attempts == 2  # failed once, retried once
-    assert len(retry_sleeps) == 1
+    assert broken.attempts == 1  # unknown outcome cannot authorize another send
+    assert retry_sleeps == []
 
 
 def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float]) -> None:
     """A transient failure (the ~0.65s connection window, task #4252) is
     healed by exactly one retry after the bounded jitter backoff."""
     core = IMBridgeCore(im_bridge_config(), gateway_client())
-    flaky = _RecordingAdapter(error=RuntimeError("connect jitter"), fail_times=1)
+    flaky = _RecordingAdapter(error=SendNotStartedError("connect jitter"), fail_times=1)
     core.register(flaky)
 
     async def run() -> dict[str, str]:
@@ -156,8 +156,7 @@ def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float]) -> 
 
 
 def test_notify_user_double_failure_reports_error(retry_sleeps: list[float]) -> None:
-    """Both attempts fail -> the channel keeps its "error: <TypeName>" result
-    (the /send gate still sees no delivery), with exactly one retry."""
+    """An unknown failure retains the compatible error result without retry."""
     core = IMBridgeCore(im_bridge_config(), gateway_client())
     broken = _RecordingAdapter(error=ValueError("boom"))
     core.register(broken)
@@ -167,8 +166,8 @@ def test_notify_user_double_failure_reports_error(retry_sleeps: list[float]) -> 
 
     results = asyncio_run(run())
     assert results[broken.channel] == "error: ValueError"
-    assert broken.attempts == 2
-    assert len(retry_sleeps) == 1
+    assert broken.attempts == 1
+    assert retry_sleeps == []
 
 
 def test_notify_user_empty_core() -> None:

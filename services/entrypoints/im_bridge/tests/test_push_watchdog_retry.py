@@ -1,6 +1,6 @@
 """`send_with_retry`'s log contract (2026-10-03 triage, E3).
 
-The first failed attempt is the transient norm (the measured ~0.65s connect
+A proven unstarted first attempt is the transient norm (the measured ~0.65s connect
 window; a flaky link): WARNING with a one-line cause, no traceback. Only when
 the single retry fails does the send log ERROR + stack and emit the
 im_push_failed event. This module exists beside `test_im_bridge_core.py` because that file
@@ -15,7 +15,7 @@ import pytest
 
 from services.entrypoints.im_bridge import push_watchdog
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
-from services.entrypoints.im_bridge.types import Reply
+from services.entrypoints.im_bridge.types import Reply, SendNotStartedError
 
 _LOGGER = "services.entrypoints.im_bridge.core.push_watchdog"
 
@@ -39,7 +39,7 @@ class _Adapter:
         del buttons, markdown
         self.attempts += 1
         if self.attempts <= self._fail_attempts:
-            raise RuntimeError("iLink sendmessage error: ret=-2 errmsg=prepare failed")
+            raise SendNotStartedError("connection failed before any send")
 
 
 class _Core:
@@ -84,3 +84,25 @@ async def test_failed_retry_keeps_error_with_traceback(
     assert adapter.attempts == 2
     retries = [r for r in caplog.records if "send retry failed" in r.getMessage()]
     assert [(r.levelname, r.exc_info is not None) for r in retries] == [("ERROR", True)]
+
+
+async def test_ambiguous_or_partial_send_is_not_repeated(
+    _no_sleep: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    class PartialAdapter(_Adapter):
+        async def send(
+            self,
+            _chat_id: str,
+            _text: str,
+            *,
+            buttons: list[tuple[str, str]] | None = None,
+            markdown: bool = False,
+        ) -> None:
+            self.attempts += 1
+            raise RuntimeError("first chunk accepted; second response lost")
+
+    caplog.set_level(logging.WARNING, logger=_LOGGER)
+    adapter = PartialAdapter(fail_attempts=0)
+    await push_watchdog.send_with_retry(_Core(), "weixin", "chat", Reply("hello"), adapter)
+    assert adapter.attempts == 1
+    assert any("outcome uncertain" in record.getMessage() for record in caplog.records)

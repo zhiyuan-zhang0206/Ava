@@ -33,7 +33,7 @@ import httpx
 from base.host.private_storage import write_private_bytes
 from base.log import logger
 from base.paths import ava_home
-from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage
+from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
 
 ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
 EP_GET_UPDATES = "ilink/bot/getupdates"
@@ -43,7 +43,6 @@ EP_SEND_MESSAGE = "ilink/bot/sendmessage"
 # push_watchdog retry waits its bounded backoff (seconds), so 5 min is a
 # wide margin; the expiry exists so a stale id can never be reused for a
 # later, different message (iLink dedups by client_id and would drop it).
-_PENDING_CLIENT_ID_TTL_S = 300.0
 EP_GET_BOT_QR = "ilink/bot/get_bot_qrcode"
 EP_GET_QR_STATUS = "ilink/bot/get_qrcode_status"
 
@@ -337,12 +336,6 @@ class WeixinAdapter(IMAdapter):
         self.push_failed_at: float | None = None
         self.push_recovered_at: float | None = None
         self._chunk_delay_seconds = _SEND_CHUNK_DELAY_SECONDS
-        # (chat_id, chunk_idx) -> (client_id, monotonic): the id of the last
-        # failed send attempt, reused on the push_watchdog retry so iLink's
-        # client_id dedup collapses the duplicate (audit round 2, P1).
-        # Entries expire so a stale id can never swallow a later, different
-        # message.
-        self._pending_client_ids: dict[tuple[str, int], tuple[str, float]] = {}
         account = load_account()
         self._account = account
         self._configured = account is not None
@@ -542,18 +535,13 @@ class WeixinAdapter(IMAdapter):
         context_token = self._tokens.get(chat_id)
         chunks = _split_text(text)
         for idx, chunk in enumerate(chunks):
-            key = (chat_id, idx)
-            now = time.monotonic()
-            pending = self._pending_client_ids.pop(key, None)
-            if pending is not None and now - pending[1] < _PENDING_CLIENT_ID_TTL_S:
-                client_id = pending[0]  # retry of a timed-out send: same id
-            else:
-                client_id = uuid.uuid4().hex
+            client_id = uuid.uuid4().hex
             try:
                 await self._send_chunk(chat_id, chunk, context_token, client_id)
-            except Exception:
-                self._pending_client_ids[key] = (client_id, now)
-                raise
+            except SendNotStartedError:
+                if idx == 0:
+                    raise
+                raise RuntimeError("weixin send incomplete after acknowledged chunks") from None
             if idx < len(chunks) - 1 and self._chunk_delay_seconds > 0:
                 await asyncio.sleep(self._chunk_delay_seconds)
 
@@ -576,8 +564,8 @@ class WeixinAdapter(IMAdapter):
     ) -> None:
         """Send one chunk; on a stale session, retry once without the token.
 
-        ``client_id`` stays fixed for this logical send — including the
-        stale-session retry — so iLink's dedup collapses duplicates."""
+        ``client_id`` stays fixed for this chunk's confirmed stale-session
+        rejection retry. Ambiguous transport failures are never retried here."""
         token = context_token
         retried_without_token = False
         while True:
@@ -630,7 +618,13 @@ class WeixinAdapter(IMAdapter):
                 headers=_headers(self._token),
                 timeout=timeout,
             )
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as exc:
+            if endpoint == EP_SEND_MESSAGE and isinstance(
+                exc, (httpx.ConnectTimeout, httpx.PoolTimeout)
+            ):
+                raise SendNotStartedError(
+                    f"weixin send not started: {type(exc).__name__}"
+                ) from None
             if endpoint == EP_GET_UPDATES:
                 return {
                     "ret": 0,
@@ -639,6 +633,8 @@ class WeixinAdapter(IMAdapter):
                 }
             raise RuntimeError("weixin send timed out") from None
         except httpx.HTTPError as exc:
+            if endpoint == EP_SEND_MESSAGE and isinstance(exc, httpx.ConnectError):
+                raise SendNotStartedError("weixin send not started: ConnectError") from None
             raise RuntimeError(f"weixin {endpoint} request failed: {type(exc).__name__}") from None
         if resp.status_code != 200:
             raise RuntimeError(f"iLink POST {endpoint} HTTP {resp.status_code}: {resp.text[:200]}")
