@@ -23,7 +23,7 @@ import pytest
 from playwright.sync_api import Browser
 
 from scripts.post_deploy_visual.check import _expected_capture_names
-from scripts.post_deploy_visual.matrix import load_ignore_registry, run_matrix
+from scripts.post_deploy_visual.matrix import golden_capture_path, load_ignore_registry, run_matrix
 from tests.e2e._ports import FRONTEND_URL
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -86,7 +86,8 @@ def _mint_goldens(
     captures_dir = golden_root / "captures"
     captures_dir.mkdir(parents=True, exist_ok=True)
     for source in sorted(captures.glob("*-current-[12].png")):
-        target = captures_dir / source.name.replace("-current-", "-golden-")
+        target = golden_capture_path(captures_dir, source.name.replace("-current-", "-golden-"))
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     (golden_root / "meta.json").write_text(
         json.dumps(

@@ -44,4 +44,4 @@ Ava agent's tool invocation and code execution layer—including normalization o
 - **Agent code must explicitly `import ava`**: `fresh_globals` no longer pre-sets `ava` (declared in `execute_code` docstring). The child is a fresh process that imports ava from disk — changes to ava/*.py on disk DO affect the child (unlike the old in-process thread's frozen `sys.modules` snapshot)
 - Design choice: in-process thread → subprocess, so a stuck native call is killable without touching the agent process (issue #184)
 
-- Rationale: [Tool-call concurrency stays in Python](../../../docs/decisions/2026-09-28-tool-call-concurrency-stays-in-python.md).
+- Rationale: [Tool-call concurrency stays in Python](../../../docs/decisions/agents/context/2026-09-28-tool-call-concurrency-stays-in-python.md).

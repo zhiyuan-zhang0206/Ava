@@ -55,4 +55,4 @@ and refusal to signal a reused numeric group.
 
 Consumer: [[base/agents/incarnation/docs/incarnation-resources.ava.okf.md|exec incarnation resources]].
 Application-service and scheduled-backup custody are removed by
-[the lifecycle decision](../../../docs/decisions/2026-10-07-native-lifecycle-and-operational-recovery.md).
+[the lifecycle decision](../../../docs/decisions/runtime/processes/startup/2026-10-07-native-lifecycle-and-operational-recovery.md).

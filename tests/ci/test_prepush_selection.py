@@ -167,9 +167,9 @@ def test_eslint_lints_just_the_changed_files(eslint_repo: tuple[Path, Path]) -> 
     result = _run_eslint_script(repo, calls, "ui/web/src/a.tsx", "ui/web/src/lib/b.ts")
     assert result.returncode == 0, result.stderr
     assert _tool_calls(calls, "npx") == [
-        "npx --no-install eslint --no-warn-ignored --format json src/a.tsx src/lib/b.ts"
+        "npx --no-install eslint --no-warn-ignored --max-warnings 0 src/a.tsx src/lib/b.ts"
     ]
-    assert _tool_calls(calls, "node") == ["node scripts/check-eslint-warnings.mjs"]
+    assert _tool_calls(calls, "node") == []
     assert _tool_calls(calls, "npm") == []
 
 
@@ -178,8 +178,6 @@ def test_eslint_lints_just_the_changed_files(eslint_repo: tuple[Path, Path]) -> 
     [
         "ui/web/eslint.config.mjs",
         "ui/web/eslint-rules/sentence-case.mjs",
-        "ui/web/scripts/check-eslint-warnings.mjs",
-        "ui/web/scripts/eslint-warning-baseline.json",
         "ui/web/package.json",
         "ui/web/package-lock.json",
         "ui/web/tsconfig.json",
@@ -188,7 +186,7 @@ def test_eslint_lints_just_the_changed_files(eslint_repo: tuple[Path, Path]) -> 
 def test_eslint_setup_change_lints_the_whole_project(
     eslint_repo: tuple[Path, Path], setup_path: str
 ) -> None:
-    """The config, local rules, warning baseline and dependencies decide the verdict of files
+    """The config, local rules and dependencies decide the verdict of files
     that did not change, so editing one of them (even next to a source file) is a full run."""
     repo, calls = eslint_repo
     result = _run_eslint_script(repo, calls, "ui/web/src/a.tsx", setup_path)
@@ -612,14 +610,27 @@ def test_new_branch_runs_own_source_and_disk_consumer(repo: Path) -> None:
             "--no-install",
             "vitest",
             "run",
+            "--config",
+            "tests/vitest.config.mts",
             "--passWithNoTests=false",
-            "src/lib/localstorage-policy.test.ts",
+            "src/lib/auth/localstorage-policy.test.ts",
         ],
-        ["--no-install", "vitest", "related", "--run", "--passWithNoTests=false", "src/widget.tsx"],
+        [
+            "--no-install",
+            "vitest",
+            "related",
+            "--run",
+            "--config",
+            "tests/vitest.config.mts",
+            "--passWithNoTests=false",
+            "src/widget.tsx",
+        ],
     ]
 
 
-@pytest.mark.parametrize("generated", ["ui/web/openapi.json", "ui/web/src/lib/types-generated.ts"])
+@pytest.mark.parametrize(
+    "generated", ["ui/web/openapi.json", "ui/web/src/lib/contracts/types-generated.ts"]
+)
 def test_schema_type_artifacts_keep_contract_checks_without_related_run(
     repo: Path, generated: str
 ) -> None:
@@ -633,13 +644,13 @@ def test_schema_type_artifacts_keep_contract_checks_without_related_run(
     assert result.returncode == 0, result.stderr
     assert all("related" not in command for command in calls(repo))
     if generated.endswith(".ts"):
-        assert calls(repo)[0][-1] == "src/lib/localstorage-policy.test.ts"
+        assert calls(repo)[0][-1] == "src/lib/auth/localstorage-policy.test.ts"
     else:
         assert "require tsc and codegen freshness" in result.stdout
 
 
 def test_type_artifact_does_not_hide_changed_runtime_source(repo: Path) -> None:
-    commit(repo, "ui/web/src/lib/types-generated.ts", "export interface Example {}")
+    commit(repo, "ui/web/src/lib/contracts/types-generated.ts", "export interface Example {}")
     commit(repo, "ui/web/scripts/runtime.mjs", "export const x = 1")
     result = select(repo, "vitest")
     assert result.returncode == 0, result.stderr
@@ -648,6 +659,8 @@ def test_type_artifact_does_not_hide_changed_runtime_source(repo: Path) -> None:
         "vitest",
         "related",
         "--run",
+        "--config",
+        "tests/vitest.config.mts",
         "--passWithNoTests=false",
         "scripts/runtime.mjs",
     ]
@@ -679,8 +692,10 @@ def test_global_inputs_report_ci_gap_and_keep_known_disk_test(repo: Path) -> Non
             "--no-install",
             "vitest",
             "run",
+            "--config",
+            "tests/vitest.config.mts",
             "--passWithNoTests=false",
-            "src/lib/frontend-bind.test.ts",
+            "src/lib/transport/frontend-bind.test.ts",
         ]
     ]
 
@@ -702,15 +717,24 @@ def test_empty_or_failed_related_run_stays_failed(
     monkeypatch.setenv("TOOL_STATUS", "1")
     result = select(repo, "vitest")
     assert result.returncode == 1
-    assert calls(repo)[0][2:5] == ["related", "--run", "--passWithNoTests=false"]
+    assert calls(repo)[0][2:7] == [
+        "related",
+        "--run",
+        "--config",
+        "tests/vitest.config.mts",
+        "--passWithNoTests=false",
+    ]
 
 
 @pytest.mark.parametrize(
     ("path", "consumer"),
     [
-        ("services/entrypoints/gate/static/login.html", "src/lib/gate-login.test.ts"),
-        ("tests/fixtures/events/chat_delta.json", "src/lib/event-fixtures.test.ts"),
-        ("base/packages/plugins/ui_contributions.py", "src/components/plugin-nav-icon.test.ts"),
+        ("services/entrypoints/gate/static/login.html", "src/lib/transport/gate-login.test.ts"),
+        ("tests/fixtures/events/chat/chat_delta.json", "src/lib/contracts/event-fixtures.test.ts"),
+        (
+            "base/packages/plugins/ui_contributions.py",
+            "src/components/plugins/plugin-nav-icon.test.ts",
+        ),
         ("ui/app/app-ui/locales/en.js", "src/app/app-ui-locale.test.ts"),
         ("ui/web/messages/en/core.json", "src/i18n/messages-layout.test.ts"),
         ("ui/web/src/app/globals.css", "src/app/globals-font-stack.test.ts"),
@@ -742,8 +766,10 @@ def test_delete_only_input_checks_type_project_and_reports_test_closure(repo: Pa
             "--no-install",
             "vitest",
             "run",
+            "--config",
+            "tests/vitest.config.mts",
             "--passWithNoTests=false",
-            "src/lib/localstorage-policy.test.ts",
+            "src/lib/auth/localstorage-policy.test.ts",
         ]
     ]
 

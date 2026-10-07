@@ -11,7 +11,7 @@
 // Group ids double as element ids / URL anchors and MUST match the Config
 // sub-entries in _sections.ts (the nav links jump to them).
 
-import type { ConfigFieldView } from "@/lib/types";
+import type { ConfigFieldView } from "@/lib/contracts/types";
 
 import { CONTROL_SECTIONS } from "./_sections";
 

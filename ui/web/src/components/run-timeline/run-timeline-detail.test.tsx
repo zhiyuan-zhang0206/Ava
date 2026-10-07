@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RunTimelineNode } from "@/lib/types";
+import type { RunTimelineNode } from "@/lib/contracts/types";
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: { getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)) },
 }));
 

@@ -7,11 +7,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { api } from "@/lib/transport/api";
 
 import { DefaultModelPanel } from "./_default_model";
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: {
     getDefaultModel: vi.fn(),
     getModels: vi.fn(),

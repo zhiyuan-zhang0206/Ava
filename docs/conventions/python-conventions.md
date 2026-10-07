@@ -459,4 +459,4 @@ The roster (`/api/cluster/roster`) legitimately lists every host — it shows
 ## Lint vs Sweeper boundary
 
 Which debt is a blocking lint here vs a periodic Sweeper finding is decided by
-the graduation test in [`lint-vs-sweeper.md`](lint-vs-sweeper.md).
+the graduation test in [`lint-vs-sweeper.md`](engineering/lint-vs-sweeper.md).

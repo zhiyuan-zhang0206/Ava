@@ -51,9 +51,9 @@ channels]]):
 repo-development workflow and Ava-cluster-operations family (review-contribution,
 ava-self-development, …) stopped being
 fleet-distributed (issue #146;
-`docs/decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`,
+`docs/decisions/runtime/processes/shutdown/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`,
 resolving the open point in
-`docs/decisions/2026-08-19-four-layer-modification-model.md`). A converge pass
+`docs/decisions/extensions/skills/2026-08-19-four-layer-modification-model.md`). A converge pass
 treats them as gone sources: untouched copies they used to land are removed
 and deregistered, so runtime agents' indexes lose the L4 noise. They reach
 agents only through the project-local mount — see

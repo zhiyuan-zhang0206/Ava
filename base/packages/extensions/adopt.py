@@ -1,6 +1,6 @@
 """Adopt this machine's locally installed skills into the cluster registry.
 
-The migration half of S2 (`future/infra/extension-ownership.md`): every machine
+The migration half of S2 (`future/infra/extensions/extension-ownership.md`): every machine
 that installed a skill before the registry existed still holds it as a purely
 local fact in `installed.json`. Nothing else in the slice looks at those — the
 install path writes the cluster row going forward, and materialization only ever

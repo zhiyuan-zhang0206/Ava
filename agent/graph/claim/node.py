@@ -3,8 +3,8 @@
 Replaces V1's transitional entry_node + loop.py's pick_thread/claim/mark_done
 flow. Per framework-rearchitecture v2 unified gateway design: all agent
 control signals pass through the inbound table, dispatched here by kind (see
-docs/decisions/2026-05-02-self-cycling-langgraph.md +
-docs/decisions/2026-04-26-inbound-queue.md).
+docs/decisions/agents/graph/2026-05-02-self-cycling-langgraph.md +
+docs/decisions/agents/messages/2026-04-26-inbound-queue.md).
 
 This module is the pipeline orchestrator; the per-axis logic lives in
 co-located modules (Task #1006 split — the original 979-line file was divided

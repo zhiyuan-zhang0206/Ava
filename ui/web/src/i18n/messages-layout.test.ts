@@ -15,9 +15,9 @@ const MESSAGES = join(__dirname, "..", "..", "messages");
 const CATALOGS = { en, zh } as const;
 
 function namespaceFiles(locale: string): string[] {
-  return readdirSync(join(MESSAGES, locale))
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => f.slice(0, -".json".length))
+  return readdirSync(join(MESSAGES, locale), { recursive: true })
+    .filter((f): f is string => typeof f === "string" && f.endsWith(".json"))
+    .map((f) => f.split("/").at(-1)!.slice(0, -".json".length))
     .sort();
 }
 
@@ -35,7 +35,9 @@ describe("message catalog layout", () => {
   it.each(Object.entries(CATALOGS))("%s index lists every namespace file under its own name", (locale, catalog) => {
     expect(Object.keys(catalog).sort()).toEqual(namespaceFiles(locale));
     for (const namespace of namespaceFiles(locale)) {
-      const onDisk: unknown = JSON.parse(readFileSync(join(MESSAGES, locale, `${namespace}.json`), "utf8"));
+      const file = readdirSync(join(MESSAGES, locale), { recursive: true }).find((file) => typeof file === "string" && file.endsWith(`/${namespace}.json`));
+      expect(file, namespace).toBeDefined();
+      const onDisk: unknown = JSON.parse(readFileSync(join(MESSAGES, locale, file as string), "utf8"));
       expect((catalog as Record<string, unknown>)[namespace], namespace).toEqual(onDisk);
     }
   });

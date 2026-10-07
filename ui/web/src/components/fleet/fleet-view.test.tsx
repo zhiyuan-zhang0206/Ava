@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow , NoticeItem } from "@/lib/types";
+import type { AgentRow , NoticeItem } from "@/lib/contracts/types";
 
 // next/link needs no router in this isolated render — a plain anchor suffices.
 // next/navigation: TaskGraph calls useRouter at its top level now (the graph
@@ -30,7 +30,7 @@ vi.mock("@/components/fleet/graph-view", () => ({
 // override via isLargeMock.mockReturnValue(false). R4 layer 4: FleetView
 // consumes useBreakpoint — the single breakpoint source.
 const isLargeMock = vi.fn<() => boolean>(() => true);
-vi.mock("@/lib/breakpoint", () => ({
+vi.mock("@/lib/layout/breakpoint", () => ({
   useBreakpoint: () => ({
     tier: isLargeMock() ? "xl" : "xs",
     isNarrow: !isLargeMock(),
@@ -57,10 +57,10 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
 
 // The live agent list is injected; the view itself is pure projection.
 const agentsMock = vi.fn<() => AgentRow[]>();
-vi.mock("@/lib/use-fleet-agents", () => ({ useFleetAgents: () => agentsMock() }));
+vi.mock("@/lib/agents/use-fleet-agents", () => ({ useFleetAgents: () => agentsMock() }));
 
 // The embedded Inbox queue fetches notice history on mount; empty here.
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: {
     getNotices: () =>
       Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }),
@@ -92,25 +92,25 @@ const useNoticesMock = vi.fn<() => TestNoticesFeed>(() => ({
   resolvedError: false,
   isLoading: false,
 }));
-vi.mock("@/lib/use-notices", () => ({ useNotices: () => useNoticesMock() }));
+vi.mock("@/lib/notifications/use-notices", () => ({ useNotices: () => useNoticesMock() }));
 
 // useTasks (the queue's grouping join + the Task Graph) also needs
 // EventStreamProvider; an empty registry keeps every queue entry flat.
-vi.mock("@/lib/use-tasks", () => ({
+vi.mock("@/lib/notifications/use-tasks", () => ({
   useTasks: () => ({ tasks: [], loading: false, error: false }),
 }));
 
 // The inbox's fleet-wide open-pages hook is SSE-backed (EventStreamProvider);
 // stub it to no open pages for these layout tests.
-vi.mock("@/lib/use-all-pages", () => ({ useAllPages: () => [] }));
+vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
 
 // Queue-collapse / left-view are DB-backed user settings; the reactive mock
 // keeps them deterministic + re-renders on setSetting (no React Query network).
-vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
 
-import { BAR_HEIGHT_CLASS } from "@/lib/layout";
+import { BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { FleetView } from "./fleet-view";
 
 beforeEach(() => resetMockSettings());

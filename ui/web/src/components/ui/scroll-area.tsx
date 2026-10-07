@@ -3,9 +3,9 @@
 import * as React from "react"
 import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area"
 
-import { cn } from "@/lib/utils"
-import { FLEX, FLEX_1, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { useNonce } from "@/lib/nonce-context";
+import { cn } from "@/lib/format/utils"
+import { FLEX, FLEX_1, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { useNonce } from "@/lib/auth/nonce-context";
 
 const SCROLLBAR_IDLE_DELAY_MS = 800
 

@@ -426,7 +426,7 @@ def daemon_acceptance() -> frozenset[str] | None:
     (`settings.data_plane.is_remote`): it keeps no write generations and issues no token, so
     its gateway-local services present, and its daemons accept, the human secret. That branch
     is the exception to "outside the gateway, the CLI and the root, no component holds the
-    cluster secret" (docs/decisions/2026-10-03-cluster-secret-contraction.md); the live
+    cluster secret" (docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md); the live
     deployment's data plane is local, and this branch only runs when `is_remote`.
     """
     from base.cluster.authority.api import acceptance, token_digest

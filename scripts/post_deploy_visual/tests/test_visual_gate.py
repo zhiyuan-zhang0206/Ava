@@ -36,7 +36,7 @@ def test_mint_goldens_copies_all_captures_and_writes_provenance(tmp_path: Path) 
 
     golden_dir = golden_root / "captures"
     expected = {name.replace("-current-", "-golden-") for name in _expected_capture_names()}
-    assert {path.name for path in golden_dir.glob("*-golden-[12].png")} == expected
+    assert {path.name for path in golden_dir.rglob("*-golden-[12].png")} == expected
     meta = json.loads((golden_root / "meta.json").read_text())
     assert meta["browser_engine"] == "playwright-chromium 147.0.0.0-fake"
 

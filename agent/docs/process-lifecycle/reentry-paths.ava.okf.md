@@ -31,7 +31,7 @@ accept different lifecycle states.
   state: any new message may resurrect a user-terminated agent, including its
   own shells' and watchers' messages — a terminate with
   `kill_all_shell_sessions` kills those sessions right before the termination
-  applies ([decision](../../../docs/decisions/2026-09-27-terminate-has-no-closed-state.md)).
+  applies ([decision](../../../docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md)).
 - A chat stalled `pending` on a crash-marked idling corpse reaches a
   bounded-time recovery decision: the delivery watchdog escalates to the
   owner's home runner (`recover-crash-marked-v2`), which harvests the corpse

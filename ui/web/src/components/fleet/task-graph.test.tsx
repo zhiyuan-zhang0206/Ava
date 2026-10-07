@@ -10,8 +10,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TaskRow } from "@/lib/types";
-import type { TasksResult } from "@/lib/use-tasks";
+import type { TaskRow } from "@/lib/contracts/types";
+import type { TasksResult } from "@/lib/notifications/use-tasks";
 import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
 
 import { FORCE_DEFAULTS, FORCE_GROUPS, TASK_FORCE_GROUPS, type ForceGroup } from "./force-controls";
@@ -19,14 +19,14 @@ import { STATUS_TO_LANE } from "./task-kanban";
 import { STATUS_FILL, TASK_FORCE_KEY, TASK_LEGEND_ENTRIES } from "./task-graph";
 import { TaskGraph } from "./task-graph";
 
-vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
 const useTasks = vi.fn<(...args: string[]) => TasksResult>();
-vi.mock("@/lib/use-tasks", () => ({
+vi.mock("@/lib/notifications/use-tasks", () => ({
   useTasks: (...args: string[]) => useTasks(...args),
 }));
 

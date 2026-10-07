@@ -1,6 +1,6 @@
 # The Linux verification container: one Ava machine, born fresh for each run.
 #
-# Design: future/infra/verification-boundaries.md. Build and run through
+# Design: future/infra/engineering/verification-boundaries.md. Build and run through
 # `python3 scripts/verify/container.py`; this file is its image definition.
 #
 # The image is the machine, not the software under test. It carries the system

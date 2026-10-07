@@ -32,7 +32,7 @@ self-hoster clones and runs the documented bring-up; on macOS the permissions he
 download quarantine and no Apple account in the loop. Code signing for TCC is
 free (a stable self-signed cert — the property that survives rebuilds is the
 designated requirement, not a paid identity). See the permissions helper
-(`services/native/`) and [`decentralized-install-and-config.md`](infra/decentralized-install-and-config.md)
+(`services/native/`) and [`decentralized-install-and-config.md`](infra/extensions/decentralized-install-and-config.md)
 (install is a local operation).
 
 ## What the `.app` is — and when it is worth it
@@ -61,4 +61,4 @@ stranger clone and run*:
   **unlocked** GUI session (synthetic input / capture are dropped on a locked
   screen).
 - Windows hardware uses the Linux lifecycle in WSL2; a native Windows root
-  adapter remains unavailable ([setup](../docs/conventions/windows-setup.md)).
+  adapter remains unavailable ([setup](../docs/conventions/operations/windows-setup.md)).

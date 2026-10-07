@@ -176,7 +176,7 @@ def worker_prompt(day: str, scan: ScanReport) -> str:
     return f"""You are today's debt-clearing pass for the Ava repository ({day}).
 
 Start a fresh worktree from origin/main and follow the normal PR workflow; never push main.
-Use the `ava.skills.sweeper` engine with `docs/conventions/tech-debt.md` as project input.
+Use the `ava.skills.sweeper` engine with `docs/conventions/engineering/tech-debt.md` as project input.
 Reconcile the single ledger at `{_LEDGER_PATH}`.
 
 The mechanical scan artifact is `{scan.artifact_path}`.

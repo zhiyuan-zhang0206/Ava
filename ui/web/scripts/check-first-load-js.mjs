@@ -61,7 +61,8 @@ export function checkFirstLoadJs(routeStats, route, budgetBytes) {
   return bytes;
 }
 
-if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+const entrypoint = process.argv.at(1);
+if (entrypoint !== undefined && path.resolve(entrypoint) === fileURLToPath(import.meta.url)) {
   const route = "/";
   // Next 16.2.7 measured 1,207,268 bytes at introduction. This allows 42,732
   // bytes (3.5%) of intentional growth before a bundle-size review is required.
