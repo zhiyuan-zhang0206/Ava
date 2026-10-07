@@ -85,8 +85,11 @@ and runs on **logical paths**: the `docs/` layer is transparent, so the last
 logical paths, `<dir>/<dir>.ava.okf.md` is the overview node for `<dir>/`, and
 the other files inside `<dir>/` are its children (user ruling 2026-08-12: a directory's
 overview lives *inside* the directory, not beside it at the parent level).
-`compute_parent` does not resolve a sibling `<dir>.ava.okf.md` at the parent
-level; lint rule E009 fires on one, layered or not. Links are not logical:
+`compute_parent` searches for the nearest ancestor overview, skipping the node
+itself and directories without an overview. Nested overviews therefore belong
+to their enclosing domain rather than the apex. Only nodes with no ancestor
+overview fall back to the root. It does not resolve a sibling `<dir>.ava.okf.md`
+at the parent level; lint rule E009 fires on one, layered or not. Links are not logical:
 `[[…]]` and relative markdown links name the real path, `docs/` included.
 
 Splitting an over-cap node follows the same rule: the child goes in the
@@ -95,14 +98,14 @@ directory named after the parent's stem — inside the `docs/` layer, so
 directory holds only documents when the code it describes lives elsewhere
 (`ava_builtins/plugins/ava_fleet/docs/neighbors/`,
 `ui/web/src/docs/frontend-components/`); a child placed beside its parent in the
-layer would attach to the directory's overview (or the root when there is none),
+layer would attach to the nearest ancestor overview (or ultimately the root),
 not to the node it was split from.
 
 The one exception is the **index layer**: the apex and the cross-domain concept
 systems — plugins, skills, MCP integration, and the design-phase R1–R4 models —
 have no code directory to sit inside, so they live in `okf/`. `compute_parent`
-resolves a missing filesystem parent to the root — so the tree has exactly one
-root and no dangling edges.
+uses the root only when no ancestor overview exists — so the tree has exactly
+one root and no dangling edges.
 
 A `[[wikilink]]` is the **edge syntax of the node graph**, so its universe is the
 `.ava.okf.md` files and nothing else. A link to any other axis — a decision

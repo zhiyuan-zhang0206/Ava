@@ -396,7 +396,7 @@ window.GRAPH_DATA = /*__GRAPH_DATA_JSON__*/;
   }
 
   const collapsed = new Set();
-  const domainIds = [...new Set(DATA.treeEdges.map(e => e.source))];
+  const domainIds = DATA.nodes.filter(n => n.parent && childrenOf.get(n.id).length).map(n => n.id);
 
   function isVisible(id) {
     let cur = nodeById.get(id).parent;

@@ -43,4 +43,4 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 ## Relationship to Other Domains
 - [[agent-runtime.ava.okf.md]] — runtime implementation (parallel perspective)
 - [[cross-cutting.ava.okf.md]] — cross-cutting concerns (environment variables, logging)
-- [[extensions.ava.okf.md]] — extension system (plugin, skill)
+- [[ava_builtins/docs/extensions.ava.okf.md]] — extension system (plugin, skill)

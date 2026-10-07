@@ -20,4 +20,4 @@ A **methodology** for creating high-quality Ava skills (`$AVA_HOME/skills/skill-
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — created things land in this mechanism
-- [[plugins.ava.okf.md|Plugin system]] — boundary between skill and plugin
+- [[okf/plugins/plugins.ava.okf.md|Plugin system]] — boundary between skill and plugin

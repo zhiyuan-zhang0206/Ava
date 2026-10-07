@@ -104,7 +104,7 @@ offers idle agents three honest options (working / waiting / done), and
 mechanisms nudge agents that stall, reach for the wrong SDK idiom, or miss a
 newly installed skill. Ambiguous silence becomes supervisable state.
 
-→ [All anti-RL-bias mechanisms](../okf/anti-rl-bias.ava.okf.md)
+→ [All anti-RL-bias mechanisms](../agent/docs/anti-rl-bias.ava.okf.md)
 
 ### 5. Observability — every turn is a trace
 
