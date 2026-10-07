@@ -35,6 +35,13 @@ reliable absolute vendor figures display a dash. Relative speed multipliers
 and cluster measurements do not fill this column. The backend also rejects
 unsupported explicit effort rather than translating it to another grade.
 
+Rates below USD 1 use up to four significant digits, with at least two decimal
+places, so nonzero cache prices such as USD 0.003 never display as USD 0.00.
+The price tooltip labels input/cache-read/output, explains that the displayed
+rates cover the current base tier, and includes declared 5-minute/1-hour
+cache-write rates. Longer contexts and recurring rate windows can select
+different rates for actual billing.
+
 Guide, preset, schedule, and package-draft creation toasts say "created" and
 point to the conversation for progress; they do not claim that a turn started.
 The conversation does not render a host-admission or launch-availability strip.

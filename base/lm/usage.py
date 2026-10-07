@@ -8,6 +8,8 @@ from datetime import datetime
 from langchain_core.messages import AIMessage
 
 from base.lm.plugin_providers import model_catalog
+from base.lm.pricing import CostQuote
+from base.lm.pricing.cache_writes import cache_write_tokens
 from base.lm.provider_api import InferenceSpeed
 from base.log import logger
 
@@ -75,11 +77,14 @@ def log_usage_from_message(
     from base.lm.reasoning import extract_reasoning_tokens
 
     reasoning = extract_reasoning_tokens(msg.usage_metadata, content=msg.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    write_5m, write_1h = cache_write_tokens(usage_metadata.get("input_token_details") or {})
     return _log_usage(
         usage_model(msg, model),
         in_total=in_total,
         out_total=out_total,
         cache_read=cache_read,
+        cache_write_5m=write_5m,
+        cache_write_1h=write_1h,
         reasoning=reasoning,
         latency_ms=latency_ms,
         decode_ms=decode_ms,
@@ -100,6 +105,8 @@ def log_usage_fields(
     tok_in: int,
     tok_out: int,
     tok_cached: int = 0,
+    cache_write_5m: int = 0,
+    cache_write_1h: int = 0,
     tok_reasoning: int = 0,
     latency_ms: float | None = None,
     usage_kind: str,
@@ -113,6 +120,8 @@ def log_usage_fields(
         in_total=tok_in,
         out_total=tok_out,
         cache_read=tok_cached,
+        cache_write_5m=cache_write_5m,
+        cache_write_1h=cache_write_1h,
         reasoning=tok_reasoning,
         latency_ms=latency_ms,
         usage_kind=usage_kind,
@@ -120,6 +129,23 @@ def log_usage_fields(
         cache_mechanism=cache_mechanism,
         cache_scope=cache_scope,
     )
+
+
+def _price_snapshot(priced: CostQuote) -> dict[str, float]:
+    return {
+        "cost_usd": priced.cost_usd,
+        "price_miss": priced.rates.cache_miss,
+        "price_hit": priced.rates.cache_hit,
+        "price_out": priced.rates.output,
+        **{
+            key: value
+            for key, value in (
+                ("price_write_5m", priced.rates.cache_write_5m),
+                ("price_write_1h", priced.rates.cache_write_1h),
+            )
+            if value is not None
+        },
+    }
 
 
 def _log_usage(
@@ -139,6 +165,8 @@ def _log_usage(
     cache_scope: str | None = None,
     emit_billing: bool = True,
     requested_model: str | None = None,
+    cache_write_5m: int = 0,
+    cache_write_1h: int = 0,
 ) -> tuple[int, float]:
     """Emit one priced or explicitly unpriced usage event and billing span."""
     from base.lm.billing import emit_billing_event, vendor_of_model
@@ -146,14 +174,17 @@ def _log_usage(
 
     cache_pct = f" ({cache_read / in_total * 100:.0f}%)" if in_total else ""
     reason_pct = f" ({reasoning / out_total * 100:.0f}%)" if out_total else ""
-    priced = quote(model, in_total, out_total, cache_read, at=priced_at)
+    priced = quote(
+        model,
+        in_total,
+        out_total,
+        cache_read,
+        at=priced_at,
+        cache_write_5m=cache_write_5m,
+        cache_write_1h=cache_write_1h,
+    )
     if priced is not None:
-        snapshot = {
-            "cost_usd": priced.cost_usd,
-            "price_miss": priced.rates.cache_miss,
-            "price_hit": priced.rates.cache_hit,
-            "price_out": priced.rates.output,
-        }
+        snapshot = _price_snapshot(priced)
     else:
         logger.warning(
             "[llm usage] model {model!r} is unpriced; add it to "
@@ -170,6 +201,8 @@ def _log_usage(
             tok_in=in_total,
             tok_out=out_total,
             tok_cached=cache_read,
+            cache_write_5m=cache_write_5m,
+            cache_write_1h=cache_write_1h,
             cost_usd=priced.cost_usd if priced is not None else 0.0,
             usage_kind=usage_kind,
             unpriced=priced is None,
@@ -186,6 +219,8 @@ def _log_usage(
         calls=1,
         in_total=in_total,
         cache_read=cache_read,
+        cache_write_5m=cache_write_5m,
+        cache_write_1h=cache_write_1h,
         cache_pct=cache_pct,
         out_total=out_total,
         reasoning=reasoning,

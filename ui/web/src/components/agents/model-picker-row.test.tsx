@@ -42,4 +42,31 @@ describe("model picker TPS column", () => {
     );
     expect(screen.getByTitle("No reliable vendor-published output TPS").textContent).toBe("—");
   });
+
+  it("keeps small rates visible and explains the three prices", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={{ spawn: messages }}>
+        <ModelPickerRow model="deepseek-flash" selected={false} onSelect={vi.fn()}
+          info={{ provider: "deepseek", context_window: 1_000_000,
+            pricing: { input: 0.33, cache_read: 0.003, output: 0.99 } }} />
+      </NextIntlClientProvider>,
+    );
+    const prices = screen.getByText(/\$0.33.*\$0.003.*\$0.99/);
+    expect(prices.title).toContain("Input / cache read / output");
+    expect(prices.title).toContain("Longer contexts");
+  });
+
+  it("includes declared cache-write rates in the price tooltip", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={{ spawn: messages }}>
+        <ModelPickerRow model="claude-opus-5-5" selected={false} onSelect={vi.fn()}
+          info={{ provider: "claude", context_window: 1_000_000,
+            pricing: { input: 4, cache_read: 0.2, output: 20,
+              cache_write_5m: 5, cache_write_1h: 8 } }} />
+      </NextIntlClientProvider>,
+    );
+    const prices = screen.getByText(/\$4.00.*\$0.20.*\$20.00/);
+    expect(prices.title).toContain("Cache write (5m): $5.00 / 1M");
+    expect(prices.title).toContain("Cache write (1h): $8.00 / 1M");
+  });
 });
