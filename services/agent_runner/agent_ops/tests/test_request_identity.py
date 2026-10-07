@@ -25,8 +25,9 @@ def pool() -> Iterator[ConnectionPool]:
 
 
 @pytest.fixture
-def dispatches(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+def dispatches(monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
+    dispatch_pool = pool
 
     async def dispatch(
         kind: str,
@@ -34,7 +35,9 @@ def dispatches(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         *,
         active_ops: daemon.ActiveOps,
         workers: WorkerFutures,
+        pool: ConnectionPool,
     ) -> tuple[OpStatus, dict[str, object]]:
+        assert pool is dispatch_pool
         calls.append({"kind": kind, "payload": payload})
         return OpStatus.COMPLETED, {"accepted": True}
 
@@ -94,6 +97,7 @@ async def test_effect_then_exception_keeps_uncertain_claim(
         *,
         active_ops: daemon.ActiveOps,
         workers: WorkerFutures,
+        pool: ConnectionPool,
     ) -> tuple[OpStatus, dict[str, object]]:
         with pool.connection() as conn:
             conn.execute("INSERT INTO agents (label) VALUES ('effect-before-crash')")
@@ -132,6 +136,7 @@ async def test_owner_cancellation_never_frees_its_key(
         *,
         active_ops: daemon.ActiveOps,
         workers: WorkerFutures,
+        pool: ConnectionPool,
     ) -> tuple[OpStatus, dict[str, object]]:
         nonlocal calls
         calls += 1
