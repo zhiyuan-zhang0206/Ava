@@ -1,9 +1,5 @@
 {
-  "files": {
-    "agent/tests/test_compact.py": 1142,
-    "agent/tests/test_impersonation.py": 842,
-    "agent/tests/test_state_slot.py": 936
-  },
+  "files": {},
   "patch_targets": {
     "agent/tests/test_exec_subprocess.py::agent.graph.exec._process": 1,
     "agent/tests/test_external.py::ava.external._deliver_telemetry_before_detach": 1,

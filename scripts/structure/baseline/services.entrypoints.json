@@ -8,8 +8,5 @@
     "services/entrypoints/im_bridge/core.py::asyncio-task:IMBridgeCore._start_typing": 1,
     "services/entrypoints/im_bridge/core.py::asyncio-task:IMBridgeCore.ensure_outbox_replay": 1
   },
-  "files": {
-    "services/entrypoints/im_bridge/adapters/tests/test_feishu_adapter.py": 1255,
-    "services/entrypoints/im_bridge/tests/test_im_bridge_core.py": 1423
-  }
+  "files": {}
 }

@@ -1,6 +1,4 @@
 {
-  "complexity": {
-    "scripts/tcc-onboard-helper-grants.py::main": 45
-  },
+  "complexity": {},
   "files": {}
 }

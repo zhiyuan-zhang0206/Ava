@@ -1,7 +1,5 @@
 {
-  "files": {
-    "tests/scripts/test_alert_rules.py": 1150
-  },
+  "files": {},
   "patch_targets": {
     "tests/scripts/test_rotate_cluster_secret.py::services.backup.dump._run_with_progress": 1
   }

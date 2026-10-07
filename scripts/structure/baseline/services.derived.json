@@ -2,11 +2,7 @@
   "ambient_state": {
     "services/derived/hierarchy_worker/runner.py::global-rebind:_fallback_scanned_at": 1
   },
-  "files": {
-    "services/derived/hierarchy_worker/tests/test_hierarchy_worker.py": 897,
-    "services/derived/memory_indexer/embeddings/tests/test_embeddings.py": 922,
-    "services/derived/memory_indexer/tests/test_memory_indexer.py": 1287
-  },
+  "files": {},
   "patch_targets": {
     "services/derived/memory_indexer/tests/test_memory_indexer.py::services.derived.memory_indexer.embeddings.gemini._EMBED_POLICY": 1
   }

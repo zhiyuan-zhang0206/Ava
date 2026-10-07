@@ -11,13 +11,7 @@
     "services/agent_runner/agent_ops/maintenance.py::ambient-container:_requests": 1,
     "services/agent_runner/agent_ops/maintenance.py::ambient-container:_workers": 1
   },
-  "files": {
-    "services/agent_runner/agent_host/tests/test_agent_host.py": 1770,
-    "services/agent_runner/agent_host/tests/test_circuit_breaker.py": 864,
-    "services/agent_runner/agent_host/tests/test_turn_dispatcher.py": 1428,
-    "services/agent_runner/agent_ops/tests/test_daemon.py": 1490,
-    "services/agent_runner/page_server/tests/test_page_server_daemon.py": 855
-  },
+  "files": {},
   "patch_targets": {
     "services/agent_runner/agent_host/tests/test_hosted_force_quiescence.py::agent.graph.exec._process": 2,
     "services/agent_runner/agent_host/tests/test_hosted_force_quiescence.py::agent.graph.exec._subprocess": 1,
