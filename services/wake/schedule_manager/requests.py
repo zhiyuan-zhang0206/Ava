@@ -8,8 +8,8 @@ bounded time for it to disappear. This module is the consumer.
 
 A request is deleted only after its sync ran, and only if it is still the row
 that was read (a newer request for the same schedule survives), so a crash
-between the sync and the delete runs the sync again: it is idempotent, kill then
-relaunch. While a maintenance hold is up nothing is consumed and the requests
+between the sync and the delete runs convergence again: matching persisted
+revision/session provenance is adopted instead of kill/relaunch. While a maintenance hold is up nothing is consumed and the requests
 stay queued.
 
 Synchronous psycopg; the loop calls it through `asyncio.to_thread`.
@@ -43,7 +43,7 @@ def consume_requests(pool: ConnectionPool, manager: ScheduleManager) -> int:
     handled = 0
     for schedule_id, requested_at in queued:
         if not manager.sync_one(schedule_id):
-            break  # a maintenance hold: leave the rest queued
+            continue  # leave held/uncertain work queued without blocking other schedules
         with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM schedule_sync_requests WHERE schedule_id = %s AND requested_at = %s",

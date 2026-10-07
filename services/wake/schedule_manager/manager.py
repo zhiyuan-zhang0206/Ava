@@ -67,8 +67,9 @@ from base.cluster import session_name
 from base.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.db.transaction import write_transaction
 from base.paths import ava_home
-from base.sessions.backend import get_shell_backend
+from base.sessions.backend import SessionBackend, get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
+from services.wake.schedule_manager import revisions
 
 _log = logging.getLogger(__name__)
 
@@ -128,27 +129,66 @@ class ScheduleManager:
     # ── control (the sync-request consumer calls this) ──────────────────────
 
     def sync_one(self, schedule_id: int) -> bool:
-        """Converge one schedule's session to its DB `enabled` state right
-        now (kill it, then relaunch if enabled), clearing its crash backoff. This
-        is the immediate path behind start / stop / restart and an edited-script
-        save (the relaunch makes the runner re-materialize the new script) —
-        rather than waiting up to a poll interval for the reconcile loop.
+        """Converge the current durable desired revision, preserving an applied run.
 
-        Returns False without acting while a maintenance hold is up: the
-        request must stay queued."""
+        Return False while held, backing off or missing safe session provenance;
+        the durable request stays queued for recovery.
+        """
         from base.deploy.maintenance import admission
 
         if admission.held():
             return False
         with self._lock:
+            return self._sync_revision(schedule_id)
+
+    def _sync_revision(self, schedule_id: int) -> bool:
+        with revisions.claim_convergence(self._pool, schedule_id) as owned:
+            if not owned:
+                return False
+            return self._sync_owned_revision(schedule_id)
+
+    def _sync_owned_revision(self, schedule_id: int) -> bool:
+        wanted = revisions.desired(self._pool, schedule_id)
+        if wanted is None or not wanted.enabled:
+            if not self._reap(schedule_id, owned=True):
+                return False
             self._clear_backoff([schedule_id])
-            if not self._reap(schedule_id):
-                if schedule_id in self._load_enabled():
-                    self._reap_retries.add(schedule_id)
+            if wanted is not None:
+                revisions.mark_applied(self._pool, schedule_id, wanted.revision)
+            return True
+        if schedule_id in self._live_ids(owned_id=schedule_id):
+            observed = revisions.launched_revision(schedule_id)
+            if observed is None:
+                # Existing legacy sessions at revision zero are adopted. For a
+                # pending versioned command missing provenance means uncertain,
+                # not permission to kill a possibly already-applied execution.
+                return wanted.revision == wanted.applied == 0
+            if observed == wanted.revision:
+                revisions.mark_applied(self._pool, schedule_id, wanted.revision)
                 return True
-            if schedule_id in self._load_enabled():
+            if not self._reap(schedule_id, owned=True):
+                self._reap_retries.add(schedule_id)
+                return False
+        elif wanted.revision == wanted.applied and wanted.status in ("completed", "error"):
+            return True
+        return self._launch_revision(schedule_id)
+
+    def _launch_revision(self, schedule_id: int) -> bool:
+        from base.deploy.lifecycle import start_serving
+
+        launch = self._load_enabled().get(schedule_id)
+        if launch is None or launch.backoff_remaining_s > 0:
+            return False
+        if launch.launch_count >= _BREAKER_MAX:
+            self._trip_breaker(schedule_id, launch.launch_count)
+            return False
+        with start_serving.recovery_permitted() as permitted:
+            if not permitted:
+                return False
+            if self._claim_launch(schedule_id, launch.launch_count):
                 self._launch(schedule_id)
-        return True
+        latest = revisions.desired(self._pool, schedule_id)
+        return latest is not None and latest.revision == latest.applied
 
     # ── reconcile (blocking: session backend + DB, run via asyncio.to_thread) ──
 
@@ -181,17 +221,22 @@ class ScheduleManager:
         # reconcile retry rather than adopting the stale survivor forever.
         retrying.intersection_update(live)
         for sid in retrying:
-            if self._reap(sid):
+            if self._retry_reap(sid):
                 live.remove(sid)
 
         # Kill sessions we no longer want (disabled / deleted).
         orphans = live - enabled
-        self._clear_backoff(sorted(orphans))
         for sid in orphans:
             if sid not in retrying:
-                self._reap(sid)
+                self._sync_revision(sid)
 
-        self._launch_missing(enabled_rows, sorted(enabled - live))
+        for sid in sorted(enabled):
+            wanted = revisions.desired(self._pool, sid)
+            if wanted is not None and wanted.revision != wanted.applied:
+                self._sync_revision(sid)
+        live = self._live_ids()
+        enabled_rows = self._load_enabled()
+        self._launch_missing(enabled_rows, sorted(set(enabled_rows) - live))
 
         # Reset backoff for schedules that have stayed live past the stable window.
         self._reset_stable_backoff(sorted(enabled & live))
@@ -226,8 +271,9 @@ class ScheduleManager:
             with start_serving.recovery_permitted() as permitted:
                 if not permitted:
                     continue
-                if self._claim_launch(sid, row.launch_count):
-                    self._launch(sid)
+                with revisions.claim_convergence(self._pool, sid) as owned:
+                    if owned and self._claim_launch(sid, row.launch_count):
+                        self._launch(sid)
 
     def _report_stalled_schedules(self, status_by_id: dict[int, str], live_ids: set[int]) -> None:
         """Alert once when an active schedule has been sessionless for 2h.
@@ -278,7 +324,7 @@ class ScheduleManager:
                 },
             )
 
-    def _live_ids(self) -> set[int]:
+    def _live_ids(self, *, owned_id: int | None = None) -> set[int]:
         from base.sessions.pty.allocation_freeze import current_generation
 
         live: set[int] = set()
@@ -298,13 +344,17 @@ class ScheduleManager:
             tail = name.removeprefix(prefix)
             if tail.isdigit():
                 schedule_id = int(tail)
-                if backend.session_generation(name) == generation:
+                observed_generation = backend.session_generation(name)
+                if observed_generation == generation:
                     live.add(schedule_id)
                     continue
                 # An enabled schedule is current desired state, but a matching
                 # name from the preceding flip is not its current exact
                 # session. Reap the old record and let this tick launch the
                 # desired runner under the active generation.
+                if owned_id is not None and owned_id != schedule_id:
+                    live.add(schedule_id)
+                    continue
                 if schedule_id in self._reap_retries:
                     live.add(schedule_id)
                     continue
@@ -313,7 +363,11 @@ class ScheduleManager:
                     tail,
                     name,
                 )
-                if not self._reap(schedule_id):
+                if not self._reap(
+                    schedule_id,
+                    owned=owned_id == schedule_id,
+                    expected_generation=observed_generation,
+                ):
                     self._reap_retries.add(schedule_id)
                     # Do not launch a second runner while the old exact session
                     # is still live. The centralized reaper retries with
@@ -360,6 +414,9 @@ class ScheduleManager:
 
         if admission.held():
             return
+        wanted = revisions.desired(self._pool, schedule_id)
+        if wanted is None or not wanted.enabled:
+            return
         name = session_name(f"schedule-{schedule_id}")
         backend = get_shell_backend()
         # A gateway restart (rollout / crash) can leave the previous run's
@@ -371,11 +428,8 @@ class ScheduleManager:
         # ever reached for a schedule the manager does not consider live (the
         # reconcile loop adopts live sessions without relaunching), so a
         # same-name survivor is by definition stale.
-        if name in backend.list_sessions():
-            _log.warning("schedule %s: reaping stale session %s", schedule_id, name)
-            if not self._reap(schedule_id):
-                self._reap_retries.add(schedule_id)
-                return
+        if not self._prepare_launch(schedule_id, name, backend, wanted):
+            return
         # _launch is only reached for a schedule with no live session, so any
         # in-progress run row at this point belongs to a dead process (the
         # reaped survivor, an externally killed runner, a crash that skipped
@@ -408,7 +462,7 @@ class ScheduleManager:
         # misread (the Task #1115 bug-B class).
         cmd = (
             f"cd {shlex.quote(str(REPO_ROOT))} && "
-            f".venv/bin/python -m gateway.schedules.runner {schedule_id}; exit $?"
+            f".venv/bin/python -m gateway.schedules.runner {schedule_id} {wanted.revision}; exit $?"
         )
         # No shell-TTL row is written here (deliberate exemption, task
         # #2614): agent_shell_ttls rows key on an agent id, and schedule
@@ -439,7 +493,36 @@ class ScheduleManager:
         # restart -- without this, last_error keeps showing "auto-restart
         # paused" forever even though the schedule is running fine (2026-08-11,
         # all 4 schedules had stale text after a rollout crash-loop).
-        self._set_status(schedule_id, "running", clear_last_error=True)
+        with write_transaction(self._pool) as conn:
+            conn.execute(
+                "UPDATE schedules SET applied_revision = %s, status = CASE "
+                "WHEN applied_revision = %s AND status = 'completed' THEN status ELSE 'running' END, "
+                "last_error = NULL WHERE id = %s AND desired_revision = %s AND enabled",
+                (wanted.revision, wanted.revision, schedule_id, wanted.revision),
+            )
+
+    def _prepare_launch(
+        self, schedule_id: int, name: str, backend: SessionBackend, wanted: revisions.Desired
+    ) -> bool:
+        from base.sessions.pty.allocation_freeze import current_generation
+
+        if name not in backend.list_sessions():
+            return True
+        if backend.session_generation(name) == current_generation():
+            observed = revisions.launched_revision(schedule_id)
+            if observed == wanted.revision:
+                revisions.mark_applied(self._pool, schedule_id, wanted.revision)
+                return False
+            if observed is None:
+                if wanted.revision > 0:
+                    return False  # uncertain allocation: no authority to replace
+                if wanted.applied == 0 and wanted.status == "running":
+                    return False  # legacy healthy execution observed after a stale scan
+        _log.warning("schedule %s: reaping stale session %s", schedule_id, name)
+        if not self._reap(schedule_id, owned=True):
+            self._reap_retries.add(schedule_id)
+            return False
+        return True
 
     def _log_reap_failure(
         self, schedule_id: int, name: str, failure: str, *, exc: BaseException | None = None
@@ -465,7 +548,28 @@ class ScheduleManager:
             exc_info=exc,
         )
 
-    def _reap(self, schedule_id: int) -> bool:
+    def _retry_reap(self, schedule_id: int) -> bool:
+        with revisions.claim_convergence(self._pool, schedule_id) as owned:
+            if not owned:
+                return False
+            wanted = revisions.desired(self._pool, schedule_id)
+            observed = revisions.launched_revision(schedule_id)
+            if wanted is not None and observed == wanted.revision == wanted.applied:
+                self._reap_retries.discard(schedule_id)
+                return False  # a different owner already installed this revision
+            return self._reap(schedule_id, owned=True)
+
+    def _reap(
+        self, schedule_id: int, *, owned: bool = False, expected_generation: str | None = None
+    ) -> bool:
+        if owned:
+            return self._reap_owned(schedule_id, expected_generation)
+        with revisions.claim_convergence(self._pool, schedule_id) as claimed:
+            if not claimed:
+                return False
+            return self._reap_owned(schedule_id, expected_generation)
+
+    def _reap_owned(self, schedule_id: int, expected_generation: str | None = None) -> bool:
         """Reap one schedule PTY through its identity-checked backend.
 
         The backend's success result means the session is confirmed gone. Do
@@ -474,6 +578,11 @@ class ScheduleManager:
         reconcile set and receive another official reap attempt next tick.
         """
         name = session_name(f"schedule-{schedule_id}")
+        if (
+            expected_generation is not None
+            and get_shell_backend().session_generation(name) != expected_generation
+        ):
+            return False
         try:
             reaped, mode = get_shell_backend().kill_session(name)
         except Exception as exc:

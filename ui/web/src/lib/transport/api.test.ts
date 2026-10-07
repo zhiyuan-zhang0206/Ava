@@ -763,3 +763,24 @@ describe("uploadFiles", () => {
     await expect(promise).rejects.toThrow("HTTP 400");
   });
 });
+
+describe("schedule operation identities", () => {
+  it("reuses an explicit restart identity without silently selecting principal scope", async () => {
+    await api.restartSchedule(17, "same-restart");
+    await api.restartSchedule(17, "same-restart");
+    for (const call of calls) {
+      const headers = new Headers(call.init?.headers);
+      expect(headers.get("Idempotency-Key")).toBe("same-restart");
+      expect(headers.has("Idempotency-Scope")).toBe(false);
+    }
+  });
+
+  it("gives deliberate new restarts separate identities", async () => {
+    await api.restartSchedule(17);
+    await api.restartSchedule(17);
+    const first = new Headers(calls[0].init?.headers).get("Idempotency-Key");
+    const second = new Headers(calls[1].init?.headers).get("Idempotency-Key");
+    expect(first).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+});

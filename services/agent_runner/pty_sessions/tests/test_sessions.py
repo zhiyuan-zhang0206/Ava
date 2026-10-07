@@ -434,3 +434,25 @@ def hosting_from_outside() -> str | None:
     from base.host.proc import hosting_supervised_session
 
     return hosting_supervised_session()
+
+
+def test_initial_command_provenance_is_opt_in_and_keeps_original_allocation(
+    unit_home: Path,
+) -> None:
+    name = "ava-test-command-provenance"
+    cmd = "echo first-allocation"
+    assert new(name, unit_home, cmd=cmd)
+    default = client.request("list", prefix=name)["sessions"]
+    assert "initial_command" not in default[0]
+    assert client.list_sessions(name)[0].initial_command is None
+    first = client.list_sessions(name, include_initial_command=True)[0]
+    assert first.initial_command == cmd
+    assert not new(name, unit_home, cmd="echo replacement")
+    second = client.list_sessions(name, include_initial_command=True)[0]
+    assert second.initial_command == cmd
+    assert second.started_at == first.started_at
+
+
+def test_list_rejects_invalid_initial_command_metadata_flag() -> None:
+    with pytest.raises(client.ServiceError, match="include_initial_command must be a boolean"):
+        client.request("list", include_initial_command="yes")

@@ -14,7 +14,7 @@ The service that supervises the `schedules` table: one session `ava-schedule-<id
 Two resident sequential loops under one `TaskGroup` (`services/wake/schedule_manager/daemon.py`, on `base/daemon/round_loop.py`). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. Each loop reports its own progress to `/healthz`.
 
 - **`reconcile`** (`manager.py`) — every 5 s.
-- **`requests`** (`requests.py`) — every second, runs the sync of each queued `schedule_sync_requests` row (kill, relaunch if enabled, clear the backoff), then deletes it only if unchanged. A maintenance hold leaves the rows queued.
+- **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A maintenance hold, failed reap/launch or uncertain provenance leaves work queued. See [[gateway/schedules/docs/schedule-convergence.ava.okf.md]] for transactional receipts and advisory ownership.
 
 ## State that moved from memory to the row
 | was (gateway, in memory) | now |

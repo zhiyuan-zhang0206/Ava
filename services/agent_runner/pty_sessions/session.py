@@ -135,6 +135,7 @@ class PtySession:
         self.cols = cols
         self.rows = rows
         self.record = record
+        self.initial_command: str | None = None
         # Any keeps the screen module and pyte lazy; naming PtyScreen here
         # would import them eagerly (no TYPE_CHECKING by repo convention).
         self._screen: Any = None

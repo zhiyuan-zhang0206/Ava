@@ -44,6 +44,12 @@ def _headers() -> dict[str, str]:
     return gateway_auth_headers()
 
 
+def _mutation_headers() -> dict[str, str]:
+    from uuid import uuid4
+
+    return {**_headers(), "Idempotency-Key": str(uuid4())}
+
+
 # ── list ──
 
 
@@ -184,7 +190,7 @@ def cmd_schedules_update(
         f"{_gateway_base()}/api/schedules/{schedule_id}",
         json=body,
         timeout=_TIMEOUT_S,
-        headers=_headers(),
+        headers=_mutation_headers(),
     )
     if resp.status_code in (400, 404, 409):
         print(_detail(resp), file=sys.stderr)
@@ -241,7 +247,7 @@ def _control(identifier: str, verb: str) -> int:
     resp = dial_post(
         f"{_gateway_base()}/api/schedules/{schedule_id}/{verb}",
         timeout=_TIMEOUT_S,
-        headers=_headers(),
+        headers=_mutation_headers(),
     )
     if resp.status_code in (404, 409):
         print(_detail(resp), file=sys.stderr)

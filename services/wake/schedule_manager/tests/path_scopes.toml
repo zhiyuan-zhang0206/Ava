@@ -8,4 +8,5 @@
     "test_manager.py",
     "test_manager_state.py",
     "test_requests.py",
+    "test_revision_recovery.py",
 ]
