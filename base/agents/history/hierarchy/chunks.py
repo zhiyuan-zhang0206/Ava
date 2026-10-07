@@ -70,7 +70,8 @@ CLAIM_LEASE_SECONDS = 3600.0
 # Claims of one job (generation retries and crashed-claim takeovers) before it is given up on.
 MAX_ATTEMPTS = 20
 # A job whose chunk the checkpoint never reaches (waiting is free: it does not count as an
-# attempt) is failed once it is this old.
+# attempt) is failed after waiting this long; the clock starts when it first waits, so a job that
+# sits in the queue while the feature is off is not timed.
 GIVE_UP_AFTER_SECONDS = 6 * 3600.0
 
 
@@ -260,7 +261,7 @@ WHERE id = (
     LIMIT 1
 )
 RETURNING id, agent_id, compact_version, start_index, end_index, end_msg_id,
-          boundary_checkpoint_id, attempts, extract(epoch FROM now() - created_at)
+          boundary_checkpoint_id, attempts, coalesce(extract(epoch FROM now() - waiting_since), 0)
 """
 
 
@@ -313,19 +314,28 @@ async def finish_job(
 
 
 async def release_job(
-    pool: AsyncConnectionPool, job_id: int, *, error: str, count_attempt: bool = True
+    pool: AsyncConnectionPool,
+    job_id: int,
+    *,
+    error: str,
+    count_attempt: bool = True,
+    waiting: bool | None = False,
 ) -> None:
     """Hand a claimed job back to the queue; it is retried after the spacing, counted from now.
 
-    A generation failure counts as an attempt; a wait (the checkpoint has not caught up, the
-    database blinked) does not, so the generation budget is spent only on generation.
+    A generation failure counts as an attempt (`waiting=False` ends any wait); a wait (the
+    checkpoint has not caught up, the database blinked: `waiting=True`) does not, and starts the
+    give-up clock if it is not running; a job put back because its host is stopping
+    (`count_attempt=False, waiting=None`) changes neither.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE understanding_chunk_jobs SET status = 'pending', error = %s, claimed_at = now(),"
-            " attempts = CASE WHEN %s THEN attempts ELSE greatest(attempts - 1, 0) END"
+            " attempts = CASE WHEN %s::boolean THEN attempts ELSE greatest(attempts - 1, 0) END,"
+            " waiting_since = CASE WHEN %s::boolean IS NULL THEN waiting_since"
+            " WHEN %s::boolean THEN coalesce(waiting_since, now()) ELSE NULL END"
             " WHERE id = %s",
-            (error, count_attempt, job_id),
+            (error, count_attempt, waiting, waiting, job_id),
         )
 
 
@@ -361,11 +371,6 @@ class ChunkDriftError(Exception):
     """The chunk's end message is not where the job recorded it: indices drifted."""
 
 
-class ChunkTruncatedError(Exception):
-    """A closing chunk reaches past what its boundary snapshot kept: the segment's last turns
-    are in no checkpoint, so the stretch cannot be described and the gap must be reported."""
-
-
 class ChunkEmptyError(Exception):
     """Nothing is left of the chunk after the SystemMessage head is excluded."""
 
@@ -377,12 +382,15 @@ class LocatedChunk:
     `prefix` is the request the agent itself would have sent up to the chunk's
     end (the segment's head, then its messages); the chunk is
     `prefix[start_offset:]`. `span` is the stitched, inclusive message-index
-    span the node row stores.
+    span the node row stores. `missing` is, for a closing chunk whose boundary snapshot lacks
+    the segment's last turns, the request-list indices `[from, to)` that no checkpoint holds
+    (the chunk is cut to what the snapshot kept); None otherwise.
     """
 
     prefix: tuple[BaseMessage, ...]
     start_offset: int
     span: tuple[int, int]
+    missing: tuple[int, int] | None = None
 
     @property
     def messages(self) -> tuple[BaseMessage, ...]:
@@ -402,12 +410,14 @@ def locate_chunk(
 
     A live chunk (`closing_segment` None) is searched newest segment first; a closing chunk is
     read from the named segment (the one its boundary checkpoint holds). Both are verified by
-    `end_msg_id` at the recorded position.
+    `end_msg_id` at the recorded position. A closing chunk whose end lies past what its boundary
+    snapshot kept is cut to the snapshot and reports the rest as `missing` (the consumer describes
+    what exists and emits the gap); a drift is still a failure.
 
     Raises:
         ChunkNotReadyError: the newest segment is shorter than the chunk's end.
         ChunkDriftError: no segment holds `end_msg_id` where the job recorded it.
-        ChunkTruncatedError: a closing chunk's end lies past what its snapshot kept.
+
         ChunkEmptyError: nothing of the chunk remains past the head.
     """
     count = len(history.segment_starts)
@@ -443,23 +453,25 @@ def _in_segment(
     seg_end = starts[k + 1] if k + 1 < len(starts) else len(history.messages)
     body = history.messages[starts[k] : seg_end]
     end_body = end_index - offset
+    missing: tuple[int, int] | None = None
     if closing and end_body > len(body):
-        raise ChunkTruncatedError(
-            f"segment {k}: the closing chunk ends at {end_index}, but its boundary snapshot "
-            f"holds {len(body) + offset} messages: the last turns of the segment are in no "
-            "checkpoint"
-        )
-    if not closing and len(body) < end_body:
+        missing = (len(body) + offset, end_index)
+        end_body = len(body)
+    elif not closing and len(body) < end_body:
         return "not_ready"
-    if end_body < 1 or body[end_body - 1].id != end_msg_id:
+    elif end_body < 1 or body[end_body - 1].id != end_msg_id:
         return None
     start_body = max(start_index - offset, 0)
     if end_body <= start_body:
-        raise ChunkEmptyError(f"segment {k}: chunk [{start_index}, {end_index}) is empty")
+        gap = (
+            f"; the snapshot lacks request indices {missing[0]} to {missing[1]}" if missing else ""
+        )
+        raise ChunkEmptyError(f"segment {k}: chunk [{start_index}, {end_index}) is empty{gap}")
     return LocatedChunk(
         prefix=(*((head,) if head is not None else ()), *body[:end_body]),
         start_offset=offset + start_body,
         span=(starts[k] + start_body, starts[k] + end_body - 1),
+        missing=missing,
     )
 
 
@@ -508,23 +520,53 @@ class GroupNode:
     text: str
 
 
-async def covered_end(
+async def covered_spans(
     pool: AsyncConnectionPool, agent_id: int, span: tuple[int, int]
-) -> int | None:
-    """The last message index covered by an existing level-1 node that overlaps `span`, or None.
+) -> list[tuple[int, int]]:
+    """The spans of the agent's level-1 nodes that overlap `span`, in order.
 
     Two jobs can describe overlapping stretches (a manual close and the producers' next size cut,
     a replay after a restart that lost the cut state, a retry of a job that had written its nodes):
-    nodes of one level never overlap, so the later chunk is shortened to what is still undescribed.
+    nodes of one level never overlap, so a later chunk is cut down to what no node covers
+    (`uncovered`). Only nodes of the chunk pipeline count (`chunk-*`): a node an old worker wrote
+    in a mixed-version window is not part of this tree.
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "SELECT max(span_end) FROM understanding_nodes"
-            " WHERE agent_id = %s AND depth = 1 AND span_start <= %s AND span_end >= %s",
+            "SELECT span_start, span_end FROM understanding_nodes"
+            " WHERE agent_id = %s AND depth = 1 AND engine_version LIKE 'chunk-%%'"
+            " AND span_start <= %s AND span_end >= %s ORDER BY span_start",
             (agent_id, span[1], span[0]),
         )
-        row = await cur.fetchone()
-    return None if row is None or row[0] is None else int(row[0])
+        return [(int(a), int(b)) for a, b in await cur.fetchall()]
+
+
+def uncovered(span: tuple[int, int], covered: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The runs of `span` (inclusive) that none of the sorted `covered` spans reaches."""
+    gaps: list[tuple[int, int]] = []
+    cursor = span[0]
+    for start, end in covered:
+        if start > cursor:
+            gaps.append((cursor, min(start - 1, span[1])))
+        cursor = max(cursor, end + 1)
+        if cursor > span[1]:
+            return gaps
+    if cursor <= span[1]:
+        gaps.append((cursor, span[1]))
+    return gaps
+
+
+def slice_chunk(located: LocatedChunk, first: int, last: int) -> LocatedChunk:
+    """`located` cut to the stitched message indices `first..last` (inside its span); the request
+    prefix ends at `last`, so the call still sends the agent's own conversation up to there."""
+    lead = first - located.span[0]
+    cut = located.start_offset + (last - located.span[0]) + 1
+    return LocatedChunk(
+        prefix=located.prefix[:cut],
+        start_offset=located.start_offset + lead,
+        span=(first, last),
+        missing=located.missing if last == located.span[1] else None,
+    )
 
 
 async def write_group_nodes(

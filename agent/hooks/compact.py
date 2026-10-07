@@ -51,7 +51,7 @@ from agent.graph.prompt.compaction import compact_contract
 from agent.hooks import Hook
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
-from agent.hooks.understanding_chunks import enqueue_closing_chunk
+from agent.hooks.understanding_chunks import await_snapshot, enqueue_closing_chunk
 from agent.llm.cache import ainvoke_with_cache_retry
 from agent.messages import (
     COMPACT_SUMMARY_HEADER,
@@ -158,6 +158,7 @@ async def stamp_compact_boundary(
     if pool is None:
         return
     boundary: str | None = None
+    await await_snapshot(pool, state, agent_id)
     try:
         boundary = await mark_compact_boundary(pool, str(agent_id))
     except Exception as exc:

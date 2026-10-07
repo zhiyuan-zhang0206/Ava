@@ -86,3 +86,18 @@ def test_a_node_names_the_job_and_the_check_that_wrote_it() -> None:
         )
     (row,) = load_nodes(db, AGENT_A + 10)
     assert (row.job_id, row.check_key) == (41, "ck")
+
+
+def test_a_node_an_older_releases_worker_wrote_is_not_read() -> None:
+    """A mixed-version window can leave nodes with a bare-number engine version beside the new
+    ones: only `chunk-*` / `group-*` nodes belong to this tree."""
+    db = Database.from_settings()
+    with db.write_transaction() as conn:
+        conn.execute(_INSERT_NODE, (AGENT_A + 20, 1, 0, 4, T0, T1, "new", None))
+        conn.execute(
+            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
+            " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
+            " schema_version) VALUES (%s, 1, 5, 9, 'k', 'old', 'h', 'i', 0, 'm', '0.3', '0.3', 1)",
+            (AGENT_A + 20,),
+        )
+    assert [r.text for r in load_nodes(db, AGENT_A + 20)] == ["new"]

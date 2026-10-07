@@ -208,7 +208,7 @@ def test_the_close_never_starts_before_the_end_of_an_existing_level_one_node(
         cur.execute(
             "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
             " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
-            " schema_version) VALUES (%s, 1, 3, 5, 'k', 't', 'h', 'i', 0, 'm', 'e', 'p', 1)",
+            " schema_version) VALUES (%s, 1, 3, 5, 'k', 't', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)",
             (tid,),
         )
     db_conn.commit()

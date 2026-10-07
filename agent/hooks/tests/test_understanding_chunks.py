@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -356,3 +357,71 @@ async def test_closing_chunk_of_a_compacted_segment_starts_past_the_summary(
         boundary="cp-0",
     )
     assert queue.calls == []
+
+
+class _State:
+    def __init__(self, messages: list[AnyMessage]) -> None:
+        self.messages = messages
+
+
+def _stamped(seconds: int) -> HumanMessage:
+    return HumanMessage(
+        content="m",
+        id=f"s{seconds}",
+        additional_kwargs={"ava_created_at": f"2026-10-07T12:00:{seconds:02d}+00:00"},
+    )
+
+
+def _checkpoint_clock(monkeypatch: pytest.MonkeyPatch, seconds: list[int | None]) -> list[int]:
+    """The newest checkpoint's time per poll (seconds past 12:00:00); the polls made."""
+    polls: list[int] = []
+
+    async def newest(_pool: Any, _agent_id: int) -> datetime | None:
+        polls.append(1)
+        sec = seconds.pop(0) if len(seconds) > 1 else seconds[0]
+        return None if sec is None else datetime(2026, 10, 7, 12, 0, sec, tzinfo=UTC)
+
+    monkeypatch.setattr(uc, "_newest_checkpoint_ts", newest)
+    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
+    monkeypatch.setattr(uc, "_SNAPSHOT_POLL_SECONDS", 0.0)
+    return polls
+
+
+async def test_the_boundary_waits_for_a_checkpoint_as_new_as_the_states_last_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The graph persists a super-step's checkpoint asynchronously, so the newest row can be one
+    step behind the state when a compaction stamps its boundary: the stamp waits for it."""
+    polls = _checkpoint_clock(monkeypatch, [5, 9, 20])  # the last message is from second 10
+    emitted: list[str] = []
+    monkeypatch.setattr(uc.telemetry, "emit", lambda _k, name, **_kw: emitted.append(name))
+    await uc.await_snapshot(MagicMock(), _State([*_request(3), _stamped(10)]), 3)
+    assert len(polls) == 3 and emitted == []
+
+
+async def test_a_snapshot_that_never_catches_up_is_stamped_anyway_with_an_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _checkpoint_clock(monkeypatch, [5])
+    monkeypatch.setattr(uc, "SNAPSHOT_WAIT_SECONDS", 0.0)
+    events: list[tuple[str, dict[str, Any] | None]] = []
+    monkeypatch.setattr(
+        uc.telemetry, "emit", lambda _k, name, attributes=None: events.append((name, attributes))
+    )
+    await uc.await_snapshot(MagicMock(), _State([*_request(3), _stamped(10)]), 3)
+    assert [e[0] for e in events] == ["understanding_snapshot_lag"]
+    attrs = events[0][1]
+    assert attrs is not None and attrs["agent_id"] == 3
+
+
+async def test_nothing_is_read_when_understanding_is_off_or_there_is_nothing_to_compare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    polls = _checkpoint_clock(monkeypatch, [None])
+    monkeypatch.setattr(settings.agent, "understanding_enabled", False)
+    await uc.await_snapshot(MagicMock(), _State([_stamped(10)]), 3)
+    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
+    await uc.await_snapshot(MagicMock(), None, 3)
+    await uc.await_snapshot(None, _State([_stamped(10)]), 3)
+    await uc.await_snapshot(MagicMock(), _State(_request(3)), 3)  # the last message has no time
+    assert polls == []

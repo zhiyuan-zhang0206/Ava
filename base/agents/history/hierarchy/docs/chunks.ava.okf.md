@@ -72,14 +72,17 @@ usage, `duration_ms`, `error`, `kind` (`leaf` / `group-correction`), `problem` (
 were refused). A write failure is the `understanding_call_record_failed` event.
 
 Outcomes: a wait (checkpoint not caught up, a database blink) requeues the job, no attempt spent,
-the spacing counted from the requeue, and fails it after 6 hours; drifted indices (`end_msg_id`
-not where recorded, for a closing chunk too) and a closing chunk past its boundary snapshot (its
-last turns are in no checkpoint) fail it (`understanding_chunk_failed`); a Gemini model (its
-cache path strips the head), an empty chunk or one already covered by nodes is `skipped` (a
-partly covered one is shortened to the undescribed part, so level-1 nodes never overlap); a
-generation error (a reply still refused after the corrections included) retries up to three
-attempts, then fails; raw records stay. The claim lease is 60 minutes, not renewed (longer than
-any honest job; a takeover of a live one costs a second run, a crash only the wait).
+the spacing counted from the requeue; the give-up clock (`waiting_since`, 6 hours) starts at the
+first wait, so a job queued while the feature is off is not timed. Drifted indices (`end_msg_id`
+not where recorded, a closing chunk's too) fail it (`understanding_chunk_failed`). A Gemini model
+(its cache path strips the head), an empty chunk or one already covered is `skipped`. A chunk
+overlapping existing level-1 nodes is cut to its first uncovered run (`covered_spans`,
+`uncovered`) and the other runs go in `understanding_chunk_gap`: nodes of a level never overlap
+and nothing is dropped silently. A closing chunk past its boundary snapshot is cut to what the
+snapshot holds, written, and the missing request indices are in the same event. A generation error
+(a reply still refused after the corrections included) retries up to three attempts, then fails;
+raw records stay. A host stopping puts its running jobs back at once (no attempt); a crash relies
+on the 60-minute lease (not renewed: longer than any honest job).
 
 ## Grouping inside the call
 
@@ -89,7 +92,8 @@ catalog) are [[base/agents/history/hierarchy/docs/chunk-grouping.ava.okf.md|Chun
 ## Known limits
 
 - Crash repair (`agent/hooks/repair.py`) shifts later indices mid-segment: a job past it fails as drift.
-- A closing chunk's snapshot may lack the segment's last turns (the checkpoint of the previous
-  super-step may still be in flight when compaction stamps the boundary; not reproduced): the job
-  fails with the event, the gap is visible, and those turns are in no stitched history either.
+- A compaction stamps its boundary after waiting up to 5 s for the checkpoint to hold the
+  state's last message (`await_snapshot`; the graph persists a super-step asynchronously, so the
+  newest row can lag). On timeout it stamps anyway and emits `understanding_snapshot_lag`; the
+  closing chunk then covers what the snapshot holds and reports the rest as a gap.
 - A node's generation cost is its job's (or check's) cost: all the groups of one job share it.

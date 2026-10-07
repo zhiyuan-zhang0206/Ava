@@ -2088,6 +2088,10 @@ CREATE TABLE IF NOT EXISTS understanding_chunk_jobs (
     attempts INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     claimed_at TIMESTAMPTZ,
+    -- When the job first waited for something outside it (a checkpoint that has not caught up, a
+    -- database blink); the give-up clock. NULL while it has never waited, so a job queued while
+    -- the feature is off is not timed.
+    waiting_since TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
     error TEXT
 );

@@ -190,7 +190,7 @@ async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
         await conn.execute(
             "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
             " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
-            " schema_version) VALUES (5, 1, 0, 0, 'k', 'old', 'h', 'i', 0, 'm', 'e', 'p', 1)"
+            " schema_version) VALUES (5, 1, 0, 0, 'k', 'old', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
         )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1)
@@ -202,13 +202,106 @@ async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
     assert status[0] == "skipped" and "already described" in status[2]
 
 
+async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dropped(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch, _seams: dict
+) -> None:
+    """A node covering the middle of a chunk splits it into two undescribed runs: the first is
+    described, the other is named in an event (the old prefix-only trim lost it silently)."""
+    events: list[tuple[str, dict[str, str] | None]] = []
+    monkeypatch.setattr(
+        loop.telemetry, "emit", lambda _k, name, attributes=None: events.append((name, attributes))
+    )
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
+            " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
+            " schema_version) VALUES (5, 1, 1, 1, 'k', 'mid', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
+        )
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
+    await _run_rounds(aops_pool, 1)
+    assert [m.id for m in _seams["described"][0].messages] == ["m0"]
+    assert {r[2:4] for r in await _nodes(aops_pool)} == {(0, 0), (1, 1)}
+    [(name, attrs)] = events
+    assert attrs is not None
+    assert name == "understanding_chunk_gap" and attrs["gaps"] == "2-3"
+
+
+async def test_an_old_workers_node_in_a_mixed_version_window_is_not_part_of_the_tree(
+    aops_pool: AsyncConnectionPool, _seams: dict
+) -> None:
+    """A node with a bare-number engine version (the retired worker's) neither covers a chunk nor
+    shows up in the tree's reads."""
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
+            " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
+            " schema_version) VALUES (5, 1, 0, 3, 'k', 'old', 'h', 'i', 0, 'm', '0.3', '0.3', 1)"
+        )
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
+    await _run_rounds(aops_pool, 1)
+    assert [m.id for m in _seams["described"][0].messages] == ["m0", "m1", "m2", "m3"]
+
+
+async def test_a_cancelled_job_is_put_back_without_spending_an_attempt(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host stops while a job runs (a rollout): the job goes back to the queue at once instead
+    of making the next host wait out the 60-minute lease, and the give-up clock is untouched."""
+    started = asyncio.Event()
+
+    async def hang(*_a: object, **_k: object) -> loop.Outcome:
+        started.set()
+        await asyncio.sleep(3600)
+        return loop.Outcome("done")
+
+    monkeypatch.setattr(loop, "_run_job", hang)
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
+    consumer = loop._Consumer(aops_pool, MagicMock(), [])
+    task = asyncio.create_task(consumer.run_until_idle())
+    await asyncio.wait_for(started.wait(), 10)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    [(status, attempts, error)] = await _status(aops_pool)
+    assert (status, attempts, error) == ("pending", 0, "host stopping")
+
+
+async def test_the_give_up_clock_starts_at_the_first_wait_and_a_queued_job_has_none(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    from base.agents.history.hierarchy.chunks import claim_job, release_job
+
+    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
+    async with aops_pool.connection() as conn:  # queued for days while the feature was off
+        await conn.execute(
+            "UPDATE understanding_chunk_jobs SET created_at = now() - interval '3 days'"
+        )
+    job = await claim_job(aops_pool)
+    assert job is not None and job.age_seconds == 0.0
+    await release_job(aops_pool, job.id, error="wait", count_attempt=False, waiting=True)
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '1 hour',"
+            " waiting_since = now() - interval '2 hours'"
+        )
+    again = await claim_job(aops_pool)
+    assert again is not None and 7000 < again.age_seconds < 7400
+    await release_job(aops_pool, again.id, error="generation", count_attempt=True, waiting=False)
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '1 h'"
+        )
+    last = await claim_job(aops_pool)
+    assert last is not None and last.age_seconds == 0.0  # a generation retry ends the wait
+
+
 async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
     aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 9), end_msg_id="m8")
     async with aops_pool.connection() as conn:
         await conn.execute(
-            "UPDATE understanding_chunk_jobs SET created_at = now() - interval '7 hours'"
+            "UPDATE understanding_chunk_jobs SET waiting_since = now() - interval '7 hours'"
         )
     monkeypatch.setattr(loop.telemetry, "emit", lambda *_a, **_k: None)
     await _run_rounds(aops_pool, 1)
@@ -216,13 +309,16 @@ async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
     assert status == "failed" and "gave up" in error
 
 
-async def test_a_closing_chunk_past_its_snapshot_fails_loudly_instead_of_being_cut(
+async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_reports_the_rest(
     aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch, _seams: dict
 ) -> None:
-    """The boundary snapshot of segment 0 holds fewer messages than the closing chunk's end: the
-    last turns are in no checkpoint. The job is failed with the event, never `done` over a gap."""
-    emitted: list[str] = []
-    monkeypatch.setattr(loop.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
+    """The boundary snapshot of segment 0 holds fewer messages than the closing chunk's end (the
+    checkpoint of the segment's last super-step was still in flight at compaction). The part the
+    snapshot holds is described and written; the missing request indices are in the event."""
+    events: list[tuple[str, dict[str, str] | None]] = []
+    monkeypatch.setattr(
+        loop.telemetry, "emit", lambda _k, name, attributes=None: events.append((name, attributes))
+    )
     monkeypatch.setattr(loop, "_load_segments", lambda *_a: (_history(), 0))
     await enqueue_chunk(
         aops_pool,
@@ -234,9 +330,12 @@ async def test_a_closing_chunk_past_its_snapshot_fails_loudly_instead_of_being_c
     )
     await _run_rounds(aops_pool, 1)
     [(status, _, error)] = await _status(aops_pool)
-    assert status == "failed" and "last turns of the segment" in error
-    assert "understanding_chunk_failed" in emitted
-    assert _seams["described"] == [] and await _nodes(aops_pool) == []
+    assert (status, error) == ("done", None)
+    assert [m.id for m in _seams["described"][0].messages] == ["m0", "m1", "m2", "m3"]
+    assert len(await _nodes(aops_pool)) == 1
+    [(name, attrs)] = events
+    assert attrs is not None and name == "understanding_chunk_gap"
+    assert "request 5-9 (not in the snapshot)" in attrs["gaps"]
 
 
 async def test_generation_error_retries_then_fails_at_the_cap(

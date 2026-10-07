@@ -11,11 +11,12 @@ from base.agents.history.hierarchy.chunks import (
     ChunkDriftError,
     ChunkEmptyError,
     ChunkNotReadyError,
-    ChunkTruncatedError,
     locate_chunk,
     message_time,
     plan_chunk,
     plan_closing_chunk,
+    slice_chunk,
+    uncovered,
 )
 
 
@@ -115,11 +116,44 @@ def test_closing_chunk_is_read_from_its_segment_and_checked_at_its_end() -> None
     assert located.span == (1, 3)
 
 
-def test_a_closing_chunk_past_its_snapshot_is_truncated_not_silently_cut() -> None:
-    # The job's end (index 9) lies past what the boundary snapshot persisted: the segment's last
-    # turns are in no checkpoint, so the chunk is refused (the consumer fails the job and reports it).
-    with pytest.raises(ChunkTruncatedError, match="last turns of the segment"):
-        locate_chunk(_history(), start_index=2, end_index=9, end_msg_id="gone", closing_segment=0)
+def test_a_closing_chunk_past_its_snapshot_is_cut_to_it_and_reports_what_is_missing() -> None:
+    # The job's end (index 9) lies past what the boundary snapshot persisted (head + a0..a3 = 5
+    # request positions): the chunk is what the snapshot holds, and the rest is named.
+    located = locate_chunk(
+        _history(), start_index=2, end_index=9, end_msg_id="gone", closing_segment=0
+    )
+    assert [m.id for m in located.messages] == ["a1", "a2", "a3"]
+    assert located.span == (1, 3) and located.missing == (5, 9)
+
+
+def test_a_closing_chunk_inside_its_snapshot_reports_nothing_missing() -> None:
+    located = locate_chunk(
+        _history(), start_index=2, end_index=5, end_msg_id="a3", closing_segment=0
+    )
+    assert located.missing is None
+
+
+def test_a_closing_chunk_with_nothing_left_in_the_snapshot_says_what_it_lacks() -> None:
+    with pytest.raises(ChunkEmptyError, match="snapshot lacks request indices 5 to 9"):
+        locate_chunk(_history(), start_index=5, end_index=9, end_msg_id="x", closing_segment=0)
+
+
+def test_uncovered_runs_are_what_no_node_reaches() -> None:
+    assert uncovered((10, 20), []) == [(10, 20)]
+    assert uncovered((10, 20), [(0, 12)]) == [(13, 20)]  # a prefix
+    assert uncovered((10, 20), [(15, 30)]) == [(10, 14)]  # a tail
+    assert uncovered((10, 20), [(13, 14), (17, 18)]) == [(10, 12), (15, 16), (19, 20)]  # the middle
+    assert uncovered((10, 20), [(0, 25)]) == []
+    assert uncovered((10, 20), [(8, 11), (11, 14)]) == [(15, 20)]
+
+
+def test_slicing_a_located_chunk_keeps_the_request_up_to_its_new_end() -> None:
+    located = locate_chunk(
+        _history(), start_index=1, end_index=5, end_msg_id="a3", closing_segment=0
+    )
+    cut = slice_chunk(located, 1, 2)
+    assert [m.id for m in cut.messages] == ["a1", "a2"]
+    assert [m.id for m in cut.prefix][-1] == "a2" and cut.span == (1, 2)
 
 
 def test_a_closing_chunk_whose_end_id_moved_is_drift() -> None:

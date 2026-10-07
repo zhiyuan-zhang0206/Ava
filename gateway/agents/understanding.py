@@ -51,7 +51,8 @@ INSERT INTO understanding_chunk_jobs
     (agent_id, compact_version, start_index, end_index, end_msg_id)
 VALUES (%s, %s, %s, %s, %s)
 ON CONFLICT (agent_id, compact_version, start_index, end_index) DO UPDATE SET
-    status = 'pending', attempts = 0, error = NULL, claimed_at = NULL, finished_at = NULL,
+    status = 'pending', attempts = 0, error = NULL, claimed_at = NULL, waiting_since = NULL,
+    finished_at = NULL,
     end_msg_id = EXCLUDED.end_msg_id
 WHERE understanding_chunk_jobs.status IN ('failed', 'skipped')
 RETURNING id
@@ -100,7 +101,8 @@ def _live_segment_state(
         ).fetchall()
         newest = conn.execute(
             "SELECT max(span_end) FROM understanding_nodes"
-            " WHERE agent_id = %s AND depth = 1 AND span_end >= %s AND span_end < %s",
+            " WHERE agent_id = %s AND depth = 1 AND engine_version LIKE 'chunk-%%'"
+            " AND span_end >= %s AND span_end < %s",
             (agent_id, base, base + len(request)),
         ).fetchone()
         top_version = conn.execute(

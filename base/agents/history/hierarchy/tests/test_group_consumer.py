@@ -43,7 +43,7 @@ async def _add_leaf(pool: AsyncConnectionPool, i: int, depth: int = 1, agent: in
             "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, start_ts, end_ts,"
             " segment_key, text, text_hash, input_hash, children_count, model, engine_version,"
             " prompt_version, schema_version)"
-            " VALUES (%s, %s, %s, %s, %s, %s, 'k', %s, 'h', 'i', 0, 'm', 'e', 'p', 1) RETURNING id",
+            " VALUES (%s, %s, %s, %s, %s, %s, 'k', %s, 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1) RETURNING id",
             (
                 agent,
                 depth,
@@ -395,3 +395,14 @@ async def test_single_groups_in_the_middle_close_and_no_level_ever_overlaps(
     for parent in parents:
         kids = by_parent[parent[0]]
         assert (parent[2], parent[3]) == (min(k[2] for k in kids), max(k[3] for k in kids))
+
+
+async def test_an_old_workers_node_is_never_an_open_node_of_the_tree(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    ids = await _fill(aops_pool, 3)
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "UPDATE understanding_nodes SET engine_version = '0.3' WHERE id = %s", (ids[0],)
+        )
+    assert [n.id for n in await load_open_nodes(aops_pool, AGENT, 1)] == ids[1:]
