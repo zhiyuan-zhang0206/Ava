@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import operator
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -142,3 +144,25 @@ def test_index_and_reader_live_outside_the_config_package() -> None:
     }
     assert set(raw["lite_fields"]) == set(LITE_FIELDS)
     assert isinstance(PER_AGENT_FIELDS, frozenset) and isinstance(REQUIRED_FIELDS, frozenset)
+
+
+@pytest.mark.parametrize(
+    "index",
+    [LITE_FIELDS, FIELD_DOMAINS, FIELD_ALIASES, FIELD_SCOPES, FIELD_CAPABILITIES],
+)
+def test_static_indexes_reject_writes_and_keep_copies_independent(
+    index: Mapping[str, object],
+) -> None:
+    name = next(iter(index))
+    original = index[name]
+    with pytest.raises(TypeError):
+        operator.setitem(cast(Any, index), name, "changed")
+    copied = dict(index)
+    copied[name] = "changed"
+    assert index[name] == original
+
+
+def test_lite_rows_contain_only_immutable_literals() -> None:
+    for row in LITE_FIELDS.values():
+        assert isinstance(row, tuple)
+        assert all(value is None or isinstance(value, str | bool | int | float) for value in row)
