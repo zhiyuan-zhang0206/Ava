@@ -1,5 +1,3 @@
 {
-  "patch_targets": {
-    "tests/integration/test_cluster_instance.py::cli.commands.data_plane.cluster_instance._HBA_PROOF_TIMEOUT_S": 1
-  }
+  "patch_targets": {}
 }
