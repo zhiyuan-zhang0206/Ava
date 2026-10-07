@@ -281,8 +281,14 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="a repeat dispatches another restart; HTTP intent has no durable receipt",
     ),
     # ── gateway/agents/understanding.py ────────────────────────────────────
-    ("POST", "/api/agents/{agent_id}/understanding/close"): RouteContract(
-        note="plans one closing job from stored state; a repeat finds the active job or an empty stretch"
+    ("GET", "/api/agents/{agent_id}/sessions"): RouteContract(
+        note="read-only: the agent's sessions with their understanding coverage and build estimate"
+    ),
+    ("POST", "/api/agents/{agent_id}/understanding/build"): RouteContract(
+        note="chunk jobs and the pending rebuild merge into live ones; a repeat only records another build (dry_run writes nothing)"
+    ),
+    ("GET", "/api/agents/{agent_id}/understanding/builds/{build_id}"): RouteContract(
+        note="read-only: a build's job statuses, rebuild state and actual cost"
     ),
     # ── gateway/mcp_server/router.py ─────────────────────────────
     ("GET", "/api/mcp/clients"): RouteContract(),

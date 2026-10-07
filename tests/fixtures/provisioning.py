@@ -221,6 +221,8 @@ _PER_TEST_TRUNCATE_TABLES = (
     "understanding_chunk_calls",  # raw record of its provider calls; no FK path
     "understanding_group_state",  # upper-level grouping cursor; no FK path
     "understanding_group_calls",  # raw record of its provider calls; no FK path
+    "understanding_builds",  # manual builds (FK to the rebuild queue, so before it)
+    "understanding_rebuilds",  # upper-level rebuild queue; no FK path to the tables above
     "user_settings",  # no FK, per-test key/value data (audit round-2 cc-docs-tests P2)
     "web_sessions",
     # The cluster extension registry (issue #39 S2). `extensions` FKs to
