@@ -120,10 +120,6 @@ _DISPATCH_RETRY_ATTEMPTS = 3
 _DISPATCH_RETRY_BACKOFF_S = 0.5
 _sleep = asyncio.sleep
 
-# Shared DB pool for all in-process ops calls — opened in `_main`, closed in
-# its finally; tests that bypass `_main` set this explicitly.
-_db_pool: ConnectionPool | None = None
-
 
 def _write_pidfile() -> None:
     if not acquire_pidfile(_pidfile(), "services.agent_runner.agent_ops.daemon"):
@@ -188,8 +184,9 @@ async def _run_arm(
     *,
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
+    pool: ConnectionPool,
 ) -> tuple[OpStatus, dict[str, object]]:
-    """`_dispatch_sync` on this daemon's own pool (see `_op_executor`).
+    """`_dispatch_sync` on this daemon's executor, with its explicit DB pool.
 
     An arm must not read contextvars: `run_in_executor` does not propagate context,
     so anything set per-request on the loop side (a request id, a trace span) reads
@@ -200,7 +197,7 @@ async def _run_arm(
     active_ops[kind] = active
     try:
         future = loop.run_in_executor(
-            _op_thread_pool(), functools.partial(_dispatch_sync, kind, payload)
+            _op_thread_pool(), functools.partial(_dispatch_sync, kind, payload, pool=pool)
         )
         maintenance_activity.track_worker(future, workers=workers)
         return await asyncio.shield(future)
@@ -209,14 +206,16 @@ async def _run_arm(
             active_ops.pop(kind)
 
 
-def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[str, object]]:
+def _dispatch_sync(
+    kind: str, payload: dict[str, Any], *, pool: ConnectionPool
+) -> tuple[OpStatus, dict[str, object]]:
     """The blocking op arms, bound to this daemon's shared pool.
 
     The arms live in `services.agent_runner.agent_ops.dispatch_sync` (split at the file-size
     ceiling, task #4129 I4). The binding stays here so `_run_arm` and the
-    tests' patch surface (`ops_daemon._dispatch_sync`) keep working unchanged.
+    worker's explicit pool binding stay in this daemon.
     """
-    return dispatch_sync(kind, payload, pool=_db_pool, db=_ops_handles()[0])
+    return dispatch_sync(kind, payload, pool=pool, db=_ops_handles()[0])
 
 
 async def _dispatch(
@@ -225,6 +224,7 @@ async def _dispatch(
     *,
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
+    pool: ConnectionPool,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
@@ -252,11 +252,6 @@ async def _dispatch(
     """
     if not is_op_kind(kind):
         return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
-    pool = _db_pool
-    if pool is None:
-        return OpStatus.FAILED, {
-            "error": "_db_pool not initialized; _main must run before _dispatch"
-        }
 
     try:
         match kind:
@@ -283,7 +278,9 @@ async def _dispatch(
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
-                return await _run_arm(kind, payload, active_ops=active_ops, workers=workers)
+                return await _run_arm(
+                    kind, payload, active_ops=active_ops, workers=workers, pool=pool
+                )
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
         # gateway's `_raise_proxied_wire_error_from_payload` can
@@ -310,7 +307,7 @@ async def _dispatch_idempotent(
     kind: str,
     payload: dict[str, Any],
     key: str,
-    pool: ConnectionPool | None,
+    pool: ConnectionPool,
     *,
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
@@ -327,10 +324,6 @@ async def _dispatch_idempotent(
     """
     if not is_op_kind(kind):
         return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
-    if pool is None:
-        return OpStatus.FAILED, {
-            "error": "_db_pool not initialized; _main must run before _dispatch_idempotent"
-        }
     for attempt in range(_DISPATCH_RETRY_ATTEMPTS):
         try:
             return await _dispatch_idempotent_pass(
@@ -378,7 +371,9 @@ async def _dispatch_idempotent_pass(
     if owned:
         # Exceptions, cancellation and result-write failure retain the committed
         # claim. A retry cannot infer that execution had no side effects.
-        status, result = await _dispatch(kind, payload, active_ops=active_ops, workers=workers)
+        status, result = await _dispatch(
+            kind, payload, active_ops=active_ops, workers=workers, pool=pool
+        )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
@@ -419,6 +414,7 @@ async def _ops_route(
     workers: maintenance_activity.WorkerFutures,
     dispatch_sem: asyncio.Semaphore,
     requests: maintenance_activity.RequestTokens,
+    pool: ConnectionPool,
 ) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
@@ -459,13 +455,17 @@ async def _ops_route(
                         envelope.kind,
                         envelope.payload,
                         envelope.idempotency_key,
-                        _db_pool,
+                        pool,
                         active_ops=active_ops,
                         workers=workers,
                     )
                 else:
                     status, result = await _dispatch(
-                        envelope.kind, envelope.payload, active_ops=active_ops, workers=workers
+                        envelope.kind,
+                        envelope.payload,
+                        active_ops=active_ops,
+                        workers=workers,
+                        pool=pool,
                     )
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -492,7 +492,6 @@ async def _main() -> None:
         sys.exit(1)
     _write_pidfile()
 
-    global _db_pool  # noqa: PLW0603 — set once at startup, cleared in finally for test reuse
     dispatch_sem = asyncio.Semaphore(settings.services.ops_concurrency)
 
     our_machine = machine_name()
@@ -511,7 +510,6 @@ async def _main() -> None:
         sys.exit(1)
 
     pool = _open_db_pool()
-    _db_pool = pool
     db, bus = _ops_handles()
     # Redeliver recorded delivery failures whenever the data plane allows
     # (task #3757): a resident loop that outlives every sender process, owned with
@@ -540,6 +538,7 @@ async def _main() -> None:
                     dispatch_sem=dispatch_sem,
                     requests=requests,
                     workers=workers,
+                    pool=pool,
                 )
             },
             liveness=liveness,
@@ -570,7 +569,6 @@ async def _main() -> None:
             _remove_pidfile()
     finally:
         pool.close()
-        _db_pool = None
         _shutdown_op_pool()
 
 
