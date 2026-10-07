@@ -41,7 +41,7 @@ def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> No
     """The beat task keeps a Liveness fresh — the regression guard for the
     503-after-startup bug."""
 
-    async def parked_outbound(_core):
+    async def parked_outbound(_core: Any):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(daemon, "_timeline_outbound_loop", parked_outbound)
@@ -120,7 +120,7 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(daemon, "_load_adapters", fake_load_adapters)
 
-    async def parked_outbound(_core):
+    async def parked_outbound(_core: Any):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(daemon, "_timeline_outbound_loop", parked_outbound)
