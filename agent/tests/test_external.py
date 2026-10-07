@@ -455,20 +455,22 @@ def test_close_delivers_telemetry_when_plugin_flush_fails(
 ) -> None:
     """The close finally path must run delivery as well as detachment."""
     attachment = external.attach("lease")
-    delivered: list[bool] = []
+    delivered: list[tuple[bool, int | None]] = []
 
     def fail_flush() -> None:
         raise RuntimeError("plugin journal unavailable")
 
     monkeypatch.setattr(attachment, "flush", fail_flush)
-    monkeypatch.setattr(
-        external, "_deliver_telemetry_before_detach", lambda: delivered.append(True)
-    )
+
+    def sync_delivery(*, bounded: bool) -> None:
+        delivered.append((bounded, _borrowed_agent_id()))
+
+    monkeypatch.setattr(telemetry, "sync", sync_delivery)
 
     with pytest.raises(RuntimeError, match="plugin journal unavailable"):
         attachment.close()
 
-    assert delivered == [True]
+    assert delivered == [(True, 405)]
     assert _borrowed_agent_id() is None
 
 
