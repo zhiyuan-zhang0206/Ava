@@ -8492,7 +8492,9 @@ export interface operations {
     post_agents_api_agents_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

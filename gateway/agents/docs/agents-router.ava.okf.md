@@ -72,8 +72,18 @@ the stored machine/config/birth stamp, and forwards the same identity without
 another inbound. Within one attempt, `spawn-launch-v2` keeps its canonical RPC
 dedupe key; a new attempt is a repeatable wake. Admission racing a failed
 forward wins and produces an accepted receipt. A failure-state DB read/write
-outage still returns the committed ID with an unknown state. A lost HTTP
-response before the caller receives the ID remains a separate create-key gap.
+outage still returns the committed ID with an unknown state. A caller may supply `Idempotency-Key` to `POST /api/agents`. The immutable
+request hash and key commit on the agent row with the fork marker and first
+prompt. Concurrent retries serialize the same birth, return its existing ID,
+and recover a still-unadmitted launch using its committed attempt and config.
+Receipt lookup precedes mutable model/preset/fork validation. Reusing the key
+with changed request data returns 409; a keyless create still creates a new
+identity. `Idempotency-Scope: principal-v1` uses the existing authenticated
+principal namespace; legacy raw keys remain global. Creation identities remain
+with the agent row and are not pruned with response caches. A replay never
+launches an agent that has since been admitted or terminated. Client-side
+automatic retry activation requires proven gateway capability; this additive
+server contract alone does not make old gateways safe to retry.
 The versioned op name also gates a rolling runner: old ops servers reject it
 before reaching their old launch handler, so they cannot force-terminate the
 committed row. New runners still accept the legacy `spawn-launch` operation
