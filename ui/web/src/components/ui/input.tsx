@@ -1,7 +1,7 @@
 import * as React from "react"
 
-import { cn } from "@/lib/utils"
-import { MIN_W_0 } from "@/lib/layout";
+import { cn } from "@/lib/format/utils"
+import { MIN_W_0 } from "@/lib/layout/layout";
 
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (

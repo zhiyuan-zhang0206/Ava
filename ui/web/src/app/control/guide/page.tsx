@@ -16,11 +16,11 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
-import { useStore } from "@/lib/store";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { api } from "@/lib/transport/api";
+import { errMsg } from "@/lib/contracts/errors";
+import { useStore } from "@/lib/state/store";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export default function GuidePage() {
   const t = useTranslations("guide");

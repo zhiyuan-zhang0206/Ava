@@ -41,7 +41,7 @@ interval on another. Ordinary threads can replay up to N-1 skipped super-steps
 after a crash, including model costs and tool effects; terminal flush persists
 the remaining tail. Delta-bearing threads retire throttling and retain every
 super-step. Interval one restores every-step persistence. The operator
-[canary protocol](../../../docs/conventions/checkpoint-interval-canary.md)
+[canary protocol](../../../docs/conventions/agents/checkpoint-interval-canary.md)
 owns verification and rollback.
 
 ## Related contracts

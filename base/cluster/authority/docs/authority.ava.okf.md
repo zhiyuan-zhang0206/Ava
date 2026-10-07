@@ -14,8 +14,8 @@ and `ava_g0_runner`, minted by the home's first start. Nothing revokes or
 replaces it: a release does not change it (the
 [code version gate](../../../db/docs/code-version-gate.ava.okf.md) keeps old code
 from writing) and no operation rotates it. The decisions are
-[internal data plane always authenticated](../../../../docs/decisions/2026-09-26-internal-data-plane-always-authenticated.md)
-and [retiring write-generation rotation](../../../../docs/decisions/2026-10-03-retire-write-generation-rotation.md).
+[internal data plane always authenticated](../../../../docs/decisions/data/security/2026-09-26-internal-data-plane-always-authenticated.md)
+and [retiring write-generation rotation](../../../../docs/decisions/runtime/updates/execution/converge/2026-10-03-retire-write-generation-rotation.md).
 
 The package is a library. Every catalog function takes the caller's admin
 connection: the OS-user superuser over the owner-only socket, autocommit,

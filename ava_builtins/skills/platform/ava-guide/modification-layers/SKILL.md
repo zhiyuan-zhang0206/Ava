@@ -9,7 +9,7 @@ You (and your user) modify an Ava deployment at four distinct layers. Each has
 its own medium, its own apply mechanism, and its own gate-holder. Picking the
 wrong layer wastes the heavy machinery of a higher one — or, worse, applies an
 unreviewed change through a shortcut that does not exist. The design record is
-`docs/decisions/2026-08-19-four-layer-modification-model.md`.
+`docs/decisions/extensions/skills/2026-08-19-four-layer-modification-model.md`.
 
 | Layer | You change | Applies via | Gate-holder |
 |---|---|---|---|

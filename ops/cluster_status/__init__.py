@@ -320,7 +320,7 @@ def kill_agent_shells(agent_id: int) -> list[int]:
     """Kill every host-local persistent shell of one agent; return the killed ids.
 
     The `kill_all_shell_sessions` primitive
-    (docs/decisions/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
+    (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
     `agent_shell_sessions` — the one `…-agent-<id>-shell-<sid>[-<name>]` rule —
     so the agent's explicit shells and its watchers go, while another agent's
     sessions and the agent's own process session are never touched. Page-server

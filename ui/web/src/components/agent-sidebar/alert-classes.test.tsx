@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AlertClassRow, AlertClassesResponse } from "@/lib/types";
+import type { AlertClassRow, AlertClassesResponse } from "@/lib/contracts/types";
 
 import { AlertClassList } from "./alert-classes";
 
@@ -15,7 +15,7 @@ const apiMock = vi.hoisted(() => ({
   dismissAlertClass: vi.fn(),
   reopenAlertClass: vi.fn(),
 }));
-vi.mock("@/lib/api", () => ({ api: apiMock }));
+vi.mock("@/lib/transport/api", () => ({ api: apiMock }));
 
 function row(overrides: Partial<AlertClassRow>): AlertClassRow {
   return {

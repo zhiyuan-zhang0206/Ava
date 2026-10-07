@@ -11,9 +11,9 @@ import { Settings2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useMemo } from "react";
 
-import { useDebouncedSetting } from "@/lib/use-user-settings";
-import { FLEX, FLEX_COL } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { useDebouncedSetting } from "@/lib/state/use-user-settings";
+import { FLEX, FLEX_COL } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 // ── Tunable d3-force layout parameters ──
 // The physics knobs the user can adjust live (DB-backed via useForceParams).

@@ -97,4 +97,4 @@ turn; they do not change wake, claim, or recovery behavior.
 - [[agent/startup/docs/startup.ava.okf.md]] — host and per-agent initialization
 - [[agent/ownership/docs/ownership.ava.okf.md]] — incarnation ownership
 - [[lifecycle.ava.okf.md]] — native control and checkpoint ordering
-- [[sessions.ava.okf.md]] — persistent shells
+- [[agent/docs/sessions.ava.okf.md]] — persistent shells

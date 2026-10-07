@@ -97,7 +97,7 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
         ("ui/web/openapi.json", False),  # generated
         ("ui/web/src/lib/api-generated.ts", False),  # generated glob
         ("db/schema.sql", False),  # generated
-        ("ui/web/src/lib/api.ts", True),
+        ("ui/web/src/lib/transport/api.ts", True),
         ("migrations/20260101T000000_x.sql", True),
         ("scripts/install-cli-tools.sh", True),
     ],
@@ -239,13 +239,16 @@ def test_contract_boundary_pair_is_skipped(tmp_path: pathlib.Path) -> None:
     _commit(
         tmp_path,
         "chore: seed",
-        {"gateway/schemas/api.py": "x = 1\n", "ui/web/src/lib/api.ts": "x = 1\n"},
+        {"gateway/schemas/api.py": "x = 1\n", "ui/web/src/lib/transport/api.ts": "x = 1\n"},
     )
     for i in range(8):
         _commit(
             tmp_path,
             f"feat(contract): sync {i}",
-            {"gateway/schemas/api.py": f"x = {i}\n", "ui/web/src/lib/api.ts": f"x = {i}\n"},
+            {
+                "gateway/schemas/api.py": f"x = {i}\n",
+                "ui/web/src/lib/transport/api.ts": f"x = {i}\n",
+            },
         )
     # A real, non-boundary cross-package pair, so the filter isn't a no-op.
     for i in range(8):
@@ -263,7 +266,7 @@ def test_contract_boundary_pair_is_skipped(tmp_path: pathlib.Path) -> None:
         for a, b in pairs
         if a.startswith("gateway/schemas/") or b.startswith("gateway/schemas/")
     )
-    assert ("gateway/schemas/api.py", "ui/web/src/lib/api.ts") not in pairs
+    assert ("gateway/schemas/api.py", "ui/web/src/lib/transport/api.ts") not in pairs
     assert ("pkg_a/mod.py", "pkg_b/mod.py") in pairs  # the control pair still shows up
 
 

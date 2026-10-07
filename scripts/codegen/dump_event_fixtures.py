@@ -206,7 +206,8 @@ def main() -> int:
     # Pydantic-canonical form (e.g. field order, null vs missing).
     for filename, sample in samples.items():
         validated = EVENT_ADAPTER.validate_python(sample)
-        out_path = out_dir / f"{filename}.json"
+        out_path = out_dir / filename.partition("_")[0] / f"{filename}.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(validated.model_dump_json(indent=2) + "\n", encoding="utf-8")
         written += 1
 

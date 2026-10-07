@@ -3,7 +3,7 @@
 Every pg-backup artifact is encrypted (`openssl enc -aes-256-cbc -pbkdf2`)
 under one passphrase, the one PINNED at
 `$AVA_HOME/backups/logical-backup.passphrase` (0600). It is independent of the
-cluster secret (docs/decisions/2026-09-28-backup-passphrase-minted-at-birth.md):
+cluster secret (docs/decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md):
 
 - a gateway home's birth mints a random one (`ensure_minted`), whatever its
   secret, so an empty-secret single box encrypts for real;

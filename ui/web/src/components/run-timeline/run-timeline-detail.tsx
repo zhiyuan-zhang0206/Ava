@@ -8,20 +8,20 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { ChatMarkdown } from "@/components/markdown";
+import { ChatMarkdown } from "@/components/content/markdown";
 import { buttonVariants } from "@/components/ui/button";
-import { api } from "@/lib/api";
-import { formatTokensCompact } from "@/lib/format-number";
-import { FLEX, MIN_W_0 } from "@/lib/layout";
-import { formatAbsolute } from "@/lib/time";
+import { api } from "@/lib/transport/api";
+import { formatTokensCompact } from "@/lib/format/format-number";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { formatAbsolute } from "@/lib/format/time";
 import type {
   RunTimelineGeneration,
   RunTimelineMessagePart,
   RunTimelineNode,
   RunTimelineUnit,
   RunTimelineUsage,
-} from "@/lib/types";
-import { cn } from "@/lib/utils";
+} from "@/lib/contracts/types";
+import { cn } from "@/lib/format/utils";
 
 import { blockClass, cacheHitRate, partsForUnit } from "./timeline-model";
 

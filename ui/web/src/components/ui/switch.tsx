@@ -2,7 +2,7 @@
 
 import * as SwitchPrimitive from "@radix-ui/react-switch"
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/format/utils"
 
 // The single boolean control for the whole app. Checked = `bg-primary` track
 // with a `bg-background` thumb: because the thumb tracks the theme background,

@@ -8,7 +8,7 @@
 // Keys: the open-queue query + the resolved-history infinite query. A resolve
 // moves a row out of open/awaiting AND into the history — both families go.
 
-import type { SystemEvent } from "../types";
+import type { SystemEvent } from "../contracts/types";
 import type { FoldOutcome } from "./types";
 import { NO_FOLD } from "./types";
 
