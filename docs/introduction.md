@@ -163,24 +163,28 @@ compaction, so standing rules stay in front of the agent.
 
 ## Where Ava sits in the landscape
 
-A quick comparison against other open agent frameworks (full
-ten-product × fifteen-dimension matrix with per-cell evidence:
-[`assets/agent-landscape-2026.html`](../assets/agent-landscape-2026.html)):
+The [agent landscape](../assets/agent-landscape-2026.html) compares ten products
+across fifteen capability dimensions and five behavioral safeguards. Its
+October 7, 2026 incremental review links official evidence for refreshed entries;
+untouched July/August entries are explicitly marked as historical baselines.
+Optional Code Mode, scripted agent orchestration and goal continuation are now
+documented in several competitors. Capability presence alone is a weak comparison.
 
-| Dimension | Ava | OpenCode | Hermes Agent | OpenClaw | DeepSeek Harness |
-|---|---|---|---|---|---|
-| CodeAct / code-as-action | ✅ the whole runtime is one `execute_code` channel, from day one | ❌ no Code Mode (build/plan agents); tool results flatten to text | ❌ standard tool-calling | ❌ standard tool-calling | ⚠️ Code Mode (2026-08): a TS program over generated tool bindings — one mode on top of standard tool-calling |
-| Typed model-visible extension | ✅ plugin state declaration: whole pydantic models become state-graph channels; can contribute messages directly | ❌ no message-schema extension; listen + compaction text injection only | ❌ extension at tool/skill/transport layer | ❌ no schema API; runtime middleware rewrite only | ✅ `SessionEventMap` event-sourcing: new event type + render + replay ("model-visible means logged") |
-| Observability | ✅ OTel + Tempo/Loki/Prometheus/Grafana; every turn is a trace; logs/traces correlate via trace_id | — | — | — | ✅ conversation-level event-sourced log with dispatch-time byte verification (audit determinism; explicitly *not* world state) |
-| Multi-machine | ✅ default shape, single box is N=1; network-reachable machines form a cluster | — | — | — | — |
-| Plugin system | ✅ typed plugins: 5 graph-edge hooks + plugin state + SDK namespace | ✅ tools + execute hooks + events (no message layer) | ✅ tools/plugins/skills/MCP/transports | ✅ channels/tools/skills/hooks middleware | ✅ everything is a plugin (Cordis microkernel: adapters, tool registry, session log, agent loop, UI) |
-| License | Apache-2.0 | MIT | MIT | custom | MIT |
+Ava's commitments connect those capabilities to how work gets done:
 
-> **Testing status**: completion-judged goal mode is a candidate — it ships
-> (`ava_goal`) with one recorded real run so far, recorded in the
-> [demo + test record](../demos/goal-mode/goal-mode-code-review.md).
-> The IM reach is one channel (Telegram via the IM bridge) with a web-console
-> UI; there is no TUI, by design.
+| Commitment | What it enables | Boundary |
+|---|---|---|
+| One CodeAct entrance | Python composes tools, verification and orchestration through `execute_code` | Code execution is not a runtime sandbox |
+| One persistent peer lifecycle | Executor, reviewer and supervisor are roles of an ordinary agent with usable identity and context | Persistent identity does not make external effects exactly-once |
+| Outcome-driven continuation | [Goal](../ava_builtins/skills/coordination/ava-goal/SKILL.md) keeps an authorized outcome in view; completion requires artifact evidence | Goal is optional; pauses and handoffs must be respected |
+| Adjustable working methods | [Workflow](../ava_builtins/skills/practice/ava-workflow/SKILL.md) selects alignment, direct work, evaluation, peer collaboration or script orchestration | No fixed watcher/worker topology or guaranteed skill invocation |
+| Investment in future work | Instructions, memory and [self-evolution](../ava_builtins/skills/platform/ava-self-evolution/SKILL.md) preserve useful corrections and follow-ups | Source promotion requires review and separately authorized rollout |
+
+These mechanisms target premature completion and shallow verification, behaviors
+often described as laziness or short-term RL bias. This is a design intention,
+not evidence that Ava has changed a model's training bias or achieved a measured
+advantage over other harnesses. The chart separates mechanism availability,
+evaluator access, recovery and cost scope from effectiveness claims.
 
 ---
 
