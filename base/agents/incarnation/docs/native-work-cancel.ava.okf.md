@@ -92,13 +92,29 @@ A concurrent force may invalidate the old receiver's final ACK, but its
 observation and a successor's certificate wait for the original writer to drain.
 
 Missing pointers, malformed/latest checkpoint proof, unresolved resources or
-an uncertified receiver preserve UNCERTAIN and hold new strong-path work. They
+an uncertified receiver preserve UNCERTAIN and hold new strong-path work in
+supported consumers. They
 do not guess APPLIED or RECOVERED_STOPPED. Ordinary startup without a pending
 strong command retains its existing behavior; an old unprotected work can be
 abandoned without claiming execution or stop. Work and command records have
 no TTL or foreign-key dependency on history. Retirement needs an explicit
 future retention policy; this change does not rewrite old history or enable
 legacy managed resources.
+
+## Binary compatibility and activation
+
+The dedicated command table prevents a legacy generic inbound claim from
+consuming or falsely acknowledging a native cancel. It does not stop an old
+binary from continuing its legacy graph/claim path. Old serializers may degrade
+new typed checkpoint values to raw dictionaries rather than rejecting them, and
+old admission does not append native transfer certificates. A supported receiver
+without the complete stop chain stays UNCERTAIN; an unsupported old receiver is
+not covered by that hold guarantee.
+
+Operator activation requires retiring or draining every old native runtime,
+claim and admission consumer for the target before strong callers are enabled.
+The protocol does not promise safe old/new concurrent execution during rolling
+replacement. This PR introduces no SDK/UI activation, fallback or deployment.
 
 Owners: `services/agent_runner/agent_host/native_work.py`,
 `agent/ownership/native_cancel.py`, `agent/ownership/hosted.py`, and
