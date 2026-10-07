@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from base.db import Database
 from gateway.app import app
+from gateway.cluster import roster_probe
 from gateway.cluster import status as status_router
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
@@ -67,44 +68,28 @@ def stub_machine_identity(set_machine_identity) -> None:
 def stub_remote_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> _RemoteProbeResults:
-    """Replace _probe_agent_runner with a lookup table — key=name,
+    """Replace the public status-probe transport with a lookup table — key=name,
     val=(online, paused). Local rows in this test suite are all pure gateway
     (handled by lightweight local read, no probe), so the table only needs to
     cover agent-runner rows.
     """
-    from datetime import datetime
-
-    from base.api_contracts.status import MachineStatus
-
     results = _RemoteProbeResults()
 
-    async def fake_probe(
-        _identity_log: object,
-        name: str,
-        role: list[str],
-        gateway_url: str | None,
-        up_since_at: datetime,
-        description: str | None,
-        stopped_at: datetime | None,
-        is_staging: bool = False,
-    ) -> MachineStatus:
+    async def fake_probe(name: str, _ops_url: str) -> dict[str, object]:
         results.calls.append(name)
         online, paused = results.get(name, (False, None))
-        return MachineStatus(
-            name=name,
-            serve_gateway="gateway" in role,
-            serve_agent_runner="agent-runner" in role,
-            serve_observability_station="observability-station" in role,
-            gateway_url=gateway_url or "",
-            up_since_at=up_since_at,
-            online=online,
-            paused=paused,
-            description=description,
-            stopped_at=stopped_at,
-            is_staging=is_staging,
-        )
+        if not online:
+            raise cluster_rpc.ClusterOpUnreachable("offline test runner")
+        if paused is None:
+            return {}  # reachable, but without a valid readiness observation
+        return {
+            "machine_name": name,
+            "serve_gateway": False,
+            "serve_agent_runner": True,
+            "paused": paused,
+        }
 
-    monkeypatch.setattr(status_router, "_probe_agent_runner", fake_probe)
+    monkeypatch.setattr(roster_probe, "dispatch_status_probe", fake_probe)
     return results
 
 
@@ -203,8 +188,8 @@ class TestClusterPanel:
         agent-runner row → stub_remote_probe lookup."""
         _ = fake_flag, stub_machine_identity
         _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway", "central node")
-        _insert_machine(db_conn, "test-host", None, "agent-runner")
-        _insert_machine(db_conn, "wsl-test", None, "agent-runner")
+        _insert_machine(db_conn, "test-host", "http://test-host:18121", "agent-runner")
+        _insert_machine(db_conn, "wsl-test", _OPS_URL, "agent-runner")
         stub_remote_probe["test-host"] = (True, False)
         stub_remote_probe["wsl-test"] = (False, None)  # probe failed
 
@@ -252,7 +237,7 @@ class TestClusterPanel:
         db_conn: psycopg.Connection,
         fake_flag: Path,
         stub_machine_identity: None,
-        stub_remote_probe: dict[str, tuple[bool, bool | None]],
+        stub_remote_probe: _RemoteProbeResults,
     ) -> None:
         """Regression: PR #466 made machines.gateway_url nullable for agent-runner;
         pre-fix `_probe_machine(url.rstrip(...))` crashed with AttributeError
@@ -267,7 +252,9 @@ class TestClusterPanel:
         machines = r.json()["cluster"]["machines"]
         assert len(machines) == 1
         assert machines[0]["name"] == "wsl-test"
-        assert machines[0]["online"] is True
+        assert machines[0]["online"] is False
+        assert machines[0]["paused"] is None
+        assert stub_remote_probe.calls == []
         assert machines[0]["gateway_url"] == ""  # NULL → ""
 
     def test_empty_machines_table(
@@ -292,7 +279,7 @@ class TestClusterPanel:
         stub_remote_probe: _RemoteProbeResults,
     ) -> None:
         _ = fake_flag, stub_machine_identity
-        _insert_machine(db_conn, "wsl-test", None, "agent-runner")
+        _insert_machine(db_conn, "wsl-test", _OPS_URL, "agent-runner")
         stub_remote_probe["wsl-test"] = (True, False)
 
         with TestClient(app) as client:
@@ -313,7 +300,7 @@ class TestClusterPanel:
     ) -> None:
         _ = fake_flag, stub_machine_identity
         monkeypatch.setattr("gateway.app.StatusCache", lambda: StatusCache(ttl_s=0.0))
-        _insert_machine(db_conn, "wsl-test", None, "agent-runner")
+        _insert_machine(db_conn, "wsl-test", _OPS_URL, "agent-runner")
         stub_remote_probe["wsl-test"] = (True, False)
 
         with TestClient(app) as client:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -313,16 +314,19 @@ def test_loop_components_report_stale_loop(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_loop_components_convert_success_iso_to_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(daemon.time, "monotonic", lambda: 100.0)
-    monkeypatch.setattr(daemon.time, "time", lambda: 1_787_659_212.5)
     liveness = LivenessGroup()
     dispatch = liveness.register("dispatch", timeout_s=15.0)
-    monkeypatch.setattr(dispatch, "_last_success_at", "2026-08-25T12:00:00+00:00")
+    dispatch.mark_success()
+    stamped = dispatch.snapshot()["last_success_at"]
+    assert isinstance(stamped, str)
+    last_success = datetime.fromisoformat(stamped).timestamp()
+    monkeypatch.setattr(daemon.time, "time", lambda: last_success + 12.5)
 
     assert daemon._loop_components(liveness) == [
         {
             "name": "dispatch",
             "status": "ok",
-            "last_success": 1_787_659_200.0,
+            "last_success": last_success,
             "age_s": 12.5,
             "progress": "idle",
         }
