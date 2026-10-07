@@ -413,10 +413,14 @@ export const api = {
     agentId: number,
     noticeId: number,
     body: ResolveNoticeIn,
+    idempotencyKey: string = crypto.randomUUID(),
   ): Promise<{ status: string }> => {
     return f(
       `/api/agents/${agentId}/notices/${noticeId}/resolve`,
-      POST_JSON(body),
+      {
+        ...POST_JSON(body),
+        headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
+      },
     ).then(ok<{ status: string }>);
   },
 

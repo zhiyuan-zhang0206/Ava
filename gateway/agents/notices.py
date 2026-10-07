@@ -29,16 +29,25 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, LiteralString, cast
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
+from base.agents.messages.inbound import InboundKind
 from base.config import settings
-from base.db import NOTICE_FYI_TTL_DAYS
+from base.db import NOTICE_FYI_TTL_DAYS, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.inbound_provenance import request_inbound_provenance
+from gateway.agents.notice_receipts import (
+    existing_receipt,
+    notice_key,
+    resolve_once,
+    save_receipt,
+    validate_creation,
+    validate_creation_state,
+)
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
     NoticeCreateIn,
@@ -49,6 +58,7 @@ from gateway.agents.schemas import (
     ResolveNoticeIn,
 )
 from ops import lifecycle as _ops
+from ops.agents import get_agent_status
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -280,7 +290,13 @@ async def get_notices_feed(
 
 @router.post("/api/agents/{agent_id}/notices/{notice_id}/resolve", status_code=201)
 async def post_notice_resolve(
-    agent_id: int, notice_id: int, body: ResolveNoticeIn, request: Request
+    agent_id: int,
+    notice_id: int,
+    body: ResolveNoticeIn,
+    request: Request,
+    idempotency_key: str | None = Header(
+        None, alias="Idempotency-Key", min_length=1, max_length=128
+    ),
 ) -> AgentMessageEnqueued:
     """Resolve one open notice and (when a reply is given) wake the agent with it.
 
@@ -307,6 +323,7 @@ async def post_notice_resolve(
     reply or a dismissal is never silently dropped. 422 when `action` is
     `answer` without a reply.
     """
+    idempotency_key = notice_key(request, idempotency_key)
     action = body.action
     reply = body.reply
 
@@ -371,6 +388,51 @@ async def post_notice_resolve(
     # (base/agents/messages/envelope.py), so no User-role message is consumed and nothing is
     # shaped like a reply request; read-without-reply still delivers nothing.
     deliver_source = "system:notice-reply" if reply is not None else "system:notice-dismiss"
+    if idempotency_key is not None:
+        receipt = await asyncio.to_thread(
+            resolve_once,
+            request.app.state.db_pool,
+            request.url.path,
+            idempotency_key,
+            body.model_dump(mode="json"),
+            agent_id,
+            deliver_source,
+            _resolve,
+            request_inbound_provenance(request),
+        )
+        inbound_id = receipt["inbound_id"]
+        if inbound_id is not None:
+            if not isinstance(inbound_id, int):
+                raise TypeError("notice inbound receipt must be an integer")
+            await asyncio.to_thread(
+                publish_inbound_wake,
+                request.app.state.db,
+                request.app.state.bus,
+                agent_id,
+                str(inbound_id),
+            )
+            content = receipt["content"]
+            if not isinstance(content, str):
+                raise TypeError("notice inbound content must be a string")
+            await _ops.publish_inbound_arrived(
+                request.app.state.bus,
+                agent_id,
+                inbound_id,
+                "chat",
+                deliver_source,
+                content,
+            )
+            status = await _ops.resurrect_if_terminated(
+                request.app.state.db,
+                request.app.state.bus,
+                agent_id,
+                trigger_inbound_id=inbound_id,
+                trigger_inbound_kind=InboundKind.CHAT,
+            )
+        else:
+            status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
+        await _ops.publish_notice_resolved(request.app.state.bus, agent_id, notice_id)
+        return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
     delivery = await deliver_chat_inbound(
         request.app.state.db_pool,
         request.app.state.db,
@@ -401,7 +463,14 @@ async def post_notice_resolve(
 
 
 @router.post("/api/agents/{agent_id}/notices", status_code=201)
-async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Request) -> dict:
+async def post_notice_create(
+    agent_id: int,
+    body: NoticeCreateIn,
+    request: Request,
+    idempotency_key: str | None = Header(
+        None, alias="Idempotency-Key", min_length=1, max_length=128
+    ),
+) -> dict:
     """Post a notice at one of the three obligation rungs (FYI /
     response-required / blocking), atomically superseding the agent's
     previous open notice.
@@ -415,34 +484,29 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
     Returns the SDK Notice shape: the new notice's local id, the pending
     count + titles (for the SDK's pending list), and the superseded ids.
     """
-    if not body.title.strip():
-        raise HTTPException(status_code=422, detail="title must be non-empty")
-    if body.blocking and not body.require_response:
-        raise HTTPException(
-            status_code=422,
-            detail="blocking=True requires require_response=True (an FYI never stalls)",
-        )
-    if body.expire_at is not None:
-        req_tz = (
-            body.expire_at
-            if body.expire_at.tzinfo is not None
-            else body.expire_at.replace(tzinfo=UTC)
-        )
-        if req_tz < datetime.now(UTC):
-            raise HTTPException(
-                status_code=422,
-                detail=f"expire_at is in the past: {req_tz.isoformat()}",
-            )
+    validate_creation(body)
+    idempotency_key = notice_key(request, idempotency_key)
+    request_body = body.model_dump(mode="json")
 
-    def _create(pool: ConnectionPool) -> tuple[int, int, list[int], list[int]]:
-        if body.task_id is not None:
-            with pool.connection() as conn, conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM agent_tasks WHERE id = %s", (body.task_id,))
-                if cur.fetchone() is None:
-                    raise HTTPException(
-                        status_code=422, detail=f"task {body.task_id} does not exist"
-                    )
+    def _create(
+        pool: ConnectionPool,
+    ) -> tuple[int, int, list[int], list[int], list[dict[str, object]], bool]:
         with write_transaction(pool) as conn, conn.cursor() as cur:
+            if idempotency_key is not None:
+                previous = existing_receipt(conn, request.url.path, idempotency_key, request_body)
+                if previous is not None:
+                    return (
+                        int(cast(int, previous["global_id"])),
+                        int(cast(int, previous["id"])),
+                        cast(list[int], previous["superseded_global"]),
+                        cast(list[int], previous["superseded"]),
+                        cast(list[dict[str, object]], previous["pending_notices"]),
+                        True,
+                    )
+            validate_creation_state(conn, body)
+            # Serialize all creations for an agent, including different keys:
+            # no-open-notice races must not allocate the same local id.
+            cur.execute("SELECT id FROM agents WHERE id = %s FOR UPDATE", (agent_id,))
             # Auto-resolve any existing open notice (supersede).
             cur.execute(
                 "SELECT id, local_id, require_response FROM agent_notices "
@@ -503,26 +567,43 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
             if row is None:  # pragma: no cover — RETURNING always yields
                 raise RuntimeError("notice insert returned no row")
             notice_global_id, notice_local_id = int(row[0]), int(row[1])
-            # Publish only after the durable rows are visible to the snapshot
-            # query; a pre-commit AgentUpdated would preserve the stale view.
-            conn.commit()
-            if body.require_response or superseded_response_required:
-                _publish_response_required_hint(request.app.state.bus, agent_id)
-            return notice_global_id, notice_local_id, superseded_global, superseded_local
-
-    def _pending(pool: ConnectionPool) -> list[dict[str, object]]:
-        # Pending summary (the SDK's Notice carries it for the agent's view).
-        with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT local_id AS id, title, created_at, priority "
                 "FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL "
                 "ORDER BY created_at DESC, local_id DESC",
                 (agent_id,),
             )
-            return [
+            pending: list[dict[str, object]] = [
                 {"id": int(r[0]), "title": r[1], "created_at": r[2].isoformat(), "priority": r[3]}
                 for r in cur.fetchall()
             ]
+            if idempotency_key is not None:
+                save_receipt(
+                    conn,
+                    request.url.path,
+                    idempotency_key,
+                    request_body,
+                    {
+                        "global_id": notice_global_id,
+                        "id": notice_local_id,
+                        "superseded_global": superseded_global,
+                        "superseded": superseded_local,
+                        "pending_notices": pending,
+                    },
+                )
+            # Publish only after the durable rows are visible to the snapshot
+            # query; a pre-commit AgentUpdated would preserve the stale view.
+            conn.commit()
+            if body.require_response or superseded_response_required:
+                _publish_response_required_hint(request.app.state.bus, agent_id)
+            return (
+                notice_global_id,
+                notice_local_id,
+                superseded_global,
+                superseded_local,
+                pending,
+                False,
+            )
 
     pool = request.app.state.db_pool
     (
@@ -530,21 +611,25 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
         notice_local_id,
         superseded_global,
         superseded_local,
+        pending,
+        replayed,
     ) = await asyncio.to_thread(_create, pool)
     # Events after the commit: superseded notices first (the feed drops them),
     # then the new posted notice. Best-effort, never raises. Events publish by
     # GLOBAL id; the SDK's return value carries LOCAL ids.
-    for _gid in superseded_global:
-        await _ops.publish_notice_resolved(request.app.state.bus, agent_id, _gid)
-    await _ops.publish_notice_posted(
-        request.app.state.bus,
-        agent_id,
-        notice_global_id,
-        body.priority,
-        body.title,
-        body.task_id,
-    )
-    pending = await asyncio.to_thread(_pending, pool)
+    if not replayed:
+        for _gid in superseded_global:
+            await _ops.publish_notice_resolved(request.app.state.bus, agent_id, _gid)
+        await _ops.publish_notice_posted(
+            request.app.state.bus,
+            agent_id,
+            notice_global_id,
+            body.priority,
+            body.title,
+            body.task_id,
+        )
+    else:
+        await asyncio.to_thread(_publish_response_required_hint, request.app.state.bus, agent_id)
     return {
         "id": int(notice_local_id),
         "pending_count": len(pending),

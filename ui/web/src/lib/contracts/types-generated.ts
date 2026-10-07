@@ -9893,7 +9893,9 @@ export interface operations {
     post_notice_resolve_api_agents__agent_id__notices__notice_id__resolve_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 agent_id: number;
                 notice_id: number;
@@ -9929,7 +9931,9 @@ export interface operations {
     post_notice_create_api_agents__agent_id__notices_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 agent_id: number;
             };

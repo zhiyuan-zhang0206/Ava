@@ -311,12 +311,14 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/notices/live"): RouteContract(),
     ("GET", "/api/notices/open"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="read with reply can insert another inbound; resolved answers do not replay receipts",
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        note="notice resolution and reply share a durable keyed receipt; keyless legacy reads with reply remain distinct",
     ),
     ("POST", "/api/agents/{agent_id}/notices"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="create notice — supersedes the previous open one; a retry supersedes twice (harmless but pointless), duplicate row",
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        note="notice creation and superseding effects share one keyed transaction; replays return the original notice result",
     ),
     ("PATCH", "/api/agents/{agent_id}/notices/current"): RouteContract(
         note="edit current open notice — repeats are harmless"
