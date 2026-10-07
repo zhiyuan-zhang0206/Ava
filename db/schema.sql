@@ -685,14 +685,16 @@ COMMENT ON COLUMN agents_meta.creation_key IS
 -- stores method='ops' rows with their outcome in `op_status`, the HTTP
 -- middleware stores HTTP-code rows in `status`.
 -- key = caller-generated per logical request; status/completed_at are NULL
--- while the owning request executes. Rows live 7 days (pruned
--- opportunistically by the middleware on each claim).
+-- while the owning request executes. HTTP cache rows live 7 days. Ops rows
+-- retain immutable request hashes and are not expired into fresh executions;
+-- domain recovery must establish safe retirement before pruning them.
 CREATE TABLE api_idempotency (
     key TEXT PRIMARY KEY,
     method TEXT NOT NULL,
     path TEXT NOT NULL,
     status INTEGER,
     op_status TEXT,
+    request_hash TEXT,
     response_body JSONB,
     response_headers JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -703,6 +705,8 @@ COMMENT ON TABLE api_idempotency IS
     'AtLeastOnceWithKey dedup for routes declaring Idempotency.AT_LEAST_ONCE_WITH_KEY (R3 doorplate 1): the first request with an Idempotency-Key header stores its response; same-key retries replay it instead of re-executing.';
 COMMENT ON COLUMN api_idempotency.status IS
     'HTTP status of the stored response; NULL while the owning request is still executing.';
+COMMENT ON COLUMN api_idempotency.request_hash IS
+    'SHA-256 of the immutable ops kind/payload; NULL on legacy/HTTP records. Unknown identity fails closed on ops replay.';
 COMMENT ON COLUMN api_idempotency.op_status IS
     'Ops-channel outcome status (''completed''/''failed''); NULL for HTTP middleware rows. The HTTP channel stores its HTTP code in `status` instead.';
 
