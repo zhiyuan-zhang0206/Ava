@@ -67,6 +67,11 @@ Edit the script template and the manifest entry (name, class, default_enabled,
 description), PR it, and deploy: the next `schedule-manager` start syncs it into
 existing clusters.
 
+The C9 template imports its accounting dependency through
+`scripts.ci.pull_requests.accounting`. Materialization changes the script
+directory, not the installed module roots. Template tests live in
+`schedules/tests/`.
+
 A `.py` template is executed in-process by the runner, which hands it a clean
 `sys.argv` — just its own path, exactly what `python <script>` would give it; the
 runner's own argv (`python -m gateway.schedules.runner <id>`) never reaches the
