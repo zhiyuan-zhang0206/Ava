@@ -218,7 +218,7 @@ def _send(args: argparse.Namespace) -> int:
     stamps for ``ava.agents.send_message`` (task #4102).
     """
     from base.agents import impersonation as control
-    from base.agents.impersonation import sessions as sessions
+    from base.agents.impersonation import sessions
     from base.native_process.ownership import process_metadata
     from cli.commands.agents.control import send_agent_message
 
@@ -235,7 +235,7 @@ def _send(args: argparse.Namespace) -> int:
 
 def _request(args: argparse.Namespace) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
-    from base.agents.impersonation import sessions as sessions
+    from base.agents.impersonation import sessions
     from base.native_process.ownership import process_metadata
     from cli.commands.agents.codex_app_server import require_control_endpoint
 
@@ -293,7 +293,7 @@ def _request(args: argparse.Namespace) -> int:
 
 def _dispatch(args: argparse.Namespace) -> int:
     from base.agents import impersonation as control
-    from base.agents.impersonation import sessions as sessions
+    from base.agents.impersonation import sessions
     from base.agents.impersonation.history import public_session, say
     from base.native_process.ownership import process_metadata
 
