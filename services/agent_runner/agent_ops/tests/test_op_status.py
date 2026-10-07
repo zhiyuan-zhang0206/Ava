@@ -1,5 +1,6 @@
 """Stored op replay validates terminal results while NULL remains an unfinished owner."""
 
+import hashlib
 from collections.abc import Iterator
 
 import psycopg
@@ -22,9 +23,9 @@ def pool() -> Iterator[ConnectionPool]:
 
 def _record(conn: psycopg.Connection, status: str | None) -> None:
     conn.execute(
-        "INSERT INTO api_idempotency(key,method,path,op_status,response_body,completed_at) "
-        "VALUES ('status-test','ops','status_probe',%s,'{}',now())",
-        (status,),
+        "INSERT INTO api_idempotency(key,method,path,op_status,response_body,completed_at,request_hash) "
+        "VALUES ('status-test','ops','status_probe',%s,'{}',now(),%s)",
+        (status, hashlib.sha256(b'["status_probe",{}]').hexdigest()),
     )
     conn.commit()
 
