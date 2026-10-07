@@ -200,7 +200,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     or an external SIGKILL). This is the only
     thing standing between a dead session and a watcher that keeps firing
     forever: nothing tracks or restarts watchers
-    (docs/decisions/2026-09-27-watchers-are-never-restarted.md), so a watcher
+    (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md), so a watcher
     child that outlived its session would otherwise run unsupervised.
     """
     watchdog = ""
@@ -314,7 +314,7 @@ def _spawn(
 
     A watcher is nothing more than a shell session running a generated
     script — there is no separate registry or desired-state record
-    (docs/decisions/2026-09-27-watchers-are-never-restarted.md): list it, capture
+    (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md): list it, capture
     its output, renew its deadline, or kill it exactly like any other session
     via ``ava.shell.sessions``. Re-registering the same schedule (`cron()`
     with the same expression/timezone, say) does not replace anything — it

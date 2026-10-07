@@ -166,7 +166,7 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
     Repeated in-process loads are a production path too, not only a test
     fixture: `agent/extensions/catalog.py:build_catalog()` loads in the calling
     process, and the runner-hosted executor sketched in
-    `future/infra/extension-ownership.md` would reload as the activated union
+    `future/infra/extensions/extension-ownership.md` would reload as the activated union
     changes rather than once at process boot.
     """
     _make_plugin(

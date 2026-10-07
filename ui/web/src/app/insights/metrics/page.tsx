@@ -25,9 +25,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { buttonVariants } from "@/components/ui/button";
-import { api, API_BASE } from "@/lib/api";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { api, API_BASE } from "@/lib/transport/api";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 // Give the notice a beat to render before moving on — a user who follows an
 // old link sees *why* they landed on Grafana, not a silent jump.

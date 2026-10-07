@@ -5,9 +5,9 @@ import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 
-import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_COL } from "@/lib/layout";
-import { useStatsDashboard, useStatsWindow } from "@/lib/sidebar";
-import { cn } from "@/lib/utils";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_COL } from "@/lib/layout/layout";
+import { useStatsDashboard, useStatsWindow } from "@/lib/agents/sidebar";
+import { cn } from "@/lib/format/utils";
 
 import { StatsCards, STATS_POPOVER_CLASS } from "./footer";
 import { fleetHref } from "./links";

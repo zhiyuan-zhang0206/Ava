@@ -12,7 +12,7 @@ under one passphrase: the file `$AVA_HOME/backups/logical-backup.passphrase`
 (0600, 64 hex characters). `services/backup/artifact/passphrase.py` is its
 only resolution, shared by every writer and restore path; it never derives a
 key, so a home without the file refuses to back up or restore
-([decision](../../../../docs/decisions/2026-09-28-backup-passphrase-minted-at-birth.md)).
+([decision](../../../../docs/decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md)).
 
 - **Birth**: a gateway claim mints and pins it (`ensure_minted`) before it
   publishes `.env`, whatever the cluster secret, so an empty-secret single box

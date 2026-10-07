@@ -5,9 +5,9 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { useAuth } from "@/lib/auth-context";
-import { FLEX, FLEX_COL } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth/auth-context";
+import { FLEX, FLEX_COL } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export function LoginForm() {
   const t = useTranslations("login");

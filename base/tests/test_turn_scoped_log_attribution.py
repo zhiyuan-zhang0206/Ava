@@ -1,6 +1,6 @@
 """Turn-scoped log attribution — which agent a log record belongs to.
 
-Prerequisite 3 of `future/infra/agent-runner-as-server.md` Phase 1. The hosted
+Prerequisite 3 of `future/infra/lifecycle/agent-runner-as-server.md` Phase 1. The hosted
 runner writes log records for every local agent from one process, so a fixed
 `agent_id` frozen into loguru's `extra` would stamp every record with the same
 agent. The default binding is a

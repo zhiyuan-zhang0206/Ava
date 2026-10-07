@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Schedule Manager & Runner
-description: The built-in schedule supervisor—a schedule is a supervised resident process (not a cron trigger). The schedule-manager service guarantees a live session for every enabled schedule.
+description: The built-in supervisor keeps a live session for each enabled schedule—a resident process, not a cron trigger.
 tags: []
 ---
 
@@ -52,7 +52,7 @@ Only applies to **crashes** (not clean exits) looping—clean exits go to `compl
 
 ## Key Dependencies
 
-- [[db.ava.okf.md]] — reads/writes the `schedules` and `schedule_fire_log` tables
+- [[agent/db/docs/db.ava.okf.md]] — reads/writes the `schedules` and `schedule_fire_log` tables
 - `base.cluster.session_name()` — generates the session name `ava-schedule-<id>`
 - [[agent/docs/lifecycle.ava.okf.md]] — agent lifecycle is independent of persistent schedule sessions
 

@@ -28,7 +28,7 @@ subagents, hooks, slash commands, and MCP servers.
 The bridge works in both directions: the gateway `/mcp` endpoint exposes the fleet as
 an MCP server, so Claude Code can keep driving it
 (`claude mcp add --transport http ava http://<gateway-host>/mcp --header "Authorization: Bearer <mcp-client-token>"`;
-token setup: `docs/conventions/mcp-client-access.md`).
+token setup: `docs/conventions/extensions/mcp-client-access.md`).
 
 ## Migration steps
 

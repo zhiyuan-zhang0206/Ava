@@ -7,7 +7,7 @@ tags: []
 
 # Gateway
 
-Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopback-only when no cluster secret is set; reachable addresses require both a secret and declared transport encryption — `gateway/cluster/server.py:main`). Pure JSON API, no HTML rendering — with a small enumerated set of exceptions: `GET /api/okf/graph` (D3 knowledge-graph page), uploads `FileResponse`, the agents' page-server reverse proxy, and the grafana reverse proxy. Frontend, CLI, agent SDK (`ava.agents.*`), bootstrap scripts all access the cluster through the same set of `/api/*` endpoints.
+Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopback-only when no cluster secret is set; reachable addresses require both a secret and declared transport encryption — `gateway/cluster/server.py:main`). Pure JSON API, no HTML rendering — with a small enumerated set of exceptions: `GET /api/okf/graph` (D3 knowledge-graph page), uploads `FileResponse`, the agents' page-server reverse proxy, and the grafana reverse proxy. Frontend, CLI, agent SDK (`ava.agents.*`) and bootstrap scripts use the same `/api/*` endpoints.
 
 ## Terminology (domain ubiquitous language)
 
@@ -67,7 +67,7 @@ Feature packages (routes + helpers + wire models):
 [[gateway/schedules/docs/schedules.ava.okf.md|schedules]],
 [[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md|mcp_server]], `auth`, `lgtm`,
 `middleware`, `extensions`. [[routers.ava.okf.md]]:
-single-module routers. [[db.ava.okf.md]]: Postgres pool.
+single-module routers. [[agent/db/docs/db.ava.okf.md]]: Postgres pool.
 
 ## Entry Points
 

@@ -30,7 +30,7 @@ grants, which macOS lets only a person give:
 Nothing of the host's `~/.ava`, launchd, keychain or TCC is touched, and at most two Tart
 VMs run at once. A VM that already has the name is never overwritten. If a step fails the
 VM is left stopped as it is, for inspection. The design is
-future/infra/verification-boundaries.md.
+future/infra/engineering/verification-boundaries.md.
 
 Host-side and stdlib-only. Run it from the repository checkout; the commit only decides
 which helper source is built.

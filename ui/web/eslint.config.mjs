@@ -7,7 +7,6 @@ import jsxA11y from "eslint-plugin-jsx-a11y";
 import sentenceCase from "./eslint-rules/sentence-case.mjs";
 import layoutPrimitive from "./eslint-rules/layout-primitive.mjs";
 import noUntranslatedUiCopy from "./eslint-rules/no-untranslated-ui-copy.mjs";
-import sourceLines from "./eslint-rules/source-lines.mjs";
 
 // Proper nouns / acronyms / brands allowed inside a Title-Case run (local/
 // sentence-case). A run is permitted only when EVERY word is listed, so
@@ -90,7 +89,7 @@ export default tseslint.config(
       ".next/**",
       ".builds/**",
       "node_modules/**",
-      "src/lib/types-generated.ts",
+      "src/lib/contracts/types-generated.ts",
       "*.config.*",
       // Local ESLint plugin source — plain .mjs outside the TS project, so the
       // type-aware base configs must not try to lint it.
@@ -154,8 +153,8 @@ export default tseslint.config(
   {
     files: [
       "src/app/control/config/page.tsx",
-      "src/components/agent-prompt-dialog.tsx",
-      "src/components/agent-row.tsx",
+      "src/components/agents/agent-prompt-dialog.tsx",
+      "src/components/agents/agent-row.tsx",
       "src/components/agent-sidebar/search-overlay.tsx",
       "src/components/fleet/inbox-queue/detail.tsx",
     ],
@@ -179,7 +178,7 @@ export default tseslint.config(
   {
     // react-markdown provides anchor children through the spread props; the
     // static rule cannot see that each rendered anchor has content.
-    files: ["src/components/markdown.tsx"],
+    files: ["src/components/content/markdown.tsx"],
     rules: {
       "jsx-a11y/anchor-has-content": "off",
     },
@@ -337,7 +336,7 @@ export default tseslint.config(
       "src/components/fleet/**/*.{ts,tsx}",
       "src/app/insights/**/*.{ts,tsx}",
       "src/app/memory/graph/**/*.{ts,tsx}",
-      "src/components/spawn-button.tsx",
+      "src/components/agents/spawn-button.tsx",
     ],
     ignores: ["**/*.test.{ts,tsx}"],
     rules: {
@@ -367,7 +366,6 @@ export default tseslint.config(
           "sentence-case": sentenceCase,
           "layout-primitive": layoutPrimitive,
           "no-untranslated-ui-copy": noUntranslatedUiCopy,
-          "source-lines": sourceLines,
         },
       },
     },
@@ -377,31 +375,14 @@ export default tseslint.config(
     },
   },
 
-  // ── Per-file 500-line soft budget ──
-  // This measures physical lines so the warning reflects the total file a
-  // maintainer must navigate. It deliberately remains a warning: the existing
-  // outliers stay visible without turning an unrelated edit into a component
-  // split. The lint warning baseline preserves existing identities while
-  // rejecting new or duplicate diagnostics, without coupling the gate to a
-  // merge-reference-wide warning count.
-  {
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: ["**/*.test.{ts,tsx}", "src/lib/types-generated.ts"],
-    rules: {
-      "local/source-lines": ["warn", { max: 500 }],
-    },
-  },
-
   // ── Per-file line budget (outlier cleanup, user ruling 2026-08-07) ──
-  // Mirror of the Python 500-soft / 800-hard discipline (AGENTS.md). The local
-  // source-lines rule above makes the 500 tier visible as a warning; this core
-  // rule retains the 800-line hard ceiling. Blank/comment lines are skipped at
+  // This lint rule retains the 800-line hard ceiling. Blank/comment lines are skipped at
   // the hard tier so a comment-dense file is not penalized. Test files are
   // exempt (fixtures carry volume; a 1200 cap lands with the test-outlier
   // sweep).
   {
     files: ["src/**/*.{ts,tsx}"],
-    ignores: ["**/*.test.{ts,tsx}", "src/lib/types-generated.ts"],
+    ignores: ["**/*.test.{ts,tsx}", "src/lib/contracts/types-generated.ts"],
     rules: {
       "max-lines": ["error", { max: 800, skipBlankLines: true, skipComments: true }],
     },

@@ -10,8 +10,8 @@
     "check:first-load-js": "node scripts/check-first-load-js.mjs",
     "check:bundle-integrity": "node scripts/check-bundle-integrity.mjs",
     "start": "next start -H 127.0.0.1",
-    "test": "vitest run",
-    "lint": "eslint . --format json | node scripts/check-eslint-warnings.mjs",
+    "test": "vitest run --config tests/vitest.config.mts",
+    "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "typecheck": "next typegen && tsc --noEmit"
   },

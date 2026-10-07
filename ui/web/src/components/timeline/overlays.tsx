@@ -9,8 +9,8 @@
 import { ArrowDown, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { cn } from "@/lib/utils";
-import { FLEX, FLEX_1 } from "@/lib/layout";
+import { cn } from "@/lib/format/utils";
+import { FLEX, FLEX_1 } from "@/lib/layout/layout";
 
 // Load-older spinner — shown while a scroll-up paging fetch (an upward
 // gesture reaching the top with older pages remaining) is in flight. Always

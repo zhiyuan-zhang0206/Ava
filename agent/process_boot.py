@@ -103,7 +103,7 @@ def land_cluster_extensions(db: Database) -> None:
     was down when someone ran `ava skill install` elsewhere catches up the moment
     anything on it next starts, and an agent never boots against a tree older
     than the registry row it could have read
-    (`future/infra/extension-ownership.md` S2).
+    (`future/infra/extensions/extension-ownership.md` S2).
 
     Process scope, not agent scope: the skills directory is a fact about the
     MACHINE, identical for every agent on it. The hosted runner therefore calls

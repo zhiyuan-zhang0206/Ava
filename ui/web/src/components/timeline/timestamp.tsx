@@ -1,6 +1,6 @@
 "use client";
 
-import { formatAbsolute } from "@/lib/time";
+import { formatAbsolute } from "@/lib/format/time";
 
 // Timestamp on agent_reasoning / agent_chat / agent_code headers.
 // `[YYYY-MM-DD HH:MM:SS TZ]`, e.g. `[2026-05-06 16:56:29 PDT]`. When

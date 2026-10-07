@@ -2,7 +2,7 @@
 
 import React, { useCallback } from "react";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/format/utils";
 
 interface AutoExpandTextareaProps
   extends Omit<React.ComponentProps<"textarea">, "onKeyDown"> {

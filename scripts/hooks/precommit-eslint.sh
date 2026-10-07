@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ESLint over the frontend files a commit changed, through the same warning gate as
-# `npm run lint` (errors and unbaselined warnings fail).
+# `npm run lint` (errors and warnings fail).
 #
-# The lint setup itself -- the config, the local rules, the warning baseline, tsconfig and the
+# The lint setup itself -- the config, the local rules, tsconfig and the
 # dependencies -- can change the verdict of files that did not change, so an edit to any of
 # them lints the whole project, as does `--all-files`. A type-aware rule can also react to a
 # type that changed in ANOTHER file, which this per-file run does not see: the pre-push
@@ -20,8 +20,7 @@ full=0
 files=()
 for path in "$@"; do
     case "$path" in
-        ui/web/eslint.config.mjs | ui/web/eslint-rules/* | ui/web/scripts/check-eslint-warnings.mjs \
-            | ui/web/scripts/eslint-warning-baseline.json | ui/web/package.json \
+        ui/web/eslint.config.mjs | ui/web/eslint-rules/* | ui/web/package.json \
             | ui/web/package-lock.json | ui/web/tsconfig.json)
             full=1
             ;;
@@ -35,4 +34,4 @@ if [[ "$full" == 1 ]]; then
 fi
 [[ ${#files[@]} -gt 0 ]] || exit 0
 # --no-warn-ignored: a file the config ignores is a clean pass here, not a null-rule warning.
-npx --no-install eslint --no-warn-ignored --format json "${files[@]}" | node scripts/check-eslint-warnings.mjs
+npx --no-install eslint --no-warn-ignored --max-warnings 0 "${files[@]}"

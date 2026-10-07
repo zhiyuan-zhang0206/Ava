@@ -14,7 +14,7 @@ by date in its own docstring: `services/healthchecks/redis_acl.py`. Surviving
 code: `services/watchdog/daemon.py` (check ordering),
 `cli/commands/_cluster_instance.py:_ensure_redis_acl`,
 `shared/cluster/provision.py:ensure_cluster_redis_acl`. Design record:
-[`future/infra/embedded-per-cluster-data-plane.md`](../../future/infra/embedded-per-cluster-data-plane.md).
+[`future/infra/data/embedded-per-cluster-data-plane.md`](../../future/infra/data/embedded-per-cluster-data-plane.md).
 
 ## Summary
 
@@ -30,7 +30,7 @@ Two facts multiplied. A credentials error was read as a server error, which is
 the ordinary way that mistake is made. And one box ran one Redis for every
 cluster on it, so a preview-scoped remedy had production-scoped reach. The
 guardrail is architectural: the
-[per-cluster data plane](../../future/infra/embedded-per-cluster-data-plane.md)
+[per-cluster data plane](../../future/infra/data/embedded-per-cluster-data-plane.md)
 gives every cluster its own Postgres and Redis under its own `$AVA_HOME`. The
 same mistake today restarts one cluster's own server and cannot touch a
 neighbour. This incident is the strongest single argument for that design,
@@ -111,7 +111,7 @@ The escape analysis:
   secret). Restarting a cluster's Redis today is a cluster-scoped act because the
   server *belongs* to one cluster — not because the operator aimed carefully.
   Rationale in
-  [`embedded-per-cluster-data-plane.md`](../../future/infra/embedded-per-cluster-data-plane.md).
+  [`embedded-per-cluster-data-plane.md`](../../future/infra/data/embedded-per-cluster-data-plane.md).
 - **`services/healthchecks/redis_acl.py`**, run every 60s by the gateway
   watchdog: PINGs Redis as the cluster identity and, on an auth failure with the
   server otherwise reachable, re-runs the idempotent provisioning primitive and

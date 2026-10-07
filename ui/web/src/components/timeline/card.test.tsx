@@ -20,12 +20,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // below can assert it's actually invoked, without depending on the real
 // dynamic import.
 const preloadPythonCodeHighlighter = vi.hoisted(() => vi.fn());
-vi.mock("@/components/python-code", () => ({ preloadPythonCodeHighlighter }));
+vi.mock("@/components/content/python-code", () => ({ preloadPythonCodeHighlighter }));
 
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
-import { resolveTimelineColors } from "@/lib/timeline-colors";
+import { resolveTimelineColors } from "@/lib/timeline/timeline-colors";
 import { formatItemTime } from "./timestamp";
-import type { BackendTimelineItem } from "@/lib/types";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

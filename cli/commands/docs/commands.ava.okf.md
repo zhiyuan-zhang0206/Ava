@@ -78,7 +78,7 @@ Root owns Gate and native LGTM application services. `_pause_resume`
 releases normal startup admission only after readiness.
 The hold journal is read through `ava status` and ended by `ava start`
 (`lifecycle/hold_report.py`, `lifecycle/_failed_receipts.py`). They reuse the [durable maintenance journal](../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
-See [the coordinated operator procedure](../../../docs/conventions/graceful-maintenance.md).
+See [the coordinated operator procedure](../../../docs/conventions/operations/graceful-maintenance.md).
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 `data_plane/pgbouncer`):
@@ -97,7 +97,7 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
   `agents/impersonation_relay.py` forwards inbound availability to the owning external
   model session; `--codex-remote` routes to the app server holding a Codex thread
   without waiting for its external queue-store scan.
-  Usage: [External agent impersonation](../../../docs/conventions/agent-impersonation.md).
+  Usage: [External agent impersonation](../../../docs/conventions/agents/agent-impersonation.md).
 
 - Which cluster a command acts on comes from `cli/commands/_repo.py:_repo_root` — the
   checkout the running `ava` belongs to — never the current directory.
@@ -122,6 +122,6 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 ## Key Dependencies
 
 - [[cli.ava.okf.md]] — the CLI domain overview: verbs, cluster identity, idempotent first start
-- [[packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` package surface
+- [[cli/commands/extensions/packages/docs/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` package surface
 - [[cli/commands/lifecycle/docs/lifecycle.ava.okf.md]] — start, stop, restart,
   maintenance and the application root

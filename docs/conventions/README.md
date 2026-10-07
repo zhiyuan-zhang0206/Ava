@@ -9,7 +9,7 @@ behavior and domain contracts remain in component-local `docs/` and the
 - [Python conventions](python-conventions.md) and [import layering](import-layering.md)
 - [Development setup](dev-setup.md) and [testing](testing.md)
 - [Documentation maintenance](doc-maintenance.md) and [SDK docstrings](sdk-docstring-discipline.md)
-- [Technical-debt inspection](tech-debt.md) and [automated-check boundary](lint-vs-sweeper.md)
+- [Technical-debt inspection](engineering/tech-debt.md) and [automated-check boundary](engineering/lint-vs-sweeper.md)
 - [Defensive patterns](defensive-patterns.md) and [runtime runbook](runbook.md)
 
 Historical choices belong in [decisions](../decisions/README.md), incident analyses

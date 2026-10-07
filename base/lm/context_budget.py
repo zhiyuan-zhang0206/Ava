@@ -14,12 +14,12 @@ still pins the whole cluster when the user says so.
 The roster runs one flat rule — force-compact at 40% of the model's own window,
 remind at 30% — so no registry entry carries a compact fraction or ceiling of its
 own and every model's thresholds are those two percentages of its own
-``context_window`` (``docs/decisions/2026-07-31-flat-compact-thresholds.md``; the
+``context_window`` (``docs/decisions/agents/context/2026-07-31-flat-compact-thresholds.md``; the
 per-model evidence the earlier tiers were built from is kept in
-``docs/decisions/2026-07-25-per-model-tuning-values.md``). The deepseek
+``docs/decisions/engineering/design/simplification/2026-07-25-per-model-tuning-values.md``). The deepseek
 entries are the exception: a user decision (2026-08-29) pins them at soft 374k /
 hard 512k (0.374 / 0.512 of their 1M window — see
-``docs/decisions/2026-08-29-deepseek-compact-thresholds-374k-512k.md``; the
+``docs/decisions/agents/context/2026-08-29-deepseek-compact-thresholds-374k-512k.md``; the
 2026-08-27 600k/700k pin is superseded).
 
 **Why the ceiling knob still exists.** A fraction tracks the ADVERTISED window,

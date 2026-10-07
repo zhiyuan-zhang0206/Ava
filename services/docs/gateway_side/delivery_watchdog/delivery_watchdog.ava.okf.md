@@ -13,7 +13,7 @@ A gateway daemon with six jobs on four resident loops under one `TaskGroup` (use
 **Role affiliation**: gateway side — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, `requires_db=True` (polls `inbound_messages`). Kept alive by the root supervisor's health monitor through the roster's `/healthz` identity probe.
 
 ## Key Dependencies
-- [[db.ava.okf.md]] — polls `inbound_messages` + reads `agents_meta` owner status
+- [[agent/db/docs/db.ava.okf.md]] — polls `inbound_messages` + reads `agents_meta` owner status
 - [[agent/graph/docs/graph.ava.okf.md]] — the claim loop whose lost-wake window this closes
 - [[process-lifecycle.ava.okf.md]] — resurrect semantics the retry re-runs
 
