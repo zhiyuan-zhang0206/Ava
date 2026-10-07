@@ -23,7 +23,9 @@ import type {
 } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
-import { blockClass, cacheHitRate, partsForUnit } from "./timeline-model";
+import { blockClass, cacheHitRate, firstLine, partsForUnit } from "./timeline-model";
+
+const CHIP_SUMMARY_CHARS = 36;
 
 const RAW_PAGE = 50;
 
@@ -173,13 +175,51 @@ function SpanFacts({
   );
 }
 
+/** A node as a button: choosing it selects that node. */
+function NodeChip({ node, onSelect }: { node: RunTimelineNode; onSelect: (id: string) => void }) {
+  const t = useTranslations("runTimeline");
+  return (
+    <button
+      type="button"
+      data-testid="run-timeline-chip"
+      data-node-id={node.id}
+      onClick={() => onSelect(node.id)}
+      className="max-w-full truncate rounded-full border border-border px-2 py-0.5 text-left text-[11px] hover:bg-muted"
+    >
+      {t("chipLabel", { level: node.level, summary: firstLine(node.summary, CHIP_SUMMARY_CHARS) })}
+    </button>
+  );
+}
+
+function Chips({ heading, nodes, onSelect }: { heading: string; nodes: RunTimelineNode[]; onSelect: (id: string) => void }) {
+  if (nodes.length === 0) return null;
+  return (
+    <section className="space-y-1" data-testid="run-timeline-chips">
+      <Heading>{heading}</Heading>
+      <div className={cn(FLEX, "flex-wrap gap-1")}>
+        {nodes.map((node) => (
+          <NodeChip key={node.id} node={node} onSelect={onSelect} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function NodeDetail({
   agentId,
   node,
+  ancestors = [],
+  childNodes = [],
+  onSelectNode = () => undefined,
   onDrill,
 }: {
   agentId: number;
   node: RunTimelineNode;
+  /** The node's loaded ancestors, nearest first. */
+  ancestors?: RunTimelineNode[];
+  /** The loaded nodes one level down that this node groups. */
+  childNodes?: RunTimelineNode[];
+  onSelectNode?: (id: string) => void;
   onDrill: () => void;
 }) {
   const t = useTranslations("runTimeline");
@@ -192,6 +232,8 @@ export function NodeDetail({
         </button>
       </div>
       <SpanFacts start={node.start} end={node.end} i0={node.span_start} i1={node.span_end} />
+      <Chips heading={t("ancestorsHeading")} nodes={ancestors} onSelect={onSelectNode} />
+      <Chips heading={t("childrenHeading")} nodes={childNodes} onSelect={onSelectNode} />
       <Heading>{t("summaryHeading")}</Heading>
       <div
         className="text-sm leading-5 [&_.chat-md_h1]:text-sm [&_.chat-md_h2]:text-[13px] [&_.chat-md_h3]:text-xs [&_.chat-md_h3]:font-semibold"
@@ -215,10 +257,15 @@ export function NodeDetail({
 export function UnitDetail({
   agentId,
   unit,
+  parent = null,
+  onSelectNode = () => undefined,
   onDrill,
 }: {
   agentId: number;
   unit: RunTimelineUnit;
+  /** The level-1 node that covers this block, when it is loaded. */
+  parent?: RunTimelineNode | null;
+  onSelectNode?: (id: string) => void;
   onDrill: () => void;
 }) {
   const t = useTranslations("runTimeline");
@@ -246,6 +293,13 @@ export function UnitDetail({
           <span className="font-mono">{unit.source}</span>
         </p>
       ) : null}
+      {parent !== null ? (
+        <Chips heading={t("coveredByHeading")} nodes={[parent]} onSelect={onSelectNode} />
+      ) : (
+        <p className="text-xs text-muted-foreground" data-testid="run-timeline-uncovered">
+          {t("coveredByNone")}
+        </p>
+      )}
       <RawMessages agentId={agentId} start={unit.i0} end={unit.i1} unitKind={unit.kind} />
     </div>
   );
