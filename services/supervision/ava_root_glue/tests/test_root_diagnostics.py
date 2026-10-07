@@ -33,6 +33,7 @@ class _EventLog:
         self._records.append(fields)
 
     warning = info
+    error = info
     log = info
 
 
@@ -307,3 +308,25 @@ def test_redis_acl_uses_runtime_ping_without_native_custody(
     assert probes.redis_acl().alive
     ping.assert_called_once_with("redis://localhost:6380")
     capture.assert_not_called()
+
+
+def test_each_root_roster_owns_its_helper_episode_reporter(
+    monkeypatch: pytest.MonkeyPatch, events: list[dict[str, object]]
+) -> None:
+    monkeypatch.setattr(probes, "IS_MACOS", True)
+    monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
+    first = next(
+        check for check in probes.build_diagnostics(set()) if check.name == "permissions-helper"
+    )
+    second = next(
+        check for check in probes.build_diagnostics(set()) if check.name == "permissions-helper"
+    )
+    assert first.report is not None and second.report is not None
+    bad = DaemonProbe.down("lwcr-stuck; helper unavailable")
+    first.report(bad)
+    first.report(bad)
+    second.report(bad)
+    assert (
+        len([event for event in events if event.get("event") == "permissions_helper_unhealthy"])
+        == 2
+    )
