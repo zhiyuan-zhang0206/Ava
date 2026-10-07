@@ -22,8 +22,5 @@
   "composerPlaceholderResurrect": "send a message to resurrect this agent",
   "failed": "Failed",
   "filesUploadingHint": "Uploading file(s) — Enter sends the text now; files are delivered when the upload finishes.",
-  "deliveryUnconfirmedStatus": "Delivery unconfirmed. Reconcile this message before sending another.",
-  "deliveryUnconfirmedToast": "Delivery unconfirmed. Retry the same message to reconcile it, or explicitly send another.",
-  "retrySameMessage": "Retry same message",
-  "sendAnotherAnyway": "Send another anyway"
+  "deliveryUnconfirmedToast": "Message receipt could not be confirmed. Your draft has been kept."
 }
