@@ -1,4 +1,4 @@
-"""Unit tests for the e2e stale-run residue reaper (`tests/e2e/_proc.py`).
+"""Managed E2E process diagnostics and stale-run residue tests (`tests/e2e/_proc.py`).
 
 The reaper finds processes an e2e run left behind (identified by the
 `ava_e2e_home_<pid>_<ts>` AVA_HOME most of them inherit, or, for the
@@ -12,6 +12,8 @@ sweep calls (a signal to nothing is not a unit-testable contract).
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -267,3 +269,25 @@ def test_identity_holds_compares_command_before_signal(monkeypatch: pytest.Monke
     assert _proc._identity_holds(100, "uv run uvicorn gateway.app:app") is False
     monkeypatch.setattr(_proc, "_ps_command_of", _cmd_none)
     assert _proc._identity_holds(100, "x") is False
+
+
+def test_next_launch_preserves_failed_process_diagnostics(tmp_path: Path) -> None:
+    log_path = tmp_path / "agent-host.log"
+    records: list[str] = []
+    for message, exit_code in (("first launch traceback", 7), ("next launch startup", 0)):
+        command = [
+            sys.executable,
+            "-c",
+            "import sys; print(sys.argv[1], "
+            "file=sys.stderr if int(sys.argv[2]) else sys.stdout, flush=True); "
+            "sys.exit(int(sys.argv[2]))",
+            message,
+            str(exit_code),
+        ]
+        with _proc.managed_proc(
+            command, label="log-retention-proof", log_path=str(log_path)
+        ) as process:
+            assert process.wait(timeout=5) == exit_code
+        records.append(message)
+        assert log_path.read_text().splitlines() == records
+        assert _proc.proc_log_tail(str(log_path)).splitlines() == records
