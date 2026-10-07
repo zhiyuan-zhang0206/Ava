@@ -15,7 +15,7 @@ def test_the_migration_restores_the_column_where_the_baseline_has_it() -> None:
     Run inside one transaction, so the suite database is untouched."""
     from base.paths import repo_root
 
-    (up_file,) = (repo_root() / "migrations").glob("*_min-code-version.sql")
+    (up_file,) = (repo_root() / "migrations").rglob("*_min-code-version.sql")
     column = (
         "SELECT data_type, is_nullable, column_default, "
         "col_description('deployment_state'::regclass, ordinal_position::int) "
