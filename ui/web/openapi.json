@@ -2308,6 +2308,155 @@
         }
       }
     },
+    "/api/keyed/v1/agents/{agent_id}/pages": {
+      "post": {
+        "summary": "Post Guarded Page Register",
+        "description": "Accept one registration atomically; never downgrade this intent to the legacy path.",
+        "operationId": "post_guarded_page_register_api_keyed_v1_agents__agent_id__pages_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageRegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageRow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/pages/{name}/close": {
+      "post": {
+        "summary": "Post Guarded Page Close",
+        "description": "Close only the observed row; replay returns its historical acceptance.",
+        "operationId": "post_guarded_page_close_api_keyed_v1_agents__agent_id__pages__name__close_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageCloseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageRow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/pages/{name}": {
       "delete": {
         "summary": "Delete Page",
@@ -12786,6 +12935,21 @@
           "agent_id"
         ],
         "title": "PackageDraftResponse"
+      },
+      "PageCloseRequest": {
+        "properties": {
+          "expected_page_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Page Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_page_id"
+        ],
+        "title": "PageCloseRequest",
+        "description": "Guarded close targets the immutable registry row the caller observed."
       },
       "PageRegisterRequest": {
         "properties": {
