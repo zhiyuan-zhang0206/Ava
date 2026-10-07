@@ -14,10 +14,8 @@ from psycopg import sql
 from base.cluster.authority import ensure_groups
 from tests.path_scoped.db_authority_tests import AuthorityCluster
 
-_MIGRATION = (
-    Path(__file__).resolve().parents[4]
-    / "migrations"
-    / "20261003T120000_impersonation-allocator-definer.sql"
+(_MIGRATION,) = (Path(__file__).resolve().parents[4] / "migrations").rglob(
+    "20261003T120000_impersonation-allocator-definer.sql"
 )
 
 
