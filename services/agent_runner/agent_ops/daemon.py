@@ -186,7 +186,11 @@ def _op_thread_pool() -> ThreadPoolExecutor:
 
 
 async def _run_arm(
-    kind: str, payload: dict[str, Any], *, active_ops: ActiveOps
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    active_ops: ActiveOps,
+    workers: maintenance_activity.WorkerFutures,
 ) -> tuple[OpStatus, dict[str, object]]:
     """`_dispatch_sync` on this daemon's own pool (see `_op_executor`).
 
@@ -201,7 +205,7 @@ async def _run_arm(
         future = loop.run_in_executor(
             _op_thread_pool(), functools.partial(_dispatch_sync, kind, payload)
         )
-        maintenance_activity.track_worker(future)
+        maintenance_activity.track_worker(future, workers=workers)
         return await asyncio.shield(future)
     finally:
         if active_ops.get(kind) == active:
@@ -219,7 +223,11 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[OpStatus, dict[s
 
 
 async def _dispatch(
-    kind: str, payload: dict[str, Any], *, active_ops: ActiveOps
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    active_ops: ActiveOps,
+    workers: maintenance_activity.WorkerFutures,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
@@ -278,7 +286,7 @@ async def _dispatch(
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
-                return await _run_arm(kind, payload, active_ops=active_ops)
+                return await _run_arm(kind, payload, active_ops=active_ops, workers=workers)
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
         # gateway's `_raise_proxied_wire_error_from_payload` can
@@ -308,6 +316,7 @@ async def _dispatch_idempotent(
     pool: ConnectionPool | None,
     *,
     active_ops: ActiveOps,
+    workers: maintenance_activity.WorkerFutures,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
@@ -327,7 +336,9 @@ async def _dispatch_idempotent(
         }
     for attempt in range(_DISPATCH_RETRY_ATTEMPTS):
         try:
-            return await _dispatch_idempotent_pass(kind, payload, key, pool, active_ops=active_ops)
+            return await _dispatch_idempotent_pass(
+                kind, payload, key, pool, active_ops=active_ops, workers=workers
+            )
         except psycopg.OperationalError:
             if attempt + 1 >= _DISPATCH_RETRY_ATTEMPTS:
                 raise
@@ -341,7 +352,13 @@ async def _dispatch_idempotent(
 
 
 async def _dispatch_idempotent_pass(
-    kind: str, payload: dict[str, Any], key: str, pool: ConnectionPool, *, active_ops: ActiveOps
+    kind: str,
+    payload: dict[str, Any],
+    key: str,
+    pool: ConnectionPool,
+    *,
+    active_ops: ActiveOps,
+    workers: maintenance_activity.WorkerFutures,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op, deduplicated by `key` — the retry-safe path for
     non-idempotent ops (spawn / lifecycle).
@@ -379,7 +396,7 @@ async def _dispatch_idempotent_pass(
         owned = cur.fetchone() is not None
     if owned:
         try:
-            status, result = await _dispatch(kind, payload, active_ops=active_ops)
+            status, result = await _dispatch(kind, payload, active_ops=active_ops, workers=workers)
             status = OpStatus(status)
         except Exception:
             # No outcome was stored — a future same-key dispatch must be able to
@@ -414,7 +431,12 @@ async def _dispatch_idempotent_pass(
 
 
 async def _ops_route(
-    body: bytes, *, active_ops: ActiveOps, dispatch_sem: asyncio.Semaphore
+    body: bytes,
+    *,
+    active_ops: ActiveOps,
+    workers: maintenance_activity.WorkerFutures,
+    dispatch_sem: asyncio.Semaphore,
+    requests: maintenance_activity.RequestTokens,
 ) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
@@ -446,7 +468,7 @@ async def _ops_route(
 
     async with dispatch_sem:
         try:
-            with maintenance_activity.admission(envelope.kind):
+            with maintenance_activity.admission(envelope.kind, requests=requests):
                 if envelope.idempotency_key is not None:
                     # Non-idempotent ops retried by the gateway carry a dedup key:
                     # first dispatch executes + stores, later same-key dispatches
@@ -457,10 +479,11 @@ async def _ops_route(
                         envelope.idempotency_key,
                         _db_pool,
                         active_ops=active_ops,
+                        workers=workers,
                     )
                 else:
                     status, result = await _dispatch(
-                        envelope.kind, envelope.payload, active_ops=active_ops
+                        envelope.kind, envelope.payload, active_ops=active_ops, workers=workers
                     )
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -480,6 +503,8 @@ async def _ops_route(
 async def _main() -> None:
     # Request arms and health snapshots share only this daemon invocation's state.
     active_ops: ActiveOps = {}
+    requests: maintenance_activity.RequestTokens = set()
+    workers: maintenance_activity.WorkerFutures = set()
     if _is_running():
         _log.info("ava-ops pidfile %s indicates another instance is alive — exiting", _pidfile())
         sys.exit(1)
@@ -528,13 +553,17 @@ async def _main() -> None:
             host=bind_host,
             extra_routes={
                 ("POST", "/ops"): functools.partial(
-                    _ops_route, active_ops=active_ops, dispatch_sem=dispatch_sem
+                    _ops_route,
+                    active_ops=active_ops,
+                    dispatch_sem=dispatch_sem,
+                    requests=requests,
+                    workers=workers,
                 )
             },
             liveness=liveness,
             components=lambda: health.ops_components(active_ops),
             extra=lambda: {
-                "maintenance": maintenance_activity.progress(),
+                "maintenance": maintenance_activity.progress(requests=requests, workers=workers),
                 "saturation": health.saturation(
                     active_ops, max(1, settings.services.ops_concurrency)
                 ),
