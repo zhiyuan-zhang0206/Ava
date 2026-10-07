@@ -720,11 +720,11 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    from agent.graph.exec._process import ExecProcessDomain
     from agent.graph.exec._result import _ExecCrashed
     from agent.graph.exec._subprocess import _run_in_subprocess
     from agent.ownership.hosted import apply_hosted_lifecycle, settle_hosted_runtime
     from agent.tests.test_inbound_ownership import _admit
+    from base.native_process.exec_domain import ExecProcessDomain
     from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 
     agent_id = _agent(db_conn)

@@ -3,3 +3,7 @@
 "tests.path_scoped.services_tests" = [
     "test_ava_root_supervisor_reaping.py",
 ]
+
+"tests.path_scoped.agent_tests" = [
+    "test_exec_domain_confirmation.py",
+]
