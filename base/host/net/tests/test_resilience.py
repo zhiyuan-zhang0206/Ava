@@ -14,6 +14,7 @@ import inspect
 import io
 import time
 import urllib.error
+from dataclasses import FrozenInstanceError
 
 import httpx
 import pytest
@@ -278,6 +279,33 @@ class TestWaitHooks:
 
 
 class TestHttpClassifier:
+    def test_override_inputs_are_snapshots(self) -> None:
+        permanent = {429}
+        transient = {404}
+        classifier = resilience._HttpClassifier(permanent=permanent, transient=transient)
+        permanent.clear()
+        permanent.add(500)
+        transient.clear()
+        transient.add(400)
+        assert classifier(_http_error(429)) is False
+        assert classifier(_http_error(500)) is True
+        assert classifier(_http_error(404)) is True
+        assert classifier(_http_error(400)) is False
+
+    def test_classifier_fields_are_immutable(self) -> None:
+        classifier = http_classifier.with_(transient={404})
+        with pytest.raises(FrozenInstanceError):
+            classifier.__setattr__("_permanent", frozenset({500}))
+        assert classifier(_http_error(500)) is True
+
+    def test_composition_preserves_the_original(self) -> None:
+        original = http_classifier.with_(transient={404})
+        extended = original.with_(permanent={429})
+        assert original(_http_error(429)) is True
+        assert extended(_http_error(429)) is False
+        assert original(_http_error(404)) is True
+        assert extended(_http_error(404)) is True
+
     def test_transient_statuses(self) -> None:
         for code in (429, 500, 502, 503, 504):
             assert http_classifier(_http_error(code)) is True

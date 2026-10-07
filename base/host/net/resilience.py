@@ -202,6 +202,7 @@ def _is_transport(exc: Exception) -> bool:
     return isinstance(exc, httpx.TransportError)
 
 
+@dataclass(frozen=True, init=False)
 class _HttpClassifier:
     """The one HTTP error-classification semantics (design D2).
 
@@ -209,8 +210,13 @@ class _HttpClassifier:
     any other HTTP status (a deterministic caller/upstream bug) and every
     non-HTTP exception (a deterministic programming error). Call sites
     compose local overrides with ``with_`` instead of re-implementing
-    classification (only-override, never-rewrite — grep-able).
+    classification (only-override, never-rewrite — grep-able). The classifier
+    snapshots overrides into immutable sets; composing a new value never
+    changes an existing caller's classification policy.
     """
+
+    _permanent: frozenset[int]
+    _transient: frozenset[int]
 
     def __init__(
         self,
@@ -218,8 +224,8 @@ class _HttpClassifier:
         permanent: AbstractSet[int] = frozenset(),
         transient: AbstractSet[int] = frozenset(),
     ) -> None:
-        self._permanent = permanent
-        self._transient = transient
+        object.__setattr__(self, "_permanent", frozenset(permanent))
+        object.__setattr__(self, "_transient", frozenset(transient))
 
     def with_(
         self,
