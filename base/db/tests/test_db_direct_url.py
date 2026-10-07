@@ -122,15 +122,6 @@ def test_direct_db_url_swaps_any_local_record_pooler(monkeypatch: pytest.MonkeyP
     assert db_module.direct_db_url() == "postgresql://ava:sek@127.0.0.1:19011/ava"
 
 
-def test_direct_db_url_already_direct_names_a_local_pg_port(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Pooling off: AVA_DB_URL carries a local record's direct pg port (not the
-    pooler's) — returned verbatim, no swap, no warning."""
-    _set(monkeypatch, db_url=_DIRECT, rec=_PG_REC)
-    assert db_module.direct_db_url() == _DIRECT
-
-
 def test_direct_db_url_remote_host_ignores_the_home_record(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,

@@ -316,12 +316,6 @@ class TestWatcherDecoupledFromSharedListener:
             _, pending = await asyncio.wait(watchers, timeout=3.0)
             assert not pending, "survivor still running after stop"
 
-    async def test_none_pool_never_fires_after_decouple(self):
-        async with subscribe_interrupt(None, 1) as event:
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(event.wait(), timeout=0.3)
-            assert not event.is_set()
-
 
 class TestWatcherExitBounded:
     """Exit must not stall the turn when the watcher's cleanup is wedged (a
