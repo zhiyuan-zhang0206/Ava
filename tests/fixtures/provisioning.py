@@ -248,6 +248,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     # row that is gone); a leaked row would be consumed by the next test.
     "schedule_sync_requests",
     "schedule_operation_receipts",
+    "notice_operation_receipts",
     "resource_creation_receipts",
 )
 
