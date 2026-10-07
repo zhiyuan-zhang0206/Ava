@@ -43,14 +43,21 @@ from base.agents.uploads import (
     render_safe_headers,
     resolve_upload_path,
     sanitize_upload_name,
-    upload_quota_used,
     upload_url,
 )
 from base.cluster.machine import machine_name
 from base.db import agent_exists
+from base.db.transaction import write_transaction
 from base.host.private_storage import ensure_private_dir, write_private_bytes
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.inbound_provenance import request_inbound_provenance
+from gateway.auth.request_principal import PrincipalScopeError, optional_request_key
+from gateway.routers.upload_batches import (
+    RESERVED_PREFIX,
+    check_quota,
+    lock_agent,
+    save_keyed_batch,
+)
 from gateway.schemas.uploads import UploadedBatch, UploadedFile
 
 _log = logging.getLogger(__name__)
@@ -141,22 +148,6 @@ def _per_file_quota_error(safe_name: str) -> HTTPException:
     )
 
 
-def _agent_bytes_quota_error(agent_id: int) -> HTTPException:
-    return HTTPException(
-        status_code=413,
-        detail=(
-            f"upload would exceed agent {agent_id}'s {MAX_AGENT_UPLOAD_BYTES:,}-byte total quota"
-        ),
-    )
-
-
-def _agent_files_quota_error(agent_id: int) -> HTTPException:
-    return HTTPException(
-        status_code=413,
-        detail=f"agent {agent_id} already holds {MAX_AGENT_UPLOAD_FILES} uploads",
-    )
-
-
 async def _read_upload_batch(files: list[UploadFile]) -> tuple[list[_UploadBatchItem], int]:
     """Read and size-check every file before the batch can write a final name."""
     batch_bytes = 0
@@ -171,9 +162,7 @@ async def _read_upload_batch(files: list[UploadFile]) -> tuple[list[_UploadBatch
     return batch, batch_bytes
 
 
-async def _commit_upload_batch(
-    dest_dir: Path, temp_dir: Path, batch: list[_UploadBatchItem]
-) -> None:
+def _commit_upload_batch(dest_dir: Path, temp_dir: Path, batch: list[_UploadBatchItem]) -> None:
     """Stage a fully validated batch, then atomically promote its final names."""
     temp_paths: list[Path] = []
     backups: dict[Path, Path] = {}
@@ -182,7 +171,7 @@ async def _commit_upload_batch(
     try:
         for _safe_name, contents, _content_type in batch:
             temp_path = temp_dir / uuid.uuid4().hex
-            await asyncio.to_thread(write_private_bytes, temp_path, contents)
+            write_private_bytes(temp_path, contents)
             temp_paths.append(temp_path)
 
         destinations = [
@@ -190,21 +179,44 @@ async def _commit_upload_batch(
             for temp_path, (safe_name, _, _) in zip(temp_paths, batch, strict=True)
         ]
         for dest in {dest for _, dest in destinations}:
-            if await asyncio.to_thread(dest.is_file):
+            if dest.is_file():
                 backup = temp_dir / uuid.uuid4().hex
                 backups[dest] = backup
-                await asyncio.to_thread(os.link, dest, backup)
-            elif not await asyncio.to_thread(dest.exists):
+                os.link(dest, backup)
+            elif not dest.exists():
                 created.add(dest)
 
         for temp_path, dest in destinations:
-            await asyncio.to_thread(os.replace, temp_path, dest)
+            os.replace(temp_path, dest)  # noqa: PTH105 -- atomic legacy promotion
             promoted.add(dest)
     except BaseException:
-        await asyncio.to_thread(_rollback_upload_batch, temp_paths, backups, created, promoted)
+        _rollback_upload_batch(temp_paths, backups, created, promoted)
         raise
     finally:
-        await asyncio.to_thread(_remove_upload_temps, [*temp_paths, *backups.values()])
+        _remove_upload_temps([*temp_paths, *backups.values()])
+
+
+def _save_legacy_batch(
+    pool: ConnectionPool,
+    agent_id: int,
+    directory: Path,
+    batch: list[_UploadBatchItem],
+    batch_bytes: int,
+) -> None:
+    with write_transaction(pool) as conn:
+        lock_agent(conn, agent_id)
+        temp_dir = directory / ".tmp"
+        _sweep_stale_upload_temps(temp_dir)
+        check_quota(
+            conn,
+            agent_id,
+            directory,
+            batch_bytes,
+            len(batch),
+            MAX_AGENT_UPLOAD_BYTES,
+            MAX_AGENT_UPLOAD_FILES,
+        )
+        _commit_upload_batch(directory, temp_dir, batch)
 
 
 @router.post("/api/agents/{agent_id}/uploads", response_model=UploadedBatch)
@@ -225,38 +237,52 @@ async def upload_files(
     response_model makes FastAPI validate the return + emit the schema into
     OpenAPI components; the frontend codegen auto-syncs to types-generated.ts."""
 
-    # Check agent exists first (fail fast before writing any file)
-    await asyncio.to_thread(_agent_exists_blocking, request.app.state.db_pool, agent_id)
-
-    dest_dir = ensure_private_dir(agent_upload_dir(agent_id))
-
+    try:
+        key = optional_request_key(request)
+    except PrincipalScopeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if key is None:
+        await asyncio.to_thread(_agent_exists_blocking, request.app.state.db_pool, agent_id)
+    dest_dir = agent_upload_dir(agent_id, create=key is None)
+    batch, batch_bytes = await _read_upload_batch(files)
+    if key is not None:
+        return await asyncio.to_thread(
+            save_keyed_batch,
+            request.app.state.db_pool,
+            f"{request.method}:{request.url.path}:{key}",
+            agent_id,
+            dest_dir,
+            batch,
+            [file.filename or "untitled" for file in files],
+            deliver=deliver,
+            max_bytes=MAX_AGENT_UPLOAD_BYTES,
+            max_files=MAX_AGENT_UPLOAD_FILES,
+        )
+    if any(name.startswith(RESERVED_PREFIX) for name, _, _ in batch):
+        raise HTTPException(
+            409, "upload filename belongs to the reserved immutable object namespace"
+        )
     upload_locks: AgentUploadLocks = request.app.state.upload_locks
     lock = await upload_locks.lock_for(agent_id)
     async with lock:
-        temp_dir = dest_dir / ".tmp"
-        await asyncio.to_thread(_sweep_stale_upload_temps, temp_dir)
-
-        # The endpoint is the gateway's one authenticated user->disk write
-        # surface, so the per-agent lock makes this baseline and batch commit
-        # atomic relative to every other upload for this agent.
-        quota_bytes, quota_files = await asyncio.to_thread(upload_quota_used, dest_dir)
-        batch, batch_bytes = await _read_upload_batch(files)
-        if quota_bytes + batch_bytes > MAX_AGENT_UPLOAD_BYTES:
-            raise _agent_bytes_quota_error(agent_id)
-        if quota_files + len(batch) > MAX_AGENT_UPLOAD_FILES:
-            raise _agent_files_quota_error(agent_id)
-        await _commit_upload_batch(dest_dir, temp_dir, batch)
-
-        saved = [
-            UploadedFile(
-                filename=safe_name,
-                path=str(dest_dir / safe_name),
-                url=upload_url(agent_id, safe_name),
-                size=len(contents),
-                content_type=content_type,
-            )
-            for safe_name, contents, content_type in batch
-        ]
+        await asyncio.to_thread(
+            _save_legacy_batch,
+            request.app.state.db_pool,
+            agent_id,
+            dest_dir,
+            batch,
+            batch_bytes,
+        )
+    saved = [
+        UploadedFile(
+            filename=name,
+            path=str(dest_dir / name),
+            url=upload_url(agent_id, name),
+            size=len(contents),
+            content_type=content_type,
+        )
+        for name, contents, content_type in batch
+    ]
 
     if deliver:
         # One inbound for the whole batch. When the agent runs on a remote
