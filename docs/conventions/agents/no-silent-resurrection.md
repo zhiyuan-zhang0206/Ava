@@ -12,6 +12,8 @@ deleting commit. The job is PR-only (a push event has no base branch),
 runs on every non-draft PR and on the Trunk test branches, and, like
 `repo-language`, ignores the change classifier: a docs-only PR can carry
 deleted lines back too.
+CI uses the PR event's base commit SHA so deleting a merged stack parent branch
+does not invalidate a queued check.
 
 ## Why
 
