@@ -50,10 +50,26 @@ retryable after the enable configuration is fixed.
 
 ## Builder and key contract
 
+Fast inference services are independent selectable Ava IDs. A provider may use
+`with_fast_variants(PROVIDER, {standard_id: PriceRates(...)})` in `contribute()`:
+it derives `<standard_id>-fast` rows with `ModelSpec.fast_of`, inheriting model
+facts and tuning while keeping separate prices and Fast supersession links.
+The builder maps `fast_of` to the provider's wire model and Fast parameter.
+Native vendor IDs such as MiMo UltraSpeed need no alias.
+
+Bindings offering Fast variants must supply `served_speed(metadata)`. It
+validates the actual response receipt as `InferenceSpeed`; missing or unknown
+receipts fail before accounting. An explicit Standard receipt selects the base
+ID's rates. OpenAI Standard IDs explicitly send `service_tier="default"`, so
+project-level Fast defaults cannot silently change their pricing.
+The existing model API and picker derive both IDs and their prices from the
+catalog; effort remains a separate setting. The pricing synchronizer parses
+both literal rate tables without executing plugin code.
+
 - `build(ctx)` is a pure function of `BuildContext` (model, spec, thinking,
   resolved_effort, disable_streaming, timeout): no caller, agent, error
-  history, or routing is exposed. The builder clamps `resolved_effort` with
-  `clamp_effort`; `require_key(key_env)` fails at build time if the bootstrap
+  history, or routing is exposed. The builder validates `resolved_effort` with
+  `validate_effort`; `require_key(key_env)` fails at build time if the bootstrap
   environment lacks the key.
 - The spawn boundary reads a plugin key from the cluster `.env`; split runners
   receive enabled bindings' present keys through bootstrap plugin-secrets, and

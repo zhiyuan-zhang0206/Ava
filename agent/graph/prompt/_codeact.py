@@ -1,4 +1,4 @@
-"""CodeAct batching section — opt-in system-prompt guidance.
+"""CodeAct batching section — default-on system-prompt guidance.
 
 Owned as its own module (like `capabilities.py`) because the section list in
 `system_prompt.py` is at its line ceiling; `system_prompt` imports and

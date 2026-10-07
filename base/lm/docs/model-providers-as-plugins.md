@@ -108,8 +108,10 @@ The current Sonnet and Sol successors are `claude-sonnet-5-5` and
 `gpt-6.1-sol`. Their predecessors remain spawnable for existing agent
 configurations and are hidden only from the spawn picker. Sonnet 5.5 rejects
 `thinking.type=disabled`, so the Claude builder ignores that request and uses
-adaptive thinking. GPT-6.1 Sol rejects `none` effort, so the GPT builder clamps
-that request to `low` using the model's effort vocabulary.
+adaptive thinking. GPT-6.1 Sol rejects explicit `none` effort. Graded effort
+must exactly match the selected model's declared options; unsupported grades
+fail at spawn and construction boundaries. Internal binary thinking-disable
+requests use the lowest supported GPT effort when disabling is unavailable.
 
 `ProviderBinding.key_env` is the secret-delivery declaration. The gateway reads
 the cluster `.env` during spawn validation, bootstrap relays enabled bindings'

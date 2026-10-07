@@ -183,14 +183,13 @@ def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.Monke
     assert "this meta-principle decides" in rendered
 
 
-# --- CodeAct batching (AVA_SYSTEM_PROMPT_CODEACT, off by default) ---
+# --- CodeAct batching (AVA_SYSTEM_PROMPT_CODEACT, on by default) ---
 
 
-def test_codeact_section_defaults_to_off():
-    """The CodeAct section is opt-in: the flag defaults to False, so an
-    unconfigured cluster never pays for the section — unlike the
-    on-by-default behavioral sections."""
-    assert settings.agent.prompt_codeact_enabled is False
+def test_codeact_section_defaults_to_on():
+    """Unconfigured clusters receive batching guidance in the assembled prompt."""
+    assert settings.agent.prompt_codeact_enabled is True
+    assert "# CodeAct" in build_system_prompt(EMPTY, AgentSlices.resolve())
 
 
 @pytest.mark.parametrize(
@@ -244,7 +243,7 @@ def test_codeact_section_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_codeact_section_absent_from_full_prompt_when_off(monkeypatch: pytest.MonkeyPatch):
-    """End-to-end: with the toggle off (the default), the section is gone from
+    """End-to-end: with an explicit off override, the section is gone from
     the assembled prompt entirely."""
     monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", False)
 

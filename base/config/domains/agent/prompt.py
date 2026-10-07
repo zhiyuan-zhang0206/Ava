@@ -478,14 +478,14 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_codeact_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="AVA_SYSTEM_PROMPT_CODEACT",
         description=(
             "Inject a 'CodeAct \u2014 batch work into fewer calls' section: "
             "pack several operations into one `execute_code` call (batch file "
             "reads, fold branches into if-else logic) because each call is one "
-            "LLM API round-trip. Off by default \u2014 opt-in, unlike the "
-            "on-by-default behavioral sections."
+            "LLM API round-trip. Enabled by default; cluster settings and "
+            "per-agent overlays can disable the guidance."
         ),
         json_schema_extra={
             "restart_required": "agent",

@@ -177,18 +177,11 @@ class TestBuildChatModel:
         assert "extra_body" not in llm.model_kwargs
         assert llm.thinking == {"type": "enabled", "budget_tokens": 8000}
 
-    def test_deepseek_out_of_range_effort_clamps_to_model_levels(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A level outside the model's `effort_levels` clamps like every other
-        provider branch instead of riding to the wire raw — the whole point of the
-        clamp is that a config value explodes (or bends) at build time, not as a
-        provider 400 after the agent is already running."""
+    def test_deepseek_rejects_unsupported_effort(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-        llm = build_chat_model("deepseek-flash")
-        assert isinstance(llm, ChatAnthropic)
-        assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "high"}}
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            build_chat_model("deepseek-flash")
 
     def test_shipped_web_fetch_config_builds_an_accepted_request(
         self, monkeypatch: pytest.MonkeyPatch
@@ -389,20 +382,12 @@ class TestBuildChatModel:
         assert m.use_responses_api is True
         assert m.reasoning == {"effort": "medium", "summary": "auto"}
 
-    def test_gpt_effort_clamps_unsupported_vocabulary_onto_model_rungs(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """gpt-5.6's wire vocabulary has no "minimal" (official docs: none,
-        low, medium, high, xhigh, max) — an explicit out-of-vocabulary effort
-        clamps to the nearest supported rung instead of reaching the wire."""
+    def test_gpt_rejects_unsupported_effort(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "minimal")
         monkeypatch.setenv("OPENAI_API_KEY", "k")
-        from langchain_openai import ChatOpenAI
-
-        m = build_chat_model("gpt-5.6-sol")
-        assert isinstance(m, ChatOpenAI)
-        assert m.reasoning == {"effort": "low", "summary": "auto"}
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            build_chat_model("gpt-5.6-sol")
 
     def test_gpt_thinking_disabled_drops_to_effort_none(
         self, monkeypatch: pytest.MonkeyPatch

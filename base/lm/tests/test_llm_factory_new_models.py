@@ -15,26 +15,20 @@ model_catalog()
 
 
 class TestGpt6Builds:
-    def test_gpt6_1_sol_clamps_disabled_and_none_to_low(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_gpt6_1_sol_defaults_and_rejects_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
         model = build_chat_model("gpt-6.1-sol")
         assert isinstance(model, ChatOpenAI)
-        assert model.use_responses_api is True
         assert model.reasoning == {"effort": "medium", "summary": "auto"}
-
         model = build_chat_model("gpt-6.1-sol", thinking={"type": "disabled"})
         assert isinstance(model, ChatOpenAI)
         assert model.reasoning == {"effort": "low"}
-
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
-        model = build_chat_model("gpt-6.1-sol")
-        assert isinstance(model, ChatOpenAI)
-        assert model.reasoning == {"effort": "low", "summary": "auto"}
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            build_chat_model("gpt-6.1-sol")
 
     def test_gpt6_astra_defaults_to_medium_effort(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """gpt-6-astra builds on the Responses API with the OpenAI default
@@ -70,34 +64,24 @@ class TestGpt6Builds:
         assert isinstance(m, ChatOpenAI)
         assert m.reasoning == {"effort": "none", "summary": "auto"}
 
-    def test_gpt6_astra_clamps_none_and_minimal_to_low(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """GPT-6 Astra dropped "none" and "minimal" from the effort vocabulary
-        (official guide: start at "low") — both clamp to low at build."""
+    def test_gpt6_astra_rejects_none_and_minimal(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("OPENAI_API_KEY", "k")
-        from langchain_openai import ChatOpenAI
-
         for effort in ("none", "minimal"):
             monkeypatch.setattr(settings.lm, "reasoning_effort", effort)
-            m = build_chat_model("gpt-6-astra")
-            assert isinstance(m, ChatOpenAI)
-            assert m.reasoning == {"effort": "low", "summary": "auto"}
+            with pytest.raises(ValueError, match="unsupported reasoning effort"):
+                build_chat_model("gpt-6-astra")
 
-    def test_gpt6_astra_thinking_disabled_clamps_to_low(
+    def test_gpt6_astra_thinking_disabled_uses_minimum_effort(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """GPT-6 Astra has no off-switch for reasoning (no "none" effort), so a
-        caller disabling thinking lands on the minimum rung, low, without a
-        summary request."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
-        m = build_chat_model("gpt-6-astra", thinking={"type": "disabled"})
-        assert isinstance(m, ChatOpenAI)
-        assert m.reasoning == {"effort": "low"}
+        model = build_chat_model("gpt-6-astra", thinking={"type": "disabled"})
+        assert isinstance(model, ChatOpenAI)
+        assert model.reasoning == {"effort": "low"}
 
 
 class TestClaudeAlwaysOnBuilds:

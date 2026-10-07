@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.config import settings
-from base.lm.effort import clamp_effort
+from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -39,7 +39,7 @@ def qwen_extra_body(
     Same shape as `mimo_extra_body` on a different wire switch: DashScope's
     compatible-mode endpoint carries thinking on the top-level `enable_thinking`
     boolean. Caller-explicit `thinking={"type":"disabled"}` (short-text paths)
-    wins outright; otherwise `reasoning_effort` clamped onto the binding's
+    wins outright; otherwise `reasoning_effort` validated against the model's
     effort vocabulary toggles the same switch — "none" sends
     `enable_thinking=False`, "high" is the registered roster's own default
     (already on — nothing to send). Empty dict = no override.
@@ -47,7 +47,7 @@ def qwen_extra_body(
     if thinking is not None and thinking.get("type") == "disabled":
         return {"enable_thinking": False}
     if reasoning_effort:
-        tier = clamp_effort(reasoning_effort, effort_levels, target="qwen")
+        tier = validate_effort(reasoning_effort, effort_levels, target="qwen")
         if tier == "none":
             return {"enable_thinking": False}
     return {}

@@ -260,6 +260,35 @@ class TestValidateModelConfig:
         result = validate_model_config(model="claude-sonnet-5")
         assert result == "claude-sonnet-5"
 
+    @pytest.mark.parametrize(
+        ("model", "effort"),
+        [("mimo-v2.6-pro", "none"), ("mimo-v2.6-pro", "high"), ("deepseek-flash", "max")],
+    )
+    def test_supported_explicit_effort_passes_unchanged(
+        self, monkeypatch: pytest.MonkeyPatch, model: str, effort: str
+    ) -> None:
+        self._set_plugin_keys(monkeypatch)
+        config: dict[str, object] = {"reasoning_effort": effort}
+        assert validate_model_config(model=model, config=config) == model
+        assert config["reasoning_effort"] == effort
+
+    @pytest.mark.parametrize(
+        ("model", "effort", "message"),
+        [
+            ("mimo-v2.6-pro", "low", "unsupported reasoning effort"),
+            ("deepseek-flash", "medium", "unsupported reasoning effort"),
+            ("gpt-6.1-sol-fast", "none", "unsupported reasoning effort"),
+            ("deepseek-flash", "invented", "unknown reasoning effort"),
+            ("deepseek-flash", 42, "reasoning_effort must be a string"),
+        ],
+    )
+    def test_invalid_explicit_effort_rejected_even_with_override(
+        self, monkeypatch: pytest.MonkeyPatch, model: str, effort: object, message: str
+    ) -> None:
+        monkeypatch.setattr(settings.lm, "llm_override", "tests.fakes:build")
+        with pytest.raises(ValueError, match=message):
+            validate_model_config(model=model, config={"reasoning_effort": effort})
+
     def test_restored_model_validates_to_itself(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Gemini 3.8 is spawnable again (2026-09-06 user order): validation
         resolves it to itself, not to the 3.7 fallback."""

@@ -11,28 +11,28 @@ from base.lm.tests.test_llm_factory import _FakeLLM, _install_fake_module
 
 
 class TestReasoningEffortDispatch:
-    """Per-provider injection / clamping / gating tests for AVA_REASONING_EFFORT.
+    """Per-provider injection / validation / gating tests for AVA_REASONING_EFFORT.
 
-    Across provider vocabularies none/minimal/low/medium/high/xhigh/max, clamp_effort
-    maps to what each provider truly accepts: out-of-range values clamp to the nearest
-    tier (ties round up, matching the precedent where DeepSeek server maps low/medium→high,
-    xhigh→max); misspelled values explode at build time instead of landing as a provider 400.
+    Model-specific options pass through exactly; unsupported effort values fail
+    before dispatch instead of being changed to a different tier.
     """
 
-    def test_clamp_unknown_value_raises(self) -> None:
-        from base.lm.factory import clamp_effort
+    def test_validation_rejects_unknown_effort(self) -> None:
+        from base.lm.factory import validate_effort
 
         with pytest.raises(ValueError, match="unknown reasoning effort"):
-            clamp_effort("higth", ("low", "high"), target="test")
+            validate_effort("higth", ("low", "high"), target="test")
 
-    def test_clamp_ties_round_up(self) -> None:
-        """medium is equidistant from low/high → picks high; xhigh is equidistant from
-        high/max → picks max."""
-        from base.lm.factory import clamp_effort
+    def test_validation_never_remaps_a_known_effort(self) -> None:
+        from base.lm.factory import validate_effort
 
-        assert clamp_effort("medium", ("low", "high", "max"), target="test") == "high"
-        assert clamp_effort("xhigh", ("low", "high", "max"), target="test") == "max"
-        assert clamp_effort("none", ("low", "medium", "high"), target="test") == "low"
+        for effort, levels in [
+            ("medium", ("low", "high", "max")),
+            ("xhigh", ("low", "high", "max")),
+            ("none", ("low", "medium", "high")),
+        ]:
+            with pytest.raises(ValueError, match="unsupported reasoning effort"):
+                validate_effort(effort, levels, target="test")
 
     # ── claude ──────────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ class TestReasoningEffortDispatch:
         itself is not completely ignored — it instead maps to the thinking budget
         mapping (see TestReasoningEffortDispatch's test_haiku_high_effort_opts_in_at_default_budget)."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
+        monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         llm = build_chat_model("claude-haiku-4-5-20251001")
         assert isinstance(llm, ChatAnthropic)
         assert llm.effort is None
@@ -104,7 +104,7 @@ class TestReasoningEffortDispatch:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """haiku-4-5 has no `effort` field (server 400) but AVA_REASONING_EFFORT
-        still does something: clamped onto the model's ('none','high') binary,
+        still does something: validated against the model's ('none','high') binary,
         'high' opts extended thinking in at the fallback default budget — this
         is the only lever available when claude_thinking_budget_tokens is unset,
         so the spawn-UI effort dropdown isn't inert for this model."""
@@ -210,16 +210,12 @@ class TestReasoningEffortDispatch:
         assert isinstance(m, ChatGoogleGenerativeAI)
         assert m.thinking_level == "low"
 
-    def test_gemini_max_clamps_to_high(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """gemini's thinking_level vocabulary only goes up to high — max/xhigh clamp to high."""
+    def test_gemini_rejects_max(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setenv("GEMINI_API_KEY", "k")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        m = build_chat_model("gemini-3.5-flash")
-        assert isinstance(m, ChatGoogleGenerativeAI)
-        assert m.thinking_level == "high"
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            build_chat_model("gemini-3.5-flash")
 
     def test_gemini_default_leaves_thinking_level_unset(
         self, monkeypatch: pytest.MonkeyPatch
@@ -264,16 +260,12 @@ class TestReasoningEffortDispatch:
         assert isinstance(m, ChatMoonshot)
         assert m.extra_body == {"reasoning_effort": "low"}
 
-    def test_kimi_medium_clamps_to_high(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """kimi enum is low/high/max — medium is equidistant, ties round up to high."""
+    def test_kimi_rejects_medium(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-kimi")
+        monkeypatch.setenv("MOONSHOT_API_KEY", "test-key")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "medium")
-        from langchain_moonshot import ChatMoonshot
-
-        m = build_chat_model("kimi-k3")
-        assert isinstance(m, ChatMoonshot)
-        assert m.extra_body == {"reasoning_effort": "high"}
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            build_chat_model("kimi-k3")
 
     def test_kimi_thinking_disabled_sends_no_thinking_param(
         self, monkeypatch: pytest.MonkeyPatch
@@ -356,7 +348,7 @@ class TestReasoningEffortDispatch:
         """DashScope's compatible-mode endpoint has no graded effort field — its
         graded knob is a token budget (`thinking_budget`) and the OpenAI-standard
         `reasoning_effort` string is documented only for its Responses API, which
-        Ava does not bind. So the cross-provider knob clamps onto the binary
+        Ava does not bind. So the cross-provider knob uses the binary
         none/high and 'none' lands on the endpoint's own off-switch."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
@@ -369,20 +361,12 @@ class TestReasoningEffortDispatch:
         # never the OpenAI-standard field: this endpoint would ignore or 400 it
         assert m.reasoning_effort is None
 
-    def test_qwen_graded_effort_clamps_onto_the_on_rung(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A graded level clamps onto 'high', which IS the model's own default
-        (thinking already on) — so nothing is sent rather than a level the
-        endpoint has no field for."""
+    def test_qwen_rejects_graded_effort(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
-
-        m = build_chat_model("qwen3.8-max")
-        assert isinstance(m, ReasoningContentChatModel)
-        assert m.extra_body is None
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            build_chat_model("qwen3.8-max")
 
     def test_qwen_thinking_disabled_sends_enable_thinking_false(
         self, monkeypatch: pytest.MonkeyPatch
@@ -431,12 +415,12 @@ class TestReasoningEffortDispatch:
         ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
     def test_mimo_high_effort_is_noop(self, monkeypatch: pytest.MonkeyPatch, model: str) -> None:
-        """MiMo has no graded reasoning_effort field — 'max' clamps to the
+        """MiMo has no graded reasoning_effort field — 'high' selects the
         two-value ('none', 'high') table's 'high' tier, which is the provider
         default (thinking already on) and needs no extra_body at all."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
+        monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model)
@@ -451,7 +435,7 @@ class TestReasoningEffortDispatch:
     def test_mimo_none_effort_disables_thinking_body(
         self, monkeypatch: pytest.MonkeyPatch, model: str
     ) -> None:
-        """AVA_REASONING_EFFORT='none' clamps to the table's 'none' tier — the
+        """AVA_REASONING_EFFORT='none' selects the declared 'none' tier — the
         only tier that differs from the provider default — and maps onto the
         same body thinking.type=disabled switch as an explicit thinking arg."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
@@ -467,20 +451,12 @@ class TestReasoningEffortDispatch:
         "model",
         ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
-    def test_mimo_low_effort_clamps_to_high(
-        self, monkeypatch: pytest.MonkeyPatch, model: str
-    ) -> None:
-        """low sits equidistant from none/high in the cross-provider vocab —
-        clamp ties round up, so it lands on 'high' (provider default, no-op),
-        not 'none' (which would silently disable thinking)."""
+    def test_mimo_rejects_low_effort(self, monkeypatch: pytest.MonkeyPatch, model: str) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
-
-        m = build_chat_model(model)
-        assert isinstance(m, ReasoningContentChatModel)
-        assert m.extra_body is None
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            build_chat_model(model)
 
     @pytest.mark.parametrize(
         "model",

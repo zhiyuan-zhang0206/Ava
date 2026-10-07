@@ -3,7 +3,9 @@
 Candidate provider files are parsed, never imported: the pricing workflow may
 resume an existing bot branch, so executing code from that branch would cross
 the workflow's trusted-main boundary. The parser accepts only the repository's
-literal ``PROVIDER = ProviderContribution(models=..., pricing=...)`` shape and fails closed otherwise.
+literal ``PROVIDER = ProviderContribution(models=..., pricing=...)`` shape,
+with optional ``with_fast_variants(PROVIDER, {...})`` in ``contribute()``.
+Both rate tables are parsed without executing plugin code.
 
 Synchronization preserves the complete pricing lattice: effective periods,
 input-token tiers, and recurring UTC windows. The flat ``PriceRates`` fields
@@ -321,6 +323,60 @@ def _mapping_keys(mapping: ast.Dict, *, context: str) -> tuple[str, ...]:
     return keys
 
 
+def _fast_variant_calls(tree: ast.Module) -> list[ast.Call]:
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "contribute"
+    ]
+    return [
+        node
+        for function in functions
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "with_fast_variants"
+    ]
+
+
+def _fast_price_nodes(tree: ast.Module, path: Path) -> dict[str, ast.expr]:
+    calls = _fast_variant_calls(tree)
+    if not calls:
+        return {}
+    if len(calls) != 1:
+        raise RuntimeError(f"{path}: expected at most one with_fast_variants declaration")
+    call = calls[0]
+    if (
+        len(call.args) != 2
+        or any(
+            keyword.arg != "reference_tps" or not isinstance(keyword.value, ast.Dict)
+            for keyword in call.keywords
+        )
+        or not isinstance(call.args[0], ast.Name)
+        or call.args[0].id != "PROVIDER"
+        or not isinstance(call.args[1], ast.Dict)
+    ):
+        raise RuntimeError(f"{path}: expected literal with_fast_variants(PROVIDER, {{...}})")
+    mapping = call.args[1]
+    keys = _mapping_keys(mapping, context=f"{path}: Fast pricing")
+    return dict(zip(keys, mapping.values, strict=True))
+
+
+def _add_fast_prices(
+    nodes: dict[str, ast.expr],
+    path: Path,
+    models: set[str],
+    prices: dict[str, _PriceDeclaration],
+    price_nodes: dict[str, ast.Call],
+) -> None:
+    for standard, value in nodes.items():
+        fast = f"{standard}-fast"
+        if standard not in models or fast in models or fast in prices:
+            raise RuntimeError(f"{path}: invalid or duplicate Fast model {fast!r}")
+        models.add(fast)
+        prices[fast], price_nodes[fast] = _price_declaration(value, context=f"{path}: {fast}")
+
+
 def _provider_manifest(source: str, path: Path) -> _ProviderManifest:
     tree = ast.parse(source, filename=str(path))
     registrations = [
@@ -340,7 +396,7 @@ def _provider_manifest(source: str, path: Path) -> _ProviderManifest:
         )
     models_node = _mapping_keyword(registrations[0], "models", path=path)
     pricing_node = _mapping_keyword(registrations[0], "pricing", path=path)
-    models = frozenset(_mapping_keys(models_node, context=f"{path}: models"))
+    models = set(_mapping_keys(models_node, context=f"{path}: models"))
     price_models = _mapping_keys(pricing_node, context=f"{path}: pricing")
     if not set(price_models) <= models:
         raise RuntimeError(f"{path}: pricing contains ids absent from models")
@@ -351,7 +407,8 @@ def _provider_manifest(source: str, path: Path) -> _ProviderManifest:
             value,
             context=f"{path}: {model}",
         )
-    return _ProviderManifest(models, prices, price_nodes)
+    _add_fast_prices(_fast_price_nodes(tree, path), path, models, prices, price_nodes)
+    return _ProviderManifest(frozenset(models), prices, price_nodes)
 
 
 def _instant(value: str | None, *, context: str) -> datetime | None:

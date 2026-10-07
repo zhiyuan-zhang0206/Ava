@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from base.lm.effort import clamp_effort
+from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -36,7 +36,7 @@ def mimo_extra_body(
     """Resolve the mimo branch's `extra_body` kwarg.
 
     Caller-explicit `thinking={"type":"disabled"}` (short-text paths) wins
-    outright. Otherwise `reasoning_effort` clamped onto the binding's effort
+    outright. Otherwise `reasoning_effort` validated against the model's effort
     vocabulary toggles the same body switch: "none" disables thinking,
     "high" is the provider default (already on — nothing to send). Empty dict
     = no override, provider default applies.
@@ -44,7 +44,7 @@ def mimo_extra_body(
     if thinking is not None and thinking.get("type") == "disabled":
         return {"thinking": {"type": "disabled"}}
     if reasoning_effort:
-        tier = clamp_effort(reasoning_effort, effort_levels, target="mimo")
+        tier = validate_effort(reasoning_effort, effort_levels, target="mimo")
         if tier == "none":
             return {"thinking": {"type": "disabled"}}
     return {}

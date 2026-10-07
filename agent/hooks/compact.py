@@ -257,7 +257,7 @@ async def generate_summary(
     response, used_explicit_cache = await ainvoke_with_cache_retry(
         llm, compaction_input, slices.llm_policy
     )
-    model = getattr(llm, "model_name", None) or slices.brain.llm_model
+    model = slices.brain.llm_model
     if isinstance(model, str) and model:
         from base.lm.usage import (
             CACHE_MECHANISM_MIXED,

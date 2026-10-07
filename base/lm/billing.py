@@ -114,10 +114,12 @@ def emit_billing_from_message(
     """Price a LangChain message and emit its billing span when usage is known."""
     try:
         from base.lm.pricing import quote, tally_tokens
+        from base.lm.usage import usage_model
 
         tok_in, tok_out, tok_cached = tally_tokens([msg])
         if tok_in is None or tok_out is None or tok_cached is None:
             return
+        model = usage_model(msg, model)
         resolved_vendor = vendor or vendor_of_model(model)
         if resolved_vendor is None:
             return

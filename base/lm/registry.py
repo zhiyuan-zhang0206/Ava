@@ -158,8 +158,18 @@ DEFAULT_TUNING = ModelTuning(
 
 
 @dataclass(frozen=True)
+class ReferenceTps:
+    """Vendor-published output speed, preserving its qualifier and conditions."""
+
+    display: str
+    source_url: str
+    source_checked_at: str
+    note: str
+
+
+@dataclass(frozen=True)
 class ModelSpec:
-    """Everything the framework knows about one concrete model id.
+    """Everything the framework knows about one selectable inference service id.
 
     Facts (windows, caps, effort vocabulary) drive the factory, the
     compact machinery, and the UI catalog; ``tuning`` carries the per-model
@@ -170,6 +180,13 @@ class ModelSpec:
     """
 
     provider: str  # supported-models group key == build_chat_model prefix
+    fast_of: str | None = None
+    """Registered standard service this Fast ID accelerates. Its ID is also
+    the provider wire model. Providers own the Fast request and receipt mapping;
+    selection, prices, tuning and usage keep the distinct Ava ID."""
+    reference_tps: ReferenceTps | None = None
+    """Official output TPS only; None means no reliable absolute figure.
+    A Fast service must declare its own reference rather than inherit Standard."""
     spawnable: bool = False  # offered in the frontend spawn dropdown
     unavailable_fallback: str | None = None  # temporarily withdraw this id from new selections
     # while preserving existing configurations: build_chat_model resolves the
@@ -192,7 +209,7 @@ class ModelSpec:
     effort_levels: tuple[str, ...] | None = None  # the effort vocabulary this model's knob
     # accepts (wire `output_config.effort` levels for adaptive claude; the binary
     # thinking on/off vocabulary for extended-thinking-only models; the provider's
-    # clamp vocabulary elsewhere). Serves the spawn-dialog dropdown + the claude clamp.
+    # effort vocabulary elsewhere). Serves the spawn-dialog dropdown and validation.
     extended_thinking_only: bool = False  # claude models whose only thinking mode is manual
     # extended thinking (budget_tokens; default OFF) and that 400 on `effort`
     thinking_always_on: bool = False  # models whose reasoning cannot be switched off: a
@@ -359,6 +376,24 @@ def validate_models(
     _validate_supersession_links(models)
     _validate_supersession_chains(models)
     _validate_unavailable_fallbacks(models)
+    _validate_fast_links(models)
+
+
+def _validate_fast_links(models: Mapping[str, ModelSpec]) -> None:
+    for model_id, spec in models.items():
+        if spec.fast_of is None:
+            continue
+        standard = models.get(spec.fast_of)
+        if (
+            standard is None
+            or standard.fast_of is not None
+            or standard.provider != spec.provider
+            or not standard.spawnable
+        ):
+            raise RuntimeError(
+                f"Fast model {model_id!r} must name a registered, spawnable standard "
+                f"model from the same provider; got fast_of={spec.fast_of!r}"
+            )
 
 
 def _validate_supersession_links(models: Mapping[str, ModelSpec]) -> None:

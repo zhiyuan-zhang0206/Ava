@@ -22,6 +22,7 @@ from typing import Any
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessageChunk
+from langchain_core.outputs import ChatResult
 
 
 class ThinkingTokensChatAnthropic(ChatAnthropic):
@@ -32,6 +33,16 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
     `base.agents.history.timeline`, `gateway.inspect.router`) all see a non-zero
     `reasoning` count — no other file needs to change.
     """
+
+    def _format_output(
+        self, data: Any, *, generation_info: dict[str, Any] | None = None, **kwargs: Any
+    ) -> ChatResult:
+        result = super()._format_output(data, generation_info=generation_info, **kwargs)
+        speed = getattr(data.usage, "speed", None)
+        if speed is not None:
+            for generation in result.generations:
+                generation.message.response_metadata["speed"] = speed
+        return result
 
     def _make_message_chunk_from_anthropic_event(
         self,
@@ -47,6 +58,12 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
             coerce_content_to_string=coerce_content_to_string,
             block_start_event=block_start_event,
         )
+        # Emit once: LangChain concatenates repeated string metadata while
+        # combining chunks. The start event carries the actual service speed.
+        if msg is not None and getattr(event, "type", None) == "message_start":
+            speed = getattr(event.message.usage, "speed", None)
+            if speed is not None:
+                msg.response_metadata["speed"] = speed
         # The `message_delta` event carries the final usage including
         # output_tokens_details.thinking_tokens — which the upstream
         # _create_usage_metadata drops. Capture it here and supplement

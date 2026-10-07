@@ -55,6 +55,32 @@ full roster. Before spawning, confirm the id exists in the registry; if this
 doc names a model the roster no longer has, update the doc — the registry is
 maintained as it ships, this skill is maintained as policy.
 
+## Inference speed is part of the model ID
+
+Select a Fast service through its independent roster ID (for example,
+`gpt-6.1-sol-fast` or `claude-opus-5-5-fast`). It has its own price row and
+usage identity; no additional Fast toggle is needed. Providers may serve the
+same underlying model with a speed parameter. MiMo UltraSpeed already has a
+native model ID. Presets can pin any authorized ID; effort still controls
+reasoning independently of inference speed.
+
+Do not assume switching speed preserves the prompt cache. Claude explicitly
+invalidates system and message caches when switching Fast/Standard; its tools
+cache can remain valid. OpenAI documents cache routing and retention but does
+not promise cross-speed reuse. Inspect reported cache-read tokens. Faster
+inference can shorten a reasoning-heavy critical path; changing the ID does
+not prescribe more progress reports or polling.
+
+Fast services remain subject to the cost policy below. Claude Fast requires
+account access to its research preview. Usage and billing follow the actual
+service receipt, including OpenAI downgrades to Standard.
+
+References: [Claude caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
+[Claude Fast](https://platform.claude.com/docs/en/build-with-claude/fast-mode),
+[OpenAI Fast](https://developers.openai.com/api/docs/guides/fast-mode),
+[OpenAI caching](https://developers.openai.com/api/docs/guides/prompt-caching)
+(checked 2026-10-07).
+
 ## Pareto frontier principle
 
 Only models on the intelligence Pareto frontier are eligible: a model is out

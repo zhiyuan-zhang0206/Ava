@@ -14,7 +14,7 @@
 // - >=2 eligible → Popover trigger with host-down entries disabled + explained
 //
 // The model picker is a custom Popover dropdown (not a native <select>) so each
-// option can lay out the model name (left) and pricing (right) with flexbox —
+// option can lay out the model name, pricing and vendor TPS in aligned columns —
 // the aligned price column makes cross-model price comparison easy.
 //
 // QueryKey ["status"] is shared with the Control page — TanStack Query
@@ -31,6 +31,7 @@ import { useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
 
 import { api } from "@/lib/transport/api";
+import { MODEL_PICKER_COLUMNS, ModelPickerRow } from "./model-picker-row";
 import { groupedModels, isSuperseded, providerLabel } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
@@ -59,7 +60,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   const { data: modelsData } = useQuery({
     queryKey: ["models"],
     queryFn: () => api.getModels(),
-    // Model list is static cluster config — never refetch on focus/remount.
+    // Model facts, rates and vendor TPS references are static cluster config.
     staleTime: Infinity,
   });
   const { data: presetsData } = useQuery({
@@ -161,7 +162,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   }
 
   // Custom Popover-based model picker — native <select> can't flexbox-align
-  // option text, so we use a dropdown with model name left + price right.
+  // option text, so we use a dropdown with model, price and TPS columns.
   // Grouped by provider: one header row per provider, then its models, all
   // inside a single <ul> (keeps one "list" role for the picker — the header
   // rows are plain non-interactive <li>s, not their own nested lists).
@@ -182,10 +183,12 @@ export function SpawnButton({ onSpawn, variant }: Props) {
           <Popover.Content
             sideOffset={6}
             align="start"
-            className="z-50 min-w-[220px] max-w-[90vw] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
+            className="z-50 w-[480px] max-w-[90vw] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
           >
-            <div className="px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground">
-              {t("models")}
+            <div className={cn(MODEL_PICKER_COLUMNS, "px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground")}>
+              <span>{t("models")}</span>
+              <span className="text-right">{t("pricePerMillion")}</span>
+                        <span className="text-right" title={t("referenceTps")}>{t("tps")}</span>
             </div>
             <ul className="py-1 max-h-[320px] overflow-y-auto">
               {modelGroups.map(([provider, models]) => (
@@ -195,30 +198,18 @@ export function SpawnButton({ onSpawn, variant }: Props) {
                   </li>
                   {models.map((m) => {
                     const info = modelsData?.models[m];
-                    const p = info?.pricing;
                     const isSelected = m === (selectedModel ?? defaultModel);
                     return (
                       <li key={m}>
-                        <button
-                          type="button"
-                          onClick={() => {
+                        <ModelPickerRow
+                          model={m}
+                          info={info}
+                          selected={isSelected}
+                          onSelect={() => {
                             setSelectedModel(m);
                             setModelOpen(false);
                           }}
-                          className={
-                            "w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent flex items-center justify-between gap-3" +
-                            (isSelected ? " bg-sidebar-accent/50" : "")
-                          }
-                        >
-                          <span className="truncate font-medium">{m}</span>
-                          {p ? (
-                            <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-                              ${p.input.toFixed(2)}&thinsp;/&thinsp;${p.cache_read.toFixed(2)}&thinsp;/&thinsp;${p.output.toFixed(2)}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground shrink-0">—</span>
-                          )}
-                        </button>
+                        />
                       </li>
                     );
                   })}

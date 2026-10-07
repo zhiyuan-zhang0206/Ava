@@ -11,7 +11,7 @@ tags:
 ## Entry points
 
 - `base/lm/factory.py:build_chat_model` — dispatches to the appropriate LangChain chat model based on model name prefix
-- `base/lm/factory.py:validate_model_config` — model/key pre-check at spawn boundary
+- `base/lm/factory.py:validate_model_config` — model, explicit effort and provider-key checks at the spawn boundary
 - `base/lm/pricing/__init__.py:tally_tokens` / `cost_usd` — token usage and three-tier cost calculation
 - `base/agents/contract.py:AgentStatus` — agent lifecycle status enum (RUNNING / IDLING / TERMINATED)
 - `base/agents/messages/kwargs.py:read_ava_kwargs` — typed reading entry point for message `additional_kwargs`

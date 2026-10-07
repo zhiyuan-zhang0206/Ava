@@ -1,23 +1,21 @@
-"""Cross-provider reasoning-effort vocabulary and clamping.
+"""Reasoning-effort vocabulary and exact per-model validation.
 
 Split out of `base/lm/factory.py` (its companion module — factory re-exports
 these names, so callers and tests keep importing from factory). Provider plugins
 own endpoint vocabularies and wire switches. This module keeps only the shared
 ``AVA_REASONING_EFFORT`` vocabulary, its public SDK enum/coercion surface, and
-the clamp that maps a cross-provider value onto a plugin's declared levels.
+validation against a plugin's declared levels without remapping the selection.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
 
-from loguru import logger
-
 # The cross-provider AVA_REASONING_EFFORT vocabulary, ordered weakest →
 # strongest. Superset of the public `ReasoningEffort` enum — the extra
 # "minimal" is a gemini-only thinking_level that some paths still accept as
-# input. clamp_effort maps a value onto what a provider actually accepts;
-# anything outside this vocabulary is a typo and fails fast.
+# input. Each model declares the subset it accepts; unsupported values fail
+# rather than being remapped to another effort level.
 EFFORT_VOCAB: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
@@ -66,31 +64,15 @@ def coerce_effort(effort: str | ReasoningEffort | None, *, example: str) -> Reas
         ) from None
 
 
-def clamp_effort(effort: str, allowed: tuple[str, ...], *, target: str) -> str:
-    """Clamp a cross-provider effort value onto the levels `target` accepts.
-
-    In-range values pass through. Known-vocabulary values outside the range
-    clamp to the nearest allowed level, ties rounding up — reproducing
-    DeepSeek's server-side precedent (low/medium→high, xhigh→max). Unknown
-    strings raise: a typo'd AVA_REASONING_EFFORT should explode at build time,
-    not as a provider 400 after the agent is already running.
-    """
+def validate_effort(effort: str, allowed: tuple[str, ...], *, target: str) -> str:
+    """Accept an exact model-supported effort value or reject it before dispatch."""
     if effort in allowed:
         return effort
     if effort not in EFFORT_VOCAB:
         raise ValueError(
-            f"unknown reasoning effort {effort!r} — expected one of {'/'.join(EFFORT_VOCAB)} "
-            f"(or empty for the provider default)"
+            f"unknown reasoning effort {effort!r} — expected one of {'/'.join(EFFORT_VOCAB)}"
         )
-    idx = EFFORT_VOCAB.index(effort)
-    clamped = min(
-        allowed,
-        key=lambda a: (abs(EFFORT_VOCAB.index(a) - idx), -EFFORT_VOCAB.index(a)),
+    raise ValueError(
+        f"unsupported reasoning effort {effort!r} for {target} — "
+        f"expected one of {'/'.join(allowed)} (or empty for the model default)"
     )
-    logger.info(
-        "reasoning effort {effort!r} not supported by {target}; clamped to {clamped!r}",
-        effort=effort,
-        target=target,
-        clamped=clamped,
-    )
-    return clamped

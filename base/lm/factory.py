@@ -48,7 +48,7 @@ Adding a provider means adding a `provider.py` beside a plugin's `plugin.py`
 
 **`max_tokens` + reasoning effort dispatching** — per-model facts (output caps,
 effort vocabularies) live in `base/lm/registry.py` (`ModelSpec`, held by the catalog); the
-per-provider clamp machinery lives in the companion module `base/lm/effort.py`
+per-model effort validation lives in the companion module `base/lm/effort.py`
 (its docstring has the detail). In short: the two anthropic-protocol branches
 pin max_tokens explicitly to the model's documented output cap
 (`ModelSpec.max_output_tokens`) and fail fast on unregistered models —
@@ -58,9 +58,9 @@ output cap, not a budget — setting to cap does not increase generation. The
 OpenAI-style branches leave it unset (those APIs default to the model's own
 cap). The reasoning effort (the `reasoning_effort` setting through `resolve_setting`:
 the agent's or the cluster's explicit value, else the model's registry default, else the
-provider default) maps per branch onto what each provider accepts via
-`clamp_effort` — out-of-range values clamp (logged), unknown strings fail
-fast at build time instead of as a provider 400 mid-run.
+provider default) is validated against the selected model's declared options.
+`validate_effort` preserves supported values and rejects unsupported or unknown
+strings at build time; it never substitutes another graded effort.
 
 Streaming / usage_metadata: providers attach `usage_metadata` on the final
 chunk; `AIMessageChunk += chunk` accumulation in `agent/graph/llm/node.py::llm_node`
@@ -90,7 +90,7 @@ from base.lm import provider_api
 # resolution live in base/lm/registry.py. Both are re-imported here so
 # factory stays the catalog import surface for callers and tests.
 from base.lm.effort import (
-    clamp_effort as clamp_effort,
+    validate_effort as validate_effort,
 )  # re-exported (tests import it via factory)
 from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import ThinkingConfig
@@ -174,6 +174,7 @@ def validate_model_config(
     to ``model`` (the cluster default), then checks:
     1. The model name is a spawnable model of the catalog.
     2. The required API key for that model's provider is configured.
+    3. An explicit effort is one of the selected model's declared options.
 
     Args:
         model: fallback model name (cluster default). Ignored when
@@ -212,6 +213,8 @@ def validate_model_config(
             f"unknown model {effective_model!r}. Available models: " + ", ".join(sorted(all_models))
         )
 
+    _validate_model_effort(effective_model, config)
+
     # 2. API key must be configured — unless an LLM override is active
     # (e2e tests inject fake chat models via AVA_LLM_OVERRIDE and don't need
     # real keys; the override path in build_chat_model skips the real LLM).
@@ -220,6 +223,18 @@ def validate_model_config(
 
     _ensure_provider_key(effective_model)
     return effective_model
+
+
+def _validate_model_effort(model: str, config: dict[str, object] | None) -> None:
+    """Reject unsupported explicit effort before spawn or override dispatch."""
+    effort = config.get("reasoning_effort") if config is not None else None
+    if effort is None or effort == "":
+        return
+    if not isinstance(effort, str):
+        # Spawn handlers translate ValueError into an HTTP 400 response.
+        raise ValueError("reasoning_effort must be a string")  # noqa: TRY004
+    spec = model_catalog().models[model]
+    validate_effort(effort, spec.effort_levels or (), target=model)
 
 
 def _ensure_provider_key(effective_model: str) -> None:
@@ -323,12 +338,10 @@ def build_chat_model(
             and ignored. `{"type": "enabled", "budget_tokens": N}` is manual
             extended thinking — see the claude helper for the per-model rules.
             None = provider default.
-        reasoning_effort: deepseek-* only — when set, overrides the resolved
-            per-model effort for this call, clamped onto the model's
-            `effort_levels` (`high` / `max`); `none` turns reasoning off
-            through the thinking switch (the endpoint's effort vocabulary has
-            no off level). Ignored when thinking is disabled (server rejects
-            both) and on non-deepseek models.
+        reasoning_effort: overrides the resolved effort for this call. Graded
+            values must be exact members of the model's `effort_levels`.
+            Provider-specific thinking switches retain their native on/off
+            conversion; unsupported grades never change to another grade.
         streaming: whether to enable LLM streaming. None (default) resolves
             from the model's registry entry (`ModelSpec.streaming` — True for
             every spawnable model). Explicit True/False overrides the model

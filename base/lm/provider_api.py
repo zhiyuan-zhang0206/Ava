@@ -35,9 +35,9 @@ Builder contract (plain Python, documented rather than schema'd — see
 - Missing API key raises ``RuntimeError`` immediately (``require_key``) — a
   clear build-time error, not a server 401 mid-turn.
 - ``ctx.resolved_effort`` keeps the provider's established wire semantics.
-  Builders with a constrained vocabulary clamp with
-  ``base.lm.effort.clamp_effort``; the GPT builder preserves the resolved
-  cross-provider value verbatim.
+  Builders with a constrained vocabulary validate with
+  ``base.lm.effort.validate_effort``. Supported grades pass through verbatim;
+  unsupported grades fail instead of remapping.
 - ``thinking={"type": "disabled"}`` is honored per provider capability
   (mirror onto the local switch, or log-and-ignore like the Moonshot plugin)
   — the core dispatch resolves the cross-provider knobs first;
@@ -50,9 +50,10 @@ Builder contract (plain Python, documented rather than schema'd — see
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
-from typing import TYPE_CHECKING, Literal, NamedTuple, NotRequired, TypedDict
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     # Annotation-only reference (`ProviderBinding.build`): the registration
@@ -62,7 +63,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.registry import ModelSpec
+from base.lm.registry import ModelSpec, ReferenceTps
 from base.lm.stop import StopSpec
 
 # Increment for breaking contract changes; additive optional fields stay on the
@@ -70,6 +71,13 @@ from base.lm.stop import StopSpec
 # consumers of a new field must degrade when it is absent. (Mirrors the
 # plugin-spec-v2 ``engines.ava`` host-compatibility idea.)
 PROVIDER_API_VERSION = 2
+
+
+class InferenceSpeed(StrEnum):
+    """Actual service speed normalized by a provider's response adapter."""
+
+    STANDARD = "standard"
+    FAST = "fast"
 
 
 class ThinkingConfig(TypedDict):
@@ -194,6 +202,9 @@ class ProviderBinding:
     # Absent means the core attachment defaults; older plugins and consumers
     # degrade without a provider-specific override.
     attach: AttachPolicy | None = None
+    served_speed: Callable[[Mapping[str, Any]], InferenceSpeed] | None = None
+    """Parse the actual service receipt of a Fast call; missing or unsupported
+    receipts fail before accounting. Providers without Fast IDs need none."""
 
 
 def provider_key_present(key_env: str) -> bool:
@@ -253,3 +264,39 @@ class ProviderContribution:
     binding: ProviderBinding
     models: Mapping[str, ModelSpec]
     pricing: Mapping[str, PriceRates]
+
+
+def with_fast_variants(
+    provider: ProviderContribution,
+    prices: Mapping[str, PriceRates],
+    *,
+    reference_tps: Mapping[str, ReferenceTps] | None = None,
+) -> ProviderContribution:
+    """Derive separately priced ``<model>-fast`` services from standard rows.
+
+    ``prices`` names standard IDs with vendor-confirmed Fast rates. Model facts
+    and tuning stay owned by the standard row; Fast replacements follow only
+    other declared Fast services. Provider builders translate ``fast_of`` into
+    the wire model and their own Fast parameter.
+    """
+    if provider.binding.served_speed is None:
+        raise ValueError("Fast services require a provider served_speed adapter")
+    models = dict(provider.models)
+    pricing = dict(provider.pricing)
+    throughput = reference_tps or {}
+    if not throughput.keys() <= prices.keys():
+        raise ValueError("Fast TPS references must name declared Fast services")
+    for standard_id, price in prices.items():
+        standard = provider.models[standard_id]
+        fast_id = f"{standard_id}-fast"
+        if standard.fast_of is not None or fast_id in models or fast_id in pricing:
+            raise ValueError(f"Invalid or duplicate Fast service {fast_id!r}")
+        replacement = standard.superseded_by
+        models[fast_id] = replace(
+            standard,
+            fast_of=standard_id,
+            reference_tps=throughput.get(standard_id),
+            superseded_by=f"{replacement}-fast" if replacement in prices else None,
+        )
+        pricing[fast_id] = price
+    return replace(provider, models=models, pricing=pricing)

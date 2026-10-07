@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from base.lm.effort import clamp_effort
+from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -64,7 +64,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         else:
             glm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     elif ctx.resolved_effort:
-        glm_kwargs["reasoning_effort"] = clamp_effort(
+        glm_kwargs["reasoning_effort"] = validate_effort(
             ctx.resolved_effort,
             ctx.effort_levels if ctx.effort_levels is not None else _GLM_EFFORT_LEVELS,
             target="glm",
@@ -98,7 +98,7 @@ PROVIDER = ProviderContribution(
             knowledge_cutoff="2025-12",
             # GLM-5.3 docs document the shared GLM-5-series parameter values
             # low/high/max (checked 2026-08-23); keep this entry aligned with the
-            # provider clamp and its gateway invariant test.
+            # provider validation and its gateway invariant test.
             effort_levels=("low", "high", "max"),
             tuning=ModelTuning(
                 # Pinned 2026-08-01 (task #568): Z.ai documents GLM-5.2's default

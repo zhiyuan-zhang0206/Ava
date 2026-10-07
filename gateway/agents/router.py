@@ -102,7 +102,7 @@ def get_models() -> ModelsResponse:
 
     # Stable model facts come off the registry; volatile prices come off the
     # effective-dated catalog. `effort_levels` is the same vocabulary the factory
-    # clamps onto at model build (for extended-thinking-only models like
+    # validates at model build (for extended-thinking-only models like
     # claude-haiku-4-5 it is the binary thinking on/off vocabulary), so the
     # dropdown and the wire behavior cannot drift apart.
     models: dict[str, ModelInfo] = {}
@@ -130,6 +130,7 @@ def get_models() -> ModelsResponse:
                 provider=provider,
                 context_window=spec.context_window or 0,
                 pricing=pricing,
+                reference_tps=spec.reference_tps,
                 reasoning_effort_options=(
                     list(spec.effort_levels) if spec.effort_levels is not None else None
                 ),

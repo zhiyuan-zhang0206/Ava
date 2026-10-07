@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from base.lm.effort import clamp_effort
+from base.lm.effort import validate_effort
 from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import (
     AttachPolicy,
@@ -39,12 +39,12 @@ def deepseek_wire_effort(effort: str, levels: tuple[str, ...], *, target: str) -
     None means "no reasoning": DeepSeek's wire vocabulary is graded levels only
     and carries no `none` variant (sending one 400s with ``unknown variant
     `none` ``), so off is the endpoint's thinking switch instead — the caller's
-    job. Every other value clamps onto `levels`, which is what keeps a global
-    effort this model does not accept from reaching the wire unclamped.
+    job. Every graded value must be an exact member of `levels`; unsupported
+    values fail before the request is sent.
     """
     if effort == "none":
         return None
-    return clamp_effort(effort, levels, target=target)
+    return validate_effort(effort, levels, target=target)
 
 
 def build(ctx: BuildContext) -> BaseChatModel:
@@ -100,12 +100,12 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # also skip effort injection; don't let global env sneakily push
     # reasoning back (the labeler short-text path is exactly this case).
     #
-    # The effort goes through the same per-model clamp as claude
+    # The effort goes through the same exact per-model validation as Claude
     # (`ModelSpec.effort_levels`), and "none" — the only cross-provider
     # value that means off rather than a level — lands on the endpoint's
     # own off-switch, `thinking={"type":"disabled"}` (the mimo branch makes
     # the same mapping). DeepSeek's vocabulary has no `none` variant, so
-    # sending it unclamped 400s the request: that is what took every
+    # sending it as an effort value 400s the request: that is what took every
     # `ava.web.fetch` down, since AVA_WEB_FETCH_REASONING ships as "none".
     deepseek_model_kwargs: dict[str, Any] = {}
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"

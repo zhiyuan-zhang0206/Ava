@@ -7,6 +7,8 @@ from datetime import datetime
 
 from langchain_core.messages import AIMessage
 
+from base.lm.plugin_providers import model_catalog
+from base.lm.provider_api import InferenceSpeed
 from base.log import logger
 
 # Cache provenance labels for the llm_usage event (task #2660). How much of a
@@ -17,6 +19,26 @@ from base.log import logger
 # the full prefix. The labels keep cross-provider comparisons honest.
 CACHE_MECHANISM_MIXED = "mixed"
 CACHE_SCOPE_EXPLICIT_BLOCK = "explicit_block"
+
+
+def usage_model(msg: AIMessage, requested_model: str) -> str:
+    """Resolve the billable Ava ID from a Fast call's actual service receipt.
+
+    Preserve the requested ID for ordinary services. An explicit standard
+    downgrade uses the standard ID; a missing or unknown Fast receipt raises
+    rather than fabricating premium consumption.
+    """
+    catalog = model_catalog()
+    spec = catalog.models.get(requested_model)
+    if spec is None or spec.fast_of is None:
+        return requested_model
+    binding = next(
+        b for prefix, b in catalog.bindings.items() if requested_model.startswith(prefix)
+    )
+    if binding.served_speed is None:
+        raise ValueError(f"Fast model {requested_model!r} has no served_speed adapter")
+    speed = InferenceSpeed(binding.served_speed(msg.response_metadata))
+    return requested_model if speed == InferenceSpeed.FAST else spec.fast_of
 
 
 def log_usage_from_message(
@@ -54,7 +76,7 @@ def log_usage_from_message(
 
     reasoning = extract_reasoning_tokens(msg.usage_metadata, content=msg.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     return _log_usage(
-        model,
+        usage_model(msg, model),
         in_total=in_total,
         out_total=out_total,
         cache_read=cache_read,
@@ -68,6 +90,7 @@ def log_usage_from_message(
         cache_mechanism=cache_mechanism,
         cache_scope=cache_scope,
         emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
+        requested_model=model,
     )
 
 
@@ -115,6 +138,7 @@ def _log_usage(
     cache_mechanism: str | None = None,
     cache_scope: str | None = None,
     emit_billing: bool = True,
+    requested_model: str | None = None,
 ) -> tuple[int, float]:
     """Emit one priced or explicitly unpriced usage event and billing span."""
     from base.lm.billing import emit_billing_event, vendor_of_model
@@ -167,6 +191,7 @@ def _log_usage(
         reasoning=reasoning,
         reason_pct=reason_pct,
         model=model,
+        **({"requested_model": requested_model} if requested_model is not None else {}),
         latency_ms=latency_ms,
         decode_ms=decode_ms,
         usage_kind=usage_kind,

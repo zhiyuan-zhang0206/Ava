@@ -611,8 +611,13 @@ def tally_tokens(
         seen = True
         tok_in += meta["input_tokens"]
         tok_out += meta["output_tokens"]
-        details = meta.get("input_token_details") or {}
-        tok_cached += int(details.get("cache_read", 0))
+        details = cast(dict[str, int], meta.get("input_token_details") or {})
+        # LangChain namespaces token details for priority/flex service tiers.
+        tok_cached += sum(
+            int(value or 0)
+            for key, value in details.items()
+            if key == "cache_read" or key.endswith("_cache_read")
+        )
     if not seen:
         return None, None, None
     return tok_in, tok_out, tok_cached
