@@ -93,6 +93,18 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
             assert module.startswith("cli.parsers."), (leaf.prog, module)
 
 
+def _run_isolated_program(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
+        [sys.executable, "-B", "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+
 def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
     """A settings-free entry can import the parser before choosing its path."""
     code = """
@@ -107,15 +119,7 @@ assert not any(name in sys.modules for name in (
     'cli.commands.agents.codex_app_server',
 ))
 """
-    result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
-        [sys.executable, "-B", "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
-        env={**os.environ, "HOME": str(tmp_path)},
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
+    result = _run_isolated_program(code, tmp_path)
     assert result.returncode == 0, result.stderr
 
 
@@ -739,13 +743,5 @@ else:
     raise AssertionError('help must exit')
 assert code_version.db_gate_applies() is False
 """
-    result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
-        [sys.executable, "-B", "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
-        env={**os.environ, "HOME": str(tmp_path)},
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
+    result = _run_isolated_program(code, tmp_path)
     assert result.returncode == 0, result.stderr
