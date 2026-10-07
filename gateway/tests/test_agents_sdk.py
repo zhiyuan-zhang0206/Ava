@@ -148,6 +148,19 @@ def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple]:
 
 
 class TestSpawn:
+    def test_public_creation_key_recovers_birth_and_rejects_changed_body(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        pin_agent(_spawn_agent())
+        first = ava.agents.spawn(prompt="one goal", idempotency_key="public-create-a")
+        assert ava.agents.spawn(prompt="one goal", idempotency_key="public-create-a") == first
+        assert _inbound_rows(db_conn, first) == [("one goal", "chat", f"agent:{ava.self.AGENT_ID}")]
+        assert ava.agents.spawn(prompt="one goal", idempotency_key="public-create-b") != first
+        from httpx2 import HTTPStatusError
+
+        with pytest.raises(HTTPStatusError, match="409"):
+            ava.agents.spawn(prompt="different", idempotency_key="public-create-a")
+
     def test_spawn_no_prompt_just_lifecycle(self, db_conn: psycopg.Connection) -> None:
         """ava.agents.spawn() without prompt — only starts lifecycle, no inbound posted."""
         pin_agent(_spawn_agent())  # self identity
@@ -184,6 +197,7 @@ class TestSpawn:
             machine: str,
             config: object = None,
             label: object = None,
+            idempotency_key: str | None = None,
         ) -> int:
             captured["machine"] = machine
             return 999

@@ -137,3 +137,37 @@ def test_stream_events_decodes_char_split_across_chunks(ch: str) -> None:
             return [event async for event in client.stream_events(7)]
 
     assert asyncio.run(scenario()) == [payload]
+
+
+def test_creation_key_survives_caller_retry_without_automatic_ambiguous_retry() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ReadTimeout("reply lost", request=request)
+        return httpx.Response(201, json={"id": 42})
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(
+            base_url="http://gateway", transport=httpx.MockTransport(handler)
+        ) as http:
+            client = gateway_client()
+            client._client = http
+            with pytest.raises(httpx.ReadTimeout):
+                await client.spawn_agent(preset="coder", config=None, idempotency_key="event-a")
+            assert len(requests) == 1
+            assert (
+                await client.spawn_agent(preset="coder", config=None, idempotency_key="event-a")
+                == 42
+            )
+            await client.spawn_agent(preset="coder", config=None, idempotency_key="event-b")
+        assert [request.headers["Idempotency-Key"] for request in requests] == [
+            "event-a",
+            "event-a",
+            "event-b",
+        ]
+        assert requests[0].content == requests[1].content
+        assert all("Idempotency-Scope" not in request.headers for request in requests)
+
+    asyncio.run(scenario())

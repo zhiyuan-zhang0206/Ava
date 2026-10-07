@@ -386,8 +386,13 @@ def spawn(
     fork_from: int | None = None,
     machine: str | None = None,
     config_overlay: dict[str, object] | None = None,
+    *,
+    idempotency_key: str | None = None,
 ) -> int:
     """Start a new agent; does not block.
+
+    Reuse `idempotency_key` with the same arguments to recover the same creation;
+    use a new key for another agent. Omit it for a new operation per call.
 
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
     `machine` defaults to yours. `config_overlay={"preset": "name"}` starts from a saved config
@@ -405,6 +410,7 @@ def spawn(
         machine=machine,
         config=config_overlay,
         label=None,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -425,6 +431,7 @@ def spawn_impl(
     machine: str | None,
     config: dict[str, object] | None,
     label: str | None,
+    idempotency_key: str | None = None,
 ) -> int:
     # Shared spawn body. `label` is exposed on the public `spawn` only when the
     # ava_fleet plugin wraps it (the plugin passes a real label through here);
@@ -437,6 +444,10 @@ def spawn_impl(
     machine = coerce_str(machine, "machine", allow_none=True)
     config = coerce_typed(config, "config", dict, allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    if idempotency_key is not None:
+        idempotency_key = validate_idempotency_key(idempotency_key)
     spawner = ava.sdk_surface.agent_identity.require_actor()
     if config:
         # The `preset` key is spawn-boundary metadata, not a Settings field: it
@@ -460,6 +471,7 @@ def spawn_impl(
         machine=machine if machine is not None else ava.self.SELF_MACHINE_NAME,
         config=config,
         label=label,
+        idempotency_key=idempotency_key,
     )
 
 

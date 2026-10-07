@@ -502,3 +502,20 @@ async def test_push_failures_counted_and_reset(env: Any) -> None:
         await adapter.send("owner-1", "again")
         assert adapter.push_failures == 0
         assert adapter.push_recovered_at is not None
+
+
+async def test_creation_uses_provider_event_identity_across_adapter_restart(env: Any) -> None:
+    core = FakeCore()
+    message = _message(text="spawn:go", message_id="birth-one")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _req: httpx.Response(200))
+    ) as client:
+        for _ in range(2):
+            adapter = WeixinAdapter(core, client=client)
+            await adapter._handle_message(message)
+        fresh = WeixinAdapter(core, client=client)
+        await fresh._handle_message(_message(text="spawn:go", message_id="birth-two"))
+    keys = [msg.idempotency_key for msg in core.inbound]
+    assert keys[0] == keys[1]
+    assert keys[0] != keys[2]
+    assert all(key is not None and key.startswith("weixin-spawn:") for key in keys)

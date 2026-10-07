@@ -653,3 +653,19 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
     # Withdrawing the surviving require_response notice publishes too.
     ava.ui.dismiss_notice()  # type: ignore[attr-defined]
     assert len(resolved) == 2
+
+
+def test_fleet_spawn_preserves_caller_creation_key(
+    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    def capture(**kwargs: Any) -> int:
+        captured.append(kwargs)
+        return 42
+
+    monkeypatch.setattr(ava.gateway_client, "spawn", capture)
+    assert ava.agents.spawn(prompt="one goal", label="worker", idempotency_key="fleet-birth") == 42
+    assert captured[0]["idempotency_key"] == "fleet-birth"
+    assert captured[0]["label"] == "worker"
+    assert "idempotency_key" in inspect.signature(ava.agents.spawn).parameters

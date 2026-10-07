@@ -443,7 +443,13 @@ async def test_callback_tap_runs_command_and_answers(env: Any) -> None:
             _callback_update(1, "cb-1", 42, "/switch 405")["callback_query"]
         )
     assert core.inbound == [
-        InboundMessage(channel="telegram", chat_id="42", text="/switch 405", message_id="7")
+        InboundMessage(
+            channel="telegram",
+            chat_id="42",
+            text="/switch 405",
+            message_id="7",
+            idempotency_key="telegram-callback:cb-1",
+        )
     ]
     (request,) = captured
     assert request.url.path.endswith("/answerCallbackQuery")
@@ -544,3 +550,20 @@ async def test_refetched_update_not_delivered_twice(env: Any, tmp_path: Any) -> 
     # simulate a re-fetch of the same update (crash before the offset write)
     await adapter._handle_update(_update(5, 42, text="hi", message_id=9))
     assert len(core.inbound) == 1  # dedup: not delivered again
+
+
+async def test_spawn_taps_use_event_identity_not_shared_menu_message(env: Any) -> None:
+    core = FakeCore()
+    transport, _ = _transport([])
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = TelegramAdapter(core, _config(), client=client)
+        for callback_id in ("first", "first", "second"):
+            await adapter._handle_callback(
+                _callback_update(1, callback_id, 42, "spawn:go")["callback_query"]
+            )
+    assert [msg.idempotency_key for msg in core.inbound] == [
+        "telegram-callback:first",
+        "telegram-callback:first",
+        "telegram-callback:second",
+    ]
+    assert {msg.message_id for msg in core.inbound} == {"7"}

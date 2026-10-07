@@ -50,11 +50,13 @@ export function useAgentActions(
       model,
       preset,
       reasoning_effort,
+      operationKey,
     }: {
       machine?: string;
       model?: string;
       preset?: string;
       reasoning_effort?: string;
+      operationKey: string;
     }) =>
       api.spawnAgent({
         ...(machine !== undefined ? { machine } : {}),
@@ -70,7 +72,7 @@ export function useAgentActions(
               },
             }
           : {}),
-      }),
+      }, operationKey),
     onSuccess: () => { track("spawn"); },
     onError: (e: unknown) => {
       if (e instanceof ApiError && e.agentId !== undefined) {
@@ -92,20 +94,8 @@ export function useAgentActions(
     // id (the button should not appear for a non-existent agent) —
     // throw directly so the onError path showErrors instead of
     // silently masking the real bug.
-    mutationFn: async ({ sourceId, prompt }: { sourceId: number; prompt?: string }) => {
-      // Fork remains available while a terminated conversation is selected.
-      // Resolve from the live tree or selected detail. An archive row can be
-      // forked before selection, so a cache miss reads that ID directly.
-      const source = queryClient.getQueryData<AgentRow>([...AGENT_DETAIL_QUERY_KEY, sourceId]) ??
-        queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents.find((agent) => agent.agent_id === sourceId) ?? await api.getAgent(sourceId);
-      // A prompt requires prompt_source (backend rejects prompt without it);
-      // a frontend prompt always comes from the user. No prompt → omit both.
-      return api.spawnAgent({
-        fork_from: sourceId,
-        machine: source.machine,
-        ...(prompt !== undefined ? { prompt, prompt_source: "user" } : {}),
-      });
-    },
+    mutationFn: async ({ body, operationKey }: { body: Promise<Parameters<typeof api.spawnAgent>[0]>; operationKey: string }) =>
+      api.spawnAgent(await body, operationKey),
     onSuccess: () => { track("fork"); },
     onError: (e: unknown) => {
       if (e instanceof ApiError && e.agentId !== undefined) {
@@ -312,7 +302,7 @@ export function useAgentActions(
         ),
       );
       try {
-        const { id } = await spawnMutation.mutateAsync({ machine, model, preset, reasoning_effort });
+        const { id } = await spawnMutation.mutateAsync({ machine, model, preset, reasoning_effort, operationKey: crypto.randomUUID() });
         setActiveId(id);
         await markSpawnPending(id);
         return id;
@@ -326,7 +316,17 @@ export function useAgentActions(
   const fork = useCallback(
     async (sourceId: number, prompt?: string): Promise<number | null> => {
       try {
-        const { id } = await forkMutation.mutateAsync({ sourceId, prompt });
+        // The one placement lookup belongs to the action, not each attempt.
+        const body = (async () => {
+          const source = queryClient.getQueryData<AgentRow>([...AGENT_DETAIL_QUERY_KEY, sourceId]) ??
+            queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents.find((agent) => agent.agent_id === sourceId) ?? await api.getAgent(sourceId);
+          return {
+            fork_from: sourceId,
+            machine: source.machine,
+            ...(prompt !== undefined ? { prompt, prompt_source: "user" } : {}),
+          };
+        })();
+        const { id } = await forkMutation.mutateAsync({ body, operationKey: crypto.randomUUID() });
         setActiveId(id);
         await markSpawnPending(id);
         return id;
@@ -334,7 +334,7 @@ export function useAgentActions(
         return null;
       }
     },
-    [forkMutation, setActiveId, markSpawnPending],
+    [forkMutation, setActiveId, markSpawnPending, queryClient],
   );
 
   const terminate = useCallback(

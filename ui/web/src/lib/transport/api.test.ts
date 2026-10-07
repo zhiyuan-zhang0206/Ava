@@ -201,7 +201,10 @@ describe("lifecycle endpoints", () => {
     // tests only anchor the endpoint path (gateway contract); host part is ignored.
     expect(calls[0].url).toMatch(/\/api\/agents$/);
     expect(calls[0].init?.method).toBe("POST");
-    expect(calls[0].init?.headers).toEqual({ "content-type": "application/json" });
+    const headers = new Headers(calls[0].init?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("Idempotency-Key")).toBeTruthy();
+    expect(headers.has("Idempotency-Scope")).toBe(false);
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({
       prompt: "Search X",
       spawner: "claude-code",
@@ -798,4 +801,15 @@ describe("schedule creation identity", () => {
       expect(headers.has("Idempotency-Scope")).toBe(false);
     }
   });
+});
+
+
+it("creation callers reuse a key across calls while new actions mint distinct keys", async () => {
+  await api.spawnAgent({}, "creation-a");
+  await api.spawnAgent({}, "creation-a");
+  await api.spawnAgent();
+  await api.spawnAgent();
+  const keys = calls.map((call) => new Headers(call.init?.headers).get("Idempotency-Key"));
+  expect(keys.slice(0, 2)).toEqual(["creation-a", "creation-a"]);
+  expect(keys[2]).not.toBe(keys[3]);
 });

@@ -499,6 +499,12 @@ class WeixinAdapter(IMAdapter):
                 chat_id=sender_id,
                 text=text,
                 message_id=message_id or None,
+                idempotency_key=(
+                    "weixin-spawn:"
+                    + hashlib.sha256(json.dumps([sender_id, message_id]).encode()).hexdigest()
+                    if message_id and text.strip().startswith("spawn:go")
+                    else None
+                ),
             )
         )
 

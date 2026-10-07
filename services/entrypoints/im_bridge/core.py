@@ -199,7 +199,9 @@ class IMBridgeCore(SpawnMenuMixin):
             if text.startswith("spawn:"):
                 # inline-keyboard navigation of the /spawn menu (only
                 # callbacks carry this prefix; typed text never does)
-                reply = await self._handle_spawn_menu(state, text)
+                reply = await self._handle_spawn_menu(
+                    state, text, idempotency_key=msg.idempotency_key
+                )
             elif text.startswith("/"):
                 reply = await self._handle_command(state, text, msg.idempotency_key)
             else:
