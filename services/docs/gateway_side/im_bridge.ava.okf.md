@@ -42,6 +42,7 @@ The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat
 
 ## Weixin inbound identity
 
-Provider IDs dedup by sender/ID for 300s; missing IDs use legacy sender/text.
-Qualified ordinary chat keys survive restarts; spawn keys are unchanged.
-Seen/core/cursor acceptance gaps remain open. See [[weixin-inbound-identity]].
+Weixin sources commit native receipts and frozen routes before cursor checkpoint.
+Account/history cutover holds, drains unproven backlog, then activates on a
+committed real empty response. Unproven commands remain uncertain.
+See [[weixin-inbound-identity]].

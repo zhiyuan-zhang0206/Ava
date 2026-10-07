@@ -342,7 +342,9 @@ class NoticeBridge:
 
     # -- callbacks ---------------------------------------------------------
 
-    async def handle_callback(self, chat_id: str, data: str) -> str | None:
+    async def handle_callback(
+        self, chat_id: str, data: str, *, account_id: str | None = None
+    ) -> str | None:
         """Consume a notice: prefixed button tap; return the hint text to
         show the user (None when the tap is not ours)."""
         if data == _CB_LIST:
@@ -351,11 +353,13 @@ class NoticeBridge:
             if data.startswith(prefix):
                 agent_id, notice_id = data[len(prefix) :].split(":", 1)
                 if action == "reply":
-                    return self._arm_reply_mode(chat_id, agent_id, notice_id)
+                    return self._arm_reply_mode(chat_id, agent_id, notice_id, account_id=account_id)
                 return await self._resolve(action, agent_id, notice_id)
         return None
 
-    def _arm_reply_mode(self, chat_id: str, agent_id: str, notice_id: str) -> str:
+    def _arm_reply_mode(
+        self, chat_id: str, agent_id: str, notice_id: str, *, account_id: str | None = None
+    ) -> str:
         """Tap [Reply]: arm the reply window on this chat. A new tap replaces
         an older mode; expired modes are dropped first."""
         window_seconds = self._config.im_bridge_notice_reply_window_seconds
@@ -366,6 +370,7 @@ class NoticeBridge:
             "notice_id": int(notice_id),
             "agent_id": int(agent_id),
             "expires_at": time.time() + window_seconds,
+            "account_id": account_id,
         }
         return (
             f"✏️ Reply mode: messages you send in the next {window_seconds // 60} min go to"  # emoji-ok: Telegram reply-mode hint (user-facing)
@@ -406,6 +411,56 @@ class NoticeBridge:
                 prefix=f"📋 Queue {i}/{len(notices)}",  # emoji-ok: Telegram queue label
             )  # emoji-ok: Telegram queue label
         return f"📋 Queue: {len(notices)} notices open, listed below"  # emoji-ok: Telegram queue summary
+
+    def reply_context_held(self, chat_id: str, text: str, account_id: str) -> bool:
+        mode = self._reply_modes.get(str(chat_id))
+        return bool(
+            mode is not None
+            and time.time() <= mode["expires_at"]
+            and (not text.startswith("/") or text.startswith("/cancel"))
+            and mode.get("account_id") != account_id
+        )
+
+    def reply_target(self, chat_id: str, text: str, *, account_id: str) -> tuple[int, int] | None:
+        """Freeze an account-proven notice target before durable source admission."""
+        mode = self._reply_modes.get(str(chat_id))
+        if (
+            mode is None
+            or time.time() > mode["expires_at"]
+            or mode.get("account_id") != account_id
+            or (text.startswith("/") and not text.startswith("/cancel"))
+        ):
+            return None
+        return mode["agent_id"], mode["notice_id"]
+
+    def clear_reply_target(
+        self, chat_id: str, agent_id: int, notice_id: int, *, account_id: str
+    ) -> bool:
+        mode = self._reply_modes.get(str(chat_id))
+        if mode is None or (mode["agent_id"], mode["notice_id"], mode.get("account_id")) != (
+            agent_id,
+            notice_id,
+            account_id,
+        ):
+            return False
+        self._reply_modes.pop(str(chat_id))
+        return True
+
+    async def resolve_frozen_reply(
+        self, agent_id: int, notice_id: int, text: str
+    ) -> dict[str, Any]:
+        """One call to the original target; return its actual domain response, no fallback."""
+        g = self.core.gateway
+        response = await (await g._http()).post(
+            f"/api/agents/{agent_id}/notices/{notice_id}/resolve",
+            json={"action": "answer", "reply": text},
+            headers=g._headers(),
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        if not isinstance(result, dict):
+            raise TypeError("notice resolution response must be an object")
+        return result
 
     async def handle_inbound(self, chat_id: str, text: str) -> str | None:
         """Reply-mode window: plain text resolves the notice; returns a

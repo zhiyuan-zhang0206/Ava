@@ -1,6 +1,6 @@
 """Unit tests for services/entrypoints/im_bridge/adapters/weixin.py.
 
-Covers the contract surface: getUpdates messages reach core.handle_inbound
+Covers the contract surface: qualified getUpdates messages commit native admission
 (and their context_token is cached to disk), sendmessage echoes the cached
 context_token with the iLink headers, long texts segment at 2000 chars, stale
 sessions retry once without the token, HTTP failures surface as sanitized
@@ -23,8 +23,12 @@ import httpx
 import pytest
 
 from services.entrypoints.im_bridge.adapters import weixin
-from services.entrypoints.im_bridge.adapters.weixin import InboundMessage, WeixinAdapter
+from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
 from services.entrypoints.im_bridge.adapters.weixin_login import qr_login
+from services.entrypoints.im_bridge.ingress.tests.conftest import NativeWeixin
+from services.entrypoints.im_bridge.ingress.tests.conftest import native_weixin as native_weixin
+from services.entrypoints.im_bridge.ingress.types import IngressReceipt, IngressStatus
+from services.entrypoints.im_bridge.types import InboundMessage
 
 
 class FakeCore:
@@ -43,7 +47,7 @@ def _message(
     *,
     text: str,
     from_user_id: str = "peer-1",
-    message_id: str = "msg-1",
+    message_id: str = "1",
     context_token: str | None = "tok-ctx-1",  # noqa: S107  (test fixture value)
     message_type: int = 1,
     room_id: str | None = None,
@@ -53,6 +57,7 @@ def _message(
         "to_user_id": "bot-id",
         "message_id": message_id,
         "message_type": message_type,
+        "message_state": 2,
         "item_list": [{"type": 1, "text_item": {"text": text}}],
     }
     if context_token is not None:
@@ -165,26 +170,16 @@ def test_atomic_json_failed_replace_keeps_old_content_and_cleans_temp(
     assert sorted(path.parent.iterdir()) == [path]
 
 
-async def test_poll_forwards_message_and_caches_context_token(env: Any, tmp_path: Any) -> None:
-    """A user text message reaches core; context_token caches and sync buf persists."""
-    core = FakeCore()
-    transport, _captured = _transport(
-        [httpx.Response(200, json=_updates(_message(text="\u4f60\u597d", context_token="tok-abc")))]  # noqa: S106  (test fixture value)
+async def test_poll_forwards_message_and_caches_context_token(native_weixin: NativeWeixin) -> None:
+    adapter = native_weixin.adapter
+    native_weixin.provider_responses.append(
+        _updates(_message(text="hello", context_token="tok-abc"))  # noqa: S106
     )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(core, client=client)
-        await adapter.start()
-        await asyncio.wait_for(core.received.wait(), timeout=2)
-        await adapter.stop()
-
-    assert core.inbound == [
-        InboundMessage(channel="weixin", chat_id="peer-1", text="\u4f60\u597d", message_id="msg-1")
-    ]
+    cursor, _ = await adapter._poll_once("", 35000)
+    assert cursor == "buf-1"
     assert adapter._tokens.get("peer-1") == "tok-abc"
-    tokens = json.loads(_state_file(tmp_path, "weixin_context_tokens.json").read_text())
-    assert tokens == {"peer-1": "tok-abc"}
-    sync = json.loads(_state_file(tmp_path, "weixin_sync.json").read_text())
-    assert sync["get_updates_buf"] == "buf-1"
+    assert json.loads(adapter._tokens._path.read_text()) == {"peer-1": "tok-abc"}
+    assert not (adapter._tokens._path.parent / "weixin_sync.json").exists()
 
 
 async def test_send_echoes_context_token_and_headers(env: Any) -> None:
@@ -314,24 +309,18 @@ async def test_transport_error_sanitized(env: Any) -> None:
     assert "ilinkai.weixin.qq.com" not in str(exc_info.value)
 
 
-async def test_skips_echo_group_bot_and_textless(env: Any) -> None:
-    """Own echoes, group events, bot-type messages and textless media are dropped."""
-    core = FakeCore()
-    transport, _captured = _transport([])
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(core, client=client)
-        await adapter._handle_message(_message(text="echo", from_user_id="bot-id"))
-        await adapter._handle_message(_message(text="group", room_id="room-1"))
-        await adapter._handle_message(_message(text="bot msg", message_type=2))
-        await adapter._handle_message(
-            {
-                "from_user_id": "peer-1",
-                "message_id": "m9",
-                "message_type": 1,
-                "item_list": [{"type": 2, "image_item": {"media": {"url": "x"}}}],
-            }
-        )
-    assert core.inbound == []
+async def test_skips_echo_group_bot_and_textless(native_weixin: NativeWeixin) -> None:
+    adapter = native_weixin.adapter
+    payloads = [
+        _message(text="echo", from_user_id="bot-id", message_id="1"),
+        _message(text="group", room_id="room-1", message_id="2"),
+        _message(text="bot", message_type=2, message_id="3"),
+        _message(text="", message_id="4"),
+    ]
+    payloads[-1]["item_list"] = [{"type": 2, "image_item": {"media": {"url": "x"}}}]
+    receipts = [await adapter._handle_message(payload) for payload in payloads]
+    assert all(receipt.status == IngressStatus.REJECTED for receipt in receipts)
+    assert all(receipt.inbound_id is None for receipt in receipts)
 
 
 async def test_unconfigured_start_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
@@ -386,90 +375,52 @@ async def test_qr_login_saves_account(env: Any, tmp_path: Any) -> None:
     assert (account.stat().st_mode & 0o777) == 0o600
 
 
-async def test_message_from_owner_is_delivered(env: Any, tmp_path: Any) -> None:
-    """The owner's own WeChat id (the scanned account's user_id) is NOT the bot:
-    their DMs must reach the core. Regression — was dropped as 'self' because
-    the filter compared against user_id (the human) instead of account_id (the bot)."""
-    core = FakeCore()
-    transport, _captured = _transport(
-        [httpx.Response(200, json=_updates(_message(text="hi", from_user_id="bot-user-id")))]
+async def test_message_from_owner_is_delivered(native_weixin: NativeWeixin) -> None:
+    core = native_weixin.core
+    state = core._get_or_create_state("weixin", "owner")
+    await core._cmd_switch(state, str(native_weixin.agent_id), replay_id="owner-selection")
+    receipt = await native_weixin.adapter._handle_message(_message(text="hi", from_user_id="owner"))
+    assert receipt.status == IngressStatus.ACCEPTED
+    assert receipt.source.sender_id == "owner"
+    assert receipt.route.agent_id == native_weixin.agent_id
+
+
+async def test_message_from_bot_itself_is_dropped(native_weixin: NativeWeixin) -> None:
+    receipt = await native_weixin.adapter._handle_message(
+        _message(text="echo", from_user_id="bot-id")
     )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(core, client=client)
-        await adapter.start()
-        await asyncio.wait_for(core.received.wait(), timeout=2)
-        await adapter.stop()
-
-    assert core.inbound == [
-        InboundMessage(channel="weixin", chat_id="bot-user-id", text="hi", message_id="msg-1")
-    ]
+    assert receipt.status == IngressStatus.REJECTED
+    assert receipt.inbound_id is None
 
 
-async def test_message_from_bot_itself_is_dropped(env: Any) -> None:
-    """Messages whose from_user_id is the bot's own account_id never reach the core."""
-    core = FakeCore()
-    transport, _captured = _transport([])
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(core, client=client)
-        await adapter._handle_message(_message(text="echo", from_user_id="bot-id"))
-    assert core.inbound == []
-
-
-async def test_bot_type_message_dropped_by_message_type(env: Any) -> None:
-    """message_type=2 (bot-originated) is filtered — the real field name, not msg_type."""
-    core = FakeCore()
-    transport, _captured = _transport([])
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(core, client=client)
-        await adapter._handle_message(_message(text="bot reply", message_type=2))
-    assert core.inbound == []
+async def test_bot_type_message_dropped_by_message_type(native_weixin: NativeWeixin) -> None:
+    receipt = await native_weixin.adapter._handle_message(
+        _message(text="bot reply", message_type=2)
+    )
+    assert receipt.status == IngressStatus.REJECTED
+    assert receipt.inbound_id is None
 
 
 # -- 24h window reminder ---------------------------------------------------
 
 
-async def test_inbound_message_marks_activity(env: Any) -> None:
-    """A handled inbound message records last_inbound and persists it."""
-    core = FakeCore()
-    transport, _captured = _transport([])
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(core, client=client)
-        assert adapter._last_inbound == {}
-        await adapter._handle_message(_message(text="hi", from_user_id="peer-1"))
+async def test_inbound_message_marks_activity(native_weixin: NativeWeixin) -> None:
+    adapter = native_weixin.adapter
+    assert adapter._last_inbound == {}
+    await adapter._handle_message(_message(text="hi"))
     assert "peer-1" in adapter._last_inbound
-    data = json.loads(_state_file(env, "weixin_activity.json").read_text(encoding="utf-8"))
-    assert "peer-1" in data["last_inbound"]
+    activity = next(adapter._tokens._path.parent.glob("weixin_activity_*.json"))
+    assert "peer-1" in json.loads(activity.read_text())["last_inbound"]
 
 
-async def test_state_files_written_0600(env: Any, tmp_path: Any) -> None:
-    """Audit round-2 P1-1: every file `_atomic_write_json` writes (context
-    tokens, sync buffer, activity, account) is owner-only — the pre-fix
-    production state had weixin_context_tokens.json / weixin_sync.json at
-    0644 while weixin_account.json was 0600."""
-    core = FakeCore()
-    transport, _captured = _transport(
-        [
-            httpx.Response(
-                200,
-                json=_updates(
-                    _message(text="hi", context_token="tok-abc"),  # noqa: S106 (test fixture value)
-                    sync_buf="buf-2",
-                ),
-            )
-        ]
-    )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(core, client=client)
-        await adapter.start()
-        await asyncio.wait_for(core.received.wait(), timeout=2)
-        await adapter.stop()
-
-    # weixin_account.json is covered by the QR-login test below (written via
-    # save_account); here the adapter itself wrote the other three.
-    for name in ("weixin_context_tokens.json", "weixin_sync.json", "weixin_activity.json"):
-        path = _state_file(tmp_path, name)
-        assert path.is_file(), name
-        assert (path.stat().st_mode & 0o777) == 0o600, name
+async def test_state_files_written_0600(native_weixin: NativeWeixin) -> None:
+    adapter = native_weixin.adapter
+    await adapter._handle_message(_message(text="hi"))
+    paths = [adapter._tokens._path, *adapter._tokens._path.parent.glob("weixin_activity_*.json")]
+    assert len(paths) == 2
+    for path in paths:
+        assert path.stat().st_mode & 0o777 == 0o600
+    assert not (adapter._tokens._path.parent / "weixin_sync.json").exists()
 
 
 async def test_push_failures_counted_and_reset(env: Any) -> None:
@@ -504,88 +455,98 @@ async def test_push_failures_counted_and_reset(env: Any) -> None:
         assert adapter.push_recovered_at is not None
 
 
-async def test_creation_uses_provider_event_identity_across_adapter_restart(env: Any) -> None:
-    core = FakeCore()
-    message = _message(text="spawn:go", message_id="birth-one")
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda _req: httpx.Response(200))
-    ) as client:
-        for _ in range(2):
-            adapter = WeixinAdapter(core, client=client)
-            await adapter._handle_message(message)
-        fresh = WeixinAdapter(core, client=client)
-        await fresh._handle_message(_message(text="spawn:go", message_id="birth-two"))
-    keys = [msg.idempotency_key for msg in core.inbound]
-    assert keys[0] == keys[1]
-    assert keys[0] != keys[2]
-    assert all(key is not None and key.startswith("weixin-spawn:") for key in keys)
+async def test_creation_uses_provider_event_identity_across_adapter_restart(
+    native_weixin: NativeWeixin,
+) -> None:
+    payload = _message(text="spawn:go", message_id="1")
+    original = await native_weixin.adapter._handle_message(payload)
+    replacement = WeixinAdapter(native_weixin.core, client=native_weixin.adapter._http)
+    native_weixin.core.register(replacement)
+    assert await replacement._handle_message(payload) == original
+    different = await replacement._handle_message(_message(text="spawn:go", message_id="2"))
+    assert original.status == different.status == IngressStatus.UNCERTAIN
+    assert original.attempt_id != different.attempt_id
 
 
 @pytest.mark.parametrize("text", ["same intent text", "spawn:go"])
-async def test_distinct_provider_ids_preserve_identical_content(env: Any, text: str) -> None:
-    core = FakeCore()
-    adapter = WeixinAdapter(core)
-    await adapter._handle_message(_message(text=text, message_id="event-one"))
-    await adapter._handle_message(_message(text=text, message_id="event-two"))
-    await adapter._handle_message(_message(text=text, message_id="event-one"))
-    assert [message.message_id for message in core.inbound] == ["event-one", "event-two"]
+async def test_distinct_provider_ids_preserve_identical_content(
+    native_weixin: NativeWeixin, text: str
+) -> None:
+    adapter = native_weixin.adapter
+    one = await adapter._handle_message(_message(text=text, message_id="1"))
+    two = await adapter._handle_message(_message(text=text, message_id="2"))
+    assert await adapter._handle_message(_message(text=text, message_id="1")) == one
+    assert one.id != two.id
     if text == "spawn:go":
-        keys = [message.idempotency_key for message in core.inbound]
-        assert all(key is not None and key.startswith("weixin-spawn:") for key in keys)
-        assert keys[0] != keys[1]
+        assert one.attempt_id != two.attempt_id
+    else:
+        assert one.inbound_id != two.inbound_id
 
 
-async def test_provider_identity_retains_sender_scope(env: Any) -> None:
-    core = FakeCore()
-    adapter = WeixinAdapter(core)
-    for peer in ("peer-one", "peer-two", "peer-one"):
-        await adapter._handle_message(_message(text="same", from_user_id=peer, message_id="event"))
-    assert [message.chat_id for message in core.inbound] == ["peer-one", "peer-two"]
+async def test_provider_identity_retains_sender_scope(native_weixin: NativeWeixin) -> None:
+    adapter = native_weixin.adapter
+    one = await adapter._handle_message(
+        _message(text="same", from_user_id="peer-one", message_id="1")
+    )
+    two = await adapter._handle_message(
+        _message(text="same", from_user_id="peer-two", message_id="1")
+    )
+    assert one.id != two.id
+    assert (
+        await adapter._handle_message(
+            _message(text="same", from_user_id="peer-one", message_id="1")
+        )
+        == one
+    )
 
 
 @pytest.mark.parametrize("identified_first", [True, False])
 async def test_missing_id_heuristic_does_not_share_provider_identity(
-    env: Any, identified_first: bool
+    native_weixin: NativeWeixin, identified_first: bool
 ) -> None:
-    core = FakeCore()
-    adapter = WeixinAdapter(core)
-    ids = ["event", ""] if identified_first else ["", "event"]
-    for message_id in [*ids, *ids]:
-        await adapter._handle_message(_message(text="same", message_id=message_id))
-    assert [message.message_id for message in core.inbound] == [value or None for value in ids]
-    assert all(message.idempotency_key is None for message in core.inbound)
+    ids = ["1", ""] if identified_first else ["", "1"]
+    accepted: list[IngressReceipt] = []
+    for provider_id in ids * 2:
+        if provider_id:
+            accepted.append(
+                await native_weixin.adapter._handle_message(
+                    _message(text="same", message_id=provider_id)
+                )
+            )
+        else:
+            with pytest.raises(ValueError, match="qualified provider"):
+                await native_weixin.adapter._handle_message(
+                    _message(text="same", message_id=provider_id)
+                )
+    assert accepted[0] == accepted[1]
 
 
 @pytest.mark.parametrize("text", ["same chat", "spawn:go"])
 async def test_poll_replay_deduplicates_events_without_merging_identical_text(
-    env: Any, text: str
+    native_weixin: NativeWeixin, text: str
 ) -> None:
-    core = FakeCore()
-    first = _message(text=text, message_id="one")
-    second = _message(text=text, message_id="two")
-    transport, requests = _transport(
+    first, second = _message(text=text, message_id="1"), _message(text=text, message_id="2")
+    native_weixin.provider_responses.extend(
         [
-            httpx.Response(200, json=_updates(first, second, sync_buf="after-one")),
-            httpx.Response(200, json=_updates(first, second, sync_buf="after-two")),
+            _updates(first, second, sync_buf="after-one"),
+            _updates(first, second, sync_buf="after-two"),
         ]
     )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(core, client=client)
-        cursor, timeout = await adapter._poll_once("", weixin.LONG_POLL_TIMEOUT_MS)
-        cursor, _ = await adapter._poll_once(cursor, timeout)
+    cursor, timeout = await native_weixin.adapter._poll_once("", 35000)
+    assert cursor == "after-one"
+    first_result = await native_weixin.adapter._handle_message(first)
+    cursor, _ = await native_weixin.adapter._poll_once(cursor, timeout)
     assert cursor == "after-two"
-    assert len(requests) == 2
-    assert [message.message_id for message in core.inbound] == ["one", "two"]
-    if text == "spawn:go":
-        assert core.inbound[0].idempotency_key != core.inbound[1].idempotency_key
+    assert await native_weixin.adapter._handle_message(first) == first_result
+    assert (await native_weixin.adapter._handle_message(second)).id != first_result.id
 
 
-async def test_missing_id_heuristic_is_memory_only_across_restart(env: Any) -> None:
-    core = FakeCore()
-    message = _message(text="same", message_id="")
-    adapter = WeixinAdapter(core)
-    await adapter._handle_message(message)
-    await adapter._handle_message(message)
-    await WeixinAdapter(core)._handle_message(message)
-    assert len(core.inbound) == 2
-    assert all(item.message_id is None and item.idempotency_key is None for item in core.inbound)
+async def test_missing_id_heuristic_is_memory_only_across_restart(
+    native_weixin: NativeWeixin,
+) -> None:
+    payload = _message(text="same", message_id="")
+    for _ in range(2):
+        adapter = WeixinAdapter(native_weixin.core, client=native_weixin.adapter._http)
+        native_weixin.core.register(adapter)
+        with pytest.raises(ValueError, match="qualified provider"):
+            await adapter._handle_message(payload)

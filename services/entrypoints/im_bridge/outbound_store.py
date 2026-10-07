@@ -1,6 +1,6 @@
 """IM intents share atomic acceptance with their timeline or notice producer."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -44,9 +44,12 @@ class IMOutboxStore:
         *,
         replay_id: str = "",
         switch_arg: str = "",
+        guard: Callable[[Connection], None] | None = None,
     ) -> TimelineAcceptance:
         self._validate_candidates(channel, account_id, chat_id, agent_id, candidates, replay_id)
         with write_transaction(self._pool()) as conn:
+            if guard is not None:
+                guard(conn)
             saved_account, saved_agent, watermark, initialized = self._lock_cursor(
                 conn,
                 channel,
@@ -358,6 +361,42 @@ class IMOutboxStore:
                 )
             return previous
 
+    def replay_result(
+        self, channel: str, account: str, chat: str, replay: str, switch_arg: str
+    ) -> dict[str, object] | None:
+        """Return the original switch receipt facts, never a later current selection."""
+        with write_transaction(self._pool()) as conn:
+            row = conn.execute(
+                "SELECT agent_id,intent_ids,switch_arg FROM im_bridge_outbound_replays "
+                "WHERE channel=%s AND account_id=%s AND chat_id=%s AND replay_id=%s",
+                (channel, account, chat, replay),
+            ).fetchone()
+            if row is None:
+                return None
+            if row[2] != switch_arg:
+                raise OutboundIdentityConflictError(
+                    "switch replay identity identifies another argument"
+                )
+            return {"agent_id": row[0], "intent_ids": list(row[1])}
+
+    def native_selections(self, channel: str, account: str) -> dict[str, int]:
+        """Derived subscriptions restore only canonical selections belonging to this account."""
+        with self._pool().connection() as conn:
+            rows = conn.execute(
+                "SELECT chat_id,push_agent_id FROM im_bridge_cursors WHERE channel=%s AND push_account_id=%s AND push_agent_id IS NOT NULL",
+                (channel, account),
+            ).fetchall()
+            return dict(rows)
+
+    def native_selection(self, channel: str, account: str, chat: str) -> int | None:
+        """Read only a matching native account selection, never import unbound JSON."""
+        with self._pool().connection() as conn:
+            row = conn.execute(
+                "SELECT push_agent_id FROM im_bridge_cursors WHERE channel=%s AND chat_id=%s AND push_account_id=%s",
+                (channel, chat, account),
+            ).fetchone()
+            return row[0] if row is not None else None
+
     def selection(
         self, channel: str, account: str, chat: str, legacy_agent: int | None
     ) -> int | None:
@@ -410,8 +449,18 @@ class IMOutboxStore:
                 result.setdefault((channel, chat), None)
         return result
 
-    def clear_selection(self, channel: str, account: str, chat: str, expected: int) -> bool:
+    def clear_selection(
+        self,
+        channel: str,
+        account: str,
+        chat: str,
+        expected: int,
+        *,
+        guard: Callable[[Connection], None] | None = None,
+    ) -> bool:
         with write_transaction(self._pool()) as conn:
+            if guard is not None:
+                guard(conn)
             return (
                 conn.execute(
                     "UPDATE im_bridge_cursors SET push_agent_id=NULL, push_item_id=NULL, push_created_at=NULL, "
