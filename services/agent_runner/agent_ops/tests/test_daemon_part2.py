@@ -4,7 +4,7 @@ Covers:
 - _dispatch routing for each op kind (kind, payload) -> (status, result)
 - wire-error proxying (AvaAgentError -> failed result carrying reason)
 - _ops_route: body parsing, {status, result} envelope, malformed-body 400,
-  semaphore-uninitialized guard
+  required semaphore binding
 - concurrency cap (Semaphore) across concurrent /ops requests
 """
 
