@@ -1,7 +1,4 @@
 {
   "files": {},
-  "patch_targets": {
-    "tests/base/test_no_secrets_on_argv.py::services.wake.schedule_manager.manager.ScheduleManager._close_null_runs": 1,
-    "tests/base/test_no_secrets_on_argv.py::services.wake.schedule_manager.manager.ScheduleManager._set_status": 1
-  }
+  "patch_targets": {}
 }
