@@ -117,7 +117,7 @@ def agent_setting(name: str) -> Any:
 # `base/packages/plugins/config_view.py`).
 #
 # Design:
-# - Private module (underscore prefix) → not in `ava.help()`, for plugin authors not the agent
+# - SDK implementation module → not in `ava.help()`, for plugin authors not the agent
 # - lazy attribute access → no cache here, so restart / test monkeypatch changes
 #   to the registry are immediately visible
 # - lazy import base.packages.plugins.config_registration → avoids ava module load triggering agent
