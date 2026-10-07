@@ -19,7 +19,7 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
         ("test_placement_dependencies.py", "scripts/structure"),
         ("test_coverage_gates.py", "scripts/ci"),
         ("test_lint_doc_roster.py", "scripts/content_lint"),
-        ("test_lint_time_bomb.py", "scripts/lint"),
+        ("test_lint_time_bomb.py", "scripts/lint/diagnostics"),
         ("test_repo_change.py", "base/deploy/git"),
     ],
 )
