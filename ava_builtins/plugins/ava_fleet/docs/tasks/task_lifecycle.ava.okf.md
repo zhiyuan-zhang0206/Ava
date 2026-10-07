@@ -27,7 +27,7 @@ in_progress ──→ done
 
 ## API
 
-### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None) -> Task`
+### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None, operation_key=None) -> Task`
 
 Create a task and return the full `Task`. `title` is a single line (unique among `in_progress` tasks); `description` is the task description.
 
@@ -37,6 +37,10 @@ Create a task and return the full `Task`. `title` is a single line (unique among
 - `remind_interval_seconds`: no-update duration after which the owner is reminded. Default scales with priority — P0 30m / P1 1h / P2 2h / P3 4h. **Cannot be disabled**—`None` falls back to the priority default; an explicit value wins; cap 24h; out-of-range raises `ValueError`.
 - **Rejects duplicate titles** among `in_progress` tasks (`ValueError`) — the check is `base.agents.tasks.rules.open_title_holder`, shared with `update()`'s rename check and the gateway PATCH.
 - Triggers a `task_create` event log + publishes `task_created` (SSE, board invalidates and refetches).
+
+Keyed standalone creation returns the original accepted Task snapshot on replay;
+see [[task_creation_receipts.ava.okf.md|Creation receipts]]. Query `get(task.id)`
+for current state.
 
 ### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", remind_interval_seconds=None) -> (Task, int)`
 
