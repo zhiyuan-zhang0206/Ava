@@ -413,7 +413,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery"
     ),
     ("POST", "/api/agents/{agent_id}/system-note"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
         note="deliver a framework system note (task assign/update/reminder) — renders as a system marker, not peer chat; resurrect is a body choice",
     ),
     # ── gateway/cluster/status.py ───────────────────────────────────

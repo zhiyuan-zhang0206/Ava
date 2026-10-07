@@ -301,6 +301,7 @@ def send_system_note(
     source: str,
     task_id: int | None,
     resurrect: bool,
+    idempotency_key: str | None = None,
 ) -> int:
     """POST /api/agents/{id}/system-note — deliver a framework system note.
 
@@ -318,7 +319,12 @@ def send_system_note(
     }
     if task_id is not None:
         body["task_id"] = task_id
-    resp = post(f"/api/agents/{agent_id}/system-note", body, timeout=httpx.Timeout(120.0))
+    resp = post(
+        f"/api/agents/{agent_id}/system-note",
+        body,
+        timeout=httpx.Timeout(120.0),
+        idempotency_key=idempotency_key,
+    )
     raise_from_response(resp)
     return int(resp.json()["inbound_id"])
 
