@@ -238,7 +238,9 @@ def test_unresolved_math_excludes_active_classes(
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
-        cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     assert result == resolution.ResolutionResult(2, 4, reopened=0, auto_dismissed=0)
@@ -272,6 +274,7 @@ def test_burst_reopens_only_above_the_configured_threshold(
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
         events_maintenance_config(events_resolution_burst_threshold=5),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
@@ -307,14 +310,24 @@ def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
 
     # The newest recorded event is an hour old: an empty window may only mean a stalled writer.
     later = datetime.now(UTC) + timedelta(hours=1)
-    assert resolution.run_resolution_slice(pool, events_maintenance_config(), now=later) is None
+    assert (
+        resolution.run_resolution_slice(
+            pool, events_maintenance_config(), now=later, cadence=resolution.AutoDismissCadence()
+        )
+        is None
+    )
     assert emitted == []
 
     def boom(*_args: object, **_kwargs: object) -> dict[resolution.EventClass, int]:
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(resolution, "class_counts", boom)
-    assert resolution.run_resolution_slice(pool, events_maintenance_config()) is None
+    assert (
+        resolution.run_resolution_slice(
+            pool, events_maintenance_config(), cadence=resolution.AutoDismissCadence()
+        )
+        is None
+    )
     assert emitted == []
 
 
@@ -324,7 +337,9 @@ def test_an_empty_window_over_a_current_record_emits_zero_gauges(
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
-        cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     assert result == resolution.ResolutionResult(0, 0, reopened=0, auto_dismissed=0)
@@ -344,9 +359,9 @@ def test_auto_dismiss_picks_the_classes_present_in_every_six_hour_slice(
         _event_class(event_name="gappy", process="p"): 1,
     }
     config = events_maintenance_config(events_auto_dismiss_enabled=True, events_auto_dismiss_days=1)
-    resolution._last_auto_dismiss_day[0] = None
+    cadence = resolution.AutoDismissCadence()
 
-    stable = resolution._stable_auto_classes(now, db_conn, current, config)
+    stable = resolution._stable_auto_classes(now, db_conn, current, config, cadence)
 
     assert stable == {_event_class(event_name="steady", process="p")}
 
@@ -364,6 +379,7 @@ def test_auto_dismiss_is_off_by_default(
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
         events_maintenance_config(events_auto_dismiss_enabled=False),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     assert result == resolution.ResolutionResult(1, 0, reopened=0, auto_dismissed=0)
@@ -420,7 +436,9 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
-        cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     assert result == resolution.ResolutionResult(1, 0, reopened=0, auto_dismissed=0)
@@ -471,6 +489,7 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
         events_maintenance_config(events_resolution_burst_threshold=5),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
@@ -499,6 +518,7 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
         events_maintenance_config(events_resolution_burst_threshold=5),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     # 4 + 2 = 6 > 5: the base-wide burst trips the wildcard row's safety valve.
@@ -553,6 +573,7 @@ def test_burst_valve_watches_the_base_across_the_category_split(
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
         events_maintenance_config(events_resolution_burst_threshold=5),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
@@ -579,6 +600,7 @@ def test_exact_burst_valve_watches_its_process_across_the_category_split(
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
         events_maintenance_config(events_resolution_burst_threshold=5),
+        cadence=resolution.AutoDismissCadence(),
     )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
