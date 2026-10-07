@@ -361,3 +361,12 @@ def test_a_view_behind_the_tree_is_rebuilt_but_not_more_than_every_two_seconds(
     cache.get(db, 1, needs=99)  # long enough since the build: rebuilt once ...
     cache.get(db, 1, needs=99)  # ... and not again at once
     assert len(loads) == 2
+
+
+def test_the_window_lists_the_llm_requests_sent_in_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    world = World(monkeypatch)
+    everything = read(world)
+    assert [(r.idx, r.input_tokens) for r in everything.requests] == [(2, 100), (4, 200)]
+    # The first request is sent when the message before it was read (minute 0), the second at minute 2.
+    later = read(world, T0 + timedelta(minutes=1), T0 + timedelta(minutes=10))
+    assert [r.idx for r in later.requests] == [4]

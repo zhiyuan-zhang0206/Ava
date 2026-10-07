@@ -437,9 +437,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/agents/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
-    # ── gateway/run_timeline/router.py, messages.py ──────────────────
+    # ── gateway/run_timeline/router.py, messages.py, context.py ──────────────────
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
         note="read-only: the understanding tree and the layer-0 message units in a window",
+    ),
+    ("GET", "/api/agents/{agent_id}/run-timeline/context"): RouteContract(
+        note="read-only context breakdown of the LLM request at (or after) a message index — recomputed from the checkpoint, no state change",
     ),
     ("GET", "/api/agents/{agent_id}/run-timeline/messages"): RouteContract(
         note="read-only raw messages of a stitched-index range — long parts clip with text_truncated; full=true returns the whole body",
