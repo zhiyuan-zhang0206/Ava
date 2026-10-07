@@ -207,14 +207,14 @@ class TestPostRetry:
         mock_resp.status_code = 200
         # First two fail, third succeeds. POST /api/agents is a
         # NON_IDEMPOTENT spawn (read timeout must NOT retry — twin risk), so
-        # this retry test uses an IDEMPOTENT lifecycle endpoint instead.
+        # this retry test uses a read-only POST endpoint instead.
         mock_client.post.side_effect = [
             httpx.ConnectError("refused"),
             httpx.ReadTimeout("timeout"),
             mock_resp,
         ]
 
-        result = post("/api/agents/42/terminate")
+        result = post("/api/memory/search")
         assert result is mock_resp
         assert mock_client.post.call_count == 3
         assert len(retry_waits) == 2

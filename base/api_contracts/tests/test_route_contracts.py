@@ -79,3 +79,10 @@ def test_contracts_have_no_unknown_semantics() -> None:
     for (method, _path), c in contracts.ROUTE_CONTRACTS.items():
         assert c.idempotency in Idempotency, f"bad idempotency on {method} {_path}"
         assert c.pause in PauseSemantics, f"bad pause on {method} {_path}"
+
+
+def test_keyed_effect_contracts_require_business_transaction_ownership() -> None:
+    """A response cache cannot justify ambiguous retries of business effects."""
+    for (method, path), contract in contracts.ROUTE_CONTRACTS.items():
+        if contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY:
+            assert contract.transactional_idempotency, (method, path)

@@ -71,7 +71,7 @@ single-module routers. [[db.ava.okf.md]]: Postgres pool.
 
 ## Entry Points
 
-- Entry point inventory: [[entry-points.ava.okf.md]].
+- Inventories: [[entry-points.ava.okf.md]], [[idempotency/idempotency.ava.okf.md]].
 
 ## Notes
 

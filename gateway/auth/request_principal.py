@@ -234,6 +234,8 @@ def request_key(request: Request, key: str, *, method: str, path: str) -> str:
     The reserved storage prefix cannot be submitted as a raw legacy key: doing
     so would allow a legacy request to address another principal's stored reply.
     """
+    if not key or len(key) > 128:
+        raise PrincipalScopeError("idempotency key must contain 1 to 128 characters")
     scope = request.headers.get(SCOPE_HEADER)
     principal = getattr(request.state, "auth_principal", None)
     if isinstance(principal, AuthPrincipal) and principal.kind == "mcp_client":
