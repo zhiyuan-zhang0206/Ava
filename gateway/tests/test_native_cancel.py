@@ -191,3 +191,32 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
     assert db_conn.execute(
         "SELECT count(*) FROM native_cancel_commands WHERE agent_id=%s", (initial.agent_id,)
     ).fetchone() == (0,)
+
+
+@pytest.mark.parametrize("raw_agent", ["0", "-1", str(2**63), str(10**40), "true", "false"])
+def test_native_paths_reject_invalid_agent_before_owner_lookup(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, raw_agent: str
+) -> None:
+    headers = _headers(monkeypatch)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid path reached SQL or command acceptance")
+
+    monkeypatch.setattr("gateway.agents.lifecycle.observe_native_work", forbidden)
+    monkeypatch.setattr("gateway.agents.lifecycle.accept_native_cancel", forbidden)
+    target = NativeWorkTarget(
+        work_id=uuid4(),
+        agent_id=1,
+        machine="isolated-boundary",
+        generation=uuid4(),
+        owner=uuid4(),
+        protocol=1,
+    )
+    url = f"/api/keyed/v1/agents/{raw_agent}"
+    assert client.get(f"{url}/native-work", headers=headers).status_code == 422
+    assert (
+        client.post(
+            f"{url}/cancel-work", json=target.model_dump(mode="json"), headers=headers
+        ).status_code
+        == 422
+    )

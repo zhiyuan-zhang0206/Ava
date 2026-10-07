@@ -391,7 +391,9 @@ async def post_agent_restart(
 
 
 @router.get("/api/keyed/v1/agents/{agent_id}/native-work")
-async def native_work(agent_id: int, request: Request) -> NativeWorkTarget:
+async def native_work(
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)], request: Request
+) -> NativeWorkTarget:
     """Expose only eligible ACTIVE work backed by actual managed-owner evidence."""
     target = await asyncio.to_thread(observe_native_work, request.app.state.db_pool, agent_id)
     if target is None:
@@ -401,7 +403,7 @@ async def native_work(agent_id: int, request: Request) -> NativeWorkTarget:
 
 @router.post("/api/keyed/v1/agents/{agent_id}/cancel-work")
 async def native_cancel(
-    agent_id: int, body: NativeWorkTarget, request: Request
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeWorkTarget, request: Request
 ) -> NativeCancelAcceptance:
     """Accept one exact work intent; acceptance does not prove checkpoint execution."""
     key = request.headers.get("Idempotency-Key")
