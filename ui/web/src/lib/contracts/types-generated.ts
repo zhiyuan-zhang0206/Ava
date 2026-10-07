@@ -7927,6 +7927,12 @@ export interface components {
             impersonation?: components["schemas"]["ImpersonationMetadata"] | null;
             /** Inbound Id */
             inbound_id?: number | null;
+            /** Source Message Id */
+            source_message_id?: string | null;
+            /** Source Inbound Id */
+            source_inbound_id?: number | null;
+            /** Source Block Idx */
+            source_block_idx?: number | null;
             /** Compact Id */
             compact_id?: string | null;
             /** Reasoning Ms */

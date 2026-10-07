@@ -40,3 +40,32 @@ LangChain forces `BaseMessage.additional_kwargs` into a bare `dict`, which canno
 ## Notes
 
 - Non-exhaustive: third-party keys (e.g., `reasoning_content` written by `ChatMoonshot`) also share this dict, intentionally left outside the contract.
+
+## Stored source identity
+
+`ava_ephemeral_message_id=True` records that a checkpoint message lacked an ID
+before read/replay normalization. LangGraph may synthesize a UUID for merging,
+but that UUID does not identify the original persisted source. The marker stays
+in reserved `additional_kwargs` through later checkpoint serialization; reads do
+not rewrite historical rows. `base/agents/messages/identity.py` owns this
+normalization, shared by sync/async tuple reads, history iterators, delta
+seeds/writes and the guarded delta reducer. Working-copy/plugin/hook new deltas
+are not normalized as legacy. LangGraph's pre-serialization writer remains the
+ID generator for new message writes.
+
+Timeline snapshots add `source_message_id`, `source_inbound_id` and
+`source_block_idx`. They preserve the existing positional `item_id` and legacy
+UI anchor behavior. A source message ID must be present and not ephemeral;
+an inbound fallback must be an explicitly embedded positive `ava_inbound_id`,
+never a positionally matched UI anchor. Block ordinals distinguish content in
+one source message and survive timeline renumbering/compact history prefixes.
+These coordinates qualify identity only: a live snapshot is not evidence of a
+committed checkpoint. Consumers requiring durable acceptance must read committed
+history and include the source agent/thread namespace in their logical key.
+
+This foundation does not enqueue outbound messages, advance cursors, replay
+legacy history or guarantee delivery. Issue #4477 remains open for transactional
+outbound intent/cursor acceptance and provider uncertainty handling. No new ID
+generator, timestamp/content hash identity or client outbox is introduced. The
+reserved marker is not rendered as message text or sent in the supported
+OpenAI/Moonshot, Anthropic and Google provider message payloads.

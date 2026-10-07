@@ -116,6 +116,7 @@ class AvaMessageKwargs(TypedDict, total=False):
     map. Both are read back for backward-compatible timeline rendering.
     """
 
+    ava_ephemeral_message_id: bool
     ava_impersonation: dict[str, Any]
     ava_msg_type: str
     ava_source: str
