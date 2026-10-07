@@ -100,7 +100,7 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
     literal `diagnose=False`.
 
     Takes source rather than a path so the lint's own tests can drive it with
-    literal snippets (same shape as scripts/lint_pool_keepalives.py).
+    literal snippets (same shape as scripts/lint/pool_keepalives.py).
     """
     try:
         tree = ast.parse(src, filename=filename)

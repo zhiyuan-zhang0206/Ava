@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from scripts.ci import commands as ci_utils
-from scripts.ci import monitor, owner_operations, status
+from scripts.ci.pull_requests import commands as ci_utils
+from scripts.ci.pull_requests import monitor, owner_operations, status
 from scripts.ci.tests.test_ci_monitor import (
     CIStatus,
     _aged,
@@ -557,13 +557,13 @@ def test_read_only_cli_does_not_load_owner_operations(arguments: list[str]) -> N
             f"sys.path.insert(0, {str(Path.cwd())!r})",
             "class RejectOwnerImports(importlib.abc.MetaPathFinder):",
             "    def find_spec(self, fullname, path, target=None):",
-            "        if fullname in ('scripts.ci.owner_operations', 'scripts.ci.trunk_api'):",
+            "        if fullname in ('scripts.ci.pull_requests.owner_operations', 'scripts.ci.pull_requests.trunk_api'):",
             "            raise AssertionError('read-only CLI imported owner operations: ' + fullname)",
             "sys.meta_path.insert(0, RejectOwnerImports())",
             "os.environ.pop('TRUNK_API_TOKEN', None)",
             "os.environ['CI_QUEUE'] = 'unrelated-owner-queue'",
-            "from scripts import ci_utils",
-            "from scripts.ci import status",
+            "from scripts.ci import cli as ci_utils",
+            "from scripts.ci.pull_requests import status",
             "status.check_ci = lambda *a, **k: status.CIResult(status.CIStatus.ALL_PASSED)",
             f"raise SystemExit(ci_utils.main({arguments!r}))",
         ]

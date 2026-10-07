@@ -15,7 +15,7 @@ A socket-less launch of `AvaPermissionsHelper.app` — no
 
 The panel renders the grant matrix from the onboarding tool's `--check`
 report, offers a one-click fill-missing run driving
-`scripts/tcc-onboard-helper-grants.py`, and shows a live run log. A fill run
+`scripts/host_ops/tcc/onboard-helper-grants.py`, and shows a live run log. A fill run
 carries the same guard pair the CLI enforces (`--fill-pending
 --confirm-user-present` — the button click is the user-present attestation),
 and no automatic path fills: the launch-time run and the refresh button are

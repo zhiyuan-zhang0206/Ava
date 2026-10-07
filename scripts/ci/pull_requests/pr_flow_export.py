@@ -79,7 +79,7 @@ from zoneinfo import ZoneInfo
 # Script-mode path guard (PYTHONSAFEPATH=1 removed the implicit script-dir
 # entry): this checkout's root first so `base` and `scripts.ci` resolve against
 # this tree.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -373,8 +373,8 @@ def load_trunk_token() -> str | None:
 
 @contextlib.contextmanager
 def _trunk_client() -> Any:
-    """The repo's Trunk API channel (`scripts/ci/trunk_api.py`), imported lazily."""
-    from scripts.ci import trunk_api
+    """The repo's Trunk API channel (`scripts/ci/pull_requests/trunk_api.py`), imported lazily."""
+    from scripts.ci.pull_requests import trunk_api
 
     yield trunk_api
 

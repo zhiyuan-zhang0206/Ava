@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import zombie_pyright_ignores as gate
+from scripts.lint.diagnostics import zombie_pyright_ignores as gate
 
 
 @pytest.fixture

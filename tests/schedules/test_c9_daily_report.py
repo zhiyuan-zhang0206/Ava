@@ -340,7 +340,7 @@ def test_report_failure_uses_exact_label_and_existing_message(
         17,
         "C9 daily reconciliation failed:\ncollector failed\n"
         "Check the schedule log; backfill the missed window manually with "
-        "`scripts/ci/accounting.py --since ... --until ... --append-ledger`.",
+        "`scripts/ci/pull_requests/accounting.py --since ... --until ... --append-ledger`.",
     )
 
 
@@ -350,6 +350,9 @@ def test_load_accounting_resolves_under_scripts_ci() -> None:
     saved_path = list(sys.path)
     try:
         loaded = module._load_accounting()
-        assert Path(loaded.__file__).resolve() == REPO_ROOT / "scripts" / "ci" / "accounting.py"
+        assert (
+            Path(loaded.__file__).resolve()
+            == REPO_ROOT / "scripts" / "ci" / "pull_requests" / "accounting.py"
+        )
     finally:
         sys.path[:] = saved_path

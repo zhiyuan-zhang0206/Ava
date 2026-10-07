@@ -12,7 +12,7 @@ set -e
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
-cd "$(dirname "$0")/.."  # repo root
+cd "$(dirname "$0")/../.."  # repo root
 
 .venv/bin/python scripts/codegen/dump_frontend_constants.py "$TMPDIR" >/dev/null
 

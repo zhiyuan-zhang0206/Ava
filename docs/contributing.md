@@ -57,7 +57,7 @@ from missing, skipped or incomplete verification. Maintainers choose how to merg
 
 Keep the checkout while it contains needed work. Before removing a worktree,
 check for live sessions or processes anchored there with
-`scripts/check_worktree_remove.py`; preserve it if the check cannot establish that
+`scripts/host_ops/check_worktree_remove.py`; preserve it if the check cannot establish that
 removal is safe. See [development setup](conventions/dev-setup.md).
 
 A merge proves repository integration, not production health. Runtime rollout is

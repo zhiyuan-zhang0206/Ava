@@ -21,7 +21,7 @@ of the same run is refused while the first rerun's new attempt runs (probed
 2026-09-17), so multi-job recovery is atomic at run level, the same policy
 .github/workflows/ci-rerun.yml applies.
 
-Used by scripts/ci_utils.py (--rerun-failed-jobs). The job objects come from
+Used by scripts/ci/cli.py (--rerun-failed-jobs). The job objects come from
 the REST API, whose shape differs from the GraphQL check runs ci_utils reads:
 the numeric job identifier is `.id` (not `.databaseId`) and conclusions are
 lowercase (`"failure"`, `"timed_out"`). A GitHub query that fails raises
@@ -35,7 +35,7 @@ import subprocess
 from typing import Any
 
 # Conclusions that mean "this job failed and is re-runnable". Kept in sync
-# with ci_utils.FAILING (scripts/ci_utils.py); REST conclusions arrive
+# with ci_utils.FAILING (scripts/ci/cli.py); REST conclusions arrive
 # lowercase, so the comparison normalizes them on read.
 FAILING = frozenset(
     {

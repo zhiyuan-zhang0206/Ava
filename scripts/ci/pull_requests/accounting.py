@@ -12,12 +12,12 @@ Scope: the `CI` workflow only (the cost driver — a full run is ~110 billable
 minutes across shards; auxiliary workflows are seconds each).
 
 Usage:
-    .venv/bin/python scripts/ci/accounting.py --since 2026-09-05T16:00Z \
+    .venv/bin/python scripts/ci/pull_requests/accounting.py --since 2026-09-05T16:00Z \
         --until 2026-09-06T16:00Z [--repo owner/repo] [--json]
 
-    .venv/bin/python scripts/ci/accounting.py --since ... --until ... \
+    .venv/bin/python scripts/ci/pull_requests/accounting.py --since ... --until ... \
         --append-ledger scripts/ci/ci_usage/ledger.jsonl
-    .venv/bin/python scripts/ci/accounting.py --report [--days N] [--json]
+    .venv/bin/python scripts/ci/pull_requests/accounting.py --report [--days N] [--json]
 
     Default: print one attribution entry per CI run in the window. With
     `--append-ledger PATH` the entries are appended idempotently (keyed by
@@ -53,7 +53,7 @@ MACOS_MINUTE_USD = 0.062
 INCLUDED_MINUTES_MONTHLY = 3000
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
-_LEDGER_DIR = Path(__file__).resolve().parent / "ci_usage"
+_LEDGER_DIR = Path(__file__).resolve().parents[1] / "ci_usage"
 DEFAULT_LEDGER = _LEDGER_DIR / "ledger.jsonl"
 
 _AGENT_RE = re.compile(r"\[Ava-(\d+)\]")

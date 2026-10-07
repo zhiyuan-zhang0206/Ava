@@ -1,4 +1,4 @@
-"""`scripts/lint/no_emoji.py` — a typo'd explicit target must fail the gate.
+"""`scripts/lint/diagnostics/no_emoji.py` — a typo'd explicit target must fail the gate.
 
 An explicit path argument that does not exist used to scan nothing and exit 0;
 it must now report the missing target on stderr and exit 1. An unreadable
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import no_emoji as gate
+from scripts.lint.diagnostics import no_emoji as gate
 
 
 def test_explicit_missing_target_is_an_error(

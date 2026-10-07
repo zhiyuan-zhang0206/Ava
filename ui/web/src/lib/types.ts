@@ -3,7 +3,7 @@
 // discriminator union that OpenAPI can't fully express) stays hand-written,
 // kept in sync via the task #11 wire-format roundtrip tests.
 //
-// Edit a backend Pydantic model → `./scripts/codegen-types.sh` regenerates
+// Edit a backend Pydantic model → `./scripts/codegen/codegen-types.sh` regenerates
 // types-generated.ts → consumers don't need to change import paths to
 // pick up the new schema (re-export names here are stable). The
 // pre-commit hook enforces codegen ↔ schema sync; drift fails the commit.

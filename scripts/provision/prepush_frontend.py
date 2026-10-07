@@ -54,7 +54,7 @@ def _query(*args: str) -> str:
 def contribution() -> list[str]:
     """Both sides of renames and deletions count; unknown scope is an error."""
     base = subprocess.run(  # noqa: S603 — fixed repo-local scope owner
-        ["bash", str(_SCRIPTS / "prepush-base.sh")],
+        ["bash", str(_SCRIPTS / "hooks" / "prepush-base.sh")],
         check=True,
         capture_output=True,
         text=True,
@@ -64,7 +64,7 @@ def contribution() -> list[str]:
 
 def _run(tool: str, command: list[str]) -> int:
     return subprocess.run(  # noqa: S603 — fixed command, Git-owned path arguments
-        ["bash", str(_SCRIPTS / "prepush-guard.sh"), tool, "--", *command], check=False
+        ["bash", str(_SCRIPTS / "hooks" / "prepush-guard.sh"), tool, "--", *command], check=False
     ).returncode
 
 

@@ -648,7 +648,7 @@ def _check_folded_strict_without_seed() -> list[str]:
     statement whose object already exists in db/schema.sql.
 
     A fresh DB stamps the baseline seed and then replays every migration file
-    the seed does not stamp — scripts/test_migrations_apply.sh builds exactly
+    the seed does not stamp — scripts/ci/test_migrations_apply.sh builds exactly
     that DB — so such a statement fails on "already exists". This check is the
     static front of that smoke: the mechanically provable "a replay would
     definitely fail" subset, matched table-qualified (a same-named object on

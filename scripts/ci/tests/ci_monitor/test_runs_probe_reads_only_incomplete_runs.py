@@ -13,8 +13,8 @@ from typing import Any, cast
 
 import pytest
 
-from scripts.ci import commands as ci_utils
-from scripts.ci import owner_operations, status
+from scripts.ci.pull_requests import commands as ci_utils
+from scripts.ci.pull_requests import owner_operations, status
 from scripts.ci.tests.test_ci_monitor import (
     _APP_CHECK,
     CIStatus,

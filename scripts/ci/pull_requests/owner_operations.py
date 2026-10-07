@@ -10,10 +10,10 @@ import sys
 import time
 from math import ceil
 
-from scripts.ci import status, trunk_api
-from scripts.ci.job_rerun import CiJobRerunError, list_failed_jobs, rerun_failed_jobs
-from scripts.ci.monitor import _deadline_hit
-from scripts.ci.status import MAX_CONSECUTIVE_ERRORS, CIStatus, _parse_ts
+from scripts.ci.pull_requests import status, trunk_api
+from scripts.ci.pull_requests.job_rerun import CiJobRerunError, list_failed_jobs, rerun_failed_jobs
+from scripts.ci.pull_requests.monitor import _deadline_hit
+from scripts.ci.pull_requests.status import MAX_CONSECUTIVE_ERRORS, CIStatus, _parse_ts
 
 QUEUE_COOLDOWN_SECONDS = 300
 RETRY_BACKOFF_SECONDS = 300
@@ -372,7 +372,7 @@ def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                 "TRUNK_API_TOKEN is required for --queue trunk --merge", file=sys.stderr, flush=True
             )
             return 3
-        from scripts.ci.monitor import wait_for_verdict
+        from scripts.ci.pull_requests.monitor import wait_for_verdict
 
         rc = wait_for_verdict(args.pr, args.repo, args.every, args.timeout)
         if rc != 0:

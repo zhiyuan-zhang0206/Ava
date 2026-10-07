@@ -60,7 +60,7 @@ npx tsc --noEmit
 ```
 
 Use `npx vitest run <selected-test-files>` when selecting test files directly.
-Regenerate OpenAPI and frontend types with `bash scripts/codegen-types.sh` from
+Regenerate OpenAPI and frontend types with `bash scripts/codegen/codegen-types.sh` from
 the repository root; do not hand-edit generated output.
 
 ## End-to-end

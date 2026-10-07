@@ -1,7 +1,7 @@
 """Forbid building a psycopg connection pool without TCP keepalives — where
 the structure gate's `postgres-dial` rule cannot see it.
 
-Run: `.venv/bin/python scripts/lint_pool_keepalives.py [path ...]` (defaults to
+Run: `.venv/bin/python scripts/lint/pool_keepalives.py [path ...]` (defaults to
 the scope below; an explicit path that does not exist is an error (stderr +
 exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
 
@@ -56,7 +56,7 @@ import re
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import lint_common  # noqa: E402 — standalone script
@@ -221,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} pool(s) built without TCP keepalives. See the docstring at the "
-            "top of scripts/lint_pool_keepalives.py and base/db/__init__.py:pool().",
+            "top of scripts/lint/pool_keepalives.py and base/db/__init__.py:pool().",
             file=sys.stderr,
         )
         return 1

@@ -58,7 +58,7 @@ lifecycle; those items wait for it to land and are then designed on its code.
    and restore drills), and add the async pool factory the agent host
    and eval pools lack. Migrate the sites; genuine exceptions become reasoned
    `allowed` entries. Collapse the three drifted `watch_idle.py` reference
-   copies into one. Then narrow `scripts/lint_pool_keepalives.py` to what
+   copies into one. Then narrow `scripts/lint/pool_keepalives.py` to what
    Rule 5 does not cover, or retire it. Waits for #3479, which rewrites
    `base/db_connections.py` (owner-admin, executor-admin and
    generation-login dials) and most of the dialing modules — design the named

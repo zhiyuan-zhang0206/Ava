@@ -5927,7 +5927,7 @@
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "Ready-for-review to merge latency by complete cluster-tz day \u2014 median and p90 seconds, sampled by the daily PR-flow export job (scripts/pr_flow_export.py) into the ava_pr_flow_daily_ready_to_merge_median_seconds / _p90_seconds gauges. One row per day; a day leaves the table once its last sample ages past the 26h lookback (a missed run shows as a gap).",
+   "description": "Ready-for-review to merge latency by complete cluster-tz day \u2014 median and p90 seconds, sampled by the daily PR-flow export job (scripts/ci/pull_requests/pr_flow_export.py) into the ava_pr_flow_daily_ready_to_merge_median_seconds / _p90_seconds gauges. One row per day; a day leaves the table once its last sample ages past the 26h lookback (a missed run shows as a gap).",
    "fieldConfig": {
     "defaults": {
      "thresholds": {

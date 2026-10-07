@@ -11,7 +11,7 @@ set -e
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
-cd "$(dirname "$0")/.."  # repo root
+cd "$(dirname "$0")/../.."  # repo root
 
 .venv/bin/python scripts/codegen/gen_event_registry.py "$TMPDIR/registry.md" >/dev/null
 

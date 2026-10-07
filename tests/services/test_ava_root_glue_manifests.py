@@ -207,7 +207,7 @@ def test_gateway_window_follows_the_drain_budget_the_launch_hands_uvicorn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One setting drives both uvicorn's drain and root's wait: no value can undercut."""
-    from gateway import _server
+    from gateway.cluster import server as _server
 
     for drain in (30.0, 5.0, 120.0):
         monkeypatch.setattr(settings.gateway, "gateway_graceful_shutdown_timeout_seconds", drain)

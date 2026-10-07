@@ -282,7 +282,7 @@ handler line, for a reporting channel's own failure path.
 ## No decorative emoji in core Python
 
 Agent + backend code stays glyph-free. Enforced by
-`scripts/lint/no_emoji.py` (hook `lint-no-emoji`). Exempt: `cli/` and `ui/`
+`scripts/lint/diagnostics/no_emoji.py` (hook `lint-no-emoji`). Exempt: `cli/` and `ui/`
 (deliberate-UX surfaces), prose/content (`skills/`, the doc axes, `ui/web/`).
 Plain text marks (✓ ✗) are allowed. A line that genuinely needs the character
 uses inline `# emoji-ok: <reason>`.

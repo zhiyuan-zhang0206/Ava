@@ -151,7 +151,7 @@ def _repo_has_workflows() -> bool:
     Bounds the NO_WORKFLOW_RUNS guard to repos where workflow checks are actually expected — a
     repo with no workflows at all is legitimately green on app checks alone.
     """
-    wf_dir = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+    wf_dir = Path(__file__).resolve().parents[3] / ".github" / "workflows"
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
 
 

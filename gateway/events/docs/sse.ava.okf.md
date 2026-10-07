@@ -48,7 +48,7 @@ Agent process ──▶ Redis pub/sub (ava:events)
 - **Heartbeat**: every 15 seconds without events, sends `data: {"role":"heartbeat"}` (drives client watchdog); otherwise sends `: hb` comment (keeps TCP/proxy alive but invisible to browser `onmessage`).
 - **Subscription failure**: `StreamingResponse` sends HTTP 200 before it iterates either generator. If `pubsub.subscribe()` then fails with a Redis IO or ACL error, the stream sends one `error` data frame and closes; the per-event endpoint sends an object, while the throttled endpoint sends a one-element array.
 - **Disconnect detection**: polls `request.is_disconnected()` (`AVA_SSE_DISCONNECT_POLL_SECONDS`, default 1s).
-- **Gateway shutdown**: both generators also poll `gateway.middleware.stopping.is_stopping()` each cycle and return cleanly once `gateway._server.GatewayServer` has marked its shutdown, so an open stream never holds a stop for uvicorn's drain budget; the browser's `EventSource` reconnects to the next gateway.
+- **Gateway shutdown**: both generators also poll `gateway.middleware.stopping.is_stopping()` each cycle and return cleanly once `gateway.cluster.server.GatewayServer` has marked its shutdown, so an open stream never holds a stop for uvicorn's drain budget; the browser's `EventSource` reconnects to the next gateway.
 - **Lifecycle metrics**: successful subscriptions increment the per-mode `ava_sse_active_connections` gauge and `ava_sse_opened_total`; generator teardown decrements active depth and increments `ava_sse_closed_total`. Gateway startup publishes zero depth for both modes.
 
 ## Fault Tolerance

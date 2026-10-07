@@ -64,7 +64,7 @@ construction.
 
 ## Baseline-schema smoke test
 
-`scripts/test_migrations_apply.sh` (matching ci.yml step) builds a fresh empty DB, applies the
+`scripts/ci/test_migrations_apply.sh` (matching ci.yml step) builds a fresh empty DB, applies the
 baseline `db/schema.sql`, INSERTs a fixture agent + page + UPDATEs
 `agents_meta SET status='terminated'`, and verifies the cascade trigger
 actually fires (DO block asserts `agent_pages.closed_at` was

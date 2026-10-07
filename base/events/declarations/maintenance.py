@@ -14,7 +14,7 @@ class CiUsageDaily(TypedDict):
     workflow's runs and ceil-billed minutes for the window, split by
     attribution (PR-title [Ava-<id>] convention) and OS. `est_usd` is the
     private-repo overage equivalent at the GitHub-hosted rates — the repo is
-    currently public, so minutes are the billing fact (scripts/ci/accounting.py).
+    currently public, so minutes are the billing fact (scripts/ci/pull_requests/accounting.py).
     Per-agent detail lives in the attribution ledger, not here.
     """
 
@@ -47,7 +47,7 @@ class DebtSweepDaily(TypedDict):
 
 
 class PrFlowDaily(TypedDict):
-    """`pr_flow_daily` payload — scripts/pr_flow_export.py (macmini daily job).
+    """`pr_flow_daily` payload — scripts/ci/pull_requests/pr_flow_export.py (macmini daily job).
 
     One event per complete cluster-tz day in the trailing window, re-emitted
     on every run so the whole window stays inside Prometheus's retention.
@@ -67,7 +67,7 @@ class PrFlowDaily(TypedDict):
 
 
 class PrFlowRun(TypedDict):
-    """`pr_flow_run` payload — scripts/pr_flow_export.py (macmini daily job).
+    """`pr_flow_run` payload — scripts/ci/pull_requests/pr_flow_export.py (macmini daily job).
 
     One event per run: the point-in-time Trunk queue depth sample. Absolute
     state -> ObservableGauge (``ava_pr_flow_run_queue_depth_ratio``). The
@@ -80,7 +80,7 @@ class PrFlowRun(TypedDict):
 
 
 class CiRunsDaily(TypedDict):
-    """`ci_runs_daily` payload — scripts/ci/runs_export.py.
+    """`ci_runs_daily` payload — scripts/ci/pull_requests/runs_export.py.
 
     One absolute-state sample per complete cluster-time day and repository.
     The collector re-emits its trailing window, so every number is an OTLP
@@ -120,7 +120,7 @@ class CiRunsDaily(TypedDict):
 
 
 class CiWorkflowWindow(TypedDict):
-    """`ci_workflow_window` payload — scripts/ci/runs_export.py.
+    """`ci_workflow_window` payload — scripts/ci/pull_requests/runs_export.py.
 
     Trailing-window absolute workflow state, keyed by repository and workflow
     name, emitted with the same daily sampler. Execution percentiles omit
@@ -145,7 +145,7 @@ class CiWorkflowWindow(TypedDict):
 
 
 class CiRunsRun(TypedDict):
-    """`ci_runs_run` payload — scripts/ci/runs_export.py.
+    """`ci_runs_run` payload — scripts/ci/pull_requests/runs_export.py.
 
     One sampler breadcrumb per repository: the fixed window's population and
     this run's GitHub-read budget. These are current observations, so all
@@ -265,31 +265,31 @@ EVENTS: dict[str, EventSpec] = {
         "daily PR-flow aggregates — ready->merged percentiles and "
         "flake discoveries (absolute gauges, one sample per complete day)",
         payload=PrFlowDaily,
-        site="scripts/pr_flow_export.py:_emit_events (positional emit)",
+        site="scripts/ci/pull_requests/pr_flow_export.py:_emit_events (positional emit)",
     ),
     "pr_flow_run": telemetry_event(
         "pr_flow_run",
         "PR-flow sampler run — point-in-time Trunk queue depth (absolute state)",
         payload=PrFlowRun,
-        site="scripts/pr_flow_export.py:_emit_events (positional emit)",
+        site="scripts/ci/pull_requests/pr_flow_export.py:_emit_events (positional emit)",
     ),
     "ci_runs_daily": telemetry_event(
         "ci_runs_daily",
         "daily CI-run aggregates",
         payload=CiRunsDaily,
-        site="scripts/ci/runs_export.py:emit_snapshot (positional emit)",
+        site="scripts/ci/pull_requests/runs_export.py:emit_snapshot (positional emit)",
     ),
     "ci_workflow_window": telemetry_event(
         "ci_workflow_window",
         "trailing workflow fragility",
         payload=CiWorkflowWindow,
-        site="scripts/ci/runs_export.py:emit_snapshot (positional emit)",
+        site="scripts/ci/pull_requests/runs_export.py:emit_snapshot (positional emit)",
     ),
     "ci_runs_run": telemetry_event(
         "ci_runs_run",
         "CI-run sampler breadcrumb",
         payload=CiRunsRun,
-        site="scripts/ci/runs_export.py:emit_snapshot (positional emit)",
+        site="scripts/ci/pull_requests/runs_export.py:emit_snapshot (positional emit)",
     ),
     "task_reminder_digest": telemetry_event(
         "task_reminder_digest",

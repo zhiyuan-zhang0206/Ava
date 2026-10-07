@@ -1,4 +1,4 @@
-"""`scripts/start_agent.py` presents the cluster secret on its bootstrap spawn.
+"""`scripts/entrypoints/agent.py` presents the cluster secret on its bootstrap spawn.
 
 `POST /api/agents` is an authenticated gateway route; the bootstrap-spawn script
 must carry `Authorization: Bearer <cluster secret>` or a multi-host gateway 401s
@@ -14,7 +14,7 @@ import pytest
 
 
 def _load_start_agent():
-    path = Path(__file__).resolve().parents[2] / "scripts" / "start_agent.py"
+    path = Path(__file__).resolve().parents[2] / "scripts" / "entrypoints" / "agent.py"
     spec = importlib.util.spec_from_file_location("start_agent_under_test", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
