@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
+from agent.impersonation import settle_checkpoint
 from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
@@ -30,9 +31,20 @@ async def finish_pending_failure(
     ctx: AvaContext,
     config: RunnableConfig,
     pending: PendingTurnFailure,
+    *,
+    recovering: bool = False,
 ) -> TurnOutcome:
     """Finish the original abort's durable writes without another invocation."""
     async with database_phase():
+        if recovering:
+            await settle_checkpoint(
+                graph,
+                ctx.require_db(),
+                ctx.require_bus(),
+                agent_id,
+                ctx.relays,
+                activate_accepted=False,
+            )
         await settle_turn_failure(graph, checkpointer, config, ctx, agent_id, pending)
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
     return TurnOutcome(exited=False, crashed=True, aborted=True)

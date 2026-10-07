@@ -15,6 +15,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import host as host_module
+from services.agent_runner.agent_host.invocation import PendingWorkResult
 from services.agent_runner.agent_host.tests.test_hosted_compact_failure import _prepare_graph
 
 
@@ -102,3 +103,43 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
     ).fetchone() == ("pending",)
     cold = await saver.aget(config)
     assert cold is not None and cold["channel_values"]["halted"] is True
+
+
+async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent = _agent(db_conn)
+    incarnation = await _admit(aops_pool, agent)
+    graph, saver, _config, _history = await _prepare_graph(aops_pool, agent, 100, [])
+    host = host_module.AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
+    ctx = AvaContext(
+        ops_pool=aops_pool,
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
+    )
+    host._runtimes[agent] = MagicMock()
+    # A forced or superseded lifecycle return can carry its graph flag while
+    # the original pointer is already absent. It still invalidates the cache,
+    # but does not prove that termination was applied.
+    pending = PendingWorkResult(
+        {"exit_requested": True, "restart_requested": False},
+        checkpoint_flushed=True,
+        trace_attached=True,
+    )
+    with bind_turn_identity(agent, incarnation=incarnation):
+        outcome = await host._finish_completed_invocation(agent, ctx, pending)
+    assert outcome is not None and not outcome.exited
+    assert agent not in host._runtimes
+    assert pending.lifecycle_command_id is None
+    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
+        "running",
+    )
