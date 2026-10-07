@@ -432,8 +432,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/tasks.py ───────────────────────────────────
     ("GET", "/api/tasks"): RouteContract(),
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="task effect and notification share a transaction; request has no replay receipt",
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        note="keyed task patch and immutable result share the notification transaction",
     ),
     # ── gateway/agents/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),

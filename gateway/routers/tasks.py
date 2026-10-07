@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, LiteralString, cast, overload
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound import InboundKind
@@ -30,6 +31,8 @@ from base.agents.tasks.rules import first_open_child, is_closed, open_title_hold
 from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.auth.request_principal import PrincipalScopeError, optional_request_key
+from gateway.routers.task_receipts import existing_task_receipt, save_task_receipt
 from gateway.schemas.tasks import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
 from ops import lifecycle as _ops
 
@@ -244,18 +247,12 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     return sets, params
 
 
-def _patch_task_blocking(
-    pool: ConnectionPool[Any], task_id: int, body: TaskUpdateRequest
-) -> tuple[TaskRow, list[TaskNoteReceipt]]:
-    """Commit the task and its owner-change inbounds in the same transaction.
-
-    The route awaits task-note delivery after this function returns, so no
-    network or process wake can roll back the owner assignment.
-    """
+def _patch_fields(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
+    """Build the fresh mutation and its reminder bookkeeping before task validation."""
     sets, params = _collect_updates(body)
     if "parent_id" in body.model_fields_set:
         # Reparenting needs a cursor (root-id resolution + cycle/existence
-        # checks), so its SET clause is built inside the transaction below.
+        # checks); collect its placeholder here and resolve it after locking the task.
         sets.append("parent_id = %s")
         params.append(body.parent_id)
     if not sets:
@@ -272,7 +269,44 @@ def _patch_task_blocking(
     sets.append("reminder_count = 0")
     sets.append("escalated_at = NULL")
 
+    return sets, params
+
+
+def _validate_patch_title(cur: Cursor[Any], task_id: int, title: str | None) -> None:
+    """Apply the shared title uniqueness rule with the HTTP boundary error."""
+    # A rename must keep the SDK create() invariant: no two in_progress
+    # tasks share a title.
+    if title is not None:
+        dup = open_title_holder(cur, title, exclude_id=task_id)
+        if dup is not None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"A task with title {title!r} already exists "
+                f"(task {dup[0]} is {dup[1]}); duplicate in_progress "
+                f"titles are not allowed.",
+            )
+
+
+def _patch_task_blocking(
+    pool: ConnectionPool[Any],
+    task_id: int,
+    body: TaskUpdateRequest,
+    operation_key: str | None = None,
+    operation_path: str | None = None,
+) -> tuple[TaskRow, list[TaskNoteReceipt]]:
+    """Commit the task and its owner-change inbounds in the same transaction.
+
+    The route awaits task-note delivery after this function returns, so no
+    network or process wake can roll back the owner assignment.
+    """
+    path = operation_path if operation_path is not None else f"/api/tasks/{task_id}"
+    request_body = body.model_dump(mode="json", exclude_unset=True)
     with write_transaction(pool) as conn, conn.cursor() as cur:
+        if operation_key is not None:
+            previous = existing_task_receipt(cur, path, operation_key, request_body)
+            if previous is not None:
+                return previous, []
+        sets, params = _patch_fields(body)
         # The system root task is immutable (the task-tree anchor / default
         # parent) — reject any edit before writing, same rule as the SDK
         # update() path. Check existence here too so a missing task still 404s.
@@ -311,17 +345,7 @@ def _patch_task_blocking(
                 params[-1] = resolve_reparent(cur, task_id, body.parent_id)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
-        # A rename must keep the SDK create() invariant: no two in_progress
-        # tasks share a title.
-        if body.title is not None:
-            dup = open_title_holder(cur, body.title, exclude_id=task_id)
-            if dup is not None:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"A task with title {body.title!r} already exists "
-                    f"(task {dup[0]} is {dup[1]}); duplicate in_progress "
-                    f"titles are not allowed.",
-                )
+        _validate_patch_title(cur, task_id, body.title)
         cur.execute(
             cast(
                 LiteralString,
@@ -357,6 +381,8 @@ def _patch_task_blocking(
                 ),
                 "user",
             )
+        if operation_key is not None:
+            save_task_receipt(cur, path, operation_key, request_body, task)
     emit_task_note_events(receipts)
     return task, receipts
 
@@ -379,11 +405,24 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
     reassigned, completed, cancelled, or otherwise edited.
 
+    An optional Idempotency-Key commits an immutable response with the write.
+    Reusing that key with different fields returns 409; replay returns the original
+    task snapshot without another update or wake, even if the task later changes.
+
     A status change to done or cancelled is rejected with 422 while any direct
     child remains in progress. Close or cancel those children first.
     """
+    try:
+        operation_key = optional_request_key(request)
+    except PrincipalScopeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     task, notes = await asyncio.to_thread(
-        _patch_task_blocking, request.app.state.db_pool, task_id, body
+        _patch_task_blocking,
+        request.app.state.db_pool,
+        task_id,
+        body,
+        operation_key,
+        request.url.path,
     )
     for note in notes:
         await asyncio.to_thread(
