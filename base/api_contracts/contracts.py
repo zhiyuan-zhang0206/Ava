@@ -117,6 +117,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="guarded plain creation requires a verified principal-v1 key; no legacy fallback",
         transactional_idempotency=True,
     ),
+    ("POST", "/api/keyed/v1/task-assignments"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="guarded atomic task/agent acceptance; principal-v1 key and no legacy fallback",
+        transactional_idempotency=True,
+    ),
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
     # ── gateway/alerts/router.py ───────────────────────────────────

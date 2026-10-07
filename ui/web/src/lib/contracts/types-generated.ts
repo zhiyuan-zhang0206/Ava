@@ -3458,6 +3458,26 @@ export interface paths {
         patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;
     };
+    "/api/keyed/v1/task-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Task Assignment
+         * @description Accept one original pair; this response never asserts runner readiness.
+         */
+        post: operations["post_task_assignment_api_keyed_v1_task_assignments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugin-ui/{plugin}": {
         parameters: {
             query?: never;
@@ -4388,6 +4408,30 @@ export interface components {
             /** Alerts */
             alerts: components["schemas"]["AlertRow"][];
             meta: components["schemas"]["AlertsListMeta"];
+        };
+        /** AssignmentAgentIn */
+        AssignmentAgentIn: {
+            /** Label */
+            label?: string | null;
+            /** Machine */
+            machine?: string | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** AssignmentTaskIn */
+        AssignmentTaskIn: {
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Parent */
+            parent: number;
+            /** @default P2 */
+            priority: components["schemas"]["Priority"];
+            /** Remind Interval Seconds */
+            remind_interval_seconds?: number | null;
         };
         /**
          * AvailabilityReason
@@ -7705,6 +7749,73 @@ export interface components {
         SystemStatus: {
             services: components["schemas"]["ServicesStatus"];
             cluster: components["schemas"]["ClusterPanel"];
+        };
+        /**
+         * Task
+         * @description remind_interval_seconds is seconds without updates before the owner is
+         *     reminded; reminders cannot be disabled.
+         */
+        Task: {
+            /** Id */
+            id: number;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Results */
+            results: string | null;
+            /** Status */
+            status: string;
+            /** Owner */
+            owner: number | null;
+            /** Created By */
+            created_by: string;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Remind Interval Seconds */
+            remind_interval_seconds?: number | null;
+            /** Last Reminded At */
+            last_reminded_at?: string | null;
+            /**
+             * Reminder Count
+             * @default 0
+             */
+            reminder_count: number;
+            /**
+             * Priority
+             * @default P2
+             */
+            priority: string;
+        };
+        /**
+         * TaskAssignmentAccepted
+         * @description Original pair plus current launch observation; neither proves execution.
+         */
+        TaskAssignmentAccepted: {
+            task: components["schemas"]["Task"];
+            /** Agent Id */
+            agent_id: number;
+            /**
+             * Launch Attempt Id
+             * Format: uuid
+             */
+            launch_attempt_id: string;
+            launch?: components["schemas"]["SpawnedAgent"] | null;
+            /** Launch Failure */
+            launch_failure?: string | null;
+            /** Retry Launch Path */
+            retry_launch_path?: string | null;
+        };
+        /** TaskAssignmentIn */
+        TaskAssignmentIn: {
+            /** Actor Agent Id */
+            actor_agent_id: number;
+            task: components["schemas"]["AssignmentTaskIn"];
+            agent: components["schemas"]["AssignmentAgentIn"];
         };
         /**
          * TaskListResponse
@@ -12443,6 +12554,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskRow"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_task_assignment_api_keyed_v1_task_assignments_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskAssignmentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskAssignmentAccepted"];
                 };
             };
             /** @description Validation Error */

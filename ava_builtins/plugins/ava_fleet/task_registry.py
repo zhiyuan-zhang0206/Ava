@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import asdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import ava
 import ava.agents
@@ -156,11 +156,13 @@ def create_and_assign(
     *,
     preset: str = "coder",
     label: str | None = None,
-    config_overlay: dict | None = None,
+    config_overlay: dict[str, Any] | None = None,
     machine: str | None = None,
     parent: int,
     remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
+    operation_key: str | None = None,
+    require_idempotency: bool = False,
 ) -> tuple[Task, int]:
     """Spawn an agent and assign it a task in one call.
 
@@ -170,9 +172,24 @@ def create_and_assign(
     ``parent``: same rule as create(). The parent is validated before the
     agent spawns.
 
+    ``require_idempotency``: opt in to atomic server acceptance with an explicit
+    ``operation_key``. Borrowed leases are unsupported in this mode. A returned
+    pair proves acceptance, not launch or execution. Keyless calls keep the
+    existing recipe; a key without opt-in is rejected.
+
     Returns:
         (task, agent_id).
     """
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    if not isinstance(require_idempotency, bool):
+        raise TypeError("require_idempotency must be a bool")
+    if operation_key is not None:
+        operation_key = validate_idempotency_key(operation_key)
+    if require_idempotency and operation_key is None:
+        raise ValueError("require_idempotency requires an explicit operation_key")
+    if not require_idempotency and operation_key is not None:
+        raise ValueError("operation_key requires require_idempotency=True")
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
     preset = coerce_str(preset, "preset")
@@ -184,6 +201,22 @@ def create_and_assign(
         remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
     )
     priority = coerce_str(priority, "priority")
+    if require_idempotency:
+        from ._task_assignment import create_and_assign_guarded
+
+        assert operation_key is not None, "strong admission requires operation_key"  # noqa: S101
+        return create_and_assign_guarded(
+            title,
+            description,
+            parent=parent,
+            preset=preset,
+            label=label,
+            config_overlay=config_overlay,
+            machine=machine,
+            remind_interval_seconds=remind_interval_seconds,
+            priority=priority,
+            operation_key=operation_key,
+        )
     # 0. Validate the parent before spawning: create() would reject a bad
     # parent after the agent exists, leaving an orphaned agent behind.
     with ava.DB.transaction(), ava.DB.cursor() as cur:
