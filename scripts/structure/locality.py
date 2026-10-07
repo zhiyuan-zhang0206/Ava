@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import ast
 import functools
-import json
 import re
 from collections import defaultdict
 from collections.abc import Callable
@@ -24,9 +23,6 @@ SECTIONS = ("private_imports", "owner_bypasses", "patch_targets")
 # section -> the lint that measures it. Frozen and guarded like the others, but measured over
 # the test files by its own script; the structure gate only parses and guards them.
 EXTERNAL_SECTIONS = {"patch_targets": "scripts/lint/patch_targets.py"}
-# section -> the lint script whose absence at the base revision means the section is being
-# introduced by this change (no earlier baseline to shrink from).
-INTRODUCED_WITH = {**EXTERNAL_SECTIONS, ambient_state.SECTION: ambient_state.LINT}
 # White-box tests reach into privates by design; only test *directories* are
 # exempt, since a governed module may legitimately be named test_*.py.
 _TEST_DIR = re.compile(r"(^|/)tests?/")
@@ -453,29 +449,6 @@ def _stale_errors(
                 f"code has {now} — {action} (the baseline must match reality)"
             )
     return errors
-
-
-def introduced(shards: dict[str, str] | None, repo_root: Path, base: str) -> dict[str, str] | None:
-    """The base revision's shards, with each section whose own lint is absent at `base`
-    carried over from the working tree.
-
-    A section is introduced by the change that adds its lint: there is no earlier baseline
-    to shrink from, so it is compared with itself. From the next revision on the lint
-    exists at the base and the section is shrink-only like the others.
-    """
-    if shards is None:
-        return None
-    new = {
-        kind
-        for kind, lint in INTRODUCED_WITH.items()
-        if not baseline_shards.exists_at(repo_root, base, lint)
-    }
-    carried = dict(shards)
-    for name, text in baseline_shards.read_worktree(repo_root).items():
-        added = {kind: entries for kind, entries in json.loads(text).items() if kind in new}
-        if added:
-            carried[name] = baseline_shards.render({**json.loads(carried.get(name, "{}")), **added})
-    return carried
 
 
 def _entry_scope(kind: str, scope: tuple[str, ...]) -> tuple[str, ...]:

@@ -1,6 +1,6 @@
-"""The `patch_targets` baseline section: introduced with its lint, shrink-only afterwards,
-carried by git renames when a test moves into `<pkg>/tests/`, and re-frozen under a new rule
-version when the placement rule changes."""
+"""The `patch_targets` baseline section: existing exemptions remain shrink-only,
+carried by git renames when a test moves into `<pkg>/tests/`, and kept shrink-only
+when a lint is introduced or its measurement rule changes."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def _sections(root: pathlib.Path, rev: str | None) -> dict[str, dict[str, int]]:
     """The merged baseline at `rev` (None: the working tree), the way the structure gate reads it."""
     if rev is None:
         return lcs._parse_baseline(baseline_shards.read_worktree(root))
-    shards = locality.introduced(baseline_shards.read_at(root, rev), root, rev)
+    shards = baseline_shards.read_at(root, rev)
     assert shards is not None
     return lcs._parse_baseline(shards)
 
@@ -114,8 +114,8 @@ def test_a_raised_count_is_refused_and_a_lowered_one_is_fine(repo: pathlib.Path)
     assert _guard(repo, "HEAD") == []
 
 
-def test_the_section_is_introduced_with_the_change_that_adds_its_lint(
-    tmp_path: pathlib.Path,
+def test_a_new_lint_cannot_freeze_new_exemptions(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = make_repo(tmp_path, {"tests/base/test_x.py": _TEST})
     _git(root, "init", "--quiet")
@@ -123,28 +123,10 @@ def test_the_section_is_introduced_with_the_change_that_adds_its_lint(
     _git(root, "commit", "--quiet", "-m", "Before the lint")
     write(root, _LINT, "# the lint\n")
     _freeze(root, {_KEY: 1})
-    assert _guard(root, "HEAD") == []  # nothing to shrink from yet: compared with itself
-    _freeze(root, {_KEY: 1, "tests/base/test_y.py::base.net.retry._sleep": 1})
-    assert _guard(root, "HEAD") == []  # still the introducing change
-    _git(root, "add", "-A")
-    _git(root, "commit", "--quiet", "-m", "Introduce the lint")
-    _freeze(
-        root, {_KEY: 1, "tests/base/test_y.py::base.net.retry._sleep": 1, "tests/z.py::a._b": 1}
-    )
-    assert "added patch_targets entry tests/z.py::a._b" in _guard(root, "HEAD")[0]
-
-
-def test_introduced_leaves_the_other_sections_and_a_missing_base_alone(
-    tmp_path: pathlib.Path,
-) -> None:
-    root = make_repo(tmp_path)
-    _git(root, "init", "--quiet")
-    _git(root, "add", "-A")
-    _git(root, "commit", "--quiet", "-m", "Base")
-    assert locality.introduced(None, root, "HEAD") is None
-    shards = baseline_shards.read_at(root, "HEAD")
-    assert shards == {}
-    assert locality.introduced(shards, root, "HEAD") == {}
+    monkeypatch.setattr(lcs, "_REPO_ROOT", root)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
+    (error,) = lcs._baseline_guard(_sections(root, None))
+    assert f"added patch_targets entry {_KEY}" in error
 
 
 def test_a_moved_test_carries_its_frozen_key_no_more_and_no_fewer(repo: pathlib.Path) -> None:
@@ -170,8 +152,7 @@ def test_a_moved_test_carries_its_frozen_key_no_more_and_no_fewer(repo: pathlib.
 
 
 # ------------------------------------------------------------------ rule versions
-# A change to how a section is measured re-freezes it under a higher version in `rules.json`;
-# across that one change the structure gate holds the section's total, not its keys.
+# A rule version never grants additional targets or larger counts, even if the total falls.
 
 _OLD = {
     "tests/base/test_a.py::base.net.retry._sleep": 3,
@@ -206,20 +187,24 @@ def test_at_the_same_version_a_new_key_is_refused_as_before(
     assert f"added patch_targets entry {_NEW_KEY}" in out
 
 
-def test_a_raised_version_with_a_lower_total_accepts_new_and_vanished_keys(
+def test_a_raised_version_with_a_lower_total_still_refuses_new_keys(
     gate: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fewer = {"tests/base/test_a.py::base.net.retry._sleep": 1, _NEW_KEY: 2}
     assert sum(fewer.values()) < _TOTAL
     _freeze(gate, fewer, rules={patch_targets.SECTION: 2})
-    assert _gate(capsys) == (0, "")
+    status, out = _gate(capsys)
+    assert status == 1
+    assert f"added patch_targets entry {_NEW_KEY}" in out
 
 
-def test_a_raised_version_may_keep_the_total_exactly(
+def test_a_raised_version_with_the_same_total_still_refuses_new_keys(
     gate: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _freeze(gate, {_NEW_KEY: _TOTAL}, rules={patch_targets.SECTION: 2})
-    assert _gate(capsys) == (0, "")
+    status, out = _gate(capsys)
+    assert status == 1
+    assert f"added patch_targets entry {_NEW_KEY}" in out
 
 
 def test_a_raised_version_with_a_higher_total_is_refused(
@@ -228,18 +213,29 @@ def test_a_raised_version_with_a_higher_total_is_refused(
     _freeze(gate, {_NEW_KEY: _TOTAL + 1}, rules={patch_targets.SECTION: 2})
     status, out = _gate(capsys)
     assert status == 1
-    assert "rule version rose from 1 to 2, but the frozen total rose " in out
-    assert f"from {_TOTAL} to {_TOTAL + 1}" in out
+    assert f"added patch_targets entry {_NEW_KEY}" in out
+
+
+def test_a_raised_version_cannot_raise_an_existing_key_when_the_total_falls(
+    gate: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    key = next(iter(_OLD))
+    _freeze(gate, {key: _OLD[key] + 1}, rules={patch_targets.SECTION: 2})
+    assert _OLD[key] + 1 < _TOTAL
+    status, out = _gate(capsys)
+    assert status == 1
+    assert f"raised patch_targets entry {key}" in out
 
 
 def test_once_the_new_version_is_the_base_the_keys_are_guarded_again(
     gate: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    refrozen = {_NEW_KEY: 2}
+    existing_key = next(iter(_OLD))
+    refrozen = {existing_key: 2}
     _freeze(gate, refrozen, rules={patch_targets.SECTION: 2})
     assert _gate(capsys) == (0, "")
     _git(gate, "add", "-A")
-    _git(gate, "commit", "--quiet", "-m", "Re-freeze under rule version 2")
+    _git(gate, "commit", "--quiet", "-m", "Lower existing debt under rule version 2")
 
     _freeze(
         gate,
@@ -250,10 +246,10 @@ def test_once_the_new_version_is_the_base_the_keys_are_guarded_again(
     assert status == 1
     assert "added patch_targets entry tests/cli/test_f.py::cli.commands._util._other" in out
 
-    _freeze(gate, {_NEW_KEY: 3}, rules={patch_targets.SECTION: 2})
+    _freeze(gate, {existing_key: 3}, rules={patch_targets.SECTION: 2})
     status, out = _gate(capsys)
     assert status == 1
-    assert f"raised patch_targets entry {_NEW_KEY} from 2 to 3" in out
+    assert f"raised patch_targets entry {existing_key} from 2 to 3" in out
 
 
 def test_the_version_only_goes_up(gate: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
