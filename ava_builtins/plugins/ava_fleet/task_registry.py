@@ -5,17 +5,20 @@ task; owners are reminded periodically, and a task may nest under a parent.
 from __future__ import annotations
 
 import builtins
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 import ava
 import ava.agents
 import ava.sdk_surface.agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
+
+# Kept as compatibility aliases for existing SDK readers and tooling.
+from base.agents.tasks.model import TASK_COLUMNS as _COLS
+from base.agents.tasks.model import Task as Task
+from base.agents.tasks.model import task_from_row as _row_to_task
 from base.agents.tasks.owner_notifications import TaskOwnerNotification, owner_change_notifications
 from base.agents.tasks.reparent import resolve_reparent
-from base.agents.tasks.rules import is_closed, open_title_holder
-from base.agents.tasks.timestamps import render_task_timestamps
 
 if TYPE_CHECKING:
     # Annotation-only here (cursor params); the runtime import sits at the raise
@@ -31,7 +34,6 @@ from ._task_update import (
     _collect_update_fields,
     _nothing_to_update,
     _owner_actually_changed,
-    _resolve_create_args,
     _validate_status,
     _write_task_update,
 )
@@ -66,151 +68,11 @@ from ._task_update import (
 # spelled `builtins.list[...]`.
 __all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", "update"]
 
-# Column order matches the Task field order and the Task(*row) unpacking in
-# _row_to_task; keep the three aligned.
-_COLS = "id, parent_id, title, description, results, status, owner, created_by, created_at, updated_at, remind_interval_seconds, last_reminded_at, reminder_count, priority"
-
-
-@dataclass
-class Task:
-    """remind_interval_seconds is seconds without updates before the owner is
-    reminded; reminders cannot be disabled."""
-
-    id: int
-    parent_id: int | None
-    title: str
-    description: str
-    results: str | None
-    status: str
-    owner: int | None
-    created_by: str
-    created_at: str
-    updated_at: str
-    remind_interval_seconds: int | None = None
-    last_reminded_at: str | None = None
-    reminder_count: int = 0
-    priority: str = _DEFAULT_PRIORITY
-
-    def __str__(self) -> str:
-        owner = f"owner=#{self.owner}" if self.owner is not None else "unowned"
-        parent = f" parent=#{self.parent_id}" if self.parent_id is not None else ""
-        return f"#{self.id} [{self.status}] {self.title}  {owner}{parent}"
-
-
-def _row_to_task(row: tuple) -> Task:
-    """Build a Task from a _COLS row; timestamps rendered bare (issue #181)."""
-    return Task(*render_task_timestamps(row, _COLS))
-
 
 def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
-    """Validate `parent` names an existing task; raise ValueError otherwise.
+    from base.agents.tasks.creation import ensure_parent_exists
 
-    Also rejects parent=1 on a deployment where task 1 is not the system root
-    (a migrated database whose root carries another id): the documented root
-    id (1) must not silently attach a top-level task under a different parent.
-    A closed (done / cancelled) parent is rejected too: a closed task must
-    never gain children -- tasks created after a parent closed are what
-    produced the false-orphan rows in the task graph (task #1975). The system
-    root is exempt by construction (its status is 'in_progress' — never closed).
-    The parent row is locked FOR UPDATE: the close path holds the same lock,
-    so a concurrent close cannot slip between this status read and the child
-    INSERT (TOCTOU, QA #993).
-    Runs inside the caller's transaction/cursor."""
-    cur.execute("SELECT id, is_root, status FROM agent_tasks WHERE id = %s FOR UPDATE", (parent,))
-    row = cur.fetchone()
-    if row is None:
-        raise ValueError(
-            f"parent task {parent} does not exist -- create the parent first, "
-            "or pass the system root task id (1) for a top-level task"
-        )
-    if parent == 1 and not row[1]:
-        cur.execute("SELECT id FROM agent_tasks WHERE is_root ORDER BY id LIMIT 1")
-        root = cur.fetchone()
-        what = f"task #{root[0]}" if root is not None else "unseeded (no root exists)"
-        raise ValueError(
-            f"task 1 is not the system root task -- the root is {what}; "
-            "pass its id for a top-level task"
-        )
-    if is_closed(row[2]):
-        raise ValueError(
-            f"parent task {parent} is {row[2]} — a closed task cannot be the "
-            "parent of a new task; reopen it or pass the system root task id "
-            "(1) for a top-level task"
-        )
-
-
-def _insert_task(
-    cur: psycopg.Cursor,
-    title: str,
-    description: str,
-    effective_parent: int | None,
-    effective_owner: int,
-    remind_interval_seconds: int,
-    priority: str,
-    actor: int,
-) -> tuple[Task, Event]:
-    """INSERT a task row + record its create audit fact inside the caller's transaction.
-
-    Returns the task and the recorded event; the caller emits the event after
-    its transaction commits.
-
-    Rejects duplicate in_progress titles -- prevents agents from creating
-    the same task twice (#60, #253)."""
-    import psycopg  # per-call: keeps the psycopg stack off plugin autoload (task #3816)
-
-    existing = open_title_holder(cur, title)
-    if existing is not None:
-        raise ValueError(
-            f"task with title {title!r} already exists (task #{existing[0]} is {existing[1]}) — "
-            f"duplicate in_progress titles are not allowed"
-        )
-    sql = f"INSERT INTO agent_tasks (parent_id, title, description, created_by, owner, remind_interval_seconds, priority) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {_COLS}"  # noqa: S608
-    try:
-        cur.execute(
-            sql,
-            (
-                effective_parent,
-                title,
-                description,
-                str(actor),
-                effective_owner,
-                remind_interval_seconds,
-                priority,
-            ),
-        )
-    except psycopg.errors.UniqueViolation as exc:
-        # The pre-check above is the common path; this catches the race where
-        # two creates both pass it and the partial unique index
-        # (agent_tasks_title_unique_in_progress) rejects the second insert. The
-        # transaction is aborted, so no lookup is possible here — the message
-        # is generic by design.
-        raise ValueError(
-            f"task with title {title!r} already exists among in_progress tasks — "
-            "duplicate in_progress titles are not allowed (enforced by the database)"
-        ) from exc
-    row = cur.fetchone()
-    if row is None:
-        raise RuntimeError("expected exactly one row: task insert")
-    task = _row_to_task(row)
-    from base.telemetry.audit_events import prepare_event_log, record_audit  # deferred (task #3816)
-
-    event = record_audit(
-        cur.connection,
-        prepare_event_log(
-            event_type="task_create",
-            agent_id=actor,
-            source="self",
-            payload={
-                "task_id": task.id,
-                "title": title,
-                "parent_id": effective_parent,
-                "owner": effective_owner,
-                "remind_interval_seconds": remind_interval_seconds,
-                "priority": priority,
-            },
-        ),
-    )
-    return task, event
+    ensure_parent_exists(cur, parent)
 
 
 def create(
@@ -234,6 +96,7 @@ def create(
     operation_key: reuse the same key and inputs to return the original Task.
         The returned snapshot may be outdated; use get(task.id) for current state.
     """
+    from base.agents.tasks.creation import create_task_in_transaction
     from base.api_contracts.idempotency import validate_idempotency_key
 
     from ._task_creation_receipts import record_creation, replay_creation
@@ -262,30 +125,15 @@ def create(
         snapshot = replay_creation(cur, actor, operation_key, request)
         if snapshot is not None:
             return Task(**snapshot)
-        remind_interval_seconds, priority = _resolve_create_args(remind_interval_seconds, priority)
-        # parent is required: only the system root task (id 1) may parent the
-        # deployment's top-level tasks; every other task must name an existing
-        # task as its parent. Validate here for a friendly error instead of a
-        # raw foreign-key violation from the INSERT.
-        _ensure_parent_exists(cur, parent)
-        task, created_event = _insert_task(
+        task, created_event, note_events = create_task_in_transaction(
             cur,
             title,
             description,
-            parent,
-            effective_owner,
-            remind_interval_seconds,
-            priority,
-            actor,
-        )
-        note_events = _queue_owner_change(
-            cur,
-            task.id,
-            title,
-            None,
-            effective_owner,
-            actor,
-            description=description,
+            parent=parent,
+            owner=effective_owner,
+            actor=actor,
+            priority=priority,
+            remind_interval_seconds=remind_interval_seconds,
         )
         record_creation(cur, actor, operation_key, request, asdict(task))
     from base import telemetry  # deferred (task #3816)

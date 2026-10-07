@@ -5,11 +5,17 @@ from __future__ import annotations
 import builtins
 from typing import TYPE_CHECKING
 
+from base.agents.tasks import priority as _task_priority
 from base.agents.tasks.notes import task_note_line
 from base.agents.tasks.priority import (
-    DEFAULT_REMIND_INTERVAL_SECONDS,
-    Priority,
+    DEFAULT_REMIND_INTERVAL_SECONDS as DEFAULT_REMIND_INTERVAL_SECONDS,
+)
+from base.agents.tasks.priority import Priority as Priority
+from base.agents.tasks.priority import (
     validate_priority,
+)
+from base.agents.tasks.priority import (
+    validate_remind_interval_seconds as _validate_remind_interval_seconds,
 )
 from base.agents.tasks.rules import first_open_child, is_closed, open_title_holder
 
@@ -27,36 +33,6 @@ from base.agents.tasks.status import TaskStatus
 # _write_task_update; create() begins every regular task in_progress).
 _STATUSES = frozenset(s.value for s in TaskStatus)
 
-# The stakes axis of a task (P0 highest .. P3 lowest) — same four rungs as a
-# notice, both validated against the shared Priority enum. Orders the board
-# within a status column; a stalled task's escalation notice inherits it.
-_DEFAULT_PRIORITY = "P2"
-
-
-# A new task reminds its owner after a silence window that scales with its
-# priority (P0 30m / P1 1h / P2 2h / P3 4h — base.agents.tasks.priority.DEFAULT_REMIND_INTERVAL_SECONDS).
-# An unattended in-progress task is the common failure the reminder guards
-# against, so the reminder is always on and cannot be disabled —
-# create(remind_interval_seconds=None) falls back to the priority default
-# rather than turning it off; an explicit value always wins.
-
-# Reminders cannot be turned off, so the interval is capped at 24h: every task
-# gets at least one reminder a day. Enforced on every SDK write (create / update)
-# and mirrored on the gateway PATCH path.
-_MAX_REMIND_INTERVAL_SECONDS = 86400
-
-
-def _validate_remind_interval_seconds(seconds: int) -> None:
-    """Reject a remind_interval_seconds that is not a positive number of seconds <= 24h.
-
-    Reminders cannot be disabled, so 0 / negative (which would remind on every
-    sweep) and values over the 24h cap are both refused."""
-    if not 0 < seconds <= _MAX_REMIND_INTERVAL_SECONDS:
-        raise ValueError(
-            f"remind_interval_seconds must be a positive number of seconds <= {_MAX_REMIND_INTERVAL_SECONDS} "
-            f"(24h) -- reminders cannot be disabled, got {seconds!r}"
-        )
-
 
 class _Unset:
     """Sentinel for update() keyword defaults: tells 'argument not passed'
@@ -72,6 +48,11 @@ class _Unset:
 
 
 _UNSET = _Unset()
+
+
+_DEFAULT_PRIORITY = _task_priority.DEFAULT_PRIORITY
+_MAX_REMIND_INTERVAL_SECONDS = _task_priority.MAX_REMIND_INTERVAL_SECONDS
+_resolve_create_args = _task_priority.resolve_create_args
 
 
 def _append_note_to_results(cur, task_id: int, note: str) -> None:  # noqa: ANN001
@@ -112,22 +93,6 @@ def _owner_actually_changed(
     """True when the reassignment is real (an explicit owner differing from the
     current one) -- gates the post-commit notification."""
     return owner_changing and old_owner != new_owner
-
-
-def _resolve_create_args(
-    remind_interval_seconds: int | None,
-    priority: str,
-) -> tuple[int, str]:
-    """Apply the reminder / priority validation rules. Returns
-    (remind_interval_seconds, priority)."""
-    validate_priority(priority)
-    # Reminders cannot be turned off: None means "use the priority default",
-    # not "off". The interval scales with stakes — a P0 task nags its owner
-    # after 30 minutes of silence, a P3 task only after 4 hours.
-    if remind_interval_seconds is None:
-        remind_interval_seconds = DEFAULT_REMIND_INTERVAL_SECONDS[Priority(priority)]
-    _validate_remind_interval_seconds(remind_interval_seconds)
-    return remind_interval_seconds, priority
 
 
 def _owner_is_changing(owner: int | None) -> bool:

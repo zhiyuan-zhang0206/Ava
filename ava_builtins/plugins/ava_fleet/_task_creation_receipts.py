@@ -1,29 +1,12 @@
 """Immutable agent-scoped SDK task creation results."""
 
-import json
-from dataclasses import asdict, fields
 from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
-from pydantic import TypeAdapter
 
 from ava.sdk_surface import agent_identity
-from base.agents.tasks.priority import validate_priority
-
-from ._task_update import _validate_status
-
-
-def validate_snapshot(snapshot: dict[str, object]) -> dict[str, Any]:
-    """Validate the complete public dataclass without defaulting absent fields."""
-    from .task_registry import Task
-
-    if set(snapshot) != {field.name for field in fields(Task)}:
-        raise ValueError("task creation snapshot has missing or unknown fields")
-    task = TypeAdapter(Task).validate_json(json.dumps(snapshot), strict=True)
-    _validate_status(task.status)
-    validate_priority(task.priority)
-    return asdict(task)
+from base.agents.tasks.model import validate_task_snapshot as validate_snapshot
 
 
 def replay_creation(
