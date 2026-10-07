@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+SCOPE_HEADER = "Idempotency-Scope"
+PRINCIPAL_SCOPE = "principal-v1"
+
 
 def validate_idempotency_key(value: object) -> str:
     """Reject malformed supplied keys rather than minting another operation."""

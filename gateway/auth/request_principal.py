@@ -21,10 +21,10 @@ from typing import Any, Literal
 
 from starlette.requests import Request
 
+from base.api_contracts.idempotency import PRINCIPAL_SCOPE as PRINCIPAL_SCOPE
+from base.api_contracts.idempotency import SCOPE_HEADER as SCOPE_HEADER
 from base.api_contracts.idempotency import validate_idempotency_key
 
-SCOPE_HEADER = "Idempotency-Scope"
-PRINCIPAL_SCOPE = "principal-v1"
 _STORAGE_PREFIX = "principal-v1:"
 
 
