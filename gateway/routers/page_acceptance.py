@@ -110,8 +110,8 @@ def register(
             digest, replay = _begin(conn, key, body.model_dump(mode="json"))
             if replay is not None:
                 return PageAcceptance(replay, [], replayed=True)
-            validate_target(conn)
             _target(conn, agent_id, register=True)
+            validate_target(conn)
             assert_port_free(conn, agent_id, body.host, body.port)
             closed = close_all_agent_pages_in_transaction(conn, agent_id)
             record = register_page_in_transaction(
@@ -145,9 +145,11 @@ def close(
             if replay is not None:
                 return PageAcceptance(replay, [], replayed=True)
             _target(conn, agent_id, register=False)
-            record = close_observed_page_in_transaction(conn, agent_id, name, expected_page_id)
+            record, changed = close_observed_page_in_transaction(
+                conn, agent_id, name, expected_page_id
+            )
             record = record.model_copy(update={"url": absolute_base + record.url})
             _finish(conn, key, digest, record)
-            return PageAcceptance(record, [], replayed=False)
+            return PageAcceptance(record, [name] if changed else [], replayed=False)
     except PageTargetChangedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
