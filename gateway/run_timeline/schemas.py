@@ -77,6 +77,11 @@ class RunTimelineUnit(BaseModel):
     inclusive message-index span of the block's unit. Blocks without a time are not served.
     `parent` is the level-1 node whose span holds the block's first message, None for a block no
     node covers (a compaction segment's head, the not yet summarized tail).
+
+    `context_tokens` is what the block occupies in the context (None while no request has read
+    it), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether
+    any of that was a share rather than the provider's own number (None with `context_tokens`).
+    A thinking / output(text) / call block is its share of the turn's AIMessage, so estimated.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -89,6 +94,9 @@ class RunTimelineUnit(BaseModel):
     source: str | None
     preview: str
     parent: str | None
+    context_tokens: int | None
+    generation_tokens: int | None
+    estimated: bool | None
 
 
 class RunTimelineEvent(BaseModel):
@@ -107,7 +115,8 @@ class RunTimelineRequest(BaseModel):
     `idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent
     (the read time of the message before it, the start of the turn's thinking block);
     `session` the zero-based compaction segment it was sent in; `input_tokens` the provider's
-    total input tokens of that request, the size of its context.
+    total input tokens of that request, the size of its context, and `output_tokens` what it
+    generated (both the provider's own numbers, never estimated).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -116,6 +125,7 @@ class RunTimelineRequest(BaseModel):
     ts: datetime
     session: int
     input_tokens: int
+    output_tokens: int
 
 
 class RunTimelineResponse(BaseModel):

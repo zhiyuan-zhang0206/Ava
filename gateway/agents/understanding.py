@@ -49,6 +49,7 @@ from base.agents.history.hierarchy.sessions import (
     load_covered_spans,
 )
 from base.agents.history.hierarchy.units import read_times
+from base.agents.history.message_tokens import summarize_segments
 from base.agents.observation.snapshot import agent_model_target
 from base.config import settings
 from base.config.domains.agent.runtime import AgentRuntimeSettings
@@ -118,7 +119,10 @@ class CostEstimateOut(BaseModel):
 
 class SessionOut(BaseModel):
     """One session. `number` 1 is the oldest. `boundary_checkpoint_id` is None for the session in
-    progress. `start` / `end` are the first and last message read times (None when no message has one)."""
+    progress. `start` / `end` are the first and last message read times (None when no message has one).
+    `context_tokens` / `generation_tokens` total the session's messages (`message_tokens`: the head
+    and every message a request has read); `estimated` is true when any of that was a share of a
+    provider total rather than the provider's own number, `exact_fraction` the exact share."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -128,6 +132,10 @@ class SessionOut(BaseModel):
     end: datetime | None
     messages: int
     peak_input_tokens: int
+    context_tokens: int
+    generation_tokens: int
+    estimated: bool
+    exact_fraction: float
     coverage: SessionCoverage
     estimate: CostEstimateOut
 
@@ -325,6 +333,7 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
     model = build_model(db, agent_id)
     jobs = plan_jobs(history, sessions, covered, threshold=chunk_size(db, agent_id))
+    totals = summarize_segments(history)
     return SessionsResponse(
         agent_id=agent_id,
         model=model,
@@ -338,6 +347,10 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
                 end=s.ended,
                 messages=s.messages,
                 peak_input_tokens=s.peak_input_tokens,
+                context_tokens=totals[s.segment].context_tokens,
+                generation_tokens=totals[s.segment].generation_tokens,
+                estimated=totals[s.segment].estimated,
+                exact_fraction=totals[s.segment].exact_fraction,
                 coverage=SessionCoverage(**asdict(coverage_of(history, s, covered))),
                 estimate=_estimate_out(
                     estimate_cost(model, [j for j in jobs if j.session == s.number])

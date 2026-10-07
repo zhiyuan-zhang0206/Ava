@@ -5,13 +5,20 @@ endpoint contract.
 
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 # Load agent.graph before agent.hooks.compact to resolve the latent graph<->compact
 # import cycle (compact.py imports agent.hooks; claim._decide imports back from
@@ -21,13 +28,14 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 import agent.graph  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, inbound_message, system_note_message
+from base.agents.history.message_tokens import MessageTokens
+from base.agents.messages.token_estimate import estimate_message_tokens
 from base.db import create_agent
 from gateway.agents.context_breakdown import (
     SECTION_SPLIT_THRESHOLD_TOKENS,
     SectionNode,
     bucket_messages,
-    compute_breakdown,
-    normalize,
+    latest_request_breakdown,
     section_breakdown,
 )
 from gateway.app import app
@@ -50,7 +58,7 @@ def _note(content: str, tag: NoteTag) -> HumanMessage:
     return system_note_message(content=content, tag=tag, created_at=datetime.now(UTC))
 
 
-def _sample_messages() -> list:
+def _sample_messages() -> list[BaseMessage]:
     return [
         SystemMessage(content="intro paragraph\n\n# Tools\ntool stuff\n\n# Skills\nskill stuff"),
         inbound_message(content="hello there", source="user", inbound_id=1),
@@ -75,8 +83,21 @@ def _sample_messages() -> list:
 # ── pure functions ──────────────────────────────────────────────────────────
 
 
+def _records(messages: Sequence[BaseMessage]) -> list[MessageTokens]:
+    """Every message counted as an estimate of its own text (the bucketing only needs counts)."""
+    return [
+        MessageTokens(max(1, round(estimate_message_tokens(m))), None, "estimated")
+        for m in messages
+    ]
+
+
+def _bucket_tokens(messages: Sequence[BaseMessage]) -> dict[str, int]:
+    buckets = bucket_messages(messages, _records(messages))
+    return {kind: sum(p.context_tokens or 0 for p in parts) for kind, parts in buckets.items()}
+
+
 def test_bucket_messages_categorizes_every_kind() -> None:
-    buckets, system_prompt = bucket_messages(_sample_messages())  # pyright: ignore[reportUnknownArgumentType]
+    buckets = _bucket_tokens(_sample_messages())
     # Every distinct kind present is bucketed; note tags split correctly, the
     # AGENT_ID note is a generic context_note, the header-prefixed untagged
     # HumanMessage is the compact summary (not user_input). Inbounds split by
@@ -96,20 +117,38 @@ def test_bucket_messages_categorizes_every_kind() -> None:
         "tool_response",
         "compact_summary",
     }
-    assert system_prompt.startswith("intro paragraph")
-    # Split keys on ava_source metadata, not the content prefix; the test passes
-    # raw (unwrapped) content, so each bucket is that string's length.
-    assert buckets["user_input"] == len("hello there")  # only the human inbound
-    assert buckets["agent_messages"] == len("peer agent says hi")
-    assert buckets["automation"] == len("watcher woke you")
-    assert buckets["reasoning"] == len("some reasoning")
-    assert buckets["output"] == len("the reply")
-    assert buckets["tool_call"] == len("print(1)")
+
+
+def test_an_ai_message_is_divided_among_its_parts_conserving_its_tokens() -> None:
+    msg = AIMessage(
+        content=[
+            {"type": "thinking", "thinking": "some reasoning"},
+            {"type": "text", "text": "the reply"},
+        ],
+        tool_calls=[{"name": "execute_code", "args": {"code": "print(1)"}, "id": "c1"}],
+    )
+    buckets = bucket_messages([msg], [MessageTokens(100, 100, "exact")])
+    assert sum(p.context_tokens or 0 for parts in buckets.values() for p in parts) == 100
+    assert {p.source for parts in buckets.values() for p in parts} == {"estimated"}
+
+
+def test_an_ai_message_with_one_part_keeps_its_source() -> None:
+    msg = AIMessage(content="only text")
+    (part,) = bucket_messages([msg], [MessageTokens(30, 30, "exact")])["output"]
+    assert (part.context_tokens, part.source) == (30, "exact")
+
+
+def test_a_message_no_request_has_read_is_left_out() -> None:
+    msgs = [HumanMessage(content="a"), HumanMessage(content="b")]
+    buckets = bucket_messages(
+        msgs, [MessageTokens(5, None, "exact"), MessageTokens(None, None, None)]
+    )
+    assert sum(p.context_tokens or 0 for p in buckets["user_input"]) == 5
 
 
 def test_bucket_ignores_image_base64_in_multimodal_inbound() -> None:
-    """A multimodal inbound counts only its text block — never the base64 image
-    (which becomes image tokens, not char tokens)."""
+    """A multimodal inbound is estimated from its text block only -- never the base64 image
+    (which becomes image tokens, not text tokens)."""
     huge_b64 = "A" * 100_000
     msg = HumanMessage(
         content=[
@@ -118,8 +157,7 @@ def test_bucket_ignores_image_base64_in_multimodal_inbound() -> None:
         ],
         additional_kwargs={"ava_msg_type": "inbound"},
     )
-    buckets, _ = bucket_messages([msg])
-    assert buckets["user_input"] == len("look at this")  # base64 excluded
+    assert estimate_message_tokens(msg) < 50
 
 
 def test_inbound_split_by_source() -> None:
@@ -139,12 +177,10 @@ def test_inbound_split_by_source() -> None:
         # legacy inbound with no ava_source -> defaults to user_input.
         HumanMessage(content="legacy", additional_kwargs={"ava_msg_type": "inbound"}),
     ]
-    buckets, _ = bucket_messages(msgs)
-    assert buckets["user_input"] == len("human") + len("page") + len("legacy")
-    assert buckets["agent_messages"] == len("peer")
-    assert buckets["automation"] == len("wake") + len("shell done") + len("sched") + len(
-        "sys"
-    ) + len("sys sub")
+    buckets = bucket_messages(msgs, _records(msgs))
+    assert len(buckets["user_input"]) == 3
+    assert len(buckets["agent_messages"]) == 1
+    assert len(buckets["automation"]) == 5
 
 
 def test_section_breakdown_flat_below_threshold() -> None:
@@ -240,36 +276,44 @@ def test_section_breakdown_conserves_tokens_at_every_level() -> None:
         _assert_conserved(n)  # and every parent == sum(children), recursively
 
 
-def test_section_breakdown_falls_back_to_estimate_without_anchor() -> None:
-    """No anchor (`system_prompt_tokens <= 0`): values are the chars/4 estimate,
-    apportioned so the tree still conserves at every level."""
-    nodes = section_breakdown(_nested_prompt(), 0)
-    assert sum(n.tokens for n in nodes) > 0
-    for n in nodes:
+def test_section_breakdown_without_tokens_is_empty() -> None:
+    """No tokens to share (no request has read the prompt): no sections, never an estimate."""
+    assert section_breakdown(_nested_prompt(), 0) == []
+
+
+def test_latest_request_breakdown_anchors_categories_to_the_requests_input() -> None:
+    breakdown = latest_request_breakdown(_sample_messages())
+    # The request is the AIMessage's: its input is the head plus the six messages before it.
+    assert breakdown.total.tokens == 1000
+    assert sum(c.total.tokens for c in breakdown.categories) == 1000
+    kinds = {c.kind for c in breakdown.categories}
+    assert {"system_prompt", "cluster_memory", "agent_memory", "user_input", "automation"} <= kinds
+    assert "tool_response" not in kinds  # read only by a later request
+    assert breakdown.total.estimated is True
+    system_tokens = next(c.total.tokens for c in breakdown.categories if c.kind == "system_prompt")
+    assert sum(n.tokens for n in breakdown.sections) == system_tokens
+    for n in breakdown.sections:
         _assert_conserved(n)
 
 
-def test_normalize_sums_exactly_to_target() -> None:
-    buckets = {"a": 300, "b": 200, "c": 100}  # est_total 600
-    out = normalize(buckets, 1000)
-    assert sum(out.values()) == 1000  # exact, residual absorbed by the largest
-    assert out["a"] > out["b"] > out["c"]  # proportions preserved
+def test_a_lone_message_in_the_context_makes_it_exact() -> None:
+    msgs = [
+        SystemMessage(content="prompt"),
+        AIMessage(
+            content="x", usage_metadata={"input_tokens": 90, "output_tokens": 3, "total_tokens": 93}
+        ),
+    ]
+    breakdown = latest_request_breakdown(msgs)
+    assert breakdown.total.tokens == 90
+    assert (breakdown.total.estimated, breakdown.total.exact_fraction) == (False, 1.0)
 
 
-def test_normalize_falls_back_to_chars_over_4_without_anchor() -> None:
-    assert normalize({"a": 400, "b": 40}, 0) == {"a": 100, "b": 10}
-
-
-def test_compute_breakdown_parts_sum_to_total() -> None:
-    categories, sections, estimated_total = compute_breakdown(_sample_messages(), 1000)  # pyright: ignore[reportUnknownArgumentType]
-    assert sum(t for _, t in categories) == 1000  # categories sum to the anchor
-    system_prompt_tokens = dict(categories)["system_prompt"]
-    # The section tree's top level sums to the system_prompt category, and every
-    # parent conserves its children.
-    assert sum(n.tokens for n in sections) == system_prompt_tokens
-    for n in sections:
-        _assert_conserved(n)
-    assert estimated_total > 0
+def test_no_request_yet_is_an_empty_breakdown() -> None:
+    breakdown = latest_request_breakdown(
+        [SystemMessage(content="prompt"), HumanMessage(content="hi")]
+    )
+    assert breakdown.categories == [] and breakdown.sections == []
+    assert breakdown.total.tokens == 0
 
 
 def test_bucket_messages_works_without_agent_graph() -> None:
@@ -285,9 +329,11 @@ def test_bucket_messages_works_without_agent_graph() -> None:
         "from langchain_core.messages import HumanMessage\n"
         "from gateway.agents.context_breakdown import bucket_messages\n"
         "from agent.messages import COMPACT_SUMMARY_HEADER\n"
-        "buckets, _ = bucket_messages("
-        "[HumanMessage(content=f'{COMPACT_SUMMARY_HEADER}\\n\\nbody')])\n"
-        "assert buckets == {'compact_summary': len(COMPACT_SUMMARY_HEADER) + 6}, buckets\n"
+        "from base.agents.history.message_tokens import MessageTokens\n"
+        "buckets = bucket_messages("
+        "[HumanMessage(content=f'{COMPACT_SUMMARY_HEADER}\\n\\nbody')],"
+        " [MessageTokens(7, None, 'exact')])\n"
+        "assert list(buckets) == ['compact_summary'], buckets\n"
         "assert 'agent.graph' not in sys.modules, 'breakdown must not import agent.graph'\n"
     )
     repo_root = Path(__file__).resolve().parents[3]
@@ -325,7 +371,7 @@ def _put_checkpoint(agent_id: int, messages: list) -> None:
         )
 
 
-def test_endpoint_returns_normalized_breakdown(
+def test_endpoint_returns_the_breakdown_of_the_latest_request(
     db_conn: psycopg.Connection, test_client: TestClient
 ) -> None:
     tid = create_agent(db_conn)
@@ -335,15 +381,17 @@ def test_endpoint_returns_normalized_breakdown(
     assert resp.status_code == 200
     body = resp.json()
     assert body["total_input_tokens"] == 1000  # the AIMessage's real input_tokens
-    assert sum(c["tokens"] for c in body["categories"]) == 1000  # normalized to truth
+    assert sum(c["tokens"] for c in body["categories"]) == 1000
+    assert body["estimated"] is True
+    assert body["exact_fraction"] == 0  # several messages shared the request input
     kinds = {c["kind"] for c in body["categories"]}
-    assert {"system_prompt", "compact_summary", "cluster_memory", "reasoning"} <= kinds
+    assert {"system_prompt", "cluster_memory", "user_input"} <= kinds
+    assert all({"estimated", "exact_fraction"} <= set(c) for c in body["categories"])
     section_names = [s["name"] for s in body["sections"]]
     assert section_names == ["(preamble)", "Tools", "Skills"]
     # The recursive shape is on the wire: each node carries `children` (empty here
-    # — this tiny prompt is under the split threshold).
-    assert all(s["children"] == [] for s in body["sections"])
-    assert body["estimated_total"] > 0
+    # — this tiny prompt is under the split threshold) and is estimated.
+    assert all(s["children"] == [] and s["estimated"] for s in body["sections"])
 
 
 def test_endpoint_no_checkpoint_is_empty(

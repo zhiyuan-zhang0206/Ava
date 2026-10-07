@@ -31,6 +31,7 @@ from agent.hooks.compact import (
     emit_compaction_monitoring,
     stamp_compact_boundary,
 )
+from agent.hooks.compact_anchor import closing_of
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
@@ -152,7 +153,7 @@ async def _compact_outcome(
     emit_compact_finished(
         ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS
     )
-    await stamp_compact_boundary(ctx.ops_pool, agent_id, state)
+    await stamp_compact_boundary(ctx.ops_pool, agent_id, state, closing=closing_of(summary_text))
     # Defer any chats co-batched with the compact: they arrived while the
     # turn was in flight and were never part of the summarized history, so
     # they must survive — but as pending inbounds delivered in the fresh

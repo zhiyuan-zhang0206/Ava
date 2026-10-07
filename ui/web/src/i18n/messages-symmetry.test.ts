@@ -37,11 +37,11 @@ describe("i18n message catalogs", () => {
     expect(missingInEn, `keys in zh missing from en: ${missingInEn.join(", ")}`).toEqual([]);
   });
 
-  it("zh covers the context breakdown surface (title, labels, estimate note)", () => {
+  it("zh covers the context breakdown surface (title, labels, estimated suffix)", () => {
     const zhCard = createTranslator({ locale: "zh", messages: zh, namespace: "contextBreakdown" });
     expect(zhCard("title")).toBe("\u4e0a\u4e0b\u6587\u6784\u6210");
     expect(zhCard("categories.system_prompt")).toBe("\u7cfb\u7edf\u63d0\u793a\u8bcd");
     expect(zhCard("categories.tool_response")).toBe("\u5de5\u5177\u8f93\u51fa");
-    expect(zhCard("estimateNote")).toBe("* \u603b\u91cf\u4e3a\u4f30\u7b97\u503c");
+    expect(zhCard("estimatedSuffix")).toBe("(\u4f30\u7b97)");
   });
 });

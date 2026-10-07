@@ -39,6 +39,7 @@ from gateway.run_timeline.schemas import (
     RunTimelineUsage,
     RunTimelineWindow,
 )
+from gateway.run_timeline.tokens import block_tokens
 
 router = APIRouter()
 router.include_router(messages_router)
@@ -71,20 +72,27 @@ def _units(
     """The view's blocks intersecting the window, each naming the level-1 node that covers it."""
     leaves = [node for node in served if node.level == 1]
     firsts = [leaf.span_start for leaf in leaves]
-    return [
-        RunTimelineUnit(
-            kind=unit.kind,
-            i0=unit.i0,
-            i1=unit.i1,
-            start=unit.start,
-            end=unit.end,
-            source=unit.source,
-            preview=unit.preview,
-            parent=_covering_leaf(leaves, firsts, unit.i0),
+    out: list[RunTimelineUnit] = []
+    for unit in view.units:
+        if unit.start > end or unit.end < start:
+            continue
+        tokens = block_tokens(view, unit)
+        out.append(
+            RunTimelineUnit(
+                kind=unit.kind,
+                i0=unit.i0,
+                i1=unit.i1,
+                start=unit.start,
+                end=unit.end,
+                source=unit.source,
+                preview=unit.preview,
+                parent=_covering_leaf(leaves, firsts, unit.i0),
+                context_tokens=tokens.context_tokens,
+                generation_tokens=tokens.generation_tokens,
+                estimated=tokens.estimated,
+            )
         )
-        for unit in view.units
-        if unit.start <= end and unit.end >= start
-    ]
+    return out
 
 
 def _window(

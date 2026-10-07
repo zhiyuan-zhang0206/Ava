@@ -1,10 +1,10 @@
 """Renderable text of a message and the token estimator built on it.
 
-Shared by the gateway context breakdown (char counts by kind) and the per-message
-true-token computation (`base/agents/history/message_tokens.py`), which uses the
-estimator to apportion a real token total among messages (or among parts of one
-message). The estimator weighs CJK and other non-space characters differently
-and charges a fixed framing overhead per message; whitespace is free.
+Shared by the per-message true-token computation (`base/agents/history/message_tokens.py`) and
+the gateway context breakdown, which use the estimator to apportion a provider-reported token
+total among messages (or among parts of one message, or the sections of the system prompt). The estimator weighs CJK and other non-space
+characters differently and charges a fixed framing overhead per message;
+whitespace is free.
 
 Coefficients were least-squares fitted (relative error) on the 3255 `exact`
 messages of preview agent 9 (1092 tool results, 403 human turns, 1760 AI turns;
@@ -92,13 +92,3 @@ def ai_message_texts(msg: AIMessage) -> dict[str, str]:
         if isinstance(code := tc["args"].get("code"), str):
             out["tool_call"] += code
     return out
-
-
-def text_chars(content: object) -> int:
-    """Char count of a message's renderable text (see `content_text`)."""
-    return len(content_text(content))
-
-
-def ai_message_chars(msg: AIMessage) -> dict[str, int]:
-    """Char counts of one AIMessage's reasoning / output / tool_call parts."""
-    return {kind: len(text) for kind, text in ai_message_texts(msg).items()}
