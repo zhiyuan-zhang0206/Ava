@@ -24,14 +24,6 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolate_runtime_incarnation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A test's process admission must not become another test's exit identity."""
-    from base.native_process import runtime_incarnation
-
-    monkeypatch.setattr(runtime_incarnation, "_child_incarnation", None)
-
-
-@pytest.fixture(autouse=True)
 def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     """Normalize the ambient session to the CI shape (issue #2331).
 
@@ -244,13 +236,6 @@ def _guard_service_readiness(
     ready = ReadinessWait((), 0.0, sessions_gone=False)
     monkeypatch.setattr(
         "cli.commands.lifecycle.root_driver.wait_for_service_tree",
-        lambda *_a, **_kw: ready,
-    )
-    # The root-driven path's wait has the same bound and the same reason to be
-    # stubbed for tests that are not about it (cli/commands/lifecycle/tests/test_root_driver.py opts
-    # out with a module-level `real_service_readiness_gate` marker).
-    monkeypatch.setattr(
-        "cli.commands.lifecycle.root_driver._wait_for_root_services_ready",
         lambda *_a, **_kw: ready,
     )
 
