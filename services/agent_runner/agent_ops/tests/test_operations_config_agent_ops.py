@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from psycopg_pool import ConnectionPool
 
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 
@@ -16,7 +17,7 @@ async def test_dispatch_config_read_calls_config_read_op(
     """config_read kind -> ops.config_read_op, returns completed with its result."""
     from services.agent_runner.agent_ops import daemon
 
-    monkeypatch.setattr(daemon, "_db_pool", object())
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     captured: list[bool] = []
 
     def _fake_config_read() -> ConfigReadResult:
@@ -24,7 +25,9 @@ async def test_dispatch_config_read_calls_config_read_op(
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
 
     monkeypatch.setattr(daemon.host_config, "config_read_op", _fake_config_read)
-    status, result = await daemon._dispatch("config_read", {}, active_ops={}, workers=set())
+    status, result = await daemon._dispatch(
+        "config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool
+    )
     assert status == "completed"
     # _dispatch serializes the result model to a JSON dict for the wire.
     assert result["machine"] == "x"
@@ -39,7 +42,7 @@ async def test_dispatch_config_write_passes_overrides(
     fail-fast on missing key."""
     from services.agent_runner.agent_ops import daemon
 
-    monkeypatch.setattr(daemon, "_db_pool", object())
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     captured: dict[str, Any] = {}
 
     def _fake_config_write(
@@ -57,7 +60,11 @@ async def test_dispatch_config_write_passes_overrides(
 
     monkeypatch.setattr(daemon.host_config, "config_write_op", _fake_config_write)
     status, _result = await daemon._dispatch(
-        "config_write", {"overrides": {"ops_concurrency": 2}}, active_ops={}, workers=set()
+        "config_write",
+        {"overrides": {"ops_concurrency": 2}},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
     )
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
@@ -73,12 +80,12 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
     validation rejects it, fail-fast, no silent fallback)."""
     from services.agent_runner.agent_ops import daemon
 
-    monkeypatch.setattr(daemon, "_db_pool", object())
+    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     # The config_write arm validates payload into ConfigWritePayload, whose
     # `overrides` is required; a missing key is a caught ValidationError surfaced
     # as a 'failed' op result (the /ops route returns HTTP 200 + status=failed).
     status, result = await daemon._dispatch(
-        "config_write", {}, active_ops={}, workers=set()
+        "config_write", {}, active_ops={}, workers=set(), pool=dispatch_pool
     )  # no 'overrides' key
     assert status == "failed"
     assert "overrides" in str(result["error"])
