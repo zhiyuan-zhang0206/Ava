@@ -345,10 +345,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/pages/{page_key}"): RouteContract(note="page reverse proxy"),
     ("GET", "/pages/{page_key}/{rest:path}"): RouteContract(note="page reverse proxy"),
     ("POST", "/api/agents/{agent_id}/pages"): RouteContract(
-        note="register page — upsert, repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="registration replaces the current page; an ambiguous retry can close newer work",
     ),
     ("DELETE", "/api/agents/{agent_id}/pages/{name}"): RouteContract(
-        note="close page — CAS, repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="name-based close can target a later registration after name reuse",
     ),
     ("GET", "/api/agents/{agent_id}/pages"): RouteContract(note="list open pages"),
     # ── gateway/extensions/plugin_ui.py ───────────────────────────────────
