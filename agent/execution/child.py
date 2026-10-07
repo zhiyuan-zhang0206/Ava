@@ -155,7 +155,7 @@ def _arm_watchdog(timeout_s: float) -> None:
     """Hard-exit past (timeout + parent kill grace + margin) — the belt to the
     parent's braces. Only fires when the parent itself died (or its signals
     were lost); a parent that is alive SIGKILLs this child first."""
-    from agent.graph.exec.protocol import KILL_GRACE_S
+    from base.native_process.exec_domain import KILL_GRACE_S
 
     margin = float(os.environ.get("AVA_EXEC_WATCHDOG_MARGIN_S", WATCHDOG_MARGIN_S))
     delay = timeout_s + KILL_GRACE_S + margin
