@@ -380,7 +380,7 @@ def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | Non
 def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[str] | None:
     """Per-image caption lines of an attach message, aligned with ``_attach_images``.
 
-    The modern pack (``base/lm/attach/__init__.py``) interleaves content blocks —
+    The modern pack (``base/lm/attach/packing.py``) interleaves content blocks —
     ``[text(notice), text(line1), image1, text(line2), image2, ...]`` — so each
     ``image_url`` block is immediately preceded by its own caption line: read
     the preceding text block and the pairing is structural, no text parsing.

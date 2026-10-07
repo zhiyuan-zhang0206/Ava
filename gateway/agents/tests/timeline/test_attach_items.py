@@ -36,7 +36,7 @@ class TestAttachItems:
         blocks_override: list[dict[str, Any]] | None = None,
     ) -> HumanMessage:
         from agent.messages import attach_message
-        from base.lm.attach import AttachEntry, pack_attachments
+        from base.lm.attach.packing import AttachEntry, pack_attachments
 
         image = tmp_path / "render.png"
         from PIL import Image
@@ -511,7 +511,7 @@ def test_item_sort_key_is_numeric_not_lexical() -> None:
         from PIL import Image
 
         from agent.messages import attach_message
-        from base.lm.attach import AttachEntry, pack_attachments
+        from base.lm.attach.packing import AttachEntry, pack_attachments
 
         image = tmp_path / "render.png"
         Image.new("RGB", (2, 2)).save(image)
