@@ -123,9 +123,10 @@ async def _check_level(
     agent_id: int,
     level: int,
     executor: Executor | None,
+    upto: int | None = None,
 ) -> bool:
     """Check one level if it is due; whether it closed at least one group."""
-    nodes = await load_open_nodes(pool, agent_id, level)
+    nodes = await load_open_nodes(pool, agent_id, level, upto=upto)
     last = min(await load_last_checked(pool, agent_id, level), len(nodes))
     if len(nodes) < last + check_threshold(level):
         return False
@@ -136,7 +137,7 @@ async def _check_level(
     settled = False
     try:
         # Re-read under the lease: another runner may have grouped since the first read.
-        nodes = await load_open_nodes(pool, agent_id, level)
+        nodes = await load_open_nodes(pool, agent_id, level, upto=upto)
         if len(nodes) < min(
             await load_last_checked(pool, agent_id, level), len(nodes)
         ) + check_threshold(level):
@@ -162,7 +163,7 @@ async def _check_level(
             await write_group_calls(pool, agent_id, level, check_key, [n.id for n in nodes], calls)
         if groups:
             await write_groups(
-                pool, agent_id, level, nodes, groups, model=model, check_key=check_key
+                pool, agent_id, level, nodes, groups, model=model, check_key=check_key, upto=upto
             )
             settled = True
             return True
@@ -181,16 +182,19 @@ async def run_group_checks(
     agent_id: int,
     *,
     executor: Executor | None = None,
+    upto: int | None = None,
 ) -> None:
     """Walk up the agent's levels from 1, checking each that is due; never raises.
 
     Checks of different agents run side by side; one `(agent, level)` is checked by one holder
     of its lease at a time. `executor` carries the blocking model call (default: the loop's).
+    `upto` is a rebuild's replay horizon: nodes ending past that message index count as not
+    landed yet, so the tree grows exactly as it did when the leaves arrived one by one.
     """
     try:
         level = 1
         while level <= MAX_LEVEL and await _check_level(
-            pool, db, models, agent_id, level, executor
+            pool, db, models, agent_id, level, executor, upto
         ):
             level += 1
     except Exception:
