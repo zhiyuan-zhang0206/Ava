@@ -15,3 +15,7 @@ Parent node: [[gateway.ava.okf.md|Gateway]].
 The gateway lifespan owns authentication rejection counters and client/path warning
 throttles. Middleware and its aggregate telemetry flusher share that instance; a
 new application lifespan starts with fresh counters and warning budgets.
+
+The lifespan also owns one login failure limiter shared by all of its requests.
+Per-IP lockout, Retry-After, expiry, successful-login reset, and bounded eviction
+retain the configured policy; separate application lifespans share no counters.
