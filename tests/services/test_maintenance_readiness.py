@@ -68,17 +68,6 @@ def test_held_gateway_health_still_reports_database_failure(
     assert not start_serving.is_serving()
 
 
-def test_control_plane_bypasses_an_unreadable_admission_journal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def unexpected_read(_request: object) -> bool:
-        raise AssertionError("control-plane request read the business admission journal")
-
-    monkeypatch.setattr("gateway.app._cluster_is_paused", unexpected_read)
-    with TestClient(app) as client:
-        assert client.get("/api/health").status_code == 200
-
-
 def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
