@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
+from psycopg_pool import ConnectionPool
 
 from base.db import Database
 
@@ -26,10 +27,9 @@ _db = Database.from_settings
 _REPO = Path(__file__).resolve().parents[4]
 
 
-def _stub_pool() -> object:
-    """Minimal stand-in for ConnectionPool used by _db_pool — ops are mocked
-    so the pool's actual API is never exercised."""
-    return object()
+def _stub_pool() -> ConnectionPool:
+    """A closed real pool for mocked arms; no connection is borrowed."""
+    return ConnectionPool(open=False)
 
 
 # ─── _dispatch routing ─────────────────────────────────────────────────────────
