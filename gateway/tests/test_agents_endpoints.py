@@ -588,7 +588,7 @@ def _result_read(client: TestClient, method: str, path: str, *, caller: str | No
 def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make non-blocked artifact reads deterministic without external services."""
     import gateway.events.agent_events as agent_events_router
-    import gateway.routers.memory as memory_router
+    from services.derived.memory_indexer.backends import factory as backend_factory
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
 
     class _StubProvider:
@@ -599,17 +599,19 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
         async def embed_query_async(_query: str) -> list[float]:
             return [0.0] * 8
 
-    async def _topk(
-        _vector: object, _k: int, _deadline: float, *args: object, **kwargs: object
-    ) -> list[str]:
-        return []
+    class StubBackend:
+        async def search_topk_async(self, *_args: object, **_kwargs: object) -> list[str]:
+            return []
+
+    def backend(*_args: object, **_kwargs: object) -> StubBackend:
+        return StubBackend()
 
     async def _stream(*_args: object, **_kwargs: object):
         if False:
             yield ""
 
     monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
-    monkeypatch.setattr(memory_router, "_backend_topk", _topk)
+    monkeypatch.setattr(backend_factory, "get_backend", backend)
     monkeypatch.setattr(agent_events_router, "event_stream", _stream)
 
 

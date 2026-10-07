@@ -15,6 +15,7 @@ from base.native_process.turn_identity import bind_turn_identity, current_turn_a
 from gateway.events import telemetry_rows
 from gateway.run_timeline import _events as reads
 from gateway.run_timeline import router as timeline
+from gateway.run_timeline.strip import SegmentReadCache
 
 
 @contextmanager
@@ -65,7 +66,7 @@ def test_small_event_window_is_one_read(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def _request() -> Request:
-    state = SimpleNamespace(db=Database.from_settings())
+    state = SimpleNamespace(db=Database.from_settings(), strip_cache=SegmentReadCache())
     return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
 
 
@@ -77,7 +78,8 @@ def test_strip_overlaps_events_and_joins_with_request_context(
 
     def strip(*args: object) -> tuple[list[object], bool]:
         assert current_turn_agent_id() == 405
-        assert args[1:] == (405, start, start + timedelta(hours=1), 7)
+        assert isinstance(args[0], SegmentReadCache)
+        assert args[2:] == (405, start, start + timedelta(hours=1), 7)
         strip_started.set()
         assert events_started.wait(2), "event read did not overlap strip"
         strip_finished.set()

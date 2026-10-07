@@ -84,7 +84,6 @@ from gateway.alerts import router as alerts_router
 from gateway.auth import rejection_log
 from gateway.auth import router as auth_router
 from gateway.auth.cors import cors_allowed_origins
-from gateway.auth.rejection_log import log_auth401_rejection
 from gateway.auth.request_principal import SessionKeys
 from gateway.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
 from gateway.cluster import alert_classes as alert_classes_router
@@ -164,6 +163,7 @@ from gateway.routers import (
     uploads as uploads_router,
 )
 from gateway.run_timeline import router as run_timeline_router
+from gateway.run_timeline.strip import SegmentReadCache
 from gateway.schedules import router as schedules_router
 
 _log = logging.getLogger(__name__)
@@ -204,6 +204,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.inspect_query_cache = inspect_router.build_query_cache()
     app.state.upload_locks = uploads_router.AgentUploadLocks()
     app.state.memory_search_gate = memory_router.build_search_gate()
+    app.state.auth401_log = rejection_log.AuthRejectionLog()
+    app.state.strip_cache = SegmentReadCache()
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.db_pool = app.state.db.pool(max_size=8)
     app.state.sessions = SessionStore(app.state.db_pool)
@@ -242,7 +244,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # drains its accumulator or DB sample once per 60s and emits ONE bounded
     # event; the lifespan owns and stops every task or scheduled callback.
     app.state.latency_flusher = asyncio.create_task(latency.latency_flusher())
-    app.state.auth401_flusher = asyncio.create_task(rejection_log.auth401_flusher())
+    app.state.auth401_flusher = asyncio.create_task(
+        rejection_log.auth401_flusher(app.state.auth401_log)
+    )
     app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
@@ -485,7 +489,7 @@ async def _cluster_auth_middleware(
         request.state.source_verified_by = verified_by
         return await call_next(request)
 
-    log_auth401_rejection(request)
+    request.app.state.auth401_log.log(request)
     return error_response(
         request,
         code="authentication_required",

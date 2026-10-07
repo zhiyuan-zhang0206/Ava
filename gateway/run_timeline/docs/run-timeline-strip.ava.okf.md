@@ -18,3 +18,7 @@ The list read takes an optional `messages_max` per-read cap, clamped to the
 `display.run_timeline_messages_max` ceiling (never raised through it); the compare view
 asks for a smaller strip budget (P4-4, task #4023). The strip read itself is not gated on
 `level` — a bucket response carries the strip like a turn response.
+
+The gateway lifespan owns a `SegmentReadCache` and passes it to window and
+message-detail reads. Both routes share its bounded LRU and existing TTLs; separate
+application lifespans never share cached checkpoint segments.

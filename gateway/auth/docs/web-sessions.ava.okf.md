@@ -11,3 +11,7 @@ tags: []
 - **CORS allowlist** (`gateway/auth/cors.py`): exact origins, credentials allowed, never a wildcard. A non-empty `AVA_GATEWAY_CORS_ALLOWED_ORIGINS` is authoritative and used verbatim. Empty derives: `localhost` / `127.0.0.1` at the Gate entry port; `localhost` / `127.0.0.1` at this home's reserved Next.js app port (`AVA_APP_PORT`, written from the registry record at start; unset derives no app origin); `AVA_BROWSER_ORIGIN`; and the gateway URL's own origin plus the entry port on its host. The app origins are loopback-only because Next.js binds `127.0.0.1` only, so no `[::1]` or remote form exists. They apply whether or not Gate is selected: Gate proxies the same listener under the allowed entry origin, so the app's own origin trusts no additional content, and a browser can use the app directly when Gate is not running.
 
 Parent node: [[gateway.ava.okf.md|Gateway]].
+
+The gateway lifespan owns authentication rejection counters and client/path warning
+throttles. Middleware and its aggregate telemetry flusher share that instance; a
+new application lifespan starts with fresh counters and warning budgets.
