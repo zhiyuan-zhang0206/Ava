@@ -9,7 +9,7 @@
 // The owner coalesces reads and guarantees trailing repair across event races.
 
 import { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY, foldAgents } from "./agents";
-import type { SystemEvent } from "../types";
+import type { SystemEvent } from "../contracts/types";
 import { FLEET_GRAPH_KEY_PREFIX, foldFleetGraph } from "./graph";
 import {
   foldNotices,

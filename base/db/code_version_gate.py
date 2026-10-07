@@ -20,7 +20,7 @@ writing during a graceful shutdown. The gate trusts the process it stops to
 run this code: a process that predates the gate cannot be stopped by it (the
 first release carrying it cannot deliver its own protection), and a process
 holding one connection forever never re-reads the minimum. The trade-off is in
-`docs/decisions/2026-09-30-client-side-code-version-gate.md`.
+`docs/decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md`.
 
 Direct connections (administrator, migration applier, `pg_dump`) and explicit
 targets (`connect_url`) are not gated. The `ava` CLI is exempt by declaration

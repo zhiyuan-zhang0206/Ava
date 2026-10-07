@@ -33,7 +33,7 @@ Each declaration derives attribution records (`PluginContributions.as_records`):
 - [[agent/graph/docs/graph.ava.okf.md]] — hook container nodes call `make_hook_runner` at graph build time
 - [[agent/docs/state.ava.okf.md]] — state field registration
 - [[system-prompt.ava.okf.md]] — prompt injection
-- [[db.ava.okf.md]] — state persisted to Postgres checkpoint
+- [[agent/db/docs/db.ava.okf.md]] — state persisted to Postgres checkpoint
 
 ## Entry Points
 - `base/packages/plugins/enable_config.py:discover_plugins()` — filesystem scan for `ava_builtins/plugins/<name>/plugin.py` (built-in) and `~/.ava/plugins/<name>/plugin.py` (external)

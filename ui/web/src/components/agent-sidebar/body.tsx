@@ -14,20 +14,20 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 
-import { AgentRow as AgentRowItem } from "@/components/agent-row";
+import { AgentRow as AgentRowItem } from "@/components/agents/agent-row";
 import { AgentArchive } from "./archive";
-import { SpawnButton } from "@/components/spawn-button";
+import { SpawnButton } from "@/components/agents/spawn-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { buildAgentTree, type AgentNode } from "@/lib/agent-tree";
-import { SORT_DEFAULT_DIR, useSidebarSort, type FlatSortKey, type SidebarSort } from "@/lib/sidebar";
-import { useStore } from "@/lib/store";
-import type { AgentRow } from "@/lib/types";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { cn } from "@/lib/utils";
+import { buildAgentTree, type AgentNode } from "@/lib/agents/agent-tree";
+import { SORT_DEFAULT_DIR, useSidebarSort, type FlatSortKey, type SidebarSort } from "@/lib/agents/sidebar";
+import { useStore } from "@/lib/state/store";
+import type { AgentRow } from "@/lib/contracts/types";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { cn } from "@/lib/format/utils";
 
 import type { InnerProps } from "./types";
 import { fleetHref } from "./links";
-import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 
 // ── Expanded sidebar body ──
 

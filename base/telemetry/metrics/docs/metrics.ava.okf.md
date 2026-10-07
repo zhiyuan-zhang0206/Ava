@@ -37,7 +37,7 @@ Currently 5: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `plugin_activa
 
 ## Key Dependencies
 
-- [[db.ava.okf.md]] — Postgres pool (`telemetry_events` holds the telemetry and log stream; the aggregate reads it)
+- [[agent/db/docs/db.ava.okf.md]] — Postgres pool (`telemetry_events` holds the telemetry and log stream; the aggregate reads it)
 - [[log.ava.okf.md]] — the event stream is written by the unified emitter (`base/telemetry/emitter.py`), fed by `base/log/__init__.py`
 
 ## SDK event collection

@@ -127,7 +127,7 @@ def _assert_no_unrecognized_alarm(page: Page, unrecognized_warnings: list[str]) 
 def _wait_for_chat_inbound_settled(agent_id: int) -> None:
     """DB: the finished turn disposed its claim — the chat row is 'done'."""
 
-    # Message states (docs/conventions/agent-impersonation.md): a native chat row
+    # Message states (docs/conventions/agents/agent-impersonation.md): a native chat row
     # moves pending -> claimed -> done, confirmed at settlement points —
     # every finished turn (#3999, services/agent_runner/agent_host/settlement.py
     # reconcile_inbounds_after_turn), a boot/recovery, or an abort. 'claimed'

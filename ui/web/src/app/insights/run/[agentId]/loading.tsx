@@ -1,6 +1,6 @@
 import { RunTimelineChartSkeleton } from "@/components/run-timeline/run-timeline-skeleton";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export default function Loading() {
   return (

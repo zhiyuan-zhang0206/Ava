@@ -260,7 +260,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/gateway/test_schemas_wire_format.py": (
         "contract",
-        "freezes the wire schemas against ui/web/openapi.json and ui/web/src/lib/types.ts",
+        "freezes the wire schemas against ui/web/openapi.json and ui/web/src/lib/contracts/types.ts",
     ),
     "tests/integration/test_hosted_lifecycle_integration.py": (
         "integration",

@@ -17,7 +17,7 @@ An agent has only one tool—`execute_code(code: str)`—but obtains all capabil
 
 ### Agent Interop
 - [[ava/external/docs/external.ava.okf.md]] — local external Python attachment to a consented agent lease
-- [[agents.ava.okf.md]] — spawn / fork / send_message / terminate / resurrect / get_neighbors / get_ancestors / get_status
+- [[ava/agents/docs/agents.ava.okf.md]] — spawn / fork / send_message / terminate / resurrect / get_neighbors / get_ancestors / get_status
 - [[ava_builtins/plugins/ava_fleet/docs/tasks/tasks.ava.okf.md|Tasks]] — Task registry `ava.tasks`: create / get / list / update / log (injected by ava_fleet plugin, not core SDK—docs in fleet subtree)
 - [[presets.ava.okf.md]] — Configuration presets: list / get
 

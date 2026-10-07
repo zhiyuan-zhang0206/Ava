@@ -14,7 +14,7 @@ Python tree from that commit's lockfile, runs `ava init` and then the first `ava
 (gateway and agent-runner on one box; the frontend dependencies and build are the
 start's own), runs the observer, copies the evidence out, and deletes the VM. The
 model is scripted; no provider key is injected, so nothing secret can reach the VM. The
-design is future/infra/verification-boundaries.md.
+design is future/infra/engineering/verification-boundaries.md.
 
 The host's `~/.ava`, launchd, keychain and TCC are never touched: the only host paths
 the run writes are its evidence directory and a temporary export of the commit. At

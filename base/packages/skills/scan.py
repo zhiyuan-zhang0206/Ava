@@ -27,7 +27,7 @@ known attacks* in *text this scanner can read*. A clean report means "no rule
 fired", never "this package is safe". Anyone who knows these rules can write a
 package that walks past all of them, and nothing here constrains what a skill
 does once an agent follows it (Ava does not sandbox execution — see
-`docs/decisions/2026-07-29-security-model-host-isolation-not-sandbox.md`).
+`docs/decisions/data/security/2026-07-29-security-model-host-isolation-not-sandbox.md`).
 
 Sibling, deliberately not shared: `ava/security.py` scans content an agent
 ingests *mid-turn* and reports through a side channel. This one scans a whole

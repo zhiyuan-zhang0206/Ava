@@ -2,8 +2,8 @@
 
 import { ArrowUp, Loader2, Square } from "lucide-react";
 
-import { cn } from "@/lib/utils";
-import { FLEX } from "@/lib/layout";
+import { cn } from "@/lib/format/utils";
+import { FLEX } from "@/lib/layout/layout";
 
 // The circular send affordance shared by every reply surface (the home
 // composer and the fleet "Waiting on you" answer box), so they never drift

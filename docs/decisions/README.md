@@ -9,3 +9,9 @@ local `docs/` for today's contract.
 
 When a choice changes, add a new dated decision and link the supersession; do not
 rewrite the earlier reasoning to match current behavior.
+
+Records are grouped by the domain whose choice they explain: `agents/`,
+`api/`, `data/`, `engineering/`, `extensions/`, `frontend/`, `observability/`
+and `runtime/`. Broad domains have subject directories beneath them. Keep the
+original dated filename inside the relevant subject; moving a record does not
+change its date or freeze its old paths into today's navigation.

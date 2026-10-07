@@ -4,10 +4,10 @@ import { Fragment, type RefObject } from "react";
 import { ChevronRight, PanelRightClose } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
-import type { QueueUnit } from "@/lib/task-notify";
-import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
+import type { QueueUnit } from "@/lib/notifications/task-notify";
+import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
+import { cn } from "@/lib/format/utils";
 
 import { fmtLabel, openKey, resolvedKey, type OpenItem } from "./keys";
 import { NoticeListRow } from "./rows";

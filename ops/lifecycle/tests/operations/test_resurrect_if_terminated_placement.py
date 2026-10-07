@@ -383,7 +383,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         # A watcher's wake is source="watcher:<id>" — neither "system" nor a
         # "system:" variant, so it is NOT a notice: a terminated owner with a
         # live watcher is auto-resurrected at its next fire, same as any user
-        # chat (docs/decisions/2026-09-27-watchers-are-never-restarted.md).
+        # chat (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md).
         watcher_iid = insert_inbound_message(
             db_conn, aid, "wake", source="watcher:7", bus=event_bus, database=database
         )

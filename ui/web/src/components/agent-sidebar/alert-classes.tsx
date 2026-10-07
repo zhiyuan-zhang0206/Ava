@@ -4,13 +4,13 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { useAlertClassActions, useAlertClasses, useAlertClassSamples } from "@/lib/alert-classes";
-import { errMsg } from "@/lib/errors";
-import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
-import { formatRelativeTime, type StatsWindowHours } from "@/lib/sidebar";
-import { formatAbsolute } from "@/lib/time";
-import type { AlertClassRow } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { useAlertClassActions, useAlertClasses, useAlertClassSamples } from "@/lib/transport/alert-classes";
+import { errMsg } from "@/lib/contracts/errors";
+import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import { formatRelativeTime, type StatsWindowHours } from "@/lib/agents/sidebar";
+import { formatAbsolute } from "@/lib/format/time";
+import type { AlertClassRow } from "@/lib/contracts/types";
+import { cn } from "@/lib/format/utils";
 
 const LEVEL_KEY = {
   warning: "alertLevelWarning",

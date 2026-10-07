@@ -9,11 +9,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { api } from "@/lib/transport/api";
 
 import PluginPage from "./page";
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: { getUiContributions: vi.fn() },
   API_BASE: "http://gateway.test:8000",
 }));

@@ -15,7 +15,7 @@ guest through `export_commit`. This module is where the macOS boundary's rules l
 - the host's cluster, credentials, keychain and VM store never enter a guest
   (`boundary.refuse_host_state`), and the host's own state is never an argument.
 
-Stdlib-only and host-side. The design is future/infra/verification-boundaries.md.
+Stdlib-only and host-side. The design is future/infra/engineering/verification-boundaries.md.
 """
 
 from __future__ import annotations
