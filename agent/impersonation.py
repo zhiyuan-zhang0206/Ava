@@ -31,7 +31,7 @@ from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.messages.envelope import wrap_inbound
-from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
+from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
@@ -574,7 +574,7 @@ async def supervise_relay(
     if (
         child is not None
         and session is not None
-        and (child.lease_id != session["id"] or child.generation != session["relay_generation"])
+        and (child.lease_id, child.generation) != (session["id"], session["relay_generation"])
     ):
         return  # A delayed predecessor snapshot cannot retire a replacement's sender.
     if session is None or session["status"] not in OPEN:
@@ -592,9 +592,12 @@ async def supervise_relay(
         return
     if await _executor_verdict_stops(db, bus, session, agent_id, relays):
         return
-    if _heartbeat_fresh(session["relay_heartbeat_at"]):
+    exited = await asyncio.to_thread(
+        relay_exited, child, session.get("relay_identity"), provider=session["relay_provider"]
+    )
+    if not exited and _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
-    await _handle_stale_relay(db, bus, session, agent_id, child, relays)
+    await _handle_stale_relay(db, bus, session, agent_id, child, relays, confirmed_exit=exited)
 
 
 async def _executor_verdict_stops(
@@ -634,6 +637,8 @@ async def _handle_stale_relay(
     agent_id: int,
     child: RelayChild | None,
     relays: RelaySupervision,
+    *,
+    confirmed_exit: bool = False,
 ) -> None:
     """Retire the previous sender before claiming a replacement generation."""
     from base.agents.impersonation.relay import record_degradation
@@ -651,14 +656,16 @@ async def _handle_stale_relay(
         )
         return
     if (
-        child is not None
+        not confirmed_exit
+        and child is not None
         and child.process.poll() is None
         and time.monotonic() - child.spawned_at < _RELAY_READY_TIMEOUT_S
     ):
         return
     minted_at = session.get("relay_minted_at")
     if (
-        minted_at is not None
+        not confirmed_exit
+        and minted_at is not None
         and (datetime.now(UTC) - minted_at).total_seconds() < _RELAY_READY_TIMEOUT_S
     ):
         return
