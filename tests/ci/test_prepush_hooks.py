@@ -19,10 +19,10 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-GUARD = ROOT / "scripts/prepush-guard.sh"
+GUARD = ROOT / "scripts/hooks/prepush-guard.sh"
 CHECK = ROOT / "scripts/provision/check_git_hooks.py"
-BRANCH_LINT = ROOT / "scripts/prepush-branch-lint.sh"
-PYRIGHT_FILES = ROOT / "scripts/prepush-pyright-files.sh"
+BRANCH_LINT = ROOT / "scripts/hooks/prepush-branch-lint.sh"
+PYRIGHT_FILES = ROOT / "scripts/hooks/prepush-pyright-files.sh"
 INSTALL = ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push"
 
 
@@ -113,7 +113,7 @@ def test_pyright_hook_scoped_to_branch_diff() -> None:
     assert pyright["verbose"] is True
     assert pyright["always_run"] is True
     assert pyright["pass_filenames"] is False
-    assert pyright["entry"] == "bash scripts/prepush-pyright-files.sh"
+    assert pyright["entry"] == "bash scripts/hooks/prepush-pyright-files.sh"
 
 
 def test_prepush_parity_hooks_configured() -> None:
@@ -130,7 +130,7 @@ def test_prepush_parity_hooks_configured() -> None:
     assert branch_diff["always_run"] is True
     assert branch_diff["verbose"] is True
     assert branch_diff["pass_filenames"] is False
-    assert branch_diff["entry"] == "bash scripts/prepush-branch-lint.sh"
+    assert branch_diff["entry"] == "bash scripts/hooks/prepush-branch-lint.sh"
 
     freshness = hooks["lint-prepush-artifact-freshness"]
     assert freshness["stages"] == ["pre-push"]
@@ -245,7 +245,7 @@ def test_pyright_files_skips_when_no_python_files_changed(tmp_path: Path) -> Non
 def test_pyright_files_scopes_to_changed_existing_python_files(tmp_path: Path) -> None:
     """Only Added/Copied/Modified/Renamed .py files that still exist on HEAD
     are handed to pyright -- a deleted .py file is excluded the same way
-    scripts/prepush-branch-lint.sh's range is (pre-commit's own ACMR
+    scripts/hooks/prepush-branch-lint.sh's range is (pre-commit's own ACMR
     diff-filter), and an untouched .py file is never included.
     """
     repo = tmp_path / "repo"
@@ -260,10 +260,10 @@ def test_pyright_files_scopes_to_changed_existing_python_files(tmp_path: Path) -
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "branch changes"], check=True)
 
-    # scripts/prepush-pyright-files.sh execs `scripts/prepush-guard.sh` by a
+    # scripts/hooks/prepush-pyright-files.sh execs `scripts/hooks/prepush-guard.sh` by a
     # RELATIVE path, so the fake repo needs one; symlink the real one in.
-    (repo / "scripts").mkdir()
-    (repo / "scripts/prepush-guard.sh").symlink_to(GUARD)
+    (repo / "scripts/hooks").mkdir(parents=True)
+    (repo / "scripts/hooks/prepush-guard.sh").symlink_to(GUARD)
     pyright_bin = repo / ".venv/bin/pyright"
     pyright_bin.parent.mkdir(parents=True)
     argv_log = repo / "pyright-argv.json"

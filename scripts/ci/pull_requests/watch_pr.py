@@ -1,6 +1,6 @@
 """Optional Ava watcher: watch a PR's CI and wake the agent once it settles.
 
-This Ava lifecycle wrapper is optional; contributors can poll ci_utils.py directly.
+This Ava lifecycle wrapper is optional; contributors can poll scripts/ci/cli.py directly.
 One-shot — delivers exactly one wake message, then exits. Launch it from an
 agent-profile process carrying the runner DB and Redis URLs with
 `ava.watcher.launch(code, timeout=..., name="ci-watch-<pr>")` right after
@@ -17,7 +17,7 @@ error stops after one attempt. Exit codes: 0 the wake was delivered, 1 the CI
 probe raised, 2 delivery failed — the absolute verdict path and cause are in
 the log and exit notice, and the persisted file is the fallback record.
 
-Uses `scripts/ci_utils.py:check_ci` — the repo-provided, correct CI polling
+Uses `scripts/ci/cli.py:check_ci` — the repo-provided, correct CI polling
 logic.  Do NOT write ad-hoc `gh pr checks` + exit-code checks: `gh pr checks`
 exits non-zero when a check FAILS, so a `returncode == 0` condition silently
 drops the red case and the watcher only wakes on the timeout — exactly the bug
@@ -65,7 +65,7 @@ REPO_ROOT = ""  # e.g. "/home/user/ava/.worktrees/ava-1234-task" — the worktre
 # (or checkout) the PR branch is on. gh resolves the repo from
 # cwd, so the watcher chdirs here before every poll.
 PR_NUMBER = ""  # e.g. "1234"
-CI_UTILS = ""  # e.g. "/home/user/ava/scripts" — directory containing ci_utils.py
+CI_UTILS = ""  # e.g. "/home/user/ava" — checkout containing scripts/ci/cli.py
 CHECK_EVERY = 60  # seconds between polls
 NO_CHECKS_RETRIES = 3  # consecutive NO_CHECKS verdicts tolerated before waking
 TIMEOUT_S = 7200  # hard stop; reports "timed out" instead of a verdict
@@ -82,7 +82,7 @@ VERDICT_PATH = (workspace_dir(WATCHER_ID) / VERDICT_FILE).resolve()
 
 os.chdir(REPO_ROOT)
 sys.path.insert(0, CI_UTILS)
-from ci_utils import CIStatus, check_ci  # noqa: E402
+from scripts.ci.cli import CIStatus, check_ci  # noqa: E402
 
 
 def persistent_config_cause(exc: Exception) -> str | None:

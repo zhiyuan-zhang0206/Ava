@@ -100,7 +100,7 @@ _CJK = chr(0x4E2D)
 _TAILNET_IP = ".".join(["100", "64", "1", "2"])  # spelled in pieces: the lint scans this file too
 
 CASES = [
-    Case("scripts.lint.no_emoji", "base/x.py", f"x = '{_EMOJI}'\n"),
+    Case("scripts.lint.diagnostics.no_emoji", "base/x.py", f"x = '{_EMOJI}'\n"),
     Case(
         "scripts.lint.diagnostics.logger_add_diagnose",
         "base/x.py",
@@ -138,7 +138,7 @@ CASES = [
         "ava.files.read = my_read\n",
     ),
     Case(
-        "scripts.lint_pool_keepalives",
+        "scripts.lint.pool_keepalives",
         "scripts/x.py",
         "pool = ConnectionPool(url, min_size=1, max_size=2, open=True)\n",
     ),
@@ -160,7 +160,11 @@ CASES = [
         "import time\n\n\nasync def f():\n    time.sleep(1)\n",
         patches={"_stale_repo_helpers": list},
     ),
-    Case("scripts.lint.time_bomb", "tests/test_a.py", "def test_x():\n    f(since='2026-09-06')\n"),
+    Case(
+        "scripts.lint.diagnostics.time_bomb",
+        "tests/test_a.py",
+        "def test_x():\n    f(since='2026-09-06')\n",
+    ),
     Case(
         "scripts.content_lint.lint_quiesced_loops",
         "services/x.py",
@@ -245,7 +249,7 @@ def test_code_structure_turns_changed_files_into_explicit_targets(tmp_path: Path
 
 
 def test_zombie_ignores_checks_only_the_changed_python_files(tmp_path: Path) -> None:
-    from scripts.lint import zombie_pyright_ignores as zombie
+    from scripts.lint.diagnostics import zombie_pyright_ignores as zombie
 
     for rel in ("a.py", "notes.md", "pyproject.toml"):
         (tmp_path / rel).write_text("x\n")

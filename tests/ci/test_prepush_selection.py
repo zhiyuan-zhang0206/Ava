@@ -21,10 +21,10 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-BRANCH_LINT = ROOT / "scripts/prepush-branch-lint.sh"
+BRANCH_LINT = ROOT / "scripts/hooks/prepush-branch-lint.sh"
 FRESHNESS = ROOT / "scripts/provision/prepush_freshness.py"
-IF_CHANGED = ROOT / "scripts/prepush-if-changed.sh"
-PRECOMMIT_ESLINT = ROOT / "scripts/precommit-eslint.sh"
+IF_CHANGED = ROOT / "scripts/hooks/prepush-if-changed.sh"
+PRECOMMIT_ESLINT = ROOT / "scripts/hooks/precommit-eslint.sh"
 SELECTOR = ROOT / "scripts/provision/prepush_frontend.py"
 
 
@@ -111,7 +111,7 @@ def test_eslint_keeps_commit_hook_and_scopes_push_contribution() -> None:
     hooks = _hooks()
     changed, whole = hooks["frontend-eslint"], hooks["frontend-eslint-full"]
     assert "stages" not in changed, "the changed-files run belongs to the commit stage"
-    assert changed["entry"] == "bash scripts/precommit-eslint.sh"
+    assert changed["entry"] == "bash scripts/hooks/precommit-eslint.sh"
     assert "pass_filenames" not in changed, "it must be handed the changed files"
     assert whole["stages"] == ["pre-push"]
     assert whole["pass_filenames"] is False
@@ -231,8 +231,11 @@ def freshness_repo(tmp_path: Path) -> tuple[Path, Path]:
     `.venv/bin/pre-commit` that logs the hook it was asked to run. Returns (repo, call log)."""
     repo = tmp_path / "repo"
     (repo / "scripts/provision").mkdir(parents=True)
+    (repo / "scripts/hooks").mkdir(parents=True)
     (repo / "scripts/provision/prepush_freshness.py").write_text(FRESHNESS.read_text())
-    (repo / "scripts/prepush-base.sh").write_text((ROOT / "scripts/prepush-base.sh").read_text())
+    (repo / "scripts/hooks/prepush-base.sh").write_text(
+        (ROOT / "scripts/hooks/prepush-base.sh").read_text()
+    )
     (repo / ".pre-commit-config.yaml").write_text((ROOT / ".pre-commit-config.yaml").read_text())
     calls = tmp_path / "calls.log"
     fake = repo / ".venv/bin/pre-commit"
@@ -459,7 +462,7 @@ def test_patch_targets_full_scan_is_gated_on_python_changes() -> None:
     assert hook["always_run"] is True  # the gate lives in the entry, which sees deletions
     assert hook["verbose"] is True
     assert shlex.split(hook["entry"]) == [
-        "bash", "scripts/prepush-if-changed.sh", r"\.py$", "--",
+        "bash", "scripts/hooks/prepush-if-changed.sh", r"\.py$", "--",
         ".venv/bin/python", "scripts/lint/patch_targets.py",
     ]  # fmt: skip
 
@@ -550,7 +553,7 @@ def test_rebased_upstream_ui_does_not_invoke_tool(repo: Path, tool: str) -> None
     }[tool]
     config.write_text(
         "repos:\n- repo: local\n  hooks:\n  - id: frontend\n    name: frontend\n"
-        f"    entry: bash {ROOT / 'scripts/prepush-guard.sh'} {tool} -- bash -c 'cd ui/web && {legacy_command}'\n"
+        f"    entry: bash {ROOT / 'scripts/hooks/prepush-guard.sh'} {tool} -- bash -c 'cd ui/web && {legacy_command}'\n"
         "    language: system\n    stages: [pre-push]\n    files: ^ui/web/.*\\.(ts|tsx)$\n    pass_filenames: false\n"
     )
     legacy = subprocess.run(

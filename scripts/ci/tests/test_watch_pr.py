@@ -1,6 +1,6 @@
 """Hermetic tests for the optional Ava CI watcher.
 
-`scripts/ci/watch_pr.py` is a launched code string,
+`scripts/ci/pull_requests/watch_pr.py` is a launched code string,
 not an importable module: the launching agent reads the file, string-substitutes
 the placeholder assignments (REPO_ROOT / PR_NUMBER / CI_UTILS / WATCHER_ID), then
 hands the result to `ava.watcher.launch`. These tests exercise that same
@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_TEMPLATE = _REPO_ROOT / "scripts" / "ci" / "watch_pr.py"
+_TEMPLATE = _REPO_ROOT / "scripts" / "ci" / "pull_requests" / "watch_pr.py"
 # The substitution below pins PR_NUMBER = "1234"; the verdict file name follows
 # from it (the template's VERDICT_FILE).
 _VERDICT_NAME = "ci-verdict-1234.txt"
@@ -34,7 +34,7 @@ _VERDICT_NAME = "ci-verdict-1234.txt"
 def _ci_status() -> Any:
     """The repo's own CIStatus enum — the watcher branches on it, never strings."""
     spec = importlib.util.spec_from_file_location(
-        "ci_utils_under_watcher_test", _REPO_ROOT / "scripts" / "ci_utils.py"
+        "ci_utils_under_watcher_test", _REPO_ROOT / "scripts" / "ci" / "cli.py"
     )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -156,7 +156,7 @@ def _run_watcher(
         # sys.modules: a stub left there leaks into fixture teardown, which
         # re-imports `ava` (same substitution the generated-watcher tests use).
         ("import ava\n", ""),
-        ("from ci_utils import CIStatus, check_ci  # noqa: E402\n", ""),
+        ("from scripts.ci.cli import CIStatus, check_ci  # noqa: E402\n", ""),
     )
     for old, new in substitutions:
         assert old in code, f"template no longer contains {old!r} — update this test"

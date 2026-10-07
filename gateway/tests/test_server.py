@@ -9,7 +9,7 @@ import pytest
 
 from base.config import settings
 from base.db import Database
-from gateway import _server
+from gateway.cluster import server as _server
 
 
 def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
@@ -32,7 +32,7 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _record_serve)
 
-    with caplog.at_level(logging.WARNING, logger="gateway._server"):
+    with caplog.at_level(logging.WARNING, logger="gateway.cluster.server"):
         _server.main()
 
     assert captured["workers"] == 1

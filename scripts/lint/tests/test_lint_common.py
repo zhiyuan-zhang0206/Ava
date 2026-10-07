@@ -12,14 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import (
-    clock_lattice,
-    code_structure,
-    no_emoji,
-    termination_source,
-    time_bomb,
-)
-from scripts.lint.diagnostics import logger_add_diagnose, loguru_format
+from scripts.lint import clock_lattice, code_structure, termination_source
+from scripts.lint.diagnostics import logger_add_diagnose, loguru_format, no_emoji, time_bomb
 from scripts.structure import lint_common
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]

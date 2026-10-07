@@ -112,7 +112,7 @@ ui/web/junit.xml
 # credits panel; regenerated on demand, not repo content.
 /.impeccable.md
 
-# CI-usage attribution ledger — runtime data of scripts/ci/accounting.py,
+# CI-usage attribution ledger — runtime data of scripts/ci/pull_requests/accounting.py,
 # appended on cluster hosts by the c9-daily-report schedule. Gitignored so
 # the source-tree guard stays quiet (the guard's documented contract for
 # gitignored paths).

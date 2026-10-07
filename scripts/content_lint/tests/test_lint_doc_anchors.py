@@ -185,8 +185,8 @@ def test_dev_skill_doc_is_in_scope(lint):
 
 
 def test_non_markdown_file_in_scope_is_scanned(lint):
-    # `scripts/ci/watch_pr.py` cites
-    # `scripts/ci_utils.py:check_ci` in its docstring — an `.md`-only scan would
+    # `scripts/ci/pull_requests/watch_pr.py` cites
+    # `scripts/ci/cli.py:check_ci` in its docstring — an `.md`-only scan would
     # walk straight past it, which is how the `#65` rename lost `db/schema.sql`.
     mod, _, skills, _ = lint
     (skills / "helper.py").write_text('"""Wraps `pkg/mod.py:renamed_away`."""\n')

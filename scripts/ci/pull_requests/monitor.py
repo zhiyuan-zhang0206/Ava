@@ -6,8 +6,8 @@ import json
 import sys
 import time
 
-from scripts.ci import status
-from scripts.ci.status import (
+from scripts.ci.pull_requests import status
+from scripts.ci.pull_requests.status import (
     _LIMBO_AGE_SECONDS,
     MAX_CONSECUTIVE_ERRORS,
     CIResult,

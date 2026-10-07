@@ -386,7 +386,7 @@ on a perfectly healthy report: a queue status comment lists
 **passed**, because the state is in the box, not in the word. Read the field that
 carries it — that same comment ships `{"version": 1, "state": "merged", ...}` as a
 machine payload directly above the prose — or ask the API (`gh pr view --json
-state,mergedAt`, `scripts/ci_utils.py`). The same discipline as *discriminate on
+state,mergedAt`, `scripts/ci/cli.py`). The same discipline as *discriminate on
 the observed values, never the names*, applied to tool output instead of test
 output: a monitor keyed on vocabulary answers a question nobody asked, and it
 answers it confidently.

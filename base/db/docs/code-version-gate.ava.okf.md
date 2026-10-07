@@ -28,7 +28,7 @@ A tree that is not a git checkout raises `CodeVersionError`; nothing substitutes
 ## The minimum
 
 `deployment_state.min_code_version` (`BIGINT NOT NULL DEFAULT 0`). Every gateway
-start raises it once, in `gateway/_server.py` after the schema assertion and the
+start raises it once, in `gateway/cluster/server.py` after the schema assertion and the
 logger init: `raise_min_code_version` runs `UPDATE ... SET min_code_version =
 GREATEST(min_code_version, <version>) WHERE id = 1` and refuses when the singleton
 row is missing. A runner's local gateway does not (`is_gateway()`), its login

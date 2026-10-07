@@ -171,7 +171,7 @@ to what the branch can do with the machine, not to what it can steal.
 
 ### Observing
 
-The gateway binds `127.0.0.1` without a cluster secret (`gateway/_server.py`) and the
+The gateway binds `127.0.0.1` without a cluster secret (`gateway/cluster/server.py`) and the
 frontend starts with `next start -H 127.0.0.1` (`ui/web/package.json`), so `docker run -p`
 cannot reach either. A cluster secret would bind the gateway to all interfaces and
 require an `AVA_TRANSPORT_ENCRYPTION` declaration. The browser dials

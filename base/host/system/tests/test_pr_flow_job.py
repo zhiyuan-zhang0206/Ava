@@ -43,7 +43,7 @@ def test_launchd_plist_schedules_the_daily_sampler(tmp_path: Path) -> None:
     command = values[2]
     assert command is not None
     assert "'/work tree/.venv/bin/python'" in command
-    assert "/check/out/scripts/pr_flow_export.py" in command
+    assert "/check/out/scripts/ci/pull_requests/pr_flow_export.py" in command
     assert (
         "<key>StartCalendarInterval</key>\n    <dict>\n"
         "            <key>Hour</key>\n            <integer>0</integer>\n"

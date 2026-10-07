@@ -1,4 +1,4 @@
-"""`scripts/lint_pool_keepalives.py` — no psycopg pool without TCP keepalives.
+"""`scripts/lint/pool_keepalives.py` — no psycopg pool without TCP keepalives.
 
 The invariant is easy to restate and easy to forget: a pool whose connections
 carry no keepalives hands out sockets that may have died during a host sleep, and
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint_pool_keepalives")
+_lint = importlib.import_module("scripts.lint.pool_keepalives")
 
 
 def _violations(src: str) -> list[tuple[int, str]]:

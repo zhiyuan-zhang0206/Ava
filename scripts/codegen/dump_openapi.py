@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # Put project root on sys.path so `from gateway.app import app` finds the module.
-# Same pattern as scripts/start_gateway.py.
+# Same pattern as scripts/entrypoints/gateway.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.host.env.dotenv_boot import enter_scratch_home
 

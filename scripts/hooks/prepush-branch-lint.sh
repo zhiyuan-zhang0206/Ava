@@ -14,7 +14,7 @@
 #
 # The commit-stage hooks judge only the files they are handed, so this run costs about
 # what one commit over the same files costs. That is why it takes no load threshold and no
-# lock (unlike the heavy tools behind scripts/prepush-guard.sh): it is light enough to run
+# lock (unlike the heavy tools behind scripts/hooks/prepush-guard.sh): it is light enough to run
 # every time, and a load-dependent skip would leave rebased commits unchecked at random.
 #
 # Missing range fails explicitly; a missing pre-commit executable still reports

@@ -338,7 +338,7 @@ def _assert_pr_flow_tiles_mirror_specs(
 def test_pr_flow_panels_match_the_otlp_contract() -> None:
     """Export-job emission, Prometheus instruments, and dashboard tiles share names.
 
-    The daily PR-flow export job (``scripts/pr_flow_export.py``, task #2139)
+    The daily PR-flow export job (``scripts/ci/pull_requests/pr_flow_export.py``, task #2139)
     re-emits one absolute sample per complete cluster-tz day as day-labeled
     OTLP gauges, so each by-day tile reads its series back with ``max by
     (day) (last_over_time(...[26h]))`` — 26h keeps the last sample alive

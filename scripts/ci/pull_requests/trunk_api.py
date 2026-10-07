@@ -11,7 +11,7 @@ from pathlib import Path
 
 # The Ava checkout root this module ships in — anchors base-freshness git reads
 # against THIS repo's origin regardless of the caller's cwd (task #2496).
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 API_BASE_URL = "https://api.trunk.io/v1"
 REQUEST_TIMEOUT_SECONDS = 30

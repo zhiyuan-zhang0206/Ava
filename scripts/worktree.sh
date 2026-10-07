@@ -36,7 +36,7 @@ cmd_clean() {
         branch="$task"
     fi
     local wt_path="$WORKTREE_ROOT/$task"
-    local guard_script="$REPO_ROOT/scripts/check_worktree_remove.py"
+    local guard_script="$REPO_ROOT/scripts/host_ops/check_worktree_remove.py"
 
     if [[ ! -d "$wt_path" ]]; then
         die "worktree not found: $wt_path"
@@ -150,7 +150,7 @@ Commands:
 To create a worktree, run: bash scripts/setup-worktree.sh <task-name>
 
 clean is anchor-guarded: it refuses when live sessions or processes are still
-anchored under the worktree (scripts/check_worktree_remove.py), when that
+anchored under the worktree (scripts/host_ops/check_worktree_remove.py), when that
 check cannot run (no python with psutil, or the checker missing), or when git
 cannot remove the tree. --force overrides explicitly: the anchor check becomes
 a warning (skipped entirely when it cannot run) and a failed removal is retried

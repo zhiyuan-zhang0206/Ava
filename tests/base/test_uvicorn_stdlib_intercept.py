@@ -132,7 +132,7 @@ def _assert_serve_is_called_with_the_serve_kwargs_assembly(tree: ast.Module) -> 
         and isinstance(node.func, ast.Name)
         and node.func.id == "serve"
     ]
-    assert serve_calls, "serve(...) call not found in gateway/_server.py"
+    assert serve_calls, "serve(...) call not found in gateway/cluster/server.py"
     for call in serve_calls:
         assert not call.keywords, "serve must receive the serve_kwargs() assembly positionally"
         assert len(call.args) == 1
@@ -161,7 +161,7 @@ def test_gateway_uvicorn_run_passes_log_config_none() -> None:
     builds uvicorn's config from), so the pin follows the call into the returned
     dict literal; a future edit cannot silently reintroduce uvicorn's dictConfig
     clobber."""
-    src = (_REPO_ROOT / "gateway" / "_server.py").read_text()
+    src = (_REPO_ROOT / "gateway" / "cluster" / "server.py").read_text()
     tree = ast.parse(src)
 
     _assert_serve_is_called_with_the_serve_kwargs_assembly(tree)

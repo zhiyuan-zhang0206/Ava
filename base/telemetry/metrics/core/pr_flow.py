@@ -1,7 +1,7 @@
 """Core PR-flow panels (task #2139) — a separate registration module.
 
 The three PR-flow tiles read what the daily macmini export job
-(``scripts/pr_flow_export.py``, ``pr_flow_daily`` / ``pr_flow_run`` events)
+(``scripts/ci/pull_requests/pr_flow_export.py``, ``pr_flow_daily`` / ``pr_flow_run`` events)
 publishes as OTLP gauges through ``base/telemetry/otlp/telemetry_otlp.py``: one absolute
 sample per complete cluster-tz day in a rolling 30-day window, re-emitted on
 every run, plus the point-in-time Trunk queue depth.
@@ -38,7 +38,7 @@ def core_metrics() -> list[MetricSpec]:
             description=(
                 "Ready-for-review to merge latency by complete cluster-tz day "
                 "\u2014 median and p90 seconds, sampled by the daily PR-flow export "
-                "job (scripts/pr_flow_export.py) into the "
+                "job (scripts/ci/pull_requests/pr_flow_export.py) into the "
                 "ava_pr_flow_daily_ready_to_merge_median_seconds / _p90_seconds "
                 "gauges. One row per day; a day leaves the table once its last "
                 "sample ages past the 26h lookback (a missed run shows as a gap)."

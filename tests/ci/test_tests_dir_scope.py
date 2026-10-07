@@ -201,7 +201,7 @@ def test_time_bomb_lint_default_scan_reaches_a_package_tests_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Rules 2 and 3 read test files: the default scan must find the ones inside packages."""
-    lint = importlib.import_module("scripts.lint.time_bomb")
+    lint = importlib.import_module("scripts.lint.diagnostics.time_bomb")
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _time_bomb_root(tmp_path)
     _write(tmp_path, "tests/test_window.py", 'since = "2026-09-06"\n')
@@ -217,7 +217,7 @@ def test_time_bomb_lint_default_scan_reaches_a_package_tests_directory(
 def test_time_bomb_lint_rule_3_does_not_govern_production_modules(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint = importlib.import_module("scripts.lint.time_bomb")
+    lint = importlib.import_module("scripts.lint.diagnostics.time_bomb")
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _time_bomb_root(tmp_path)
     _write(tmp_path, "base/packages/window.py", 'since = "2026-09-06"\n')

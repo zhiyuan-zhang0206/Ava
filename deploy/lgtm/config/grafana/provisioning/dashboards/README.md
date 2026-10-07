@@ -78,7 +78,7 @@ also appends each query part's bucket divisor (`[5m]` -> ` / 5`), so title and
 query cannot drift.
 
 The `PR flow` row (task #2139) reads the daily macmini export job
-(`scripts/pr_flow_export.py`, 00:25 cluster time) back as Prometheus gauges:
+(`scripts/ci/pull_requests/pr_flow_export.py`, 00:25 cluster time) back as Prometheus gauges:
 one absolute sample per complete cluster-tz day, re-emitted on every run so
 the trailing window stays visible. Each by-day tile is a **fixed-lookback**
 instant query, `max by (day) (last_over_time(<gauge>[26h]))` — 26h keeps a

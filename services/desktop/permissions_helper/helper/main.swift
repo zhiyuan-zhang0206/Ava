@@ -1723,7 +1723,7 @@ struct PanelArgs {
 }
 
 /// The panel controller: grant matrix, tier picker, the one-click fill-missing
-/// run driven through scripts/tcc-onboard-helper-grants.py (the single source
+/// run driven through scripts/host_ops/tcc/onboard-helper-grants.py (the single source
 /// of truth for probes and triggers), and a live run log.
 final class PanelDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate {
     private static let rowOrder = [
@@ -1761,7 +1761,7 @@ final class PanelDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildWindow()
         if let repo = args.repo,
-           FileManager.default.fileExists(atPath: repo + "/scripts/tcc-onboard-helper-grants.py") {
+           FileManager.default.fileExists(atPath: repo + "/scripts/host_ops/tcc/onboard-helper-grants.py") {
             runTool(check: true)
         } else {
             setStatus(panelString("panel.error.noRepo"), color: .systemRed)
@@ -1889,7 +1889,7 @@ final class PanelDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             return
         }
         let python = repo + "/.venv/bin/python"
-        let tool = repo + "/scripts/tcc-onboard-helper-grants.py"
+        let tool = repo + "/scripts/host_ops/tcc/onboard-helper-grants.py"
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: python), fileManager.fileExists(atPath: tool) else {
             setStatus(panelString("panel.error.noRepo"), color: .systemRed)

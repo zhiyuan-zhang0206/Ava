@@ -41,8 +41,8 @@ def _clean(repo: Path, home: Path, *extra: str) -> subprocess.CompletedProcess[s
 def _make_repo(tmp_path: Path) -> Path:
     """A throwaway repo shaped like the dev clone: the script + its checker."""
     repo = tmp_path / "repo"
-    (repo / "scripts").mkdir(parents=True)
-    for name in ("worktree.sh", "check_worktree_remove.py"):
+    (repo / "scripts" / "host_ops").mkdir(parents=True)
+    for name in ("worktree.sh", "host_ops/check_worktree_remove.py"):
         (repo / "scripts" / name).write_bytes((_REPO_ROOT / "scripts" / name).read_bytes())
     _git(repo, "init", "-q", "-b", "main")
     _git(
@@ -159,7 +159,7 @@ def test_unusable_checker_environment_refuses_and_force_overrides(tmp_path: Path
 def test_missing_checker_refuses_and_force_overrides(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     target = _add_worktree(repo)
-    (repo / "scripts" / "check_worktree_remove.py").unlink()
+    (repo / "scripts" / "host_ops" / "check_worktree_remove.py").unlink()
     home = _fake_home(tmp_path)
 
     refused = _clean(repo, home, "t1")
@@ -179,7 +179,7 @@ def test_crashed_checker_refuses_and_force_overrides(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     target = _add_worktree(repo)
     _plant_usable_python(repo)
-    (repo / "scripts" / "check_worktree_remove.py").write_text("raise SystemExit(2)\n")
+    (repo / "scripts" / "host_ops" / "check_worktree_remove.py").write_text("raise SystemExit(2)\n")
     home = _fake_home(tmp_path)
 
     refused = _clean(repo, home, "t1")

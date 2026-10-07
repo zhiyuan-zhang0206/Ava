@@ -2,7 +2,7 @@
 values derived from a fixed instant while the derivation can reach the real
 clock, and fixed calendar fixtures bound to window-shaped names in tests.
 
-Run: `.venv/bin/python scripts/lint/time_bomb.py [path ...]` (defaults to the
+Run: `.venv/bin/python scripts/lint/diagnostics/time_bomb.py [path ...]` (defaults to the
 source dirs + tests/; an explicit path that does not exist is an error (stderr +
 exit 1) rather than a silent no-op). Also run automatically via pre-commit.
 
@@ -81,7 +81,7 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import lint_common  # noqa: E402 - standalone script

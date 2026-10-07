@@ -2,9 +2,9 @@
 """`git worktree remove` guard (issue #194) — refuse the removal when live
 sessions or processes are anchored under the worktree.
 
-Usage: python scripts/check_worktree_remove.py <worktree-path>
+Usage: python scripts/host_ops/check_worktree_remove.py <worktree-path>
 
-Run it with the checkout's interpreter (`.venv/bin/python scripts/check_worktree_remove.py
+Run it with the checkout's interpreter (`.venv/bin/python scripts/host_ops/check_worktree_remove.py
 <path>`): the scan needs psutil, which a system python does not have.
 
 Exits 0 when nothing live is anchored under the path, 1 when there is (the
@@ -18,7 +18,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from base.host.env.dotenv_boot import skip_config_fetch
 
 if __name__ == "__main__":
@@ -36,7 +36,7 @@ except ModuleNotFoundError as error:
     print(
         f"MISSING DEPENDENCY {error.name}: {sys.executable} cannot run the live-anchor scan, "
         "so no verdict was reached. Run it with the checkout's interpreter: "
-        ".venv/bin/python scripts/check_worktree_remove.py <worktree-path>",
+        ".venv/bin/python scripts/host_ops/check_worktree_remove.py <worktree-path>",
         file=sys.stderr,
     )
     raise SystemExit(EXIT_MISSING_DEPENDENCY) from None
@@ -44,7 +44,10 @@ except ModuleNotFoundError as error:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("usage: python scripts/check_worktree_remove.py <worktree-path>", file=sys.stderr)
+        print(
+            "usage: python scripts/host_ops/check_worktree_remove.py <worktree-path>",
+            file=sys.stderr,
+        )
         return 2
     target = Path(sys.argv[1])
     hits = find_live_anchors(target)

@@ -16,7 +16,7 @@
 
 set -e
 
-cd "$(dirname "$0")/.."  # repo root
+cd "$(dirname "$0")/../.."  # repo root
 
 .venv/bin/python scripts/codegen/dump_openapi.py
 (cd ui/web && npx --no-install openapi-typescript ./openapi.json -o src/lib/types-generated.ts)

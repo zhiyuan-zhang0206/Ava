@@ -1,4 +1,4 @@
-"""Tests for scripts/ci/job_rerun.py — re-run of failed CI jobs.
+"""Tests for scripts/ci/pull_requests/job_rerun.py — re-run of failed CI jobs.
 
 The behavior this file locks in (issue #102, task #3764): GitHub refuses
 re-runs while the containing run is still going, so jobs of a still-running
@@ -25,7 +25,9 @@ import pytest
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownArgumentType = warning
 
-_MOD_PATH = Path(__file__).resolve().parents[3] / "scripts" / "ci" / "job_rerun.py"
+_MOD_PATH = (
+    Path(__file__).resolve().parents[3] / "scripts" / "ci" / "pull_requests" / "job_rerun.py"
+)
 _MOD_NAME = "ci_job_rerun_under_test"
 _spec = importlib.util.spec_from_file_location(_MOD_NAME, _MOD_PATH)
 assert _spec and _spec.loader

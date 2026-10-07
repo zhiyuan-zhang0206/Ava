@@ -129,7 +129,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             identity_probe=partial(probe_home, settings.services.gateway_health_url),
             healthcheck_module="services.supervision.healthchecks.gateway",
             # SIGTERM lets uvicorn drain in-flight requests for up to the budget the
-            # launch hands it (`gateway._server.serve_kwargs`), then run the lifespan
+            # launch hands it (`gateway.cluster.server.serve_kwargs`), then run the lifespan
             # cleanup: root must wait at least that long.
             stop_ceiling_s=(
                 settings.gateway.gateway_graceful_shutdown_timeout_seconds

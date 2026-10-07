@@ -137,7 +137,7 @@ def test_directory_with_dangling_symlink_member_is_skipped(
 
 def test_test_file_is_exempt(tmp_path: Path) -> None:
     """A test fixture that mounts a throwaway sink against a captured list has
-    no secret in its local frames to leak — exempt like scripts/lint_pool_keepalives.py
+    no secret in its local frames to leak — exempt like scripts/lint/pool_keepalives.py
     exempts tests/ from its equivalent rule."""
     test_dir = tmp_path / "tests"
     test_dir.mkdir()

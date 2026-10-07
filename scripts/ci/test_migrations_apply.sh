@@ -14,8 +14,8 @@
 # agents_meta (column is `id`), causing every UPDATE status='terminated' to 5xx.
 #
 # Usage:
-#   AVA_DB_URL=postgresql://ava@host:5432/ scripts/test_migrations_apply.sh
-#   (or directly PGHOST=postgres PGUSER=ava scripts/test_migrations_apply.sh)
+#   AVA_DB_URL=postgresql://ava@host:5432/ scripts/ci/test_migrations_apply.sh
+#   (or directly PGHOST=postgres PGUSER=ava scripts/ci/test_migrations_apply.sh)
 # Default: connect to postgres:5432 (CI container service sidecar default name).
 set -euo pipefail
 
@@ -34,7 +34,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-REPO_ROOT="${AVA_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+REPO_ROOT="${AVA_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$REPO_ROOT"
 
 echo "-> create $TEST_DB on $PGHOST:$PGPORT"

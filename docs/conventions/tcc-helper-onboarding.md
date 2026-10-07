@@ -23,15 +23,15 @@ first (per host), then flip.
 
 ## The tool
 
-`scripts/tcc-onboard-helper-grants.py`, run on the host with the repository
+`scripts/host_ops/tcc/onboard-helper-grants.py`, run on the host with the repository
 venv and the user present:
 
 ```bash
-.venv/bin/python scripts/tcc-onboard-helper-grants.py --check    # inventory only, zero dialogs
-.venv/bin/python scripts/tcc-onboard-helper-grants.py            # interactive: trigger missing grants
-.venv/bin/python scripts/tcc-onboard-helper-grants.py --tier L2  # the machine target tier (design v1)
-.venv/bin/python scripts/tcc-onboard-helper-grants.py --items folders --timeout 180
-.venv/bin/python scripts/tcc-onboard-helper-grants.py --fill-pending --confirm-user-present
+.venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --check    # inventory only, zero dialogs
+.venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py            # interactive: trigger missing grants
+.venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --tier L2  # the machine target tier (design v1)
+.venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --items folders --timeout 180
+.venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --fill-pending --confirm-user-present
                                                                  # + extended-group fills (experimental)
 ```
 
@@ -39,7 +39,7 @@ venv and the user present:
   (`services.desktop.permissions_helper.client.spawn_process`), so tccd attributes the
   request to `com.ava.permissions-helper`. The inventory probe uses the same
   helper-spawned `TCCAccessPreflight` pattern as
-  `scripts/tcc-verify-spawn-chain.sh`: zero dialogs, repeatable.
+  `scripts/host_ops/tcc/verify-spawn-chain.sh`: zero dialogs, repeatable.
 - The interactive run waits for each dialog decision (default 90s per item,
   overridable with `--timeout`), skips items that are already granted, and ends
   with a summary plus a JSON report under the workdir (default
@@ -103,7 +103,7 @@ are never attempted, by decision.
 - **Never use a Desktop-listing probe to verify.** A listing blocks on a
   permission prompt whenever the grant is missing, and a pending prompt blocks
   synthesized input machine-wide until a human clicks it. Verification is
-  preflight-only; see `scripts/tcc-verify-spawn-chain.sh` for the pattern.
+  preflight-only; see `scripts/host_ops/tcc/verify-spawn-chain.sh` for the pattern.
 - **A helper build without the nursery `spawn` wire method can not be
   onboarded.** Older builds answer `unknown method: spawn`; rebuild the helper
   first (same signing identity), then run this tool.
@@ -210,14 +210,14 @@ Per-machine rebuild/reinstall flow gains one step, inserted before the flip:
 1. Rebuild / reinstall the helper (design: stable signing identity, pinned
    designated requirement -- a rebuild that changes identity invalidates every
    existing grant and the onboarding must be redone).
-2. Run the inventory: `.venv/bin/python scripts/tcc-onboard-helper-grants.py --check`.
+2. Run the inventory: `.venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --check`.
 3. Complete the missing grants with the user present: run the tool without
    `--check`; add `--fill-pending --confirm-user-present` to also attempt the
    extended groups (`appdata` / `media` / `icloud`) that still lack their
    grant (experimental methods -- see the archive).
 4. Flip the backend: `ava config set permissions_helper_spawn=true --machine
    <host>` (official config API), restart the host's spawn-related services,
-   then verify with `scripts/tcc-verify-spawn-chain.sh` (PASS = the probe's
+   then verify with `scripts/host_ops/tcc/verify-spawn-chain.sh` (PASS = the probe's
    requests attributed to the helper; the per-service preflight results it
    prints are informational).
 

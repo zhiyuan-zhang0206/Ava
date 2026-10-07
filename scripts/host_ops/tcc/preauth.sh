@@ -10,7 +10,7 @@
 # client ping, attempts sqlite3 -readonly TCC queries, and prints the manual grants.
 set -euo pipefail
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)
 readonly repo_root
 readonly python_bin="$repo_root/.venv/bin/python"
 readonly helper_bundle_id="com.ava.permissions-helper"

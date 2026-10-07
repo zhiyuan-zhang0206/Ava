@@ -49,7 +49,7 @@ Endpoint implementations live in the gateway's feature packages
 mounted at the bottom of this file in a fixed order. Lifespan and middleware registration remain
 in this module; exception-to-envelope adapters live in `gateway/middleware/error_handlers.py`.
 
-Start: `.venv/bin/python scripts/start_gateway.py` (or `python -m gateway`)
+Start: `.venv/bin/python scripts/entrypoints/gateway.py` (or `python -m gateway`)
 -> uvicorn :8000 on all interfaces, both IPv4 and IPv6 (reachable on the
 cluster's private network)
 """
@@ -73,7 +73,6 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import model_catalog
-from gateway._server import main as _run_gateway
 from gateway.agents import conversation as conversation_router
 from gateway.agents import lifecycle as agents_lifecycle_router
 from gateway.agents import notices as notices_router
@@ -94,6 +93,7 @@ from gateway.cluster import ops_monitor as ops_monitor_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
 from gateway.cluster.roster_probe import IdentityMismatchLog
+from gateway.cluster.server import main as _run_gateway
 from gateway.cluster.status import StatusCache
 from gateway.events import agent_events as agent_events_router
 from gateway.events import computer_traces as computer_traces_router
