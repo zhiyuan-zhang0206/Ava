@@ -707,8 +707,8 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
     (head + tail) with the full text archived to the workspace .exec_output/
     ring — same logic as exec output overflow; the archive path rides in the
     note so the agent can read / grep the complete content."""
-    from agent.graph.exec import output
     from base.config import settings
+    from base.paths import workspace_dir
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -718,8 +718,8 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
     (repo / "foo.py").write_text("# code")
 
     monkeypatch.setattr(settings.sandbox, "exec_output_max_chars", 500)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    overflow = tmp_path / "overflow"
-    monkeypatch.setattr(output, "_overflow_dir", lambda: overflow)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    pin_agent(123)
+    overflow = workspace_dir(123) / ".exec_output"
 
     ava.state = _make_state_with_cwd(str(repo))
     ava.state_update = {}
