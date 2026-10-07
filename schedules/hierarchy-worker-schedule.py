@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from base.db import Database
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from services.derived.hierarchy_worker.roots import prepare, tick
+from services.derived.hierarchy_worker.runner import FallbackScanCadence
 from base.daemon.schedules.watcher import next_fire
 
 # One tick a minute: the scan is one aggregated query over `checkpoints`, so
@@ -34,19 +35,20 @@ from base.daemon.schedules.watcher import next_fire
 CRON = "* * * * *"
 
 
-def _fire_tick(_trigger: None) -> None:
-    tick()
-
-
 def main() -> None:
     db = Database.from_settings()
     prepare()
-    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=_fire_tick)
+    cadence = FallbackScanCadence()
+
+    def fire_tick(_trigger: None) -> None:
+        tick(cadence)
+
+    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=fire_tick)
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
         while datetime.now(UTC) < nxt:
             time.sleep(30)
-        fire_slot_once(db, nxt, None, fire=_fire_tick)
+        fire_slot_once(db, nxt, None, fire=fire_tick)
 
 
 if __name__ == "__main__":
