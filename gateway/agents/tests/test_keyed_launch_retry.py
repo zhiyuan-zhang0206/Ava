@@ -1,8 +1,11 @@
 """Real HTTP retry receipts, frozen identities and repeatable native wake fences."""
 
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 from uuid import UUID, uuid4
 
+import httpx2 as httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -11,21 +14,25 @@ from base.config import settings
 from gateway.agents import launch_retry
 from gateway.agents import router as birth_router
 from gateway.app import app
-from ops.rpc_schemas import SpawnedAgent
+from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
 
 @pytest.fixture
-def client(monkeypatch, set_machine_identity, db_conn):
+def client(
+    monkeypatch: pytest.MonkeyPatch,
+    set_machine_identity: Callable[..., None],
+    db_conn: psycopg.Connection[Any],
+) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     db_conn.execute("INSERT INTO machines(name) VALUES ('local-test') ON CONFLICT DO NOTHING")
     db_conn.commit()
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "retry-test-secret")
 
-    async def born(_db, _target, body):
+    async def born(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)
 
-    async def reconcile(*_args, **_kwargs):
+    async def reconcile(*_args: object, **_kwargs: object) -> dict[str, bool]:
         return {"wake_published": False}
 
     monkeypatch.setattr(birth_router, "forward_spawn_to_remote", born)
@@ -34,7 +41,7 @@ def client(monkeypatch, set_machine_identity, db_conn):
         yield value
 
 
-def birth(client):
+def birth(client: TestClient) -> tuple[int, str]:
     result = client.post(
         "/api/agents", json={"machine": "local-test", "prompt": "once", "prompt_source": "user"}
     )
@@ -45,7 +52,7 @@ def birth(client):
     return agent_id, prior
 
 
-def submit(client, agent_id, prior, key="operation"):
+def submit(client: TestClient, agent_id: int, prior: str, key: str = "operation") -> httpx.Response:
     return client.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
         json={"expected_prior_attempt_id": prior},
@@ -53,10 +60,16 @@ def submit(client, agent_id, prior, key="operation"):
     )
 
 
-def test_lost_response_concurrency_and_deliberate_new_attempt(client, db_conn):
+def test_lost_response_concurrency_and_deliberate_new_attempt(
+    client: TestClient, db_conn: psycopg.Connection[Any]
+) -> None:
     agent_id, prior = birth(client)
+
+    def retry(_index: int) -> httpx.Response:
+        return submit(client, agent_id, prior)
+
     with ThreadPoolExecutor(max_workers=4) as pool:
-        responses = list(pool.map(lambda _: submit(client, agent_id, prior), range(4)))
+        responses = list(pool.map(retry, range(4)))
     assert all(r.status_code == 200 for r in responses)
     first = responses[0].json()
     assert all(r.json() == first for r in responses)
@@ -74,7 +87,9 @@ def test_lost_response_concurrency_and_deliberate_new_attempt(client, db_conn):
     ).fetchone() == (1,)
 
 
-def test_replay_survives_mutable_config_admission_and_target_deletion(client, db_conn):
+def test_replay_survives_mutable_config_admission_and_target_deletion(
+    client: TestClient, db_conn: psycopg.Connection[Any]
+) -> None:
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
     snapshot = db_conn.execute(
@@ -108,7 +123,9 @@ def test_replay_survives_mutable_config_admission_and_target_deletion(client, db
         {"Idempotency-Key": "x" * 129, "Idempotency-Scope": "principal-v1"},
     ],
 )
-def test_invalid_guard_has_no_receipt_or_pointer_effect(client, db_conn, headers):
+def test_invalid_guard_has_no_receipt_or_pointer_effect(
+    client: TestClient, db_conn: psycopg.Connection[Any], headers: dict[str, str]
+) -> None:
     agent_id, prior = birth(client)
     response = client.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
@@ -122,7 +139,9 @@ def test_invalid_guard_has_no_receipt_or_pointer_effect(client, db_conn, headers
     assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (0,)
 
 
-def test_bad_body_and_revoked_auth_do_not_execute(client, db_conn, monkeypatch):
+def test_bad_body_and_revoked_auth_do_not_execute(
+    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     agent_id, prior = birth(client)
     response = client.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
@@ -138,10 +157,12 @@ def test_bad_body_and_revoked_auth_do_not_execute(client, db_conn, monkeypatch):
     ).fetchone() == (UUID(accepted["launch_attempt_id"]),)
 
 
-def test_unsupported_old_runner_has_no_fallback_and_keeps_acceptance(client, monkeypatch):
-    calls = []
+def test_unsupported_old_runner_has_no_fallback_and_keeps_acceptance(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
 
-    async def old(_db, **kwargs):
+    async def old(_db: object, **kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
         raise launch_retry.rpc.ClusterOpFailed({"error": "unknown kind"})
 
@@ -154,16 +175,24 @@ def test_unsupported_old_runner_has_no_fallback_and_keeps_acceptance(client, mon
 
 
 @pytest.mark.parametrize("changed", ["admitted", "terminated", "new-attempt", "machine", "deleted"])
-def test_native_repeat_rejects_superseded_target(client, db_conn, monkeypatch, changed):
+def test_native_repeat_rejects_superseded_target(
+    client: TestClient,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    changed: str,
+) -> None:
     from ops.lifecycle import launch_reconcile
     from ops.rpc_schemas.launch_retry import LaunchReconcileRequest
 
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
-    wakes = []
-    monkeypatch.setattr(
-        launch_reconcile, "publish_inbound_wake", lambda *args: wakes.append(args) or True
-    )
+    wakes: list[tuple[object, ...]] = []
+
+    def wake(*args: object) -> bool:
+        wakes.append(args)
+        return True
+
+    monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
     payload = LaunchReconcileRequest(launch_attempt_id=accepted["launch_attempt_id"])
     assert launch_reconcile._reconcile(
         app.state.db, app.state.bus, payload, app.state.db_pool
@@ -189,12 +218,13 @@ def test_native_repeat_rejects_superseded_target(client, db_conn, monkeypatch, c
         app.state.db, app.state.bus, payload, app.state.db_pool
     ).wake_published
     assert len(wakes) == 2
-    assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone()[0] >= 1
+    count = db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone()
+    assert count is not None and count[0] >= 1
 
 
 def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
-    client, db_conn, monkeypatch
-):
+    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from ops.lifecycle import launch_reconcile
     from ops.rpc_schemas.launch_retry import LaunchReconcileRequest
 
@@ -202,16 +232,19 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     accepted = submit(client, agent_id, prior).json()
     payload = LaunchReconcileRequest(launch_attempt_id=accepted["launch_attempt_id"])
 
-    def crash(*_args):
+    def crash(*_args: object) -> bool:
         raise RuntimeError("native crash before publication")
 
     monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", crash)
     with pytest.raises(RuntimeError, match="native crash"):
         launch_reconcile._reconcile(app.state.db, app.state.bus, payload, app.state.db_pool)
-    wakes = []
-    monkeypatch.setattr(
-        launch_reconcile, "publish_inbound_wake", lambda *args: wakes.append(args) or True
-    )
+    wakes: list[tuple[object, ...]] = []
+
+    def wake(*args: object) -> bool:
+        wakes.append(args)
+        return True
+
+    monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
     # Discard the successful result just as a lost RPC ACK; repeat the same
     # natural wake without introducing a second queue item or rotating identity.
     launch_reconcile._reconcile(app.state.db, app.state.bus, payload, app.state.db_pool)
@@ -228,7 +261,9 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     ).fetchone() == (0,)
 
 
-def test_reconcile_holds_row_fence_until_publication(client, db_conn, monkeypatch):
+def test_reconcile_holds_row_fence_until_publication(
+    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from threading import Event
 
     from ops.lifecycle import launch_reconcile
@@ -239,7 +274,7 @@ def test_reconcile_holds_row_fence_until_publication(client, db_conn, monkeypatc
     payload = LaunchReconcileRequest(launch_attempt_id=accepted["launch_attempt_id"])
     publishing, release = Event(), Event()
 
-    def wake(*_args):
+    def wake(*_args: object) -> bool:
         publishing.set()
         assert release.wait(5)
         return True
@@ -262,14 +297,16 @@ def test_reconcile_holds_row_fence_until_publication(client, db_conn, monkeypatc
         assert pending.result(timeout=5).wake_published
 
 
-def test_unverified_principal_guard_when_auth_disabled(client, db_conn, monkeypatch):
+def test_unverified_principal_guard_when_auth_disabled(
+    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     agent_id, prior = birth(client)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
     assert submit(client, agent_id, prior).status_code == 400
     assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (0,)
 
 
-def test_old_http_router_has_no_guarded_retry_endpoint(db_conn):
+def test_old_http_router_has_no_guarded_retry_endpoint(db_conn: psycopg.Connection[Any]) -> None:
     from fastapi import FastAPI
 
     old = FastAPI()
@@ -284,7 +321,9 @@ def test_old_http_router_has_no_guarded_retry_endpoint(db_conn):
     assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (0,)
 
 
-def test_receipt_insert_and_pointer_rotation_roll_back_together(client, db_conn):
+def test_receipt_insert_and_pointer_rotation_roll_back_together(
+    client: TestClient, db_conn: psycopg.Connection[Any]
+) -> None:
     agent_id, prior = birth(client)
     db_conn.execute("""
         CREATE FUNCTION pg_temp.reject_retry_rotation() RETURNS trigger LANGUAGE plpgsql AS $$
