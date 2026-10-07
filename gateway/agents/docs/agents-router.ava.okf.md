@@ -131,3 +131,5 @@ standard gateway authentication, returns `expired` or `not_open`, and returns
   `gateway/agents/context_breakdown.py`.
 
 System-note receipt and retry semantics: [[system-note.ava.okf.md]].
+
+Guarded retry: [[launch-retry.ava.okf.md]].

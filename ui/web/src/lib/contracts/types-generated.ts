@@ -378,6 +378,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/agents/{agent_id}/retry-launch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Launch
+         * @description Commit one retry intent, then best-effort reconcile its frozen attempt.
+         *
+         *     Never downgrade this intent to the original endpoint or v2 launch RPC.
+         *     Every request authenticates again, including a historical receipt replay.
+         */
+        post: operations["retry_launch_api_keyed_v1_agents__agent_id__retry_launch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/impersonation/force-expire": {
         parameters: {
             query?: never;
@@ -4076,6 +4099,8 @@ export interface components {
             liveness_state: components["schemas"]["LivenessState"];
             /** Last Probe At */
             last_probe_at: string | null;
+            /** Last Launch Attempt Id */
+            last_launch_attempt_id?: string | null;
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation?: components["schemas"]["AgentObservation"] | null;
             /** Notices Awaiting Response */
@@ -6929,6 +6954,52 @@ export interface components {
          */
         ResurrectResult: "spawned" | "already_alive";
         /**
+         * RetryLaunchAccepted
+         * @description Historical committed intent; neither a wake nor execution acknowledgement.
+         */
+        RetryLaunchAccepted: {
+            /** Agent Id */
+            agent_id: number;
+            /**
+             * Prior Attempt Id
+             * Format: uuid
+             */
+            prior_attempt_id: string;
+            /**
+             * Launch Attempt Id
+             * Format: uuid
+             */
+            launch_attempt_id: string;
+            /**
+             * Accepted At
+             * Format: date-time
+             */
+            accepted_at: string;
+            /**
+             * Accepted
+             * @default true
+             * @constant
+             */
+            accepted: true;
+            /**
+             * Execution Observed
+             * @default false
+             * @constant
+             */
+            execution_observed: false;
+        };
+        /**
+         * RetryLaunchRequest
+         * @description One deliberate retry of the attempt the caller actually observed.
+         */
+        RetryLaunchRequest: {
+            /**
+             * Expected Prior Attempt Id
+             * Format: uuid
+             */
+            expected_prior_attempt_id: string;
+        };
+        /**
          * RunTimelineEvent
          * @description A lifecycle marker from the audit record (spawn, restart, terminate).
          */
@@ -8689,6 +8760,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BornChainResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_launch_api_keyed_v1_agents__agent_id__retry_launch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryLaunchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetryLaunchAccepted"];
                 };
             };
             /** @description Validation Error */

@@ -593,6 +593,56 @@
         }
       }
     },
+    "/api/keyed/v1/agents/{agent_id}/retry-launch": {
+      "post": {
+        "summary": "Retry Launch",
+        "description": "Commit one retry intent, then best-effort reconcile its frozen attempt.\n\nNever downgrade this intent to the original endpoint or v2 launch RPC.\nEvery request authenticates again, including a historical receipt replay.",
+        "operationId": "retry_launch_api_keyed_v1_agents__agent_id__retry_launch_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryLaunchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetryLaunchAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/impersonation/force-expire": {
       "post": {
         "summary": "Post Force Expire Impersonation",
@@ -7781,6 +7831,18 @@
             ],
             "title": "Last Probe At"
           },
+          "last_launch_attempt_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Launch Attempt Id"
+          },
           "availability": {
             "anyOf": [
               {
@@ -13518,6 +13580,67 @@
           "already_alive"
         ],
         "title": "ResurrectResult"
+      },
+      "RetryLaunchAccepted": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Agent Id"
+          },
+          "prior_attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Prior Attempt Id"
+          },
+          "launch_attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Launch Attempt Id"
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Accepted At"
+          },
+          "accepted": {
+            "type": "boolean",
+            "const": true,
+            "title": "Accepted",
+            "default": true
+          },
+          "execution_observed": {
+            "type": "boolean",
+            "const": false,
+            "title": "Execution Observed",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "prior_attempt_id",
+          "launch_attempt_id",
+          "accepted_at"
+        ],
+        "title": "RetryLaunchAccepted",
+        "description": "Historical committed intent; neither a wake nor execution acknowledgement."
+      },
+      "RetryLaunchRequest": {
+        "properties": {
+          "expected_prior_attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Expected Prior Attempt Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_prior_attempt_id"
+        ],
+        "title": "RetryLaunchRequest",
+        "description": "One deliberate retry of the attempt the caller actually observed."
       },
       "RunTimelineEvent": {
         "properties": {

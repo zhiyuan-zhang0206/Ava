@@ -2545,3 +2545,17 @@ CREATE TABLE task_creation_receipts (
 );
 
 INSERT INTO schema_migrations (name) VALUES ('20261007T190652_task-creation-receipts');
+CREATE TABLE agent_launch_retry_receipts (
+    operation_key text PRIMARY KEY,
+    agent_id bigint NOT NULL,
+    prior_attempt_id uuid NOT NULL,
+    launch_attempt_id uuid NOT NULL UNIQUE,
+    machine text NOT NULL,
+    config_overlay jsonb,
+    birth_config jsonb,
+    acceptance jsonb NOT NULL
+);
+COMMENT ON TABLE agent_launch_retry_receipts IS
+'Immutable guarded retry-launch intents; retain after target deletion, no TTL.';
+
+INSERT INTO schema_migrations (name) VALUES ('20261008T021500_agent-launch-retry-receipts');

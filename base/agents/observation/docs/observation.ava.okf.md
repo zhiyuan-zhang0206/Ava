@@ -49,3 +49,7 @@ Inspector `shells_available=false` means the runner observation failed;
 from older servers is unknown. Known RPC failures emit a bounded-reason metric
 and a warning; malformed results and database errors are not converted to empty
 successes.
+
+Selected-agent detail exposes optional `last_launch_attempt_id` from metadata,
+so guarded retry callers can submit the exact observed UUID. It is an attempt
+identity, not admission or execution evidence; older details may omit it.
