@@ -63,6 +63,11 @@ def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
         calls.append((agent_id, message))
 
     monkeypatch.setattr(daemon, "deliver_message", _fake)
+
+    def _accepted(_db: object, _bus: object, owner: int, _inbound_id: int, content: str) -> None:
+        calls.append((owner, content))
+
+    monkeypatch.setattr(daemon, "announce_reminder", _accepted)
     return calls
 
 

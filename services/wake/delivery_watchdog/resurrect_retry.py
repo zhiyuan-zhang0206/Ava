@@ -1,6 +1,6 @@
 """Terminated-owner resurrect retry loop (G4).
 
-A pending chat whose owner is terminated means the delivery-path auto-resurrect
+A pending chat or current task assignment whose owner is terminated means the delivery-path auto-resurrect
 failed (or the delivery predates it). This loop retries it, bounded against
 storms and against unbounded age: past the stale-claimed threshold the chat is
 a dead letter and its owner is never resurrected for it again (issue #2049).
@@ -27,7 +27,8 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentStatus
-from base.agents.messages.inbound import InboundKind
+from base.agents.messages.inbound import InboundKind, WakeTriggerKind, validate_wake_trigger_kind
+from base.agents.tasks.delivery import TASK_ASSIGNMENT_CURRENT
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
@@ -45,7 +46,7 @@ def select_terminated_owners_with_pending(
     threshold_s: float,
 ) -> list[tuple[int, int]]:
     """One `(agent_id, trigger_inbound_id)` per terminated owner with a
-    post-termination pending chat, ordered by agent id.
+    post-termination pending chat or current task assignment, ordered by agent id.
 
     The selected chat is carried to the home runner as the final resurrection
     CAS. A chat already pending when the agent was terminated cannot reverse
@@ -54,17 +55,21 @@ def select_terminated_owners_with_pending(
     operator's will, so leftover work still resumes its owner. A later
     termination makes this trigger stale before it can launch, and a tripped
     recovery breaker (`RECOVERY_BREAKER_CLEAR`) or an active wake suppression
-    keeps automatic recovery halted entirely. Chat only: lifecycle kinds
+    keeps automatic recovery halted entirely. Chats and internal assignment notes only: lifecycle kinds
     (terminate / restart) must not resurrect a dead agent against the caller's
     intent. A pile of 250 dead letters for one agent still means one attempt,
     not 250.
 
-    System notices never resurrect: a system-family chat (`system` /
+    Generic system notices never resurrect: a system-family chat (`system` /
     `system:<subtype>`) is a framework notification, not a person or peer
     message — it waits for the owner's next resurrect, or the stale threshold
     closes it. Machine *wakeups* still wake; exempt are the recovery-class
     chats (`hosted_turn_recovery` marker): the watchdog's wedged-turn wake and
     the corpse reaper's crash-recovery wake (task #4039) revive their owner.
+
+    Internal task assignments additionally persist an explicit resurrection policy
+    and must still belong to this owner. The home-side transaction locks the task
+    through wake commit; reassignment supersedes unclaimed old directions.
 
     `threshold_s` bounds how long a pending chat keeps its terminated owner a
     resurrect candidate: past it the row is a dead letter (issue #2049) that
@@ -84,7 +89,7 @@ def select_terminated_owners_with_pending(
                 "SELECT m.agent_id, MIN(m.id) "
                 "FROM inbound_messages m "
                 "JOIN agents_meta ON agents_meta.id = m.agent_id "
-                "WHERE m.status = 'pending' AND m.kind = 'chat' "
+                "WHERE m.status = 'pending' AND (m.kind = 'chat' OR {}) "
                 "  AND agents_meta.status = 'terminated' AND NOT {} "
                 " AND (m.created_at > agents_meta.status_changed_at OR {}) "
                 "  AND m.created_at > now() - make_interval(secs => %s) "
@@ -92,10 +97,11 @@ def select_terminated_owners_with_pending(
                 "  AND (agents_meta.wake_suppressed_until IS NULL "
                 "       OR agents_meta.wake_suppressed_until < now()) "
                 "  AND {} "
-                "  AND NOT {} "
+                "  AND (m.kind <> 'chat' OR NOT {}) "
                 "GROUP BY m.agent_id "
                 "ORDER BY m.agent_id"
             ).format(
+                sql.SQL(TASK_ASSIGNMENT_CURRENT),
                 sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
                 sql.SQL(SYSTEM_REAPED_CRASH_ROW),
                 sql.SQL(RECOVERY_BREAKER_CLEAR),
@@ -104,6 +110,16 @@ def select_terminated_owners_with_pending(
             (threshold_s,),
         )
         return [(r[0], r[1]) for r in cur.fetchall()]
+
+
+def _trigger_kind(pool: ConnectionPool, agent_id: int, trigger_inbound_id: int) -> WakeTriggerKind:
+    """Read the immutable kind of the selected durable wake intent."""
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT kind FROM inbound_messages WHERE id=%s AND agent_id=%s",
+            (trigger_inbound_id, agent_id),
+        ).fetchone()
+    return InboundKind.CHAT if row is None else validate_wake_trigger_kind(row[0])
 
 
 async def resurrect_one(
@@ -116,13 +132,16 @@ async def resurrect_one(
 
     try:
         try:
+            trigger_kind = await asyncio.to_thread(
+                _trigger_kind, pool, agent_id, trigger_inbound_id
+            )
             async with asyncio.timeout(rounds.rpc_deadline_s()):
                 status = await resurrect_if_terminated(
                     db,
                     bus,
                     agent_id,
                     trigger_inbound_id=trigger_inbound_id,
-                    trigger_inbound_kind=InboundKind.CHAT,
+                    trigger_inbound_kind=trigger_kind,
                 )
         except Exception:
             _log.warning(

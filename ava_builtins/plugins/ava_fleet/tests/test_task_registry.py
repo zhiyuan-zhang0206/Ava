@@ -18,6 +18,7 @@ import psycopg
 import pytest
 
 from ava_builtins.plugins.ava_fleet import task_registry
+from ava_builtins.plugins.ava_fleet.tests.task_registry.notes import record_notes
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -466,7 +467,7 @@ def test_create_explicit_owner(db_conn: psycopg.Connection, root_task_id: int) -
     agent_id = _seed_agent(db_conn)
     other_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    with patch("ava.agents.send_system_note"):
+    with record_notes(db_conn):
         task = task_registry.create("title", "detail", owner=other_id, parent=root_task_id)
     assert task.owner == other_id
     assert _persisted_owner(db_conn, task.id) == other_id
@@ -477,7 +478,7 @@ def test_create_with_owner_notifies_target(db_conn: psycopg.Connection, root_tas
     agent_id = _seed_agent(db_conn)
     other_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    with patch("ava.agents.send_system_note") as mock_send:
+    with record_notes(db_conn) as mock_send:
         task = task_registry.create("title", "detail", owner=other_id, parent=root_task_id)
         mock_send.assert_called_once()
         call_args = mock_send.call_args
@@ -499,7 +500,7 @@ def test_create_with_owner_self_no_notification(
     """When owner == creator, no notification is sent."""
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    with patch("ava.agents.send_system_note") as mock_send:
+    with record_notes(db_conn) as mock_send:
         task_registry.create("title", "detail", owner=agent_id, parent=root_task_id)
         mock_send.assert_not_called()
 
@@ -510,7 +511,7 @@ def test_create_without_owner_no_notification(
     """When owner is not passed (default = creator), no notification is sent."""
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
-    with patch("ava.agents.send_system_note") as mock_send:
+    with record_notes(db_conn) as mock_send:
         task_registry.create("title", "detail", parent=root_task_id)
         mock_send.assert_not_called()
 
@@ -525,7 +526,7 @@ def test_update_owner_reassign_notifies(db_conn: psycopg.Connection, root_task_i
     other_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id)
-    with patch("ava.agents.send_system_note") as mock_send:
+    with record_notes(db_conn) as mock_send:
         task_registry.update(task.id, owner=other_id)
         # Only new owner notified; old owner == actor is skipped
         mock_send.assert_called_once()
@@ -566,7 +567,7 @@ def test_update_owner_self_no_notification(db_conn: psycopg.Connection, root_tas
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id)
-    with patch("ava.agents.send_system_note") as mock_send:
+    with record_notes(db_conn) as mock_send:
         task_registry.update(task.id, owner=agent_id)
         # send_system_note should not be called because old_owner == new_owner
         mock_send.assert_not_called()
@@ -582,7 +583,7 @@ def test_update_owner_new_terminated_still_notified(
     dead_id = _seed_agent(db_conn, status="terminated")
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id)
-    with patch("ava.agents.send_system_note") as mock_send:
+    with record_notes(db_conn) as mock_send:
         task_registry.update(task.id, owner=dead_id)
         mock_send.assert_called_once()
         assert mock_send.call_args[0][0] == dead_id
@@ -607,17 +608,17 @@ def test_update_owner_old_terminated_leg_skipped(db_conn: psycopg.Connection) ->
         )
         task_id = cur.fetchone()[0]  # type: ignore[index]
     db_conn.commit()
-    with patch("ava.agents.send_system_note") as mock_send:
+    with record_notes(db_conn) as mock_send:
         task_registry.update(task_id, owner=new_owner)  # pyright: ignore[reportUnknownArgumentType]
         # Only the new owner is told; the terminated old owner is skipped.
         mock_send.assert_called_once()
         assert mock_send.call_args[0][0] == new_owner
 
 
-def test_update_owner_notifies_new_owner_before_previous_owner_liveness_check(
+def test_failed_notification_policy_lookup_rolls_back_assignment(
     db_conn: psycopg.Connection,
 ) -> None:
-    """A failed old-owner status lookup cannot suppress the new assignment."""
+    """A failed notification policy lookup cannot commit a task without its notes."""
     actor_id = _seed_agent(db_conn)
     old_owner = _seed_agent(db_conn)
     new_owner = _seed_agent(db_conn)
@@ -631,16 +632,17 @@ def test_update_owner_notifies_new_owner_before_previous_owner_liveness_check(
         task_id = cur.fetchone()[0]  # type: ignore[index]
     db_conn.commit()
     with (
-        patch("ava.agents.send_system_note") as send_note,
+        record_notes(db_conn) as send_note,
         # Fleet-plugin tests can replace the sys.modules entry in this xdist
         # worker. Patch the collection-time module that update() calls.
         patch.object(task_registry, "_is_terminated", side_effect=RuntimeError),
         pytest.raises(RuntimeError),
     ):
         task_registry.update(task_id, owner=new_owner)  # pyright: ignore[reportUnknownArgumentType]
-    assert send_note.call_count == 1
-    assert send_note.call_args.args[0] == new_owner
-    assert send_note.call_args.kwargs["resurrect"] is True
+    send_note.assert_not_called()
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT owner FROM agent_tasks WHERE id=%s", (task_id,))
+        assert cur.fetchone() == (old_owner,)
 
 
 # ── update() — non-owner write notifies the owner ─────────────────────────
