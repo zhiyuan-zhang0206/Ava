@@ -7,6 +7,5 @@
     "services/entrypoints/im_bridge/core.py::asyncio-task:IMBridgeCore._ensure_subscription": 1,
     "services/entrypoints/im_bridge/core.py::asyncio-task:IMBridgeCore._start_typing": 1,
     "services/entrypoints/im_bridge/core.py::asyncio-task:IMBridgeCore.ensure_outbox_replay": 1
-  },
-  "files": {}
+  }
 }

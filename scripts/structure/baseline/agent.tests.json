@@ -1,5 +1,4 @@
 {
-  "files": {},
   "patch_targets": {
     "agent/tests/test_resource_admission.py::agent.graph.exec._owned_run": 2
   }
