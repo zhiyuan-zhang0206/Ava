@@ -1,6 +1,7 @@
 # Delivered upload recovery
 
-Design pending review; no guarded admission, receiver or worker is implemented.
+Approved design with an implementation candidate; repository merge and deployment are not implied.
+Current contract: [delivered upload owner](../../../gateway/upload_delivery/docs/delivered-uploads.ava.okf.md).
 Issue #4476. Audited from fourth integration `ae2b2f903266ade04a7831f83ee06d44bd40a8fb`.
 
 ## Scope
@@ -99,8 +100,7 @@ records remote proof. Timeout, response loss or native restart permits repeating
 only this same copy. Unsupported protocol, checksum conflict, absent/ambiguous
 unit or changed placement becomes bounded inspectable HOLD with a safe reason;
 no redirect, overwrite, fallback or fabricated ready outcome. A retryable outage
-keeps pending state/backoff. Operators may explicitly cancel an undelivered intent
-or restore its frozen target; retargeting is a new intent, never receipt mutation.
+keeps pending state/backoff. A future reviewed operator policy may cancel an undelivered intent or restore its frozen target; no cancel/unseal endpoint is implemented. Retargeting is a new intent, never receipt mutation.
 
 ### One retained inbound acceptance
 
@@ -114,8 +114,9 @@ or moved targets HOLD without notification. Target termination/resurrection uses
 the existing pending-inbound policy after commit; acceptance is not execution.
 Post-commit wake is a hint, repaired only for the original still-pending row.
 
-Status distinguishes receiving, source-ready/pending-copy, copy-verified,
-inbound-accepted and HOLD/cancelled. Source acceptance and final delivery snapshots
+The implementation status distinguishes receiving, pending-copy, inbound-accepted
+and HOLD. Copy proof commits with the final inbound outcome rather than exposing
+a separate durable copy-verified phase. Source acceptance and final delivery snapshots
 are immutable; status is an authenticated operator projection, not a rewritten
 202 receipt. No FK/TTL deletion of identity, reservations or accepted evidence.
 

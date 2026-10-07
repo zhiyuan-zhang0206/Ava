@@ -3839,10 +3839,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/agents/{agent_id}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload */
+        post: operations["upload_api_keyed_v1_agents__agent_id__uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_keyed_v1_agents__agent_id__uploads__batch_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}/objects/{ordinal}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Object File */
+        get: operations["object_file_api_keyed_v1_agents__agent_id__uploads__batch_id__objects__ordinal__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * Acceptance
+         * @description Historical source acceptance; not copy readiness or agent execution.
+         */
+        Acceptance: {
+            /** Batch Id */
+            batch_id: string;
+            /** Agent Id */
+            agent_id: number;
+            /** Files */
+            files: components["schemas"]["Object"][];
+            /** Status Url */
+            status_url: string;
+        };
         /**
          * AdmissionOutcome
          * @enum {string}
@@ -4797,6 +4862,11 @@ export interface components {
             /** Halted Alive */
             halted_alive: components["schemas"]["BillingHaltedAliveRow"][];
         };
+        /** Body_upload_api_keyed_v1_agents__agent_id__uploads_post */
+        Body_upload_api_keyed_v1_agents__agent_id__uploads_post: {
+            /** Files */
+            files: string[];
+        };
         /** Body_upload_files_api_agents__agent_id__uploads_post */
         Body_upload_files_api_agents__agent_id__uploads_post: {
             /** Files */
@@ -5413,6 +5483,25 @@ export interface components {
         DefaultModelWrite: {
             /** Model */
             model: string;
+        };
+        /** DeliveryStatus */
+        DeliveryStatus: {
+            acceptance: components["schemas"]["Acceptance"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "receiving" | "pending" | "accepted" | "hold";
+            /** Reason */
+            reason: string | null;
+            /** Inbound Id */
+            inbound_id: number | null;
+            source: components["schemas"]["UnitIdentity"];
+            target: components["schemas"]["UnitIdentity"];
+            /** Attempts */
+            attempts: number;
+            /** Next Attempt At */
+            next_attempt_at: string | null;
         };
         /**
          * EventResolutionCreate
@@ -6854,6 +6943,21 @@ export interface components {
             /** Resolved Page */
             resolved_page: components["schemas"]["NoticeItem"][];
             next_cursor: components["schemas"]["NoticesCursor"] | null;
+        };
+        /** Object */
+        Object: {
+            /** Ordinal */
+            ordinal: number;
+            /** Filename */
+            filename: string;
+            /** Name */
+            name: string;
+            /** Size */
+            size: number;
+            /** Sha256 */
+            sha256: string;
+            /** Content Type */
+            content_type: string;
         };
         /**
          * ObservedNotice
@@ -9003,6 +9107,16 @@ export interface components {
             dark_tokens?: {
                 [key: string]: string;
             } | null;
+        };
+        /**
+         * UnitIdentity
+         * @description One unit: its machine name and its home path on that machine (data).
+         */
+        UnitIdentity: {
+            /** Machine */
+            machine: string;
+            /** Home */
+            home: string;
         };
         /**
          * UploadedBatch
@@ -13823,6 +13937,109 @@ export interface operations {
             path: {
                 agent_id: number;
                 filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_api_keyed_v1_agents__agent_id__uploads_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_api_keyed_v1_agents__agent_id__uploads_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Acceptance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    status_api_keyed_v1_agents__agent_id__uploads__batch_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    object_file_api_keyed_v1_agents__agent_id__uploads__batch_id__objects__ordinal__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+                batch_id: string;
+                ordinal: number;
             };
             cookie?: never;
         };
