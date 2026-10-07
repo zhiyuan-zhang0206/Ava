@@ -1,6 +1,4 @@
 {
   "ambient_state": {},
-  "patch_targets": {
-    "ava/sdk_surface/tests/test_lazy_plugin_load.py::agent.extensions.__spec__._initializing": 4
-  }
+  "patch_targets": {}
 }
