@@ -6,7 +6,7 @@ thing: the full history across compaction segments, its layer-0 units
 deriving them costs a checkpoint reconstruction, and drilling fires one request
 per click, so the derived view is kept for a few seconds per agent. A reader that
 finds the view behind the understanding tree (a node written after the view was
-built) asks for a fresh one.
+built) says how many messages it needs, and a view with fewer is rebuilt.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ from base.db import Database
 # Short enough that a live agent's growth shows within a click or two; the cache
 # only has to absorb the burst of requests one page interaction makes.
 _TTL_SECONDS = 5.0
+# A view is rebuilt for a node it does not reach at most this often.
+_REFRESH_SECONDS = 2.0
 # One agent's view is its whole history; the gateway is shared by concurrently
 # viewed agents, so only a few are kept.
 _MAX_ENTRIES = 6
@@ -62,13 +64,18 @@ class HistoryViewCache:
         self._lock = threading.Lock()
         self._entries: dict[int, tuple[float, HistoryView]] = {}
 
-    def get(self, db: Database, agent_id: int, *, fresh: bool = False) -> HistoryView:
-        """The agent's view; `fresh` skips the cache (and refills it)."""
+    def get(self, db: Database, agent_id: int, *, needs: int = 0) -> HistoryView:
+        """The agent's view. `needs` is how many messages the caller must see (a node written
+        after the cached view was built reaches past it): a view with fewer is rebuilt, but not more
+        than once per `_REFRESH_SECONDS`, so a node that reaches past the history for good (an
+        orphan) cannot make every request pay for a full rebuild."""
         now = time.monotonic()
         with self._lock:
             hit = self._entries.get(agent_id)
-            if hit is not None and not fresh and now - hit[0] <= _TTL_SECONDS:
-                return hit[1]
+            if hit is not None and now - hit[0] <= _TTL_SECONDS:
+                behind = len(hit[1].history.messages) < needs
+                if not behind or now - hit[0] < _REFRESH_SECONDS:
+                    return hit[1]
         history = load_checkpoint_history_full(db, agent_id)
         read = read_times(history.messages)
         units = display_blocks(divide_units(history.messages), history.messages, read)

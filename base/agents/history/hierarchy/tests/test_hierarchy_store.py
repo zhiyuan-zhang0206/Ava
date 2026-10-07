@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from base.agents.history.hierarchy.store import load_call_records, load_nodes
+from base.agents.history.hierarchy.store import load_generation_costs, load_nodes
 from base.db import Database
 
 AGENT_A = 990_128_901  # node reads
@@ -40,8 +40,9 @@ def test_load_nodes_returns_every_node_ordered_by_depth_then_position() -> None:
     assert (rows[0].engine_version, rows[0].prompt_version) == ("chunk-0.2", "chunk-0.12")
 
 
-def test_load_call_records_joins_each_call_to_its_jobs_segment() -> None:
+def test_generation_costs_are_summed_per_chunk_job_and_per_grouping_check() -> None:
     db = Database.from_settings()
+    usage = '{"input_tokens": 5, "output_tokens": 2, "input_token_details": {"cache_read": 3}}'
     with db.write_transaction() as conn:
         job = conn.execute(
             "INSERT INTO understanding_chunk_jobs"
@@ -50,12 +51,38 @@ def test_load_call_records_joins_each_call_to_its_jobs_segment() -> None:
             (AGENT_B,),
         ).fetchone()
         assert job is not None
+        for rnd in (0, 1):  # the answer and one correction
+            conn.execute(
+                "INSERT INTO understanding_chunk_calls (job_id, agent_id, attempt, round, model,"
+                " instruction, prefix_len, start_offset, usage_metadata, duration_ms)"
+                " VALUES (%s, %s, 1, %s, 'm', 'i', 100, 8, %s::jsonb, 1500)",
+                (job[0], AGENT_B, rnd, usage),
+            )
         conn.execute(
-            "INSERT INTO understanding_chunk_calls (job_id, agent_id, attempt, round, model,"
-            " instruction, prefix_len, start_offset, usage_metadata, duration_ms)"
-            " VALUES (%s, %s, 1, 0, 'm', 'i', 100, 8, '{\"input_tokens\": 5}'::jsonb, 1500)",
-            (job[0], AGENT_B),
+            "INSERT INTO understanding_group_calls (agent_id, level, check_key, round, model,"
+            " open_ids, request, usage_metadata, duration_ms)"
+            " VALUES (%s, 1, 'ck-1', 0, 'm', '{1,2}', 'r', %s::jsonb, 2000)",
+            (AGENT_B, usage),
         )
-    (record,) = load_call_records(db, AGENT_B)
-    assert (record.compact_version, record.start_offset, record.prefix_len) == (3, 8, 100)
-    assert record.usage_metadata == {"input_tokens": 5} and record.duration_ms == 1500.0
+    jobs, checks = load_generation_costs(db, AGENT_B)
+    cost = jobs[int(job[0])]
+    assert (cost.calls, cost.input, cost.cache_read, cost.output, cost.seconds) == (
+        2,
+        10,
+        6,
+        4,
+        3.0,
+    )
+    assert checks["ck-1"].calls == 1 and checks["ck-1"].seconds == 2.0
+
+
+def test_a_node_names_the_job_and_the_check_that_wrote_it() -> None:
+    db = Database.from_settings()
+    with db.write_transaction() as conn:
+        conn.execute(_INSERT_NODE, (AGENT_A + 10, 1, 0, 4, T0, T1, "leaf", None))
+        conn.execute(
+            "UPDATE understanding_nodes SET job_id = 41, check_key = 'ck' WHERE agent_id = %s",
+            (AGENT_A + 10,),
+        )
+    (row,) = load_nodes(db, AGENT_A + 10)
+    assert (row.job_id, row.check_key) == (41, "ck")

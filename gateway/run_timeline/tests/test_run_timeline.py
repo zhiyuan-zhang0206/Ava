@@ -18,7 +18,7 @@ from base.agents.history.hierarchy.units import (
     divide_units,
     read_times,
 )
-from base.agents.history.hierarchy.usage import CallRecord, MessageUsage
+from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
 from gateway.run_timeline import router
 from gateway.run_timeline.history import HistoryView
@@ -98,19 +98,19 @@ class World:
         self.events: list[RunTimelineEvent] = []
         self.fresh_reads = 0
         monkeypatch.setattr(router, "load_nodes", self._nodes)
-        monkeypatch.setattr(router, "load_call_records", self._calls)
+        monkeypatch.setattr(router, "load_generation_costs", self._costs)
         monkeypatch.setattr(router._lifecycle, "read", self._lifecycle)
 
-    def get(self, _db: object, _agent: int, *, fresh: bool = False) -> HistoryView:
+    def get(self, _db: object, _agent: int, *, needs: int = 0) -> HistoryView:
         """The `HistoryViewCache.get` the app state serves."""
-        self.fresh_reads += fresh
+        self.fresh_reads += needs > 0
         return self.view
 
     def _nodes(self, _db: object, _agent: int) -> list[StoredNode]:
         return list(self.nodes)
 
-    def _calls(self, _db: object, _agent: int) -> list[CallRecord]:
-        return []
+    def _costs(self, _db: object, _agent: int) -> tuple[dict[int, object], dict[str, object]]:
+        return {}, {}
 
     def _lifecycle(
         self, _db: object, _agent: int, _start: datetime, _end: datetime
@@ -201,17 +201,28 @@ def test_an_agent_with_nothing_has_a_fallback_window_and_no_lifetime(
     assert result.nodes == [] and result.units == []
 
 
-def test_a_node_beyond_the_cached_view_makes_the_read_fresh(
+def test_a_node_beyond_the_cached_view_asks_for_a_view_that_reaches_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     world = World(monkeypatch)
     world.nodes = [stored(1, level=1, span=(1, 4), start=0, end=10)]
     read(world)
     assert world.fresh_reads == 0
-    world.view = view(history_messages()[:3])
-    with pytest.raises(IndexError):  # still behind after the fresh read: an explicit error
-        read(world)
-    assert world.fresh_reads == 1
+
+
+def test_an_orphan_node_is_left_out_and_the_page_still_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A node whose span lies past the history (checkpoints rolled back or restored) used to fail
+    the whole read with an IndexError (a 500 for the agent's page, for good)."""
+    world = World(monkeypatch)
+    world.nodes = [
+        stored(1, level=1, span=(1, 4), start=0, end=10),
+        stored(2, level=1, span=(400, 410), start=11, end=12),  # past the 5 messages
+    ]
+    result = read(world)
+    assert [n.id for n in result.nodes] == ["1"]
+    assert [u.kind for u in result.units] != []
 
 
 def test_a_failed_lifecycle_read_leaves_the_markers_out(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,3 +312,28 @@ def test_a_recorded_pickup_time_is_the_read_time_and_older_messages_fall_back_to
         T0 + timedelta(minutes=6),  # the recorded pickup, not the arrival
         T0 + timedelta(minutes=6),  # no pickup: arrival, lifted to the read order
     ]
+
+
+def test_a_view_behind_the_tree_is_rebuilt_but_not_more_than_every_two_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gateway.run_timeline import history as history_module
+
+    loads: list[int] = []
+    clock = {"now": 100.0}
+
+    def load(_db: object, _agent: int) -> object:
+        loads.append(1)
+        return single_segment_history(history_messages())
+
+    monkeypatch.setattr(history_module, "load_checkpoint_history_full", load)
+    monkeypatch.setattr(history_module.time, "monotonic", lambda: clock["now"])
+    cache = history_module.HistoryViewCache()
+    db = cast(Database, object())
+    cache.get(db, 1)
+    cache.get(db, 1, needs=99)  # an orphan reaches past the history: too soon to rebuild
+    assert len(loads) == 1
+    clock["now"] += 2.5
+    cache.get(db, 1, needs=99)  # long enough since the build: rebuilt once ...
+    cache.get(db, 1, needs=99)  # ... and not again at once
+    assert len(loads) == 2
