@@ -2782,6 +2782,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/run-timeline/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Timeline Context
+         * @description The context breakdown of the LLM request at (or next after) message index `at`.
+         */
+        get: operations["get_run_timeline_context_api_agents__agent_id__run_timeline_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/run-timeline": {
         parameters: {
             query?: never;
@@ -7190,6 +7210,49 @@ export interface components {
          */
         ResurrectResult: "spawned" | "already_alive";
         /**
+         * RunTimelineContext
+         * @description GET /api/agents/{agent_id}/run-timeline/context — what one LLM request's context held.
+         *
+         *     The breakdown of the request `request` (`categories` sum to its `input_tokens`), plus where
+         *     it sits: `session` of `sessions` compaction segments (zero-based) and the time it was sent.
+         */
+        RunTimelineContext: {
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Estimated Total */
+            estimated_total: number;
+            /**
+             * Max Input Tokens
+             * @default 0
+             */
+            max_input_tokens: number;
+            /**
+             * Soft Compact Tokens
+             * @default 0
+             */
+            soft_compact_tokens: number;
+            /**
+             * Hard Compact Tokens
+             * @default 0
+             */
+            hard_compact_tokens: number;
+            /** Sections */
+            sections: components["schemas"]["ContextSection"][];
+            /** Categories */
+            categories: components["schemas"]["ContextCategory"][];
+            /** Request */
+            request: number;
+            /** Session */
+            session: number;
+            /** Sessions */
+            sessions: number;
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+        };
+        /**
          * RunTimelineEvent
          * @description A lifecycle marker from the audit record (spawn, restart, terminate).
          */
@@ -7300,6 +7363,28 @@ export interface components {
             generation: components["schemas"]["RunTimelineGeneration"] | null;
         };
         /**
+         * RunTimelineRequest
+         * @description One LLM request of the agent: an AIMessage carrying `usage_metadata`.
+         *
+         *     `idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent
+         *     (the read time of the message before it, the start of the turn's thinking block);
+         *     `session` the zero-based compaction segment it was sent in; `input_tokens` the provider's
+         *     total input tokens of that request, the size of its context.
+         */
+        RunTimelineRequest: {
+            /** Idx */
+            idx: number;
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Session */
+            session: number;
+            /** Input Tokens */
+            input_tokens: number;
+        };
+        /**
          * RunTimelineResponse
          * @description GET /api/agents/{agent_id}/run-timeline response.
          *
@@ -7307,7 +7392,8 @@ export interface components {
          *     messages and understanding nodes — and the default window; None when it has
          *     neither. `nodes` are the tree's nodes intersecting the window, every level;
          *     `units` are layer 0 intersecting it. `events` are optional lifecycle markers
-         *     in the window; they play no part in the extent.
+         *     in the window; they play no part in the extent. `requests` are the agent's LLM requests
+         *     sent in the window (the context-size row).
          */
         RunTimelineResponse: {
             /** Agent Id */
@@ -7320,6 +7406,8 @@ export interface components {
             units: components["schemas"]["RunTimelineUnit"][];
             /** Events */
             events: components["schemas"]["RunTimelineEvent"][];
+            /** Requests */
+            requests: components["schemas"]["RunTimelineRequest"][];
         };
         /**
          * RunTimelineUnit
@@ -11874,6 +11962,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunTimelineMessages"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_timeline_context_api_agents__agent_id__run_timeline_context_get: {
+        parameters: {
+            query: {
+                at: number;
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTimelineContext"];
                 };
             };
             /** @description Validation Error */
