@@ -61,8 +61,8 @@ Owners:
 | `POST /api/memory/search` | natural | pure read |
 | `POST /api/agents/{agent_id}/notices/{notice_id}/resolve` | keyed | operation receipt and reply inbound commit together; intentional later replies use new keys |
 | `POST /api/agents/{agent_id}/notices` | keyed | immutable request and original notice snapshot replay before mutable expiry/task checks |
-| `PATCH /api/agents/{agent_id}/notices/current` | natural | edit current open notice — repeats are harmless |
-| `POST /api/agents/{agent_id}/notices/current/dismiss` | natural | withdraw current open notice — CAS, repeats are harmless |
+| `PATCH /api/agents/{agent_id}/notices/current` | one-shot | retry can edit a newer current notice |
+| `POST /api/agents/{agent_id}/notices/current/dismiss` | one-shot | retry can withdraw a newer current notice |
 | `POST /api/packages/draft` | one-shot | LLM generation incurs a fresh external request and token cost |
 | `POST /api/agents/{agent_id}/pages` | one-shot | replaces current page; replay may close newer work; no receipt |
 | `DELETE /api/agents/{agent_id}/pages/{name}` | one-shot | name-based close can affect a later registration |

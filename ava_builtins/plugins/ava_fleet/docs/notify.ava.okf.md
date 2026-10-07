@@ -41,7 +41,7 @@ Push a notification, automatically superseding any previously unresolved notific
 
 ### `ava.ui.edit_notice(*, title=..., content=..., priority=..., blocking=...) -> None`
 
-Modify fields of the pending notice (at most one is open per agent, so no id is needed). Pass only the fields to change; the rest remain unchanged.
+Modify the current pending notice. Pass only changed fields. This selector has no receipt or observed notice ID; an ambiguous response is surfaced without automatic replay, which could edit a newer notice.
 
 - Cannot change `require_response` (to change it, dismiss + re-notify)
 - `content=None` clears the content
@@ -50,7 +50,7 @@ Modify fields of the pending notice (at most one is open per agent, so no id is 
 
 ### `ava.ui.dismiss_notice() -> None`
 
-Withdraw the open notice (resolution=`"withdrawn"`). Applicable when: the situation resolved itself, the answer was found another way, the decision window closed. No open notice → idempotent no-op.
+Withdraw the current open notice (resolution=`"withdrawn"`); no open notice is a no-op. An ambiguous response is surfaced without automatic replay, which could withdraw a newer notice. Inspect current state before an explicit new intent.
 
 ### ~~`ava.ui.list_notices`~~ (removed 2026-08-02)
 

@@ -345,10 +345,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="notice creation and superseding effects share one keyed transaction; replays return the original notice result",
     ),
     ("PATCH", "/api/agents/{agent_id}/notices/current"): RouteContract(
-        note="edit current open notice — repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="current-notice selector can edit a later notice after an ambiguous response",
     ),
     ("POST", "/api/agents/{agent_id}/notices/current/dismiss"): RouteContract(
-        note="withdraw current open notice — CAS, repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="current-notice selector can withdraw a later notice after an ambiguous response",
     ),
     # ── gateway/routers/okf_graph.py ───────────────────────────────────
     ("GET", "/api/okf/graph"): RouteContract(),
