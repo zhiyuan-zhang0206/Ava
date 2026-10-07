@@ -629,7 +629,7 @@ class TestTransientHttpRetry:
         ok = _transient_resp(204)
         mock_client.delete.side_effect = [_transient_resp(500), ok]
 
-        resp = _delete("/api/agents/1/pages/x")
+        resp = _delete("/api/presets/1")
         assert resp is ok
         assert mock_client.delete.call_count == 2
 
