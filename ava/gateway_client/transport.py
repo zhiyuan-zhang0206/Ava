@@ -17,7 +17,7 @@ from base.agents.messages.delivery_outbox import (
 )
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
-from base.api_contracts.idempotency import validate_idempotency_key
+from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER, validate_idempotency_key
 from base.config import settings
 from base.host.net.resilience import Policy, http_classifier, retry
 
@@ -280,6 +280,7 @@ def post(
     *,
     idempotent: bool | None = None,
     idempotency_key: str | None = None,
+    idempotency_scope: str | None = None,
     max_retries: int | None = None,
 ) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
@@ -316,6 +317,9 @@ def post(
     client's configured timeout" — there is deliberately no way to ask for an
     unbounded request.
 
+    `idempotency_scope` opts into the principal-v1 wire namespace and requires
+    an explicit key on a keyed route. It changes neither the route nor its retry gate.
+
     `max_retries` overrides the module-wide attempt count (`_max_retries()`) for
     this one call. The default fits routes the gateway works on directly, but
     a call whose failure mode is a *modelled, already-spent* response (e.g.
@@ -331,6 +335,10 @@ def post(
     # our None straight through therefore disabled the client's timeout on every
     # POST in this module rather than falling back to it, so a gateway route that
     # stopped responding parked its SDK callers forever instead of raising.
+    if idempotency_scope is not None:
+        if not isinstance(idempotency_scope, str) or idempotency_scope != PRINCIPAL_SCOPE:
+            raise ValueError("unsupported idempotency scope; expected principal-v1")
+        idempotency_key = validate_idempotency_key(idempotency_key)
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
 
     # Inherit retry semantics from the route's doorplate unless the caller
@@ -346,6 +354,11 @@ def post(
     # server can dedup the retries against the original.
     key = idempotency_key or _uuid.uuid4().hex
     headers = {"Idempotency-Key": key} if semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY else None
+
+    if idempotency_scope is not None:
+        if headers is None:
+            raise ValueError("idempotency scope requires a keyed route")
+        headers[SCOPE_HEADER] = idempotency_scope
 
     retries = _max_retries() if max_retries is None else max_retries
     return _request_with_retry(
