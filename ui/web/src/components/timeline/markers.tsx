@@ -15,9 +15,9 @@
 import { GitFork, Info, NotebookText, PowerOff, RotateCw, type LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { ChatMarkdown } from "@/components/markdown";
-import { DEFAULT_TIMELINE_COLORS, type ColorSlotId, type TimelineColors } from "@/lib/timeline-colors";
-import { cn } from "@/lib/utils";
+import { ChatMarkdown } from "@/components/content/markdown";
+import { DEFAULT_TIMELINE_COLORS, type ColorSlotId, type TimelineColors } from "@/lib/timeline/timeline-colors";
+import { cn } from "@/lib/format/utils";
 
 export const LIFECYCLE_TAGS = [
   "lifecycle_terminate",

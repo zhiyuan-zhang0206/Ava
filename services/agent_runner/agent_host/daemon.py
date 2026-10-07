@@ -1,6 +1,6 @@
 """Agent-host daemon — the supervised process that runs every local agent's turns.
 
-Phase 1 of `future/infra/agent-runner-as-server.md`, and the piece that makes the
+Phase 1 of `future/infra/lifecycle/agent-runner-as-server.md`, and the piece that makes the
 other three real: `dispatcher.py` turns wakes into turn tasks, `host.py` runs a
 turn, and this module is the long-running process they live in — pidfile,
 healthz, process-scope boot, and the shutdown that drains them.

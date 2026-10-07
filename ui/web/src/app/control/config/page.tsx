@@ -50,15 +50,15 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
+import { api } from "@/lib/transport/api";
+import { errMsg } from "@/lib/contracts/errors";
 import type {
   AgentMachineRow,
   ConfigFieldView,
   ConfigView,
   ConfigWriteResult,
-} from "@/lib/types";
-import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
+} from "@/lib/contracts/types";
+import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
 
 import {
   CONFIG_DISPLAY_GROUPS,
@@ -77,8 +77,8 @@ import {
 import { useSectionVisible } from "../_visibility";
 import { DefaultModelPanel } from "./_default_model";
 import { PerModelPanel } from "./_per_model";
-import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 // `null` selection = the cluster / gateway view (machine omitted from
 // the request). A string = that agent-runner's name.

@@ -10,7 +10,7 @@ The kernel resolves the rows (its ownership rule, see
 callables. ``order=150`` sits the section directly below the built-in page
 section (page=100, shells=200): the agent's open pages first, its work queue
 next (user ruling 2026-09-18, task #3903; the order scale and the built-in
-sections' keys are documented in ``docs/conventions/plugin-spec-v2.md``).
+sections' keys are documented in ``docs/conventions/extensions/plugin-spec-v2.md``).
 """
 
 from base.packages.plugins.extensions import PluginContributions

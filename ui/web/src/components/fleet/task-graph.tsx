@@ -23,15 +23,15 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 
-import { ChatMarkdown } from "@/components/markdown";
-import { WindowSelect, type WindowOption } from "@/components/window-select";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { PRIORITY_BG } from "@/lib/notices";
-import { formatRelative, formatUptime } from "@/lib/time";
-import type { TaskRow, TaskStatus } from "@/lib/types";
-import { useTasks, type TaskWindow } from "@/lib/use-tasks";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { cn } from "@/lib/utils";
+import { ChatMarkdown } from "@/components/content/markdown";
+import { WindowSelect, type WindowOption } from "@/components/agents/window-select";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { PRIORITY_BG } from "@/lib/notifications/notices";
+import { formatRelative, formatUptime } from "@/lib/format/time";
+import type { TaskRow, TaskStatus } from "@/lib/contracts/types";
+import { useTasks, type TaskWindow } from "@/lib/notifications/use-tasks";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { cn } from "@/lib/format/utils";
 
 import {
   FORCE_DEFAULTS,

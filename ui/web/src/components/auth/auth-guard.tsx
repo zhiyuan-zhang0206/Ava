@@ -8,10 +8,10 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
-import { TelemetryPageView } from "@/lib/telemetry-page-view";
-import { useAuth } from "@/lib/auth-context";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { TelemetryPageView } from "@/lib/telemetry/telemetry-page-view";
+import { useAuth } from "@/lib/auth/auth-context";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export function AuthGuard({ children }: { children: ReactNode }) {
   const { status } = useAuth();

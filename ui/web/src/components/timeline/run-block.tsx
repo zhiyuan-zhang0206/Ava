@@ -32,12 +32,12 @@
 import { ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { formatDuration, type SdkCall } from "@/lib/item-summary";
-import { cn } from "@/lib/utils";
+import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
+import { cn } from "@/lib/format/utils";
 
 import { CallBadge, HEADER_CLS, STICKY_HEADER_CLS, STUCK_HEADER_CLS, UNSTUCK_HEADER_CLS } from "./card";
-import { formatTurnSummary, type TurnSummary } from "./runs";
-import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_CLIP } from "@/lib/layout";
+import { formatTurnSummary, type TurnSummary } from "./model/runs";
+import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_CLIP } from "@/lib/layout/layout";
 
 const LIVE_CLOCK_INTERVAL_MS = 100;
 

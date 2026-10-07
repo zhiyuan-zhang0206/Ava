@@ -1,7 +1,7 @@
 # Tech-debt ledger
 
 > Living tech-debt ledger. Current inspection rules and automated owners live in
-> [technical-debt guidance](../../docs/conventions/tech-debt.md).
+> [technical-debt guidance](../../docs/conventions/engineering/tech-debt.md).
 > The single "what debt is open now" view. Forward-looking (what we intend to
 > fix) → lives in `future/`. Entries are agent + human maintained: humans
 > set `wontfix`, and the sweeper must never re-add a `wontfix` item. Resolved
@@ -36,7 +36,7 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 ## Retired guarantees
 
 The PTY whole-tree disappearance/proof requirement is retired by the user
-[decision of 2026-10-07](../../docs/decisions/2026-10-07-pty-best-effort-closure.md).
+[decision of 2026-10-07](../../docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md).
 Do not reopen it as an implementation defect or infer it was fixed by passing
 reruns. Historical Bash/TERM and OS-stall observations remain evidence for
 operational investigation; this decision does not establish their root causes.
@@ -102,6 +102,6 @@ fixture/incident scope.
 ### docstring-budget:ava/watcher.py:cron
 - **class**: docstring-budget
 - **status**: wontfix
-- **evidence**: ~18 lines (soft cap 12) after the 2026-09-27 watcher-registry removal (docs/decisions/2026-09-27-watchers-are-never-restarted.md) dropped the old supersede/replace/reuse residue entirely. Residue now: five Args (cron format, timezone, end_time types, name, notify) + the one-line warning that re-registering the same schedule does NOT dedupe any more — it starts a second, independent session, whose loss would silently reintroduce the double-firing confusion the old dedupe used to prevent. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.
+- **evidence**: ~18 lines (soft cap 12) after the 2026-09-27 watcher-registry removal (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md) dropped the old supersede/replace/reuse residue entirely. Residue now: five Args (cron format, timezone, end_time types, name, notify) + the one-line warning that re-registering the same schedule does NOT dedupe any more — it starts a second, independent session, whose loss would silently reintroduce the double-firing confusion the old dedupe used to prevent. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.
 - **first-seen**: 2026-09-23
 - **last-verified**: 2026-09-27

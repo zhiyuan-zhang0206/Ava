@@ -14,7 +14,7 @@ backend member with no frontend branch fails CI immediately.
 
 The frontend side of the same contract — every dispatch-set member renders
 its chip and never the alarm — lives in
-`ui/web/src/components/timeline.test.tsx` ("Marker contract: every
+`ui/web/src/components/timeline/timeline.test.tsx` ("Marker contract: every
 dispatch-set source renders without the red alarm").
 
 Companion backend-internal contract: `gateway/agents/tests/test_timeline.py`

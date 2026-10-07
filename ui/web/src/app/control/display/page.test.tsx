@@ -4,11 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
-import { SETTINGS_QUERY_KEY } from "@/lib/use-user-settings";
+import { api } from "@/lib/transport/api";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import DisplaySettingsPage from "./page";
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: {
     getSettings: vi.fn(),
     putSetting: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock("@/lib/api", () => ({
 // default; the narrow-viewport test flips it. R4 layer 4: the page consumes
 // useBreakpoint — the single breakpoint source.
 let isDesktop = true;
-vi.mock("@/lib/breakpoint", () => ({
+vi.mock("@/lib/layout/breakpoint", () => ({
   useBreakpoint: () => ({
     tier: isDesktop ? "xl" : "xs",
     isNarrow: !isDesktop,

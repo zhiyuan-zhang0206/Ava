@@ -1,5 +1,5 @@
 """Package refresh executor — one pass that makes this machine's channel-backed
-skills match their sources (design `future/infra/core-package-update-channel.md`
+skills match their sources (design `future/infra/lifecycle/core-package-update-channel.md`
 §5.3; tasks #2915 / #3267).
 
 The engine behind `ava packages refresh`. One code path for manual runs and the

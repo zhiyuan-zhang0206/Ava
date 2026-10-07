@@ -12,7 +12,7 @@ and starts every unit) later wakes with its old processes still running. The gat
 makes such a process stop itself: every pooled session compares the process's
 **code version** with `deployment_state.min_code_version` and refuses to work under
 a lower one. Why it is client-side, what it costs, and what it does not cover:
-[decision](../../../docs/decisions/2026-09-30-client-side-code-version-gate.md).
+[decision](../../../docs/decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md).
 Operator procedures (reading state, rollback, credential rotation):
 [runbook](../../../docs/conventions/runbook.md#code-version-gate).
 

@@ -27,18 +27,18 @@
 import { useTranslations } from "next-intl";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
-import { PRIORITY_RANK } from "@/lib/notices";
-import { groupByTaskSubtree } from "@/lib/task-notify";
-import type { AgentRow, PublicAgentStatus, NoticeItem, PageRow } from "@/lib/types";
-import { useAllPages } from "@/lib/use-all-pages";
-import { useNotices } from "@/lib/use-notices";
-import { useTasks } from "@/lib/use-tasks";
-import { cn } from "@/lib/utils";
+import { PRIORITY_RANK } from "@/lib/notifications/notices";
+import { groupByTaskSubtree } from "@/lib/notifications/task-notify";
+import type { AgentRow, PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
+import { useAllPages } from "@/lib/agents/use-all-pages";
+import { useNotices } from "@/lib/notifications/use-notices";
+import { useTasks } from "@/lib/notifications/use-tasks";
+import { cn } from "@/lib/format/utils";
 
 import { CompactDetail, OpenDetail, ResolvedDetail } from "./detail";
 import { fmtLabel, openKey, resolvedKey, type OpenItem } from "./keys";
 import { EmptyState, QueueHeader, QueueList } from "./list";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 
 // Merge the two open kinds into one sorted list. Both come from the same
 // endpoint now (useNotices): awaiting = require_response, open = FYI.

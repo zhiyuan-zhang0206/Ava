@@ -17,7 +17,7 @@ corruption. `run_backup` is `dump -> encrypt -> optional off-site publish ->
 prune`. The best-effort off-site leg publishes the encrypted artifact to OSS
 iff absent (`services.backup.artifact.offsite`); an unconfigured,
 unavailable or failing store keeps the local artifact, and nothing here deletes
-a remote object (see `future/infra/pg-backup.md`). The dump uses PostgreSQL's
+a remote object (see `future/infra/data/pg-backup.md`). The dump uses PostgreSQL's
 compressed custom format; legacy gzip artifacts stay restorable
 (`gunzip_if_needed`).
 

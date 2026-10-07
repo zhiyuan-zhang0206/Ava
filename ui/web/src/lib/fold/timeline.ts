@@ -57,7 +57,7 @@
 // re-exports the helpers for its historical importers, so nothing here may
 // import ../timeline (cycle).
 
-import type { BackendTimelineItem, SystemEvent } from "../types";
+import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
 /**
  * Parse a backend item_id (format: "{msg_idx}.{block_idx}") into a
  * sortable tuple. Unparseable inputs return null — ephemeral markers

@@ -235,7 +235,7 @@ repos:
 
       # A broad handler (`except Exception`, `suppress(Exception)`) must re-raise or report
       # (WARNING+ log, emit, stderr, or pass the exception on): a swallowed failure is
-      # indistinguishable from success (docs/decisions/2026-10-04-no-silent-failures.md).
+      # indistinguishable from success (docs/decisions/engineering/design/contracts/2026-10-04-no-silent-failures.md).
       # Exemption: `# silent-ok: <reason>` on the handler line, reserved for a reporting
       # channel's own failure path. See scripts/lint/diagnostics/no_silent_failures.py header.
       - id: lint-no-silent-failures
@@ -483,7 +483,7 @@ repos:
         entry: .venv/bin/python scripts/lint/termination_source.py --only
         files: \.py$
 
-      # The stop window is database-quiet (docs/decisions/2026-09-12-stop-window-contract.md):
+      # The stop window is database-quiet (docs/decisions/runtime/processes/shutdown/2026-09-12-stop-window-contract.md):
       # a resident periodic loop that borrows the pool every tick keeps a paused
       # runner's idle clients alive and blocks PgBouncer's stop. Every such loop
       # in services/, gateway/ and ops/ gates on `admission.quiesced()` or says
@@ -613,8 +613,8 @@ repos:
         pass_filenames: false
 
       # ESLint over the files this commit changed, through the same warning gate as CI (errors
-      # and unbaselined warnings fail). An edit to the lint setup (config, local rules, warning
-      # baseline, tsconfig, dependencies) lints the whole project instead. The commit stage cannot
+      # and warnings fail). An edit to the lint setup (config, local rules,
+      # tsconfig, dependencies) lints the whole project instead. The commit stage cannot
       # see a type-aware rule react to a type that changed in another file; CI checks those
       # whole-project effects. The id stays `frontend-eslint`: CI's SKIP lists name it, and
       # CI's frontend job lints the whole project.
@@ -622,7 +622,7 @@ repos:
         name: frontend eslint (changed files)
         entry: bash scripts/hooks/precommit-eslint.sh
         language: system
-        files: ^ui/web/(.*\.(ts|tsx|js|mjs)|package(-lock)?\.json|tsconfig\.json|scripts/eslint-warning-baseline\.json)$
+        files: ^ui/web/(.*\.(ts|tsx|js|mjs)|package(-lock)?\.json|tsconfig\.json)$
 
       # Push selection ignores old remote tips and lints own surviving paths.
       # Keep this ID for existing CI SKIP-list compatibility.
@@ -669,13 +669,13 @@ repos:
         # test follows route annotations/imports so moves cannot escape here.
         # A package's own tests/ directory is never a schema source: the directory
         # sources below exclude it (`(?!(?:.*/)?tests/)`).
-        files: ^(gateway/(?!(?:.*/)?tests/).*\.py$|base/agents/contract\.py$|base/api_contracts/(?!(?:.*/)?tests/).*\.py$|base/agents/tasks/priority\.py$|base/agents/tasks/status\.py$|base/agents/history/timeline\.py$|base/agents/observation/snapshot\.py$|base/host/resource_sample\.py$|ops/rpc_schemas/(?!(?:.*/)?tests/).*\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$|base/agents/observation/roster\.py$|base/agents/observation/evidence\.py$|base/agents/history/timeline_item\.py$|ops/cluster_status/__init__\.py$|base/agents/impersonation/(history|status)\.py$|base/agents/sdk/telemetry\.py$|base/daemon/schedules/completion_notices\.py$)
+        files: ^(gateway/(?!(?:.*/)?tests/).*\.py$|base/agents/contract\.py$|base/api_contracts/(?!(?:.*/)?tests/).*\.py$|base/agents/tasks/priority\.py$|base/agents/tasks/status\.py$|base/agents/history/timeline\.py$|base/agents/observation/snapshot\.py$|base/host/resource_sample\.py$|ops/rpc_schemas/(?!(?:.*/)?tests/).*\.py$|ui/web/src/lib/contracts/types-generated\.ts$|ui/web/openapi\.json$|base/agents/observation/roster\.py$|base/agents/observation/evidence\.py$|base/agents/history/timeline_item\.py$|ops/cluster_status/__init__\.py$|base/agents/impersonation/(history|status)\.py$|base/agents/sdk/telemetry\.py$|base/daemon/schedules/completion_notices\.py$)
         pass_filenames: false
       - id: constants-codegen-fresh
         name: "constants-generated.ts in sync with base/events/live/projection.py (drift: run ./scripts/codegen/dump_frontend_constants.py)"
         entry: ./scripts/codegen/check-constants-fresh.sh
         language: system
-        files: ^(base/events/live/projection\.py$|scripts/codegen/dump_frontend_constants\.py$|ui/web/src/lib/constants-generated\.ts$)
+        files: ^(base/events/live/projection\.py$|scripts/codegen/dump_frontend_constants\.py$|ui/web/src/lib/contracts/constants-generated\.ts$)
         pass_filenames: false
 
       # base/events/registry.md must stay in sync with the event contract

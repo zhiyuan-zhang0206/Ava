@@ -1,6 +1,6 @@
 """Agent host — the hosted-mode runner that runs agents' turns as tasks.
 
-Phase 1 of `future/infra/agent-runner-as-server.md`, in three parts:
+Phase 1 of `future/infra/lifecycle/agent-runner-as-server.md`, in three parts:
 
 - `dispatcher.py` — WHEN an agent runs. One `PSUBSCRIBE` over every inbound
   channel, a wake-pending flag per agent, and one turn task per agent at a time.

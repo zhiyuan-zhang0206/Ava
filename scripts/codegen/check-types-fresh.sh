@@ -24,9 +24,9 @@ if ! diff -q ui/web/openapi.json "$TMPDIR/openapi.json" >/dev/null; then
     exit 1
 fi
 
-if ! diff -q ui/web/src/lib/types-generated.ts "$TMPDIR/types-generated.ts" >/dev/null; then
-    echo "ERROR: ui/web/src/lib/types-generated.ts is out of sync with OpenAPI spec"
+if ! diff -q ui/web/src/lib/contracts/types-generated.ts "$TMPDIR/types-generated.ts" >/dev/null; then
+    echo "ERROR: ui/web/src/lib/contracts/types-generated.ts is out of sync with OpenAPI spec"
     echo "   run ./scripts/codegen/codegen-types.sh to regenerate"
-    diff ui/web/src/lib/types-generated.ts "$TMPDIR/types-generated.ts" | head -30
+    diff ui/web/src/lib/contracts/types-generated.ts "$TMPDIR/types-generated.ts" | head -30
     exit 1
 fi

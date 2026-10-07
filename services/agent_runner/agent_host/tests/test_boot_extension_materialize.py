@@ -3,7 +3,7 @@
 Converge (`ava start`, `ava converge`) already materializes, so the restart path
 was covered. What it does not cover is the case with no operator in it: a machine
 that was down when someone ran `ava skill install` elsewhere, or a hosted daemon
-that has been up since before the install. `future/infra/extension-ownership.md`
+that has been up since before the install. `future/infra/extensions/extension-ownership.md`
 S2 puts the same pass at process boot for exactly that window.
 
 The long-lived host runs this once before serving any agent.

@@ -4,8 +4,8 @@ import * as React from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { XIcon } from "lucide-react"
 
-import { cn } from "@/lib/utils"
-import { FLEX, FLEX_COL } from "@/lib/layout";
+import { cn } from "@/lib/format/utils"
+import { FLEX, FLEX_COL } from "@/lib/layout/layout";
 
 function Dialog({
   ...props

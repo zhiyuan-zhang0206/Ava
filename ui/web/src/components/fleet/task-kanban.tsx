@@ -10,11 +10,11 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
-import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notices";
-import type { TaskRow, TaskStatus } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { ChatMarkdown } from "@/components/markdown";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notifications/notices";
+import type { TaskRow, TaskStatus } from "@/lib/contracts/types";
+import { cn } from "@/lib/format/utils";
+import { ChatMarkdown } from "@/components/content/markdown";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
 const KANBAN_LANE_KEYS = ["inProgress", "done", "canceled"] as const;
 
