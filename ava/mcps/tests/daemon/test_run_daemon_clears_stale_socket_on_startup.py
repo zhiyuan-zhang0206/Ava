@@ -116,14 +116,17 @@ def test_main_runs_daemon_with_socket_arg(monkeypatch: pytest.MonkeyPatch) -> No
 async def test_socket_is_live_true_when_ping_answered(short_socket_path: str) -> None:
     """A daemon answering the ping protocol = live; a second daemon must not start."""
 
+    release = asyncio.Event()
+
     async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             await reader.readline()
             writer.write(b'{"ok": true}\n')
             await writer.drain()
-            await asyncio.sleep(30)
+            await release.wait()
         finally:
             writer.close()
+            await writer.wait_closed()
 
     sock = short_socket_path
     server = await asyncio.start_unix_server(handler, path=sock)
@@ -133,6 +136,7 @@ async def test_socket_is_live_true_when_ping_answered(short_socket_path: str) ->
         # call site, `main()`, is sync and has no such conflict).
         assert await asyncio.to_thread(daemon_mod._socket_is_live, sock) is True
     finally:
+        release.set()
         server.close()
         await server.wait_closed()
         with contextlib.suppress(OSError):
@@ -143,17 +147,21 @@ async def test_socket_is_live_false_when_connect_but_no_reply(short_socket_path:
     """A socket that accepts but never answers is NOT live — a half-dead occupant
     must be replaceable, not shielded forever by a successful connect."""
 
+    release = asyncio.Event()
+
     async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            await asyncio.sleep(30)
+            await release.wait()
         finally:
             writer.close()
+            await writer.wait_closed()
 
     sock = short_socket_path
     server = await asyncio.start_unix_server(handler, path=sock)
     try:
         assert await asyncio.to_thread(daemon_mod._socket_is_live, sock) is False
     finally:
+        release.set()
         server.close()
         await server.wait_closed()
         with contextlib.suppress(OSError):
