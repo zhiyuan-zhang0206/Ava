@@ -13,6 +13,7 @@ from base.config import settings
 from base.db import Database
 from base.log import init_gateway_process, logger
 from services.derived.hierarchy_worker.config import HierarchyWorkerConfig
+from services.derived.hierarchy_worker.runner import FallbackScanCadence
 
 
 def hierarchy_worker_config() -> HierarchyWorkerConfig:
@@ -45,11 +46,11 @@ def hierarchy_worker_db() -> Database:
     return Database.from_settings()
 
 
-def tick() -> None:
+def tick(cadence: FallbackScanCadence) -> None:
     """One schedule tick: the runner's drain with this process's configuration and database."""
     from services.derived.hierarchy_worker.runner import run_tick
 
-    run_tick(hierarchy_worker_config(), hierarchy_worker_db())
+    run_tick(hierarchy_worker_config(), hierarchy_worker_db(), cadence)
 
 
 def prepare() -> None:

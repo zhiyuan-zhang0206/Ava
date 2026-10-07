@@ -54,10 +54,19 @@ from services.derived.hierarchy_worker.scan import (
 # from the same checkout this runner executes.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# When the reconcile scan last ran (task #4674 B3). Module-global: the worker
-# process is long-lived, so a timestamp is the whole state; None means "not
-# yet this process" — the first tick after boot always scans (boot reconcile).
-_fallback_scanned_at: datetime | None = None
+
+@dataclass
+class FallbackScanCadence:
+    """Reconcile scan cadence owned by one resident schedule host."""
+
+    last_scanned_at: datetime | None = None
+
+    def due(self, now: datetime, config: HierarchyWorkerConfig) -> bool:
+        if self.last_scanned_at is None:
+            return True
+        return now - self.last_scanned_at >= timedelta(
+            seconds=config.hierarchy_fallback_scan_seconds
+        )
 
 
 @dataclass(frozen=True)
@@ -67,13 +76,6 @@ class ClaimedJob:
     id: int
     agent_id: int
     include_tail: bool
-
-
-def _fallback_scan_due(now: datetime, config: HierarchyWorkerConfig) -> bool:
-    """Whether the low-frequency reconcile pass is due (task #4674 B3)."""
-    if _fallback_scanned_at is None:
-        return True
-    return now - _fallback_scanned_at >= timedelta(seconds=config.hierarchy_fallback_scan_seconds)
 
 
 # A finished job row that was a first build is a compact job with `include_tail` (the claim
@@ -295,7 +297,7 @@ def _recover(job_id: int, error: str, db: Database) -> None:
         )
 
 
-def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
+def run_tick(config: HierarchyWorkerConfig, db: Database, cadence: FallbackScanCadence) -> None:
     """One schedule tick: claim and run due jobs back-to-back — drain, not scan.
 
     The event trigger enqueues each compact boundary's job, so a tick
@@ -309,7 +311,6 @@ def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
     code<->DB drift raises so the manager's crash path restarts the worker
     after a fix; no retry self-heals it.
     """
-    global _fallback_scanned_at  # noqa: PLW0603 — process-local scan cadence
     if not config.hierarchy_worker_enabled:
         return
     while True:
@@ -320,9 +321,9 @@ def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
                 if _regen_budget_check(conn, config):
                     return
                 now = datetime.now(UTC)
-                if _fallback_scan_due(now, config):
+                if cadence.due(now, config):
                     outcome = scan(conn, config)
-                    _fallback_scanned_at = now
+                    cadence.last_scanned_at = now
                     if (
                         outcome.baselined
                         or outcome.enqueued

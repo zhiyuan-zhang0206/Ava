@@ -16,6 +16,7 @@ The scan's enqueue decisions and the child-side outcome live in
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -33,6 +34,11 @@ from services.derived.hierarchy_worker.tests.slices import hierarchy_config, hie
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownArgumentType = warning
+
+
+@pytest.fixture
+def scan_cadence() -> runner.FallbackScanCadence:
+    return runner.FallbackScanCadence()
 
 
 def cid(nth: int) -> str:
@@ -113,7 +119,6 @@ def _fake_connect(**_kw: object) -> _FakeConnection:
 def _armed_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     """Arm a fake-connection tick test: switch on, first scan due, breaker quiet."""
     monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
-    monkeypatch.setattr(runner, "_fallback_scanned_at", None)
     monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn, _config: False)
     monkeypatch.setattr(runner, "_first_builds_deferred", lambda _conn, _config: False)
 
@@ -122,6 +127,7 @@ def _armed_tick(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_run_tick_drains_back_to_back_and_scans_once_per_window(
+    scan_cadence: runner.FallbackScanCadence,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A tick drains every due job before returning; the reconcile scan runs
@@ -150,17 +156,19 @@ def test_run_tick_drains_back_to_back_and_scans_once_per_window(
 
     monkeypatch.setattr(runner, "run_child", fake_child)
 
-    runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
+    runner.run_tick(hierarchy_config(), fake_database(_fake_connect), cadence=scan_cadence)
     assert ran == [1, 2]
     assert len(scanned) == 1  # one due scan, then the claims drain
 
     runner.run_tick(
-        hierarchy_config(), fake_database(_fake_connect)
+        hierarchy_config(), fake_database(_fake_connect), cadence=scan_cadence
     )  # inside the fallback window: no re-scan, nothing due
     assert len(scanned) == 1
 
 
-def test_run_tick_returns_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_tick_returns_on_a_transient_failure(
+    scan_cadence: runner.FallbackScanCadence, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A transient DB failure ends the tick without raising — the next slot
     retries, so the manager never sees a crash for a blip."""
 
@@ -171,12 +179,15 @@ def test_run_tick_returns_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(runner, "scan", failing_scan)
 
     runner.run_tick(
-        hierarchy_config(), fake_database(_fake_connect)
+        hierarchy_config(), fake_database(_fake_connect), cadence=scan_cadence
     )  # returns — no exception escapes the tick
+    assert scan_cadence.last_scanned_at is None
 
 
 def test_run_tick_raises_on_schema_drift(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    scan_cadence: runner.FallbackScanCadence,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """Code<->DB drift escapes the tick so the manager's crash path records it."""
 
@@ -187,13 +198,15 @@ def test_run_tick_raises_on_schema_drift(
     monkeypatch.setattr(runner, "scan", drifted_scan)
 
     with pytest.raises(psycopg.ProgrammingError):
-        runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
+        runner.run_tick(hierarchy_config(), fake_database(_fake_connect), cadence=scan_cadence)
     record = next(r for r in loguru_records if "code<->DB drift" in r["message"])
     assert record["exception"] is not None
     assert record["exception"].type is psycopg.ProgrammingError
 
 
-def test_run_tick_is_silent_while_the_switch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_tick_is_silent_while_the_switch_is_off(
+    scan_cadence: runner.FallbackScanCadence, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The master switch (task #4674 B5) gates the worker side too: off means
     the tick touches nothing — not the breaker, not the scan, not the claim."""
     touched: list[str] = []
@@ -204,7 +217,7 @@ def test_run_tick_is_silent_while_the_switch_is_off(monkeypatch: pytest.MonkeyPa
 
     assert settings.daemon.hierarchy_worker_enabled is False  # the shipped default
 
-    runner.run_tick(hierarchy_config(), fake_database(exploding_connect))
+    runner.run_tick(hierarchy_config(), fake_database(exploding_connect), cadence=scan_cadence)
     assert touched == []
 
 
@@ -357,7 +370,9 @@ def test_budget_at_exactly_the_budget_does_not_trip(
     assert db_conn.execute("SELECT count(*) FROM hierarchy_worker_breaker").fetchone() == (0,)
 
 
-def test_run_tick_stops_while_the_breaker_is_tripped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_tick_stops_while_the_breaker_is_tripped(
+    scan_cadence: runner.FallbackScanCadence, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An active trip stops the tick before any claim (task #4674 §4): the
     worker stays down until the operator resets the breaker."""
     claims: list[str] = []
@@ -366,7 +381,7 @@ def test_run_tick_stops_while_the_breaker_is_tripped(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn, _config: True)
     monkeypatch.setattr(runner, "claim_next", lambda _conn, **_kw: claims.append("claim"))
 
-    runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
+    runner.run_tick(hierarchy_config(), fake_database(_fake_connect), cadence=scan_cadence)
     assert claims == []
 
 
@@ -573,3 +588,15 @@ def test_guardrail_emit_failure_never_fails_the_build(
     record = next(r for r in loguru_records if "guardrail event" in r["message"])
     assert record["exception"] is not None
     assert record["exception"].type is RuntimeError
+
+
+def test_scan_cadence_is_owned_by_the_resident_host() -> None:
+    config = hierarchy_config(hierarchy_fallback_scan_seconds=120.0)
+    now = datetime(2026, 10, 7, tzinfo=UTC)
+    first = runner.FallbackScanCadence()
+    assert first.due(now, config)
+    first.last_scanned_at = now
+    assert not first.due(now + timedelta(seconds=119), config)
+    assert first.due(now + timedelta(seconds=120), config)
+    second = runner.FallbackScanCadence()
+    assert second.due(now, config)
