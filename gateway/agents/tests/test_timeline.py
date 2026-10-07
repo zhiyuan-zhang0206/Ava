@@ -312,8 +312,8 @@ class TestTimelineFailLoud:
     @staticmethod
     def _put_minimal_aimessage(agent_id: int) -> None:
         """Load a single AIMessage so dispatch hits the _ai_message_items path.
-        Tests use monkeypatch to replace the helper, triggering a RuntimeError
-        to simulate a dispatch error."""
+        Tests replace the public renderer, triggering a RuntimeError to verify
+        the endpoint's fail-loud boundary."""
         from langchain_core.messages import AIMessage
         from langgraph.checkpoint.base import empty_checkpoint
         from langgraph.checkpoint.postgres import PostgresSaver
@@ -345,7 +345,7 @@ class TestTimelineFailLoud:
         """Any logic error in the dispatch layer (NameError / KeyError / custom helper raise)
         must propagate as endpoint 500 — must not be swallowed into 200 + empty list.
 
-        Bug reproduce: replace _ai_message_items with a raise RuntimeError, feed one
+        Bug reproduce: replace the public build_timeline_items renderer with a raise RuntimeError, feed one
         AIMessage into state. Old code (try wrapped the entire loop): endpoint 200 +
         empty list + debug log swallowed. New code (try only wraps saver IO): 500.
 
@@ -354,7 +354,7 @@ class TestTimelineFailLoud:
         the HTTP-layer 500 status, so disable re-raise to let FastAPI run the default error
         middleware and return 500.
         """
-        from base.agents.history import timeline as base_timeline
+        from gateway.agents import timeline as gateway_timeline
 
         tid = create_agent(db_conn)
         self._put_minimal_aimessage(tid)
@@ -364,7 +364,7 @@ class TestTimelineFailLoud:
                 "simulated dispatch failure (e.g. NameError when refactor forgot import)"
             )
 
-        monkeypatch.setattr(base_timeline, "_ai_message_items", boom)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_timeline, "build_timeline_items", boom)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 500, (
