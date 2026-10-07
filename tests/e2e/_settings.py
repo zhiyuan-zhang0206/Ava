@@ -1,7 +1,7 @@
 """User-settings helpers for e2e tests.
 
 The frontend resolves an unset setting from `USER_SETTING_DEFAULTS`
-(`ui/web/src/lib/types.ts`), so a fresh e2e cluster renders with the product
+(`ui/web/src/lib/contracts/types.ts`), so a fresh e2e cluster renders with the product
 defaults — and a default is a user-ruling-changed value, not a test fixture.
 A test that asserts on rendering which depends on a specific setting pins it
 explicitly through the same REST surface the frontend uses

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Optional Ava debt-candidate report. Rules and evidence requirements live in
-# docs/conventions/tech-debt.md. This is not a lint or contribution prerequisite.
+# docs/conventions/engineering/tech-debt.md. This is not a lint or contribution prerequisite.
 # Usage: bash scripts/audit/tech_debt_candidates.sh [--repo PATH]
 # The existing daily-debt schedule consumes this report; no runtime is changed here.
 
@@ -200,7 +200,7 @@ echo ""
 # Class 11: locality (whole-repo) — per-commit spread + cross-package
 # co-change index, defaults (90-day window on main, min-support 8,
 # min-confidence 0.6). Detection only; findings + ledger entries need
-# judgment (docs/conventions/tech-debt.md).
+# judgment (docs/conventions/engineering/tech-debt.md).
 # ------------------------------------------------------------------
 echo "--- [6/6] locality: cochange.py (spread + co-change index) ---"
 report_scan cochange .venv/bin/python scripts/structure/cochange.py --json

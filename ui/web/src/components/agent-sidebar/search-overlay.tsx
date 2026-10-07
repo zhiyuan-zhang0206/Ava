@@ -4,9 +4,9 @@ import { Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 
-import type { AgentRow } from "@/lib/types";
-import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import type { AgentRow } from "@/lib/contracts/types";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 // Task #723: search moved from an inline sidebar box to a floating overlay —
 // a dimmed backdrop + a centered, shadowed panel (command-palette style), so

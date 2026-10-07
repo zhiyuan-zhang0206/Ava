@@ -60,7 +60,7 @@ inherited context stays cache-valid; only ADDING skills to
 load at the context tail.
 
 ## Key Dependencies
-- [[agents.ava.okf.md]] — spawn resolves `config_overlay.preset` at the spawn boundary
+- [[ava/agents/docs/agents.ava.okf.md]] — spawn resolves `config_overlay.preset` at the spawn boundary
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — name resolution for the two skill combination fields + index-vs-expand mechanism
 
 ## Notes

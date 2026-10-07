@@ -67,7 +67,7 @@ Feature packages (routes + helpers + wire models):
 [[gateway/schedules/docs/schedules.ava.okf.md|schedules]],
 [[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md|mcp_server]], `auth`, `lgtm`,
 `middleware`, `extensions`. [[routers.ava.okf.md]]:
-single-module routers. [[db.ava.okf.md]]: Postgres pool.
+single-module routers. [[agent/db/docs/db.ava.okf.md]]: Postgres pool.
 
 ## Entry Points
 

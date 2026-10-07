@@ -1,6 +1,6 @@
 """Inbound wake -> turn task: the hosted runner's dispatcher.
 
-Phase 1 work item (a) of `future/infra/agent-runner-as-server.md` — the
+Phase 1 work item (a) of `future/infra/lifecycle/agent-runner-as-server.md` — the
 pull->push inversion. Today the push already exists at the transport level
 (Redis pub/sub) but terminates in a **per-process idle wait**: every idle agent
 process holds its own subscription and blocks in the claim node. Hosted mode

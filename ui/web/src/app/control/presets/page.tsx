@@ -34,16 +34,16 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
-import { useStore } from "@/lib/store";
-import { formatRelative } from "@/lib/time";
-import type { PresetUpdate, PresetView } from "@/lib/types";
+import { api } from "@/lib/transport/api";
+import { errMsg } from "@/lib/contracts/errors";
+import { useStore } from "@/lib/state/store";
+import { formatRelative } from "@/lib/format/time";
+import type { PresetUpdate, PresetView } from "@/lib/contracts/types";
 
 import { PRESETS_QUERY_KEY, presetAnchorId } from "../_sections";
 import { useSectionVisible } from "../_visibility";
-import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export default function PresetsPage() {
   const t = useTranslations("presets");

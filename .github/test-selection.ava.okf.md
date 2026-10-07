@@ -42,6 +42,6 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 
 ## Related policy
 
-[docs/conventions/test-selection.md](../docs/conventions/test-selection.md) owns the
+[docs/conventions/engineering/test-selection.md](../docs/conventions/engineering/test-selection.md) owns the
 selection rules, blind-file limits, duration guard, artifacts, maintenance, and
 the mode switch.

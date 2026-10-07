@@ -7,7 +7,7 @@ pre-commit.
 
 ## Why
 
-In the hosted runner model (future/infra/agent-runner-as-server.md, work item
+In the hosted runner model (future/infra/lifecycle/agent-runner-as-server.md, work item
 b) many agents' turns share one process, so a `per_agent=True` field read
 through the process-global `settings` singleton returns the CLUSTER default —
 silently ignoring the agent's `config_overlay` / `birth_config`. The correct

@@ -38,7 +38,7 @@ async def _await_status(pool: AsyncConnectionPool, agent_id: int, expected: str)
     (This helper once carried a heavy CI-flake forensic dump for an intermittent
     `idling != restarting`. That flake was a reused-id collision, killed at the
     source by the monotonic-id contract — see
-    docs/decisions/2026-06-30-monotonic-test-ids.md — so
+    docs/decisions/engineering/tooling/2026-06-30-monotonic-test-ids.md — so
     the dump is gone; the status trail is enough for any residual failure.)
     """
     seen: list[object] = []

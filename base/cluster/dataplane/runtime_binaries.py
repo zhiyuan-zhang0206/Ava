@@ -224,7 +224,7 @@ def _extract_pg(jar_bytes: bytes, target: Path) -> None:
 # the platform's package channel and are copied into the extracted tree:
 # `lib/postgresql/` (pkglibdir) gets the loadable module, `share/postgresql/
 # extension/` gets the control + install SQL. Verified layout facts (see
-# future/infra/vendored-data-plane-binaries.md): `$libdir` resolves to
+# future/infra/data/vendored-data-plane-binaries.md): `$libdir` resolves to
 # `<prefix>/lib/postgresql`, and the macOS module suffix is `.dylib`.
 
 # The pinned pgvector version. A PG major bump must re-pin these artifacts

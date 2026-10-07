@@ -74,7 +74,7 @@ Do not declare success from a filtered roster, pointer, CLI exit, or stale
 health response. An offline host is an explicit incomplete result.
 
 If rollout fails, preserve evidence and read `ava status` and
-`docs/conventions/graceful-maintenance.md`. Confirm the hold's owner is not live and
+`docs/conventions/operations/graceful-maintenance.md`. Confirm the hold's owner is not live and
 schema compatibility before acting. Do not blindly retry
 updates or reset production source. If no supported safe path exists, report
 the precise blocker and request a scoped recovery decision.

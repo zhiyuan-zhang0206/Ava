@@ -33,7 +33,7 @@ DeepSeek Harness the same way (takeover-only): it boots dsh's `headless`
 profile with the bundled `ava-relay-dsh` plugin, which opens one persistent
 session with the launch message and starts the relay from the stub the request
 writes — nothing to arm. dsh needs `node` and `dsh` on PATH and its own model
-credential; see the `docs/conventions/agent-impersonation-hosts.md#deepseek-harness-dsh` in the Ava source checkout.
+credential; see the `docs/conventions/agents/agent-impersonation-hosts.md#deepseek-harness-dsh` in the Ava source checkout.
 
 The two states, and nothing else:
 

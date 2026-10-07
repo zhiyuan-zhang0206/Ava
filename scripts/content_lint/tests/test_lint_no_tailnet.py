@@ -146,8 +146,15 @@ def test_other_lines_with_marker_not_exempted(repo: Path) -> None:
 
 def test_decisions_is_frozen_exemption(repo: Path) -> None:
     literal = _cgnat_ip(103, "96.72")
-    _write(repo, "docs/decisions/2026-06-11-multihost-deployment.md", f"our gateway {literal}\n")
-    assert gate._scan_file("docs/decisions/2026-06-11-multihost-deployment.md") == []
+    _write(
+        repo,
+        "docs/decisions/runtime/updates/release/2026-06-11-multihost-deployment.md",
+        f"our gateway {literal}\n",
+    )
+    assert (
+        gate._scan_file("docs/decisions/runtime/updates/release/2026-06-11-multihost-deployment.md")
+        == []
+    )
 
 
 def test_binary_file_skipped(repo: Path) -> None:

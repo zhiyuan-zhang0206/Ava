@@ -39,7 +39,7 @@ a wall, not a nuisance:
   - **Code-span restriction.** Only `ava.<name>` references that sit inside an
     inline-code span (`` `...` ``) or a fenced code block (``` ``` ```) are checked. A
     bare prose mention is never flagged — it is exactly the ambiguous case the
-    graduation test (`docs/conventions/lint-vs-sweeper.md`) says belongs in the sweeper, not
+    graduation test (`docs/conventions/engineering/lint-vs-sweeper.md`) says belongs in the sweeper, not
     a commit-blocking lint.
   - **Non-symbol forms excluded.** Even inside code, three forms are not symbols and
     are skipped: a name segment followed by a domain-style suffix (`ava.host.com`) is a

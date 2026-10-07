@@ -10,7 +10,7 @@ defect: the same header duplicated instead of the next section's own.
 Both rules are commit-blocking (E-level, not W-level): a concatenation is a
 rendering-breaking defect, not a style nit, and the fix is a one-line local
 edit — exactly the graduation-test shape for a lint rather than a sweeper
-class (docs/conventions/lint-vs-sweeper.md).
+class (docs/conventions/engineering/lint-vs-sweeper.md).
 
 Everything is asserted against constructed trees, never the real doc tree.
 """

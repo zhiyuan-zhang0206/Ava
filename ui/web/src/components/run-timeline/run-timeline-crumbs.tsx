@@ -5,8 +5,8 @@
 
 import { useTranslations } from "next-intl";
 
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 import type { Crumb } from "./timeline-model";
 

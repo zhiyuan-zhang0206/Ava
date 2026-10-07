@@ -8,7 +8,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 
 import { Button } from "@/components/ui/button";
-import { ChatMarkdown } from "@/components/markdown";
+import { ChatMarkdown } from "@/components/content/markdown";
 import {
   ForceControls,
   FORCE_GROUPS,
@@ -20,18 +20,18 @@ import {
   ResizablePanelGroup,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { api } from "@/lib/api";
+import { api } from "@/lib/transport/api";
 import {
   useForceLayout,
   type SimNode,
   type SimLink,
-} from "@/lib/use-force-layout";
-import type { MemoryGraphNode, MemoryGraphResponse, MemoryNoteResponse } from "@/lib/types";
-import { useBreakpoint } from "@/lib/breakpoint";
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { panelLayoutStorage } from "@/lib/panel-layout-storage";
-import { useSvgZoomPan } from "@/lib/use-svg-zoom-pan";
-import { cn } from "@/lib/utils";
+} from "@/lib/fleet/use-force-layout";
+import type { MemoryGraphNode, MemoryGraphResponse, MemoryNoteResponse } from "@/lib/contracts/types";
+import { useBreakpoint } from "@/lib/layout/breakpoint";
+import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
+import { useSvgZoomPan } from "@/lib/fleet/use-svg-zoom-pan";
+import { cn } from "@/lib/format/utils";
 
 // ── Memory graph force defaults ──
 // Lighter than the agents graph: memory notes are sparser, links are weaker,
@@ -56,7 +56,7 @@ const MEMORY_FORCE_KEY = "display.memory_force_params";
 // module outside the localStorage-policy scan. The palette holds note data
 // (memory tag names), and one of them matches the scan's storage-key pattern;
 // keeping the data in lib/ keeps the page source free of that false positive.
-import { colorForTag, FOLDER_COLOR } from "@/lib/memory-graph-colors";
+import { colorForTag, FOLDER_COLOR } from "@/lib/fleet/memory-graph-colors";
 
 const MEMORY_GRAPH_QUERY_KEY = ["memory-graph"] as const;
 

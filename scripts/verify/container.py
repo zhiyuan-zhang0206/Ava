@@ -11,7 +11,7 @@ into it, builds both dependency trees from that commit's lockfiles, runs `ava in
 and then the first `ava start` (gateway and agent-runner on one box), runs the observer, copies the
 evidence out, and removes the container with its volumes. The model is scripted;
 no provider key is injected, so nothing secret can reach the container. The design
-is future/infra/verification-boundaries.md.
+is future/infra/engineering/verification-boundaries.md.
 
 This file is host-side and stdlib-only; the observer beside it runs in the container.
 Run trusted branches only: the boundary keeps a mistake away from the host's cluster,

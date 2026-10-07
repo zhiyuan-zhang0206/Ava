@@ -19,20 +19,20 @@ import { useTranslations } from "next-intl";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { CopyButton } from "@/components/copy-button";
-import { ChatMarkdown } from "@/components/markdown";
-import { PythonCode } from "@/components/python-code";
-import { assetUrl } from "@/lib/api";
-import type { BackendTimelineItem } from "@/lib/types";
-import { SSE_EVENT_WINDOW_MS } from "@/lib/constants-generated";
-import { useThrottledStreaming } from "@/lib/use-throttled-streaming";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { cn } from "@/lib/utils";
+import { CopyButton } from "@/components/content/copy-button";
+import { ChatMarkdown } from "@/components/content/markdown";
+import { PythonCode } from "@/components/content/python-code";
+import { assetUrl } from "@/lib/transport/api";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { SSE_EVENT_WINDOW_MS } from "@/lib/contracts/constants-generated";
+import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { cn } from "@/lib/format/utils";
 
 import { EphemeralSystemMarker, MarkerBody, classifyMarker } from "./markers";
-import { isLiveReasoning } from "./reasoning-clock";
-import { inboundKind } from "./runs";
-import { FLEX } from "@/lib/layout";
+import { isLiveReasoning } from "./model/reasoning-clock";
+import { inboundKind } from "./model/runs";
+import { FLEX } from "@/lib/layout/layout";
 
 // Cap how often a streaming item re-parses its content (markdown / Prism).
 // One re-parse per SSE event window (~25 FPS) reads as live while removing the

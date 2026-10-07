@@ -123,7 +123,7 @@ def test_layered_document_parents_to_the_layered_overview() -> None:
     assert parents["base/deploy/maintenance/docs/lifecycle-wait.ava.okf.md"] == (
         "base/deploy/maintenance/docs/maintenance.ava.okf.md"
     )
-    # An overview node hangs off the apex, like every overview.
+    # Without an ancestor overview, this overview hangs off the apex.
     assert parents["base/deploy/maintenance/docs/maintenance.ava.okf.md"] == _ROOT
 
 
@@ -132,6 +132,25 @@ def test_layered_directory_without_overview_parents_to_root() -> None:
     parents = _parents(paths)
     assert parents["base/sessions/docs/stopping.ava.okf.md"] == _ROOT
     assert parents["base/sessions/docs/x.ava.okf.md"] == _ROOT
+
+
+def test_nested_overviews_and_missing_intermediate_overviews_use_nearest_ancestor() -> None:
+    paths = {
+        _ROOT,
+        "agent/docs/agent.ava.okf.md",
+        "agent/graph/docs/graph.ava.okf.md",
+        "agent/graph/exec/docs/exec.ava.okf.md",
+        "agent/graph/exec/deep/docs/leaf.ava.okf.md",
+        "agent/unindexed/deep/docs/leaf.ava.okf.md",
+    }
+    assert _parents(paths) == {
+        _ROOT: None,
+        "agent/docs/agent.ava.okf.md": _ROOT,
+        "agent/graph/docs/graph.ava.okf.md": "agent/docs/agent.ava.okf.md",
+        "agent/graph/exec/docs/exec.ava.okf.md": "agent/graph/docs/graph.ava.okf.md",
+        "agent/graph/exec/deep/docs/leaf.ava.okf.md": "agent/graph/exec/docs/exec.ava.okf.md",
+        "agent/unindexed/deep/docs/leaf.ava.okf.md": "agent/docs/agent.ava.okf.md",
+    }
 
 
 def test_layered_and_unlayered_documents_share_one_tree() -> None:
@@ -156,7 +175,7 @@ def test_layered_and_unlayered_documents_share_one_tree() -> None:
         "agent/kernel.ava.okf.md": "agent/agent.ava.okf.md",
         "base/docs/base.ava.okf.md": _ROOT,
         "base/docs/config.ava.okf.md": "base/docs/base.ava.okf.md",
-        "base/sessions/docs/stopping.ava.okf.md": _ROOT,
+        "base/sessions/docs/stopping.ava.okf.md": "base/docs/base.ava.okf.md",
         "mixed/mixed.ava.okf.md": _ROOT,
         "mixed/docs/part.ava.okf.md": "mixed/mixed.ava.okf.md",
     }
@@ -206,6 +225,8 @@ def test_graph_of_layered_bundle_has_one_root_and_physical_edges(tmp_path: Path)
     write("okf/index.ava.okf.md")
     write("pkg/docs/pkg.ava.okf.md")
     write("pkg/docs/child.ava.okf.md", "See [[other/docs/leaf.ava.okf.md]].")
+    write("pkg/nested/docs/nested.ava.okf.md")
+    write("pkg/nested/deep/docs/leaf.ava.okf.md")
     write("other/docs/leaf.ava.okf.md")
     write("legacy/legacy.ava.okf.md")
     write("legacy/child.ava.okf.md")
@@ -218,6 +239,8 @@ def test_graph_of_layered_bundle_has_one_root_and_physical_edges(tmp_path: Path)
     assert tree == {
         ("okf/index.ava.okf.md", "pkg/docs/pkg.ava.okf.md"),
         ("pkg/docs/pkg.ava.okf.md", "pkg/docs/child.ava.okf.md"),
+        ("pkg/docs/pkg.ava.okf.md", "pkg/nested/docs/nested.ava.okf.md"),
+        ("pkg/nested/docs/nested.ava.okf.md", "pkg/nested/deep/docs/leaf.ava.okf.md"),
         ("okf/index.ava.okf.md", "other/docs/leaf.ava.okf.md"),
         ("okf/index.ava.okf.md", "legacy/legacy.ava.okf.md"),
         ("legacy/legacy.ava.okf.md", "legacy/child.ava.okf.md"),
