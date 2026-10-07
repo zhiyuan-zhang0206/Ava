@@ -1,5 +1,0 @@
-{
-  "patch_targets": {
-    "tests/schedules/test_c9_daily_report.py::schedules._report_failure": 1
-  }
-}
