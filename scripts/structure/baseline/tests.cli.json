@@ -1,6 +1,0 @@
-{
-  "patch_targets": {
-    "tests/cli/test_pgbouncer_wire.py::base.db.code_version_gate._last_read_at": 1,
-    "tests/cli/test_pgbouncer_wire.py::base.native_process.code_version._db_gate_exempt": 1
-  }
-}

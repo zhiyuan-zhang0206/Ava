@@ -652,16 +652,28 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         monkeypatch.setattr(code_version, "get", lambda: 4321)
-        monkeypatch.setattr(code_version, "_db_gate_exempt", False)
-        monkeypatch.setattr(gate, "_last_read_at", None)  # the minimum is read on this dial
+        monkeypatch.setattr(code_version, "db_gate_applies", lambda: True)
+        gate.observe_minimum(0)
+        assert gate.min_read_due() is False
 
         import base.db
 
-        with base.db.connect() as conn:
-            assert gate.min_read_due() is False  # the dial did read it
-            assert _statement_timeout(conn) == "1min"
-            with psycopg.connect(_admin_console_url(pooled), autocommit=True) as console:
-                cursor = console.execute("SHOW CLIENTS")
-                columns = [column.name for column in cursor.description or ()]
-                names = {row[columns.index("application_name")] for row in cursor.fetchall()}
+        monotonic = time.monotonic
+        try:
+            with monkeypatch.context() as clock:
+                # Advance the refresh clock without rewriting the gate's cache.
+                clock.setattr(time, "monotonic", lambda: monotonic() + gate.MIN_REFRESH_INTERVAL_S)
+                assert gate.min_read_due() is True
+                with base.db.connect() as conn:
+                    assert gate.min_read_due() is False  # the dial did read it
+                    assert _statement_timeout(conn) == "1min"
+                    with psycopg.connect(_admin_console_url(pooled), autocommit=True) as console:
+                        cursor = console.execute("SHOW CLIENTS")
+                        columns = [column.name for column in cursor.description or ()]
+                        names = {
+                            row[columns.index("application_name")] for row in cursor.fetchall()
+                        }
+        finally:
+            # Restore a real observation after the advanced clock is removed.
+            gate.observe_minimum(0)
     assert f"ava:{process_name()}:v4321" in names
