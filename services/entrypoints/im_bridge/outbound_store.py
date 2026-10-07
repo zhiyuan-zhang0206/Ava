@@ -1,4 +1,4 @@
-"""Timeline intent acceptance shares one transaction with its push cursor."""
+"""IM intents share atomic acceptance with their timeline or notice producer."""
 
 from collections.abc import Sequence
 from typing import Any
@@ -17,14 +17,14 @@ from services.entrypoints.im_bridge.cursor_store import (
 from services.entrypoints.im_bridge.outbound_types import (
     OutboundAccountMismatchError,
     OutboundIdentityConflictError,
+    OutboundIntent,
     OutboundStatus,
     TimelineAcceptance,
     TimelineCandidate,
-    TimelineIntent,
 )
 
 
-class TimelineOutboxStore:
+class IMOutboxStore:
     def __init__(self, pool: ConnectionPool | None) -> None:
         self.pool = pool
 
@@ -90,7 +90,7 @@ class TimelineOutboxStore:
             accepted = self._qualified_prefix(fresh)
             if replay_id and len(accepted) != len(fresh):
                 return TimelineAcceptance((), None, blocked=True, selected_agent_id=saved_agent)
-            ids = tuple(self._insert(conn, candidate.intent) for candidate in accepted)
+            ids = tuple(self.insert_intent(conn, candidate.intent) for candidate in accepted)
             position = self._position(accepted, agent_id, saved_agent, watermark, replay_id)
             self._record_acceptance(
                 conn,
@@ -301,7 +301,7 @@ class TimelineOutboxStore:
         )
 
     @staticmethod
-    def _insert(conn: Connection, intent: TimelineIntent | None) -> int:
+    def insert_intent(conn: Connection, intent: OutboundIntent | None) -> int:
         if intent is None:
             raise ValueError("unqualified timeline source cannot be inserted")
         key = (
@@ -445,7 +445,7 @@ class TimelineOutboxStore:
                 ).fetchall()
             )
 
-    def claim(self, stream: tuple[str, str, str]) -> tuple[int, UUID, TimelineIntent] | None:
+    def claim(self, stream: tuple[str, str, str]) -> tuple[int, UUID, OutboundIntent] | None:
         """Recover and claim only while the caller holds this stream's transaction gate.
 
         The gate must outlive the external call and finish commit. There is no
@@ -472,7 +472,7 @@ class TimelineOutboxStore:
                 "outcome_reason=NULL WHERE id=%s AND status='queued'",
                 (attempt, row[0]),
             )
-            return int(row[0]), attempt, TimelineIntent.model_validate(row[1])
+            return int(row[0]), attempt, OutboundIntent.model_validate(row[1])
 
     def finish(
         self, intent_id: int, attempt_id: UUID, status: OutboundStatus, reason: str | None

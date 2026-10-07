@@ -2433,7 +2433,7 @@ CREATE TABLE im_bridge_outbound_intents (
     account_id TEXT NOT NULL,
     chat_id TEXT NOT NULL,
     agent_id BIGINT NOT NULL,
-    source_kind TEXT NOT NULL CHECK (source_kind IN ('message', 'inbound')),
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('message', 'inbound', 'notice')),
     source_id TEXT NOT NULL,
     block_idx INTEGER NOT NULL CHECK (block_idx >= 0),
     replay_id TEXT NOT NULL DEFAULT '',
@@ -2451,7 +2451,7 @@ CREATE TABLE im_bridge_outbound_intents (
 CREATE INDEX im_bridge_outbound_pending ON im_bridge_outbound_intents (id)
     WHERE status IN ('queued', 'sending');
 COMMENT ON TABLE im_bridge_outbound_intents IS
-    'Immutable timeline outbound acceptance; cursor advancement commits with intent insertion. Sending is persisted before provider calls; unresolved attempts are uncertain and never automatically replayed. No expiry.';
+    'Immutable IM timeline and normal notice intents. Producer acceptance commits with its receipt/cursor; sending is persisted before provider calls. Unresolved attempts are uncertain and never automatically replayed. No expiry.';
 COMMENT ON COLUMN im_bridge_cursors.push_account_id IS
     'Nonsecret adapter account owning the accepted push cursor; legacy NULL binds once without backfill. Explicit switch replay alone may rebind another account.';
 
@@ -2652,3 +2652,27 @@ COMMENT ON TABLE task_assignment_receipts IS
     'Immutable principal-scoped compound acceptance tombstones; no FK or automatic expiry.';
 
 INSERT INTO schema_migrations (name) VALUES ('20261007T201556_task-assignment-receipts');
+
+CREATE TABLE im_bridge_notice_poll_state (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    legacy_floor BIGINT NOT NULL CHECK (legacy_floor >= 0),
+    import_reason TEXT NOT NULL CHECK (import_reason IN ('legacy_cursor', 'no_history', 'legacy_history_unknown')),
+    accepted_notice_id BIGINT NOT NULL DEFAULT 0 CHECK (accepted_notice_id >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE im_bridge_notice_poll_state IS
+    'One-time normal Telegram notice cutover. The immutable legacy floor preserves imported skips or unknown old history; accepted_notice_id is diagnostic and never eligibility.';
+
+CREATE TABLE im_bridge_notice_acceptances (
+    notice_id BIGINT PRIMARY KEY CHECK (notice_id > 0),
+    decision TEXT NOT NULL CHECK (decision IN ('queued', 'filtered')),
+    request JSONB NOT NULL,
+    intent_ids BIGINT[] NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((decision = 'filtered') = (cardinality(intent_ids) = 0))
+);
+COMMENT ON TABLE im_bridge_notice_acceptances IS
+    'Normal-poll notice source receipts with immutable destination/rendering or deliberate filter decision. No foreign-key pin or expiry; explicit listing is a separate producer.';
+
+INSERT INTO schema_migrations (name) VALUES ('20261007T194939_im-notice-poll-acceptance');

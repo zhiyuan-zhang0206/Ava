@@ -176,7 +176,7 @@ _core = create_test_core
 
 
 def _queued_text(core: IMBridgeCore) -> str:
-    with core.timeline_outbox._pool().connection() as conn:
+    with core.outbound_store._pool().connection() as conn:
         rows = conn.execute("SELECT request FROM im_bridge_outbound_intents ORDER BY id").fetchall()
     return "\n".join(
         chunk["text"] for (request,) in rows for chunk in request["prepared"]["chunks"]
