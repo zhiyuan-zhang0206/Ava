@@ -17,6 +17,7 @@ import logging
 import time
 from typing import Any
 
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
@@ -35,12 +36,21 @@ def enqueue_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
     """Queue (or refresh) the schedule's sync request. The row has no foreign
     key: a delete asks for the orphaned session to be killed after the schedule
     row is already gone."""
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO schedule_sync_requests (schedule_id) VALUES (%s) "
-            "ON CONFLICT (schedule_id) DO UPDATE SET requested_at = clock_timestamp()",
-            (schedule_id,),
-        )
+    with write_transaction(pool) as conn:
+        enqueue_in_transaction(conn, schedule_id)
+
+
+def enqueue_in_transaction(conn: Connection[Any], schedule_id: int) -> None:
+    """Persist convergence work in the transaction that changes desired state.
+
+    The caller owns commit/rollback; no schedule foreign key allows deletion
+    to leave a durable request to reap its orphaned session.
+    """
+    conn.execute(
+        "INSERT INTO schedule_sync_requests (schedule_id) VALUES (%s) "
+        "ON CONFLICT (schedule_id) DO UPDATE SET requested_at = clock_timestamp()",
+        (schedule_id,),
+    )
 
 
 def _is_queued_blocking(pool: ConnectionPool[Any], schedule_id: int) -> bool:
