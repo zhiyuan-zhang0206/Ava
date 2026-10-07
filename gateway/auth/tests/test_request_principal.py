@@ -78,3 +78,17 @@ def test_mcp_principal_cannot_opt_out_by_omitting_header() -> None:
     assert request_key(request, "k", method="POST", path="/api/a") == principal_key(
         principal, "POST", "/api/a", "k"
     )
+
+
+@pytest.mark.parametrize("scope", [None, "principal-v1"])
+@pytest.mark.parametrize("key", ["", "x" * 129])
+def test_invalid_keys_fail_in_both_legacy_and_principal_scope(scope: str | None, key: str) -> None:
+    request = _request(scope, AuthPrincipal("cluster", "administrator"))
+    with pytest.raises(PrincipalScopeError, match="1 to 128"):
+        request_key(request, key, method="POST", path="/api/a")
+
+
+def test_legacy_key_boundary_is_compatible() -> None:
+    request = _request(scope=None)
+    key = "x" * 128
+    assert request_key(request, key, method="POST", path="/api/a") == key

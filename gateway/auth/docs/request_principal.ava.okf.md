@@ -31,6 +31,10 @@ no write generation, so `require_human_credential` admits only the human facts
 (`cluster_bearer`, `user_session`) there and answers 403 to a generation-bound
 one. An open API passes, having no credential to tell apart.
 
+Supplied keys must contain 1 to 128 characters in both legacy and scoped
+requests; invalid keys fail before durable writes. Missing keys retain each
+route's legacy one-shot behavior without an ambiguous-retry guarantee.
+
 Requests explicitly choosing `Idempotency-Scope: principal-v1` namespace their
 key by verified principal, logical method/path, and caller key. The stored key
 is a bounded digest, never a credential. Delivery and reconciliation use the

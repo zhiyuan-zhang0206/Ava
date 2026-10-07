@@ -8,6 +8,8 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
 
+import httpx
+
 from ava.sdk_surface import process_context
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.agents.messages.delivery_outbox import (
@@ -19,7 +21,7 @@ from base.config import settings
 from base.host.net.resilience import Policy, http_classifier, retry
 
 
-def _http() -> httpx.Client:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def _http() -> httpx.Client:  # pyright: ignore[reportUndefinedVariable]
     """The bound context's gateway client, built on first use so importing the SDK in a no-config
     context does not require the gateway URL to be resolvable until an actual call is made. Its
     timeout is `Settings.gateway_client_http_timeout_seconds` (env override
@@ -88,7 +90,7 @@ _MEMORY_SEARCH_MAX_RETRIES = 2
 _MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
 
 
-def _memory_search_timeout() -> httpx.Timeout:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def _memory_search_timeout() -> httpx.Timeout:  # pyright: ignore[reportUndefinedVariable]
     """Per-attempt HTTP timeout for one memory search: the gateway's own
     search deadline plus the margin, so the server's deadline fires first."""
     import httpx
@@ -124,7 +126,7 @@ def _retry_delay_seconds(attempt: int) -> float:
     return base + _agent_jitter_seconds()
 
 
-def raise_from_response(resp: httpx.Response) -> None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def raise_from_response(resp: httpx.Response) -> None:  # pyright: ignore[reportUndefinedVariable]
     """Non-2xx → rebuild exception per wire contract. Flow:
 
     1. body JSON parse failure (FastAPI default 500 plain text, corrupted
@@ -168,7 +170,7 @@ def raise_from_response(resp: httpx.Response) -> None:  # noqa: F821  # pyright:
     raise EXCEPTION_BY_REASON[reason](body["detail"])
 
 
-def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict] | None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict[str, Any]] | None:  # pyright: ignore[reportUndefinedVariable]
     """Parse the wire `reason` from a non-2xx response body, or None.
 
     None means the body does not carry a valid wire-contract reason (not
@@ -207,16 +209,16 @@ def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict] | None:  # no
 class _TransientResponseError(Exception):
     """Carry the original HTTP response through the exception-based retry executor."""
 
-    def __init__(self, response: httpx.Response) -> None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    def __init__(self, response: httpx.Response) -> None:  # pyright: ignore[reportUndefinedVariable]
         self.response = response
 
 
 def _request_with_retry(
-    request: Callable[[], httpx.Response],  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    request: Callable[[], httpx.Response],  # pyright: ignore[reportUndefinedVariable]
     attempts: int,
     *,
     retryable: bool = True,
-) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Execute one route's policy while keeping its final wire response intact."""
     import httpx
 
@@ -271,14 +273,14 @@ def _post_semantics(path: str, *, idempotent: bool | None) -> Idempotency:
 
 def post(
     path: str,
-    json: dict | None = None,
-    params: dict | None = None,
-    timeout: httpx.Timeout | None = None,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    json: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+    timeout: httpx.Timeout | None = None,  # pyright: ignore[reportUndefinedVariable]
     *,
     idempotent: bool | None = None,
     idempotency_key: str | None = None,
     max_retries: int | None = None,
-) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Retries transport failures and HTTP 429/5xx responses only when the route
@@ -299,7 +301,10 @@ def post(
     spawn's phantom-twin agent), and
     AT_LEAST_ONCE_WITH_KEY retries with an `Idempotency-Key` header (one key
     per logical call, shared by all retries) — the server dedups, so
-    re-sending is safe. An explicit `idempotent=...` overrides the contract
+    re-sending is safe only for routes protected by the rollout baseline.
+    Newly protected keyed routes still send a key, but do not retry ambiguous
+    outcomes until positive server capability negotiation is available: an
+    older gateway may ignore the key. An explicit `idempotent=...` overrides the contract
     (kept for callers that know better); `idempotency_key` pins the key for
     a caller that wants to control it. The connect family is always
     retried: those fail before anything reached the server.
@@ -330,7 +335,12 @@ def post(
     # Inherit retry semantics from the route's doorplate unless the caller
     # overrides: server promises (base/api_contracts/contracts.py), clients inherit.
     semantics = _post_semantics(path, idempotent=idempotent)
-    retryable = semantics is not Idempotency.NON_IDEMPOTENT
+    contract = contracts.contract_for("POST", path)
+    retryable = semantics is Idempotency.IDEMPOTENT or (
+        semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY
+        and contract is not None
+        and contract.legacy_keyed_retry
+    )
     # One key per logical call — every retry of this call shares it, so the
     # server can dedup the retries against the original.
     key = idempotency_key or _uuid.uuid4().hex
@@ -349,10 +359,10 @@ def post(
 def get(
     path: str,
     *,
-    params: dict | None = None,
-    timeout: httpx.Timeout | None = None,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    params: dict[str, Any] | None = None,
+    timeout: httpx.Timeout | None = None,  # pyright: ignore[reportUndefinedVariable]
     max_retries: int | None = None,
-) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Unified GET wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Same policy as `post`; a GET is always idempotent, so transient HTTP
@@ -372,16 +382,23 @@ def get(
     return _request_with_retry(lambda: _http().get(path, params=params, timeout=per_call), retries)
 
 
-def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def patch(path: str, json: dict[str, Any] | None = None) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
-    Same policy as `get` — a PATCH (partial update, e.g. edit the current
-    notice) is idempotent by contract: repeating it cannot change the
-    outcome beyond the first application.
+    Retry ambiguous failures only when the route declares natural idempotency.
+    A PATCH verb alone does not prove its business effects are repeatable.
     """
-    return _request_with_retry(lambda: _http().patch(path, json=json or {}), _max_retries())
+    return _request_with_retry(
+        lambda: _http().patch(path, json=json or {}),
+        _max_retries(),
+        retryable=contracts.idempotency_for("PATCH", path) is Idempotency.IDEMPOTENT,
+    )
 
 
-def _delete(path: str) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    """Unified DELETE wrapper + transient-failure retry + failure → GatewayUnavailable. Same policy as `post`; DELETE is idempotent by semantics."""
-    return _request_with_retry(lambda: _http().delete(path), _max_retries())
+def _delete(path: str) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
+    """Delete with the route's verified retry policy, not a verb-based assumption."""
+    return _request_with_retry(
+        lambda: _http().delete(path),
+        _max_retries(),
+        retryable=contracts.idempotency_for("DELETE", path) is Idempotency.IDEMPOTENT,
+    )

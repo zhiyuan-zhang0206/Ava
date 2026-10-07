@@ -1,32 +1,20 @@
-"""AtLeastOnceWithKey dedup middleware — doorplate ① server side (R3).
+"""Legacy HTTP response replay, bypassed by transactional business receipts.
 
-Routes that declare `Idempotency.AT_LEAST_ONCE_WITH_KEY` promise a keyed
-exactly-once effect. Most routes implement that by storing/replaying the first
-successful response in `api_idempotency`. A route marked
-`transactional_idempotency` instead owns the key in its business transaction
-and bypasses this middleware: message delivery stores `client_message_id` on
-the inbound row and retries return its stable inbound id. Its delivery-time
-status is allowed to reflect current state rather than replaying old bytes.
+The response cache's claim, handler effect and result store are separate
+transactions. It can replay completed responses and coordinate concurrent
+requests, but it cannot promise exactly-once business effects after an owner
+crash or handler error. Its release and seven-day pruning permit re-execution;
+these are cache policies, not durable operation recovery or retention rules.
 
-Concurrency: the first request INSERTs a placeholder row (status NULL =
-executing); a same-key retry that finds the placeholder polls until the
-owner completes, then replays. A non-2xx outcome deletes the row so a later
-retry executes afresh (a transient 5xx is not a result worth replaying —
-the client will retry and must get a real execution). Rows live 7 days
-(far beyond any retry window) and are pruned opportunistically on each
-claim.
+Current keyed routes own their identity and immutable request comparison in
+the business transaction and bypass this cache. New keyed-effect declarations
+must do the same (enforced by the route-contract tests). Chat acceptance uses
+its inbound row and returns the same inbound id; mutable status fields may
+reflect current state on retry.
 
-Failure containment: a placeholder whose owner died mid-execution (status
-NULL past the retention window) is pruned with the same 7-day sweep and
-stolen by the next claim, so no key can brick forever; every failure path
-between claim and store releases the row. The claim is scoped to
-(method, path): a same key reused on a different route is treated as
-absent and re-claimed, so two endpoints sharing a key never replay each
-other's responses.
-
-The middleware only engages for non-transactional routes whose contract
-declares AT_LEAST_ONCE_WITH_KEY **and** requests that actually carry an
-Idempotency-Key header — everything else passes through untouched.
+This middleware engages only for non-transactional AT_LEAST_ONCE_WITH_KEY
+contracts with an Idempotency-Key header. The implementation remains for
+legacy response-replay consumers and its tests, not as a general outbox.
 """
 
 from __future__ import annotations

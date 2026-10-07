@@ -1,0 +1,109 @@
+"""Unprotected writes must not be repeated after an ambiguous outcome."""
+
+import httpx
+import pytest
+
+from ava.gateway_client import transport
+from base.agents import GatewayUnavailable
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/api/cancel"),
+        ("POST", "/api/agents/7/restart"),
+        ("POST", "/api/agents/7/compact"),
+        ("POST", "/api/agents/7/notices/1/resolve"),
+        ("POST", "/api/schedules/1/restart"),
+        ("PATCH", "/api/tasks/1"),
+        ("PATCH", "/api/unknown"),
+        ("DELETE", "/api/cluster/machines/host"),
+        ("DELETE", "/api/unknown"),
+    ],
+)
+@pytest.mark.parametrize("failure", ["timeout", "server_error"])
+def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("response lost", request=request)
+        return httpx.Response(503)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        transport.use_client(client),
+    ):
+
+        def send() -> httpx.Response:
+            if method == "POST":
+                return transport.post(path)
+            if method == "PATCH":
+                return transport.patch(path)
+            return transport._delete(path)
+
+        if failure == "timeout":
+            with pytest.raises(GatewayUnavailable, match="result unknown"):
+                send()
+        else:
+            assert send().status_code == 503
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("method", ["PATCH", "DELETE"])
+@pytest.mark.usefixtures("retry_waits")
+def test_natural_idempotent_write_retries(method: str) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(503 if len(requests) == 1 else 200)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        transport.use_client(client),
+    ):
+        response = (
+            transport.patch("/api/agents/1", {"label": "new"})
+            if method == "PATCH"
+            else transport._delete("/api/agents/1/pages/report")
+        )
+    assert response.status_code == 200
+    assert len(requests) == 2
+
+
+@pytest.mark.parametrize("failure", ["timeout", "server_error"])
+def test_new_keyed_route_does_not_activate_ambiguous_retry(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from base.api_contracts import contracts
+    from base.api_contracts.contracts import Idempotency, RouteContract
+
+    path = "/api/new-keyed-effect"
+    monkeypatch.setitem(
+        contracts.ROUTE_CONTRACTS,
+        ("POST", path),
+        RouteContract(Idempotency.AT_LEAST_ONCE_WITH_KEY, transactional_idempotency=True),
+    )
+    requests: list[httpx.Request] = []
+
+    def older_gateway(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("older server ignores key", request=request)
+        return httpx.Response(503)
+
+    with (
+        httpx.Client(
+            transport=httpx.MockTransport(older_gateway), base_url="http://gateway"
+        ) as client,
+        transport.use_client(client),
+    ):
+        if failure == "timeout":
+            with pytest.raises(GatewayUnavailable, match="result unknown"):
+                transport.post(path, idempotency_key="intent-1")
+        else:
+            assert transport.post(path, idempotency_key="intent-1").status_code == 503
+    assert len(requests) == 1
+    assert requests[0].headers["Idempotency-Key"] == "intent-1"

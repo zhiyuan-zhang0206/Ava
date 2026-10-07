@@ -34,12 +34,12 @@ class Idempotency(StrEnum):
         change the outcome (reads, CAS state transitions, upserts).
     NON_IDEMPOTENT: never auto-retry — a retry can duplicate the effect
         (pure INSERTs: spawn, create, upload).
-    AT_LEAST_ONCE_WITH_KEY: safe to retry because the server dedups by an
-        ``Idempotency-Key`` header. The route's ``transactional_idempotency``
-        selects either response replay from ``api_idempotency`` or keyed effect
-        exactly-once in the business transaction. Transactional message sends
-        return the same durable inbound id; mutable response fields such as the
-        agent's current status may be recomputed on a retry.
+    AT_LEAST_ONCE_WITH_KEY: safe to retry with the same ``Idempotency-Key``
+        only when the handler records identity and immutable request matching
+        in the business transaction. A durable receipt proves acceptance, not
+        delivery or execution. Mutable response fields may be recomputed.
+        The generic ``api_idempotency`` response cache does not make effects
+        atomic; new keyed-effect routes must use transactional ownership.
     """
 
     IDEMPOTENT = "idempotent"
@@ -77,6 +77,10 @@ class RouteContract:
     pause: PauseSemantics = PauseSemantics.DATA_PLANE
     note: str = ""
     transactional_idempotency: bool = False
+    # True only for keyed routes already protected by the rollout baseline.
+    # Newly protected routes need positive server negotiation before callers
+    # may automatically retry an ambiguous outcome against a mixed-version gateway.
+    legacy_keyed_retry: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -214,20 +218,21 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="reverse proxy — semantics follow upstream"
     ),
     ("POST", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
+        Idempotency.NON_IDEMPOTENT, note="reverse proxy — semantics follow upstream"
     ),
     ("PATCH", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
+        Idempotency.NON_IDEMPOTENT, note="reverse proxy — semantics follow upstream"
     ),
     ("DELETE", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
+        Idempotency.NON_IDEMPOTENT, note="reverse proxy — semantics follow upstream"
     ),
     ("PUT", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
+        Idempotency.NON_IDEMPOTENT, note="reverse proxy — semantics follow upstream"
     ),
     # ── gateway/routers/guide.py ───────────────────────────────────
     ("POST", "/api/guide/draft"): RouteContract(
-        note="LLM draft generation — repeats waste tokens but are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="LLM generation incurs a fresh external request and token cost",
     ),
     # ── gateway/cluster/status.py (health) ───────────────────────────────────
     ("GET", "/api/health"): RouteContract(
@@ -250,20 +255,26 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="observed-session CAS close — repeated or stale requests leave the lease unchanged"
     ),
     ("POST", "/api/agents/{agent_id}/compact"): RouteContract(
-        note="enqueue compact — repeats just re-summarize"
+        Idempotency.NON_IDEMPOTENT,
+        note="each request enqueues a new compact command; no durable command receipt",
     ),
-    ("POST", "/api/cancel"): RouteContract(note="enqueue cancel — repeats are harmless"),
+    ("POST", "/api/cancel"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="each request enqueues cancel; a delayed retry can cancel later work",
+    ),
     ("POST", "/api/agents/{agent_id}/terminate"): RouteContract(
-        note="graceful exit — already_terminated branch makes repeats harmless"
+        Idempotency.NON_IDEMPOTENT, note="termination is not bound to the observed incarnation"
     ),
     ("POST", "/api/agents/{agent_id}/resurrect"): RouteContract(
-        note="already_alive branch makes repeats harmless"
+        Idempotency.NON_IDEMPOTENT, note="resurrection is not bound to the observed incarnation"
     ),
     ("POST", "/api/agents/resurrect-billing"): RouteContract(
-        note="preview by default; execute is balance-gated + single-flight, a rerun is an audited no-op"
+        Idempotency.NON_IDEMPOTENT,
+        note="billing resurrection has no durable operation receipt; preview alone is read-only",
     ),
     ("POST", "/api/agents/{agent_id}/restart"): RouteContract(
-        note="enqueue restart — repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="a repeat dispatches another restart; HTTP intent has no durable receipt",
     ),
     # ── gateway/agents/understanding.py ────────────────────────────────────
     ("POST", "/api/agents/{agent_id}/understanding/close"): RouteContract(
@@ -298,7 +309,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/notices/live"): RouteContract(),
     ("GET", "/api/notices/open"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
-        note="CAS resolve — repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="read with reply can insert another inbound; resolved answers do not replay receipts",
     ),
     ("POST", "/api/agents/{agent_id}/notices"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
@@ -314,7 +326,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/okf/graph"): RouteContract(),
     # ── gateway/extensions/packages.py ───────────────────────────────────
     ("POST", "/api/packages/draft"): RouteContract(
-        note="LLM draft generation — repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="LLM generation incurs a fresh external request and token cost",
     ),
     # ── gateway/routers/pages.py ───────────────────────────────────
     ("GET", "/api/pages"): RouteContract(),
@@ -351,18 +364,24 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT, note="create schedule — pure INSERT; a retry duplicates the row"
     ),
     ("POST", "/api/schedules/draft"): RouteContract(
-        note="LLM draft generation — repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="LLM generation incurs a fresh external request and token cost",
     ),
     ("POST", "/api/schedules/{schedule_id}/start"): RouteContract(
-        note="state machine — repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="schedule control enqueues a fresh sync; no durable command receipt",
     ),
     ("POST", "/api/schedules/{schedule_id}/stop"): RouteContract(
-        note="state machine — repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="schedule control enqueues a fresh sync; no durable command receipt",
     ),
     ("POST", "/api/schedules/{schedule_id}/restart"): RouteContract(
-        note="state machine — repeats are harmless"
+        Idempotency.NON_IDEMPOTENT,
+        note="schedule control enqueues a fresh sync; no durable command receipt",
     ),
-    ("PUT", "/api/schedules/{schedule_id}"): RouteContract(note="full replace — PUT is idempotent"),
+    ("PUT", "/api/schedules/{schedule_id}"): RouteContract(
+        Idempotency.NON_IDEMPOTENT, note="script edits append versions and can restart the process"
+    ),
     ("DELETE", "/api/schedules/{schedule_id}"): RouteContract(note="delete — repeats are harmless"),
     # ── gateway/routers/settings.py ───────────────────────────────────
     ("GET", "/api/settings"): RouteContract(),
@@ -386,6 +405,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="enqueue chat inbound — one logical message must land exactly once; clients retry with an Idempotency-Key",
         transactional_idempotency=True,
+        legacy_keyed_retry=True,
     ),
     ("POST", "/api/agents/{agent_id}/messages/reconcile"): RouteContract(
         note="idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery"
@@ -404,7 +424,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/system/all"): RouteContract(),
     # ── gateway/routers/tasks.py ───────────────────────────────────
     ("GET", "/api/tasks"): RouteContract(),
-    ("PATCH", "/api/tasks/{task_id}"): RouteContract(note="task update — repeats are harmless"),
+    ("PATCH", "/api/tasks/{task_id}"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="update resets reminders and owner notification is outside the transaction",
+    ),
     # ── gateway/agents/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
     # ── gateway/run_timeline/router.py, messages.py ──────────────────
