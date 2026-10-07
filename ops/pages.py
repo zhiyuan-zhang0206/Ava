@@ -303,8 +303,14 @@ def close_all_agent_pages(db: psycopg.Connection, agent_id: int) -> list[str]:
 def close_all_agent_pages_in_transaction(
     db: psycopg.Connection,
     agent_id: int,
+    *,
+    include_expired: bool = False,
 ) -> list[str]:
     """Close every currently open page for ``agent_id``.
+
+    HTTP registration includes expired rows so a fresh registration cannot
+    revive an older numeric identity. The raw committing wrapper retains its
+    existing unexpired-only policy. This primitive never commits.
 
     Returns the names of the closed pages so the caller can publish
     PageClosed events for each one (every close needs its own event for
@@ -322,15 +328,15 @@ def close_all_agent_pages_in_transaction(
     with db.cursor() as cur:
         cur.execute(
             "SELECT name FROM agent_pages "
-            "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL",
-            (agent_id,),
+            "WHERE agent_id = %s AND closed_at IS NULL AND (%s OR expired_at IS NULL)",
+            (agent_id, include_expired),
         )
         names = [r[0] for r in cur.fetchall()]
         if names:
             cur.execute(
                 "UPDATE agent_pages SET closed_at = now() "
-                "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL",
-                (agent_id,),
+                "WHERE agent_id = %s AND closed_at IS NULL AND (%s OR expired_at IS NULL)",
+                (agent_id, include_expired),
             )
     return names
 
