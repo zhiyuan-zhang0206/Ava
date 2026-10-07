@@ -6,7 +6,7 @@ layout (each skill is a directory with its own `SKILL.md`).
 
 **Distribution: project-local only for the real project-skill directories.**
 They are NOT a `converge` source (issue #146 /
-`docs/decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`).
+`docs/decisions/runtime/processes/shutdown/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`).
 An Ava agent sees them only through the project-local mount —
 `ava_builtins/plugins/ava_code/_walk.py:project_skill_roots` resolves this
 directory from `ava.cwd` at scan time — so they load exactly when the agent is

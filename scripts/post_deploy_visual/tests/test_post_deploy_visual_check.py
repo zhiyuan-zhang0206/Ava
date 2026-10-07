@@ -70,13 +70,13 @@ def test_surface_attribution_matches_route_and_component_paths() -> None:
     attribution = attribute_surface(
         "home-composer",
         [
-            "ui/web/src/components/composer.tsx",
+            "ui/web/src/components/conversation/composer.tsx",
             "ui/web/src/app/fleet/page.tsx",
         ],
     )
 
     assert attribution.expected is True
-    assert attribution.matched_paths == ("ui/web/src/components/composer.tsx",)
+    assert attribution.matched_paths == ("ui/web/src/components/conversation/composer.tsx",)
     assert attribute_surface("home-sidebar", ["ui/web/src/components/agent-sidebar.tsx"]).expected
     assert attribute_surface("missing-surface", ["ui/web/src/app/page.tsx"]).expected is False
     assert attribute_surface("control-nav", ["docs/readme.md"]).expected is False
@@ -288,7 +288,7 @@ def test_accept_wave_requires_complete_captures_and_resets_counter(tmp_path: Pat
     assert _accept_wave(args) == 0
 
     golden = tmp_path / "golden" / "abc123" / "captures"
-    assert len(list(golden.glob("*-golden-[12].png"))) == 44
+    assert len(list(golden.rglob("*-golden-[12].png"))) == 44
     state = json.loads((tmp_path / "state.json").read_text())
     assert state == {"golden_sha": "abc123", "unexpected_wave_counts": {}}
     audit = json.loads((tmp_path / "acceptance-audit.jsonl").read_text())

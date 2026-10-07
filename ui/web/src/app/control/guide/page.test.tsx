@@ -2,14 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { api } from "@/lib/transport/api";
 
 const push = vi.fn();
 const showToast = vi.fn();
 const setActiveId = vi.fn();
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
-vi.mock("@/lib/store", () => ({
+vi.mock("@/lib/state/store", () => ({
   useStore: <T,>(selector: (state: { showToast: typeof showToast; setActiveId: typeof setActiveId }) => T): T =>
     selector({ showToast, setActiveId }),
 }));
@@ -57,7 +57,7 @@ describe("GuidePage", () => {
     await waitFor(() => expect(setActiveId).toHaveBeenCalledWith(42));
     expect(showToast).toHaveBeenCalledWith("Ava Guide #42 created — check its conversation for progress");
     expect(push).toHaveBeenCalledWith("/");
-    expect((screen.getByPlaceholderText(/Describe an operations task/) as HTMLInputElement).value).toBe("");
+    expect(screen.getByPlaceholderText<HTMLInputElement>(/Describe an operations task/).value).toBe("");
   });
 
   it("reports a draft failure without navigating", async () => {

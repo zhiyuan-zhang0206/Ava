@@ -2,7 +2,7 @@
 
 WAL archiving ships every completed WAL segment, encrypted, to an OSS prefix
 through a pinned WAL-G
-([decision](../../../../docs/decisions/2026-10-02-walg-physical-backup.md),
+([decision](../../../../docs/decisions/data/backup/2026-10-02-walg-physical-backup.md),
 [node](walg.ava.okf.md)). It is off until
 `AVA_WALG_CONFIG_FILE` is set; unset, nothing of it runs. It archives WAL and, once a
 day, takes a base backup, verifies the archived chain and applies retention;
@@ -123,7 +123,7 @@ directory (a `--dir` that is or contains `$AVA_HOME/pg` is refused) or its ports
 
 Scope: this recovers the **database** under the same home identity. A whole-host rebuild
 (the `$AVA_HOME/db-authority/` ledger, `.env`, `start-intent.json`) is not covered or
-exercised; see [disaster recovery](../../../../docs/conventions/disaster-recovery.md).
+exercised; see [disaster recovery](../../../../docs/conventions/data/disaster-recovery.md).
 
 **Switching it off.** `ava config unset AVA_WALG_CONFIG_FILE`, then `ava stop && ava
 start`; converge removes the daily job. Nothing is left in the data directory (the archive

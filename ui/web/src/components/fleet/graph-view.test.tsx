@@ -17,8 +17,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, FleetGraph, FleetGraphEdge, FleetGraphNode } from "@/lib/types";
-import type { FleetGraphResult } from "@/lib/use-fleet-graph";
+import type { AgentRow, FleetGraph, FleetGraphEdge, FleetGraphNode } from "@/lib/contracts/types";
+import type { FleetGraphResult } from "@/lib/fleet/use-fleet-graph";
 
 import { resetMockSettings } from "@/test-support/user-settings-mock";
 
@@ -29,18 +29,18 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
 }));
 
-vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 // useFleetGraph is exercised on its own in use-fleet-graph.test.ts; here we feed
 // GraphView a fixed graph so the render is deterministic.
 const useFleetGraph = vi.fn<() => FleetGraphResult>();
-vi.mock("@/lib/use-fleet-graph", () => ({
+vi.mock("@/lib/fleet/use-fleet-graph", () => ({
   useFleetGraph: () => useFleetGraph(),
 }));
 
 const { getAgentRoster } = vi.hoisted(() => ({ getAgentRoster: vi.fn() }));
-vi.mock("@/lib/api", () => ({ api: { getAgentRoster } }));
-import { AGENTS_QUERY_KEY } from "@/lib/use-agents";
+vi.mock("@/lib/transport/api", () => ({ api: { getAgentRoster } }));
+import { AGENTS_QUERY_KEY } from "@/lib/agents/use-agents";
 
 function node(agent_id: number, over: Partial<FleetGraphNode> = {}): FleetGraphNode {
   return {

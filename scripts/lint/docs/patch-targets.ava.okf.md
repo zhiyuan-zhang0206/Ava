@@ -41,6 +41,6 @@ Checks: pre-commit passes only the changed test files (a changed lint, placement
 
 ## Report
 
-`scripts/lint/patch_targets.py --report` prints the census as Markdown and exits 0: the class distribution, D by relation, D by test home, D by production module (the injection-seam work list), the most-patched ambient modules and the fallback files. The numbers and the follow-up list live in [test patch audit](../../../future/infra/test-patch-audit.md).
+`scripts/lint/patch_targets.py --report` prints the census as Markdown and exits 0: the class distribution, D by relation, D by test home, D by production module (the injection-seam work list), the most-patched ambient modules and the fallback files. The numbers and the follow-up list live in [test patch audit](../../../future/infra/engineering/test-patch-audit.md).
 
 Parent: [[scripts/lint/docs/lint.ava.okf.md|lint]].

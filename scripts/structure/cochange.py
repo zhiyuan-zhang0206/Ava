@@ -4,10 +4,10 @@ co-change pairs over a rolling window of first-parent history.
 Run: `.venv/bin/python scripts/structure/cochange.py [--days N | --commits N]
 [--repo PATH] [--min-support N] [--min-confidence F] [--json]`.
 
-This is an optional inspection tool (`docs/conventions/tech-debt.md`, locality
+This is an optional inspection tool (`docs/conventions/engineering/tech-debt.md`, locality
 class), not a pre-commit gate: it reports on debt that
 accumulates across many commits with no single owner or door, which
-`docs/conventions/lint-vs-sweeper.md`'s graduation test puts on the sweeper side —
+`docs/conventions/engineering/lint-vs-sweeper.md`'s graduation test puts on the sweeper side —
 detection needs a rolling window of history and the fix needs judgement, so
 neither half of the lint test holds. It always exits 0 on a successful scan
 (an index, not a wall) and reuses `scripts.structure.locality._package_of`
@@ -28,7 +28,7 @@ decision with no single owner. Declared cross-process contract boundaries
 codegen) are excluded from pairing, and so is any file the branch tip no
 longer has (paths follow renames to their current name; a deleted file names
 no owner to fix); see "Calibration snapshot" in
-`future/infra/locality.md` (read there, not edited here).
+`future/infra/engineering/locality.md` (read there, not edited here).
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ _GENERATED_EXCLUDE = (
 )
 # Declared cross-process contract boundaries: a pair of path prefixes whose
 # co-change is carried by codegen, not a leaked decision. See the module
-# docstring and future/infra/locality.md's "Calibration snapshot".
+# docstring and future/infra/engineering/locality.md's "Calibration snapshot".
 # Declared cross-process contracts: both sides change together by design, so a
 # co-change there is a protocol change, not a leaked decision.
 _CONTRACT_BOUNDARIES: tuple[tuple[str, str], ...] = (

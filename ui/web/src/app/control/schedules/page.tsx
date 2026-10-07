@@ -27,8 +27,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { CodeHighlighterPreloader } from "@/components/code-highlighter-preloader";
-import { PythonCode, preloadPythonCodeHighlighter } from "@/components/python-code";
+import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
+import { PythonCode, preloadPythonCodeHighlighter } from "@/components/content/python-code";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -38,15 +38,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
-import { useStore } from "@/lib/store";
-import { formatRelative } from "@/lib/time";
-import type { ScheduleCreate, ScheduleSummary, ScheduleUpdate } from "@/lib/types";
+import { api } from "@/lib/transport/api";
+import { errMsg } from "@/lib/contracts/errors";
+import { useStore } from "@/lib/state/store";
+import { formatRelative } from "@/lib/format/time";
+import type { ScheduleCreate, ScheduleSummary, ScheduleUpdate } from "@/lib/contracts/types";
 
 import { useSectionVisible } from "../_visibility";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 const SCHEDULES_QUERY_KEY = ["schedules"] as const;
 

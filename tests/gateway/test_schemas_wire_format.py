@@ -1,7 +1,7 @@
 """Freeze the HTTP wire format of the gateway wire schemas.
 
 Analogous to `test_events_wire_format.py`: the Python schema and the hand-written TS
-mirror (`ui/web/src/lib/types.ts`) must stay in sync on fields; a rename like
+mirror (`ui/web/src/lib/contracts/types.ts`) must stay in sync on fields; a rename like
 `content` → `text` won't be caught by type tests — but external consumers / the
 frontend will blow up at runtime.
 

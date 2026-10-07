@@ -16,7 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { PackageDraftEntry } from "@/components/package-draft-entry";
+import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { Switch } from "@/components/ui/switch";
 
 import {
@@ -27,14 +27,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
-import { useStore } from "@/lib/store";
-import type { SkillLayer, SkillsView } from "@/lib/types";
+import { api } from "@/lib/transport/api";
+import { errMsg } from "@/lib/contracts/errors";
+import { useStore } from "@/lib/state/store";
+import type { SkillLayer, SkillsView } from "@/lib/contracts/types";
 
 import { useSectionVisible } from "../_visibility";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
 

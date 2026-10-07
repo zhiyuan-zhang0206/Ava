@@ -6,7 +6,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, SystemEvent } from "../types";
+import type { AgentRow, SystemEvent } from "../contracts/types";
 import { AGENTS_QUERY_KEY, foldAgents, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
 import { foldFleetGraph } from "./graph";
 import { foldAgainstCache, applyEvent, ALL_PAGES_QUERY_KEY } from "./index";

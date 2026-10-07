@@ -159,7 +159,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "cli/commands/lifecycle/service_stop.py",
         "_TERMINAL_STOP_GRACE_S",
     ): "independent: HUP/TERM -> SIGKILL grace of a normal stop's terminal closure "
-    "(docs/decisions/2026-09-28-stop-escalates-to-sigkill.md); the stop's own deadline caps it "
+    "(docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md); the stop's own deadline caps it "
     "and nothing orders against it, no lattice neighbour",
     (
         "base/events/live/redis_listener.py",

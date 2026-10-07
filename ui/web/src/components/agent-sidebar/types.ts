@@ -1,4 +1,4 @@
-import type { AgentRow, AgentLineage } from "@/lib/types";
+import type { AgentRow, AgentLineage } from "@/lib/contracts/types";
 
 export interface Props {
   /** Server-driven agent list (TanStack Query cache, kept in sync by useAgents via SSE). */

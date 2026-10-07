@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { ContextBreakdownCard } from "@/components/context-breakdown";
+import { ContextBreakdownCard } from "@/components/inspector/context-breakdown";
 import { RunTimelineCrumbs } from "@/components/run-timeline/run-timeline-crumbs";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { RunTimelineRows } from "@/components/run-timeline/run-timeline-rows";
@@ -24,11 +24,11 @@ import {
   type Viewport,
 } from "@/components/run-timeline/timeline-model";
 import { buttonVariants } from "@/components/ui/button";
-import { api } from "@/lib/api";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { formatAbsolute } from "@/lib/time";
-import type { RunTimelineUnit } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { api } from "@/lib/transport/api";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { formatAbsolute } from "@/lib/format/time";
+import type { RunTimelineUnit } from "@/lib/contracts/types";
+import { cn } from "@/lib/format/utils";
 
 const CRUMB_LABEL_CHARS = 40;
 

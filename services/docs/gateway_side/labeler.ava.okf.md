@@ -21,7 +21,7 @@ An independent agent label auto-generation process — polls per second for rows
 - **Publish update**: after generating a label, publishes via `base/labels.publish_label_updated`
 
 ## Key Dependencies
-- [[db.ava.okf.md]] — reads and writes `agents` table
+- [[agent/db/docs/db.ava.okf.md]] — reads and writes `agents` table
 - [[base/lm/docs/lm.ava.okf.md]] — LLM call (`build_chat_model`)
 - [[loop.ava.okf.md]] — agent labels are used for fleet view display and neighbor discovery
 

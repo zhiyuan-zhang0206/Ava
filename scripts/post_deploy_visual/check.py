@@ -34,6 +34,7 @@ from base.native_process.child_env import inherited_process_env  # noqa: E402
 from scripts.post_deploy_visual.matrix import (  # noqa: E402
     SESSION_REJECTED_DETAIL,
     VisualGateBudgetExceeded,
+    golden_capture_path,
 )
 from scripts.post_deploy_visual.policy import (  # noqa: E402
     extract_gateway_sha,
@@ -293,7 +294,8 @@ def _accept_wave(args: argparse.Namespace) -> int:
         raise RuntimeError(f"wave is missing {len(missing)} required captures")
     accepted = []
     for source in sorted(captures.glob("*-current-[12].png")):
-        target = golden / source.name.replace("-current-", "-golden-")
+        target = golden_capture_path(golden, source.name.replace("-current-", "-golden-"))
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         accepted.append(target.name)
     if not accepted:

@@ -24,4 +24,4 @@ Claude Code package install through the same path.
 
 Use [modification-layers](../modification-layers/SKILL.md) to determine change
 ownership and activation. CLI help owns plugin command syntax;
-`docs/conventions/plugin-spec-v2.md` owns native contribution contracts.
+`docs/conventions/extensions/plugin-spec-v2.md` owns native contribution contracts.

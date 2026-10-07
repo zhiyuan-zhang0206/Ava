@@ -27,19 +27,19 @@ import { InboxQueue } from "@/components/fleet/inbox-queue";
 import { LeftGraphPanel } from "@/components/fleet/left-graph-panel";
 import { readFleetRouteIds } from "@/components/fleet/fleet-route";
 import { TaskGraph } from "@/components/fleet/task-graph";
-import { PluginNavIcons } from "@/components/plugin-nav";
+import { PluginNavIcons } from "@/components/plugins/plugin-nav";
 import {
   ResizablePanel,
   ResizablePanelGroup,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import type { AgentRow } from "@/lib/types";
-import { useFleetAgents } from "@/lib/use-fleet-agents";
-import { useBreakpoint } from "@/lib/breakpoint";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { cn } from "@/lib/utils";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { panelLayoutStorage } from "@/lib/panel-layout-storage";
+import type { AgentRow } from "@/lib/contracts/types";
+import { useFleetAgents } from "@/lib/agents/use-fleet-agents";
+import { useBreakpoint } from "@/lib/layout/breakpoint";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { cn } from "@/lib/format/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
 
 // Which mobile tab is on screen is an EPHEMERAL, per-device selection ("which
 // surface am I looking at right now"), not a durable preference — so it stays

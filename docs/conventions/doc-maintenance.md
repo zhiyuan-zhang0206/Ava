@@ -22,7 +22,7 @@ on the axis that owns the question and replace the other with a pointer.
 ### What the system *does* is not an axis
 
 There was a fifth axis, `traces/` — one real recorded run, annotated. It is
-retired ([why](../decisions/2026-08-19-retire-the-traces-doc-axis.md)) and
+retired ([why](../decisions/engineering/design/simplification/2026-08-19-retire-the-traces-doc-axis.md)) and
 nothing trace-shaped is committed to this repo. A committed run is a fact about
 a version that has already moved: it rots on every CLI rename and behavior
 change, and the evidence it copied is still queryable, and current, in the
@@ -112,7 +112,7 @@ A `[[wikilink]]` is the **edge syntax of the node graph**, so its universe is th
 record, a plan, a convention — cannot resolve however plainly the file exists,
 because those are not nodes and `compute_parent` has nowhere to put them. Cite
 them as a normal markdown link or a backticked path
-(`[why](../decisions/2026-07-29-okf-node-ceiling.md)`) and keep `[[…]]` for
+(`[why](../decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md)`) and keep `[[…]]` for
 node-to-node edges. The linter recognises this mistake by name: a target that
 matches a real non-node doc reports `W008` saying so, not a bare "not found".
 
@@ -139,7 +139,7 @@ A node with less than `WARN_MARGIN` characters of room left reports `W010`, a
 to plan your next section as a separate node. It is not an instruction to trim
 this one — the cap was raised in 2026-07 precisely because trimming to fit had
 been deleting documented facts to make room for new ones
-([why](../decisions/2026-07-29-okf-node-ceiling.md)).
+([why](../decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md)).
 
 The ceiling counts **characters of decoded UTF-8** (`len(text)`), not bytes. So
 `wc -c` reads high on any node containing multi-byte glyphs — `→`, `✓`, CJK — and
@@ -206,7 +206,7 @@ Process, rule, and observed-behaviour changes → the doc that owns them:
 | A bug class that already shipped here | `defensive-patterns.md` — plus a `docs/postmortems/` entry when it clears the entry bar |
 
 A directional decision — one that rejected alternatives — also gets a new
-`docs/decisions/YYYY-MM-DD-<topic>.md`. Superseding one means writing a new file
+`docs/decisions/<domain>/<subject>/YYYY-MM-DD-<topic>.md`. Superseding one means writing a new file
 and forward-linking from the old, never editing the old.
 
 A failure that cleared the entry bar above also gets a new

@@ -17,13 +17,13 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ShellMonitorPage from "@/app/shell/[agentId]/[sessionId]/page";
-import type { ShellCapture } from "@/lib/types";
+import type { ShellCapture } from "@/lib/contracts/types";
 
 // vi.hoisted so the mock fn is initialised before the hoisted vi.mock factory runs.
 const { getAgentShell } = vi.hoisted(() => ({
   getAgentShell: vi.fn<(agentId: number, sessionId: number, lines?: number) => Promise<ShellCapture>>(),
 }));
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/transport/api", () => ({
   api: { getAgentShell },
 }));
 
@@ -40,7 +40,7 @@ vi.mock("next/navigation", () => ({
 
 // Terminal theme is a DB-backed user setting; the reactive mock cycles it +
 // re-renders on setSetting (no React Query network for settings).
-vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 import { resetMockSettings } from "@/test-support/user-settings-mock";
 
 afterEach(() => {

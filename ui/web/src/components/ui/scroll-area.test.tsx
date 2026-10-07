@@ -5,7 +5,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { NonceProvider } from "@/lib/nonce-context";
+import { NonceProvider } from "@/lib/auth/nonce-context";
 import { ScrollArea } from "./scroll-area";
 
 const defaultResizeObserver = globalThis.ResizeObserver;

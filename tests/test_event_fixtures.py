@@ -28,7 +28,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "events"
 
 def _all_fixture_paths() -> list[Path]:
     """All fixture JSON paths — sorted by filename to keep parametrize output stable."""
-    return sorted(FIXTURES_DIR.glob("*.json"))
+    return sorted(FIXTURES_DIR.rglob("*.json"))
 
 
 @pytest.mark.parametrize("fixture_path", _all_fixture_paths(), ids=lambda p: p.stem)

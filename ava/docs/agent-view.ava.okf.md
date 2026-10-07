@@ -20,7 +20,7 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 - [[sdk-surface.ava.okf.md]] — **index**, pointing to the following modules
 - [[files.ava.okf.md]] — file system operations
 - [[shell.ava.okf.md]] — shell commands and persistent sessions
-- [[agents.ava.okf.md]] — agent interop
+- [[ava/agents/docs/agents.ava.okf.md]] — agent interop
 - [[ava_builtins/plugins/ava_fleet/docs/tasks/tasks.ava.okf.md|Tasks]] — task registry `ava.tasks` (injected by ava_fleet plugin)
 - [[presets.ava.okf.md]] — configuration presets
 - [[ava/mcps/docs/mcps.ava.okf.md]] — MCP tool servers

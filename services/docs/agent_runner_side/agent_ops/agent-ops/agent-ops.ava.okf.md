@@ -51,7 +51,7 @@ The ops server and the **delivery-outbox redelivery loop** (`services/agent_runn
 ## Key Dependencies
 - [[gateway-cli.ava.okf.md]] — Gateway issues ops commands to agent-runner via this service
 - [[services/supervision/ava_root_glue/docs/ava_root_glue.ava.okf.md]] — keeps alive every 60s (HTTP `/healthz`)
-- [[db.ava.okf.md]] — ops directly reads/writes the cluster DB in-process
+- [[agent/db/docs/db.ava.okf.md]] — ops directly reads/writes the cluster DB in-process
 
 ## Entry Points
 - `services/agent_runner/agent_ops/daemon.py` — `.venv/bin/python -m services.agent_runner.agent_ops.daemon`

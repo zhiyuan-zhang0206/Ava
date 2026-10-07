@@ -24,7 +24,7 @@ instead of asking; an agent that declares intent beats a prompt that asks it to.
    options: still working (do nothing), waiting (`ava.self.pause_heartbeat(duration)`
    suppresses nudges for a declared window; real wake-ups still arrive), or done
    (terminate). Opt-out is an active agent choice, not an escalation chain
-   ([why](../../docs/decisions/2026-06-22-heartbeat-opt-out-over-escalation.md)).
+   ([why](../../docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md)).
 2. **Silent-idle continue nudge** — `ava_builtins/plugins/ava_silent_idle/`
    ([[ava_builtins/plugins/ava_silent_idle/docs/ava_silent_idle.ava.okf.md]]).
    When the model produces reasoning but no text and no tool call, the kernel
@@ -48,7 +48,7 @@ instead of asking; an agent that declares intent beats a prompt that asks it to.
 6. **Delivery semantics** — a bare text turn delivers nothing:
    `ava.agents.send_message` (peers) and `ava.ui.notify` (the user) are the only
    delivery verbs, so "not done yet" must be said out loud and silence reads as
-   busy ([why](../../docs/decisions/2026-08-01-one-send-is-one-inbound.md)).
+   busy ([why](../../docs/decisions/agents/messages/2026-08-01-one-send-is-one-inbound.md)).
 7. **Standing memory injection** — the memory index (`MEMORY.md`) is injected at
    cold start and after every compact, so long-lived rules stay in front of the
    agent ([[agent/graph/docs/context-notes/memory-injection.ava.okf.md]]).
