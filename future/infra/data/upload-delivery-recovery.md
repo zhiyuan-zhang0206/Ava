@@ -44,7 +44,9 @@ request identity. Replay checks that identity before mutable target facts.
 
 Tx A reuses source quota admission and retained receiving identity. Fresh
 admission freezes source unit, original target machine/unit, request provenance,
-manifest and delivery policy. `agents_meta.machine` supplies placement;
+manifest and delivery policy. Freeze audit provenance, not bearer secrets; background
+transport uses current native credentials. Preserve the upload contract's user
+source rather than relabeling delivery as the worker. `agents_meta.machine` supplies placement;
 `machine_units(machine_name, home)` supplies the existing unit identity. Resolve
 exactly one serving runner unit matching the registered Ops URL; ambiguity or
 unknown placement rejects before claim. Receiver checks its actual machine/home,
@@ -81,7 +83,9 @@ not the reserved control pool, with one connection per short transaction.
 New `upload-receive-v1` is an independently known OpKind, not a payload added to
 old `upload_receive`. Freeze target unit and immutable object references; validate
 strict sizes, SHA-256, ordinal/name safety and target identity before effects.
-Unknown old kinds fail before dispatch/dedupe; never fall back. Each receiver
+Unknown old kinds fail before dispatch/dedupe; never fall back. Keep this naturally
+repeatable kind outside transport uncertain-claim caching and send no transport
+idempotency key; domain batch identity is the recovery owner. Each receiver
 has a retained batch/target-unit manifest and receiving quota reservation. The
 file phase runs without a borrowed DB connection, publishes only create-only
 files, verifies existing bytes, and fsyncs. Its ready transaction records copy
@@ -89,7 +93,8 @@ acceptance. Repeated requests verify/fill actual files before issuing the typed
 matching-manifest proof; cached RPC success alone is not present-file proof.
 A local shortcut requires the exact same source/target unit, not just same name.
 
-The source validates the new receiver result against frozen unit/hash/size and
+The source requires an exact supported proof version and validates the new
+receiver result against frozen unit/hash/size and
 records remote proof. Timeout, response loss or native restart permits repeating
 only this same copy. Unsupported protocol, checksum conflict, absent/ambiguous
 unit or changed placement becomes bounded inspectable HOLD with a safe reason;
