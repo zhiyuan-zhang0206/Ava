@@ -8,6 +8,9 @@ secret in the environment, and the argv it builds is asserted clean. A future
 launcher that reaches for `redis-cli -a`, an env-var argv splice, or an
 argv-carried JSON blob fails here rather than in a `ps` listing.
 
+The schedule launcher contract lives with the schedule-manager tests and shares
+the sentinel environment and real PTY argv harness from tests.factories.secret_argv.
+
 Coverage is per *launcher*, not per caller: the `ava start` session launch,
 schedule processes, agent shells, and the Redis bring-up each funnel into one
 of the functions below. Schedule and agent-shell sessions are created through the
@@ -19,7 +22,6 @@ projection through the environment.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 from typing import Any, cast
@@ -29,26 +31,17 @@ import pytest
 
 from base.cluster import ownership, port_preflight
 from base.native_process.os_platform import IS_WINDOWS
+from tests.factories.secret_argv import (
+    SECRET,
+    SECRET_VALUES,
+    assert_clean,
+    assert_service_tree_clean,
+)
+from tests.factories.secret_argv import secret_env as secret_env
+from tests.factories.secret_argv import secrets_in_creator_env as secrets_in_creator_env
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import output_until, type_line, wait_for
-
-# Values that must never appear in an argv. Shaped like the real thing: the
-# cluster secret, the data-plane URLs that embed it, a provider key.
-_SECRET = "sentinel-cluster-secret-6f21ab"  # noqa: S105 — a sentinel to search argv for, not a credential
-_DB_URL = f"postgresql://ava:{_SECRET}@10.0.0.4:5433/ava"
-_REDIS_URL = f"redis://ava:{_SECRET}@10.0.0.4:6380/0"
-_API_KEY = "sk-sentinel-provider-key-4c19"
-_SECRET_VALUES = (_SECRET, _DB_URL, _REDIS_URL, _API_KEY)
-
-_SECRET_ENV = {
-    "AVA_HOME": "/tmp/ava-home",  # noqa: S108 — a literal env value, never opened
-    "AVA_CLUSTER_SECRET": _SECRET,
-    "AVA_DB_URL": _DB_URL,
-    "AVA_REDIS_URL": _REDIS_URL,
-    "DEEPSEEK_API_KEY": _API_KEY,
-    "PATH": "/usr/bin:/bin",
-}
+from tests.path_scoped.pty_shells import output_until, type_line
 
 pytestmark = pytest.mark.skipif(
     IS_WINDOWS, reason="POSIX launch paths only (Windows hands env to CreateProcess)"
@@ -81,7 +74,6 @@ def _fake_child_pid_never_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
     danger (audit 2026-08-08 P2), which records a create_time no live process
     can match. Other pids resolve normally.
     """
-    import psutil
 
     real_process = psutil.Process
 
@@ -91,19 +83,6 @@ def _fake_child_pid_never_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
         return real_process(pid, *args, **kwargs)
 
     monkeypatch.setattr(psutil, "Process", guarded)
-
-
-def _assert_clean(argv: list[str], *, label: str) -> None:
-    for element in argv:
-        for secret in _SECRET_VALUES:
-            assert secret not in element, f"{label} leaked a secret on argv: {argv!r}"
-
-
-@pytest.fixture
-def secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The live env a daemon launcher forwards. Replaced wholesale — the
-    forwarders read `os.environ` by nature (see no_os_environ's allowlist)."""
-    monkeypatch.setattr(os, "environ", dict(_SECRET_ENV))
 
 
 @pytest.fixture
@@ -141,7 +120,7 @@ def test_session_backend_new_session(
         "ava-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()
     )
     assert captured_argv, "no subprocess was launched"
-    _assert_clean(captured_argv[-1], label="PosixProcSessionBackend.new_session")
+    assert_clean(captured_argv[-1], label="PosixProcSessionBackend.new_session")
 
 
 def test_launch_record_cannot_reach_a_live_process(
@@ -170,36 +149,6 @@ def test_launch_record_cannot_reach_a_live_process(
     assert not posixproc.has_session("ava-gateway")
 
 
-@pytest.fixture
-def secrets_in_creator_env(pty_service: PtyServiceProcess, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The creating process holds the secrets (as an agent or gateway does); the
-    already-running service does not, so a secret reaching a shell could only have
-    come through the request."""
-    del pty_service
-    for key, value in _SECRET_ENV.items():
-        if key not in ("AVA_HOME", "PATH"):
-            monkeypatch.setenv(key, value)
-
-
-def _service_tree_argvs(service: PtyServiceProcess) -> list[list[str]]:
-    """The argv of the service process and of every process under it (shells, jobs)."""
-    root = psutil.Process(service.pid)
-    argvs = [root.cmdline()]
-    for child in root.children(recursive=True):
-        try:
-            argvs.append(child.cmdline())
-        except psutil.NoSuchProcess:
-            continue
-    return argvs
-
-
-def _assert_service_tree_clean(service: PtyServiceProcess, *, label: str) -> None:
-    argvs = _service_tree_argvs(service)
-    assert len(argvs) >= 2, f"{label}: expected the service and a shell, saw {argvs!r}"
-    for argv in argvs:
-        _assert_clean(argv, label=label)
-
-
 def _shell_env_report(name: str) -> str:
     """What a secret-name lookup in the session's shell prints (empty: none is set)."""
     type_line(
@@ -207,46 +156,6 @@ def _shell_env_report(name: str) -> str:
         "printenv AVA_CLUSTER_SECRET AVA_DB_URL AVA_REDIS_URL DEEPSEEK_API_KEY; echo ENVCHECK_DONE",
     )
     return output_until(name, "ENVCHECK_DONE")
-
-
-def test_schedule_launch(
-    pty_service: PtyServiceProcess,
-    secrets_in_creator_env: None,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A schedule's resident process. The launch is a `new` request to the pty-sessions
-    service: the env (the schedule id included) rides the request body of its unix
-    socket, the command is typed into the session's shell, and no argv of the service
-    or the shell tree carries a secret; the shell's environment holds the schedule
-    id and none of the secrets."""
-    from services.wake.schedule_manager import manager as sm
-    from services.wake.schedule_manager.manager import ScheduleManager
-
-    # The runner is a stub that records its own environment, then stays up: the real
-    # runner would need a database and exit within the test.
-    stub = unit_home / ".venv" / "bin" / "python"
-    stub.parent.mkdir(parents=True)
-    dump = unit_home / "runner-env.txt"
-    stub.write_text(f"#!/bin/sh\nenv > {dump}.tmp && mv {dump}.tmp {dump}\nexec sleep 300\n")
-    stub.chmod(0o755)
-    monkeypatch.setattr(sm, "REPO_ROOT", unit_home)
-
-    manager = ScheduleManager(None)  # type: ignore[arg-type] — _launch's pool-touching writes are stubbed below
-    monkeypatch.setattr(ScheduleManager, "_set_status", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
-    # The orphan-run close is a pool write like _set_status — stubbed the same
-    # way; this test asserts argv cleanliness, not DB behavior.
-    monkeypatch.setattr(ScheduleManager, "_close_null_runs", lambda _self, _sid: None)  # pyright: ignore[reportUnknownArgumentType]
-    manager._launch(7)
-
-    assert wait_for(dump.exists), f"the runner never started:\n{pty_service.output()}"
-    runner_env = dump.read_text()
-    assert "AVA_SCHEDULE_ID=7\n" in runner_env, "the schedule id rides the request env"
-    for secret in _SECRET_VALUES:
-        assert secret not in runner_env, f"{secret!r} reached the schedule's environment"
-    _assert_service_tree_clean(pty_service, label="ScheduleManager._launch")
-    for argv in _service_tree_argvs(pty_service):
-        assert "AVA_SCHEDULE_ID" not in " ".join(argv), f"schedule id on argv: {argv!r}"
 
 
 def test_agent_shell_session(
@@ -270,9 +179,9 @@ def test_agent_shell_session(
     assert get_shell_backend().has_session(name)
 
     report = _shell_env_report(name)
-    for secret in _SECRET_VALUES:
+    for secret in SECRET_VALUES:
         assert secret not in report, f"{secret!r} leaked into the shell's environment"
-    _assert_service_tree_clean(pty_service, label="ava.shell.sessions.create_session")
+    assert_service_tree_clean(pty_service, label="ava.shell.sessions.create_session")
 
 
 def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -303,10 +212,10 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # down on the first probe (so the full start path runs), up on the next
     probes = iter([False, True, True])
     monkeypatch.setattr(ci, "_redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType]
-    assert ci.start_redis(46999, _SECRET, _SECRET, _SECRET, "ava") == 0
+    assert ci.start_redis(46999, SECRET, SECRET, SECRET, "ava") == 0
 
     for argv in calls:
-        _assert_clean(argv, label="redis bring-up")
+        assert_clean(argv, label="redis bring-up")
     conf = tmp_path / "redis" / "redis.conf"
     assert conf.stat().st_mode & 0o777 == 0o600
-    assert _SECRET in conf.read_text()
+    assert SECRET in conf.read_text()
