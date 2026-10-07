@@ -1,5 +1,3 @@
 {
-  "patch_targets": {
-    "ava/tests/test_log_batching.py::base.telemetry.emitter._jsonl_failures": 1
-  }
+  "patch_targets": {}
 }
