@@ -345,6 +345,13 @@ def stamp_notified(conn: psycopg.Connection, keys: list[AlertKey]) -> None:
             )
 
 
+def im_bridge_rpc_url() -> str:
+    """Resolve the existing notification daemon endpoint at its composition owner."""
+    return (settings.services.im_bridge_health_url or "").rstrip("/") or (
+        f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('im_bridge').health_port}"
+    )
+
+
 def notify_im(text: str) -> bool:
     """POST one message to the local im_bridge daemon's ``/send`` RPC.
 
@@ -362,9 +369,7 @@ def notify_im(text: str) -> bool:
 
     if not settings.alerts.im_notify_enabled:
         return False
-    base = (settings.services.im_bridge_health_url or "").rstrip("/") or (
-        f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('im_bridge').health_port}"
-    )
+    base = im_bridge_rpc_url()
     try:
         resp = httpx.post(
             f"{base}/send",

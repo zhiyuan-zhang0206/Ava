@@ -788,6 +788,7 @@ CREATE TABLE alerts (
     -- Provenance: 'grafana' (webhook default), 'health-probe', 'machine-probe'.
     source       TEXT NOT NULL DEFAULT 'grafana',
     notified_at  TIMESTAMPTZ,
+    notified_revision BIGINT NOT NULL DEFAULT 0 CHECK (notified_revision >= 0),
     notification_revision BIGINT NOT NULL DEFAULT 0 CHECK (notification_revision >= 0),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -811,11 +812,11 @@ CREATE TABLE alert_notification_groups (
     language TEXT NOT NULL CHECK (language IN ('zh','en')),
     render_version TEXT NOT NULL CHECK (render_version = 'alert-group-v1'),
     text TEXT NOT NULL,
-    origin TEXT NOT NULL DEFAULT 'shadow' CHECK (origin = 'shadow'),
+    origin TEXT NOT NULL DEFAULT 'shadow' CHECK (origin IN ('shadow','native-v1')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE alert_notification_groups IS
-    'Immutable shadow ingest groups; never queued, accepted or sent. Legacy may have delivered them: no automatic historical dispatch or expiry.';
+    'Immutable ingest groups. Only native-v1 creation origin qualifies for new acceptance; shadow history is never promoted or automatically dispatched.';
 
 CREATE TABLE alert_notification_members (
     alert_id BIGINT NOT NULL CHECK (alert_id > 0),
@@ -2484,8 +2485,8 @@ CREATE TABLE im_bridge_outbound_intents (
     channel TEXT NOT NULL,
     account_id TEXT NOT NULL,
     chat_id TEXT NOT NULL,
-    agent_id BIGINT NOT NULL,
-    source_kind TEXT NOT NULL CHECK (source_kind IN ('message', 'inbound', 'notice')),
+    agent_id BIGINT,
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('message', 'inbound', 'notice', 'alert_group')),
     source_id TEXT NOT NULL,
     block_idx INTEGER NOT NULL CHECK (block_idx >= 0),
     replay_id TEXT NOT NULL DEFAULT '',
@@ -2497,7 +2498,9 @@ CREATE TABLE im_bridge_outbound_intents (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
-    UNIQUE (channel, account_id, chat_id, agent_id, source_kind, source_id, block_idx, replay_id),
+    CONSTRAINT im_bridge_outbound_identity UNIQUE NULLS NOT DISTINCT (channel, account_id, chat_id, agent_id, source_kind, source_id, block_idx, replay_id),
+    CONSTRAINT im_bridge_outbound_context CHECK ((source_kind='alert_group' AND agent_id IS NULL AND block_idx=0 AND replay_id='')
+           OR (source_kind<>'alert_group' AND agent_id IS NOT NULL AND agent_id>0)),
     CHECK ((status = 'queued') = (attempt_id IS NULL))
 );
 CREATE INDEX im_bridge_outbound_pending ON im_bridge_outbound_intents (id)
@@ -2751,3 +2754,17 @@ CREATE TABLE page_operation_receipts (
     accepted_at timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO schema_migrations (name) VALUES ('20261007T205013_page-operation-receipts');
+
+CREATE TABLE im_bridge_alert_acceptances (
+    group_id BIGINT PRIMARY KEY CHECK (group_id > 0),
+    request JSONB NOT NULL,
+    decisions JSONB NOT NULL,
+    intent_ids BIGINT[] NOT NULL CHECK (cardinality(intent_ids)>0),
+    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE im_bridge_alert_acceptances IS
+    'Frozen available recipient subset and retained unavailable channel decisions, accepted atomically with shared intents. No FK to mutable/retained source or queue, no expiry, no retrospective fanout.';
+
+COMMENT ON COLUMN alerts.notified_revision IS
+    'Native revision completed by at least one real SENT channel; legacy notified_at never populates this fact.';
+INSERT INTO schema_migrations (name) VALUES ('20261007T211550_native-alert-outbound');

@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.db.transaction import write_transaction
+from base.telemetry.alerts.native import stamp_native_sent
 from services.entrypoints.im_bridge.cursor_store import (
     PushWatermark,
     is_after_watermark,
@@ -325,7 +326,7 @@ class IMOutboxStore:
             return int(row[0])
         row = conn.execute(
             "SELECT id, request FROM im_bridge_outbound_intents WHERE channel=%s AND account_id=%s "
-            "AND chat_id=%s AND agent_id=%s AND source_kind=%s AND source_id=%s AND block_idx=%s AND replay_id=%s",
+            "AND chat_id=%s AND agent_id IS NOT DISTINCT FROM %s AND source_kind=%s AND source_id=%s AND block_idx=%s AND replay_id=%s",
             key,
         ).fetchone()
         if row is None:
@@ -480,11 +481,11 @@ class IMOutboxStore:
         if status not in (OutboundStatus.SENT, OutboundStatus.UNCERTAIN, OutboundStatus.FAILED):
             raise ValueError("a sending attempt requires a terminal outcome")
         with write_transaction(self._pool()) as conn:
-            return (
-                conn.execute(
-                    "UPDATE im_bridge_outbound_intents SET status=%s, outcome_reason=%s, completed_at=now() "
-                    "WHERE id=%s AND attempt_id=%s AND status='sending'",
-                    (status.value, reason, intent_id, attempt_id),
-                ).rowcount
-                == 1
-            )
+            row = conn.execute(
+                "UPDATE im_bridge_outbound_intents SET status=%s, outcome_reason=%s, completed_at=now() "
+                "WHERE id=%s AND attempt_id=%s AND status='sending' RETURNING source_kind,source_id",
+                (status.value, reason, intent_id, attempt_id),
+            ).fetchone()
+            if row is not None and status == OutboundStatus.SENT and row[0] == "alert_group":
+                stamp_native_sent(conn, int(row[1]))
+            return row is not None

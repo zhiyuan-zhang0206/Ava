@@ -56,3 +56,41 @@ def test_a_runner_profile_process_without_a_token_fails_the_notify_instead_of_se
     assert alerts.notify_im("hello") is False
 
     assert sent == []
+
+
+def test_native_acceptance_uses_fixed_versioned_path_and_never_falls_back_on_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.telemetry.alerts.native import notify_alert_group
+
+    monkeypatch.setenv(API_TOKEN_ENV, "machine-token")
+    calls: list[tuple[str, dict[str, str], object]] = []
+
+    def post(
+        url: str, *, headers: dict[str, str], json: object, **_kwargs: object
+    ) -> httpx.Response:
+        calls.append((url, headers, json))
+        return httpx.Response(404)
+
+    monkeypatch.setattr(httpx, "post", post)
+    assert notify_alert_group(7) is False
+    assert len(calls) == 1 and calls[0][0].endswith("/send/alert-outbound-v1")
+    assert calls[0][1] == {"Authorization": "Bearer machine-token"}
+    assert calls[0][2] == {"group_id": 7, "source_origin": "native-v1"}
+
+
+def test_native_transport_error_does_not_log_credentials_or_retry_legacy(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from base.telemetry.alerts.native import notify_alert_group
+
+    monkeypatch.setenv(API_TOKEN_ENV, "machine-token")
+
+    def fail(url: str, **_kwargs: object) -> httpx.Response:
+        raise httpx.ReadError("URL secret-token-context")
+
+    monkeypatch.setattr(httpx, "post", fail)
+    assert notify_alert_group(7) is False
+    assert "secret-token-context" not in caplog.text
+    assert "ReadError" in caplog.text

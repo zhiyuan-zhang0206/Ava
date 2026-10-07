@@ -247,6 +247,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "im_bridge_cursors",
     "im_bridge_notice_acceptances",
     "im_bridge_notice_poll_state",
+    "im_bridge_alert_acceptances",
     "im_bridge_outbound_intents",
     "im_bridge_outbound_replays",
     # ttl-reaper cadence clocks: no FK path; a leaked stamp would make the next

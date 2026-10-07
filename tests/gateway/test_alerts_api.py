@@ -15,6 +15,7 @@ tests).
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,8 +27,23 @@ from pydantic import SecretStr
 
 from base.config import settings
 from base.events.live.tests.fakes import record_publishes
+from base.telemetry.alerts.native import load_native_group, stamp_native_sent
 from gateway.alerts import router as alerts_router
 from gateway.app import app
+
+
+def native_sender(callback: Callable[[str], bool]) -> Callable[[int], bool]:
+    """The policy fixture reports real-send success; acceptance-only tests live with Outbox."""
+
+    def send(group_id: int) -> bool:
+        with app.state.db_pool.connection() as conn:
+            source = load_native_group(conn, group_id)
+            succeeded = callback(source["text"])
+            if succeeded:
+                stamp_native_sent(conn, group_id)
+            return succeeded
+
+    return send
 
 
 def _alert(
@@ -99,7 +115,7 @@ def _alerts_auth_and_im(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_notify(text: str) -> bool:
         return True
 
-    monkeypatch.setattr(alerts_router, "notify_im", _fake_notify)
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_fake_notify))
 
 
 # -- ingest ------------------------------------------------------------------
@@ -246,7 +262,7 @@ def test_ingest_every_severity_notifies() -> None:
         return True
 
     with TestClient(app) as client, pytest.MonkeyPatch.context() as mp:
-        mp.setattr(alerts_router, "notify_im", _capture)
+        mp.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
         _ingest(client, _webhook(alerts=[_alert(severity="critical", fingerprint="c1")]))
         _ingest(client, _webhook(alerts=[_alert(severity="warning", fingerprint="w1")]))
         _ingest(client, _webhook(alerts=[_alert(severity="error", fingerprint="e1")]))
@@ -277,7 +293,7 @@ def test_ingest_notify_im_false_stores_and_publishes_without_im(
         notified.append(text)
         return True
 
-    monkeypatch.setattr(alerts_router, "notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
     record_publishes(monkeypatch, published)
 
     with TestClient(app) as client:
@@ -307,7 +323,7 @@ def test_ingest_notify_im_false_firing_and_resolution_stay_silent(
         notified.append(text)
         return True
 
-    monkeypatch.setattr(alerts_router, "notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
 
     with TestClient(app) as client:
         firing = _ingest(client, _webhook(notify_im="false"))
@@ -340,7 +356,7 @@ def test_ingest_notify_im_non_gating_value_still_notifies(
         notified.append(text)
         return True
 
-    monkeypatch.setattr(alerts_router, "notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
 
     with TestClient(app) as client:
         resp = _ingest(client, _webhook(notify_im="true"))
@@ -358,7 +374,7 @@ def test_ingest_notify_im_false_resends_and_refire_stay_silent(
         notified.append(text)
         return True
 
-    monkeypatch.setattr(alerts_router, "notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
 
     with TestClient(app) as client:
         firing = _ingest(client, _webhook(notify_im="false"))
@@ -413,7 +429,7 @@ def test_ingest_uses_display_language_setting(db_conn: psycopg.Connection) -> No
         return True
 
     with TestClient(app) as client, pytest.MonkeyPatch.context() as mp:
-        mp.setattr(alerts_router, "notify_im", _capture)
+        mp.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
         _ingest(client, _webhook())
     assert len(notified) == 1
     assert (
@@ -440,7 +456,7 @@ def test_ingest_im_failure_does_not_fail_ingest(
 ) -> None:
     """im_bridge down -> the ingest still stores the row (notified_at stays
     NULL) and answers 200."""
-    monkeypatch.setattr(alerts_router, "notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(lambda _text: False))  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         resp = _ingest(client, _webhook())
         assert resp.status_code == 200
@@ -458,10 +474,10 @@ def test_ingest_firing_retries_notify_after_failed_attempt(
 ) -> None:
     """notified_at NULL keeps the firing gate open — the next re-send retries
     the IM."""
-    monkeypatch.setattr(alerts_router, "notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(lambda _text: False))  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         _ingest(client, _webhook())
-    monkeypatch.setattr(alerts_router, "notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(lambda _text: True))  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         resp = _ingest(client, _webhook())
         assert resp.json()["notified"] == 1
@@ -699,34 +715,35 @@ def _capture_im(monkeypatch: pytest.MonkeyPatch, *, ok: bool = True) -> list[str
         sent.append(text)
         return ok
 
-    monkeypatch.setattr(alerts_router, "notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
     return sent
 
 
-def test_shadow_groups_preserve_legacy_retry_grouping_and_notified_fact(
+def test_native_groups_recover_original_group_and_new_members_without_sent_fact(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Native observations freeze once while legacy retries retain their existing grouping."""
+    """Native retries recover their original group rather than re-rendering expanded POSTs."""
     sent: list[str] = []
 
     def unavailable(text: str) -> bool:
         sent.append(text)
         return False
 
-    monkeypatch.setattr(alerts_router, "notify_im", unavailable)
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(unavailable))
     a, b, c = [_alert(fingerprint=fp, summary=fp) for fp in ("a", "b", "c")]
     with TestClient(app) as client:
         first = _ingest(client, _webhook(alerts=[a, b]))
         second = _ingest(client, _webhook(alerts=[a, b, c]))
         assert first.json() == {"processed": 2, "inserted": 2, "updated": 0, "notified": 0}
         assert second.json() == {"processed": 3, "inserted": 1, "updated": 2, "notified": 0}
-    assert len(sent) == 2
-    assert sent[0] != sent[1]  # Legacy second POST still includes A+B+C.
+    assert len(sent) == 3
+    assert sent[0] == sent[1]
+    assert sent[2] != sent[0]  # C is a distinct source operation.
     rows = db_conn.execute(
         "SELECT text,origin FROM alert_notification_groups ORDER BY id"
     ).fetchall()
-    assert rows[0] == (sent[0], "shadow")
-    assert rows[1][0] != sent[1]  # Only C is a new immutable shadow operation.
+    assert rows[0] == (sent[0], "native-v1")
+    assert rows[1] == (sent[2], "native-v1")
     assert db_conn.execute("SELECT count(*) FROM alert_notification_members").fetchone() == (3,)
     assert db_conn.execute(
         "SELECT count(*) FROM alerts WHERE notified_at IS NOT NULL"
@@ -743,13 +760,13 @@ def test_shadow_keeps_input_order_missing_start_resolution(
         sent.append(text)
         return False
 
-    monkeypatch.setattr(alerts_router, "notify_im", unavailable)
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(unavailable))
     first = _alert(fingerprint="same")
     later = _alert(fingerprint="same", starts_at="", summary="later")
     with TestClient(app) as client:
         response = _ingest(client, _webhook(alerts=[first, later]))
     assert response.json() == {"processed": 2, "inserted": 1, "updated": 1, "notified": 0}
     assert len(sent) == 1
-    assert "later" in sent[0]
+    assert "later" not in sent[0]  # The original source body is immutable.
     assert db_conn.execute("SELECT count(*) FROM alert_notification_members").fetchone() == (1,)
     assert db_conn.execute("SELECT annotations->>'summary' FROM alerts").fetchone() == ("later",)

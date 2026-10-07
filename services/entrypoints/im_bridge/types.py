@@ -150,6 +150,10 @@ class IMAdapter(ABC):
         """Freeze the notice owner's target and rendering without sending."""
         raise NotImplementedError(f"{type(self).__name__} has no durable notice capability")
 
+    async def prepare_alert_owner(self, text: str) -> tuple[str, PreparedOutboundSend]:
+        """Freeze one native alert owner's recipient/rendering without sending."""
+        raise NotImplementedError(f"{type(self).__name__} has no durable alert owner capability")
+
     async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
         """Send exactly the accepted rendering; never rebuild or change its account."""
         raise NotImplementedError(f"{type(self).__name__} has no durable timeline capability")

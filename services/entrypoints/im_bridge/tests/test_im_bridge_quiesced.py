@@ -47,7 +47,9 @@ async def test_timeline_acceptance_and_dispatch_loop_hold_during_maintenance(
     monkeypatch.setattr(daemon.asyncio, "sleep", short_sleep)
     core = MagicMock()
     core.poll_timeline_outbound = AsyncMock()
-    task = asyncio.create_task(daemon._timeline_outbound_loop(core))
+    alerts = MagicMock()
+    alerts.poll_once = AsyncMock()
+    task = asyncio.create_task(daemon._timeline_outbound_loop(core, alerts))
     try:
         await real_sleep(0.05)
     finally:
@@ -55,3 +57,4 @@ async def test_timeline_acceptance_and_dispatch_loop_hold_during_maintenance(
         await asyncio.gather(task, return_exceptions=True)
     core.outbound_worker.validate_pool.assert_called_once()
     assert core.poll_timeline_outbound.called is (not quiesced)
+    assert alerts.poll_once.called is (not quiesced)

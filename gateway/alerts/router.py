@@ -43,15 +43,10 @@ from pydantic import TypeAdapter
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.telemetry.alerts import (
-    AlertKey,
     display_language,
-    normalize_status,
-    notify_group_text,
-    notify_im,
-    parse_alertname,
-    stamp_notified,
     upsert_alert,
 )
+from base.telemetry.alerts.native import native_sent_count, notify_alert_group
 from base.telemetry.alerts.shadow import AlertShadowBatch
 from gateway.alerts.publish import ALERTS_CHANNEL, publish_alert_rows
 from gateway.alerts.schemas import (
@@ -117,19 +112,15 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
     inserted = updated = notified = 0
     rows: list[dict[str, Any]] = []
-    # One IM per rule and status in this POST (Grafana's notification group): instances still
-    # get their own row, but the user hears one message with a count.
-    pending: dict[tuple[str, str], list[tuple[AlertKey, dict[str, Any]]]] = {}
-
     with write_transaction(request.app.state.db_pool) as conn:
         lang = display_language(conn)
         alerts = body.flattened()
-        shadow = AlertShadowBatch(conn, alerts, lang)
+        shadow = AlertShadowBatch(conn, alerts, lang, native=settings.alerts.im_notify_enabled)
         for alert in shadow.items:
             instance_key, previous = shadow.observe(alert)
             if instance_key is None:
                 continue
-            key, did_insert, should_notify, row = upsert_alert(
+            _key, did_insert, should_notify, row = upsert_alert(
                 conn, alert, source=body.source, instance_key=instance_key
             )
             if not row:
@@ -140,25 +131,15 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
                 updated += 1
             rows.append(row)
             shadow.record(alert, row, previous, should_notify=should_notify)
-            if should_notify:
-                group = (
-                    normalize_status(str(alert.get("status") or "")),
-                    parse_alertname(alert.get("labels") or {}),
-                )
-                pending.setdefault(group, []).append((key, alert))
         shadow.freeze()
         conn.commit()
 
     publish_alert_rows(request.app.state.bus, rows)
 
-    if pending:
-        with write_transaction(request.app.state.db_pool) as conn:
-            for members in pending.values():
-                keys = [key for key, _ in members]
-                if notify_im(notify_group_text([alert for _, alert in members], lang)):
-                    notified += len(keys)
-                    stamp_notified(conn, keys)
-            conn.commit()
+    for group_id in sorted(shadow.native_ids):
+        notify_alert_group(group_id)
+    with request.app.state.db_pool.connection() as conn:
+        notified = native_sent_count(conn, shadow.native_ids)
 
     return AlertIngestResult(
         processed=len(body.alerts), inserted=inserted, updated=updated, notified=notified
