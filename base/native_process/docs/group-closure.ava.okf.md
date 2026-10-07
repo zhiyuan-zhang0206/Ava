@@ -49,6 +49,8 @@ and refusal to signal a reused numeric group.
 
 ## Callers
 
+Exec workers read `ExecProcessDomain` and `KILL_GRACE_S` from `exec_domain`, rather than routing native-process facts through envelope helpers.
+
 | Caller | Uses |
 |---|---|
 | `ExecProcessDomain.close_confirmed` | `confirm_closure` with its own round signal: under the domain lock and `Popen`'s wait lock, only while the root's native birth and parentage hold; EPERM passes only when no member is live |
