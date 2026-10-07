@@ -9,12 +9,10 @@ keeps concurrent PRs off each other's lines. Existing entries can stay in their
 original shard when their files move; duplicate section/key pairs are errors.
 
 `rules.json` is not a shard: it names the rule version each section was frozen under
-(`{"patch_targets": 2}`; a section it does not list is at version 1). A change to how a
-section's sites are measured makes today's keys disappear and new ones appear, so the guard
-cannot hold a per-key shrink-only line across it: when a section's version differs from the
-base revision's, the guard holds only its total (see `rule_change_errors`), and against an
-equal version it is per-key again. Raise the version in the same change as the rule change,
-re-freeze the section under the new rule, and leave it alone afterwards.
+(`{"patch_targets": 2}`; a section it does not list is at version 1). A rule version records a measurement change,
+but it does not relax the shrink-only guard: existing keys may only disappear
+or decrease. Neither introducing a lint nor changing its version permits new
+baseline targets.
 
 The directory also carries `README.md`, committed even when every shard is
 empty (all debt paid off): git does not track empty directories, so without it
@@ -161,16 +159,6 @@ def read_at(repo_root: Path, rev: str) -> dict[str, str] | None:
     return texts
 
 
-def exists_at(repo_root: Path, rev: str, path: str) -> bool:
-    """Whether `path` exists in the tree of revision `rev`."""
-    result = subprocess.run(  # noqa: S603 — local git query, no shell
-        ["git", "-C", str(repo_root), "cat-file", "-e", f"{rev}:{path}"],
-        capture_output=True,
-        check=False,
-    )
-    return result.returncode == 0
-
-
 def parse_rules(text: str) -> dict[str, int]:
     """The rule versions of a `rules.json` text: section -> integer version >= 1."""
     rules = cast("object", json.loads(text))
@@ -202,23 +190,3 @@ def read_rules_at(repo_root: Path, rev: str) -> dict[str, int]:
 def read_rules(repo_root: Path, rev: str) -> tuple[dict[str, int], dict[str, int]]:
     """(the rule versions at `rev`, the rule versions in the working tree)."""
     return read_rules_at(repo_root, rev), read_rules_worktree(repo_root)
-
-
-def rule_change_errors(
-    section: str, current: dict[str, int], previous: dict[str, int], was: int, now: int
-) -> list[str]:
-    """What a section's baseline may do when its rule version changes from `was` to `now`.
-
-    The keys are not comparable across a rule change, so only the total is held: the new
-    rule may not freeze more sites than the old one did. The version itself only goes up.
-    """
-    if now < was:
-        return [f"{SHARD_DIR}/{RULES_FILE}: {section} rule version went back from {was} to {now}"]
-    before, after = sum(previous.values()), sum(current.values())
-    if after > before:
-        return [
-            f"{SHARD_DIR}/{RULES_FILE}: {section} rule version rose from {was} to {now}, but the "
-            f"frozen total rose from {before} to {after} — a rule change may only keep or lower "
-            "the frozen sites"
-        ]
-    return []

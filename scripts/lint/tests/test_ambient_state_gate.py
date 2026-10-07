@@ -1,6 +1,6 @@
 """End-to-end coverage of the ambient-state rule (Rule 9) through lcs.main(): a new site fails,
 the frozen baseline must match reality in both directions, the base-revision guard is
-shrink-only, the section is introduced by the change that adds the lint, and a stale list
+shrink-only, a new lint cannot introduce baseline exemptions, and a stale list
 entry fails. Rule semantics live in scripts/structure/tests/test_ambient_state.py."""
 
 from __future__ import annotations
@@ -269,15 +269,27 @@ def test_a_renamed_site_in_the_same_file_cannot_carry_its_frozen_entry(
     )
 
 
-def test_the_section_is_introduced_by_the_change_that_adds_the_lint(
+def test_introducing_a_lint_cannot_freeze_new_exemptions(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """With no ambient lint at the base revision there is no earlier baseline to shrink from:
-    the change that adds it freezes today's sites, and the next revision is shrink-only."""
+    """Introducing a lint cannot grant an exemption absent from the base revision."""
     _write(_repo, "base/state.py", "_REGISTRY = {}\n")
     _commit_base(_repo, with_lint=False)
 
     _baseline(_repo, {"base/state.py::ambient-container:_REGISTRY": 1})
+    _write(_repo, LINT_STUB, "# the lint arrives in this change\n")
+
+    assert lcs.main([]) == 1
+    assert "added ambient_state entry base/state.py::ambient-container:_REGISTRY" in (
+        capsys.readouterr().out
+    )
+
+
+def test_introducing_a_lint_with_no_exemptions_passes(
+    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(_repo, "base/state.py", "VALUE = 1\n")
+    _commit_base(_repo, with_lint=False)
     _write(_repo, LINT_STUB, "# the lint arrives in this change\n")
 
     assert lcs.main([]) == 0
