@@ -58,8 +58,10 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
+from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
 from base import paths
+from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.impersonation.terminal_notices import run_notice_delivery
 from base.agents.incarnation.exec_request_evidence import disposition_hint
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
@@ -320,8 +322,10 @@ async def _exec_memory_guard_forever() -> None:
     await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()
 
 
-def _background_loops() -> dict[str, Coroutine[object, object, None]]:
-    """The daemon's background loops for plugins, logs and exec memory.
+def _background_loops(
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection], db: Database
+) -> dict[str, Coroutine[object, object, None]]:
+    """The daemon's background loops for plugins, logs, exec memory and understanding chunks.
 
     Split out of `run()` so the wiring is testable without booting the
     dispatcher: the rotator's existence is what keeps a traceback storm from
@@ -333,6 +337,7 @@ def _background_loops() -> dict[str, Coroutine[object, object, None]]:
         "plugins_watch": _watch_plugins_for_restart(),
         "stdout_log_rotate": _rotate_stdout_log_forever(),
         "exec_memory_guard": _exec_memory_guard_forever(),
+        "understanding_chunks": understanding_loop_forever(control_pool, db, [execute_code]),
     }
 
 
@@ -527,7 +532,7 @@ async def run() -> None:
                 background.create_task(
                     run_notice_delivery(db, local_machine), name="impersonation_terminal_notices"
                 )
-                for name, loop in _background_loops().items():
+                for name, loop in _background_loops(control_pool, db).items():
                     background.create_task(loop, name=name)
                 await InboundWakeDispatcher(
                     bus,

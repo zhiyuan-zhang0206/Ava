@@ -217,12 +217,10 @@ _PER_TEST_TRUNCATE_TABLES = (
     # leaked row would survive into the next test (a stale layer in a
     # run-timeline read).
     "understanding_nodes",
-    # The hierarchy worker's queue + scan cursor (task #3704 P2b) and its
-    # regeneration breaker (task #4674): no FK path into the tables above; a
-    # leaked row would change the next test's scan outcome or claim loop.
-    "hierarchy_jobs",
-    "hierarchy_worker_state",
-    "hierarchy_worker_breaker",
+    "understanding_chunk_jobs",  # chunk-triggered understanding queue; no FK path
+    "understanding_chunk_calls",  # raw record of its provider calls; no FK path
+    "understanding_group_state",  # upper-level grouping cursor; no FK path
+    "understanding_group_calls",  # raw record of its provider calls; no FK path
     "user_settings",  # no FK, per-test key/value data (audit round-2 cc-docs-tests P2)
     "web_sessions",
     # The cluster extension registry (issue #39 S2). `extensions` FKs to

@@ -36,11 +36,31 @@ class CompactState(BaseModel):
     value and `model_copy(update=...)`'s only the fields it changes, so bumping
     `version` alone (force / claim path) or flipping the reminder flags alone
     never resets the siblings.
+
+    A compaction bumps `version` AND zeroes the understanding cut (see
+    `next_segment`); every compact path goes through that one constructor.
     """
 
     version: int = 0
     reminder_shown: bool = False
     reminder_seen_version: int = 0
+    # Understanding chunk bookkeeping, per compaction segment: the message
+    # index (in the llm node's request list, head included) and the
+    # provider-reported input tokens at the previous understanding cut. Both
+    # reset to 0 with the segment on every compaction, so a segment's first
+    # chunk starts at its head and measures tokens from zero.
+    understanding_cut_index: int = 0
+    understanding_cut_tokens: int = 0
+
+    def next_segment(self) -> CompactState:
+        """The state after one compaction: version +1, understanding cut zeroed."""
+        return self.model_copy(
+            update={
+                "version": self.version + 1,
+                "understanding_cut_index": 0,
+                "understanding_cut_tokens": 0,
+            }
+        )
 
 
 class AttachEntry(BaseModel):

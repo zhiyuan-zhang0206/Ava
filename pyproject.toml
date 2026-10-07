@@ -31,10 +31,6 @@ dependencies = [
     "langchain-google-genai>=4.2.4",
     "langchain-openai>=0.3",
     "langchain-moonshot>=0.1.0",
-    # Imported by name in base/agents/history/hierarchy/tokens.py (hierarchy budget
-    # accounting in o200k tokens); already resolved transitively through
-    # langchain-openai — declared here because the repo imports it directly.
-    "tiktoken>=0.14",
     "croniter>=6.2.2",
     "google-genai>=2.0",
     "watchdog>=6.0.0",
@@ -209,6 +205,10 @@ ignore_imports = [
     # The daemon is the composition root that builds the plugin `ExtensionRegistry` once the graph
     # (and with it every agent_runtime face) is loaded, and hands it to `AgentHost`.
     "services.agent_runner.agent_host.daemon -> agent.extensions",
+    # The daemon hands the agent's own tool schema (`execute_code`) to the understanding-chunk
+    # consumer loop, so its generation requests bind the same tools as the agent's own calls
+    # (prefix-cache parity).
+    "services.agent_runner.agent_host.daemon -> agent.llm",
     # The host catches native fatal errors to persist the halted/circuit state
     # and flush its checkpoint before settling the turn. Import only the taxonomy leaf.
     "services.agent_runner.agent_host.host -> agent.graph.llm_errors",
@@ -235,13 +235,6 @@ ignore_imports = [
     "services.agent_runner.agent_host.host -> agent.impersonation",
     "services.agent_runner.agent_host.* -> agent.startup",
     "services.agent_runner.agent_host.* -> agent.state",
-    # The hierarchy worker's build child binds the agent's own tool schema
-    # (`execute_code`) onto generation requests, so their leading bytes match
-    # the agent's own calls — the prefix-cache parity task #4674 exists to
-    # restore. `agent.llm` is a dependency-free schema leaf (langchain only),
-    # and the alternative — a second copy of the schema under services — is
-    # exactly the drift class this ratchet cannot catch.
-    "services.derived.hierarchy_worker.execute -> agent.llm",
 ]
 
 # The one reverse edge base must never grow: `base` is the bottom layer,
@@ -1140,11 +1133,6 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/backup/walg/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/derived/hierarchy_worker/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

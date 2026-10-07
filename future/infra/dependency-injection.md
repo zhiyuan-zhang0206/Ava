@@ -286,9 +286,9 @@ Two more gateway-side daemons, one root each, no reader outside the package.
 - Left for later: `services/backup/scheduler` (`backup_hour` is also read by
   `services/backup/dump.py` and `base/host/system/walg_job.py`), and `memory_indexer` (read by ops and the CLI).
 
-### Computer use, page server, memory search and hierarchy worker
+### Computer use, page server and memory search
 
-Four more daemons, one slice each, each package declaring itself sliced:
+Three more daemons, one slice each, each package declaring itself sliced:
 
 - `ComputerUseConfig` (`services/desktop/computer`, root `mcp_daemon.py`): lease, queue timeout and
   session idle, taken by `ComputerMcpDaemon`.
@@ -298,12 +298,6 @@ Four more daemons, one slice each, each package declaring itself sliced:
   port and the batch bound `build_app` takes. The embedding provider still comes from the
   memory-indexer factory, which three consumers share (gateway router, bring-up, this
   daemon) and which waits for the shared-kernel batch.
-- `HierarchyWorkerConfig` (`services/derived/hierarchy_worker`, root `roots.py`): the 17 `hierarchy_*`
-  daemon fields and the generation model. The package has two processes, the schedule host
-  and the build child, so the root is its own module: `hierarchy_worker_config()` and
-  `prepare()` live there, the scan, runner and job execution take the slice. The big test
-  files keep their `settings` patches and reach the code through
-  `tests/slices.py` wrappers that rebuild the slice from the live settings at each call.
 
 Not sliceable yet, found by re-scanning the code: `delivery_watchdog`, `ttl_reaper` and
 `schedule_manager` are being reworked; `memory_indexer` and `cli/commands/cluster` have
@@ -326,7 +320,7 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
 - **Held by a rule, package by package**: the `ambient-db` rule of the ambient-state gate bans the
   shim in the packages listed in `DB_HANDLE_PACKAGES` (`scripts/structure/ambient_state/
   allowlist.py`), and bans `Database.from_settings()` outside the roots named there. Listed so far:
-  labeler, page server, hierarchy worker, events maintenance, IM bridge. A package joins when its
+  labeler, page server, events maintenance, IM bridge. A package joins when its
   last ambient dial is gone, in the same change; the shim is deleted with the last package.
 - **Done, the endpoint table** (`base/daemon/endpoints.py`): `ServiceEndpoints.from_settings()`
   builds one row per health daemon (`ServiceEndpoint`: name, healthz port, pidfile under

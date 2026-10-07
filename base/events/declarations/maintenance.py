@@ -1,4 +1,4 @@
-"""Scheduled reports, task maintenance and hierarchy-worker events."""
+"""Scheduled reports, task maintenance and understanding-tree events."""
 
 from __future__ import annotations
 
@@ -176,55 +176,56 @@ class TaskEscalation(TypedDict):
     leg: Literal["delegator", "user"]
 
 
-class HierarchyEnqueueFailed(TypedDict):
-    """`hierarchy_enqueue_failed` payload — the compact-boundary build enqueue
-    did not land (task #4674). The enqueue is best-effort by design: the
-    compact round proceeds and the reconcile scan backstops, so this event is
-    the observability signal that the event trigger is degraded."""
+class UnderstandingEnqueueFailed(TypedDict):
+    """`understanding_enqueue_failed` payload — a chunk-triggered understanding
+    job could not be enqueued. Best-effort by design: the agent's turn goes on
+    and the next trigger covers the same stretch again."""
 
     agent_id: int
+    compact_version: int
     error: str
 
 
-class HierarchyRegenAlert(TypedDict):
-    """`hierarchy_regen_alert` payload — one build job generated more nodes
-    than the alert threshold (task #4674 guardrail; non-blocking)."""
+class UnderstandingChunkFailed(TypedDict):
+    """`understanding_chunk_failed` payload — a queued understanding chunk
+    failed for good (drifted indices, exhausted retries, a generation error
+    past its attempts). The stretch stays undescribed."""
 
     agent_id: int
     job_id: int
-    generated: int
-    threshold: int
+    attempts: int
+    error: str
 
 
-class HierarchyRegenHalt(TypedDict):
-    """`hierarchy_regen_halt` payload — generation stopped mid-run at the halt
-    threshold; the remainder is skipped and the continuation waits out the
-    retry backoff (task #4674 guardrail)."""
-
-    agent_id: int
-    job_id: int
-    generated: int
-    threshold: int
-
-
-class HierarchyRegenBudgetTripped(TypedDict):
-    """`hierarchy_regen_budget_tripped` payload — the fleet's 24h generated
-    total crossed the daily budget and the worker stopped claiming until an
-    operator resets the breaker with a note (task #4674 guardrail)."""
-
-    window_nodes: int
-    budget_nodes: int
-
-
-class HierarchyRegenLowReuse(TypedDict):
-    """`hierarchy_regen_low_reuse` payload — one build job reused almost none
-    of an established tree's texts, the shape of a full re-cut (task #4674
-    guardrail)."""
+class UnderstandingChunkSkipped(TypedDict):
+    """`understanding_chunk_skipped` payload — a queued chunk was closed
+    without a node: an unsupported provider path (Gemini explicit cache) or a
+    chunk with nothing past the head."""
 
     agent_id: int
     job_id: int
-    generated: int
-    reused: int
+    reason: str
+
+
+class UnderstandingGroupFailed(TypedDict):
+    """`understanding_group_failed` payload — an upper-level grouping check
+    failed (provider error, or a reply still refused after the configured
+    corrections). The level's open nodes stay ungrouped until five more arrive."""
+
+    agent_id: int
+    level: int
+    open_nodes: int
+    error: str
+
+
+class UnderstandingBacklog(TypedDict):
+    """`understanding_backlog` payload — one sample of the chunk queue per
+    consumer round: rows waiting, rows in flight, and how long the oldest
+    waiting row has waited. A growing age is a consumer that does not keep up."""
+
+    pending: int
+    running: int
+    oldest_pending_age_seconds: float
 
 
 EVENTS: dict[str, EventSpec] = {
@@ -303,43 +304,38 @@ EVENTS: dict[str, EventSpec] = {
         "label generation given up on after repeated failures",
         tier="noise",
     ),
-    # hierarchy regen guardrails (task #4674): the understanding-tree build
-    # queue's cost breakers — a reader fix that invalidated every input hash
-    # turned into a fleet-wide full re-cut, so repair waves are bounded by
-    # explicit config and made visible on the stream.
-    "hierarchy_enqueue_failed": telemetry_event(
-        "hierarchy_enqueue_failed",
-        "a compact-boundary build job could not be enqueued (best-effort; the reconcile scan backstops)",
-        payload=HierarchyEnqueueFailed,
+    "understanding_enqueue_failed": telemetry_event(
+        "understanding_enqueue_failed",
+        "a chunk-triggered understanding job could not be enqueued (best-effort; the next trigger covers the same stretch)",
+        payload=UnderstandingEnqueueFailed,
         tier="anomaly",
-        site="base/agents/history/checkpoint_cleanup.py:_enqueue_failed",
+        site="base/agents/history/hierarchy/chunks.py:enqueue_chunk",
     ),
-    "hierarchy_regen_alert": telemetry_event(
-        "hierarchy_regen_alert",
-        "one build job generated more nodes than the alert threshold (observability only)",
-        payload=HierarchyRegenAlert,
+    "understanding_chunk_failed": telemetry_event(
+        "understanding_chunk_failed",
+        "a queued understanding chunk failed for good and stays undescribed",
+        payload=UnderstandingChunkFailed,
         tier="anomaly",
-        site="services/derived/hierarchy_worker/execute.py:_try_emit",
+        site="base/agents/history/hierarchy/chunk_consumer.py:_settle",
     ),
-    "hierarchy_regen_halt": telemetry_event(
-        "hierarchy_regen_halt",
-        "generation stopped mid-run at the halt threshold; the remainder is skipped and the continuation waits out the backoff",
-        payload=HierarchyRegenHalt,
+    "understanding_chunk_skipped": telemetry_event(
+        "understanding_chunk_skipped",
+        "a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk)",
+        payload=UnderstandingChunkSkipped,
         tier="anomaly",
-        site="services/derived/hierarchy_worker/execute.py:_try_emit",
+        site="base/agents/history/hierarchy/chunk_consumer.py:_settle",
     ),
-    "hierarchy_regen_budget_tripped": telemetry_event(
-        "hierarchy_regen_budget_tripped",
-        "the 24h fleet-wide generated-node total crossed the daily budget; the worker stopped claiming until an operator resets the breaker",
-        payload=HierarchyRegenBudgetTripped,
+    "understanding_group_failed": telemetry_event(
+        "understanding_group_failed",
+        "an upper-level understanding grouping check failed; the level's open nodes stay ungrouped until its next check threshold of new nodes arrives",
+        payload=UnderstandingGroupFailed,
         tier="anomaly",
-        site="services/derived/hierarchy_worker/runner.py:_regen_budget_check",
+        site="base/agents/history/hierarchy/group_consumer.py:_check_level",
     ),
-    "hierarchy_regen_low_reuse": telemetry_event(
-        "hierarchy_regen_low_reuse",
-        "one build job reused almost none of an established tree's texts — the shape of a full re-cut",
-        payload=HierarchyRegenLowReuse,
-        tier="anomaly",
-        site="services/derived/hierarchy_worker/execute.py:_try_emit",
+    "understanding_backlog": telemetry_event(
+        "understanding_backlog",
+        "one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age",
+        payload=UnderstandingBacklog,
+        site="base/agents/history/hierarchy/chunk_consumer.py:understanding_loop_forever",
     ),
 }

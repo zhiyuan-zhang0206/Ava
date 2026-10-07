@@ -17,10 +17,6 @@ from base.config.domains.daemon.delivery_watchdog_fields import (
     DeliveryWatchdogFields,
     InboundReconcileFields,
 )
-from base.config.domains.daemon.hierarchy_worker_fields import (
-    HierarchyWorkerFields,
-    parse_hierarchy_worker_agents,
-)
 
 
 class DaemonSettings(
@@ -28,7 +24,6 @@ class DaemonSettings(
     DeliveryOutboxFields,
     DeliveryWatchdogFields,
     InboundReconcileFields,
-    HierarchyWorkerFields,
     EnvSettings,
 ):
     host_max_concurrent_turns: int = Field(
@@ -676,29 +671,6 @@ class DaemonSettings(
                 "host_db_recovery_prolonged_seconds must be below host_db_recovery_budget_seconds"
             )
         return self
-
-    @model_validator(mode="after")
-    def _validate_hierarchy_budget_below_deadline(self) -> DaemonSettings:
-        """The job budget must leave room under the hard deadline.
-
-        A budget >= deadline would let the worker's own stop point overshoot
-        the kill ceiling: the child gets SIGKILLed mid-write with no graceful
-        partial result, and the retry loop pays full cost each time — exactly
-        what the budget exists to prevent.
-        """
-        if self.hierarchy_job_budget_seconds >= self.hierarchy_job_deadline_seconds:
-            raise ValueError(
-                "hierarchy_job_budget_seconds must be below "
-                "hierarchy_job_deadline_seconds (the graceful stop point must "
-                "leave kill margin)"
-            )
-        return self
-
-    @field_validator("hierarchy_worker_agents")
-    @classmethod
-    def _validate_hierarchy_worker_agents(cls, value: str) -> str:
-        parse_hierarchy_worker_agents(value)
-        return value
 
     @field_validator("delivery_watchdog_dispatch_backoff_steps_s", mode="before")
     @classmethod

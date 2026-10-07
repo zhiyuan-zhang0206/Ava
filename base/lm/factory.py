@@ -443,8 +443,7 @@ def close_chat_model(llm: Any) -> None:
     """Close the provider clients a chat model holds; never raises.
 
     LangChain's chat models never close their underlying provider clients, so
-    a process that builds models per job (the hierarchy worker builds one per
-    generation pass) leaves their HTTP connection pools open until the process
+    a process that builds a model per job leaves their HTTP connection pools open until the process
     exits — lingering CLOSE-WAIT sockets toward the provider (task #3915).
     Whoever owns a model's lifetime closes it here once its calls are done.
 

@@ -67,14 +67,6 @@
       "command": "python trace-ship-tempo-schedule.py"
     },
     {
-      "name": "hierarchy-worker",
-      "class": "product",
-      "default_enabled": true,
-      "description": "Compact-driven understanding-tree worker — scans for new compaction boundaries, enqueues per-agent builds of the run-timeline narrative layers and runs them serially with a bounded per-job budget (task #3704 P2b).",
-      "script": "hierarchy-worker-schedule.py",
-      "command": "python hierarchy-worker-schedule.py"
-    },
-    {
       "name": "dev-ci-metrics",
       "class": "product",
       "default_enabled": true,

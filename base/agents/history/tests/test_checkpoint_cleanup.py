@@ -28,12 +28,10 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint_cleanup import (
-    _enqueue_failed,
     count_checkpoints,
     mark_compact_boundary,
     trim_checkpoints,
 )
-from base.config import settings
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
@@ -349,7 +347,7 @@ async def test_mark_compact_boundary_stamps_newest(aops_pool: AsyncConnectionPoo
     """`mark_compact_boundary` stamps the thread's NEWEST checkpoint (idempotent)
     — the full-snapshot record of the just-frozen pre-compact segment."""
     ids = await _put_turns(aops_pool, "1", 4)
-    await mark_compact_boundary(aops_pool, "1")
+    assert await mark_compact_boundary(aops_pool, "1") == ids[-1]  # names the stamped checkpoint
     await mark_compact_boundary(aops_pool, "1")  # idempotent
 
     async with aops_pool.connection() as conn, conn.cursor() as cur:
@@ -360,61 +358,6 @@ async def test_mark_compact_boundary_stamps_newest(aops_pool: AsyncConnectionPoo
         rows = await cur.fetchall()
     stamped = [r[0] for r in rows if (r[1] or {}).get("compact_boundary")]
     assert stamped == [ids[-1]]  # exactly the newest, stamped once
-
-
-async def test_mark_compact_boundary_enqueues_one_live_build_job(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The stamp best-effort enqueues the worker's build job (task #4674): one
-    pending `compact` job at the stamped boundary, live-deduped by the partial
-    unique index — a second boundary adds no row while one is live."""
-    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
-    ids = await _put_turns(aops_pool, "1", 4)
-    await mark_compact_boundary(aops_pool, "1")
-    await mark_compact_boundary(aops_pool, "1")
-
-    async with aops_pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT agent_id, kind, trigger_boundary, status, include_tail"
-            " FROM hierarchy_jobs WHERE agent_id = 1"
-        )
-        assert await cur.fetchall() == [(1, "compact", ids[-1], "pending", False)]
-
-
-async def test_enqueue_stays_silent_off_or_for_foreign_threads(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The enqueue is gated twice (task #4674): the shipped-dark switch and the
-    thread-id rule — foreign threads and a disabled trigger write nothing."""
-    assert settings.daemon.hierarchy_worker_enabled is False  # shipped dark
-    await _put_turns(aops_pool, "1", 4)
-    await mark_compact_boundary(aops_pool, "1")
-    await mark_compact_boundary(aops_pool, "1")
-
-    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
-    await _put_turns(aops_pool, "qa-3f", 1)
-    await mark_compact_boundary(aops_pool, "qa-3f")
-
-    async with aops_pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT count(*) FROM hierarchy_jobs")
-        assert await cur.fetchone() == (0,)
-
-
-async def test_enqueue_follows_the_rollout_allowlist(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An unlisted agent's boundary enqueues nothing while a listed one does
-    (`hierarchy_worker_agents`, empty = every agent)."""
-    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
-    monkeypatch.setattr(settings.daemon, "hierarchy_worker_agents", "2, 5")
-    await _put_turns(aops_pool, "1", 4)
-    await mark_compact_boundary(aops_pool, "1")
-    await _put_turns(aops_pool, "2", 4)
-    await mark_compact_boundary(aops_pool, "2")
-
-    async with aops_pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT agent_id FROM hierarchy_jobs ORDER BY agent_id")
-        assert await cur.fetchall() == [(2,)]
 
 
 async def test_trim_keeps_compaction_boundary(aops_pool: AsyncConnectionPool) -> None:
@@ -588,21 +531,3 @@ async def test_tail_edit_keeps_the_replaced_copy_in_writes(
         blobs = [bytes(r[0]) for r in await cur.fetchall()]
     assert any(b"reply 1 original" in blob for blob in blobs)  # replaced copy kept
     assert any(b"reply 1 edited" in blob for blob in blobs)  # replacement present
-
-
-def test_enqueue_failure_log_keeps_the_traceback(
-    loguru_records: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The best-effort enqueue-failure warning keeps its cause (task #4979)."""
-
-    def _broken(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("telemetry queue down")
-
-    monkeypatch.setattr("base.telemetry.emit", _broken)
-    _enqueue_failed(42, RuntimeError("enqueue refused"))
-
-    record = next(
-        r for r in loguru_records if "enqueue-failure event could not be emitted" in r["message"]
-    )
-    assert record["exception"] is not None
-    assert record["exception"].type is RuntimeError
