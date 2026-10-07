@@ -3,8 +3,5 @@
     "cli/commands/agents/impersonation_relay.py::asyncio-task:cmd_relay.run": 1,
     "cli/commands/lifecycle/root_driver.py::global-rebind:_direct_root_child": 1
   },
-  "patch_targets": {
-    "cli/commands/data_plane/tests/test_storage_ownership_data_plane.py::base.cluster.postgres._read": 1,
-    "cli/commands/data_plane/tests/test_storage_ownership_data_plane.py::base.cluster.postgres._spawn": 2
-  }
+  "patch_targets": {}
 }
