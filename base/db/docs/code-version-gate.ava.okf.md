@@ -67,7 +67,7 @@ caller's thread. PgBouncer's `SHOW CLIENTS` lists these names.
   forever.
 
 Tests: `base/native_process/tests/test_loaded_commit.py` (the count, on real repositories),
-`base/tests/test_connect_helpers.py` (the read schedule, the verdict and exit,
+`base/db/tests/test_connect_helpers.py` (the read schedule, the verdict and exit,
 the restore against a fake and a real Postgres, the raise, the migration pair),
 `tests/cli/test_pgbouncer_wire.py` (the name in a real PgBouncer's client list).
 

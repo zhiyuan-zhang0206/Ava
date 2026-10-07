@@ -1,8 +1,7 @@
-"""`base.db` / `base.events.live.redis_client` connection helpers read settings once
-and hand back a working connection / pool / sync client, so call sites stop
-hand-writing `psycopg.connect(settings.data_plane.db_url)` and
-`redis.Redis.from_url(settings.data_plane.redis_url)`. These pin that the helpers read the
-live settings URL (the conftest testcontainer) and pass options through.
+"""`base.db` connection helpers read settings once
+and hand back a working connection / pool, so call sites stop
+hand-writing `psycopg.connect(settings.data_plane.db_url)`. These pin that the
+helpers read the live settings URL (the conftest testcontainer) and pass options through.
 
 The second half is the client-side code-version gate every pooled session of these
 helpers carries: a session under a lower code version than
@@ -32,8 +31,6 @@ from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.config import settings
 from base.db import Database, connections
 from base.db import code_version_gate as gate
-from base.events.live.bus import EventBus
-from base.log.sinks import add_sink
 from base.native_process import code_version
 from base.telemetry import process_name
 
@@ -79,24 +76,6 @@ def test_pool_hands_out_working_connections() -> None:
         pool.close()
 
 
-def test_sync_redis_ping() -> None:
-    client = EventBus.from_settings().sync_redis()
-    try:
-        assert client.ping() is True  # pyright: ignore[reportUnknownMemberType]
-    finally:
-        client.close()
-
-
-def test_sync_redis_decode_responses_passthrough() -> None:
-    client = EventBus.from_settings().sync_redis(decode_responses=True)
-    try:
-        client.set("ava:test:connect-helper", "v")
-        assert client.get("ava:test:connect-helper") == "v"  # str, not bytes
-    finally:
-        client.delete("ava:test:connect-helper")
-        client.close()
-
-
 # ── the code-version gate ────────────────────────────────────────────────────
 
 _VERSION = 500
@@ -114,7 +93,7 @@ class _Exited(BaseException):
 def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """A gated process at a fixed version whose `os._exit` is observable.
 
-    Process posture, the version cache and the read timestamp are replaced for
+    The public process posture/version answers and the owned read timestamp are replaced for
     the test and restored after; `hard_exit` also closes loguru's sinks and the
     stdlib handlers, so both are neutralized to keep the session's. Returns the
     exit codes attempted.
@@ -132,7 +111,7 @@ def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     monkeypatch.setattr(loguru_logger, "remove", keep)
     monkeypatch.setattr(logging, "shutdown", keep)
     monkeypatch.setattr(code_version, "get", lambda: _VERSION)
-    monkeypatch.setattr(code_version, "_db_gate_exempt", False)
+    monkeypatch.setattr(code_version, "db_gate_applies", lambda: True)
     monkeypatch.setattr(gate, "_last_read_at", None)
     return exits
 
@@ -164,8 +143,8 @@ def test_the_first_borrow_reads_and_the_next_thirty_seconds_do_not(
     assert gate.min_read_due() is True
 
 
-def test_an_exempt_process_never_reads_the_minimum() -> None:
-    code_version.exempt_from_db_gate()
+def test_an_exempt_process_never_reads_the_minimum(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(code_version, "db_gate_applies", lambda: False)
     assert gate.min_read_due() is False
 
 
@@ -188,7 +167,7 @@ def test_a_process_below_the_minimum_logs_critical_and_exits(
     def capture(message: loguru.Message) -> None:
         rendered.append(message.record["message"])
 
-    sink_id = add_sink(capture, level="CRITICAL")
+    sink_id = loguru_logger.add(capture, level="CRITICAL", diagnose=False)
     try:
         with pytest.raises(_Exited) as exited:
             gate.observe_minimum(_VERSION + 1)
@@ -349,8 +328,8 @@ async def test_the_async_restore_follows_the_same_schedule_and_verdict(
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
 
 
-def test_an_exempt_process_keeps_the_plain_restore() -> None:
-    code_version.exempt_from_db_gate()
+def test_an_exempt_process_keeps_the_plain_restore(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(code_version, "db_gate_applies", lambda: False)
     conn = _FakeConn(minimum=10**9)
     restore: Any = connections._restore_pooled_session
 
@@ -416,7 +395,7 @@ def test_the_raise_is_greatest_and_never_lowers_the_minimum(
     closes (two gateways starting at once) is reproduced by an exempt dial, which
     skips the read, carrying an older version."""
     _set_minimum(_VERSION + 25)
-    code_version.exempt_from_db_gate()
+    monkeypatch.setattr(code_version, "db_gate_applies", lambda: False)
     monkeypatch.setattr(code_version, "get", lambda: _VERSION)
 
     assert gate.raise_min_code_version(database) == _VERSION + 25
@@ -482,6 +461,7 @@ def test_a_dict_row_pool_borrows_through_the_gate(
 async def test_the_async_restore_reads_the_stored_minimum(
     monkeypatch: pytest.MonkeyPatch, stored_minimum: int, _gated_process: list[int]
 ) -> None:
+    now = _clock(monkeypatch)
     _set_minimum(_VERSION)
     restore: Any = connections._restore_pooled_session_async
     async with await psycopg.AsyncConnection.connect(settings.data_plane.db_url) as aconn:
@@ -493,7 +473,8 @@ async def test_the_async_restore_reads_the_stored_minimum(
 
     _set_minimum(_VERSION + 1)
     assert gate.min_read_due() is False  # the read above is still fresh
-    monkeypatch.setattr(gate, "_last_read_at", None)  # thirty seconds on: the read is due again
+    now[0] += gate.MIN_REFRESH_INTERVAL_S
+    assert gate.min_read_due() is True
     async with await psycopg.AsyncConnection.connect(settings.data_plane.db_url) as aconn:
         with pytest.raises(_Exited):
             await restore(aconn)
@@ -514,7 +495,7 @@ def test_an_exempt_process_dials_as_the_cli_without_a_version(
     monkeypatch: pytest.MonkeyPatch, stored_minimum: int, _gated_process: list[int]
 ) -> None:
     _set_minimum(_VERSION + 1)
-    code_version.exempt_from_db_gate()
+    monkeypatch.setattr(code_version, "db_gate_applies", lambda: False)
     monkeypatch.setattr(code_version, "get", lambda: pytest.fail("the CLI needs no version"))
 
     with db.connect() as conn:
@@ -540,6 +521,3 @@ def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE deployment_state SET min_code_version = 0")
     assert _gated_process == []
-
-
-# ── the migration ────────────────────────────────────────────────────────────
