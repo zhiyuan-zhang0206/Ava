@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { ContextBreakdownCard } from "@/components/inspector/context-breakdown";
+import { ContextBreakdownCard, type CategoryHighlight } from "@/components/inspector/context-breakdown";
 import { RunTimelineCrumbs } from "@/components/run-timeline/run-timeline-crumbs";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { RunTimelineRows } from "@/components/run-timeline/run-timeline-rows";
@@ -13,12 +13,18 @@ import { RunTimelineChartSkeleton } from "@/components/run-timeline/run-timeline
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import {
   blockClass,
+  categoryClass,
+  classCategory,
   clampViewport,
+  contextPoint,
   firstLine,
+  nodeAncestors,
+  nodeChildren,
   nodeWindow,
   unitWindow,
   viewportOf,
   type Crumb,
+  type Highlight,
   type Selection,
   type TimelineWindow,
   type Viewport,
@@ -42,6 +48,8 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
   const [paramsResolved, setParamsResolved] = useState(false);
   const [trail, setTrail] = useState<Crumb[]>([]);
   const [selection, setSelection] = useState<Selection | null>(null);
+  // The legend's (or a context breakdown row's) highlight of one kind of block; it survives zoom, pan and drill.
+  const [highlight, setHighlight] = useState<Highlight | null>(null);
   // null = the whole loaded extent.
   const [viewport, setViewport] = useState<Viewport | null>(null);
 
@@ -68,6 +76,7 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
     // eslint-disable-next-line react-hooks/set-state-in-effect -- identity-keyed reset, not a render loop
     setTrail((previous) => (previous.length === 0 ? previous : []));
     setSelection(null);
+    setHighlight(null);
     setViewport(null);
   }, [agentId]);
 
@@ -145,6 +154,18 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
         )
       : undefined;
 
+  // The context card follows the selected block, else the last LLM request in view.
+  const contextAt = data && view ? contextPoint(selection, data.nodes, data.requests, view) : undefined;
+  const categoryHighlight: CategoryHighlight = {
+    active: highlight === null ? null : classCategory(highlight.cls),
+    has: (category) => categoryClass(category) !== null,
+    onToggle: (category) => {
+      const cls = categoryClass(category);
+      if (cls === null) return;
+      setHighlight(highlight?.cls === cls ? null : { cls, source: null });
+    },
+  };
+
   const main = (
     <>
       <RunTimelineCrumbs trail={trail} onSelect={stepBack} />
@@ -166,6 +187,8 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
             selection={selection}
             onSelect={setSelection}
             onDrill={drill}
+            highlight={highlight}
+            onHighlight={setHighlight}
           />
         </>
       ) : query.isPending ? (
@@ -179,7 +202,9 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
         </div>
       )}
       {/* Agent-scoped context details follow the timeline. */}
-      {agentId !== null ? <ContextBreakdownCard agentId={agentId} /> : null}
+      {agentId !== null && contextAt !== undefined ? (
+        <ContextBreakdownCard agentId={agentId} at={contextAt} categoryHighlight={categoryHighlight} />
+      ) : null}
     </>
   );
 
@@ -188,6 +213,9 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
       key={`n${selectedNode.id}`}
       agentId={agentId ?? 0}
       node={selectedNode}
+      ancestors={data ? nodeAncestors(selectedNode, data.nodes) : []}
+      childNodes={data ? nodeChildren(selectedNode, data.nodes) : []}
+      onSelectNode={(id) => setSelection({ kind: "node", id })}
       onDrill={() => drill({ kind: "node", id: selectedNode.id })}
     />
   ) : selectedUnit ? (
@@ -195,6 +223,8 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
       key={`u${selectedUnit.kind}${selectedUnit.i0}-${selectedUnit.i1}`}
       agentId={agentId ?? 0}
       unit={selectedUnit}
+      parent={data?.nodes.find((node) => node.id === selectedUnit.parent) ?? null}
+      onSelectNode={(id) => setSelection({ kind: "node", id })}
       onDrill={() => drill({ kind: "unit", i0: selectedUnit.i0, i1: selectedUnit.i1, unitKind: selectedUnit.kind })}
     />
   ) : (

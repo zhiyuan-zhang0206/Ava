@@ -4,12 +4,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ContextBreakdownResponse,
+  RunTimelineContext,
   RunTimelineMessages,
   RunTimelineResponse,
   UserSettingListResponse,
 } from "@/lib/contracts/types";
 
-const { getRunTimeline, getRunTimelineMessages, getSettings, getContextBreakdown, useMediaQuery } =
+const {
+  getRunTimeline,
+  getRunTimelineMessages,
+  getRunTimelineContext,
+  getSettings,
+  getContextBreakdown,
+  useMediaQuery,
+} =
   vi.hoisted(() => ({
     getRunTimeline:
       vi.fn<
@@ -25,12 +33,13 @@ const { getRunTimeline, getRunTimelineMessages, getSettings, getContextBreakdown
     useMediaQuery: vi.fn(() => false),
     getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
+    getRunTimelineContext: vi.fn<(agentId: number, at: number) => Promise<RunTimelineContext>>(),
   }));
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimeline, getRunTimelineMessages, getSettings, getContextBreakdown },
+  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getSettings, getContextBreakdown },
 }));
 
 import RunTimelinePage from "./page";
@@ -116,6 +125,10 @@ const lifetimeResponse: RunTimelineResponse = {
     },
   ],
   events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
+  requests: [
+    { idx: 2, ts: "2026-10-04T12:04:00.000000Z", session: 0, input_tokens: 1000 },
+    { idx: 7, ts: "2026-10-04T14:00:00.000000Z", session: 1, input_tokens: 400 },
+  ],
 };
 
 const messagesResponse: RunTimelineMessages = {
@@ -163,6 +176,22 @@ beforeEach(() => {
   getSettings.mockResolvedValue({ settings: [] });
   getContextBreakdown.mockReset();
   getContextBreakdown.mockResolvedValue(cbdFixture);
+  getRunTimelineContext.mockReset();
+  getRunTimelineContext.mockImplementation((_agent, at) => {
+    const request = lifetimeResponse.requests.find((candidate) => candidate.idx >= at) ?? lifetimeResponse.requests[1];
+    return Promise.resolve({
+      ...cbdFixture,
+      categories: [
+        { kind: "system_prompt", tokens: 300 },
+        { kind: "user_input", tokens: 200 },
+        { kind: "reasoning", tokens: 100 },
+      ],
+      request: request.idx,
+      session: request.session,
+      sessions: 2,
+      ts: request.ts,
+    });
+  });
 });
 
 afterEach(() => {
@@ -187,6 +216,7 @@ describe("the default window", () => {
       "run-timeline-row-level-2",
       "run-timeline-row-level-1",
       "run-timeline-row-units",
+      "run-timeline-row-context",
     ]);
     expect(screen.getAllByTestId("run-timeline-node")).toHaveLength(3);
     expect(screen.getAllByTestId("run-timeline-unit")).toHaveLength(3);
@@ -201,9 +231,11 @@ describe("the default window", () => {
     expect(screen.queryByRole("button", { name: "Compact session" })).toBeNull();
   });
 
-  it("keeps the context breakdown card", async () => {
+  it("shows the context of the last LLM request in view, not the agent's current context", async () => {
     render();
-    await waitFor(() => expect(getContextBreakdown).toHaveBeenCalledWith(42));
+    await waitFor(() => expect(getRunTimelineContext).toHaveBeenCalledWith(42, 7));
+    expect(getContextBreakdown).not.toHaveBeenCalled();
+    expect((await screen.findByTestId("context-breakdown-heading")).textContent).toContain("request #7 · session 2 of 2");
   });
 });
 
@@ -543,5 +575,255 @@ describe("failure and loading", () => {
     expect(blocks.filter((block) => !block.hasAttribute("data-marker")).every((block) => block.style.top === "")).toBe(true);
     const legend = screen.getByTestId("run-timeline-legend");
     expect(within(legend).getAllByRole("listitem")).toHaveLength(7);
+  });
+});
+
+const unitOf = async (kind: string) =>
+  (await screen.findAllByTestId("run-timeline-unit")).find((el) => el.getAttribute("data-unit-kind") === kind)!;
+const nodeOf = async (id: string) =>
+  (await screen.findAllByTestId("run-timeline-node")).find((el) => el.getAttribute("data-node-id") === id)!;
+const faded = (el: Element) => el.hasAttribute("data-faded");
+
+describe("legend highlight", () => {
+  it("lights one class, fades every other block and every summary block, and clears on a second click", async () => {
+    render();
+    const human = await unitOf("inbound");
+    const text = await unitOf("text");
+    const legendHuman = screen.getByTestId("run-timeline-legend-human");
+    expect(legendHuman.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(legendHuman);
+    expect(legendHuman.getAttribute("aria-pressed")).toBe("true");
+    expect(faded(human)).toBe(false);
+    expect(human.hasAttribute("data-matched")).toBe(true);
+    expect(faded(text)).toBe(true);
+    expect(faded(await nodeOf("1"))).toBe(true);
+    expect(faded(await nodeOf("3"))).toBe(true);
+
+    fireEvent.click(legendHuman);
+    expect(legendHuman.getAttribute("aria-pressed")).toBe("false");
+    expect(faded(text)).toBe(false);
+    expect(faded(await nodeOf("1"))).toBe(false);
+  });
+
+  it("keeps the highlight through a drill", async () => {
+    render();
+    await screen.findByTestId("run-timeline-chart");
+    fireEvent.click(screen.getByTestId("run-timeline-legend-text"));
+    fireEvent.doubleClick(await nodeOf("1"));
+    await screen.findByTestId("run-timeline-crumbs");
+    expect(screen.getByTestId("run-timeline-legend-text").getAttribute("aria-pressed")).toBe("true");
+    expect(faded(await unitOf("inbound"))).toBe(true);
+    expect(faded(await unitOf("text"))).toBe(false);
+  });
+
+  it("keeps the highlight through a zoom", async () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const wide = this.hasAttribute("data-track");
+      return { left: 100, top: 0, width: wide ? 1000 : 0, height: 0, right: 1100, bottom: 0, x: 100, y: 0, toJSON: () => ({}) };
+    });
+    render();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    fireEvent.click(screen.getByTestId("run-timeline-legend-human"));
+    wheel(chart, { deltaY: -400, clientX: 100 });
+    expect(faded(await unitOf("text"))).toBe(true);
+    expect(faded(await unitOf("inbound"))).toBe(false);
+    vi.restoreAllMocks();
+  });
+
+  it("links to the context breakdown rows: a row lights its class, and the legend lights its row", async () => {
+    render();
+    const row = await screen.findByTestId("context-breakdown-category-user_input");
+    expect(row.getAttribute("aria-pressed")).toBe("false");
+    // A category with no blocks on the timeline is not a button.
+    expect(screen.queryByTestId("context-breakdown-category-system_prompt")).toBeNull();
+    fireEvent.click(row);
+    expect(screen.getByTestId("run-timeline-legend-human").getAttribute("aria-pressed")).toBe("true");
+    expect(faded(await unitOf("text"))).toBe(true);
+    expect(row.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByTestId("run-timeline-legend-human"));
+    expect(row.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByTestId("run-timeline-legend-thinking"));
+    expect(screen.getByTestId("context-breakdown-category-reasoning").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("splits inbound blocks by source: highlighting one agent's inbound fades the other's", async () => {
+    getRunTimeline.mockResolvedValue({
+      ...lifetimeResponse,
+      units: [
+        { ...lifetimeResponse.units[0], kind: "inbound", i0: 1, i1: 1, source: "agent:12", preview: "from twelve" },
+        { ...lifetimeResponse.units[0], kind: "inbound", i0: 3, i1: 3, source: "agent:9", start: "2026-10-04T12:10:00.000000Z", end: "2026-10-04T12:10:00.000000Z", preview: "from nine" },
+      ],
+    });
+    render();
+    fireEvent.click(await screen.findByTestId("run-timeline-legend-agent"));
+    const select = await screen.findByTestId("run-timeline-source-select");
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "All sources",
+      "Inbound from agent 12",
+      "Inbound from agent 9",
+    ]);
+    fireEvent.change(select, { target: { value: "agent:12" } });
+    const [twelve, nine] = screen.getAllByTestId("run-timeline-unit");
+    expect(faded(twelve)).toBe(false);
+    expect(faded(nine)).toBe(true);
+    fireEvent.change(select, { target: { value: "" } });
+    expect(faded(nine)).toBe(false);
+  });
+});
+
+describe("hover", () => {
+  const readout = () => screen.getByTestId("run-timeline-readout").textContent;
+  const hoverOf = async (id: string) => (await nodeOf(id)).getAttribute("data-hover");
+
+  it("reads a block's kind, message span, read time, source and preview, and restores on leave", async () => {
+    render();
+    const idle = (await screen.findByTestId("run-timeline-readout")).textContent;
+    const human = await unitOf("inbound");
+    fireEvent.mouseEnter(human);
+    expect(readout()).toContain("Human message · #1–#1 · read");
+    expect(readout()).toContain("user · please fix the bug");
+    fireEvent.mouseLeave(human);
+    expect(readout()).toBe(idle);
+  });
+
+  it("reads a node's level, span, summary first line and the agent's own usage", async () => {
+    render();
+    fireEvent.mouseEnter(await nodeOf("1"));
+    const text = readout();
+    expect(text).toContain("Level 1");
+    expect(text).toContain("#1–#5");
+    expect(text).toContain("The agent read the repo");
+    expect(text).not.toContain("and planned");
+    expect(text).toContain("3 calls · 3.0k in · 120 out");
+  });
+
+  it("lights a hovered block's ancestor chain softly", async () => {
+    render();
+    fireEvent.mouseEnter(await unitOf("text"));
+    expect(await hoverOf("1")).toBe("lit");
+    expect(await hoverOf("3")).toBe("lit");
+    expect(await hoverOf("2")).toBeNull();
+    fireEvent.mouseLeave(await unitOf("text"));
+    expect(await hoverOf("1")).toBeNull();
+  });
+
+  it("lights a hovered node's covered blocks and its ancestors", async () => {
+    render();
+    fireEvent.mouseEnter(await nodeOf("1"));
+    expect((await nodeOf("1")).getAttribute("data-hover")).toBe("self");
+    expect(await hoverOf("3")).toBe("lit");
+    expect((await unitOf("inbound")).getAttribute("data-hover")).toBe("lit");
+    expect((await unitOf("text")).getAttribute("data-hover")).toBe("lit");
+    // node 2 is a sibling: no block of it is covered
+    expect(await hoverOf("2")).toBeNull();
+  });
+
+  it("gives the selection priority over the hover", async () => {
+    render();
+    fireEvent.click(await nodeOf("2"));
+    fireEvent.mouseEnter(await unitOf("text"));
+    expect((await nodeOf("2")).getAttribute("data-highlight")).toBe("self");
+    expect((await nodeOf("3")).getAttribute("data-highlight")).toBe("ancestor");
+    expect((await nodeOf("1")).getAttribute("data-hover")).toBe("lit");
+    expect((await nodeOf("1")).getAttribute("data-highlight")).toBe("none");
+  });
+});
+
+describe("side panel links", () => {
+  it("lists a node's ancestors and children as chips that jump to them", async () => {
+    render();
+    fireEvent.click(await nodeOf("1"));
+    let detail = await screen.findByTestId("run-timeline-node-detail");
+    const up = within(detail).getAllByTestId("run-timeline-chip");
+    expect(up.map((chip) => chip.textContent)).toEqual(["Level 2 · A whole task, start to finish."]);
+    fireEvent.click(up[0]);
+
+    detail = await screen.findByTestId("run-timeline-node-detail");
+    expect(detail.textContent).toContain("Level 2 summary");
+    expect((await nodeOf("3")).getAttribute("data-highlight")).toBe("self");
+    const down = within(detail).getAllByTestId("run-timeline-chip");
+    expect(down.map((chip) => chip.getAttribute("data-node-id"))).toEqual(["1", "2"]);
+    fireEvent.click(down[1]);
+    expect((await nodeOf("2")).getAttribute("data-highlight")).toBe("self");
+  });
+
+  it("shows the summary block a message block belongs to, and jumps to it", async () => {
+    render();
+    fireEvent.click(await unitOf("text"));
+    const detail = await screen.findByTestId("run-timeline-unit-detail");
+    fireEvent.click(within(detail).getByTestId("run-timeline-chip"));
+    expect((await nodeOf("1")).getAttribute("data-highlight")).toBe("self");
+    expect(await screen.findByTestId("run-timeline-node-detail")).toBeTruthy();
+  });
+
+  it("says so when no summary block covers a message block", async () => {
+    getRunTimeline.mockResolvedValue({
+      ...lifetimeResponse,
+      units: [{ ...lifetimeResponse.units[0], parent: null }],
+    });
+    render();
+    fireEvent.click(await unitOf("inbound"));
+    expect(await screen.findByTestId("run-timeline-uncovered")).toBeTruthy();
+  });
+});
+
+describe("context breakdown follows the point", () => {
+  it("follows a selected block, then a selected node, and is titled with its session and time", async () => {
+    render();
+    await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 7));
+    fireEvent.click(await unitOf("text"));
+    await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2));
+    await waitFor(() =>
+      expect(screen.getByTestId("context-breakdown-heading").textContent).toContain("request #2 · session 1 of 2"),
+    );
+    fireEvent.click(await nodeOf("2"));
+    await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 6));
+    await waitFor(() =>
+      expect(screen.getByTestId("context-breakdown-heading").textContent).toContain("request #7 · session 2 of 2"),
+    );
+  });
+
+  it("without a selection follows the last request inside the viewport", async () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const wide = this.hasAttribute("data-track");
+      return { left: 100, top: 0, width: wide ? 1000 : 0, height: 0, right: 1100, bottom: 0, x: 100, y: 0, toJSON: () => ({}) };
+    });
+    render();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 7));
+    // Zooming at the left edge leaves only the first request (12:04) in view.
+    wheel(chart, { deltaY: -600, clientX: 100 });
+    await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2));
+    vi.restoreAllMocks();
+  });
+
+  it("says so when the agent has made no request", async () => {
+    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, requests: [] });
+    render();
+    expect((await screen.findByTestId("context-breakdown-empty")).textContent).toContain("no LLM request");
+    expect(getRunTimelineContext).not.toHaveBeenCalled();
+  });
+});
+
+describe("context size row", () => {
+  it("draws one bar per request, scaled to the largest input, and reads its value on hover", async () => {
+    render();
+    const bars = await screen.findAllByTestId("run-timeline-request");
+    expect(bars.map((bar) => bar.getAttribute("data-input-tokens"))).toEqual(["1000", "400"]);
+    expect(bars.map((bar) => bar.getAttribute("data-session"))).toEqual(["0", "1"]);
+    const heights = bars.map((bar) => parseFloat((bar.firstElementChild as HTMLElement).style.height));
+    expect(heights[1] / heights[0]).toBeCloseTo(0.4);
+    fireEvent.mouseEnter(bars[1]);
+    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("LLM request #7 · session 2");
+    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("400 input tokens");
+  });
+
+  it("has no row for an agent that made no request", async () => {
+    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, requests: [] });
+    render();
+    await screen.findByTestId("run-timeline-chart");
+    expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
   });
 });
