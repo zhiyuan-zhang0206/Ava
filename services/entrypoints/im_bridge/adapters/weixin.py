@@ -39,10 +39,6 @@ ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
 EP_GET_UPDATES = "ilink/bot/getupdates"
 EP_SEND_MESSAGE = "ilink/bot/sendmessage"
 
-# How long a failed send's client_id stays reusable for the retry. The
-# push_watchdog retry waits its bounded backoff (seconds), so 5 min is a
-# wide margin; the expiry exists so a stale id can never be reused for a
-# later, different message (iLink dedups by client_id and would drop it).
 EP_GET_BOT_QR = "ilink/bot/get_bot_qrcode"
 EP_GET_QR_STATUS = "ilink/bot/get_qrcode_status"
 
