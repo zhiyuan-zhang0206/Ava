@@ -197,6 +197,8 @@ _PER_TEST_TRUNCATE_TABLES = (
     "agent_model_tokens_total_through",
     "agent_metric_file_cursors",
     "agents",
+    "alert_notification_members",
+    "alert_notification_groups",
     "alerts",
     "machines",
     "machine_probe",
