@@ -1,5 +1,9 @@
 {
   "models": "Models",
+  "tps": "TPS",
+  "pricePerMillion": "USD / 1M",
+  "referenceTps": "Vendor reference output tokens per second",
+  "referenceTpsUnavailable": "No reliable vendor-published output TPS",
   "hiddenModels": "{count} hidden — manage in Control > Display",
   "effortDefault": "Effort: default",
   "presets": "Presets",

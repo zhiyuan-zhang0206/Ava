@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -10,22 +12,38 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from base.lm.effort import clamp_effort
+from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
+    InferenceSpeed,
     PricePeriod,
     PriceRates,
     PriceTier,
     ProviderBinding,
     ProviderContribution,
     require_key,
+    with_fast_variants,
 )
-from base.lm.registry import ModelSpec, ModelTuning
+from base.lm.registry import ModelSpec, ModelTuning, ReferenceTps
 from base.lm.stop import StopCategory, StopSpec
 from base.packages.plugins.extensions import PluginContributions
 
 # Effort vocabulary shared by GPT-5.6 and GPT-6 Sol/Luna; Astra differs.
 _GPT_EFFORT = ("none", "low", "medium", "high", "xhigh", "max")
+
+
+class OpenAIServiceTier(StrEnum):
+    """Service receipts supported for an explicitly requested Fast call."""
+
+    DEFAULT = "default"
+    FAST = "fast"
+    PRIORITY = "priority"
+
+
+def served_speed(metadata: Mapping[str, Any]) -> InferenceSpeed:
+    """GPT-5.6 reports priority for Fast; ramp-rate downgrades report default."""
+    tier = OpenAIServiceTier(metadata.get("service_tier"))
+    return InferenceSpeed.STANDARD if tier == OpenAIServiceTier.DEFAULT else InferenceSpeed.FAST
 
 
 def build(ctx: BuildContext) -> BaseChatModel:
@@ -53,22 +71,27 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # so code rendering is unaffected by the API switch.
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
     gpt_effort = "none" if thinking_disabled else (ctx.resolved_effort or "medium")
-    # Clamp onto the model's declared effort vocabulary (per-model
+    model_levels = ctx.spec.effort_levels if ctx.spec is not None else None
+    if thinking_disabled and model_levels is not None and "none" not in model_levels:
+        # The binary thinking switch asks for the cheapest supported mode;
+        # it is distinct from an explicit effort selection, which never remaps.
+        gpt_effort = model_levels[0]
+    # Validate the model's declared effort vocabulary (per-model
     # ModelSpec.effort_levels). GPT-6 Astra rejects "none" and "minimal";
     # GPT-6 Sol and Luna accept "none" but reject "minimal" (live-checked
-    # 2026-09-25), so only out-of-vocabulary efforts are clamped. Models
+    # 2026-09-25). An unsupported explicit effort raises. Models
     # without a declared vocabulary keep the historic verbatim passthrough.
-    model_levels = ctx.spec.effort_levels if ctx.spec is not None else None
     if model_levels is not None:
-        gpt_effort = clamp_effort(gpt_effort, model_levels, target=ctx.model)
+        gpt_effort = validate_effort(gpt_effort, model_levels, target=ctx.model)
     gpt_reasoning: dict[str, Any] = (
         {"effort": gpt_effort} if thinking_disabled else {"effort": gpt_effort, "summary": "auto"}
     )
     return ChatOpenAI(
-        model=ctx.model,  # type: ignore[call-arg]
+        model=(ctx.spec.fast_of if ctx.spec and ctx.spec.fast_of else ctx.model),  # type: ignore[call-arg]
         api_key=api_key,  # type: ignore[arg-type]
         use_responses_api=True,
         reasoning=gpt_reasoning,
+        service_tier="fast" if ctx.spec and ctx.spec.fast_of else "default",
         disable_streaming=ctx.disable_streaming,
         timeout=ctx.timeout,
     )
@@ -82,6 +105,7 @@ PROVIDER = ProviderContribution(
         build=build,
         effort_levels=_GPT_EFFORT,
         vision=True,
+        served_speed=served_speed,
         stop_spec=StopSpec(
             "openai",
             "finish_reason",
@@ -102,7 +126,7 @@ PROVIDER = ProviderContribution(
             knowledge_cutoff="2026-04",
             # GPT-6 Astra rejects "none" and "minimal" (live-checked
             # 2026-09-25), unlike Sol and Luna which accept "none";
-            # the builder clamps out-of-vocabulary efforts onto these rungs.
+            # the builder rejects efforts outside these rungs.
             effort_levels=("low", "medium", "high", "xhigh", "max"),
             tuning=ModelTuning(
                 reasoning_effort="medium",  # OpenAI default (see gpt-5.6-sol)
@@ -416,5 +440,243 @@ PROVIDER = ProviderContribution(
 
 
 def contribute() -> PluginContributions:
-    """What this plugin declares: its model provider."""
-    return PluginContributions(providers=(PROVIDER,))
+    """Standard and independently priced Fast inference services."""
+    return PluginContributions(
+        providers=(
+            with_fast_variants(
+                PROVIDER,
+                {
+                    "gpt-6-astra": PriceRates(
+                        cache_miss=20,
+                        cache_hit=2,
+                        output=100,
+                        source_url="https://developers.openai.com/api/docs/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="openai",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=272000,
+                                        cache_miss="20",
+                                        cache_hit="2",
+                                        output="100",
+                                    ),
+                                    PriceTier(
+                                        input_tokens_min=272001,
+                                        input_tokens_max=None,
+                                        cache_miss="40",
+                                        cache_hit="4",
+                                        output="150",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    "gpt-6.1-sol": PriceRates(
+                        cache_miss=4,
+                        cache_hit=0.2,
+                        output=20,
+                        source_url="https://developers.openai.com/api/docs/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="openai",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=272000,
+                                        cache_miss="4",
+                                        cache_hit="0.2",
+                                        output="20",
+                                    ),
+                                    PriceTier(
+                                        input_tokens_min=272001,
+                                        input_tokens_max=None,
+                                        cache_miss="8",
+                                        cache_hit="0.4",
+                                        output="30",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    "gpt-6-sol": PriceRates(
+                        cache_miss=4,
+                        cache_hit=0.4,
+                        output=20,
+                        source_url="https://developers.openai.com/api/docs/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="openai",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=272000,
+                                        cache_miss="4",
+                                        cache_hit="0.4",
+                                        output="20",
+                                    ),
+                                    PriceTier(
+                                        input_tokens_min=272001,
+                                        input_tokens_max=None,
+                                        cache_miss="8",
+                                        cache_hit="0.8",
+                                        output="30",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    "gpt-6-luna": PriceRates(
+                        cache_miss=0.2,
+                        cache_hit=0.02,
+                        output=1,
+                        source_url="https://developers.openai.com/api/docs/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="openai",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=272000,
+                                        cache_miss="0.2",
+                                        cache_hit="0.02",
+                                        output="1",
+                                    ),
+                                    PriceTier(
+                                        input_tokens_min=272001,
+                                        input_tokens_max=None,
+                                        cache_miss="0.4",
+                                        cache_hit="0.04",
+                                        output="1.5",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    "gpt-5.6-sol": PriceRates(
+                        cache_miss=8,
+                        cache_hit=0.8,
+                        output=40,
+                        source_url="https://developers.openai.com/api/docs/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="openai",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=272000,
+                                        cache_miss="8",
+                                        cache_hit="0.8",
+                                        output="40",
+                                    ),
+                                    PriceTier(
+                                        input_tokens_min=272001,
+                                        input_tokens_max=None,
+                                        cache_miss="16",
+                                        cache_hit="1.6",
+                                        output="60",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    "gpt-5.6-terra": PriceRates(
+                        cache_miss=4,
+                        cache_hit=0.4,
+                        output=24,
+                        source_url="https://developers.openai.com/api/docs/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="openai",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=272000,
+                                        cache_miss="4",
+                                        cache_hit="0.4",
+                                        output="24",
+                                    ),
+                                    PriceTier(
+                                        input_tokens_min=272001,
+                                        input_tokens_max=None,
+                                        cache_miss="8",
+                                        cache_hit="0.8",
+                                        output="36",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    "gpt-5.6-luna": PriceRates(
+                        cache_miss=0.4,
+                        cache_hit=0.04,
+                        output=2.4,
+                        source_url="https://developers.openai.com/api/docs/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="openai",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=272000,
+                                        cache_miss="0.4",
+                                        cache_hit="0.04",
+                                        output="2.4",
+                                    ),
+                                    PriceTier(
+                                        input_tokens_min=272001,
+                                        input_tokens_max=None,
+                                        cache_miss="0.8",
+                                        cache_hit="0.08",
+                                        output="3.6",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                },
+                reference_tps={
+                    "gpt-5.6-sol": ReferenceTps(
+                        display=">80",
+                        source_url="https://openai.com/api-fast-mode/",
+                        source_checked_at="2026-10-07",
+                        note="Enterprise Fast latency SLA: 99%, calculated as p50 request latency per 5-minute window.",
+                    ),
+                    "gpt-5.6-terra": ReferenceTps(
+                        display=">70",
+                        source_url="https://openai.com/api-fast-mode/",
+                        source_checked_at="2026-10-07",
+                        note="Enterprise Fast latency SLA: 99%, calculated as p50 request latency per 5-minute window.",
+                    ),
+                    "gpt-5.6-luna": ReferenceTps(
+                        display=">100",
+                        source_url="https://openai.com/api-fast-mode/",
+                        source_checked_at="2026-10-07",
+                        note="Enterprise Fast latency SLA: 99%, calculated as p50 request latency per 5-minute window.",
+                    ),
+                },
+            ),
+        )
+    )

@@ -6083,6 +6083,7 @@ export interface components {
             /** Context Window */
             context_window: number;
             pricing?: components["schemas"]["ModelPricing"] | null;
+            reference_tps?: components["schemas"]["ReferenceTps"] | null;
             /** Reasoning Effort Options */
             reasoning_effort_options?: string[] | null;
             /** Reasoning Effort Default */
@@ -6633,6 +6634,20 @@ export interface components {
          * @enum {string}
          */
         Priority: "P0" | "P1" | "P2" | "P3";
+        /**
+         * ReferenceTps
+         * @description Vendor-published output speed, preserving its qualifier and conditions.
+         */
+        ReferenceTps: {
+            /** Display */
+            display: string;
+            /** Source Url */
+            source_url: string;
+            /** Source Checked At */
+            source_checked_at: string;
+            /** Note */
+            note: string;
+        };
         /**
          * ResolveNoticeIn
          * @description POST /api/agents/{id}/notices/{notice_id}/resolve request body.

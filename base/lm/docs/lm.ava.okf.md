@@ -29,7 +29,7 @@ tags:
 | `qwen` | ReasoningContentChatModel (Alibaba) | DASHSCOPE_API_KEY + `AVA_DASHSCOPE_BASE_URL` |
 
 - `base/lm/catalog.py:ModelCatalog` is an immutable value built from the enabled plugins (`plugin_providers.model_catalog()`). A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
-- `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered + key configured, else 400 (fail-fast vs silent hang).
+- `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered, explicit effort supported, and key configured, else 400. Effort is validated exactly, never translated to a nearby grade.
 - Gateway lifespan loads providers; zero bindings raises before the once flag, so a corrected config is retryable.
 - [[media-capabilities.ava.okf.md]] — per-model media resolution and attachment packing.
 - `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped.

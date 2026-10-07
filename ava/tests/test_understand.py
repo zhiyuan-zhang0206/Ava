@@ -78,21 +78,25 @@ def test_effort_invalid_value_raises(mock_deepseek: dict[str, Any]) -> None:
         understand_mod.understand([{"prompt": "x", "text": "y"}], effort=3)  # type: ignore[arg-type]
 
 
-def test_media_effort_clamps_to_gemini_thinking_level(
+def test_media_effort_preserves_supported_gemini_levels(
     mock_gemini: dict[str, Any], fake_image: Path
 ) -> None:
-    """Media path maps effort onto Gemini's thinking_level vocabulary via the
-    cross-provider clamp: none→minimal, low→low, medium→medium, high→high,
-    xhigh→high (clamped). Rides the factory's media_thinking_level kwarg."""
+    """Valid graded levels pass through; none selects the model's lowest tier."""
     for effort, level in [
         ("none", "minimal"),
         ("low", "low"),
         ("medium", "medium"),
         ("high", "high"),
-        ("xhigh", "high"),
     ]:
         understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}], effort=effort)
         assert mock_gemini["kwargs"]["media_thinking_level"] == level, f"effort={effort}"
+
+
+def test_media_effort_rejects_unsupported_grade(
+    mock_gemini: dict[str, Any], fake_image: Path
+) -> None:
+    with pytest.raises(ValueError, match="unsupported reasoning effort"):
+        understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}], effort="xhigh")
 
 
 def test_media_default_effort_max_keeps_settings_knob(

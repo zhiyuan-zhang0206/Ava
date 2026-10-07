@@ -24,6 +24,15 @@ tags:
 
 - Usage events keep price snapshots at the time of use so cost accounting remains stable when catalog rates later change.
 - Calls without provider usage metadata emit nothing, except raw-field callers that intentionally account for a completed zero-token provider response.
+- For a requested Fast ID, `usage_model()` reads the provider's actual service
+  receipt before pricing: OpenAI `fast` / legacy `priority` and Claude `fast`
+  keep the Fast ID; OpenAI `default` / Claude `standard` select the base ID.
+  Missing or unknown receipts raise instead of inventing a premium charge.
+  `llm_usage.model` records the served ID and `requested_model` preserves the
+  selected ID. Compaction also passes the selected Ava ID rather than the
+  client's wire model name.
+- Cache and reasoning counts include LangChain's tier-prefixed detail keys,
+  such as `priority_cache_read` and `priority_reasoning`.
 
 - Key deps: [[lm.ava.okf.md]] (provider-layer overview) and [[pricing.ava.okf.md]] (price selection).
 

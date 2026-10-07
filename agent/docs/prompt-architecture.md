@@ -89,11 +89,11 @@ Capabilities rather than standing as its own section.
   plain-Python / raw-shell equivalents. Deliberately example-free — specific
   misuse patterns get addressed if logs show them.
 - **Core CodeAct batching** — `agent/graph/prompt/_codeact.py:_codeact_section` (registered by `system_prompt.py`),
-  **off by default** via `settings.agent.prompt_codeact_enabled` (env
+  **on by default** via `settings.agent.prompt_codeact_enabled` (env
   `AVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
   call when no intermediate review is needed. Split for decisions, approval
-  and execution/output limits. Opt-in (user ruling 2026-08-26): unlike the
-  on-by-default behavioral sections, an unconfigured cluster never pays for it.
+  and execution/output limits. The user ruling on 2026-10-07 changed the
+  repository default to on; cluster settings and per-agent overlays can disable it.
 - **Core capabilities index** — `agent/graph/prompt/capabilities.py:capabilities_section`:
   always-on name + one-line description of the capabilities the agent already
   has, under one `# Capabilities` heading — the prompt's ONE skill index.
@@ -437,9 +437,9 @@ Landed so far:
   machines, spawn an agent on the target machine so it can use that machine's
   resources directly. Semantic steer only — no API detail, so it cannot go
   stale. User-finalized wording, shipped verbatim.
-- A CodeAct batching section (`AVA_SYSTEM_PROMPT_CODEACT`, **off by default**):
+- A CodeAct batching section (`AVA_SYSTEM_PROMPT_CODEACT`, **on by default**):
   pack several operations into one `execute_code` call to save LLM API calls
-  (user ruling 2026-08-26). Opt-in, unlike the ablation-toggled sections above.
+  (default-on user ruling 2026-10-07, superseding the 2026-08-26 opt-in default).
 
 Closed without building:
 

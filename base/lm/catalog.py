@@ -179,6 +179,8 @@ class CatalogBuilder:
                 )
         prices = PriceBook(self._archive, self._plugin_prices)
         for model_id, spec in models.items():
+            if spec.fast_of is not None and binding.served_speed is None:
+                raise ValueError(f"Fast model {model_id!r} needs a served_speed adapter")
             validate_spec(
                 model_id,
                 spec,

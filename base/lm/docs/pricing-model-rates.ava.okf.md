@@ -13,6 +13,32 @@ tags:
 
 The provider plugins and `pricing_catalog_archive.json` hold these reviewed rates.
 
+## Fast inference services
+
+Fast service IDs have independently declared prices, even when their wire model
+is shared with Standard. The following USD per million token rates were checked
+2026-10-07 against [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
+and [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+Triples are input / cache read / output. OpenAI's long-context rate prices the
+whole request when input exceeds 272,000 tokens.
+
+| Ava service ID | Base rate | Long-context rate |
+| --- | --- | --- |
+| `gpt-6-astra-fast` | 20 / 2 / 100 | 40 / 4 / 150 |
+| `gpt-6.1-sol-fast` | 4 / 0.20 / 20 | 8 / 0.40 / 30 |
+| `gpt-6-sol-fast` | 4 / 0.40 / 20 | 8 / 0.80 / 30 |
+| `gpt-6-luna-fast` | 0.20 / 0.02 / 1 | 0.40 / 0.04 / 1.50 |
+| `gpt-5.6-sol-fast` | 8 / 0.80 / 40 | 16 / 1.60 / 60 |
+| `gpt-5.6-terra-fast` | 4 / 0.40 / 24 | 8 / 0.80 / 36 |
+| `gpt-5.6-luna-fast` | 0.40 / 0.04 / 2.40 | 0.80 / 0.08 / 3.60 |
+| `claude-opus-5-fast` | 10 / 1 / 50 | Same |
+| `claude-opus-5-5-fast` | 8 / 0.40 / 40 | Same |
+
+The actual response service receipt controls billing. OpenAI may downgrade a
+Fast request to Standard; missing or unknown Fast receipts fail rather than
+guessing its price. Claude Fast remains subject to vendor access approval.
+Anthropic cache writes are still outside Ava's three-rate accounting model.
+
 ## Published model rates
 
 - **gpt-5.6-sol carries its promotional price** ($4 in / $0.4 cached / $20 out per 1M, official model page checked 2026-09-06, valid at least through 2026-11-21). The revert to the standard rates ($5 / $0.5 / $30) is a deliberate manual flip in the plugin + archive, not an automatic period boundary (405 ruling 2026-09-07).

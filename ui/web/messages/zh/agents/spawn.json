@@ -1,5 +1,9 @@
 {
   "models": "模型",
+  "tps": "TPS",
+  "pricePerMillion": "USD / 百万 token",
+  "referenceTps": "厂商公布的参考输出 token 数/秒",
+  "referenceTpsUnavailable": "没有可靠的厂商官方输出 TPS",
   "hiddenModels": "已隐藏 {count} 个 — 前往控制 > 显示管理",
   "effortDefault": "推理强度：默认",
   "presets": "预设",

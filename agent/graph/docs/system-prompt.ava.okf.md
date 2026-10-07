@@ -29,7 +29,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 **Conduct group**:
 - `_prefer_sdk_section` — "Prefer SDK"
-- `_codeact_section` (in `agent/graph/prompt/_codeact.py`, registered by `system_prompt`) — "CodeAct — batch work into fewer calls": batch known operations when no intermediate review is needed; split for decisions, approval or execution/output limits. Toggle `AVA_SYSTEM_PROMPT_CODEACT` (default off — opt-in, unlike the on-by-default sections).
+- `_codeact_section` (in `agent/graph/prompt/_codeact.py`, registered by `system_prompt`) — "CodeAct — batch work into fewer calls": batch known operations when no intermediate review is needed; split for decisions, approval or execution/output limits. Toggle `AVA_SYSTEM_PROMPT_CODEACT` (default on; explicit cluster settings and per-agent overlays can disable it).
 - `_keep_it_simple_section` — "Keep It Simple"
 - `conversation.user_reply_section` — Owns ordinary assistant-text reply routing, including text alongside tools; answer humans or reply before investigation, including resumed handoff requests, with every style. Continue investigating only concrete remaining questions; no courtesy replies for wakes or peers.
 - `_communication_style_section` — How verbose to be while working; `AVA_AGENT_COMMUNICATION_STYLE` selects `off` (default; section omitted entirely) / `oriented` (short progress reports while working) / `concise` (only speak at milestones) / `silent` (work silently, provide a complete summary at the end)

@@ -12,23 +12,25 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from base.lm.effort import clamp_effort
+from base.lm.effort import validate_effort
 from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
+    InferenceSpeed,
     PricePeriod,
     PriceRates,
     PriceTier,
     ProviderBinding,
     ProviderContribution,
     require_key,
+    with_fast_variants,
 )
 from base.lm.registry import ModelSpec, ModelTuning, resolve_setting
 from base.lm.stop import StopSpec
 from base.packages.plugins.extensions import PluginContributions
 
-# Budget used when AVA_REASONING_EFFORT clamps an extended-thinking-only claude
+# Budget used when AVA_REASONING_EFFORT enables an extended-thinking-only Claude
 # model to its "on" tier and no explicit AVA_CLAUDE_THINKING_BUDGET_TOKENS is
 # configured (0 = unset). Anthropic's minimum is 1024; this sits well under
 # haiku-4-5's 64K max_tokens cap with headroom left for the actual response.
@@ -37,6 +39,11 @@ _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
 # Effort vocabulary shared by adaptive-thinking Claude models. The per-model
 # declarations remain authoritative because the dated haiku-4-5 diverges.
 _CLAUDE_ADAPTIVE_EFFORT = ("low", "medium", "high", "xhigh", "max")
+
+
+def served_speed(metadata: Mapping[str, Any]) -> InferenceSpeed:
+    """Parse the actual speed retained from Anthropic usage by the adapter."""
+    return InferenceSpeed(metadata.get("speed"))
 
 
 def claude_extended_thinking_kwarg(
@@ -51,8 +58,8 @@ def claude_extended_thinking_kwarg(
     passed none explicitly.
 
     `budget_tokens` (the resolved claude_thinking_budget_tokens, an explicit
-    numeric budget) wins when set; otherwise `reasoning_effort` clamped onto
-    the model's binary `effort_levels` ("none"/"high") opts in at
+    numeric budget) wins when set; otherwise the exact `reasoning_effort`
+    value "high" from the model's binary `effort_levels` opts in at
     `_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET` — these models have no `effort`
     wire field, so this is the knob's only effect on them. None = leave
     thinking unset (provider default OFF); also None for any model that is not
@@ -65,7 +72,7 @@ def claude_extended_thinking_kwarg(
         return {"type": "enabled", "budget_tokens": budget_tokens}
     if reasoning_effort:
         levels = spec.effort_levels
-        if levels is not None and clamp_effort(reasoning_effort, levels, target=model) != "none":
+        if levels is not None and validate_effort(reasoning_effort, levels, target=model) != "none":
             return {"type": "enabled", "budget_tokens": _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET}
     return None
 
@@ -78,6 +85,29 @@ def _effective_thinking(ctx: BuildContext, spec: ModelSpec) -> Mapping[str, Any]
         )
         return None
     return thinking
+
+
+def _service_kwargs(spec: ModelSpec) -> dict[str, Any]:
+    """Declare caching and opt into the provider's Fast service when selected."""
+    model_kwargs: dict[str, Any] = {"cache_control": {"type": "ephemeral"}}
+    kwargs: dict[str, Any] = {"model_kwargs": model_kwargs}
+    if spec.fast_of is not None:
+        model_kwargs["speed"] = InferenceSpeed.FAST.value
+        kwargs["betas"] = ["fast-mode-2026-02-01"]
+    return kwargs
+
+
+def _effort_kwargs(ctx: BuildContext, spec: ModelSpec, *, disabled: bool) -> dict[str, Any]:
+    """Adaptive effort uses the model's exact vocabulary; binary thinking is separate."""
+    effort = ctx.resolved_effort
+    if not effort or disabled or spec.extended_thinking_only:
+        return {}
+    if spec.effort_levels is not None:
+        return {"effort": validate_effort(effort, spec.effort_levels, target=ctx.model)}
+    logger.warning(
+        f"{ctx.model} does not support reasoning effort; AVA_REASONING_EFFORT={effort!r} ignored"
+    )
+    return {}
 
 
 def build(ctx: BuildContext) -> BaseChatModel:
@@ -109,7 +139,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
 
     thinking = _effective_thinking(ctx, spec)
     thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
-    extra_kwargs: dict[str, Any] = {}
+    extra_kwargs = _service_kwargs(spec)
     if thinking is not None:
         extra_kwargs["thinking"] = thinking
     if ctx.disable_streaming:
@@ -122,16 +152,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # Caller-disabled thinking skips effort injection, mirroring deepseek:
     # an explicit cheap/fast path shouldn't have the global env push
     # reasoning back in.
-    claude_kwargs: dict[str, Any] = {}
     effort = ctx.resolved_effort
-    if effort and not thinking_disabled and not spec.extended_thinking_only:
-        if spec.effort_levels is not None:
-            claude_kwargs["effort"] = clamp_effort(effort, spec.effort_levels, target=ctx.model)
-        else:
-            logger.warning(
-                f"{ctx.model} does not support reasoning effort; "
-                f"AVA_REASONING_EFFORT={effort!r} ignored"
-            )
+    claude_kwargs = _effort_kwargs(ctx, spec, disabled=thinking_disabled)
 
     # Extended-thinking-only models (haiku-4-5) map budget_tokens / effort
     # onto their thinking on/off binary.
@@ -167,10 +189,9 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # eligible message blocks get cached server-side for 5 minutes (default TTL),
     # reducing input token cost and latency on repeated turns.
     return ThinkingTokensChatAnthropic(
-        model=ctx.model,  # type: ignore[call-arg]
+        model=spec.fast_of or ctx.model,  # type: ignore[call-arg]
         api_key=api_key,
         max_tokens=spec.max_output_tokens,  # type: ignore[call-arg]
-        model_kwargs={"cache_control": {"type": "ephemeral"}},
         timeout=ctx.timeout,
         **claude_kwargs,
         **extra_kwargs,
@@ -186,6 +207,7 @@ PROVIDER = ProviderContribution(
         effort_levels=None,
         vision=True,
         anthropic_protocol=True,
+        served_speed=served_speed,
         attach=AttachPolicy(
             file_size_limits={"image": 10 * 1024 * 1024, "pdf": 32 * 1024 * 1024},
             image_dimension_tiers=((1, 8000),),
@@ -241,7 +263,7 @@ PROVIDER = ProviderContribution(
             context_window=200_000,
             max_output_tokens=64_000,
             knowledge_cutoff="2025-10",
-            # No wire `effort` field (server 400) — the cross-provider knob clamps
+            # No wire `effort` field (server 400) — the model publishes
             # onto the manual-thinking on/off binary instead.
             effort_levels=("none", "high"),
             extended_thinking_only=True,
@@ -522,5 +544,59 @@ PROVIDER = ProviderContribution(
 
 
 def contribute() -> PluginContributions:
-    """What this plugin declares: its model provider."""
-    return PluginContributions(providers=(PROVIDER,))
+    """Standard and independently priced Fast inference services."""
+    return PluginContributions(
+        providers=(
+            with_fast_variants(
+                PROVIDER,
+                {
+                    "claude-opus-5": PriceRates(
+                        cache_miss=10,
+                        cache_hit=1,
+                        output=50,
+                        source_url="https://platform.claude.com/docs/en/about-claude/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="anthropic",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=None,
+                                        cache_miss="10",
+                                        cache_hit="1",
+                                        output="50",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    "claude-opus-5-5": PriceRates(
+                        cache_miss=8,
+                        cache_hit=0.4,
+                        output=40,
+                        source_url="https://platform.claude.com/docs/en/about-claude/pricing",
+                        source_checked_at="2026-10-07",
+                        vendor="anthropic",
+                        periods=(
+                            PricePeriod(
+                                effective_from=None,
+                                effective_until=None,
+                                tiers=(
+                                    PriceTier(
+                                        input_tokens_min=0,
+                                        input_tokens_max=None,
+                                        cache_miss="8",
+                                        cache_hit="0.4",
+                                        output="40",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                },
+            ),
+        )
+    )

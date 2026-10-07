@@ -11711,6 +11711,16 @@
               }
             ]
           },
+          "reference_tps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferenceTps"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reasoning_effort_options": {
             "anyOf": [
               {
@@ -12904,6 +12914,35 @@
         ],
         "title": "Priority",
         "description": "Stakes rung: P0 (highest) through P3 (lowest)."
+      },
+      "ReferenceTps": {
+        "properties": {
+          "display": {
+            "type": "string",
+            "title": "Display"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "source_checked_at": {
+            "type": "string",
+            "title": "Source Checked At"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display",
+          "source_url",
+          "source_checked_at",
+          "note"
+        ],
+        "title": "ReferenceTps",
+        "description": "Vendor-published output speed, preserving its qualifier and conditions."
       },
       "ResolveNoticeIn": {
         "properties": {

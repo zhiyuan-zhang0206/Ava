@@ -22,8 +22,8 @@ from base.config import settings
 from base.lm.attach.constants import ATTACH_MEDIA_MIME
 from base.lm.effort import (
     ReasoningEffort,
-    clamp_effort,
     coerce_effort,
+    validate_effort,
 )
 
 # Provider split by modality is config-driven: settings.lm.understand_text_model
@@ -307,8 +307,8 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
     """Answer over a text-only `content` list using settings.lm.understand_text_model.
 
     `effort` (validated by the public function) rides
-    `build_chat_model(reasoning_effort=...)`; the cross-provider clamp in
-    `base/lm/effort.py` maps it onto what the model's provider accepts
+    `build_chat_model(reasoning_effort=...)`; the exact per-model validation in
+    `base/lm/effort.py` rejects unsupported graded values
     (`max` → deepseek's max, `none` → reasoning off via the thinking switch).
     """
     from base.lm.call import invoke_text
@@ -349,12 +349,9 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     later at invoke time; the abstraction is in place for a second media
     provider to plug in with its own part conversion.
 
-    `effort` maps onto Gemini's `thinking_level` via the cross-provider clamp:
-    any level is clamped onto `minimal`/`low`/`medium`/`high` (`none` →
-    `minimal`, `xhigh` → `high`). `max` has no gemini equivalent and keeps the
-    configured `settings.lm.understand_media_thinking_level` knob instead, so
-    default calls behave exactly as before. (The path is Gemini-only for now —
-    see the module docstring — so the knob always applies.)
+    Graded efforts must be exact model-supported values. The SDK's historical
+    default `max` selects the configured media thinking level; explicit `none`
+    selects the model's lowest thinking level because Gemini cannot turn it off.
     """
     from base.lm.call import invoke_text
     from base.lm.factory import build_chat_model, provider_key_of_model
@@ -381,17 +378,17 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
 
     thinking_level = settings.lm.understand_media_thinking_level
     if effort != ReasoningEffort.MAX:
-        binding = next(
-            binding
-            for prefix, binding in model_catalog().bindings.items()
-            if model.startswith(prefix)
-        )
-        levels = binding.effort_levels
-        if levels is None:
+        spec = model_catalog().models[model]
+        levels = spec.effort_levels
+        if not levels:
             raise UnderstandError(
                 f"media model {model!r} does not declare a reasoning-effort vocabulary"
             )
-        thinking_level = clamp_effort(effort, levels, target="gemini")
+        thinking_level = (
+            levels[0]
+            if effort == ReasoningEffort.NONE
+            else validate_effort(effort, levels, target=model)
+        )
     try:
         llm = build_chat_model(
             model,

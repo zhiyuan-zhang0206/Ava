@@ -1,8 +1,8 @@
 """LLM model catalog (GET /api/models) + the cluster default model
 (GET/PUT /api/config/default-model).
 
-Split out of the former monolithic ops/schemas.py; FastAPI registers these
-unchanged, so the OpenAPI codegen is byte-identical to the wire before.
+FastAPI generates the model-picker wire contract from these schemas and the
+canonical registry's vendor reference TPS metadata.
 """
 
 from typing import Literal
@@ -10,6 +10,8 @@ from typing import Literal
 from pydantic import (
     BaseModel,
 )
+
+from base.lm.registry import ReferenceTps
 
 
 class ModelPricing(BaseModel):
@@ -26,6 +28,7 @@ class ModelInfo(BaseModel):
     provider: str
     context_window: int
     pricing: ModelPricing | None = None
+    reference_tps: ReferenceTps | None = None
     reasoning_effort_options: list[str] | None = None
     # The model's concrete default reasoning effort — the level a spawn with no
     # explicit reasoning_effort runs at, and what the picker pre-selects.
