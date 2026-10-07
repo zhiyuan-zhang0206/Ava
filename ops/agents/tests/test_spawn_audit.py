@@ -14,7 +14,7 @@ import pytest
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
-from ops.agents import spawn
+from ops.agents import birth_transaction
 from ops.agents.spawn import create_agent_row
 
 
@@ -104,7 +104,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     def refuse(_conn: psycopg.Connection, _event: object) -> None:
         raise RuntimeError("audit write failed")
 
-    monkeypatch.setattr(spawn, "record_audit", refuse)
+    monkeypatch.setattr(birth_transaction, "record_audit", refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
         create_agent_row(database, event_bus, spawner="user", machine=machine_name())

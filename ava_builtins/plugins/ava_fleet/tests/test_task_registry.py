@@ -672,7 +672,9 @@ def _fake_no_duplicate_precheck(real_execute):
     drive the code past the friendly check into the database backstop."""
 
     def fake_execute(cur, query, *args, **kwargs):
-        if query.startswith("SELECT id, status FROM agent_tasks WHERE title"):  # pyright: ignore[reportUnknownMemberType]
+        if isinstance(query, str) and query.startswith(
+            "SELECT id, status FROM agent_tasks WHERE title"
+        ):  # pyright: ignore[reportUnknownMemberType]
             real_execute(cur, "SELECT 1 WHERE FALSE")
             return None
         return real_execute(cur, query, *args, **kwargs)
