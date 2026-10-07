@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
 from itertools import count
 from threading import Event, Thread, Timer
-from typing import Annotated, Any
+from typing import Any
 
 import pytest
-from langchain_core.messages import AnyMessage, HumanMessage, RemoveMessage
-from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
-from pydantic import BaseModel, Field
+from langchain_core.messages import HumanMessage, RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 
 import ava
 from agent import state as state_module
@@ -24,108 +23,10 @@ from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.settings import agent_setting
 from base import telemetry
 from base.db import Database
-from base.telemetry import Event as TelemetryEvent
-from base.telemetry.otlp import telemetry_otlp
-from tests.fixtures.pin_agent import pin_agent
-
-# Load-proof handshake windows: close()'s telemetry tail can take seconds on a
-# loaded runner, so a fixed 2s window read a slow close as a revoked call
-# (2026-10-03 shard-10 flap, run 37082059707). Generous but still bounded, so a
-# genuinely stuck close fails clearly instead of hanging.
-_HANDSHAKE_BOUND_S = 30.0
-
-
-def _union(left: set[str], right: set[str]) -> set[str]:
-    return left | right
-
-
-class ExamplePlugin(BaseModel):
-    seen: Annotated[set[str], _union] = Field(default_factory=set)
-
-
-class ExampleMessagesPlugin(BaseModel):
-    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list[AnyMessage])
-
-
-class ExampleState(state_module.BaseAgentState):
-    """What `build_agent_state` makes for a registry whose `sample` plugin declares `ExamplePlugin`
-    and whose messages-declaring plugin declares `ExampleMessagesPlugin`."""
-
-    sample__seen: Annotated[set[str], _union] = Field(default_factory=set)
-    __plugin_base_declared__ = frozenset({"messages"})
-    __plugin_state_classes__ = frozenset({ExamplePlugin, ExampleMessagesPlugin})
-
-
-@pytest.fixture
-def attached_runtime(
-    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> tuple[dict[str, Any], Any, list[dict[str, Any]]]:
-    lease: dict[str, Any] = {
-        "id": "lease",
-        "session_id": 0,
-        "agent_id": 405,
-        "machine": "local-runner",
-        "status": "active",
-        "delta_version": 0,
-        "applied_version": 0,
-        "plugin_delta": [],
-        "automatic": False,
-        "event_delivery_protocol_version": None,
-    }
-    staged: list[dict[str, Any]] = []
-    snapshot = ExampleState(sample__seen={"native"})
-    pin_agent(None, owns_loop=True)
-    ava.unbind_exec_turn()
-    request.addfinalizer(ava.unbind_exec_turn)
-
-    def loader_stub(**_kwargs: object) -> None:
-        """Accept the `surface` kwarg attach passes (ignored)."""
-
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
-    monkeypatch.setattr(external, "machine_name", lambda: "local-runner")
-
-    def load(_agent_id: int) -> tuple[ExampleState, dict[str, Any], None]:
-        return snapshot.model_copy(deep=True), {"llm_model": "external-test"}, None
-
-    monkeypatch.setattr(external, "load_snapshot", load)
-
-    def require(_db: Database, lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
-        assert lease_id == "lease"
-        assert attesting == {"pid": 777}
-        if lease["status"] != "active":
-            raise RuntimeError("lease expired")
-        return dict(lease)
-
-    def stage(
-        db: Database,
-        lease_id: str,
-        attesting: dict[str, Any],
-        delta: dict[str, Any],
-        *,
-        expected_version: int,
-    ) -> None:
-        require(db, lease_id, attesting)
-        if expected_version != lease["delta_version"]:
-            raise RuntimeError("stale version")
-        staged.append(delta)
-        lease["plugin_delta"].append(delta)
-        lease["delta_version"] += 1
-
-    monkeypatch.setattr(external.control, "require_active", require)
-    monkeypatch.setattr(external.control, "merge_plugin_delta", stage)
-    monkeypatch.setattr(external, "process_metadata", lambda: {"pid": 777})
-
-    # This suite models the pre-event-log lease boundary with a symbolic lease
-    # id. The receipt seam is integration-tested against real UUID leases;
-    # keeping it outside this state-machine fixture avoids an accidental DB
-    # dial that the fixture cannot represent.
-    def no_local_participant(_db: object, *_args: Any, **_kwargs: Any) -> bool:
-        return False
-
-    monkeypatch.setattr(
-        "base.agents.impersonation.manifest.open_local_participant", no_local_participant
-    )
-    return lease, snapshot, staged
+from base.telemetry.otlp.tests.external_flush import paused_otlp_record as paused_otlp_record
+from tests.factories.external_attachment import HANDSHAKE_BOUND_S as _HANDSHAKE_BOUND_S
+from tests.factories.external_attachment import ExampleMessagesPlugin, ExamplePlugin, ExampleState
+from tests.factories.external_attachment import attached_runtime as attached_runtime
 
 
 def test_attach_borrows_identity_even_with_explicit_external_profile(
@@ -476,57 +377,10 @@ def test_close_delivers_telemetry_when_plugin_flush_fails(
 
 def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
-    monkeypatch: pytest.MonkeyPatch,
+    paused_otlp_record: tuple[Event, InMemoryLogRecordExporter],
 ) -> None:
     """A closing attachment waits for the OTLP worker's already-dequeued tail."""
-    from opentelemetry.sdk._logs import LoggerProvider
-    from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
-    from opentelemetry.sdk.metrics import MeterProvider
-    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-
-    exporter = InMemoryLogRecordExporter()
-    logger_provider = LoggerProvider()
-    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
-    backend = telemetry_otlp._OtlpBackend(
-        providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()]))
-    )
-    monkeypatch.setattr(backend, "_enabled", lambda: True)
-    monkeypatch.setattr(telemetry_otlp, "backend", backend)
-
-    def no_sync(*_args: object, **_kwargs: object) -> None:
-        pass
-
-    monkeypatch.setattr(telemetry, "sync", no_sync)
-    paused = Event()
-    release = Event()
-    original_emit = backend._emit_log
-
-    def pause_after_dequeue(event: TelemetryEvent) -> None:
-        paused.set()
-        assert release.wait(_HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
-        original_emit(event)
-
-    monkeypatch.setattr(backend, "_emit_log", pause_after_dequeue)
-    backend.export_batch(
-        [
-            TelemetryEvent(
-                ts=datetime.now(UTC),
-                trace_id=None,
-                span_id=None,
-                agent_id=405,
-                machine="test",
-                cluster="test",
-                process="external-test",
-                category="telemetry",
-                event_name="sdk_call",
-                level="info",
-                source="agent:405",
-                target_agent_id=None,
-                attributes={"fn": "files.read", "duration": 0.01},
-            )
-        ]
-    )
-    assert paused.wait(_HANDSHAKE_BOUND_S), "OTLP worker did not dequeue the tail record"
+    release, exporter = paused_otlp_record
     attachment = external.attach("lease")
     timer = Timer(0.1, release.set)
     timer.daemon = True
@@ -539,57 +393,6 @@ def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
     finally:
         release.set()
         timer.cancel()
-        backend.shutdown()
-
-
-def test_expired_lease_cannot_dispatch_through_local_mcp(
-    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ava import mcps
-
-    lease, _, _ = attached_runtime
-    dispatched: list[bool] = []
-
-    def local_dispatch(coroutine: Any) -> dict[str, Any]:
-        coroutine.close()
-        dispatched.append(True)
-        return {}
-
-    monkeypatch.setattr(mcps, "_get_remote_client", lambda: None)
-    monkeypatch.setattr(mcps, "_run_async", local_dispatch)
-    attachment = external.attach("lease")
-    lease["status"] = "expired"
-    try:
-        with pytest.raises(RuntimeError, match="expired"):
-            mcps._call_raw("example", "side_effect")
-        assert not dispatched
-    finally:
-        with pytest.raises(RuntimeError, match="expired"):
-            attachment.close()
-
-
-def test_mcp_revalidates_lease_before_transport_fallback(
-    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ava import mcps
-
-    lease, _, _ = attached_runtime
-
-    class FailedDaemon:
-        def call_tool(self, *_args: Any) -> dict[str, Any]:
-            lease["status"] = "expired"
-            raise mcps.MCPConnectError("daemon disconnected")
-
-    monkeypatch.setattr(mcps, "_get_remote_client", FailedDaemon)
-    attachment = external.attach("lease")
-    try:
-        with pytest.raises(RuntimeError, match="expired"):
-            mcps._call_raw("example", "side_effect")
-    finally:
-        with pytest.raises(RuntimeError, match="expired"):
-            attachment.close()
 
 
 def test_receipted_journal_entries_are_not_replayed(
