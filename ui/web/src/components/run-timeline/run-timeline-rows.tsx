@@ -8,7 +8,7 @@
 // into it (the page zooms the viewport to the block's span).
 
 import { useTranslations } from "next-intl";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/types";
 import { formatShort } from "@/lib/time";
@@ -25,7 +25,11 @@ import {
   classColor,
   firstLine,
   isSelected,
+  layoutRow,
   levelsTopFirst,
+  MARKER_HIT_PX,
+  MARKER_LINE_PX,
+  type RowPlacement,
   panViewport,
   pendingSpans,
   spanBox,
@@ -38,8 +42,12 @@ import {
 } from "./timeline-model";
 
 const NODE_LABEL_CHARS = 80;
-// A block narrower than this would vanish; the axis keeps every block visible.
-const MIN_BLOCK_PX = 3;
+// Track width assumed until the first measurement.
+const DEFAULT_TRACK_PX = 1000;
+// Height of one marker lane's hit area; markers stacked at one instant take one lane each.
+const MARKER_LANE_PX = 5;
+const LEVEL_ROW_PX = 32;
+const UNIT_ROW_PX = 24;
 // A pointer must travel this far before a press becomes a pan (below it, it is a click).
 const DRAG_THRESHOLD_PX = 4;
 const WHEEL_ZOOM_RATE = 0.0015;
@@ -51,7 +59,48 @@ const PENDING_HATCH =
   "repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, currentColor 14%, transparent) 4px 5px)";
 
 function boxStyle(box: { left: number; width: number }) {
-  return { left: `${box.left}%`, width: `max(${box.width}%, ${MIN_BLOCK_PX}px)` };
+  return { left: `${box.left}%`, width: `max(${box.width}%, 3px)` };
+}
+
+/** Position of a block: its body, or for a marker the hit strip of its lane (the line itself is a child). */
+function placeStyle(place: RowPlacement): React.CSSProperties {
+  if (!place.marker) return { left: place.left, width: place.width };
+  return {
+    left: place.left - MARKER_HIT_PX / 2,
+    width: MARKER_HIT_PX,
+    top: place.lane * MARKER_LANE_PX,
+    height: MARKER_LANE_PX + 1,
+    zIndex: 1 + place.lane,
+  };
+}
+
+/** The visible line of a marker: the full row height, drawn inside its (smaller) hit strip. */
+function MarkerLine({
+  place,
+  rowPx,
+  color,
+  strong,
+}: {
+  place: RowPlacement;
+  rowPx: number;
+  color: string;
+  strong: boolean;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="run-timeline-marker-line"
+      className="pointer-events-none absolute rounded-[1px]"
+      style={{
+        top: -place.lane * MARKER_LANE_PX,
+        height: rowPx,
+        left: (MARKER_HIT_PX - MARKER_LINE_PX) / 2,
+        width: MARKER_LINE_PX,
+        background: color,
+        boxShadow: strong ? "0 0 0 1px var(--foreground)" : undefined,
+      }}
+    />
+  );
 }
 
 function RowShell({
@@ -119,6 +168,21 @@ export function RunTimelineRows({
     pending.current = null;
     live.current = { base, view, onView };
   });
+  const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
+  useEffect(() => {
+    const track = chartRef.current?.querySelector("[data-track]");
+    if (!track) return;
+    const measure = () => {
+      const width = track.getBoundingClientRect().width;
+      if (width > 0) setTrackPx(width);
+    };
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, []);
   const drag = useRef<{ x: number; view: Viewport; panning: boolean; id: number } | null>(null);
   const suppressClick = useRef(false);
 
@@ -251,11 +315,18 @@ export function RunTimelineRows({
               </div>
             );
           })}
-          {data.nodes
-            .filter((node) => node.level === level)
-            .map((node) => {
-              const box = spanBox(node.start, node.end, visible);
-              if (box === null) return null;
+          {(() => {
+            const levelNodes = data.nodes.filter((node) => node.level === level);
+            const places = new Map(
+              layoutRow(
+                levelNodes.map((node) => ({ key: node.id, start: node.start, end: node.end })),
+                visible,
+                trackPx,
+              ).map((place) => [place.key, place]),
+            );
+            return levelNodes.map((node) => {
+              const place = places.get(node.id);
+              if (place === undefined) return null;
               const picked = isSelected(selection, { kind: "node", id: node.id });
               const ancestor = !picked && chain.has(node.id);
               const label = firstLine(node.summary, NODE_LABEL_CHARS);
@@ -268,29 +339,51 @@ export function RunTimelineRows({
                   data-testid="run-timeline-node"
                   data-node-id={node.id}
                   data-highlight={picked ? "self" : ancestor ? "ancestor" : "none"}
+                  data-marker={place.marker ? "" : undefined}
                   onClick={() => onSelect({ kind: "node", id: node.id })}
                   onDoubleClick={() => onDrill({ kind: "node", id: node.id })}
                   className={cn(
-                    "absolute inset-y-0 truncate rounded border px-1 text-left text-[10px] leading-8",
-                    "border-border bg-primary/20 text-foreground hover:bg-primary/30",
-                    "outline-none focus-visible:ring-2 focus-visible:ring-foreground",
-                    picked && "bg-primary/45 ring-2 ring-foreground",
-                    ancestor && "bg-primary/40 ring-2 ring-foreground/60",
+                    "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
+                    place.marker
+                      ? ""
+                      : "inset-y-0 truncate rounded border px-1 text-left text-[10px] leading-8 border-border bg-primary/20 text-foreground hover:bg-primary/30",
+                    !place.marker && picked && "bg-primary/45 ring-2 ring-foreground",
+                    !place.marker && ancestor && "bg-primary/40 ring-2 ring-foreground/60",
                     dim && !picked && !ancestor && "opacity-40",
                   )}
-                  style={boxStyle(box)}
+                  style={placeStyle(place)}
                 >
-                  {label}
+                  {place.marker ? (
+                    <MarkerLine
+                      place={place}
+                      rowPx={LEVEL_ROW_PX}
+                      strong={picked || ancestor}
+                      color={
+                        picked || ancestor ? "var(--foreground)" : "color-mix(in srgb, var(--primary) 70%, transparent)"
+                      }
+                    />
+                  ) : (
+                    label
+                  )}
                 </button>
               );
-            })}
+            });
+          })()}
         </RowShell>
       ))}
 
       <RowShell label={t("messagesRow")} height="h-6" testId="run-timeline-row-units">
-        {data.units.map((unit) => {
-          const box = spanBox(unit.start, unit.end, visible);
-          if (box === null) return null;
+        {(() => {
+          const places = new Map(
+            layoutRow(
+              data.units.map((unit) => ({ key: `${unit.kind}-${unit.i0}-${unit.i1}`, start: unit.start, end: unit.end })),
+              visible,
+              trackPx,
+            ).map((place) => [place.key, place]),
+          );
+          return data.units.map((unit) => {
+          const place = places.get(`${unit.kind}-${unit.i0}-${unit.i1}`);
+          if (place === undefined) return null;
           const candidate: Selection = {
             kind: "unit",
             i0: unit.i0,
@@ -309,17 +402,24 @@ export function RunTimelineRows({
               data-unit-kind={unit.kind}
               data-block-class={blockClass(unit)}
               data-highlight={picked ? "self" : "none"}
+              data-marker={place.marker ? "" : undefined}
               onClick={() => onSelect(candidate)}
               onDoubleClick={() => onDrill(candidate)}
               className={cn(
-                "absolute inset-y-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-foreground",
-                picked && "ring-2 ring-foreground",
+                "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
+                !place.marker && "inset-y-1 rounded-sm",
+                !place.marker && picked && "ring-2 ring-foreground",
                 dim && !picked && "opacity-40",
               )}
-              style={{ ...boxStyle(box), background: unitColor(unit) }}
-            />
+              style={place.marker ? placeStyle(place) : { ...placeStyle(place), background: unitColor(unit) }}
+            >
+              {place.marker ? (
+                <MarkerLine place={place} rowPx={UNIT_ROW_PX} strong={picked} color={picked ? "var(--foreground)" : unitColor(unit)} />
+              ) : null}
+            </button>
           );
-        })}
+          });
+        })()}
       </RowShell>
 
       <div className={cn(FLEX, "gap-2 text-[10px] text-muted-foreground")}>

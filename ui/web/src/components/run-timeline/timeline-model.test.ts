@@ -14,6 +14,7 @@ import {
   zoomViewport,
   firstLine,
   isSelected,
+  layoutRow,
   levelsTopFirst,
   nodeWindow,
   BLOCK_CLASSES,
@@ -248,5 +249,63 @@ describe("pendingSpans", () => {
       { from: "2026-10-04T12:07:00Z", to: "2026-10-04T12:08:00Z" },
     ]);
     expect(pendingSpans(nodes, 1)).toEqual([]);
+  });
+});
+
+describe("layoutRow", () => {
+  const VIEW = { from: "2026-10-04T12:00:00.000Z", to: "2026-10-04T12:00:01.000Z" };
+  const at = (ms: number) => new Date(Date.parse(VIEW.from) + ms).toISOString();
+  const item = (key: string, from: number, to: number) => ({ key, start: at(from), end: at(to) });
+  const bodies = (places: ReturnType<typeof layoutRow>) =>
+    places.filter((place) => !place.marker).sort((a, b) => a.left - b.left);
+
+  function expectDisjoint(places: ReturnType<typeof layoutRow>) {
+    const sorted = bodies(places);
+    sorted.forEach((place, i) => {
+      if (i > 0) expect(place.left).toBeGreaterThanOrEqual(sorted[i - 1].left + sorted[i - 1].width - 1e-6);
+    });
+  }
+
+  it("draws an empty block next to its successor as a marker, leaving the successor whole", () => {
+    const places = layoutRow([item("a", 100, 100), item("b", 100, 400)], VIEW, 1000);
+    expect(places.find((place) => place.key === "a")).toMatchObject({ marker: true, width: 0 });
+    const b = places.find((place) => place.key === "b");
+    expect(b?.marker).toBe(false);
+    expect(b?.left).toBeCloseTo(100);
+    expect(b?.width).toBeCloseTo(300);
+    expectDisjoint(places);
+  });
+
+  it("lets a point grow to the minimum width only into the free space before the next block", () => {
+    const roomy = layoutRow([item("a", 100, 100), item("b", 110, 200)], VIEW, 1000);
+    expect(roomy.find((place) => place.key === "a")).toMatchObject({ marker: false, width: 3 });
+    const tight = layoutRow([item("a", 100, 100), item("b", 102, 200)], VIEW, 1000);
+    const a = tight.find((place) => place.key === "a");
+    expect(a).toMatchObject({ marker: false, width: 2 });
+    expectDisjoint(tight);
+  });
+
+  it("keeps a point followed by a duration disjoint and the point in the bar's own space", () => {
+    const places = layoutRow([item("call", 500, 500), item("out", 500, 800)], VIEW, 1000);
+    expect(places.map((place) => place.marker)).toEqual([true, false]);
+    expectDisjoint(places);
+  });
+
+  it("stacks consecutive coincident points in separate lanes", () => {
+    const places = layoutRow(
+      [item("a", 200, 200), item("b", 200, 200), item("c", 200, 200), item("d", 200, 500)],
+      VIEW,
+      1000,
+    );
+    const markers = places.filter((place) => place.marker);
+    expect(markers).toHaveLength(3);
+    expect(new Set(markers.map((place) => place.lane)).size).toBe(3);
+    expectDisjoint(places);
+  });
+
+  it("never lets a block run past the track and omits blocks outside the window", () => {
+    const places = layoutRow([item("end", 999, 1000), item("gone", 5000, 6000)], VIEW, 1000);
+    expect(places.map((place) => place.key)).toEqual(["end"]);
+    expect(places[0].left + places[0].width).toBeLessThanOrEqual(1000);
   });
 });
