@@ -11,13 +11,11 @@ existing entry may remain in its original shard when its file moves. Duplicate
 section/key pairs across shards fail the gate; the growth guard still checks
 the combined entries and permits no additional targets or counts.
 
-`rules.json` is not a shard: it records the rule version a section was frozen under
-(`baseline_shards.py` explains how the guard uses it when a rule changes).
+`rules.json` is not a shard: it records the rule version a section was frozen under.
+The guard still checks each key and count when that version changes; a rule upgrade
+or a newly introduced lint cannot add exemptions.
 
-This README is committed even when every shard is empty (all structural debt
-paid off): git does not track empty directories, so without it a fully clean
-baseline directory would vanish from the tree and become indistinguishable
-from a revision that predates the sharded baseline entirely — the very commit
-where the shrink-only guard should start comparing against an empty baseline.
-Keeping this file here means the directory, and an empty baseline, are always
-visible to git.
+This directory is temporary while the existing exemptions are removed. Keep its
+README while the shrink-only gate still reads it. After the final exemption is
+fixed, remove the baseline directory and its supporting machinery instead of
+keeping an empty baseline or allowing new exemptions to be frozen.

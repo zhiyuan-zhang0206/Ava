@@ -40,8 +40,8 @@ modules) are outside it. There is no inline exemption.
 Like Rules 4-6 the frozen counts must match reality in both directions, and
 against the base revision the section is shrink-only: a new key, or a raised
 count, is refused; a fixed site must be removed from the baseline. A rename or a
-split cannot carry a frozen site. The section is introduced by the change that adds
-this module: with no lint at the base revision it is compared with itself.
+split cannot carry a frozen site. Introducing this lint does not permit a new
+baseline entry; comparisons always use the base revision's entries.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ from scripts.structure.ambient_state import (
 )
 
 SECTION = "ambient_state"
-# The file whose absence at the base revision means this section is being introduced.
+# The rule module path used by integration-test repository fixtures.
 LINT = "scripts/structure/ambient_state/__init__.py"
 SCOPE = (*lint_common.FRAMEWORK_DIRS, "schedules")
 Sites = dict[str, list[int]]
