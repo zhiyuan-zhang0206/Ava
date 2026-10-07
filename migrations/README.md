@@ -1,9 +1,9 @@
 # migrations/
 
-Post-baseline schema deltas, one forward file each:
+Post-baseline schema deltas, grouped by UTC date, one forward file each:
 
 ```
-YYYYMMDDTHHMMSS_<kebab-name>.sql
+YYYY/MM/DD/YYYYMMDDTHHMMSS_<kebab-name>.sql
 ```
 
 - **Timestamp prefix** = second-precision UTC (`date -u +%Y%m%dT%H%M%S`). It
@@ -14,8 +14,8 @@ YYYYMMDDTHHMMSS_<kebab-name>.sql
 - **No down migrations.** A mistake is fixed forward by a new migration, and
   lossy operations go expand-contract (the drop is its own later migration,
   after the code that stopped using the object has shipped).
-- **A merged migration is immutable.** A file already on main is never edited,
-  deleted or renamed — only new files are added
+- **A merged migration is immutable.** SQL bytes and names already on main never change. Directory-only moves
+  preserve the name and bytes, and therefore the applied-set identity
   (`scripts/content_lint/lint_migrations.py`, against the merge-base with
   `origin/main`). A DB that applied it never re-runs it, so changing the file
   forks what a fresh DB builds from what applied DBs hold.

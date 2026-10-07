@@ -451,7 +451,7 @@ SQL
 echo "-> convergence: db/schema.sql alone vs baseline-pending migrations (pg_dump --schema-only)"
 psql -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $FULL_DB"
 psql -d "$FULL_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql
-for f in migrations/*.sql; do
+while IFS= read -r f; do
     migration_name="${f##*/}"
     migration_name="${migration_name%.sql}"
     # A current baseline can fold a non-idempotent migration and stamp its name
@@ -464,7 +464,7 @@ SQL
         continue
     fi
     psql -d "$FULL_DB" -v ON_ERROR_STOP=1 -q -f "$f"
-done
+done < <(find migrations -type f -name '*.sql' | awk -F / '{print $NF "\t" $0}' | LC_ALL=C sort | cut -f 2-)
 
 BASELINE_DUMP=$(mktemp)
 FULL_DUMP=$(mktemp)

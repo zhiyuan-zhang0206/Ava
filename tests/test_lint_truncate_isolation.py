@@ -85,7 +85,7 @@ def _schema_tables() -> set[str]:
     # LangGraph owns these declarations outside db/schema.sql. Three carry
     # per-test checkpoint data; checkpoint_migrations is infra bookkeeping.
     tables.update({"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"})
-    for mig in sorted(_MIGRATIONS_DIR.glob("*.sql")):
+    for mig in sorted(_MIGRATIONS_DIR.rglob("*.sql")):
         text = _strip_sql_comments(mig.read_text(encoding="utf-8"))
         tables.update(_CREATE_TABLE_RE.findall(text))
         tables.difference_update(_DROP_TABLE_RE.findall(text))
