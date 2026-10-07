@@ -93,7 +93,8 @@ catalog) are [[base/agents/history/hierarchy/docs/chunk-grouping.ava.okf.md|Chun
 
 - Crash repair (`agent/hooks/repair.py`) shifts later indices mid-segment: a job past it fails as drift.
 - A compaction stamps its boundary after waiting up to 5 s for the newest checkpoint to be as
-  new as the state's last message (`await_snapshot`, one cheap read per poll; the graph persists a super-step asynchronously, so the
-  newest row can lag). On timeout it stamps anyway and emits `understanding_snapshot_lag`; the
+  new as the read time of the state's last message (`await_snapshot`, one cheap read per
+  poll; the graph persists a super-step asynchronously, so the newest row can lag; a last message
+  with no usable time, none or no timezone, takes the timeout path at once). On timeout it stamps anyway and emits `understanding_snapshot_lag`; the
   closing chunk then covers what the snapshot holds and reports the rest as a gap.
 - A node's generation cost is its job's (or check's) cost: all the groups of one job share it.

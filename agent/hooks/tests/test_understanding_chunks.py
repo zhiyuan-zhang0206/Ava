@@ -414,6 +414,48 @@ async def test_a_snapshot_that_never_catches_up_is_stamped_anyway_with_an_event(
     assert attrs is not None and attrs["agent_id"] == 3
 
 
+def _inbound_picked_up(pickup: str, created: str) -> HumanMessage:
+    return HumanMessage(
+        content="in",
+        id="in1",
+        additional_kwargs={
+            "ava_msg_type": "inbound",
+            "ava_created_at": created,
+            "ava_picked_up_at": pickup,
+        },
+    )
+
+
+async def test_an_inbound_last_message_is_compared_by_the_time_the_model_read_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An inbound message arrived at second 3 but was picked up at second 10: the checkpoint at
+    second 5 predates its pickup, so the stamp waits (its arrival time alone would let it pass)."""
+    polls = _checkpoint_clock(monkeypatch, [5, 12])
+    inbound = _inbound_picked_up("2026-10-07T12:00:10+00:00", "2026-10-07T12:00:03+00:00")
+    await uc.await_snapshot(MagicMock(), _State([*_request(3), inbound]), 3)
+    assert len(polls) == 2
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [None, "2026-10-07T12:00:10", "not a time"],
+    ids=["no timestamp", "no timezone", "unparsable"],
+)
+async def test_a_last_message_without_a_usable_time_is_not_waved_through_or_an_error(
+    monkeypatch: pytest.MonkeyPatch, stamp: str | None
+) -> None:
+    """Old messages have no timezone (or no stamp at all): the check cannot pass, so it is the
+    timeout path at once: no exception, the boundary is stamped, the lag event says so."""
+    polls = _checkpoint_clock(monkeypatch, [99])
+    events: list[str] = []
+    monkeypatch.setattr(uc.telemetry, "emit", lambda _k, name, **_kw: events.append(name))
+    kwargs = {} if stamp is None else {"ava_created_at": stamp}
+    last = HumanMessage(content="old", id="old", additional_kwargs=kwargs)
+    await uc.await_snapshot(MagicMock(), _State([*_request(3), last]), 3)
+    assert events == ["understanding_snapshot_lag"] and polls == []
+
+
 async def test_nothing_is_read_when_understanding_is_off_or_there_is_nothing_to_compare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -423,5 +465,4 @@ async def test_nothing_is_read_when_understanding_is_off_or_there_is_nothing_to_
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
     await uc.await_snapshot(MagicMock(), None, 3)
     await uc.await_snapshot(None, _State([_stamped(10)]), 3)
-    await uc.await_snapshot(MagicMock(), _State(_request(3)), 3)  # the last message has no time
     assert polls == []

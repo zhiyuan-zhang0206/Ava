@@ -40,7 +40,7 @@ from base.agents.history.hierarchy.chunks import (
     segment_head_len,
     sendable_len,
 )
-from base.agents.messages.kwargs import read_ava_kwargs
+from base.agents.messages.kwargs import message_read_time
 from base.config import settings
 from base.log import logger
 
@@ -147,9 +147,17 @@ _NEWEST_CHECKPOINT_TS = (
 )
 
 
-def _created_at(message: AnyMessage) -> datetime | None:
-    stamp: Any = read_ava_kwargs(message).get("ava_created_at")
-    return datetime.fromisoformat(stamp) if isinstance(stamp, str) and stamp else None
+def _read_time(message: AnyMessage) -> datetime | None:
+    """When the model read `message` (`ava_picked_up_at`, else `ava_created_at`) as an aware
+    time; None for a missing, unparsable or timezone-less stamp (an old message)."""
+    stamp = message_read_time(message)
+    if not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
 
 
 async def _newest_checkpoint_ts(pool: AsyncConnectionPool, agent_id: int) -> datetime | None:
@@ -167,19 +175,19 @@ async def await_snapshot(pool: AsyncConnectionPool | None, state: Any, agent_id:
     the full-snapshot record of the segment, and the segment's closing chunk is read from it, so a
     checkpoint one super-step behind would lose the segment's last turns for good (from the
     stitched history as well). A checkpoint is written after the messages of its step, so one whose
-    time is not before the last message's `ava_created_at` holds it. One cheap read per poll and a
-    bounded sleep; nothing about the turn, the state or the request prefix changes. On timeout the
-    boundary is stamped anyway and `understanding_snapshot_lag` is emitted. Best-effort, silent when
-    understanding is off or the last message has no time.
+    time is not before the last message's read time (`message_read_time`: the pickup time of an
+    injected message, else its creation) holds it. One cheap read per poll and a bounded sleep;
+    nothing about the turn, the state or the request prefix changes. When the wait cannot succeed
+    (it times out, or the last message has no usable time: none, or no timezone) the boundary is
+    stamped anyway and `understanding_snapshot_lag` is emitted. Best-effort, silent only when
+    understanding is off or there is no state.
     """
     messages: list[AnyMessage] = [] if state is None else list(state.messages)
     if pool is None or not messages or not settings.agent.understanding_enabled:
         return
-    last = _created_at(messages[-1])
-    if last is None:
-        return
+    last = _read_time(messages[-1])
     started = time.monotonic()
-    while True:
+    while last is not None:
         try:
             newest = await _newest_checkpoint_ts(pool, agent_id)
         except Exception:
@@ -191,8 +199,8 @@ async def await_snapshot(pool: AsyncConnectionPool | None, state: Any, agent_id:
             break
         await asyncio.sleep(_SNAPSHOT_POLL_SECONDS)
     logger.warning(
-        "compaction of agent {agent} stamps its boundary before the checkpoint holds the last "
-        "message {message}",
+        "compaction of agent {agent} stamps its boundary before the checkpoint is known to hold "
+        "the last message {message}",
         agent=agent_id,
         message=messages[-1].id,
     )
