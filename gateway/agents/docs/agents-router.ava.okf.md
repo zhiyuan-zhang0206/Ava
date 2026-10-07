@@ -117,19 +117,4 @@ standard gateway authentication, returns `expired` or `not_open`, and returns
   observed input-token ratio. It is a pure one-read view in
   `gateway/agents/context_breakdown.py`.
 
-## System-note acceptance
-
-`POST /api/agents/{id}/system-note` accepts an optional `Idempotency-Key`.
-The gateway serializes a keyed operation and commits the key on its
-`inbound_messages` row with the note. A same-key replay returns that inbound
-id; changed recipient, content, source, task/tag or resurrection policy
-conflicts. The note keeps `kind=system_note`; its payload records
-`delivery_resurrect` for immutable policy comparison. Legacy keyless payloads
-keep their existing shape. SDK transport inherits keyed retry semantics from
-the route contract and keeps one key throughout its automatic retry chain.
-
-Replay checks the durable receipt before current task ownership: later
-reassignment does not invalidate an accepted message. Repeating wake is safe;
-resurrection remains guarded by the exact pending inbound, so a handled note
-cannot revive old work. Rows follow the existing inbound receipt retention
-policy; there is no separate response-cache expiry or client outbox.
+System-note receipt and retry semantics: [[system-note.ava.okf.md]].
