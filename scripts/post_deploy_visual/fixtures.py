@@ -41,7 +41,13 @@ AGENT_CARD: dict[str, object] = {
     **{
         key: value
         for key, value in AGENT.items()
-        if key not in {"notices_awaiting_response", "fork_source_checkpoint_id", "last_probe_at"}
+        if key
+        not in {
+            "notices_awaiting_response",
+            "fork_source_checkpoint_id",
+            "last_probe_at",
+            "last_launch_attempt_id",
+        }
     },
     "awaiting_response_count": 0,
     "highest_notice_priority": None,
