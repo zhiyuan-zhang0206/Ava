@@ -5,6 +5,7 @@ import json
 from collections.abc import Awaitable
 
 from base.db.transaction import write_transaction
+from base.deploy.maintenance import admission
 from base.log import logger
 from services.entrypoints.im_bridge.outbound_store import TimelineOutboxStore
 from services.entrypoints.im_bridge.outbound_types import OutboundStatus
@@ -55,6 +56,8 @@ class TimelineOutboxWorker:
 
     async def run_once(self) -> None:
         """At most one active whole-send per daemon; old accounts remain queued."""
+        if admission.quiesced():
+            return
         self.validate_pool()
         async with self._serial:
             accounts: dict[str, str] = {}
@@ -70,6 +73,8 @@ class TimelineOutboxWorker:
             await asyncio.to_thread(self.store.mark_unavailable_accounts, accounts)
             streams = await asyncio.to_thread(self.store.pending_streams, accounts)
             for stream in streams:
+                if admission.quiesced():
+                    return
                 await self._dispatch(stream)
 
     async def _dispatch(self, stream: tuple[str, str, str]) -> None:
