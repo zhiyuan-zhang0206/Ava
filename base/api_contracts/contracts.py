@@ -357,6 +357,18 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/pages"): RouteContract(),
     ("GET", "/pages/{page_key}"): RouteContract(note="page reverse proxy"),
     ("GET", "/pages/{page_key}/{rest:path}"): RouteContract(note="page reverse proxy"),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/pages"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="versioned page registration commits replacement and original acceptance together",
+    ),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/pages/{name}/close"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="versioned page close requires observed row identity; replay cannot close a later page",
+    ),
     ("POST", "/api/agents/{agent_id}/pages"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="registration replaces the current page; an ambiguous retry can close newer work",

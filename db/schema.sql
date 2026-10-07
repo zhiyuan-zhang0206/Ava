@@ -2690,3 +2690,12 @@ COMMENT ON TABLE agent_launch_retry_receipts IS
 'Immutable guarded retry-launch intents; retain after target deletion, no TTL.';
 
 INSERT INTO schema_migrations (name) VALUES ('20261008T021500_agent-launch-retry-receipts');
+
+-- Historical page acceptance survives registry/agent cleanup.
+CREATE TABLE page_operation_receipts (
+    operation_key text PRIMARY KEY,
+    request_hash text NOT NULL CHECK (length(request_hash) = 64),
+    acceptance jsonb NOT NULL,
+    accepted_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO schema_migrations (name) VALUES ('20261007T205013_page-operation-receipts');

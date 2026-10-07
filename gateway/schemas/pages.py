@@ -48,3 +48,9 @@ class PageRegisterRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     serve_dir: str | None = Field(default=None, max_length=4096)
     ttl_seconds: int | None = Field(default=None, gt=0)
+
+
+class PageCloseRequest(BaseModel):
+    """Guarded close targets the immutable registry row the caller observed."""
+
+    expected_page_id: int = Field(..., strict=True, gt=0)
