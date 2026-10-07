@@ -24,7 +24,7 @@ async def test_dispatch_config_read_calls_config_read_op(
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
 
     monkeypatch.setattr(daemon.host_config, "config_read_op", _fake_config_read)
-    status, result = await daemon._dispatch("config_read", {})
+    status, result = await daemon._dispatch("config_read", {}, active_ops={})
     assert status == "completed"
     # _dispatch serializes the result model to a JSON dict for the wire.
     assert result["machine"] == "x"
@@ -56,7 +56,9 @@ async def test_dispatch_config_write_passes_overrides(
         return ConfigWriteOpResult(machine="x", results={}, applied=True, restart_required=[])
 
     monkeypatch.setattr(daemon.host_config, "config_write_op", _fake_config_write)
-    status, _result = await daemon._dispatch("config_write", {"overrides": {"ops_concurrency": 2}})
+    status, _result = await daemon._dispatch(
+        "config_write", {"overrides": {"ops_concurrency": 2}}, active_ops={}
+    )
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
     assert captured["actor"] is None  # payload carried no gateway-stamped identity
@@ -75,6 +77,6 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
     # The config_write arm validates payload into ConfigWritePayload, whose
     # `overrides` is required; a missing key is a caught ValidationError surfaced
     # as a 'failed' op result (the /ops route returns HTTP 200 + status=failed).
-    status, result = await daemon._dispatch("config_write", {})  # no 'overrides' key
+    status, result = await daemon._dispatch("config_write", {}, active_ops={})  # no 'overrides' key
     assert status == "failed"
     assert "overrides" in str(result["error"])
