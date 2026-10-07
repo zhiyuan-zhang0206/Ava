@@ -64,7 +64,7 @@ async def close_hosted_turn(
     )
     if outcome.aborted:
         await reconcile_inbounds_after_abort(pool, checkpointer, incarnation)
-    elif not outcome.crashed and not outcome.truncated:
+    elif not outcome.crashed and not outcome.truncated and not outcome.native_held:
         # A truncated turn (an applied force terminate of its incarnation)
         # skips the pass too: the successor boundary that observes the force
         # owns its claimed rows.

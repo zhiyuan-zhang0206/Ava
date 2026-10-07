@@ -2,17 +2,20 @@
 durable half)."""
 
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.llm_errors import FatalProviderError
+from agent.ownership.hosted import admit_hosted_runtime
 from agent.state import AgentState, CircuitState
 from base.agents.context import AvaContext
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.native_process.turn_identity import bind_turn_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -43,6 +46,12 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     from services.agent_runner.agent_host.host import AgentHost
 
     agent_id = spawn_agent()
+    row = db_conn.execute("SELECT machine FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+    assert row is not None
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, row[0], uuid4(), db=Database.from_settings(), expected_from="idling"
+    )
+    assert incarnation is not None
     calls = 0
 
     def reject(state: AgentState) -> dict[str, object]:
@@ -71,7 +80,8 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             bus=EventBus.from_settings(),
             db=Database.from_settings(),
         )
-        assert not (await host._invoke_until_done(agent_id, _breaker_ctx())).exited
+        with bind_turn_identity(agent_id, incarnation=incarnation):
+            assert not (await host._invoke_until_done(agent_id, _breaker_ctx())).exited
     # New saver/connection prevents in-memory buffered state from faking success.
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as reader:
         stored = await reader.aget_tuple({"configurable": {"thread_id": str(agent_id)}})

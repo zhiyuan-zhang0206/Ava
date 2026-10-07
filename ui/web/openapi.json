@@ -958,6 +958,96 @@
         }
       }
     },
+    "/api/keyed/v1/agents/{agent_id}/native-work": {
+      "get": {
+        "summary": "Native Work",
+        "description": "Expose only eligible ACTIVE work backed by actual managed-owner evidence.",
+        "operationId": "native_work_api_keyed_v1_agents__agent_id__native_work_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeWorkTarget"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/cancel-work": {
+      "post": {
+        "summary": "Native Cancel",
+        "description": "Accept one exact work intent; acceptance does not prove checkpoint execution.",
+        "operationId": "native_cancel_api_keyed_v1_agents__agent_id__cancel_work_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeWorkTarget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCancelAcceptance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/sessions": {
       "get": {
         "summary": "Get Agent Sessions",
@@ -13221,6 +13311,73 @@
         ],
         "title": "ModelsResponse",
         "description": "GET /api/models — model picker source for the spawn UI."
+      },
+      "NativeCancelAcceptance": {
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Command Id"
+          },
+          "target": {
+            "$ref": "#/components/schemas/NativeWorkTarget"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "command_id",
+          "target"
+        ],
+        "title": "NativeCancelAcceptance",
+        "description": "Immutable command acceptance; it does not claim execution completed."
+      },
+      "NativeWorkTarget": {
+        "properties": {
+          "work_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Work Id"
+          },
+          "agent_id": {
+            "type": "integer",
+            "exclusiveMaximum": 9.223372036854776e+18,
+            "exclusiveMinimum": 0.0,
+            "title": "Agent Id"
+          },
+          "machine": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Machine"
+          },
+          "generation": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Generation"
+          },
+          "owner": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner"
+          },
+          "protocol": {
+            "type": "integer",
+            "const": 1,
+            "title": "Protocol"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "work_id",
+          "agent_id",
+          "machine",
+          "generation",
+          "owner",
+          "protocol"
+        ],
+        "title": "NativeWorkTarget",
+        "description": "The immutable original work and actual hosted owner observed by a caller."
       },
       "NeighborRow": {
         "properties": {

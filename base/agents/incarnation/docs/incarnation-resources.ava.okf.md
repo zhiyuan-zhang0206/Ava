@@ -103,3 +103,8 @@ Same-host admission preserves the stored receipt rather than rewriting its facts
 
 Owner domain closure and Windows Job accounting:
 [[domain-closure.ava.okf.md|domain closure]].
+
+Successful hosted admission can return its exact predecessor proof to the native
+work owner in the same transaction; it does not widen resource admission.
+Guarded work identity and cancel recovery:
+[[native-work-cancel.ava.okf.md|native work cancellation]].

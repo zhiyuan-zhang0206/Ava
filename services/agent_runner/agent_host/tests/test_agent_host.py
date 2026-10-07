@@ -327,6 +327,10 @@ def _stub_host_transitions(
         )
 
     monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
+    # These orchestration fixtures expose no managed native-work capability.
+    # Strong command/checkpoint/transfer facts use actual PG tests in native_cancel/.
+    monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
+    monkeypatch.setattr(host_mod, "prepare_native_invocation", AsyncMock(return_value=None))
     monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
     return stamps
 
@@ -522,6 +526,9 @@ class TestPoolIsolation:
             return False
 
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
+        # This force fixture has no strong native-work command.
+        monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
+        monkeypatch.setattr(host_mod, "prepare_native_invocation", AsyncMock(return_value=None))
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
         monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", force)
         host = _host(

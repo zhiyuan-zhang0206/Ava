@@ -39,13 +39,39 @@ from collections.abc import Generator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
+from uuid import UUID
 
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _TURN_AGENT_ID: ContextVar[int | None] = ContextVar("ava_turn_agent_id", default=None)
-_TURN_INCARNATION: ContextVar[RuntimeIncarnation | None] = ContextVar(
+
+
+@dataclass(frozen=True)
+class _TurnExecutionIdentity:
+    incarnation: RuntimeIncarnation | None
+    native_work_id: UUID | None = None
+
+
+_TURN_INCARNATION: ContextVar[_TurnExecutionIdentity | None] = ContextVar(
     "ava_turn_incarnation", default=None
 )
+
+
+@contextlib.contextmanager
+def bind_native_work(work_id: UUID | None) -> Generator[None, None, None]:
+    """Carry one invocation in the existing turn identity through DB recovery."""
+    previous = _TURN_INCARNATION.get()
+    identity = _TurnExecutionIdentity(None if previous is None else previous.incarnation, work_id)
+    token = _TURN_INCARNATION.set(identity)
+    try:
+        yield
+    finally:
+        _TURN_INCARNATION.reset(token)
+
+
+def current_native_work_id() -> UUID | None:
+    identity = _TURN_INCARNATION.get()
+    return None if identity is None else identity.native_work_id
 
 
 @dataclass
@@ -101,7 +127,7 @@ def bind_turn_identity(
     (which copies the context) -> reset. Nesting rebinds cleanly.
     """
     token = _TURN_AGENT_ID.set(agent_id)
-    runtime_token = _TURN_INCARNATION.set(incarnation)
+    runtime_token = _TURN_INCARNATION.set(_TurnExecutionIdentity(incarnation))
     try:
         yield
     finally:
@@ -110,7 +136,8 @@ def bind_turn_identity(
 
 
 def current_turn_incarnation() -> RuntimeIncarnation | None:
-    return _TURN_INCARNATION.get()
+    identity = _TURN_INCARNATION.get()
+    return None if identity is None else identity.incarnation
 
 
 def current_turn_agent_id() -> int | None:

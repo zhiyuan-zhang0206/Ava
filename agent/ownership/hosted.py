@@ -19,6 +19,7 @@ from base.agents.incarnation.lifecycle_acceptance import (
     RECORD_APPLIED,
     terminate_kills_shell_sessions,
 )
+from base.agents.incarnation.native_work import certify_transfer
 from base.agents.incarnation.resource_admission import admit_resources_async
 from base.agents.incarnation.resources import (
     IncarnationResources,
@@ -416,7 +417,7 @@ async def _lock_previous(conn: psycopg.AsyncConnection[Any], agent_id: int, owne
     previous = await (
         await conn.execute(
             "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
-            "incarnation_resources,lease_expires_at FROM agents_meta "
+            "incarnation_resources,lease_expires_at,native_work_id FROM agents_meta "
             "WHERE id=%s FOR UPDATE",
             (agent_id,),
         )
@@ -516,7 +517,7 @@ async def admit_hosted_runtime(
                 legacy_adoption=legacy_adoption,
             )
 
-            await admit_resources_async(
+            resource_transfer = await admit_resources_async(
                 conn,
                 RuntimeIncarnation(agent_id, generation, owner),
                 host_identity,
@@ -538,6 +539,14 @@ async def admit_hosted_runtime(
             if row is None:
                 # Resource transfer and ordinary admission are one transaction.
                 _refuse_hosted_admission()
+            await certify_transfer(
+                conn,
+                resource_transfer,
+                work_id=previous[6],
+                source_machine=previous[3],
+                target_machine=machine,
+                incarnation=RuntimeIncarnation(agent_id, row[0], owner),
+            )
             if legacy_adoption_used and legacy_adoption is not None:
                 recorded.append(await _record_legacy_adoption(conn, agent_id, legacy_adoption))
             from agent.ownership.lifecycle_intent import observe_hosted_admission

@@ -626,6 +626,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/agents/{agent_id}/native-work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Native Work
+         * @description Expose only eligible ACTIVE work backed by actual managed-owner evidence.
+         */
+        get: operations["native_work_api_keyed_v1_agents__agent_id__native_work_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/cancel-work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Native Cancel
+         * @description Accept one exact work intent; acceptance does not prove checkpoint execution.
+         */
+        post: operations["native_cancel_api_keyed_v1_agents__agent_id__cancel_work_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/sessions": {
         parameters: {
             query?: never;
@@ -6611,6 +6651,48 @@ export interface components {
             default: string;
         };
         /**
+         * NativeCancelAcceptance
+         * @description Immutable command acceptance; it does not claim execution completed.
+         */
+        NativeCancelAcceptance: {
+            /**
+             * Command Id
+             * Format: uuid
+             */
+            command_id: string;
+            target: components["schemas"]["NativeWorkTarget"];
+        };
+        /**
+         * NativeWorkTarget
+         * @description The immutable original work and actual hosted owner observed by a caller.
+         */
+        NativeWorkTarget: {
+            /**
+             * Work Id
+             * Format: uuid
+             */
+            work_id: string;
+            /** Agent Id */
+            agent_id: number;
+            /** Machine */
+            machine: string;
+            /**
+             * Generation
+             * Format: uuid
+             */
+            generation: string;
+            /**
+             * Owner
+             * Format: uuid
+             */
+            owner: string;
+            /**
+             * Protocol
+             * @constant
+             */
+            protocol: 1;
+        };
+        /**
          * NeighborRow
          * @description One row in the GET /api/agents/{id}/neighbors result — a neighbor in
          *     `neighbors` or an ancestor in `ancestors`.
@@ -9693,6 +9775,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestartAgentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    native_work_api_keyed_v1_agents__agent_id__native_work_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeWorkTarget"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    native_cancel_api_keyed_v1_agents__agent_id__cancel_work_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NativeWorkTarget"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeCancelAcceptance"];
                 };
             };
             /** @description Validation Error */
