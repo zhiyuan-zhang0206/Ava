@@ -104,6 +104,7 @@ def test_keyed_effect_contracts_require_business_transaction_ownership() -> None
 )
 def test_guarded_notice_contract_remains_server_only(method: str, path: str) -> None:
     contract = contracts.contract_for(method, path)
+    assert contract is not None
     assert contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
     assert contract.transactional_idempotency
     assert not contract.legacy_keyed_retry
