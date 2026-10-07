@@ -607,10 +607,12 @@ def test_update_title_duplicate_in_progress_raises(db_conn, root_task_id: int):
     assert task_registry.get(task.id).title == "free title"
 
 
-def test_update_title_reassign_notifies_with_new_title(db_conn, root_task_id: int):
+def test_update_title_reassign_notifies_with_new_title(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     """A rename and a reassignment in one update() notify with the new title."""
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    other_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = _seed_agent(db_conn)
+    other_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("old title", "detail", parent=root_task_id)
     with record_notes(db_conn) as mock_send:

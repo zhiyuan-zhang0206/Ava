@@ -19,6 +19,7 @@ import pytest
 
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.notes import record_notes
+from base.db import fetch_one
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -629,7 +630,7 @@ def test_failed_notification_policy_lookup_rolls_back_assignment(
             "VALUES ('t', 'd', %s, %s, 1800) RETURNING id",
             (str(actor_id), old_owner),
         )
-        task_id = cur.fetchone()[0]  # type: ignore[index]
+        task_id = int(fetch_one(cur, "test task")[0])
     db_conn.commit()
     with (
         record_notes(db_conn) as send_note,
@@ -638,7 +639,7 @@ def test_failed_notification_policy_lookup_rolls_back_assignment(
         patch.object(task_registry, "_is_terminated", side_effect=RuntimeError),
         pytest.raises(RuntimeError),
     ):
-        task_registry.update(task_id, owner=new_owner)  # pyright: ignore[reportUnknownArgumentType]
+        task_registry.update(task_id, owner=new_owner)
     send_note.assert_not_called()
     with db_conn.cursor() as cur:
         cur.execute("SELECT owner FROM agent_tasks WHERE id=%s", (task_id,))
