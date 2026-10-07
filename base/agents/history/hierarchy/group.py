@@ -65,8 +65,11 @@ _CORRECTION = """Your reply cannot be used: {problem}
 
 Reply again with the corrected groups, in the same format. Do not call any tool."""
 
-_OPENING = re.compile(r"<group\b")
-_GROUP = re.compile(r'<group\s+first="?(\d+)"?\s+last="?(\d+)"?\s*>(.*?)</group>', re.DOTALL)
+# Only a tag with its attributes opens a group: a summary that mentions the word `<group` is fine.
+_OPENING = re.compile(r"<group\s+first=")
+_GROUP = re.compile(
+    r'<group\s+first="?(\d{1,9})"?\s+last="?(\d{1,9})"?\s*>(.*?)</group>', re.DOTALL
+)
 
 
 @dataclass(frozen=True)
@@ -126,7 +129,7 @@ def build_group_prompt(nodes: Sequence[OpenNode], *, clock: Clock, must_close: b
 
 
 def parse_groups(text: str, nodes: Sequence[OpenNode], *, must_close: bool) -> list[Group]:
-    """The groups of a reply that close (two summaries or more), checked against the open `nodes`.
+    """The groups of a reply that close, checked against the open `nodes`; a trailing one-summary group stays open.
 
     Raises:
         GroupReplyError: a grouping rule is broken, or no group closed when `must_close`.
@@ -139,10 +142,13 @@ def parse_groups(text: str, nodes: Sequence[OpenNode], *, must_close: bool) -> l
             "close every group with </group>, and no summary contains the tag"
         )
     _check_groups(groups, nodes)
-    # A group of one summary adds a level that only repeats it: the node stays open and joins the
-    # next check with the newer ones. Not an error, not corrected; a reply of only such groups
-    # under `must_close` closes nothing and is refused like an empty one.
-    groups = [group for group in groups if group.first != group.last]
+    # A group of one summary at the END of the reply stays open: it joins the next check with the
+    # newer nodes. One in the middle or at the start is closed like any other: the open nodes
+    # must stay one contiguous run from the oldest, so a closed group never spans an open node
+    # (a parent over a node that stayed open would overlap the parent that later covers it).
+    # A reply of only such groups under `must_close` closes nothing and is refused like an empty one.
+    while groups and groups[-1].first == groups[-1].last:
+        groups = groups[:-1]
     if not groups and must_close:
         raise GroupReplyError(
             f"there are {len(nodes)} open summaries, so at least one group must be closed"

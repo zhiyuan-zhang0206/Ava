@@ -16,10 +16,10 @@ the number checkable: a model that numbers its groups 1, 2, 3 instead of naming 
 its last group at the catalog's end, so the reply is refused instead of being stored with every
 span shifted. Every problem of a reply is collected so one correction round can fix them all:
 
-- a malformed envelope: a `<group` / `<open` tag that does not end up as its own complete
-  `<group>...</group>` element (a missing `</group>` swallows the next group into the previous
-  summary, an unclosed last group is dropped, an `<open/>` element does not exist), which would
-  otherwise merge groups silently;
+- a malformed envelope: a `<group first=` tag that does not end up as its own complete
+  `<group first="N" last="M">...</group>` element (a missing `</group>` swallows the next group
+  into the previous summary, an unclosed last group is dropped, a number of more than nine digits),
+  which would otherwise merge groups silently; other markup, `<open>` elements included, is ignored;
 - a number that is not in the catalog, a `last` before its `first`;
 - a first group that does not start at unit 1, a group that does not start right after the
   previous one's `last`, a last group that does not end at the last unit, an empty summary.
@@ -39,8 +39,12 @@ from dataclasses import dataclass
 from base.agents.history.hierarchy.group import GroupReplyError
 from base.agents.history.hierarchy.units import MessageUnit
 
-_OPENING = re.compile(r"<(?:group|open)\b")
-_ITEM = re.compile(r"<group\s+first=\"?(\d+)\"?\s+last=\"?(\d+)\"?\s*>(.*?)</group>", re.DOTALL)
+# Only a tag with its attributes opens a group: a summary that mentions the word `<group` is fine,
+# and a number too long to be a unit number is an incomplete tag (refused, then corrected).
+_OPENING = re.compile(r"<group\s+first=")
+_ITEM = re.compile(
+    r"<group\s+first=\"?(\d{1,9})\"?\s+last=\"?(\d{1,9})\"?\s*>(.*?)</group>", re.DOTALL
+)
 _HINT_CHARS = 40
 
 
@@ -67,8 +71,8 @@ def parse_reply(text: str) -> list[Draft]:
     """The groups of a reply, in order.
 
     Raises:
-        GroupReplyError: no `<group>` element, or a `<group` / `<open` tag that is not a
-            complete element.
+        GroupReplyError: no `<group>` element, or a `<group first=` tag that is not a complete
+            element.
     """
     opened = len(_OPENING.findall(text))
     drafts = [
@@ -77,10 +81,9 @@ def parse_reply(text: str) -> list[Draft]:
     ]
     if opened != len(drafts):
         raise GroupReplyError(
-            f"the reply opens {opened} <group> / <open> tags but holds {len(drafts)} complete "
-            'groups: write every group as <group first="N" last="M">summary</group>, close it '
-            "with </group>, and use no other tag (there is no <open> element; no summary "
-            "contains either tag)"
+            f"the reply opens {opened} <group> tags but holds {len(drafts)} complete "
+            'groups: write every group as <group first="N" last="M">summary</group> with unit '
+            "numbers, close it with </group>, and keep the tag out of the summaries"
         )
     if not drafts:
         raise GroupReplyError('the reply has no <group first="N" last="M">summary</group> element')

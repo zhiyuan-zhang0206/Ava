@@ -192,10 +192,21 @@ def test_group_sizes_are_not_constrained() -> None:
     ]
 
 
-def test_there_is_no_open_element_a_reply_using_one_is_refused() -> None:
-    for reply in (group("a", 1, 3) + '<open start="5"/>', '<open start="1"/>', "<open/>"):
-        with pytest.raises(GroupReplyError, match=r"there is no <open> element"):
-            parse_reply(reply)
+def test_an_open_element_is_ignored_like_any_other_markup() -> None:
+    drafts = parse_reply(group("a", 1, 6) + '<open start="5"/>')
+    assert drafts == [Draft(1, 6, "a")]
+
+
+def test_a_number_too_long_to_be_a_unit_number_is_refused_not_a_value_error() -> None:
+    huge = "9" * 5000
+    reply = f'<group first="1" last="{huge}">a</group>'
+    with pytest.raises(GroupReplyError, match="opens 1 <group> tags but holds 0"):
+        parse_reply(reply)
+
+
+def test_a_summary_that_mentions_the_group_tag_by_name_is_fine() -> None:
+    drafts = parse_reply(group("the <group> envelope and a literal <group tag in prose", 1, 6))
+    assert drafts[0].summary == "the <group> envelope and a literal <group tag in prose"
 
 
 @pytest.mark.parametrize(
@@ -204,7 +215,6 @@ def test_there_is_no_open_element_a_reply_using_one_is_refused() -> None:
         "no groups at all",
         "<groups></groups>",
         '<group first="3" last="4"></group',
-        "<open start='x'/>",
         '<group start="1">no first or last</group>',
     ],
 )
@@ -224,7 +234,7 @@ def test_a_missing_close_tag_is_refused_not_merged_into_one_group() -> None:
     reply = (
         '<group first="1" last="2">a<group first="3" last="4">b<group first="5" last="6">c</group>'
     )
-    with pytest.raises(GroupReplyError, match=r"opens 3 <group> / <open> tags but holds 1"):
+    with pytest.raises(GroupReplyError, match=r"opens 3 <group> tags but holds 1"):
         parse_reply(reply)
 
 
