@@ -660,7 +660,9 @@ def _register_page_blocking(
         try:
             assert_port_free(conn, agent_id, body.host, body.port)
             # Close any existing open pages for this agent before registering a new one.
-            closed_names = close_all_agent_pages_in_transaction(conn, agent_id)
+            closed_names = close_all_agent_pages_in_transaction(
+                conn, agent_id, include_expired=True
+            )
             record = register_page_in_transaction(
                 conn,
                 agent_id,

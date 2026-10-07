@@ -428,3 +428,23 @@ def test_placement_is_locked_before_host_validation(
         finally:
             proceed.set()
         assert accepted.result().status_code == 201
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_expired_name_reregistration_has_a_new_observed_identity(
+    client: TestClient, db_conn: psycopg.Connection, legacy: bool
+) -> None:
+    agent = _agent(db_conn)
+    first = client.post(_path(agent), json=BODY, headers=HEADERS).json()
+    db_conn.execute("UPDATE agent_pages SET expired_at=now() WHERE id=%s", (first["id"],))
+    db_conn.commit()
+    target = f"/api/agents/{agent}/pages" if legacy else _path(agent)
+    later = client.post(target, json={**BODY, "port": 8802}, headers=_key("later"))
+    assert later.status_code == 201 and later.json()["id"] != first["id"]
+    stale = client.post(
+        _close_path(agent), json={"expected_page_id": first["id"]}, headers=_key("old-close")
+    )
+    assert stale.status_code == 409
+    assert db_conn.execute("SELECT id FROM agent_pages WHERE closed_at IS NULL").fetchone() == (
+        later.json()["id"],
+    )
