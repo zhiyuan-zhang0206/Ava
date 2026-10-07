@@ -708,6 +708,11 @@ export interface paths {
          *     owner, while plain update / reminder notices must not (user ruling
          *     2026-08-27 — notification messages never resurrect a terminated owner).
          *
+         *     An optional Idempotency-Key names one logical note, including its
+         *     resurrection policy. Replays return the original inbound id and repair
+         *     its wake tail; changed requests conflict (409). Keyless legacy requests
+         *     create a fresh note. The inbound remains kind='system_note'.
+         *
          *     404: agent_id does not exist. 413: content exceeds the 1 MiB transport
          *     limit. 422: note_tag is not a NoteTag value, or source is not a legal
          *     envelope source.
@@ -8946,7 +8951,9 @@ export interface operations {
     post_agent_system_note_api_agents__agent_id__system_note_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 agent_id: number;
             };

@@ -549,6 +549,7 @@ def send_system_note(
     tag: str = "task",
     task_id: int | None = None,
     resurrect: bool = True,
+    idempotency_key: str | None = None,
 ) -> int:
     """Deliver a framework system note to another agent.
 
@@ -562,6 +563,9 @@ def send_system_note(
 
     `task_id` links this note to a task in the timeline. It does not attribute
     the target's LLM usage to that task.
+
+    `idempotency_key` identifies one logical send across your own retries.
+    Reuse it only for the same note and policy; a new send needs a new key.
 
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
@@ -581,6 +585,9 @@ def send_system_note(
     if task_id is not None and tag != NoteTag.TASK.value:
         raise ValueError("task_id requires tag='task'")
     resurrect = coerce_typed(resurrect, "resurrect", bool)
+    idempotency_key = coerce_str(idempotency_key, "idempotency_key", allow_none=True)
+    if idempotency_key is not None and not 1 <= len(idempotency_key) <= 128:
+        raise ValueError("idempotency_key must contain 1 to 128 characters")
     source = ava.sdk_surface.agent_identity.require_actor()
     return _client.send_system_note(
         agent_id,
@@ -589,6 +596,7 @@ def send_system_note(
         source=source,
         task_id=task_id,
         resurrect=resurrect,
+        idempotency_key=idempotency_key,
     )
 
 
