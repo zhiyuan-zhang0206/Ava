@@ -112,6 +112,71 @@ export function spanBox(
   return { left: left * 100, width: Math.max(0, right - left) * 100 };
 }
 
+/** A block narrower than this would vanish; it may grow to it only into free space. */
+export const MIN_BLOCK_PX = 3;
+/** Below this a block has no visible body and is drawn as a thin marker instead. */
+export const MARKER_MIN_BODY_PX = 2;
+/** Width of a marker's visible line and of its (slightly larger) hit area, in pixels. */
+export const MARKER_LINE_PX = 2;
+export const MARKER_HIT_PX = 4;
+/** Markers that sit within this distance of each other are stacked in separate lanes along the row's top. */
+const MARKER_CLUSTER_PX = 3;
+export const MARKER_LANES = 5;
+
+export interface RowItem {
+  key: string;
+  start: string;
+  end: string;
+}
+
+/** Where one block of a row is drawn, in pixels from the track's left edge. */
+export interface RowPlacement {
+  key: string;
+  left: number;
+  width: number;
+  /** No room for a body: drawn as a thin line at `left` (hit area `MARKER_HIT_PX` wide), in `lane`. */
+  marker: boolean;
+  lane: number;
+}
+
+/**
+ * Lays out one row of blocks on a track `trackPx` wide. A block's body never reaches the next
+ * block's start: the minimum width only fills the free space before the next block, and a block with
+ * no room at all becomes a marker (a thin line in its own lane) rather than covering its neighbour.
+ */
+export function layoutRow(
+  items: readonly RowItem[],
+  window: TimelineWindow,
+  trackPx: number,
+  minPx: number = MIN_BLOCK_PX,
+): RowPlacement[] {
+  const boxes: { key: string; left: number; right: number }[] = [];
+  for (const item of items) {
+    const box = spanBox(item.start, item.end, window);
+    if (box === null) continue;
+    const left = (box.left / 100) * trackPx;
+    boxes.push({ key: item.key, left, right: left + (box.width / 100) * trackPx });
+  }
+  boxes.sort((a, b) => a.left - b.left || a.right - b.right);
+  const placements: RowPlacement[] = [];
+  let lastMarker: { left: number; lane: number } | null = null;
+  boxes.forEach((box, i) => {
+    const natural = box.right - box.left;
+    const limit = i + 1 < boxes.length ? boxes[i + 1].left : trackPx;
+    const room = Math.max(0, limit - box.left);
+    const width = Math.min(natural >= minPx ? natural : Math.max(natural, Math.min(minPx, room)), trackPx - box.left);
+    if (width >= MARKER_MIN_BODY_PX) {
+      placements.push({ key: box.key, left: box.left, width, marker: false, lane: 0 });
+      return;
+    }
+    const near = lastMarker !== null && box.left - lastMarker.left < MARKER_CLUSTER_PX;
+    const lane = near && lastMarker !== null ? (lastMarker.lane + 1) % MARKER_LANES : 0;
+    lastMarker = { left: box.left, lane };
+    placements.push({ key: box.key, left: box.left, width: 0, marker: true, lane });
+  });
+  return placements;
+}
+
 /** The window of a drill into a node: exactly its time span. */
 export function nodeWindow(node: RunTimelineNode): TimelineWindow {
   return { from: node.start, to: node.end };
