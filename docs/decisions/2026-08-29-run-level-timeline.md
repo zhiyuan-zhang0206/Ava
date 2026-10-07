@@ -50,5 +50,10 @@ the compact view reports post-boundary activity with a direct switch. The page
 requests one-hour buckets up front for server-selected or six-hour-and-larger
 windows, while preserving turn detail for narrower explicit windows.
 
+Superseded for the session route by
+[`decisions/2026-10-05-run-timeline-lifetime-window.md`](2026-10-05-run-timeline-lifetime-window.md).
+
 Superseded for the frontend presentation and default request by
 [`decisions/2026-09-02-run-timeline-interactive-turn-track.md`](2026-09-02-run-timeline-interactive-turn-track.md).
+
+Forward: the run timeline no longer reads this event waterfall (`decisions/2026-10-05-run-timeline-from-messages-and-tree.md`).

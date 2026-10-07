@@ -119,51 +119,33 @@ INSPECT_STATISTICS = {
 RUN_TIMELINE = {
     "agent_id": 1,
     "window": {"from": "2026-09-01T00:00:00Z", "to": "2026-09-01T01:00:00Z"},
-    "meta": {
-        "n_turns": 1,
-        "wall_span_s": 3600,
-        "active_s": 4,
-        "tokens_in": 100,
-        "tokens_out": 20,
-        "cost_usd": 0.01,
-        "n_exec_failed": 0,
-        "n_compact": 0,
-        "n_restart": 0,
-        "fallback_turns": 0,
-        "unmatched_turns": 0,
-    },
-    "rows": [
+    "lifetime": {"from": "2026-09-01T00:00:00Z", "to": "2026-09-01T01:00:00Z"},
+    "nodes": [
         {
-            "turn": 1,
-            "n_turns": 1,
+            "id": "1",
+            "level": 1,
+            "parent": None,
+            "start": "2026-09-01T00:00:00Z",
+            "end": "2026-09-01T01:00:00Z",
+            "span_start": 1,
+            "span_end": 3,
+            "summary": "The visual fixture agent ran one task.",
+            "usage": {"calls": 1, "input": 100, "cache_read": 50, "output": 20},
+            "generation": None,
+        }
+    ],
+    "units": [
+        {
+            "kind": "work",
+            "i0": 2,
+            "i1": 3,
             "start": "2026-09-01T00:10:00Z",
             "end": "2026-09-01T00:10:04Z",
-            "active_s": 4,
-            "trace_id": "visual-trace",
-            "checkpoint_id": None,
-            "ok": True,
-            "llm": {
-                "calls": 1,
-                "in_total": 100,
-                "cache_read": 50,
-                "out_total": 20,
-                "reasoning": 5,
-                "latency_ms": 1200,
-                "cost_usd": 0.01,
-                "model": "visual-model",
-            },
-            "execs": [],
-            "anomalies": [],
-            "tags": [],
+            "source": None,
+            "preview": "visual fixture step",
         }
     ],
     "events": [],
-    "boundaries": {
-        "initialize_turn": 1,
-        "last_before_compact_turn": 1,
-        "post_window_turns": 0,
-        "has_activity_after_window": False,
-    },
 }
 FIXTURES: dict[str, object] = {
     "/api/agents/roster": {"agents": [AGENT_CARD], "ancestors": []},

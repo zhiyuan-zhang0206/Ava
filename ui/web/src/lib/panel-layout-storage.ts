@@ -25,11 +25,19 @@ function browserStorage(): Storage | null {
 export function panelLayoutStorage(): LayoutStorage {
   return {
     getItem(key) {
-      const storage = browserStorage();
-      return storage === null ? null : storage.getItem(key);
+      try {
+        return browserStorage()?.getItem(key) ?? null;
+      } catch {
+        // A read can throw too (private mode, cleared site data): no saved layout.
+        return null;
+      }
     },
     setItem(key, value) {
-      browserStorage()?.setItem(key, value);
+      try {
+        browserStorage()?.setItem(key, value);
+      } catch {
+        // A write can throw (quota, private mode): the layout just is not remembered.
+      }
     },
   };
 }

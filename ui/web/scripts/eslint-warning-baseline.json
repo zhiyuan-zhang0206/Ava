@@ -21,22 +21,12 @@
       "line": 1
     },
     {
-      "file": "src/app/insights/compare/_view.tsx",
-      "rule": "local/source-lines",
-      "line": 1
-    },
-    {
       "file": "src/app/insights/status/page.tsx",
       "rule": "local/source-lines",
       "line": 1
     },
     {
       "file": "src/app/memory/graph/page.tsx",
-      "rule": "local/source-lines",
-      "line": 1
-    },
-    {
-      "file": "src/app/insights/run/[agentId]/page.tsx",
       "rule": "local/source-lines",
       "line": 1
     },
@@ -62,11 +52,6 @@
     },
     {
       "file": "src/components/inspector-panel.tsx",
-      "rule": "local/source-lines",
-      "line": 1
-    },
-    {
-      "file": "src/components/run-timeline/run-timeline-chart.tsx",
       "rule": "local/source-lines",
       "line": 1
     },

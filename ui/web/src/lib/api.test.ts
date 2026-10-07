@@ -124,20 +124,28 @@ describe("lifecycle endpoints", () => {
     await api.getRunTimeline(405, {
       from: "2026-08-29T08:00:00.000Z",
       to: "2026-08-29T09:00:00.000Z",
-      level: "bucket",
-      bucket: "1h",
     });
 
     expect(calls[0].url).toMatch(
-      /\/api\/agents\/405\/run-timeline\?from=2026-08-29T08%3A00%3A00.000Z&to=2026-08-29T09%3A00%3A00.000Z&level=bucket&bucket=1h$/,
+      /\/api\/agents\/405\/run-timeline\?from=2026-08-29T08%3A00%3A00.000Z&to=2026-08-29T09%3A00%3A00.000Z$/,
     );
     expect(calls[0].init?.method).toBeUndefined();
   });
 
-  it("getRunTimeline requests the current session explicitly", async () => {
-    await api.getRunTimeline(405, { session: "current" });
+  it("getRunTimeline sends no query without a window (the whole lifetime)", async () => {
+    await api.getRunTimeline(405);
 
-    expect(calls[0].url).toMatch(/\/api\/agents\/405\/run-timeline\?session=current$/);
+    expect(calls[0].url).toMatch(/\/api\/agents\/405\/run-timeline$/);
+  });
+
+  it("getRunTimelineMessages GETs an index range, uncut only when asked", async () => {
+    await api.getRunTimelineMessages(405, { start: 8, end: 68, limit: 50 });
+    await api.getRunTimelineMessages(405, { start: 8, end: 68, full: true });
+
+    expect(calls[0].url).toMatch(
+      /\/api\/agents\/405\/run-timeline\/messages\?start=8&end=68&limit=50$/,
+    );
+    expect(calls[1].url).toMatch(/\/run-timeline\/messages\?start=8&end=68&full=true$/);
   });
 
   it("listAgents defaults to the SQL-bounded live roster", async () => {

@@ -193,9 +193,14 @@ export type ContextSection = Schemas["ContextSection"];
 // --- Run timeline (GET /api/agents/{id}/run-timeline) ---
 
 export type RunTimelineResponse = Schemas["RunTimelineResponse"];
+export type RunTimelineNode = Schemas["RunTimelineNode"];
+export type RunTimelineUnit = Schemas["RunTimelineUnit"];
+export type RunTimelineEvent = Schemas["RunTimelineEvent"];
+export type RunTimelineUsage = Schemas["RunTimelineUsage"];
+export type RunTimelineGeneration = Schemas["RunTimelineGeneration"];
+export type RunTimelineMessages = Schemas["RunTimelineMessages"];
 export type RunTimelineMessage = Schemas["RunTimelineMessage"];
 export type RunTimelineMessagePart = Schemas["RunTimelineMessagePart"];
-export type RunTimelineMessageDetails = Schemas["RunTimelineMessageDetails"];
 
 // --- Per-agent inspector panel (GET /api/agents/{id}/inspect/statistics) ---
 
@@ -814,14 +819,6 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.sidebar_sort": { key: "id", dir: "desc" },
   // Sidebar stats aggregation window (`?hours=`). Must stay within STATS_WINDOWS.
   "display.stats_window_hours": 24,
-  "display.run_timeline_window_hours": 0.5,
-  // Per-read message cap for the compare view's strip reads (P4-4, task
-  // #4023) — server-clamped to the display.run_timeline_messages_max
-  // ceiling; 200 keeps a wide strip inside the read-latency budget.
-  "display.run_timeline_compare_messages_max": 200,
-  // Show the run timeline summary layer when the data provides one
-  // (hierarchical layer blocks, or a single raw-context summary).
-  "display.run_timeline_summary_visible": true,
   // Fleet view surfaces.
   "display.fleet_left_view": "graph",
   "display.fleet_queue_collapsed": false,
