@@ -13,8 +13,16 @@ from base.lm.factory import build_chat_model
 from base.lm.plugin_providers import model_catalog
 from base.lm.pricing import Rates, rates_at, tally_tokens
 from base.lm.reasoning import extract_reasoning_tokens
-from base.lm.registry import validate_models
+from base.lm.registry import ModelSpec, validate_models
 from base.lm.usage import log_usage_from_message, usage_model
+
+
+def test_additive_service_fields_preserve_plugin_positional_constructor() -> None:
+    spec = ModelSpec("fixture", True, context_window=100, fast_of="fixture-standard")
+    assert spec.provider == "fixture"
+    assert spec.spawnable is True
+    assert spec.fast_of == "fixture-standard"
+    assert spec.reference_tps is None
 
 
 @pytest.mark.parametrize("standard", ["gpt-6.1-sol", "claude-opus-5-5"])
