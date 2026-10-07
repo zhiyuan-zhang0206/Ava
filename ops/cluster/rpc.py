@@ -69,7 +69,7 @@ _log = logging.getLogger(__name__)
 
 # OpKind (the op vocabulary) now lives in ops.rpc_schemas beside the wire models;
 # re-exported here (imported above, listed in __all__) so existing importers of
-# `ops.cluster_rpc.OpKind` keep working.
+# `ops.cluster.rpc.OpKind` keep working.
 
 # ── Retry policy ─────────────────────────────────────────────────────────────
 # A dispatch is one synchronous round-trip over the cluster's private network,

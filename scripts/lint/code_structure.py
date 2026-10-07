@@ -227,7 +227,7 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # types appear in annotations only, or (pricing) import at the call
         # site of a runtime isinstance (task #3633).
         "base/lm/stop.py",
-        "base/lm/pricing.py",
+        "base/lm/pricing/__init__.py",
         "base/agents/messages/kwargs.py",
         # Exec-child boot path (`_run_code` -> sdk_telemetry): ToolMessage is
         # runtime-only (imported at the isinstance call site), BaseMessage

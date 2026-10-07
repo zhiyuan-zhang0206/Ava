@@ -390,7 +390,7 @@ class SessionInfo(BaseModel):
 # carries the op outcome + the per-kind result (or an OpFailure on failure).
 
 # The op vocabulary — the discriminator the daemon's `_dispatch` switches on;
-# lives here (not cluster_rpc.py) beside its models; `ops.cluster_rpc` re-exports it.
+# lives here (not cluster_rpc.py) beside its models; `ops.cluster.rpc` re-exports it.
 OpKind = Literal[
     "spawn-launch",
     "spawn-launch-v2",

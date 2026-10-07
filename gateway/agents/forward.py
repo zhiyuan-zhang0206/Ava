@@ -28,7 +28,7 @@ from base.agents import (
 )
 from base.agents.observation.evidence import AvailabilityReason
 from base.db import Database
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, OpFailure, SpawnedAgent
 
 # Browser clients and the agent UI give lifecycle requests a short response

@@ -110,7 +110,7 @@ def _module_aliases(
 
 
 def _attribute_target(node: ast.Attribute, aliases: dict[str, str], repo_root: Path) -> str | None:
-    """`module._name` reached by attribute access on a module alias (`ava.agent_identity.x`)."""
+    """`module._name` reached by attribute access on a module alias (`module._member`)."""
     attrs: list[str] = []
     current: ast.expr = node
     while isinstance(current, ast.Attribute):

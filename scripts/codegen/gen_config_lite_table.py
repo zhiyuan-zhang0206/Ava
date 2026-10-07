@@ -24,7 +24,7 @@ several columns) blow past the repo's 800-line hard ceiling
 (``scripts/lint/code_structure.py``, no new baseline entries), and that rule's remedy —
 split into focused modules — does not fit one machine-generated table whose
 columns are never read as separate units. A data file carries no line budget
-(precedent: ``base/lm/pricing_catalog_archive.json``);
+(precedent: ``base/lm/pricing/pricing_catalog_archive.json``);
 ``base/host/env/config_lite_table.py`` is the hand-written reader that materializes the
 named surfaces consumers import.
 
@@ -182,7 +182,10 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "eval isolation network gate (conditional: isolation on)",
     ),
     LiteField(
-        "llm_model", "literal", None, "ava/attachment_transport.py model gate + lifecycle reads"
+        "llm_model",
+        "literal",
+        None,
+        "ava/sdk_surface/attachment_transport.py model gate + lifecycle reads",
     ),
     LiteField(
         "telemetry_otlp_enabled", "literal", None, "base/telemetry/otlp/telemetry_otlp boot read"

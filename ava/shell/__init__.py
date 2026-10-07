@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
-from ava import agent_identity
+from ava.sdk_surface import agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from base.log import logger

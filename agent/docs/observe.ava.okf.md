@@ -28,4 +28,4 @@ and `usage_kind` for every metered LLM path.
 
 ## Notes
 - Log format uses `[bracket]` prefix convention for easy grep
-- Cost calculation is not in the facade — pricing is the single source of truth in `base/lm/pricing.py`
+- Cost calculation is not in the facade — pricing is the single source of truth in `base/lm/pricing/__init__.py`

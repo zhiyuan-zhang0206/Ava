@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 
 
 def _insert_agent(db: psycopg.Connection, *, machine: str = "unknown") -> int:

@@ -19,7 +19,7 @@ from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, valid
 from ava.sdk_surface.validation import coerce_str
 from base.clock import Clock
 from base.config import settings
-from base.lm.attach_constants import ATTACH_MEDIA_MIME
+from base.lm.attach.constants import ATTACH_MEDIA_MIME
 from base.lm.effort import (
     ReasoningEffort,
     clamp_effort,
@@ -59,7 +59,7 @@ def _save_understand_output(prompt: str, result: str, *, source: str) -> Path | 
     is established (outside an agent process). Prunes old files to a ring of
     `_OVERFLOW_KEEP`."""
     try:
-        from ava import agent_identity
+        from ava.sdk_surface import agent_identity
     except ImportError:
         return None
     try:

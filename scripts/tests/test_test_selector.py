@@ -48,7 +48,7 @@ def _write(repo_root: Path, relative_path: str, content: str = "") -> None:
 def _selector_repo(tmp_path: Path) -> Path:
     """Build a small checkout with direct imports and known test timings."""
     files = {
-        "agent/exec_child.py": "",
+        "agent/execution/child.py": "",
         "cli/commands.py": "",
         "ops/worker.py": "",
         "scripts/only_helper.py": "",
@@ -63,7 +63,7 @@ def _selector_repo(tmp_path: Path) -> Path:
             "def test_imports(): pass\n"
             "\n"
             "def lazy_imports():\n"
-            "    from agent import exec_child\n"
+            "    from agent.execution import child as exec_child\n"
             "    from base import lm\n"
         ),
         "tests/unit/test_other.py": "def test_other(): pass\n",
@@ -93,7 +93,7 @@ def test_builds_a_direct_import_reverse_map_from_every_test_scope(tmp_path: Path
     reverse_map = test_selector.build_import_reverse_map(repo_root)
 
     expected_importer = {"tests/unit/test_imports.py"}
-    assert reverse_map["agent/exec_child.py"] == expected_importer
+    assert reverse_map["agent/execution/child.py"] == expected_importer
     assert reverse_map["cli/commands.py"] == expected_importer
     assert reverse_map["ops/worker.py"] == expected_importer
     assert reverse_map["base/lm/__init__.py"] == expected_importer

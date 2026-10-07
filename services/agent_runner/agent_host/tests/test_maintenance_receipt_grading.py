@@ -153,7 +153,7 @@ def test_unpause_releases_undelivered_receipts(
 ) -> None:
     from unittest.mock import MagicMock
 
-    from ops.cluster_pause import unpause_local_cluster
+    from ops.cluster.pause import unpause_local_cluster
 
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())

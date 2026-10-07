@@ -15,7 +15,7 @@ import logging
 from fastapi import APIRouter, Request
 
 from gateway.schemas.commands import CommandItem
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 
 router = APIRouter()
 _log = logging.getLogger(__name__)

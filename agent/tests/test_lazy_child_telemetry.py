@@ -1,6 +1,6 @@
 """A zero-record exec child must exit without the telemetry / OTel imports (task #3816 M3).
 
-`agent.exec_child._finalize_telemetry()` is the clean-exit delivery path
+`agent.execution.child._finalize_telemetry()` is the clean-exit delivery path
 (sync queued SDK-call events, flush the OTLP backend). A child that never
 emitted a record has no `base.telemetry` queue to drain, so the helper must
 return before importing anything — and in particular must not import the OTel
@@ -43,7 +43,7 @@ import json
 import sys
 
 sys.path.insert(0, {root!r})
-import agent.exec_child as exec_child  # the module under test
+import agent.execution.child as exec_child  # the module under test
 
 exec_child._finalize_telemetry()  # the zero-record exit path
 
@@ -90,7 +90,7 @@ import sys
 import time
 
 sys.path.insert(0, {str(root)!r})
-import agent.exec_child as exec_child
+import agent.execution.child as exec_child
 
 exec_child._init_logger(999999)  # the real arm path (task #3816 M4b)
 # The boot clock is all the record reads; the SDK modules stay unimported.

@@ -83,7 +83,7 @@ _CONTRACT_BOUNDARIES: tuple[tuple[str, str], ...] = (
     # The exec child's request/result wire: `exec/protocol.py` owns it; the
     # child process (`exec_child`) and the parent's exec node package
     # (`agent/graph/exec/`) are its two ends.
-    ("agent/exec_child.py", "agent/graph/exec/"),
+    ("agent/execution/child.py", "agent/graph/exec/"),
 )
 _COMMIT_TYPES = ("fix", "feat", "refactor")
 _TAG_PREFIX_RE = re.compile(r"^\[[^\]]*\]\s*")

@@ -330,14 +330,14 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
     Patching the four `execv*` names covers all eight — stdlib `os.execl*` are
     thin wrappers that call the module-global `execv`/`execvp`. Real in-process
     exec is never intended from a test: the production call sites are either a
-    dedicated `__main__` that runs in a subprocess (`base._reparent`,
+    dedicated `__main__` that runs in a subprocess (`base.native_process.reparent`,
     `services.desktop.browser.daemon`) or a CLI re-exec. Tests
     that assert an exec *would* have happened patch `os.exec*` themselves
     inside the test body — last-write-wins over this default, restored LIFO at
     teardown.
 
     `os._exit` is deliberately NOT guarded: it is the correct call in a forked
-    child (`base._reparent`), and hijacking it there would resurrect a pytest
+    child (`base.native_process.reparent`), and hijacking it there would resurrect a pytest
     process inside the fork.
     """
 

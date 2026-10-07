@@ -10,7 +10,7 @@ its hooks run in the agent host and operate on the graph state they are handed.
 
 The surface reaches this plugin's state through `plugin.read_state` /
 `plugin.update_state`, which build the handle here at each call (a child upgrades
-to this face before any state is injected — `agent/exec_child.py`; a stateful
+to this face before any state is injected — `agent/execution/child.py`; a stateful
 request never takes the surface-only path).
 """
 

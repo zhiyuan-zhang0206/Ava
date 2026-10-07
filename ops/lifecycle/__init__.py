@@ -2,7 +2,7 @@
 
 spawn / terminate / resurrect / restart / self-exit finalize, plus the
 InboundArrived / PageClosed event publishes the agent-runner emits. One of the
-op clusters beside `ops.cluster` / `ops.host_config` / `ops.inventory` /
+op clusters beside `ops.cluster.operations` / `ops.host_config` / `ops.inventory` /
 `ops.uploads`; each cluster is self-contained — no op here calls an op in another cluster.
 
 This package door holds the lifecycle ops; its submodules hold the pieces the
@@ -47,7 +47,6 @@ from base.db import Database, insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.registry import normalize_overlay_llm_model
-from ops import cluster_rpc as _cluster_rpc
 from ops.agents import (
     get_agent_machine,
     get_agent_status,
@@ -55,6 +54,7 @@ from ops.agents import (
 )
 from ops.agents.resurrection_retry import report_auto_resurrect_failure
 from ops.agents.wake import ResurrectTriggerStaleError
+from ops.cluster import rpc as _cluster_rpc
 from ops.cluster_status import kill_agent_shells
 from ops.lifecycle import termination
 from ops.lifecycle.crash_harvest import (

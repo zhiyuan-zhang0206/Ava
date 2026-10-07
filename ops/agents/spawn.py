@@ -31,7 +31,7 @@ import psycopg
 from base import telemetry
 from base.agents.birth_config import resolve_birth_config
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
-from base.agents.impersonation_manifest import record_central_event
+from base.agents.impersonation.manifest import record_central_event
 from base.agents.labels import spawn_prompt_with_label
 from base.db import Database, announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
 from base.events.live.announce import publish_agent_spawned_sync

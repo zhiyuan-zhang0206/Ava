@@ -157,7 +157,7 @@ def test_runner_hard_exit_child_ownership(
     elif mode == "delayed-record":
         (root / "reparent-on-record").touch()
         setup = (
-            "from gateway import schedule_runner as r\n"
+            "from gateway.schedules import runner as r\n"
             "from pathlib import Path\n"
             "import os, psutil, time\n"
             f"root = Path({str(root)!r})\n"
@@ -176,7 +176,7 @@ def test_runner_hard_exit_child_ownership(
             "r._record_error = delayed_record\n"
         )
     code = (
-        setup + "from gateway import schedule_runner as r; import ava; "
+        setup + "from gateway.schedules import runner as r; import ava; "
         "ava.ensure_plugins_loaded = lambda: None; "
         "from base.config import settings; "
         "settings.gateway.schedule_stall_timeout_seconds = 0.15; "
@@ -216,7 +216,7 @@ def test_runner_hard_exit_child_ownership(
 def test_stall_exit_bounds_failure_records(tmp_path: Path, blocked_write: str) -> None:
     """A blocked DB write cannot keep a stalled runner alive past the record budget."""
     code = (
-        "from gateway import schedule_runner as r\n"
+        "from gateway.schedules import runner as r\n"
         "from pathlib import Path\n"
         "import threading, time\n"
         f"root = Path({str(tmp_path)!r})\n"

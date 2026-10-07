@@ -18,7 +18,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 
-from ava._settings import database
+from ava.sdk_surface.settings import database
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 
 

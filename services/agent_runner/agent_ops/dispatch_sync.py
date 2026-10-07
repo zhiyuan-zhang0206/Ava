@@ -16,7 +16,8 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
-from ops import cluster, host_config, inventory, uploads
+from ops import host_config, inventory, uploads
+from ops.cluster import operations as cluster
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
     ConfigAuditReadPayload,

@@ -244,7 +244,7 @@ async def test_legacy_null_row_refuses_while_an_exec_child_of_the_agent_lives(
     successor_owner = uuid4()
     request = exec_run_dir() / str(agent_id) / f"{uuid4()}.json"
     with _look_alike(
-        ["-m", "agent.exec_child"],
+        ["-m", "agent.execution.child"],
         {
             "AVA_HOME": str(ava_home()),
             "AVA_EXEC_REQUEST_FILE": str(request),
@@ -283,7 +283,7 @@ async def test_legacy_null_row_refuses_an_unattributable_exec_child(
     """A child-shaped process without readable identity is never guessed away."""
     agent_id, prior = _seed(db_conn)
     successor_owner = uuid4()
-    with _look_alike(["-m", "agent.exec_child"], {"AVA_HOME": str(ava_home())}) as child_pid:
+    with _look_alike(["-m", "agent.execution.child"], {"AVA_HOME": str(ava_home())}) as child_pid:
         _wait_until(
             lambda: any(f"pid {child_pid}" in reason for reason in _evidence(agent_id).unreadable),
             what="the unattributable child to appear in the evidence",

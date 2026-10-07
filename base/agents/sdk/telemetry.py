@@ -110,7 +110,7 @@ def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | Non
 def _event_capture_admission() -> Generator[None, None, None]:
     """Use the optional local capture gate without changing SDK call behavior."""
     try:
-        from base.agents.impersonation_manifest import admitted_local_sdk_call
+        from base.agents.impersonation.manifest import admitted_local_sdk_call
     except Exception as exc:
         # Event capture is a side channel. An unavailable settings
         # bootstrap must never turn an SDK operation into a new hard failure.

@@ -116,7 +116,7 @@ def _predicate_in_new_session(*argv_tail: str) -> str:
 
 
 @pytest.mark.skipif(IS_WINDOWS, reason="the membership route is POSIX-only (getsid)")
-@pytest.mark.parametrize("entry", ["agent.exec_child", "agent.exec_owner_child"])
+@pytest.mark.parametrize("entry", ["agent.execution.child", "agent.execution.owner_child"])
 def test_hosting_exec_domain_names_the_entry_of_its_session_leader(entry: str) -> None:
     """Both exec spawn shapes make their root the session leader; the entry
     module on its argv is what marks the session as an exec domain."""
@@ -161,7 +161,7 @@ def test_hosting_exec_domain_follows_the_session_through_a_broken_parent_chain(
         "time.sleep(5.0)\n"
     )
     leader = subprocess.Popen(  # noqa: S603 — fixed interpreter + test source, fixture argv
-        [sys.executable, "-c", child_src, str(out), "agent.exec_child"],
+        [sys.executable, "-c", child_src, str(out), "agent.execution.child"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -180,7 +180,7 @@ def test_hosting_exec_domain_follows_the_session_through_a_broken_parent_chain(
         # The reading was taken while the leader (the synthetic exec root) was
         # alive — what a call's exec domain looks like mid-call.
         assert leader.poll() is None
-        assert entry == "agent.exec_child"
+        assert entry == "agent.execution.child"
         assert int(sid) == leader_pid  # still inside the exec session
         assert leader_was_an_ancestor == "False"  # and no longer under its lineage
     finally:

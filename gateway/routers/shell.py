@@ -18,7 +18,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from gateway.schemas.shell import ShellCaptureResponse
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 
 router = APIRouter()
 

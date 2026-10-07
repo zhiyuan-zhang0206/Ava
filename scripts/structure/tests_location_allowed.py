@@ -388,7 +388,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/scripts/test_update_model_pricing_contract.py": (
         "contract",
-        "the reconcile tests run against the reviewed catalog base/lm/pricing_catalog_archive.json, and the update-model-pricing workflow runs only trusted main code with write permissions",
+        "the reconcile tests run against the reviewed catalog base/lm/pricing/pricing_catalog_archive.json, and the update-model-pricing workflow runs only trusted main code with write permissions",
     ),
     "tests/scripts/test_worktree_sh_clean.py": (
         "contract",

@@ -50,4 +50,4 @@ The base-layer public entry points: [[base/docs/entry-points.ava.okf.md]].
 - `base` is the bottom import layer; which package may import which is in
   [`docs/conventions/import-layering.md`](../../docs/conventions/import-layering.md). There is no
   internal layer restriction within base.
-- File line budget: soft limit 600 / hard limit 800 (enforced by lint)
+- File line budget: hard limit 800 (enforced by lint)

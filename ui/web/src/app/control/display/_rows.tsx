@@ -1,9 +1,7 @@
 "use client";
 
 // Row primitives + the Timeline-colors section for the Display settings page.
-// Split out of page.tsx so that file stays under the 500-line budget after the
-// Timeline-colors section landed (task #3312): the page keeps the section
-// composition, this module owns the presentational rows.
+// The page composes sections; this module owns their presentational rows.
 
 import { Switch } from "@/components/ui/switch";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";

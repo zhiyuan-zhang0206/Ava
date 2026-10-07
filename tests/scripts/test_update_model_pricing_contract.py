@@ -1,4 +1,4 @@
-"""Contract: the reconcile tests run against the reviewed catalog base/lm/pricing_catalog_archive.json, and the update-model-pricing workflow runs only trusted main code with write permissions."""
+"""Contract: the reconcile tests run against the reviewed catalog base/lm/pricing/pricing_catalog_archive.json, and the update-model-pricing workflow runs only trusted main code with write permissions."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ _DEEPSEEK_TABLE = """
 
 
 def _reviewed_catalog() -> dict[str, Any]:
-    return json.loads((_REPO_ROOT / "base/lm/pricing_catalog_archive.json").read_text())
+    return json.loads((_REPO_ROOT / "base/lm/pricing/pricing_catalog_archive.json").read_text())
 
 
 def _without_recorded_succession(catalog: dict[str, Any]) -> dict[str, Any]:

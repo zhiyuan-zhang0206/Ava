@@ -8,7 +8,7 @@ Package door — no imports, no re-exports; callers use `agent.graph.exec.node`
 
   - `node.py`        — exec node: run one pending call, dispatch the result sum type
   - `output.py`      — output envelope fed back to the LLM: format / truncate / overflow-to-file
-  - `protocol.py`    — request/result envelopes shared with the child entry (`agent/exec_child.py`)
+  - `protocol.py`    — request/result envelopes shared with the child entry (`agent/execution/child.py`)
   - `_subprocess.py` — parent side: spawn / poll / signal / collect one child
   - `_owned_run.py`  — the same run under an admitted durable resource set
   - `_process.py`    — owned lifetime of one child process tree (reap, domain close, reader join)
@@ -18,7 +18,7 @@ Package door — no imports, no re-exports; callers use `agent.graph.exec.node`
   - `_notes.py`      — in-memory system-note injection after the tool results
   - `_alerts.py`     — best-effort operator alert for boot-phase child crashes
 
-The child entry itself stays at `agent/exec_child.py`: `-m agent.exec_child` is
+The child entry itself stays at `agent/execution/child.py`: `-m agent.execution.child` is
 a runtime process entry another checkout's parent may spawn, so its module path
 is a cross-version contract.
 """

@@ -165,7 +165,9 @@ def _sdk_expand_section(slices: AgentSlices) -> str:
     # docstring + field annotations + enum values, methods and nested classes
     # skipped — fields stay so the agent sees attribute names, and the full
     # contract (methods) is one `ava.help(ava.X.ClassName)` away.
-    hidden: frozenset[str] = ava.attachment_transport.media_gated_members(slices.brain.llm_model)
+    hidden: frozenset[str] = ava.sdk_surface.attachment_transport.media_gated_members(
+        slices.brain.llm_model
+    )
     for path in wanted:
         if _disabled_by_sdk_config(path, slices.prompt.sdk_disable):
             continue
@@ -574,7 +576,7 @@ def _workspace_section(slices: AgentSlices) -> str:
     own path."""
     import ava
 
-    aid = ava.agent_identity.agent_id()
+    aid = ava.sdk_surface.agent_identity.agent_id()
     if aid is None or not settings.agent.workspace_in_system_prompt:
         return ""
     # Ensure the workspace directory exists (mkdir side effect).

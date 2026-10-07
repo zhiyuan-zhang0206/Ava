@@ -1,6 +1,6 @@
 """Reparenting spawn helper — the POSIX "detach a child to init" primitive.
 
-`base.sessions.posixproc.new_session` runs this as ``python -m base._reparent`` to
+`base.sessions.posixproc.new_session` runs this as ``python -m base.native_process.reparent`` to
 launch a long-running agent process fully detached from whoever spawned it. The
 gateway / ops daemon that starts an agent is long-lived, so a naive
 ``Popen(start_new_session=True)`` agent would linger as a zombie in that parent
@@ -12,7 +12,7 @@ once and is reaped by the spawner's own ``subprocess`` wait.
 
 Invocation (argv, no shell — JSON argument elements pass through intact)::
 
-    python -m base._reparent <stdout_log> <stderr_log> <cmd> [args...]
+    python -m base.native_process.reparent <stdout_log> <stderr_log> <cmd> [args...]
 
 ``<cmd> [args...]`` is the program to exec (the venv python + ``-m agent`` …).
 This process ``setsid()``s (new session, no controlling terminal), forks once,

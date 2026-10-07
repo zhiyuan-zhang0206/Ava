@@ -10,7 +10,7 @@ import asyncio
 
 from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.turn_progress import TurnProgress
-from services.agent_runner.agent_host.admission import TurnAdmission
+from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
 
 
 def database_waiting(

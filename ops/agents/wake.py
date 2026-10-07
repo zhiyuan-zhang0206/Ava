@@ -321,7 +321,7 @@ def _stage_resurrect_event(
         target_agent_id=_resurrect_event_target(resurrected_by),
         payload=payload,
     )
-    from base.agents.impersonation_manifest import record_central_event
+    from base.agents.impersonation.manifest import record_central_event
 
     return record_audit(conn, record_central_event(conn, event))
 

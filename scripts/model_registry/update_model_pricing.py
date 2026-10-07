@@ -111,7 +111,7 @@ _PEAK_HOURS = re.compile(
 _USD = re.compile(r"\$(?:0|[1-9]\d*)(?:\.\d+)?")
 _MODEL_LABEL_FOOTNOTE = re.compile(r"\s*\(\d+\)$")
 _DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing/"
-_CATALOG_PATH = Path(__file__).resolve().parents[2] / "base/lm/pricing_catalog_archive.json"
+_CATALOG_PATH = Path(__file__).resolve().parents[2] / "base/lm/pricing/pricing_catalog_archive.json"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -479,7 +479,9 @@ def main(argv: list[str] | None = None) -> int:
 
     repo_root = args.repo_root or _REPO_ROOT
     catalog_path = args.catalog or (
-        repo_root / "base/lm/pricing_catalog_archive.json" if args.sync_plugins else _CATALOG_PATH
+        repo_root / "base/lm/pricing/pricing_catalog_archive.json"
+        if args.sync_plugins
+        else _CATALOG_PATH
     )
     if args.sync_plugins:
         if args.source_file is not None or args.detected_at is not None:

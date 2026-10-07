@@ -119,7 +119,7 @@ def spawn_via_helper(
 ) -> int:
     """Ask the permissions helper to spawn one named direct child.
 
-    Failure is deliberately loud. Falling back to ``base._reparent`` would
+    Failure is deliberately loud. Falling back to ``base.native_process.reparent`` would
     launch successfully with the wrong TCC responsibility identity.
     """
     # Resolve the upper-layer wire adapter lazily. The lifecycle policy stays

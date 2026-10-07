@@ -13,7 +13,7 @@ from base.config import settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
-from ops.cluster_rpc import worst_case_dispatch_seconds
+from ops.cluster.rpc import worst_case_dispatch_seconds
 from services.wake.delivery_watchdog import attempts, daemon, rounds
 
 

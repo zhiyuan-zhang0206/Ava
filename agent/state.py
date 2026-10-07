@@ -471,7 +471,7 @@ class PluginStateHandle[T: BaseModel]:
             PluginStateOutsideTurnError: not inside an exec turn (`ava.state` is unbound).
         """
         import ava  # lazy import: avoid circular (ava imports agent.state via plugin loading)
-        from ava.agent_identity import validate_external_identity
+        from ava.sdk_surface.agent_identity import validate_external_identity
 
         validate_external_identity()
 
@@ -498,7 +498,7 @@ class PluginStateHandle[T: BaseModel]:
             ValueError: delta contains a key outside the BaseModel schema (plugin author typo).
         """
         import ava
-        from ava.agent_identity import validate_external_identity
+        from ava.sdk_surface.agent_identity import validate_external_identity
 
         validate_external_identity()
 
@@ -546,7 +546,7 @@ def compact_version() -> int:
         PluginStateOutsideTurnError: not inside an exec turn (`ava.state` is unbound).
     """
     import ava
-    from ava.agent_identity import validate_external_identity
+    from ava.sdk_surface.agent_identity import validate_external_identity
 
     validate_external_identity()
 

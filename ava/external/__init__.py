@@ -15,9 +15,8 @@ from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
 
-from ava import agent_identity
-from ava._settings import database
-from ava.sdk_surface import process_context
+from ava.sdk_surface import agent_identity, process_context
+from ava.sdk_surface.settings import database
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity, ExternalLease
@@ -101,7 +100,7 @@ class Attachment:
         self._closed = False
         self._closing = False
         self._stack = ExitStack()
-        # The attached agent's pins and plugin-config view (`ava._settings._attached` reads it through the lease), once loaded.
+        # The attached agent's pins and plugin-config view (`ava.sdk_surface.settings._attached` reads it through the lease), once loaded.
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
         self._event_participant: Any = None
         # The process's own context, put back at detach; `_bound` says this attachment bound one.
@@ -172,7 +171,7 @@ class Attachment:
         if self._closed:
             raise RuntimeError("external attachment is closed")
         if self._closing and not allow_closing:
-            from base.agents.impersonation_manifest import local_sdk_call_was_admitted
+            from base.agents.impersonation.manifest import local_sdk_call_was_admitted
 
             if not local_sdk_call_was_admitted():
                 raise RuntimeError("external attachment is closing")
@@ -231,7 +230,7 @@ class Attachment:
 
     def _open_event_participant(self) -> None:
         """Register this controller before it can emit a protocol-v1 event."""
-        from base.agents.impersonation_manifest import (
+        from base.agents.impersonation.manifest import (
             LocalParticipant,
             bind_local_participant,
             is_log_native,
@@ -257,7 +256,7 @@ class Attachment:
         """Close admission, drain local SDK work, then seal the durable receipt."""
         if self._event_participant is None:
             return
-        from base.agents.impersonation_manifest import (
+        from base.agents.impersonation.manifest import (
             close_local_participant_admission,
             seal_local_participant,
         )
@@ -278,7 +277,7 @@ class Attachment:
         if self._event_participant is None:
             self._closing = True
             return
-        from base.agents.impersonation_manifest import begin_local_participant_close
+        from base.agents.impersonation.manifest import begin_local_participant_close
 
         # The gate lock makes setting `_closing` and closing admission one
         # linearization point. A call admitted before it may drain; one that
@@ -297,7 +296,7 @@ class Attachment:
         self._closed = True
         try:
             if self._event_participant is not None:
-                from base.agents.impersonation_manifest import unbind_local_participant
+                from base.agents.impersonation.manifest import unbind_local_participant
 
                 unbind_local_participant(self._event_participant)
                 self._event_participant = None

@@ -79,7 +79,7 @@ Runtime facts needed to choose the checkout and operation have component owners:
 | PostgreSQL, PgBouncer and Redis startup/custody | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.ava.okf.md) |
 | Database roles and credential delivery | [Authority](../../base/cluster/authority/docs/authority.ava.okf.md), [wiring](../../base/cluster/authority/docs/wiring.ava.okf.md), [unit bundle exposure](../../base/cluster/authority/docs/unit-bundle.ava.okf.md) |
 | Source-start host integration | [Host converge](../../cli/commands/converge/docs/converge-host-wiring.ava.okf.md) |
-| External agent skill ownership and update | [Package commands](../../cli/commands/extensions/docs/packages.ava.okf.md) |
+| External agent skill ownership and update | [Package commands](../../cli/commands/extensions/packages/docs/packages.ava.okf.md) |
 | Schedule source, provisioning and stored-script verification | [Schedules](../../schedules/README.md) |
 
 Use the [deployment capability](../../ava_builtins/skills/platform/ava-guide/deploy/SKILL.md)
@@ -99,7 +99,7 @@ nodes of the packages that own the code:
 | `$AVA_HOME` layout, what derives from the home | `base/paths/docs/paths.ava.okf.md` |
 | plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.ava.okf.md` |
 | `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry.ava.okf.md` |
-| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/docs/packages.ava.okf.md` |
+| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages/docs/packages.ava.okf.md` |
 | machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/docs/machine.ava.okf.md` |
 | which services each capability contributes | `services/docs/services.ava.okf.md` |
 

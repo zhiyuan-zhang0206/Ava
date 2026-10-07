@@ -205,7 +205,7 @@ async def _handle_send(core: Any) -> Any:
     as Bearer (the health server's ``auth_digests``). Returns per-channel
     results; a channel that failed to send is reported, not fatal. When
     EVERY channel failed (or none is loaded) the route answers 502 instead
-    of 200 — the caller (base/telemetry/alerts.py) keys ``notified_at`` off the status
+    of 200 — the caller (base/telemetry/alerts/__init__.py) keys ``notified_at`` off the status
     code, and a fake 200 would stamp a message that never reached the user.
     """
 
@@ -221,7 +221,7 @@ async def _handle_send(core: Any) -> Any:
         delivered = any(v == "ok" for v in results.values())
         if not delivered:
             # Nothing reached the user — report failure so the caller does not
-            # treat the fan-out as delivered (base/telemetry/alerts.py keeps notified_at NULL
+            # treat the fan-out as delivered (base/telemetry/alerts/__init__.py keeps notified_at NULL
             # and retries on the next Grafana re-send).
             return 502, json.dumps({"results": results}).encode(), "application/json"
         return 200, json.dumps({"results": results}).encode(), "application/json"

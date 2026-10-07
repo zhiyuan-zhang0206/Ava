@@ -162,7 +162,7 @@ def _current_agent_id() -> int | None:
     `ava.self.AGENT_ID` reads). None outside an agent process — background
     scripts recovered an identity only when AVA_AGENT_ID is set; a hosted
     turn context (turn contextvar bound) wins over the ambient env."""
-    from ava.agent_identity import validate_external_identity
+    from ava.sdk_surface.agent_identity import validate_external_identity
     from base.native_process.turn_identity import effective_agent_id
 
     borrowed = validate_external_identity()

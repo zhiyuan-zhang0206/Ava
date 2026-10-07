@@ -13,7 +13,7 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
-import ava.agent_identity as _ava_identity
+import ava.sdk_surface.agent_identity as _ava_identity
 from base.paths import workspace_dir
 
 
@@ -26,7 +26,7 @@ def default_cwd() -> str:
     `$AVA_HOME/workspaces/<agent_id>/` (created here on first touch). Direct
     state construction without a bootstrap (tests, dev REPL) has no agent and
     therefore no workspace; $HOME is the documented pre-bootstrap placeholder
-    (see `ava.agent_identity.agent_id`)."""
+    (see `ava.sdk_surface.agent_identity.agent_id`)."""
     aid = _ava_identity.agent_id()
     if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() returns None pre-bootstrap
         return str(Path.home())

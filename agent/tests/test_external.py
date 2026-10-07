@@ -16,11 +16,12 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
-from ava import _settings, agent_identity, external, gateway_client
-from ava._settings import agent_setting
+from ava import external, gateway_client
 from ava.external import state
 from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
-from ava.sdk_surface import process_context
+from ava.sdk_surface import agent_identity, process_context
+from ava.sdk_surface import settings as _settings
+from ava.sdk_surface.settings import agent_setting
 from base import telemetry
 from base.db import Database
 from base.telemetry import Event as TelemetryEvent
@@ -122,7 +123,7 @@ def attached_runtime(
         return False
 
     monkeypatch.setattr(
-        "base.agents.impersonation_manifest.open_local_participant", no_local_participant
+        "base.agents.impersonation.manifest.open_local_participant", no_local_participant
     )
     return lease, snapshot, staged
 
@@ -155,7 +156,7 @@ def test_legacy_attachment_never_opens_an_event_receipt(
         pytest.fail("legacy attachment opened an event receipt")
 
     monkeypatch.setattr(
-        "base.agents.impersonation_manifest.open_local_participant",
+        "base.agents.impersonation.manifest.open_local_participant",
         unexpected_open,
     )
 
@@ -381,7 +382,7 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
     database: Database,
 ) -> None:
     """Close fences a new SDK call before its gateway effect, not only at detach."""
-    from base.agents import impersonation_manifest as manifest
+    from base.agents.impersonation import manifest
 
     attachment = external.attach("lease")
     participant = manifest.LocalParticipant(
@@ -415,7 +416,7 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     database: Database,
 ) -> None:
     """An SDK call already inside its metering admission finishes its gateway effect."""
-    from base.agents import impersonation_manifest as manifest
+    from base.agents.impersonation import manifest
 
     attachment = external.attach("lease")
     participant = manifest.LocalParticipant(

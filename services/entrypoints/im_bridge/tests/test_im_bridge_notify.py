@@ -233,7 +233,7 @@ def test_send_route_rejects_bad_bodies() -> None:
 
 
 def test_send_route_502_when_no_channel_delivered() -> None:
-    """All adapters failed (or none loaded) -> 502, so the caller (base/telemetry/alerts.py)
+    """All adapters failed (or none loaded) -> 502, so the caller (base/telemetry/alerts/__init__.py)
     keeps notified_at NULL instead of stamping a message that never landed."""
     from services.entrypoints.im_bridge import daemon
 

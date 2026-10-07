@@ -69,7 +69,7 @@ def _start(tmp_path: Path, context: OwnerContext) -> subprocess.Popen[bytes]:
             "-X",
             "utf8",
             "-m",
-            "agent.exec_domain_owner",
+            "agent.execution.domain_owner",
             "--context",
             str(path),
         ],
@@ -191,7 +191,7 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
 
 @pytest.mark.parametrize("ending", ["record", "partial_eof", "oversize"])
 def test_control_pipe_is_bounded_and_owned_by_calling_loop(ending: str) -> None:
-    from agent.exec_domain_owner import ControlPipe
+    from agent.execution.domain_owner import ControlPipe
     from base.agents.incarnation.exec_owner_protocol import MAX_OWNER_MESSAGE
 
     source, destination = os.pipe()
@@ -281,7 +281,7 @@ def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> Non
             "-I",
             "-B",
             "-c",
-            "import sys; import agent.exec_domain_owner; "
+            "import sys; import agent.execution.domain_owner; "
             "assert 'agent.graph' not in sys.modules; assert 'ava' not in sys.modules; "
             "assert 'base.config' not in sys.modules",
         ],
@@ -302,7 +302,7 @@ from base.agents.incarnation.exec_owner_protocol import OwnerControl, OwnerReady
 path = Path(sys.argv[1])
 context = read_owner_context(path)
 owner = subprocess.Popen(
-    [sys.executable, '-I', '-B', '-X', 'utf8', '-m', 'agent.exec_domain_owner', '--context', str(path)],
+    [sys.executable, '-I', '-B', '-X', 'utf8', '-m', 'agent.execution.domain_owner', '--context', str(path)],
     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     close_fds=True,
 )

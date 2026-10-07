@@ -394,7 +394,7 @@ def expire(conn: psycopg.Connection, lease: LeaseRecord) -> LeaseRecord:
             lease["relay_degraded_reason"] = reason
         return lease
     from base.agents.impersonation.event_log import is_log_native
-    from base.agents.impersonation_manifest import close_event_admission
+    from base.agents.impersonation.manifest import close_event_admission
 
     if is_log_native(lease):
         close_event_admission(conn, str(lease["id"]))

@@ -29,7 +29,7 @@ from base.host import config_validators
 from base.host.env import runtime_config
 from gateway.app import app
 from gateway.routers import config as config_router
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
 
 

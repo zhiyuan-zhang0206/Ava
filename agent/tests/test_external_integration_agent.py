@@ -15,8 +15,9 @@ from pydantic import BaseModel, Field
 import ava
 from agent import state as state_module
 from agent.messages import NoteTag, system_note_message
-from ava import agent_identity, external
+from ava import external
 from ava.external.state import decode_plugin_delta, load_snapshot
+from ava.sdk_surface import agent_identity
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
 from base.agents.messages.caller_identity import CallerIdentity

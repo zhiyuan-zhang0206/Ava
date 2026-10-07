@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from base.config import settings
 from gateway.app import app
 from gateway.inspect import router as inspect_router
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 
 

@@ -39,8 +39,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import ava
-from ava import agent_identity
-from ava.sdk_surface import process_context
+from ava.sdk_surface import agent_identity, process_context
 from base.telemetry import report_sink_failure
 
 # A recorder marks itself with a reference to itself. `is_recorder` tests that identity, so

@@ -24,7 +24,8 @@ from base.db import Database, create_agent, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
-from ops import agent_pause, cluster_pause
+from ops import agent_pause
+from ops.cluster import pause as cluster_pause
 
 WHEN = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
 HOLDER = "ops:test:4150"

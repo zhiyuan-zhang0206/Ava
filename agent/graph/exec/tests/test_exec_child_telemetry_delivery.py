@@ -1,7 +1,7 @@
 """Exec-child telemetry delivery — the result/write record reaches the OTLP
 receiver before the child exits (task #4312).
 
-`agent.exec_child._run` writes the result envelope last, so its
+`agent.execution.child._run` writes the result envelope last, so its
 `[exec envelope] result write` event is the child's final record. It must ride
 the child's own telemetry finalize (task #4312): an exec child defers its OTLP
 bring-up, and a deferred hold cannot complete once the interpreter is
@@ -116,7 +116,7 @@ def _spawn(
     env.pop("AVA_LOG_DIR", None)
     # Fixed argv, sys.executable is trusted.
     proc = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
+        [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
         capture_output=True,
         text=True,
         env=env,

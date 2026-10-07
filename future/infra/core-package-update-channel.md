@@ -59,7 +59,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `base/packages/plugins/manifest.py`, `docs/conventions/plugin-spec-v2.md` |
 | Per-machine OS jobs | launchd / crontab / schtasks registrars, idempotent, converge-registered (health probe, watchdog, autostart, logs), test switch `AVA_OS_JOBS_ENABLED=false` | `base/os_*.py`, `cli/commands/converge/_os_jobs.py` |
 | Cluster extension registry (S2, in progress) | `extensions` / `extension_blobs` tables; install writes row+blob; converge/boot materialize; adoption sweep; content-addressed by tree hash; trust rises only | `base/packages/extensions/registry.py`, `base/packages/extensions/materialize.py` |
-| Update coordination | per-home refresh flock; source-tree tamper detection (health-probe check 8, alert-only) | `cli/commands/extensions/packages_refresh.py`, `base/deploy/git/source_tree_guard.py` |
+| Update coordination | per-home refresh flock; source-tree tamper detection (health-probe check 8, alert-only) | `cli/commands/extensions/packages/refresh.py`, `base/deploy/git/source_tree_guard.py` |
 | Existing boundaries | four-layer modification model; extension ownership (cluster/machine/agent); CLI scope convention; CLI-only updates | `docs/decisions/2026-08-19-four-layer-modification-model.md`, `docs/decisions/2026-08-21-extension-ownership-three-tiers.md`, `2026-08-02-cli-scope-convention.md`, `2026-08-05-cli-only-updates.md` |
 
 ## 3. Constraints the design must respect (hard facts)
@@ -324,7 +324,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Registry schema v2: `UpdateState` / `ChannelState` fields, lazy migration (retired, batch b5 2026-09-20: a v1 file is refused), defaults resolution from settings (`base/config/domains/packages.py`: per-class default mode/interval, base tick, master switch).
 - `ava packages status` (read-only) + `--json` — including the host version and each package's declared range (§5.5).
 - Version plumbing: optional manifest support for skill packages; the core-content CI check (declared ranges must include the repo's current version); the derived host-version policy recorded in [`docs/conventions/host-versioning.md`](../../docs/conventions/host-versioning.md) (no bump discipline; `[project].version` remains only as the wheel-mode fallback).
-- Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/extensions/docs/packages.ava.okf.md`, and the `ava-guide.modification-layers` / `ava-guide.plugins.develop` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
+- Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/extensions/packages/docs/packages.ava.okf.md`, and the `ava-guide.modification-layers` / `ava-guide.plugins.develop` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
 - Acceptance at landing: v1 file loads, migrates on next write, defaults visible in status; no behavior change elsewhere (test lock: registry round-trip + migration) — the v1 leg later retired, batch b5 2026-09-20: v1 files are refused.
 
 ### P1 — skills fast lane (the POC; the deliverable the user can feel) — **landed: PR #2368**
@@ -402,7 +402,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Plugin discovery + loaders: `base/packages/plugins/enable_config.py:discover_plugins`, `agent/extensions/__init__.py:load_extensions`, `base/lm/plugin_providers.py`; roots: `base/paths/__init__.py:repo_plugins_dir/plugins_dir`, `base/deploy/release/runtime_interpreter.py:external_plugin_read_root`.
 - Manifest/engines gate: `base/packages/plugins/manifest.py` (`host_version_from_repo`, `check_host_engine`), `docs/conventions/plugin-spec-v2.md`.
 - OS jobs: `base/host/system/cron.py` (5-min health tick as the registrar template), `cli/commands/converge/_os_jobs.py`, `AVA_OS_JOBS_ENABLED`.
-- Update coordination: the per-home flock and objects-only fetch in `cli/commands/extensions/packages_refresh.py`; `base/deploy/git/source_tree_guard.py` (tamper detection, alert-only).
+- Update coordination: the per-home flock and objects-only fetch in `cli/commands/extensions/packages/refresh.py`; `base/deploy/git/source_tree_guard.py` (tamper detection, alert-only).
 - Extension ownership S1/S2: `docs/decisions/2026-08-21-extension-ownership-three-tiers.md`, `future/infra/extension-ownership.md`, `base/packages/extensions/registry.py`, `base/packages/extensions/materialize.py`.
 - Four-layer model / builtin-plugin ruling: `docs/decisions/2026-08-19-four-layer-modification-model.md` (revised in part: builtin plugins stay *authored* in the kernel but are *delivered* via the content channel).
 - Historical incident class: skill edit merged to main, runtime stale for two days (2026-08-27). R5 background: task #1013.

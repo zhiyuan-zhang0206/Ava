@@ -7,7 +7,9 @@ components of an entry's directory (`agent/graph/x.py` files under
 `base` lives in `base.json`). See `scripts/structure/baseline_shards.py`
 for the exact rule (`shard_of`) and `scripts/lint/code_structure.py` for how
 the shards are merged, validated and compared against the base revision. An
-entry filed under the wrong shard fails the gate.
+existing entry may remain in its original shard when its file moves. Duplicate
+section/key pairs across shards fail the gate; the growth guard still checks
+the combined entries and permits no additional targets or counts.
 
 `rules.json` is not a shard: it records the rule version a section was frozen under
 (`baseline_shards.py` explains how the guard uses it when a rule changes).

@@ -134,17 +134,17 @@ def _hosting_pty_session(lineage: set[int]) -> str | None:
 
 # The entry modules an agent exec-domain session leader runs. Both exec spawn
 # shapes make their root the session leader (`start_new_session`): the
-# protocol-zero spawn runs `agent.exec_child` directly
+# protocol-zero spawn runs `agent.execution.child` directly
 # (`agent/graph/exec/_subprocess.py::_spawn`), and the owned protocol spawns
-# `agent.exec_owner_child` as the root (`agent/exec_domain_owner.py`), which
+# `agent.execution.owner_child` as the root (`agent/execution/domain_owner.py`), which
 # runs the same payload via `runpy` in-process. Compared as whole argv
 # elements: the token is one exact argument, never a substring.
-EXEC_DOMAIN_SESSION_ENTRIES = frozenset({"agent.exec_child", "agent.exec_owner_child"})
+EXEC_DOMAIN_SESSION_ENTRIES = frozenset({"agent.execution.child", "agent.execution.owner_child"})
 
 
 def hosting_exec_domain() -> str | None:
     """The agent exec domain this process runs inside — the entry module of this
-    process's session leader (`agent.exec_child` / `agent.exec_owner_child`), or
+    process's session leader (`agent.execution.child` / `agent.execution.owner_child`), or
     None when this process is not in an exec-domain session.
 
     Membership, not ancestry: the exec root calls setsid (its spawn passes

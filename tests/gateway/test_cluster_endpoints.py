@@ -25,7 +25,8 @@ from base.native_process.root_control import client as root_client
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
 from gateway.events import telemetry_rows
-from ops import agent_pause, cluster_pause, cluster_status
+from ops import agent_pause, cluster_status
+from ops.cluster import pause as cluster_pause
 
 
 @pytest.fixture
@@ -51,7 +52,7 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr("gateway.app._cluster_is_paused", _paused)
     monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", lambda _db: flag.exists())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", lambda _db: flag.exists())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ops.cluster_pause.is_paused", _snapshot_paused)
+    monkeypatch.setattr("ops.cluster.pause.is_paused", _snapshot_paused)
     return flag
 
 
@@ -449,7 +450,7 @@ class TestClusterEndpoints:
     def test_post_stopping_marks_machine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """POST /api/cluster/stopping?machine=<name>&home=<home> retracts that unit."""
         marked: list[tuple[str, str]] = []
-        from ops import cluster as ops_mod
+        from ops.cluster import operations as ops_mod
 
         monkeypatch.setattr(
             ops_mod,

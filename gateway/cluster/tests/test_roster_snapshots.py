@@ -22,7 +22,7 @@ from gateway.app import app
 from gateway.cluster import snapshots
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.snapshots import Snapshot
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 
 _ROW = tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)

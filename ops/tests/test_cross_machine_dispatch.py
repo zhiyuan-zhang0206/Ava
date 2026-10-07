@@ -24,7 +24,7 @@ import psycopg
 import pytest
 
 from base.db import Database
-from ops.cluster_rpc import ClusterOpFailed, dispatch_to_machine
+from ops.cluster.rpc import ClusterOpFailed, dispatch_to_machine
 
 
 class _OpsStub:

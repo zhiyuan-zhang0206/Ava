@@ -427,7 +427,7 @@ def test_exec_child_with_hidden_environment_is_never_excluded(
     hidden.info = {
         "pid": 987654,
         "status": psutil.STATUS_RUNNING,
-        "cmdline": ["python", "-m", "agent.exec_child"],
+        "cmdline": ["python", "-m", "agent.execution.child"],
     }
     hidden.environ.side_effect = psutil.AccessDenied()
     monkeypatch.setattr(exec_request_evidence.psutil, "process_iter", _only_process(hidden))
@@ -455,7 +455,7 @@ def test_exec_child_birth_window_bounds_a_scrubbed_root(
     scrubbed.info = {
         "pid": 987655,
         "status": psutil.STATUS_RUNNING,
-        "cmdline": ["python", "-I", "-B", "-X", "utf8", "-m", "agent.exec_child"],
+        "cmdline": ["python", "-I", "-B", "-X", "utf8", "-m", "agent.execution.child"],
     }
     scrubbed.environ.return_value = {}
     scrubbed.create_time.return_value = request.stat().st_mtime + birth_offset

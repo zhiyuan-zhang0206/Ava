@@ -10,7 +10,7 @@
 
 from typing import NoReturn
 
-from ava import agent_identity
+from ava.sdk_surface import agent_identity
 from ava.sdk_surface.validation import coerce_str
 from base.agents.lifecycle import AgentImpersonation
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
@@ -45,7 +45,7 @@ def accept(request_id: str, start_message: str) -> NoReturn:
     relay cannot start, the acceptance rolls back loudly (the lease becomes
     rejected with the reason) and you keep running as native.
     """
-    from ava._settings import bus, database
+    from ava.sdk_surface.settings import bus, database
     from base.agents.impersonation import accept as accept_request
 
     incarnation = _native_incarnation()
@@ -62,7 +62,7 @@ def accept(request_id: str, start_message: str) -> NoReturn:
 
 def reject(request_id: str, reason: str = "") -> None:
     """Decline a takeover request; your current execution continues."""
-    from ava._settings import bus, database
+    from ava.sdk_surface.settings import bus, database
     from base.agents.impersonation import reject as reject_request
 
     incarnation = _native_incarnation()

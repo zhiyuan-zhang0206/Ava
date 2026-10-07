@@ -93,7 +93,7 @@ def core_metrics() -> list[MetricSpec]:
             description=(
                 "LLM call cost per minute — unwrap of the cost_usd field every "
                 "llm_usage payload carries (task #2626; the producer computes it "
-                "from one versioned-catalog quote in base/lm/pricing.py, unpriced "
+                "from one versioned-catalog quote in base/lm/pricing/__init__.py, unpriced "
                 "models carry no cost_usd and are skipped); 30-minute buckets "
                 "normalized to per-minute USD (bucket sum / 30). "
                 "event_name='llm_usage', category='telemetry'."

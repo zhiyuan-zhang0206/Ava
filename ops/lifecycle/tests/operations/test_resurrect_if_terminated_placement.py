@@ -10,7 +10,8 @@ from base.agents import ResurrectResult
 from base.agents.messages.inbound import InboundKind
 from base.db import Database
 from base.events.live.bus import EventBus
-from ops import cluster_rpc, lifecycle
+from ops import lifecycle
+from ops.cluster import rpc as cluster_rpc
 from ops.lifecycle import launch
 from ops.lifecycle.tests.test_operations import _db
 from ops.lifecycle.tests.test_operations import (
@@ -192,7 +193,7 @@ class TestResurrectIfTerminatedPlacement:
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, event_bus: EventBus
     ) -> None:
         from base.agents import AgentStatus
-        from ops.cluster_rpc import ClusterOpUnreachable
+        from ops.cluster.rpc import ClusterOpUnreachable
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "wsl")
@@ -215,7 +216,7 @@ class TestResurrectIfTerminatedPlacement:
         self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         from base.agents import AgentStatus
-        from ops.cluster_rpc import ClusterOpFailed
+        from ops.cluster.rpc import ClusterOpFailed
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "wsl")

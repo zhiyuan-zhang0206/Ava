@@ -335,7 +335,7 @@ def add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) 
     does not work" silent degrade.
 
     Public for a boot seam that composes its own sinks instead of calling an
-    init_*: the exec child (`agent/exec_child.py`) pairs
+    init_*: the exec child (`agent/execution/child.py`) pairs
     `init_subprocess_logger` with this, best-effort, so a pipeline outage
     degrades it to the file sink rather than stopping agent code.
 

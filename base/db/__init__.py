@@ -378,7 +378,7 @@ def insert_inbound_message_in_transaction(
     )
     new_id = fetch_one(cur, "insert inbound message")[0]
     if event_type is not None:
-        from base.agents.impersonation_manifest import record_central_event
+        from base.agents.impersonation.manifest import record_central_event
         from base.telemetry.audit_events import prepare_event_log, record_audit
 
         prepared_event = prepare_event_log(
@@ -408,7 +408,7 @@ def insert_spawn_prompt_in_transaction(
     prompts have no multimodal payload or transport provenance; caller identity
     still follows the ordinary inbound rules.
     """
-    from base.agents.impersonation_manifest import record_central_event
+    from base.agents.impersonation.manifest import record_central_event
     from base.agents.messages.caller_identity import caller_payload
     from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
     from base.telemetry.audit_events import prepare_event_log, record_audit
@@ -496,7 +496,7 @@ def insert_restart_completed_inbound(
     restart_completed_row = cur.fetchone()
     if restart_completed_row is None:
         raise RuntimeError("restart-completed inbound INSERT returned no id")
-    from base.agents.impersonation_manifest import record_central_event
+    from base.agents.impersonation.manifest import record_central_event
     from base.telemetry.audit_events import prepare_event_log, record_audit
 
     prepared_event = prepare_event_log(

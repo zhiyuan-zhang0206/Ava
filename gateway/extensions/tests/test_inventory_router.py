@@ -24,7 +24,7 @@ from base.config import settings
 from gateway.app import app
 from gateway.cluster.snapshots import Snapshot
 from gateway.extensions import inventory as inventory_router
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
 
 

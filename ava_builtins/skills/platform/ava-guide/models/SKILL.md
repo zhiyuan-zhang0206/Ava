@@ -40,7 +40,7 @@ copied from an old doc or an old spawn; list the current roster first:
 - **Source of truth (repo-side)** — `base/lm/catalog.py`'s `ModelCatalog.models` and
   the derived `supported_models` (provider → spawnable ids). A model is
   selectable iff `spawnable=True`. Chat prices live in the provider plugin's
-  `PriceRates` and are mirrored in `base/lm/pricing_catalog_archive.json` —
+  `PriceRates` and are mirrored in `base/lm/pricing/pricing_catalog_archive.json` —
   the reviewed ledger the runtime reads (catalog-only services such as
   embeddings price from the archive alone). The frontend picker and
   `/api/models` both derive from this registry, so the registry is the only

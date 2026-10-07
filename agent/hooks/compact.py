@@ -15,7 +15,7 @@ Exports:
   live in `agent/hooks/compact_events.py` (file line budget).
 
 Redesign plan for forced / command / spontaneous compact:
-`agent/compaction-redesign.md`.
+`future/agent/compaction-redesign.md`.
 
 Compaction replaces the whole history with `[system prompt, summary]` — the
 summary is the complete memory, nothing raw is carried over. No tail of recent

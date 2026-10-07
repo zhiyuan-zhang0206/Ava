@@ -12,8 +12,8 @@ A provider plugin makes one vendor's models nameable. It never decides which
 model an agent runs on. Model choice happens at spawn; no provider hook observes
 a request and swaps models after a failure or according to cost or load. This is
 the standing non-goal in
-[`docs/conventions/non-goals.md`](../../docs/conventions/non-goals.md) and
-[`docs/decisions/2026-07-29-no-runtime-model-routing.md`](../../docs/decisions/2026-07-29-no-runtime-model-routing.md).
+[`docs/conventions/non-goals.md`](../../../docs/conventions/non-goals.md) and
+[`docs/decisions/2026-07-29-no-runtime-model-routing.md`](../../../docs/decisions/2026-07-29-no-runtime-model-routing.md).
 
 The extension surface enforces that boundary:
 
@@ -147,7 +147,7 @@ the declared instant without waiting for another bot run.
 
 The plugin/core criterion is that deployment-physics extension points stay in
 core while removable vendor bindings live in plugins
-([`docs/decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md`](../../docs/decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md)).
+([`docs/decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md`](../../../docs/decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md)).
 A binding's lifetime follows a vendor endpoint and the deployment's decision to
 enable it; the registry, loader, normalization, and fail-fast invariants remain
 useful regardless of which providers are installed.

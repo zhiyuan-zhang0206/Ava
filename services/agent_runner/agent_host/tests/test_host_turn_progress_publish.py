@@ -23,7 +23,7 @@ class _FakeAdmission:
     """Minimal stand-in for `AgentHost.admission` — the beat loop's long-wait scan.
 
     These tests drive `_beat_forever` with a host double; the real host always
-    carries a `TurnAdmission` (`services/agent_runner/agent_host/admission.py`), so the double
+    carries a `TurnAdmission` (`services/agent_runner/agent_host/scheduling/admission.py`), so the double
     carries the same empty-shaped surface.
     """
 

@@ -44,7 +44,7 @@ from psycopg_pool import ConnectionPool
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
-from ops import cluster_rpc as _cluster_rpc
+from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import (
     BillingBalanceReport,
     BillingHaltedAliveRow,

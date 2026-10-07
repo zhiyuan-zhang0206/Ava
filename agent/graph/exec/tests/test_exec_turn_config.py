@@ -59,7 +59,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     code = (
         "import json, os\n"
         "from base.config import settings\n"
-        "from ava._settings import plugins\n"
+        "from ava.sdk_surface.settings import plugins\n"
         "print('CONFIG=' + json.dumps([settings.lm.llm_model, "
         "settings.lm.llm_stream_ttft_timeout_seconds, "
         "plugins.exec_config_probe.exec_probe_marker, "

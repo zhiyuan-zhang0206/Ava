@@ -8,7 +8,7 @@ tags: []
 # Agent-Ops — Agent-Runner Inbound HTTP Ops Service
 
 ## What is it
-The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway resolves the local address from the `machines` table and directly connects to `POST /ops`; the daemon calls the ops op clusters (`ops.cluster` / `ops.host_config` / `ops.inventory` / `ops.lifecycle` / `ops.uploads`) in-process to execute cluster ops operations, returning results synchronously in the HTTP response. Compact request/response, non-streaming, no queue / no SSE / no reconnection.
+The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway resolves the local address from the `machines` table and directly connects to `POST /ops`; the daemon calls the ops op clusters (`ops.cluster.operations` / `ops.host_config` / `ops.inventory` / `ops.lifecycle` / `ops.uploads`) in-process to execute cluster ops operations, returning results synchronously in the HTTP response. Compact request/response, non-streaming, no queue / no SSE / no reconnection.
 
 **Role affiliation**: agent-runner side (gateway does not run; instead it runs `gateway.ops_*` in-process) — `ServiceSpec.capabilities=_AGENT_RUNNER` in `ops/spec.py`.
 
@@ -29,7 +29,7 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 - **Singleton**: pidfile ensures only one instance per agent-runner; before start, `assert_schema_current` (refuses service if DB is ahead).
 - **Boot self-registration** (`_register_boot`): once the health server is up, the daemon calls `base.cluster.machines.register_self(url=unit_dial_url(machine_role()))` for its own unit — clearing any `stopped_at` latch and restamping `up_since_at`. The `machine_units` row is a liveness record, so the process whose liveness it stands for is the one that writes it; `ava start` alone could not, because a host also comes back via an OS autostart, a watchdog respawn, or a rollout's restart leg. Deliberately **non-fatal** (unlike `assert_schema_current`): a stale row is not incorrect dispatch, and exiting would hand the watchdog a respawn loop that takes the host dark for the gateway. `unit_dial_url` is shared with `ava start`, so the two writers cannot advertise different addresses for one unit.
 
-`ops.cluster_pause` uses `ops.agent_pause` for the shared native drain;
+`ops.cluster.pause` uses `ops.agent_pause` for the shared native drain;
 `ops.agent_pause.probe` checks actual daemon identity and admitted work.
 Dependency APIs remain available until existing native actions finish.
 Local service teardown closes new API admission only after the drain; normal

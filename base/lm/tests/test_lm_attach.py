@@ -10,14 +10,14 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from PIL import Image
 
-from base.lm.attach import (
-    AttachEntry,
-    pack_attachments,
-)
-from base.lm.attach_constants import (
+from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_FILES_PER_TURN,
     ATTACH_MAX_TOTAL_BYTES,
+)
+from base.lm.attach.packing import (
+    AttachEntry,
+    pack_attachments,
 )
 from base.lm.factory import media_types_for_model
 from base.lm.plugin_providers import model_catalog
@@ -221,7 +221,7 @@ def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
     monkeypatch: pytest.MonkeyPatch,
     deepseek_vision_model: str,
 ) -> None:
-    from base.lm import attach
+    from base.lm.attach import packing as attach
 
     monkeypatch.setattr(attach, "ATTACH_MAX_FILES_PER_TURN", 15)
     entries: list[AttachEntry] = []

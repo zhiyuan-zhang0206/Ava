@@ -56,7 +56,7 @@ def signal_incomplete_event_logs(pool: ConnectionPool) -> int:
     seals (or ever, after a capture failure), and nothing else will say so.
     Re-emitted every pass while the fact holds.
     """
-    from base.agents.impersonation_event_signals import emit_incomplete_event_logs
+    from base.agents.impersonation.event_signals import emit_incomplete_event_logs
     from base.log import logger
 
     try:
@@ -86,7 +86,7 @@ def force_expire_impersonation(
     )
     from base.agents.impersonation.event_log import is_log_native
     from base.agents.impersonation.history import set_actor
-    from base.agents.impersonation_manifest import close_event_admission
+    from base.agents.impersonation.manifest import close_event_admission
     from base.log import logger
 
     with write_transaction(pool) as conn:

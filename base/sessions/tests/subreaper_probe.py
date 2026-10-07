@@ -21,7 +21,7 @@ def middle(root: Path) -> None:
         [
             sys.executable,
             "-m",
-            "base._reparent",
+            "base.native_process.reparent",
             str(root / "out"),
             str(root / "err"),
             "/bin/sleep",

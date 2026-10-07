@@ -68,7 +68,7 @@ jobs:
       - name: Reconcile official pricing
         env:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
-          ARCHIVE: ${{ steps.candidate.outputs.path }}/base/lm/pricing_catalog_archive.json
+          ARCHIVE: ${{ steps.candidate.outputs.path }}/base/lm/pricing/pricing_catalog_archive.json
         run: |
           if [ ! -f "$ARCHIVE" ] || [ -L "$ARCHIVE" ]; then
             echo "Candidate archive must be a regular, non-symlink file" >&2
@@ -98,7 +98,7 @@ jobs:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
           if git -C "$CANDIDATE" diff --quiet -- \
-            base/lm/pricing_catalog_archive.json \
+            base/lm/pricing/pricing_catalog_archive.json \
             ':(glob)ava_builtins/plugins/lm_*/provider.py'; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
@@ -114,7 +114,7 @@ jobs:
           git -C "$CANDIDATE" config user.name 'ava-pricing-bot'
           git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C "$CANDIDATE" add \
-            base/lm/pricing_catalog_archive.json \
+            base/lm/pricing/pricing_catalog_archive.json \
             ':(glob)ava_builtins/plugins/lm_*/provider.py'
           git -C "$CANDIDATE" commit -m 'fix: update model pricing'
           git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
@@ -140,7 +140,7 @@ jobs:
           ## File tree
 
           ```text
-          base/lm/pricing_catalog_archive.json      (M when changed) ★ effective-dated rates and provenance
+          base/lm/pricing/pricing_catalog_archive.json      (M when changed) ★ effective-dated rates and provenance
           ava_builtins/plugins/lm_*/provider.py       (M when changed) ★ synchronized runtime PriceRates
           ```
 

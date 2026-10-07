@@ -1,4 +1,4 @@
-"""ava.agent_identity — the identity read off the bound context, and the owns_loop guard.
+"""ava.sdk_surface.agent_identity — the identity read off the bound context, and the owns_loop guard.
 
 The guard is the safety behavior the launched-script work added: a background
 script (owns_loop=False) must not drive the agent's turn loop, so the lifecycle
@@ -10,8 +10,7 @@ would silently reopen the watcher-compacts-its-own-agent bug) fails loudly.
 import pytest
 
 import ava
-from ava import agent_identity
-from ava.sdk_surface import process_context
+from ava.sdk_surface import agent_identity, process_context
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 

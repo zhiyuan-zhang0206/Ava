@@ -69,7 +69,7 @@ def help(
         if process_context.peek() is None:
             hidden_members = frozenset()
         else:
-            from ava.attachment_transport import own_media_gated_members
+            from ava.sdk_surface.attachment_transport import own_media_gated_members
 
             hidden_members = own_media_gated_members()
     render = _Render(compact_classes=compact_classes, hidden_members=hidden_members)

@@ -61,15 +61,15 @@ from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
-from services.agent_runner.agent_host.admission import TurnAdmission
-from services.agent_runner.agent_host.stall_guard import (
-    HostRestartRequiredError,
-    TurnStallTimeoutError,
-)
-from services.agent_runner.agent_host.turn_gates import (
+from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
+from services.agent_runner.agent_host.scheduling.turn_gates import (
     admission_waiting,
     database_waiting,
     raise_if_cancellation_pending,
+)
+from services.agent_runner.agent_host.stall_guard import (
+    HostRestartRequiredError,
+    TurnStallTimeoutError,
 )
 
 # The pattern one subscription covers: every agent's inbound channel. Kept

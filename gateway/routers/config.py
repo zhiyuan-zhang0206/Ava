@@ -45,8 +45,8 @@ from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
 from base.host.env import runtime_config
 from base.host.env.audit import check_env_integrity
-from ops import cluster_rpc as _cluster_rpc
 from ops import host_config
+from ops.cluster import rpc as _cluster_rpc
 from ops.host_config import SENSITIVE_MASK
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
 

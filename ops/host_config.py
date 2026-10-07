@@ -2,7 +2,7 @@
 
 Read this machine's host-scope config fields (sensitive values masked) and apply
 a validated all-or-nothing override write. One of the op clusters beside
-`ops.lifecycle`, `ops.cluster`, `ops.inventory` and `ops.uploads`; each cluster
+`ops.lifecycle`, `ops.cluster.operations`, `ops.inventory` and `ops.uploads`; each cluster
 is self-contained.
 
 Dispatched by the agent-runner ops server (`services/agent_runner/agent_ops/daemon.py`) and

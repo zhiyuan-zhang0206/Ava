@@ -13,7 +13,7 @@ pty-sessions service (`services/agent_runner/pty_sessions`, reached through
 The agent launch and the reap / status consumers use this surface:
 
 - a "session" is a named process launched **double-forked** (via
-  `base._reparent`) so it reparents to init immediately — a long-lived spawner
+  `base.native_process.reparent`) so it reparents to init immediately — a long-lived spawner
   (gateway / ops daemon) never accumulates it as a zombie, and no PTY is
   allocated;
 - its identity (pid + start-time, to defeat pid recycling) is recorded as JSON
@@ -151,7 +151,7 @@ def new_session(
     to the session log; `stderr_append`, when given, splits stderr to that file
     (the agent stderr log).
 
-    The child is double-forked via `base._reparent` so it reparents to init and
+    The child is double-forked via `base.native_process.reparent` so it reparents to init and
     the spawner accretes no zombie. An existing live session of the same name is
     left untouched (idempotent), matching the has-session guard at the call site.
 
@@ -173,7 +173,14 @@ def new_session(
     # forking the real child). Waiting reaps the helper — the spawner's ONLY
     # direct child — so no zombie is left; the real child is already reparented
     # to init. The helper prints the child's pid to stdout.
-    helper = [sys.executable, "-m", "base._reparent", str(stdout_path), str(stderr_path), *argv]
+    helper = [
+        sys.executable,
+        "-m",
+        "base.native_process.reparent",
+        str(stdout_path),
+        str(stderr_path),
+        *argv,
+    ]
     result = subprocess.run(  # noqa: S603 — argv composed from repo-internal literals + int agent_id
         helper,
         cwd=str(cwd),
@@ -265,7 +272,7 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
 def _pgid_of(proc: psutil.Process) -> int | None:
     """The process group the session process lives in, or None when it is gone.
 
-    ``base._reparent`` setsid()s the helper before forking, so the launched
+    ``base.native_process.reparent`` setsid()s the helper before forking, so the launched
     process — and every descendant that does not deliberately leave the group —
     shares one pgid (the helper's pid; the helper itself exits at once).
     psutil has no pgid accessor, so this reads it via ``os.getpgid``."""
@@ -316,7 +323,7 @@ def _group_empty(pgid: int | None) -> bool:
 def _terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> bool:
     """Terminate `proc` and its whole process group.
 
-    The session process runs in its own process group (``base._reparent``
+    The session process runs in its own process group (``base.native_process.reparent``
     setsid()s the helper; the launched process and every descendant that does
     not deliberately leave the group share that pgid). Signaling the GROUP —
     SIGTERM to all members, wait, SIGKILL to all members — closes the window

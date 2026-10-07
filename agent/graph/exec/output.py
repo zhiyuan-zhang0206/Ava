@@ -29,7 +29,7 @@ from pathlib import Path
 from langchain_core.messages import BaseMessage
 
 import ava
-import ava.agent_identity
+import ava.sdk_surface.agent_identity
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
 from base.config import settings
@@ -58,7 +58,7 @@ _OVERFLOW_KEEP = 20
 
 
 def _overflow_dir() -> Path:
-    return workspace_dir(ava.agent_identity.require_agent_id()) / _OVERFLOW_DIRNAME
+    return workspace_dir(ava.sdk_surface.agent_identity.require_agent_id()) / _OVERFLOW_DIRNAME
 
 
 def _marker(

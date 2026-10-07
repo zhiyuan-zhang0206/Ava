@@ -247,7 +247,7 @@ repos:
       # Ban raw CJK characters anywhere in the repo — English-only source
       # (user ruling 2026-08-27, tightening English-primary). Exemption: i18n /
       # locale copy only (<dir>/messages/**, */locales/*, *.po, and
-      # base/telemetry/alerts_copy.py — the IM alert-copy locale module). Skill bodies,
+      # base/telemetry/alerts/copy.py — the IM alert-copy locale module). Skill bodies,
       # code comments, docs, tests, fixtures, demos all fail on raw CJK;
       # functional CJK data is written as \uXXXX escapes (runtime-identical).
       # Scope: every tracked file; a commit judges the changed ones (--only), `--all-files` all of

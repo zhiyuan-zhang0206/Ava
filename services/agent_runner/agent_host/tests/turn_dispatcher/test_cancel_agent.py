@@ -9,12 +9,12 @@ import pytest
 
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import dispatcher
-from services.agent_runner.agent_host.admission import TurnAdmission
 from services.agent_runner.agent_host.dispatcher import (
     InboundWakeDispatcher,
     TurnScheduler,
     agent_id_from_channel,
 )
+from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
 from services.agent_runner.agent_host.tests.test_turn_dispatcher import (
     _FRESH,
     _STALE,

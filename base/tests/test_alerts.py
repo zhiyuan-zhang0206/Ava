@@ -1,8 +1,8 @@
 """base.telemetry.alerts IM-copy contract tests (Task #1261, user ruling 2026-08-13).
 
 Locks the alert-push governance contract: the user-visible alert templates
-live in base/telemetry/alerts_copy.py (no head/trigger/jump-link literals in
-base/telemetry/alerts.py; services/entrypoints/im_bridge/copy.py re-exports them), the template
+live in base/telemetry/alerts/copy.py (no head/trigger/jump-link literals in
+base/telemetry/alerts/__init__.py; services/entrypoints/im_bridge/copy.py re-exports them), the template
 language follows user_settings ``display.language`` ("zh" | "en", default
 "zh"), and only template/framework copy is translated — alert
 labels/annotations data passes through verbatim.
@@ -21,8 +21,13 @@ from psycopg.types.json import Jsonb
 import base.telemetry.alerts as base_alerts
 from base.config import settings
 from base.config.domains.general import GeneralSettings
-from base.telemetry import alerts_copy as copy
-from base.telemetry.alerts import display_language, format_local, frontend_base_url, notify_text
+from base.telemetry.alerts import (
+    copy,
+    display_language,
+    format_local,
+    frontend_base_url,
+    notify_text,
+)
 
 
 def _alert(*, status: str = "firing", severity: str = "error") -> dict[str, Any]:
@@ -48,14 +53,14 @@ def _head(lang: str, *, resolved: bool, severity: str = "ERROR") -> str:
 
 def test_alert_format_literals_not_hardcoded_in_alerts_module() -> None:
     """Governance (user ruling 2026-08-08): user-visible IM copy lives in
-    base/telemetry/alerts_copy.py — the alert head literals must not creep back into
-    base/telemetry/alerts.py."""
+    base/telemetry/alerts/copy.py — the alert head literals must not creep back into
+    base/telemetry/alerts/__init__.py."""
     src = Path(base_alerts.__file__).read_text(encoding="utf-8")
     for literal in (
-        "⚠️ ALERT",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts.py)
-        "✅ RESOLVED",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts.py)
-        "⚠️ \u544a\u8b66",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts.py)
-        "✅ \u5df2\u6062\u590d",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts.py)
+        "⚠️ ALERT",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts/__init__.py)
+        "✅ RESOLVED",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts/__init__.py)
+        "⚠️ \u544a\u8b66",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts/__init__.py)
+        "✅ \u5df2\u6062\u590d",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts/__init__.py)
     ):
         assert literal not in src
 

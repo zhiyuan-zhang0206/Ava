@@ -92,7 +92,7 @@ E_MODULES: dict[str, tuple[str, str, bool]] = {
         False,
     ),
     "base.cluster": ("identity", "cluster record and home identity at the package door", False),
-    "ava.agent_identity": (
+    "ava.sdk_surface.agent_identity": (
         "identity",
         "which agent am I (process-global agent id and actor)",
         False,

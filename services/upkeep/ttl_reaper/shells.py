@@ -55,7 +55,7 @@ from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
-from ops import cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from services.upkeep.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
 
 _log = logging.getLogger(__name__)
