@@ -23,6 +23,7 @@ tags:
 ## Notes
 
 - Usage events keep price snapshots at the time of use so cost accounting remains stable when catalog rates later change.
+- Cache-write counts (`cache_write_5m`, `cache_write_1h`) and declared rate snapshots (`price_write_5m`, `price_write_1h`) preserve TTL-specific creation costs. Writes are included in `in_total`, so they are deducted from ordinary input, priced once, and also recorded as additive billing-span attributes. Actual served Standard/Fast identity selects all rates together. Existing persisted cost snapshots are not rewritten.
 - Calls without provider usage metadata emit nothing, except raw-field callers that intentionally account for a completed zero-token provider response.
 - For a requested Fast ID, `usage_model()` reads the provider's actual service
   receipt before pricing: OpenAI `fast` / legacy `priority` and Claude `fast`

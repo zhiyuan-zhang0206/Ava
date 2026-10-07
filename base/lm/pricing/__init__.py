@@ -7,7 +7,7 @@ services such as embeddings continue to price directly from the archive. Both
 sources use the same parser and deterministic selection path.
 ``pricing_catalog.json`` is an empty placeholder that runtime never loads;
 ``load_archive`` reads the archive.
-``quote`` returns one selected rate triple with its cost atomically, and
+``quote`` returns the selected rates with their cost atomically, and
 ``cost_usd`` remains the compatibility surface for existing readers. Schema v2
 requires each catalog entry to identify its vendor; the cross-line contract
 lives in ``pricing_catalog_schema.md``.
@@ -20,7 +20,8 @@ Using a 2-tuple (in, out) computes the entire `in` at cache-miss rate
 and overestimates total cost by 30-50x — history: the same bug in
 a batch run once reported $56.38 for a 30-case
 SWE-bench, actual was $0.8; fix in PR #322 / commit 5c85b74. So the
-pricing fact is a 3-tuple `(cache_miss, cache_hit, out)` USD/M.
+legacy price tuple is `(cache_miss, cache_hit, out)` USD/M; optional cache-write
+rates separately price creation by TTL without changing that tuple.
 
 Every model entry carries its own official source URL and verification date.
 Providers with machine-readable pricing can be reconciled by adapters; providers
@@ -73,7 +74,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 from types import MappingProxyType
@@ -89,11 +90,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Rates:
-    """Cache-miss input, cache-hit input, and output USD per 1M tokens."""
+    """Input, output, and optional cache-write USD per 1M tokens."""
 
     cache_miss: float
     cache_hit: float
     output: float
+    cache_write_5m: float | None = field(default=None, kw_only=True)
+    cache_write_1h: float | None = field(default=None, kw_only=True)
 
     def as_tuple(self) -> tuple[float, float, float]:
         """Compatibility shape used by usage-event price snapshots."""
@@ -193,8 +196,16 @@ def _clock(value: str) -> time:
 
 
 def _rates(raw: dict[str, Any]) -> Rates:
-    values = Rates(float(raw["input"]), float(raw["cache_read"]), float(raw["output"]))
-    if any(not math.isfinite(value) or value < 0 for value in values.as_tuple()):
+    writes = {
+        key: float(raw[key]) if raw.get(key) is not None else None
+        for key in ("cache_write_5m", "cache_write_1h")
+    }
+    values = Rates(float(raw["input"]), float(raw["cache_read"]), float(raw["output"]), **writes)
+    if any(
+        not math.isfinite(value) or value < 0
+        for value in (*values.as_tuple(), *writes.values())
+        if value is not None
+    ):
         raise RuntimeError(f"pricing catalog rates must be finite and non-negative: {raw!r}")
     return values
 
@@ -427,6 +438,8 @@ def plugin_model_price(
     source_checked_at: str,
     vendor: str | None = None,
     periods: tuple[Any, ...] = (),
+    cache_write_5m: float | None = None,
+    cache_write_1h: float | None = None,
     plugin: str = "<unknown>",
 ) -> ModelPrice:
     """Validate and parse a plugin provider's per-model price declaration.
@@ -450,8 +463,14 @@ def plugin_model_price(
             f"provider plugin {plugin!r}: source_checked_at must be YYYY-MM-DD, "
             f"got {source_checked_at!r}"
         )
-    for name, value in (("cache_miss", cache_miss), ("cache_hit", cache_hit), ("output", output)):
-        if not math.isfinite(value) or value < 0:
+    for name, value in (
+        ("cache_miss", cache_miss),
+        ("cache_hit", cache_hit),
+        ("output", output),
+        ("cache_write_5m", cache_write_5m),
+        ("cache_write_1h", cache_write_1h),
+    ):
+        if value is not None and (not math.isfinite(value) or value < 0):
             raise ValueError(
                 f"provider plugin {plugin!r}: {model!r} price {name} must be finite and non-negative"
             )
@@ -468,6 +487,8 @@ def plugin_model_price(
                             "input": tier.cache_miss,
                             "cache_read": tier.cache_hit,
                             "output": tier.output,
+                            "cache_write_5m": getattr(tier, "cache_write_5m", None),
+                            "cache_write_1h": getattr(tier, "cache_write_1h", None),
                         },
                         "utc_daily_overrides": [
                             {
@@ -477,6 +498,8 @@ def plugin_model_price(
                                     "input": window.cache_miss,
                                     "cache_read": window.cache_hit,
                                     "output": window.output,
+                                    "cache_write_5m": getattr(window, "cache_write_5m", None),
+                                    "cache_write_1h": getattr(window, "cache_write_1h", None),
                                 },
                             }
                             for window in tier.windows
@@ -500,6 +523,8 @@ def plugin_model_price(
                             "input": cache_miss,
                             "cache_read": cache_hit,
                             "output": output,
+                            "cache_write_5m": cache_write_5m,
+                            "cache_write_1h": cache_write_1h,
                         },
                         "utc_daily_overrides": [],
                     }
@@ -630,8 +655,10 @@ def quote(
     tok_cached: int | None = None,
     *,
     at: datetime | None = None,
+    cache_write_5m: int = 0,
+    cache_write_1h: int = 0,
 ) -> CostQuote | None:
-    """Price one call and return the selected rates with the cost.
+    """Price one call, with cache reads/writes included in total input.
 
     When `tok_cached=None`, fall back to 0 (treats all as cache miss,
     overestimate but safe); for callers with only old `(in, out)`
@@ -640,16 +667,25 @@ def quote(
     if tok_in is None or tok_out is None:
         return None
     cache_read = 0 if tok_cached is None else tok_cached
-    if tok_in < 0 or tok_out < 0 or cache_read < 0 or cache_read > tok_in:
+    if (
+        min(tok_in, tok_out, cache_read, cache_write_5m, cache_write_1h) < 0
+        or cache_read + cache_write_5m + cache_write_1h > tok_in
+    ):
         raise ValueError("token counts must be non-negative and cached tokens cannot exceed input")
     selected = rates_at(model, at, tok_in)
     if selected is None:
         return None
-    cache_miss = tok_in - cache_read
+    if (cache_write_5m and selected.cache_write_5m is None) or (
+        cache_write_1h and selected.cache_write_1h is None
+    ):
+        return None
+    cache_miss = tok_in - cache_read - cache_write_5m - cache_write_1h
     cost = (
         cache_miss * selected.cache_miss
         + cache_read * selected.cache_hit
         + tok_out * selected.output
+        + cache_write_5m * (selected.cache_write_5m or 0)
+        + cache_write_1h * (selected.cache_write_1h or 0)
     ) / 1_000_000
     return CostQuote(cost_usd=cost, rates=selected)
 
@@ -661,6 +697,8 @@ def cost_usd(
     tok_cached: int | None = None,
     *,
     at: datetime | None = None,
+    cache_write_5m: int = 0,
+    cache_write_1h: int = 0,
 ) -> float | None:
     """Compatibility wrapper returning only ``quote(...).cost_usd``.
 
@@ -668,5 +706,13 @@ def cost_usd(
     optional keyword-only extension for deterministic historical/boundary
     pricing; omitting it selects the schedule at the current UTC instant.
     """
-    priced = quote(model, tok_in, tok_out, tok_cached, at=at)
+    priced = quote(
+        model,
+        tok_in,
+        tok_out,
+        tok_cached,
+        at=at,
+        cache_write_5m=cache_write_5m,
+        cache_write_1h=cache_write_1h,
+    )
     return priced.cost_usd if priced is not None else None
