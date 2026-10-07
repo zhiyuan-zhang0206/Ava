@@ -14,6 +14,7 @@ import argparse
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -165,6 +166,18 @@ def test_dispatch_invokes_per_subcommand_handler(
     assert "args" in captured
 
 
+def _stub_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    handler: Callable[[argparse.Namespace], int],
+) -> None:
+    """Use the real parser tree and replace only this entry-point test's dispatch."""
+    parser = build_parser()
+    leaf = next(item for item in _iter_leaf_parsers(parser) if item.prog == f"ava {command}")
+    leaf.set_defaults(func=handler)
+    monkeypatch.setattr(_main, "_build_parser", lambda: parser)
+
+
 def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI always constructs the full settings domain set."""
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
@@ -177,7 +190,7 @@ def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPat
     def _fake(_args: argparse.Namespace) -> int:
         return 0
 
-    monkeypatch.setattr(_host, "_h_status", _fake)
+    _stub_dispatch(monkeypatch, "status", _fake)
 
     assert _main.main(["status"]) == 0
     assert "AVA_PROCESS_PROFILE" not in os.environ
@@ -355,7 +368,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
         captured["args"] = args
         return 7
 
-    monkeypatch.setattr(_host, "_h_start", _fake)
+    _stub_dispatch(monkeypatch, "start", _fake)
     # `start` is the one verb with a pre-dispatch side effect (the settings-free
     # installed-home gate), which this test neutralizes — it asserts flag
     # forwarding, not bring-up behaviour.
@@ -440,7 +453,7 @@ def test_settings_load_failure_prints_env_template(
     def _boom(_args: argparse.Namespace) -> int:
         raise err
 
-    monkeypatch.setattr(_host, "_h_status", _boom)
+    _stub_dispatch(monkeypatch, "status", _boom)
     rc = _main.main(["status"])
     captured = capsys.readouterr()
     assert rc == 1
