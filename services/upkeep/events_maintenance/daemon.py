@@ -87,7 +87,7 @@ from services.upkeep.events_maintenance.blob_vacuum import (
 )
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.observed_metrics import recover_observations
-from services.upkeep.events_maintenance.resolution import run_resolution_slice
+from services.upkeep.events_maintenance.resolution import AutoDismissCadence, run_resolution_slice
 from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.upkeep.events_maintenance.token_totals import fold_totals
@@ -199,11 +199,14 @@ def _run_maintenance(
 
 
 def _run_resolution(
-    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+    pool: ConnectionPool,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
+    cadence: AutoDismissCadence,
 ) -> None:
     """Run the resolution slice while discarding its test-facing summary."""
 
-    run_resolution_slice(pool, config)
+    run_resolution_slice(pool, config, cadence=cadence)
     progress.beat()
     progress.mark_success()
 
@@ -347,6 +350,7 @@ async def _resolution_loop(
     configured interval; schema drift exits for watchdog recovery.
     """
 
+    cadence = AutoDismissCadence()
     interval = config.events_resolution_interval_seconds
     _log.info(
         "[events-maintenance] resolution loop started, pid=%s, interval=%ds",
@@ -359,7 +363,7 @@ async def _resolution_loop(
                 await _maintenance_with_liveness(
                     pool,
                     progress,
-                    lambda target_pool: _run_resolution(target_pool, progress, config),
+                    lambda target_pool: _run_resolution(target_pool, progress, config, cadence),
                 )
         except asyncio.CancelledError:
             raise
