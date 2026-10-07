@@ -6,12 +6,17 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
+import psycopg
 import pytest
+from fastapi.testclient import TestClient
 
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import UploadDeliveryConflictError
+from base.db import Database
+from base.events.live.bus import EventBus
 from gateway.app import app
 from gateway.tests.test_upload_delivery_recovery import post, proof_for, request_for
 from gateway.tests.test_upload_delivery_recovery import uploaded_agent as uploaded_agent
@@ -20,19 +25,22 @@ from gateway.upload_delivery import worker
 
 @pytest.mark.parametrize("stage", ["before-link", "after-link"])
 def test_hard_death_native_temp_not_double_charged_or_cleaned(
-    uploaded_agent, db_conn, monkeypatch, stage
+    uploaded_agent: tuple[TestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
 ):
     client, agent = uploaded_agent
     original = storage.publish
 
-    def refuse(*_args):
+    def refuse(*_args: Any):
         raise OSError("source publication not started")
 
     monkeypatch.setattr(storage, "publish", refuse)
     assert post(client, agent).status_code == 500
-    manifest = source.Manifest.model_validate(
-        db_conn.execute("SELECT manifest FROM upload_delivery_batches").fetchone()[0]
-    )
+    row = db_conn.execute("SELECT manifest FROM upload_delivery_batches").fetchone()
+    assert row is not None
+    manifest = source.Manifest.model_validate(row[0])
     directory = source.agent_upload_dir(agent, create=False).resolve()
     final = storage.object_path(directory, manifest, manifest.objects[0])
     script = """import os, sys
@@ -60,7 +68,9 @@ private_storage.create_private_bytes(Path(sys.argv[1]), b'bytes')
     assert temps[0].exists()  # No orphan cleanup or inferred writer-dead takeover.
 
 
-def test_hold_is_not_automatically_unsealed_by_late_copy_proof(uploaded_agent, db_conn):
+def test_hold_is_not_automatically_unsealed_by_late_copy_proof(
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+):
     client, agent = uploaded_agent
     request = request_for(app.state.db_pool, post(client, agent).json()["batch_id"])
     source.record_failure(
@@ -77,7 +87,9 @@ def test_hold_is_not_automatically_unsealed_by_late_copy_proof(uploaded_agent, d
 @pytest.mark.parametrize(
     "directory", ["relative", "/elsewhere", "/Downloads/AvaAgent-1/.delivered-v1/wrong"]
 )
-def test_unusable_native_directory_never_accepts_inbound(uploaded_agent, db_conn, directory):
+def test_unusable_native_directory_never_accepts_inbound(
+    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any], directory: str
+):
     from pydantic import ValidationError
 
     client, agent = uploaded_agent
@@ -92,7 +104,9 @@ def test_unusable_native_directory_never_accepts_inbound(uploaded_agent, db_conn
 
 
 @pytest.mark.asyncio
-async def test_shutdown_drains_native_future_after_cancelled_http_wait(uploaded_agent):
+async def test_shutdown_drains_native_future_after_cancelled_http_wait(
+    uploaded_agent: tuple[TestClient, int],
+):
     recovery = worker.UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
     entered, finish = threading.Event(), threading.Event()
 
@@ -121,7 +135,7 @@ async def test_shutdown_drains_native_future_after_cancelled_http_wait(uploaded_
 
 @pytest.mark.asyncio
 async def test_wake_round_rotates_and_one_failure_does_not_starve_later_pending(
-    uploaded_agent, monkeypatch
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
     _client, agent = uploaded_agent
     for ordinal in range(40):
@@ -137,9 +151,9 @@ async def test_wake_round_rotates_and_one_failure_does_not_starve_later_pending(
         source.complete(app.state.db_pool, request, proof_for(request))
     ordered = source.pending_wakes(app.state.db_pool, "", 100)
     first_iid = ordered[0][2]
-    reached = set()
+    reached: set[int] = set()
 
-    def wake(_db, _bus, _agent, iid):
+    def wake(_db: Database, _bus: EventBus, _agent: int, iid: str):
         reached.add(int(iid))
         if int(iid) == first_iid:
             raise RuntimeError("first target unavailable")
@@ -155,12 +169,14 @@ async def test_wake_round_rotates_and_one_failure_does_not_starve_later_pending(
 
 
 @pytest.mark.asyncio
-async def test_business_pause_skips_new_copy_and_db_round(uploaded_agent, monkeypatch):
+async def test_business_pause_skips_new_copy_and_db_round(
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
+):
     client, agent = uploaded_agent
     request = request_for(app.state.db_pool, post(client, agent).json()["batch_id"])
     monkeypatch.setattr(worker, "business_paused", lambda: True)
 
-    def forbidden(*_args):
+    def forbidden(*_args: Any):
         raise AssertionError("paused source must not inspect/accept pending work")
 
     monkeypatch.setattr(source, "validate_pending", forbidden)
@@ -171,7 +187,9 @@ async def test_business_pause_skips_new_copy_and_db_round(uploaded_agent, monkey
 
 
 @pytest.mark.asyncio
-async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(uploaded_agent):
+async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(
+    uploaded_agent: tuple[TestClient, int],
+):
     recovery = worker.UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
     entered, finish = threading.Event(), threading.Event()
 
@@ -200,7 +218,7 @@ async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(uploade
 
 
 def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
-    db_conn, tmp_path, monkeypatch
+    db_conn: psycopg.Connection[Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import time
 
