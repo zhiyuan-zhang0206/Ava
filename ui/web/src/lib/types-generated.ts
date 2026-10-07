@@ -3419,7 +3419,7 @@ export interface paths {
          *     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
          *     null is rejected — reminders cannot be disabled). Any write resets the
          *     reminder counters, same as the SDK update path. An owner reassignment sends
-         *     the SDK-equivalent task system notes after the database write commits.
+         *     the SDK-equivalent task system notes in the same database transaction.
          *
          *     The system root task is immutable: any PATCH targeting it is rejected with
          *     422 (mirrors the SDK update() guard), so the task-tree anchor can never be

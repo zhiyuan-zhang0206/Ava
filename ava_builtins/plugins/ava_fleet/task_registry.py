@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING
 
 import ava
 import ava.agents
 import ava.sdk_surface.agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-from base.agents.tasks.owner_notifications import owner_change_notifications
+from base.agents.tasks.owner_notifications import TaskOwnerNotification, owner_change_notifications
 from base.agents.tasks.reparent import resolve_reparent
 from base.agents.tasks.rules import is_closed, open_title_holder
 from base.agents.tasks.timestamps import render_task_timestamps
@@ -258,17 +258,21 @@ def create(
             priority,
             actor,
         )
+        note_events = _queue_owner_change(
+            cur,
+            task.id,
+            title,
+            None,
+            effective_owner,
+            actor,
+            description=description,
+        )
     from base import telemetry  # deferred (task #3816)
 
     telemetry.emit_prepared(created_event)
 
-    # Notify the assigned owner when it differs from the creator — same
-    # post-transaction pattern as update() to avoid waking an agent inside a
-    # transaction. The new owner is told even when terminated (the system-note
-    # delivery auto-resurrects it), so an assigned task never strands on a dead
-    # agent.
-    if owner is not None and owner != actor:
-        _notify_owner_change(task.id, title, None, owner, actor, description=description)
+    for event in note_events:
+        telemetry.emit_prepared(event)
 
     # Live-refresh every open task board (fleet-wide invalidate + refetch).
     from base.events.live import announce, bus  # deferred (task #3816)
@@ -429,6 +433,17 @@ def update(
         )
         if parent_id is not _UNSET:
             changes.append("parent → root" if parent_id is None else f"parent → #{parent_id}")
+        note_events = _queue_after_update(
+            cur,
+            task_id,
+            title if title is not None else current_title,
+            old_owner,
+            new_owner,
+            actor,
+            changes,
+            owner_changed=_owner_actually_changed(owner_changing, old_owner, new_owner),
+            parent_only=parent_only,
+        )
 
     from base import telemetry  # deferred (task #3816)
 
@@ -439,59 +454,43 @@ def update(
     # has no actor for a task note or TaskUpdated; like gateway PATCH, its
     # committed write relies on the board's normal poll.
     if actor is not None:  # agent_id() is None before bootstrap; system tooling has no actor.
-        _notify_after_update(
-            task_id,
-            title,
-            current_title,
-            old_owner,
-            new_owner,
-            owner_changing,
-            actor,
-            changes,
-            parent_only,
-        )
+        for event in note_events:
+            telemetry.emit_prepared(event)
         from base.events.live import announce, bus  # deferred (task #3816)
 
         announce.publish_task_updated_sync(bus.EventBus.from_settings(), actor, task_id)
 
 
-def _should_notify_previous_owner(old_owner: int | None, actor: int) -> TypeGuard[int]:
-    """True when the previous owner should be told the task left it: a
-    terminated former owner is left asleep rather than resurrected just to be
-    told (see _notify_owner_change), and the acting agent is never notified
-    about its own action."""
-    return old_owner is not None and old_owner != actor and not _is_terminated(old_owner)
-
-
-def _notify_after_update(
+def _queue_after_update(
+    cur: psycopg.Cursor,
     task_id: int,
-    title: str | None,
-    current_title: str,
+    title: str,
     old_owner: int | None,
     new_owner: int | None,
-    owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
-    actor: int,
+    actor: int | None,
     changes: builtins.list[str],
-    parent_only: bool,  # noqa: FBT001 — internal helper flag, always passed by name
-) -> None:
-    """Post-commit owner notifications for update(): tell the new owner about
-    the reassignment (with the change summary), or tell the unchanged owner
-    that another agent wrote to its task.
+    *,
+    owner_changed: bool,
+    parent_only: bool,
+) -> builtins.list[Event]:
+    """Enqueue policy-approved updates before the task transaction commits."""
+    if owner_changed:
+        from base.agents.tasks.delivery import supersede_task_assignments
 
-    A parent-only reparent is skipped entirely — it is structural tree
-    maintenance (cleanup / hierarchy moves), not a change to the task's own
-    work, so no owner is woken for it (the 2026-08-27 incident: one batch
-    reparent auto-resurrected 62 terminated owners through this path)."""
-    if parent_only:
-        return
-    resolved_title = title if title is not None else current_title
-    if _owner_actually_changed(owner_changing, old_owner, new_owner):
-        _notify_owner_change(task_id, resolved_title, old_owner, new_owner, actor, changes=changes)
-    elif new_owner is not None and actor != new_owner:
-        _notify_owner_updated(task_id, resolved_title, new_owner, actor, changes)
+        supersede_task_assignments(cur, task_id)
+    if actor is None or parent_only:
+        return []
+    if owner_changed:
+        return _queue_owner_change(
+            cur, task_id, title, old_owner, new_owner, actor, changes=changes
+        )
+    if new_owner is not None and actor != new_owner and not _is_terminated(new_owner):
+        return _queue_owner_updated(cur, task_id, title, new_owner, actor, changes)
+    return []
 
 
-def _notify_owner_change(
+def _queue_owner_change(
+    cur: psycopg.Cursor,
     task_id: int,
     title: str,
     old_owner: int | None,
@@ -499,84 +498,44 @@ def _notify_owner_change(
     actor: int,
     description: str | None = None,
     changes: builtins.list[str] | None = None,
-) -> None:
-    """Tell the new owner the task is theirs and the previous owner it is not,
-    never notifying the caller (`actor`) about its own action.
+) -> builtins.list[Event]:
+    """Commit assignment directions with their task mutation, never HTTP-send."""
+    from base.agents.tasks.delivery import enqueue_task_notifications
 
-    The new owner is always told, even when terminated: the system-note
-    delivery auto-resurrects a terminated target (an assignment is a delegator
-    direction, not a plain notification), so an assigned task never strands on
-    a dead agent. The previous owner is the one deliberate skip -- waking a
-    terminated former owner just to say the task left it is wasteful, and it
-    never asked to be resurrected.
-
-    When `description` is provided (from create()), it is appended to the new
-    owner's message so they know what the task is about without a separate lookup.
-    `changes` (from update()) is likewise appended, so a reassignment that also
-    edits the task reports the other fields in the same message.
-
-    Delivery is a system note (NoteTag `task`), not a peer chat: the timeline
-    renders it as a system marker without an Agent prefix or peer timestamp
-    (user ruling 2026-08-27).
-    """
-    for note in owner_change_notifications(
+    notes = owner_change_notifications(
         task_id,
         title,
-        None,
+        old_owner,
         new_owner,
         actor=actor,
-        previous_owner_terminated=False,
+        previous_owner_terminated=old_owner is None or _is_terminated(old_owner),
         description=description,
         changes=changes,
-    ):
-        ava.agents.send_system_note(
-            note.agent_id,
-            note.content,
-            task_id=task_id if note.resurrect else None,
-            resurrect=note.resurrect,
-        )
-    if _should_notify_previous_owner(old_owner, actor):
-        for note in owner_change_notifications(
-            task_id,
-            title,
-            old_owner,
-            None,
-            actor=actor,
-            previous_owner_terminated=False,
-        ):
-            ava.agents.send_system_note(note.agent_id, note.content, resurrect=note.resurrect)
+    )
+    receipts = enqueue_task_notifications(cur, task_id, notes, f"agent:{actor}")
+    return [receipt.event for receipt in receipts if receipt.event is not None]
 
 
-def _notify_owner_updated(
+def _queue_owner_updated(
+    cur: psycopg.Cursor,
     task_id: int,
     title: str,
     owner: int,
     actor: int,
     changes: builtins.list[str],
-) -> None:
-    """Tell the task's owner that another agent changed their task.
+) -> builtins.list[Event]:
+    """Queue an informational update while preserving the no-resurrection policy."""
+    from base.agents.tasks.delivery import enqueue_task_notifications
 
-    Fires on any non-owner business write (status, title, description,
-    results, note, priority, ...) so an owner is never left unaware that its
-    task was touched -- the case that motivated it: task #494 was cancelled by
-    another agent and its owner only found out later. A terminated owner is
-    deliberately left asleep: this is a notification, not a delegator
-    direction, so it must not auto-resurrect the owner just to be told (user
-    ruling 2026-08-27 -- notification messages never resurrect a terminated
-    owner; only real delegator/user business messages may). Delivered as a
-    system note with resurrect=False, so the delivery path itself enforces
-    the ruling. `actor` is never notified about its own action -- update()
-    only calls this when `actor != owner`.
-    """
-    if _is_terminated(owner):
-        return
-    detail = "\n".join(f"- {c}" for c in changes)
-    ava.agents.send_system_note(
+    detail = "\n".join(f"- {change}" for change in changes)
+    note = TaskOwnerNotification(
         owner,
         f'Task #{task_id} "{title}" was updated by agent #{actor}:\n{detail}',
-        task_id=task_id,
         resurrect=False,
+        link_task=True,
     )
+    receipts = enqueue_task_notifications(cur, task_id, [note], f"agent:{actor}")
+    return [receipt.event for receipt in receipts if receipt.event is not None]
 
 
 def _is_terminated(agent_id: int) -> bool:

@@ -13,7 +13,7 @@ tags:
 
 ## When it triggers
 
-Two places trigger the same `_notify_owner_change`:
+Two producers use the same owner-change notification policy:
 - In `update`, when **owner changes** and the new and old owners are different — merely changing `status` or `results` does not generate a notification; only when a task is transferred from one person to another.
 - In `create`, when an **owner other than the creator** is specified (including `create_and_assign`) — the assigned agent is notified as soon as the task is created.
 
@@ -39,7 +39,7 @@ The skip rules for the two legs are asymmetric — the new owner is always notif
 | `new_owner is None` | Defensive: only the root task has no owner, a normal transfer path won't hit this |
 | `new_owner == actor` (caller themselves) | No need to tell themselves they've taken over |
 
-A new owner that is already `terminated` is still sent — the system-note delivery (`send_system_note`, `resurrect=True`) revives a terminated target automatically. This prevents tasks from becoming stranded when assigning to a terminated agent (the assignment notification and the task body are delivered together to the revived owner).
+A new owner that is already `terminated` is still sent — the queued assignment records `delivery_resurrect=true`; delivery recovery revives a terminated target automatically. This prevents tasks from becoming stranded when assigning to a terminated agent (the assignment notification and the task body are delivered together to the revived owner).
 
 **Old owner leg** (whether to send "task left you"):
 
@@ -51,60 +51,49 @@ A new owner that is already `terminated` is still sent — the system-note deliv
 
 ## Delivery: system note, not peer chat (user ruling 2026-08-27)
 
-Task notifications are **system notes** (`ava.agents.send_system_note`, NoteTag
+Task notifications are **system notes** (NoteTag
 `task`): they render in the receiving agent's timeline as a system_marker —
 no Agent prefix, no peer timestamp — consistent with other system notes. They
 are delivered through the inbound queue as kind=`system_note` rows and claimed
 into `ava_msg_type='system_note'` messages; the timeline dispatches on the
 NoteTag, so the rendering change needs no frontend special-casing.
 
-## Implementation Details
+## Durable acceptance and recovery
 
-```python
-def _notify_owner_change(task_id, title, old_owner, new_owner, actor, description=None):
-    # New owner leg: always notify (terminated agents are auto-revived —
-    # an assignment is a delegator direction, so the system-note delivery resurrects)
-    if new_owner is not None and new_owner != actor:
-        new_msg = f'Task #{task_id} "{title}" is now assigned to you (by agent #{actor}).'
-        if description:                   # Only passed from the create assignment path
-            new_msg += f"\n\n{description}"
-        ava.agents.send_system_note(new_owner, new_msg, task_id=task_id, resurrect=True)
-    # Old owner leg: the only leg that may be skipped due to terminated status;
-    # resurrect=False — a notification must never revive an owner
-    if old_owner is not None and old_owner != actor and not _is_terminated(old_owner):
-        ava.agents.send_system_note(
-            old_owner, f'Task #{task_id} "{title}" you owned is no longer assigned to you.',
-            resurrect=False,
-        )
+SDK task create/update and gateway task PATCH insert the notification directly
+into `inbound_messages` in the same Postgres transaction as the task mutation.
+The existing inbound queue is the server outbox: there is no second outbox table
+or client-side delivery queue. A committed task has its immutable notification
+content, recipient and `delivery_resurrect` policy committed with it. Failed
+notification acceptance rolls the mutation back; failed post-commit telemetry,
+Redis hints or resurrection do not erase that accepted intent.
 
+The normal watchdog pending scan repairs live-owner wakes. Its terminated-owner
+recovery also selects internal task assignments marked `task_notification=true`
+and `delivery_resurrect=true`, linked to a task currently owned by that recipient.
+Informational previous-owner notes, update notes and reminders never resurrect.
 
-def _is_terminated(agent_id):               # Only gates the old owner leg
-    with ava.DB.cursor() as cur:
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-        meta = cur.fetchone()
-    return meta is None or meta[0] == "terminated"
-```
+Reassignment closes earlier pending assignment directions in the task transaction,
+with `delivery_result={outcome: superseded, reason: task_reassigned}`. This also
+fences A -> B -> A: the first A assignment cannot become new work again. The home
+resurrection transaction locks the linked task before the agent and holds that
+ownership fence through commit, refusing an in-flight stale notification.
+Already claimed notes retain normal inbound processing semantics; this queue
+cannot revoke an instruction an agent has already consumed.
 
-## Execution Timing
+Existing force-termination, suppression, recovery-breaker, attempt cooldown and
+age limits still apply. Once the terminated-owner age deadline expires, the
+row is retained as `done` with
+`delivery_result={outcome: failed, reason: resurrection_deadline_expired}` so an
+operator can inspect the accepted instruction and its final failure.
 
-Notifications are executed **after the transaction commits**, not inside the database transaction:
-
-```python
-with ava.DB.transaction(), ava.DB.cursor() as cur:
-    # ... SELECT FOR UPDATE, UPDATE ...
-
-# ← Transaction commits here
-if owner_changing and old_owner != new_owner:
-    _notify_owner_change(...)  # Executed outside the transaction
-```
-
-This design has two reasons:
-1. `send_system_note` may auto-revive a terminated agent — this is a side-effect operation that should not be performed while holding locks.
-2. If notification fails, the task state is already persisted — we don't want to roll back business data due to a notification failure.
+The task write itself remains keyless and is not automatically retried after an
+ambiguous response. This closes the task-effect/notification crash gap; it does
+not make repeated task create calls the same operation.
 
 ## Relationship with Other Notifications
 
-- Task owner change notifications are **system notes** (sent via `agents.send_system_note`, NoteTag `task`), not peer chat messages.
+- Task owner change notifications are **system notes** (accepted into the inbound queue, NoteTag `task`), not peer chat messages.
 - Task completion results should be presented to the **user** via [[../notify.ava.okf.md|`ava.ui.notify`]].
 - These two types of notifications are not substitutes for each other — the former lets the receiving agent know about a new task, the latter lets the human supervisor see the result.
 - A third, different line: `create`/`update` also publishes `task_created`/`task_updated` events on each write (SSE, visible to `GLOBAL_ROLES`) — these are not directed messages but cause all open task boards to invalidate and re-fetch; overdue task escalation (if parent has an owner → send a chat to the parent owner; if parent has no owner → insert a require_response notice on the stuck owner) is covered in [[../../task_maintenance/docs/task-maintenance.ava.okf.md|Task-Maintenance]] and is not part of this node.

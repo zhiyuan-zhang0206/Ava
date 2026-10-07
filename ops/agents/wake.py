@@ -209,6 +209,16 @@ def _prepare_resurrect_attempt(
     reject_unnegotiated_caller(resurrected_by)
     recover_local_resources(db, agent_id, machine_name())
     with db.write_transaction() as conn, conn.cursor() as cur:
+        # Task before agent: producers hold the task while inserting an inbound
+        # whose foreign key can lock agents_meta. Keep the same lock order.
+        from base.agents.tasks.delivery import lock_task_note_owner
+
+        if trigger_inbound_id is not None and not lock_task_note_owner(
+            cur, agent_id, trigger_inbound_id
+        ):
+            raise ResurrectTriggerStaleError(
+                f"agent {agent_id} task assignment is no longer current"
+            )
         latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(_RESURRECTION_ROW, (agent_id,))
         row = cur.fetchone()

@@ -15,17 +15,23 @@ from typing import Any, Literal, LiteralString, cast, overload
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
+from base.agents.messages.inbound import InboundKind
+from base.agents.tasks.delivery import (
+    TaskNoteReceipt,
+    emit_task_note_events,
+    enqueue_task_notifications,
+    supersede_task_assignments,
+)
 from base.agents.tasks.owner_notifications import (
-    TaskOwnerNotification,
     owner_change_notifications,
 )
 from base.agents.tasks.reparent import resolve_reparent
 from base.agents.tasks.rules import first_open_child, is_closed, open_title_holder
+from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.agents.schemas import SystemNoteIn
-from gateway.agents.state import post_agent_system_note
 from gateway.schemas.tasks import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
+from ops import lifecycle as _ops
 
 router = APIRouter()
 
@@ -240,8 +246,8 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
 
 def _patch_task_blocking(
     pool: ConnectionPool[Any], task_id: int, body: TaskUpdateRequest
-) -> tuple[TaskRow, list[TaskOwnerNotification]]:
-    """Run the task transaction and return committed owner-change notes.
+) -> tuple[TaskRow, list[TaskNoteReceipt]]:
+    """Commit the task and its owner-change inbounds in the same transaction.
 
     The route awaits task-note delivery after this function returns, so no
     network or process wake can roll back the owner assignment.
@@ -334,20 +340,25 @@ def _patch_task_blocking(
         if row is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
 
-    task = _row_to_task(row[:-1], "full", owner_label=row[-1])
-    if "owner" not in body.model_fields_set or previous_owner == task.owner:
-        return task, []
-    return (
-        task,
-        owner_change_notifications(
-            task.id,
-            task.title,
-            previous_owner,
-            task.owner,
-            actor=None,
-            previous_owner_terminated=previous_owner_status in (None, "terminated"),
-        ),
-    )
+        task = _row_to_task(row[:-1], "full", owner_label=row[-1])
+        receipts: list[TaskNoteReceipt] = []
+        if "owner" in body.model_fields_set and previous_owner != task.owner:
+            supersede_task_assignments(cur, task_id)
+            receipts = enqueue_task_notifications(
+                cur,
+                task_id,
+                owner_change_notifications(
+                    task.id,
+                    task.title,
+                    previous_owner,
+                    task.owner,
+                    actor=None,
+                    previous_owner_terminated=previous_owner_status in (None, "terminated"),
+                ),
+                "user",
+            )
+    emit_task_note_events(receipts)
+    return task, receipts
 
 
 @router.patch("/api/tasks/{task_id}")
@@ -362,7 +373,7 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
     null is rejected — reminders cannot be disabled). Any write resets the
     reminder counters, same as the SDK update path. An owner reassignment sends
-    the SDK-equivalent task system notes after the database write commits.
+    the SDK-equivalent task system notes in the same database transaction.
 
     The system root task is immutable: any PATCH targeting it is rejected with
     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
@@ -375,14 +386,19 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
         _patch_task_blocking, request.app.state.db_pool, task_id, body
     )
     for note in notes:
-        await post_agent_system_note(
+        await asyncio.to_thread(
+            publish_inbound_wake,
+            request.app.state.db,
+            request.app.state.bus,
             note.agent_id,
-            SystemNoteIn(
-                content=note.content,
-                source="user",
-                task_id=task_id if note.resurrect else None,
-                resurrect=note.resurrect,
-            ),
-            request,
+            str(note.inbound_id),
         )
+        if note.resurrect:
+            await _ops.resurrect_if_terminated(
+                request.app.state.db,
+                request.app.state.bus,
+                note.agent_id,
+                trigger_inbound_id=note.inbound_id,
+                trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
+            )
     return task

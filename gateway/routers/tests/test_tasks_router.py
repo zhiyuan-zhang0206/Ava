@@ -182,14 +182,19 @@ class TestOwner:
             (
                 f'Task #{tid} "t" is now assigned to you.',
                 "user",
-                {"note_tag": "task", "task_id": tid},
+                {
+                    "note_tag": "task",
+                    "task_id": tid,
+                    "task_notification": True,
+                    "delivery_resurrect": True,
+                },
             )
         ]
         assert _task_notes(db_conn, owner) == [
             (
                 f'Task #{tid} "t" you owned is no longer assigned to you.',
                 "user",
-                {"note_tag": "task"},
+                {"note_tag": "task", "task_notification": True, "delivery_resurrect": False},
             )
         ]
 
