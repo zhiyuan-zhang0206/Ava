@@ -50,3 +50,7 @@ This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 Consumer: [[base/agents/incarnation/docs/incarnation-resources.ava.okf.md|exec incarnation resources]].
 Application-service and scheduled-backup custody are removed by
 [the lifecycle decision](../../../docs/decisions/2026-10-07-native-lifecycle-and-operational-recovery.md).
+
+Native domain closure is verified in `../tests/test_exec_domain_confirmation.py`,
+including real grandchildren, delayed group membership, retained leader ownership
+and refusal to signal a reused numeric group.

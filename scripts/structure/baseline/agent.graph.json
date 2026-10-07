@@ -16,7 +16,6 @@
   },
   "files": {},
   "patch_targets": {
-    "agent/graph/exec/tests/test_exec_domain_confirmation.py::base.native_process.exec_domain._process_group_has_live_member": 2,
     "agent/graph/tests/test_build_with_extensions.py::base.packages.plugins.enable_config._dangling_reported": 1
   }
 }
