@@ -41,6 +41,9 @@ def _row(
     }
 
 
+TEST_POOL: Any = None
+
+
 class FakeGateway:
     """GatewayClient stand-in returning the real response shapes."""
 
@@ -55,7 +58,10 @@ class FakeGateway:
         stream_failures: int = 0,
     ) -> None:
         self.agents = agents or []
-        self.timeline = timeline or []
+        self.timeline = [
+            dict(item, source_message_id=f"stored-{index}", source_block_idx=0)
+            for index, item in enumerate(timeline or [])
+        ]
         self.presets = presets or []
         self.models = models or {"models": {}, "default": "deepseek-v4-pro"}
         self.commands: list[dict[str, Any]] | None = None
@@ -157,8 +163,24 @@ class FakeGateway:
         yield None  # pragma: no cover - unreachable
 
 
-def _core(gateway: FakeGateway, **config: Any) -> IMBridgeCore:
-    return IMBridgeCore(im_bridge_config(**config), gateway)  # type: ignore[arg-type]
+def create_test_core(gateway: FakeGateway, **config: Any) -> IMBridgeCore:
+    core = IMBridgeCore(im_bridge_config(**config), gateway, db_pool=TEST_POOL)  # type: ignore[arg-type]
+    telegram = FakePlainAdapter()
+    telegram.channel = "telegram"
+    core.register(telegram)
+    core.register(FakePlainAdapter())
+    return core
+
+
+_core = create_test_core
+
+
+def _queued_text(core: IMBridgeCore) -> str:
+    with core.timeline_outbox._pool().connection() as conn:
+        rows = conn.execute("SELECT request FROM im_bridge_outbound_intents ORDER BY id").fetchall()
+    return "\n".join(
+        chunk["text"] for (request,) in rows for chunk in request["prepared"]["chunks"]
+    )
 
 
 def _text(reply: object) -> str:
@@ -217,7 +239,10 @@ def test_cmd_switch_matches_agent_id() -> None:
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out)
+    assert "hello" not in _text(out), (
+        "dialog is queued instead of returned through the command send owner"
+    )
+    text = _text(out) + "\n" + _queued_text(core)
     assert state.current_agent_id == 405
     assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
     assert "hello" in text
@@ -280,7 +305,7 @@ def test_cmd_switch_replays_five_dialog_items_amid_non_dialog() -> None:
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out)
+    text = _text(out) + "\n" + _queued_text(core)
     for m in ("m1", "m2", "m3", "m4", "m5"):
         assert m in text
     assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "5.1")
@@ -297,7 +322,7 @@ def test_cmd_switch_replay_caps_at_five() -> None:
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out)
+    text = _text(out) + "\n" + _queued_text(core)
     for m in ("m1", "m2", "m3"):
         assert m not in text
     for m in ("m4", "m5", "m6", "m7", "m8"):
@@ -316,7 +341,7 @@ def test_cmd_switch_window_and_replay_follow_config() -> None:
     core = _core(gateway, im_bridge_timeline_window=7, im_bridge_replay_messages=2)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out)
+    text = _text(out) + "\n" + _queued_text(core)
     assert gateway.timeline_limits[-1] == 7
     for m in ("m1", "m2", "m3", "m4", "m5", "m6"):
         assert m not in text
@@ -339,7 +364,7 @@ def test_cmd_status_reads_agent_id() -> None:
     state = ChatState("telegram", "12345")
     state.current_agent_id = 405
     out = asyncio.run(core._cmd_status(state))
-    text = _text(out)
+    text = _text(out) + "\n" + _queued_text(core)
     assert copy.STATUS_DETAIL_LINE.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
     assert copy.STATUS_STATE_LINE.format(status="running") in text
     assert gateway.directory_calls == []
@@ -500,12 +525,13 @@ def test_switch_summary_uses_strict_filter() -> None:
     core = _core(gateway)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out)
+    text = _text(out) + "\n" + _queued_text(core)
     assert "real answer" in text
     assert "peer" not in text
     assert "print(1)" not in text
-    # one message per item: header + 1 kept item
-    assert isinstance(out, list) and len(out) == 2
+    # Only the command header returns inline; the qualified dialog is durably queued.
+    assert isinstance(out, list) and len(out) == 1
+    assert _queued_text(core) == "[Ava #405] real answer"
 
 
 def test_render_item_tags_speaker() -> None:

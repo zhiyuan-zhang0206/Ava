@@ -197,6 +197,18 @@ async def _notice_loop(core: Any) -> None:
         await asyncio.sleep(3.0)
 
 
+async def _timeline_outbound_loop(core: Any) -> None:
+    """One service-owned dispatcher and periodic committed-tail wakeup."""
+    core.timeline_worker.validate_pool()
+    while True:
+        if not admission.quiesced():
+            try:
+                await core.poll_timeline_outbound()
+            except Exception as exc:
+                _log.warning("im_bridge: outbound round failed class=%s", type(exc).__name__)
+        await asyncio.sleep(3.0)
+
+
 async def _handle_send(core: Any) -> Any:
     """Route handler for the daemon's ``POST /send`` RPC (ops-alerts fan-out).
 
@@ -281,6 +293,9 @@ async def run() -> None:
             loops.create_task(_contained(_liveness_loop(liveness), "liveness loop"))
             loops.create_task(_contained(_notice_loop(core), "notice loop"))
             await asyncio.gather(*(a.start() for a in adapters))
+            if adapters:
+                core.timeline_worker.validate_pool()
+                loops.create_task(_timeline_outbound_loop(core))
             # Every adapter's start() returns once its connection loop is launched
             # (long polls / ws threads run in the background). The daemon now stays
             # alive forever; SIGTERM/SIGINT unwinds through the finally below.

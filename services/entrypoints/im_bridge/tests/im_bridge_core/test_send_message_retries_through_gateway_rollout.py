@@ -126,17 +126,26 @@ def test_chat_typing_starts_and_stops_on_agent_reply(
     state.current_agent_id = 405
 
     async def scenario() -> None:
+        core.timeline_outbox.accept(
+            state.channel, "test-account", state.chat_id, 405, [], replay_id="initial-switch"
+        )
         out = await core._handle_chat(state, "hi")
         assert out is None
         assert gateway.sent == [(405, "hi", "user")]
         await asyncio.sleep(0.06)  # several refresh ticks
         calls_before = len(adapter.typing_calls)
         assert calls_before >= 3  # refreshed, not a one-shot
-        await core._push_snapshot(
-            ("telegram", "12345"),
-            state,
-            {"items": [{"kind": "agent_chat", "item_id": "6.0", "payload": "answer"}]},
-        )
+        gateway.timeline = [
+            {
+                "kind": "agent_chat",
+                "item_id": "6.0",
+                "payload": "answer",
+                "source_message_id": "stored-answer",
+                "source_block_idx": 0,
+            }
+        ]
+        await core._push_snapshot(("telegram", "12345"), state, {"items": []})
+        await core.timeline_worker.run_once()
         await asyncio.sleep(0.06)
         assert len(adapter.typing_calls) == calls_before  # stopped by the reply
         assert adapter.sent == [("12345", "[Ava #405] answer")]
@@ -155,14 +164,23 @@ def test_typing_skipped_for_plain_adapters() -> None:
     state.current_agent_id = 405
 
     async def scenario() -> None:
+        core.timeline_outbox.accept(
+            state.channel, "test-account", state.chat_id, 405, [], replay_id="initial-switch"
+        )
         await core._handle_chat(state, "hi")
         await asyncio.sleep(0.02)
         assert adapter.typing_calls == []
-        await core._push_snapshot(
-            ("weixin", "67890"),
-            state,
-            {"items": [{"kind": "agent_chat", "item_id": "6.0", "payload": "answer"}]},
-        )
+        gateway.timeline = [
+            {
+                "kind": "agent_chat",
+                "item_id": "6.0",
+                "payload": "answer",
+                "source_message_id": "stored-answer",
+                "source_block_idx": 0,
+            }
+        ]
+        await core._push_snapshot(("weixin", "67890"), state, {"items": []})
+        await core.timeline_worker.run_once()
         assert adapter.sent == [("67890", "[Ava #405] answer")]
 
     asyncio.run(scenario())
@@ -568,13 +586,23 @@ def test_push_snapshot_watermark_compares_numerically() -> None:
         return {"items": [{"item_id": item_id, "kind": "agent_chat", "payload": payload}]}
 
     async def scenario() -> None:
-        core._last_pushed[("telegram", "12345", 405)] = PushWatermark(None, "9.5")
+        core.cursor_store.save_push("telegram", "12345", 405, PushWatermark(None, "9.5"))
         # crossing the magnitude boundary: '10.1' is fresh after '9.5'
-        await core._push_snapshot(("telegram", "12345"), state, snapshot("10.1", "ten"))
+        gateway.timeline = [
+            dict(item, source_message_id="stored-ten", source_block_idx=0)
+            for item in snapshot("10.1", "ten")["items"]
+        ]
+        await core._push_snapshot(("telegram", "12345"), state, {})
+        await core.timeline_worker.run_once()
         assert adapter.sent == [("12345", "[Ava #405] ten")]
         assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(None, "10.1")
         # the reverse: an older item behind a newer watermark is stale
-        await core._push_snapshot(("telegram", "12345"), state, snapshot("9.9", "nine"))
+        gateway.timeline = [
+            dict(item, source_message_id="stored-nine", source_block_idx=0)
+            for item in snapshot("9.9", "nine")["items"]
+        ]
+        await core._push_snapshot(("telegram", "12345"), state, {})
+        await core.timeline_worker.run_once()
         assert adapter.sent == [("12345", "[Ava #405] ten")]  # unchanged
 
     asyncio.run(scenario())

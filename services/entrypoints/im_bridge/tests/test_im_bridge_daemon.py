@@ -40,6 +40,11 @@ class _FakeServer:
 def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> None:
     """The beat task keeps a Liveness fresh — the regression guard for the
     503-after-startup bug."""
+
+    async def parked_outbound(_core):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(daemon, "_timeline_outbound_loop", parked_outbound)
     monkeypatch.setattr(daemon, "_LIVENESS_BEAT_INTERVAL_S", 0.02)
     liveness = Liveness(timeout_s=0.2)
 
@@ -94,6 +99,9 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
             self.gateway = gateway
             self.db_pool = db_pool
             self.outbox_replay_started = False
+            from unittest.mock import MagicMock
+
+            self.timeline_worker = MagicMock()
             created_cores.append(self)
 
         async def restore_subscriptions(self) -> None:
@@ -111,6 +119,11 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
         return []
 
     monkeypatch.setattr(daemon, "_load_adapters", fake_load_adapters)
+
+    async def parked_outbound(_core):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(daemon, "_timeline_outbound_loop", parked_outbound)
     monkeypatch.setattr(daemon, "_LIVENESS_BEAT_INTERVAL_S", 0.02)
 
     async def scenario() -> None:
