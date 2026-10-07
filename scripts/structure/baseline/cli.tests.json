@@ -1,6 +1,5 @@
 {
   "patch_targets": {
-    "cli/tests/test_main_dispatch.py::base.native_process.code_version._db_gate_exempt": 1,
-    "cli/tests/test_plugin_scaffold.py::cli.commands.extensions._plugin_scaffold": 2
+    "cli/tests/test_main_dispatch.py::base.native_process.code_version._db_gate_exempt": 1
   }
 }
