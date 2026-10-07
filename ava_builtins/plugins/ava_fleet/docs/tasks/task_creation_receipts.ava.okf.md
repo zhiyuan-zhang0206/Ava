@@ -36,6 +36,9 @@ receipt, then uses the existing parent lock, open-title uniqueness checks and
 task writer for fresh creation. Task insert, creation audit, owner notification
 intent and immutable receipt commit together. Failure rolls them all back.
 Keyless creation retains parent and title checks without a receipt.
+The task writer and shared snapshot model are native
+[[base/agents/tasks/docs/creation-transactions.ava.okf.md|creation transaction primitives]];
+the SDK remains the receipt admission and post-commit owner.
 
 A receipt stores the complete originally returned `Task` dataclass snapshot,
 including its rendered timestamp strings. Replay validates all fields and the

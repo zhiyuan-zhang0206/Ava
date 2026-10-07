@@ -10,7 +10,8 @@ tags:
 
 # Task Model
 
-The `Task` data class represents one work item in the task registry. All tasks form a parent-child tree rooted at the system [[ava_builtins/plugins/ava_fleet/docs/tasks/task_model/task_model_root.ava.okf.md|Root Task]].
+The standard `Task` dataclass is owned by `base.agents.tasks.model` and
+reexported unchanged by the fleet SDK. It represents one work item in the task registry. All tasks form a parent-child tree rooted at the system [[ava_builtins/plugins/ava_fleet/docs/tasks/task_model/task_model_root.ava.okf.md|Root Task]].
 
 ```python
 @dataclass

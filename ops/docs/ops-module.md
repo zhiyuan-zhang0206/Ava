@@ -82,3 +82,11 @@ report `invalid-migration-layout`; query and connection failures report
 `unavailable`. Only a successful comparison of equal sets returns no diagnosis.
 The batched host snapshot also reports an unavailable comparison when its shared
 database read fails, without retrying through another connection.
+
+## Birth transaction ownership
+
+`ops.agents.spawn.create_agent_row` retains its public transaction and
+post-commit announcement contract. Its cursor-owned SQL writer is
+`ops.agents.birth_transaction.insert_agent_birth`; see
+[creation transaction primitives](../../base/agents/tasks/docs/creation-transactions.ava.okf.md).
+The writer opens no connection, commits nothing and performs no launch.

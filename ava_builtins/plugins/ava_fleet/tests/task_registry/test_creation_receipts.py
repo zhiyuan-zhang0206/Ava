@@ -118,7 +118,7 @@ def test_default_intention_replays_original_and_owner_alias(
     def fail_render(*_args: object) -> tuple[object, ...]:
         raise RuntimeError("replay must not render timestamps again")
 
-    monkeypatch.setattr(task_registry, "render_task_timestamps", fail_render)
+    monkeypatch.setattr("base.agents.tasks.model.render_task_timestamps", fail_render)
     assert (
         task_registry.create(
             "default", "work", parent=root_task_id, owner=actor, operation_key="defaults"
@@ -159,13 +159,14 @@ def test_changed_request_conflicts_before_mutable_checks(
 def test_failure_after_effect_rolls_back_all_facts(
     db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
+    from base.agents.tasks import creation
     from base.telemetry import audit_events
 
     actor, owner = _seed_agent(db_conn), _seed_agent(db_conn)
     pin_agent(actor)
     before = _facts(db_conn)
     module, name = {
-        "notification": (task_registry, "_queue_owner_change"),
+        "notification": (creation, "queue_creation_notifications"),
         "receipt": (_task_creation_receipts, "record_creation"),
         "audit": (audit_events, "record_audit"),
     }[failure]
