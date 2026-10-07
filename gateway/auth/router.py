@@ -20,7 +20,7 @@ from base.cluster.auth import (
     is_managed_browser_user_agent,
     session_cookie_header,
 )
-from base.cluster.rate_limit import login_limiter
+from base.cluster.rate_limit import LoginRateLimiter
 from base.config import settings
 from gateway.auth.cors import session_cookie_secure
 from gateway.auth.request_principal import (
@@ -84,6 +84,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     if not secret:
         return JSONResponse(content={"ok": True})
 
+    login_limiter: LoginRateLimiter = request.app.state.login_limiter
     remaining = login_limiter.lockout_remaining(ip)
     if remaining > 0:
         return error_response(
