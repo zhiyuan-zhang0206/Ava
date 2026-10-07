@@ -67,6 +67,11 @@ from agent.ownership.hosted import (
     renew_hosted_owner,
     settle_hosted_runtime,
 )
+from agent.ownership.hosted_completion import (
+    completed_hosted_lifecycle_kind,
+    pending_hosted_lifecycle_id,
+)
+from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.process_boot import boot_agent_scope
 from agent.startup import (
     reconcile_claimed_inbounds_at_startup,
@@ -77,7 +82,6 @@ from agent.turn.runloop import (
     PendingTurnFailure,
     emit_error_event,
     graph_config,
-    settle_turn_failure,
 )
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from ava.sdk_surface import process_context
@@ -112,6 +116,7 @@ from services.agent_runner.agent_host.force_termination import (
     force_termination_stop,
     kill_terminating_agent_shells,
 )
+from services.agent_runner.agent_host.invocation import PendingWorkResult, finish_pending_failure
 from services.agent_runner.agent_host.runtime import (
     HostStats,
     TurnOutcome,
@@ -590,14 +595,8 @@ class AgentHost:
         finally:
             await event_publisher.aclose()
 
-    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:  # noqa: PLR0915 — the turn exit boundary
-        """Run until a durable lifecycle command or idle state ends this turn.
-
-        Normal return flushes before applying lifecycle; restart retains its
-        successor pointer, termination returns terminal intent, idle releases
-        the task without manufacturing an inbound or model call.
-        Reset only transient flags; halted/message/plugin state survives cold admission.
-        """
+    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:
+        """Run to idle or lifecycle completion, settling each returned invocation."""
         tags = ["ava", f"agent-{agent_id}", "hosted"]
         metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
         config: RunnableConfig = graph_config(
@@ -606,113 +605,159 @@ class AgentHost:
         turn = 0
         pending_failure: PendingTurnFailure | None = None
         while True:
-            try:
-                async with database_phase():
-                    await settle_checkpoint(
-                        self._graph,
-                        self._db,
-                        self._bus,
-                        agent_id,
-                        self.relays,
-                        activate_accepted=False,
-                    )
-                turn += 1
-                with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
-                    if pending_failure is not None:
-                        # Database recovery must finish the original abort, not
-                        # invoke a model again before halted/breaker state is saved.
-                        async with database_phase():
-                            await settle_turn_failure(
-                                self._graph,
-                                self._checkpointer,
-                                config,
-                                ctx,
-                                agent_id,
-                                pending_failure,
-                            )
-                            await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
-                        return TurnOutcome(exited=False, crashed=True, aborted=True)
+            turn += 1
+            pending: PendingWorkResult | None = None
+            with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
+                # Retain the result and trace; recovery cannot claim the next work.
+                while True:
                     try:
-                        result: dict[str, object] = await run_invocation_with_stall_guard(
-                            self._graph,
-                            agent_id,
-                            ctx,
-                            config,
-                            {  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-                                "turn_active": False,
-                                "exit_requested": False,
-                                "turn_idle": False,
-                                "restart_requested": False,
-                            },
-                        )
-                    except (FatalLLMStreamError, FatalProviderError, CompactionFailedError) as exc:
-                        pending_failure = PendingTurnFailure(exc)
-                        async with database_phase():
-                            await settle_turn_failure(
+                        if pending_failure is not None:
+                            return await finish_pending_failure(
                                 self._graph,
                                 self._checkpointer,
-                                config,
-                                ctx,
                                 agent_id,
+                                ctx,
+                                config,
                                 pending_failure,
                             )
-                            await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
-                        return TurnOutcome(exited=False, crashed=True, aborted=True)
-                    # The trace must remain current until its final checkpoint is
-                    # durable; an N-step buffered ID is not yet readable by the UI.
-                    async with database_phase():
-                        await flush_checkpoint(self._checkpointer, agent_id)
-                        await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
-                if result["exit_requested"] or result["restart_requested"]:
-                    incarnation = current_incarnation(agent_id)
-                    if incarnation is None:
-                        raise RuntimeError(  # noqa: TRY301 — report through the turn error boundary
-                            "hosted lifecycle return has no admitted incarnation"
+                        prepared = (
+                            pending.result
+                            if pending is not None
+                            else await self._invoke_prepared_graph(agent_id, ctx, config)
                         )
-                    self.drop_agent(agent_id)
-                    async with database_phase():
-                        kind = await apply_hosted_lifecycle(
-                            self._control_pool,
-                            incarnation,
-                            bus=self._bus,
-                            kill_shell_sessions=kill_terminating_agent_shells,
+                        if isinstance(prepared, PendingTurnFailure):
+                            pending_failure = prepared
+                            continue
+                        if pending is None:
+                            pending = PendingWorkResult(prepared)
+                        outcome = await self._finish_completed_invocation(agent_id, ctx, pending)
+                        if outcome is not None:
+                            return outcome
+                        break
+                    except (psycopg.OperationalError, PoolTimeout):
+                        incarnation = current_incarnation(agent_id)
+                        if incarnation is None:
+                            raise
+                        kind = await self._recover_completed_work(incarnation, pending)
+                        if kind is not None:
+                            return TurnOutcome(exited=kind == "terminate", crashed=False)
+                    except Exception as exc:
+                        ended = await force_termination_outcome(exc, self._control_pool, agent_id)
+                        if ended is not None:
+                            self.drop_agent(agent_id)
+                            return ended
+                        emit_error_event(
+                            ctx,
+                            agent_id,
+                            f"{type(exc).__name__}: {exc}",
+                            error_class=type(exc).__name__,
                         )
-                    logger.info(
-                        "hosted lifecycle return settled",
-                        agent_id=agent_id,
-                        generation=str(incarnation.generation),
-                        command_kind=kind,
+                        raise
+                    finally:
+                        flush_node_exit_aggregate(agent_id)
+
+    async def _invoke_prepared_graph(
+        self, agent_id: int, ctx: AvaContext, config: RunnableConfig
+    ) -> dict[str, object] | PendingTurnFailure:
+        async with database_phase():
+            await settle_checkpoint(
+                self._graph,
+                self._db,
+                self._bus,
+                agent_id,
+                self.relays,
+                activate_accepted=False,
+            )
+        try:
+            return await run_invocation_with_stall_guard(
+                self._graph,
+                agent_id,
+                ctx,
+                config,
+                {  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
+                    "turn_active": False,
+                    "exit_requested": False,
+                    "turn_idle": False,
+                    "restart_requested": False,
+                },
+            )
+        except (FatalLLMStreamError, FatalProviderError, CompactionFailedError) as exc:
+            return PendingTurnFailure(exc)
+
+    async def _finish_completed_invocation(
+        self, agent_id: int, ctx: AvaContext, pending: PendingWorkResult
+    ) -> TurnOutcome | None:
+        # Correlate the original trace only after its checkpoint is durable.
+        async with database_phase():
+            if not pending.checkpoint_flushed:
+                await flush_checkpoint(self._checkpointer, agent_id)
+                pending.checkpoint_flushed = True
+            if not pending.trace_attached:
+                await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
+                pending.trace_attached = True
+        if pending.result["exit_requested"] or pending.result["restart_requested"]:
+            incarnation = current_incarnation(agent_id)
+            if incarnation is None:
+                raise RuntimeError("hosted lifecycle return has no admitted incarnation")
+            async with database_phase():
+                if pending.lifecycle_command_id is None:
+                    pending.lifecycle_command_id = await pending_hosted_lifecycle_id(
+                        self._control_pool, incarnation
                     )
-                    return TurnOutcome(exited=kind == "terminate", crashed=False)
-                if result["turn_idle"]:
-                    async with database_phase():
-                        await settle_checkpoint(
-                            self._graph, self._db, self._bus, agent_id, self.relays
-                        )
+                if pending.lifecycle_command_id is None:
                     return TurnOutcome(exited=False, crashed=False)
-            except (psycopg.OperationalError, PoolTimeout):
-                incarnation = current_incarnation(agent_id)
-                if incarnation is None:
-                    raise
-                await recover_database(
-                    pool=self._control_pool,
-                    checkpointer=self._checkpointer,
-                    graph=self._graph,
-                    incarnation=incarnation,
-                    database_waits=self.database_waits,
-                    peek_lock=self._peek_lock,
+                self.drop_agent(agent_id)
+                kind = await apply_hosted_lifecycle(
+                    self._control_pool,
+                    incarnation,
+                    bus=self._bus,
+                    kill_shell_sessions=kill_terminating_agent_shells,
+                    expected_command_id=pending.lifecycle_command_id,
                 )
-            except Exception as exc:
-                ended = await force_termination_outcome(exc, self._control_pool, agent_id)
-                if ended is not None:
-                    self.drop_agent(agent_id)
-                    return ended
-                emit_error_event(
-                    ctx, agent_id, f"{type(exc).__name__}: {exc}", error_class=type(exc).__name__
-                )
+                if kind is None:
+                    kind = await completed_hosted_lifecycle_kind(
+                        self._control_pool, incarnation, pending.lifecycle_command_id
+                    )
+            logger.info(
+                "hosted lifecycle return settled",
+                agent_id=agent_id,
+                generation=str(incarnation.generation),
+                command_kind=kind,
+            )
+            return TurnOutcome(exited=kind == "terminate", crashed=False)
+        if pending.result["turn_idle"]:
+            async with database_phase():
+                await settle_checkpoint(self._graph, self._db, self._bus, agent_id, self.relays)
+            return TurnOutcome(exited=False, crashed=False)
+        return None
+
+    async def _recover_completed_work(
+        self, incarnation: RuntimeIncarnation, pending: PendingWorkResult | None
+    ) -> str | None:
+        try:
+            await recover_database(
+                pool=self._control_pool,
+                checkpointer=self._checkpointer,
+                graph=self._graph,
+                incarnation=incarnation,
+                database_waits=self.database_waits,
+                peek_lock=self._peek_lock,
+            )
+        except RuntimeOwnershipLostError:
+            if (
+                pending is None
+                or not pending.checkpoint_flushed
+                or pending.lifecycle_command_id is None
+            ):
                 raise
-            finally:
-                flush_node_exit_aggregate(agent_id)
+            async with database_phase():
+                kind = await completed_hosted_lifecycle_kind(
+                    self._control_pool, incarnation, pending.lifecycle_command_id
+                )
+            if kind is None:
+                raise
+            return kind
+        return None
 
     async def aclose(self) -> None:
         """Drop every cached runtime. The pool, checkpointer and graph belong to
