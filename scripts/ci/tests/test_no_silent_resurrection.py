@@ -150,6 +150,35 @@ def test_restored_deleted_block_is_a_hit(
     assert "Resurrects:" in out  # the failing output carries the allowance recipe
 
 
+@pytest.mark.parametrize("restore", [False, True])
+def test_deleted_stack_parent_uses_event_base_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    restore: bool,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    _write(repo, "a.py", _KEEP + _BLOCK_A)
+    _commit(repo, "add historical block", days_ago=10)
+    _git(repo, "checkout", "-q", "-b", "stack-parent")
+    _write(repo, "a.py", _KEEP)
+    base_sha = _commit(repo, "remove historical block", days_ago=2)
+    _git(repo, "checkout", "-q", "-b", "stack-child")
+    _write(repo, "a.py", _KEEP + (_BLOCK_A if restore else _BLOCK_B))
+    _commit(repo, "add child change", days_ago=0.1)
+    _git(repo, "branch", "-D", "stack-parent")
+
+    code, out, err = _check(repo, monkeypatch, capsys, base=base_sha)
+    assert code == int(restore)
+    assert err == ""
+    assert ("HIT a.py" in out) == restore
+    if not restore:
+        assert "no resurrection detected" in out
+    missing_code, _, missing_err = _check(repo, monkeypatch, capsys, base="stack-parent")
+    assert missing_code == 2
+    assert "is not a commit" in missing_err
+
+
 def test_unrelated_sha_declaration_does_not_allow(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

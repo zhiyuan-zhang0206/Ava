@@ -353,7 +353,7 @@ jobs:
 
       - name: Compare added lines against recently deleted main lines
         env:
-          BASE_REF: origin/${{ github.base_ref }}
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: python3 scripts/ci/no_silent_resurrection.py --base "$BASE_REF"
 
   dependency-audit:
