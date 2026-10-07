@@ -241,7 +241,8 @@ class ChunkJob:
 # next chunk starts where the previous one left an open group, so one agent's jobs
 # never run side by side or out of order). SKIP LOCKED lets several runners poll
 # one queue without ever taking the same row, and one runner's concurrent claims
-# likewise. A replay (`segment_parallel`) narrows "oldest of its agent" to "oldest of
+# likewise. An agent whose upper-level rebuild is running (`rebuild.py`) has no job claimed: the
+# rebuild owns its tree. A replay (`segment_parallel`) narrows "oldest of its agent" to "oldest of
 # its compaction segment": a closing chunk seals every open group, so segments carry
 # nothing across; `agent_id` confines the claim to one agent.
 _CLAIM_SQL = """
@@ -256,6 +257,10 @@ WHERE id = (
         WHERE o.agent_id = j.agent_id AND o.id < j.id AND o.status IN ('pending', 'running')
           AND (NOT %(per_segment)s OR o.compact_version = j.compact_version))
       AND (%(agent)s::bigint IS NULL OR j.agent_id = %(agent)s::bigint)
+      AND NOT EXISTS (
+        SELECT 1 FROM understanding_rebuilds r
+        WHERE r.agent_id = j.agent_id AND r.status = 'running'
+          AND r.claimed_at >= now() - make_interval(secs => %(lease)s))
     ORDER BY j.id
     FOR UPDATE OF j SKIP LOCKED
     LIMIT 1

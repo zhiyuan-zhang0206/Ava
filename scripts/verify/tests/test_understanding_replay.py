@@ -11,8 +11,8 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemM
 from agent.hooks import understanding_chunks as uc
 from agent.state_channels import CompactState
 from base.agents.history.checkpoint import FullHistory
+from base.agents.history.hierarchy.chunk_plan import plan_history, plan_replay
 from base.config import settings
-from scripts.verify.understanding_replay import plan_history, plan_replay
 
 _THRESHOLD = 1000
 
