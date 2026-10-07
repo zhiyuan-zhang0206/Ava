@@ -49,6 +49,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
 from agent.graph.prompt.compaction import compact_contract
 from agent.hooks import Hook
+from agent.hooks.compact_anchor import SummaryText, closing_of, closing_request_of
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.hooks.understanding_chunks import await_snapshot, enqueue_closing_chunk
@@ -63,6 +64,7 @@ from agent.nodes import CLAIM, INIT_CONTEXT
 from agent.state import AgentState, CompactState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.history.checkpoint_cleanup import mark_compact_boundary
+from base.agents.history.closing_request import ClosingRequest
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
@@ -140,19 +142,19 @@ class CompactionFailedError(RuntimeError):
 
 
 async def stamp_compact_boundary(
-    pool: AsyncConnectionPool | None, agent_id: int, state: AgentState | None = None
+    pool: AsyncConnectionPool | None,
+    agent_id: int,
+    state: AgentState | None = None,
+    closing: ClosingRequest | None = None,
 ) -> None:
     """Best-effort: stamp the newest pre-compact checkpoint as the segment anchor.
 
-    The stamped checkpoint is the full-snapshot record of this compaction
-    segment; timeline segment reads and audits anchor on it. Must never abort
-    the agent's turn (it runs inside the graph), so a failure is logged and
-    swallowed. `pool is None` (container / eval mode) is a no-op. Shared by the
-    automatic LLM compaction operation here and the agent-/user-triggered compact paths in the
-    claim node. Nothing is trimmed here since the never-delete ruling
-    (2026-09-12, task #3180).
-
-    With `state` (the pre-compact state), the segment's closing understanding
+    The stamped checkpoint is the full-snapshot record of this compaction segment; segment
+    reads and audits anchor on it. Must never abort the agent's turn, so a failure is logged
+    and swallowed. `pool is None` (container / eval mode) is a no-op. Shared by the automatic
+    LLM compaction here and the agent-/user-triggered paths in the claim node. Nothing is
+    trimmed (never-delete ruling, 2026-09-12, task #3180). `closing` (the compaction LLM call)
+    is recorded in the boundary's metadata. With `state`, the segment's closing understanding
     chunk is enqueued against the stamped checkpoint — `enqueue_closing_chunk`.
     """
     if pool is None:
@@ -160,7 +162,7 @@ async def stamp_compact_boundary(
     boundary: str | None = None
     await await_snapshot(pool, state, agent_id)
     try:
-        boundary = await mark_compact_boundary(pool, str(agent_id))
+        boundary = await mark_compact_boundary(pool, str(agent_id), closing=closing)
     except Exception as exc:
         logger.warning(
             "[{label}] {body}",
@@ -215,7 +217,7 @@ async def generate_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
     slices: AgentSlices,
-) -> str:
+) -> SummaryText:
     """Run the Compaction LLM over the whole conversation; returns the summary text.
 
     Used by the claim node for handling inbound kind `compact_request`
@@ -244,13 +246,10 @@ async def generate_summary(
     if not content_msgs:
         raise ValueError("conversation is empty, nothing to compress")
 
-    compaction_input = [
-        *system_head,
-        *content_msgs,
-        HumanMessage(
-            content=f"{COMPACTION_INSTRUCTION}\nava.self.compact contract:\n{compact_contract()}"
-        ),
-    ]
+    instruction = HumanMessage(
+        content=f"{COMPACTION_INSTRUCTION}\nava.self.compact contract:\n{compact_contract()}"
+    )
+    compaction_input = [*system_head, *content_msgs, instruction]
     # Same request shape as the llm node via prepare_invocation: when a
     # Gemini explicit cache is live the summary call rides it too (and its
     # stale-retry recovers a lapsed TTL), otherwise plain bind_tools.
@@ -275,6 +274,7 @@ async def generate_summary(
             cache_scope=CACHE_SCOPE_EXPLICIT_BLOCK if used_explicit_cache else None,
         )
     summary = response.text
+    closing = closing_request_of(response, instruction)
     if not summary.strip():
         raise RuntimeError(
             f"Compaction LLM returned no text content"
@@ -282,7 +282,7 @@ async def generate_summary(
             f" response content type {type(response.content).__name__});"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             f" cannot replace history with an empty summary"
         )
-    return summary
+    return SummaryText(summary, closing)
 
 
 def _last_compact_summary_text(messages: list[AnyMessage]) -> str | None:
@@ -655,7 +655,7 @@ async def auto_compact_for_llm(
         extra_msgs=([history_dump_note(dump_path)] if dump_path is not None else None),
         summary_kwargs=summary_kwargs,
     )
-    await stamp_compact_boundary(runtime.context.ops_pool, agent_id, state)
+    await stamp_compact_boundary(runtime.context.ops_pool, agent_id, state, closing_of(summary))
     transition["compact"] = state.compact.next_segment()
     emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS)
     return transition

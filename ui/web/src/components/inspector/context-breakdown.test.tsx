@@ -34,27 +34,29 @@ afterEach(() => {
 
 const breakdown = {
   total_input_tokens: 1000,
-  estimated_total: 250,
+  estimated: false,
+  exact_fraction: 1,
   max_input_tokens: 1_000_000,
   soft_compact_tokens: 600_000,
   hard_compact_tokens: 800_000,
   sections: [
-    { name: "(preamble)", tokens: 100 },
-    { name: "Tools", tokens: 400 },
+    { name: "(preamble)", tokens: 100, estimated: true },
+    { name: "Tools", tokens: 400, estimated: true },
   ],
   categories: [
-    { kind: "system_prompt", tokens: 400 },
-    { kind: "output", tokens: 300 },
-    { kind: "reasoning", tokens: 100 },
-    { kind: "agent_messages", tokens: 150 },
-    { kind: "automation", tokens: 50 },
+    { kind: "system_prompt", tokens: 400, estimated: false, exact_fraction: 1 },
+    { kind: "output", tokens: 300, estimated: false, exact_fraction: 1 },
+    { kind: "reasoning", tokens: 100, estimated: false, exact_fraction: 1 },
+    { kind: "agent_messages", tokens: 150, estimated: false, exact_fraction: 1 },
+    { kind: "automation", tokens: 50, estimated: false, exact_fraction: 1 },
   ],
 };
 
 // The endpoint's tolerated degenerate shape: no checkpoint yet.
 const emptyBreakdown = {
   total_input_tokens: 0,
-  estimated_total: 0,
+  estimated: false,
+  exact_fraction: 1,
   max_input_tokens: 0,
   soft_compact_tokens: 0,
   hard_compact_tokens: 0,
@@ -125,14 +127,15 @@ describe("ContextButton", () => {
     getContextBreakdown.mockResolvedValue({
       ...breakdown,
       sections: [
-        { name: "(preamble)", tokens: 100 },
+        { name: "(preamble)", tokens: 100, estimated: true },
         {
           name: "expanded SDK reference",
           tokens: 3000,
+          estimated: true,
           children: [
-            { name: "(intro)", tokens: 200 },
-            { name: "ava.self", tokens: 1500 },
-            { name: "ava.ui", tokens: 1300 },
+            { name: "(intro)", tokens: 200, estimated: true },
+            { name: "ava.self", tokens: 1500, estimated: true },
+            { name: "ava.ui", tokens: 1300, estimated: true },
           ],
         },
       ],
@@ -310,10 +313,10 @@ describe("ContextButton", () => {
     getContextBreakdown.mockResolvedValue({
       ...breakdown,
       categories: [
-        { kind: "system_prompt", tokens: 400 },
-        { kind: "compact_summary", tokens: 1 },
-        { kind: "output", tokens: 300 },
-        { kind: "tool_response", tokens: 299 },
+        { kind: "system_prompt", tokens: 400, estimated: false, exact_fraction: 1 },
+        { kind: "compact_summary", tokens: 1, estimated: false, exact_fraction: 1 },
+        { kind: "output", tokens: 300, estimated: false, exact_fraction: 1 },
+        { kind: "tool_response", tokens: 299, estimated: false, exact_fraction: 1 },
       ],
     });
     wrap(<Harness agentId={7} {...meterProps} />);
@@ -349,10 +352,10 @@ describe("ContextButton", () => {
     getContextBreakdown.mockResolvedValue({
       ...breakdown,
       categories: [
-        { kind: "system_prompt", tokens: 400 },
-        { kind: "context_note", tokens: 30 },
-        { kind: "output", tokens: 300 },
-        { kind: "automation", tokens: 50 },
+        { kind: "system_prompt", tokens: 400, estimated: false, exact_fraction: 1 },
+        { kind: "context_note", tokens: 30, estimated: false, exact_fraction: 1 },
+        { kind: "output", tokens: 300, estimated: false, exact_fraction: 1 },
+        { kind: "automation", tokens: 50, estimated: false, exact_fraction: 1 },
       ],
     });
     wrap(<Harness agentId={7} {...meterProps} />);
@@ -506,21 +509,33 @@ describe("ContextBreakdownCard (P4-3)", () => {
     expect(subtitle.textContent).toBe("The composition of the current context");
   });
 
-  it("footnotes the total while the anchor is the chars/4 estimate (no provider truth)", async () => {
+  it("suffixes the total, a category and a section with (estimated) only when flagged", async () => {
     getContextBreakdown.mockResolvedValue({
       ...breakdown,
-      total_input_tokens: 0,
-      estimated_total: 125_000,
+      estimated: true,
+      exact_fraction: 0.5,
+      categories: [
+        { kind: "system_prompt", tokens: 400, estimated: true, exact_fraction: 0 },
+        { kind: "output", tokens: 600, estimated: false, exact_fraction: 1 },
+      ],
     });
     wrap(<ContextBreakdownCard agentId={7} />);
-    const note = await screen.findByTestId("context-breakdown-estimate-note");
-    expect(note.textContent).toBe("* Total is an estimate");
+    const total = await screen.findByTestId("context-breakdown-total");
+    expect(total.textContent).toContain("tokens (estimated)");
+    expect(screen.getByText(/^400 \(estimated\)/)).toBeTruthy();
+    expect(screen.getByText(/^600 · /).textContent).not.toContain("estimated");
+    fireEvent.click(screen.getByTestId("context-breakdown-sections-toggle"));
+    expect(screen.getAllByText(/\(estimated\)$/).length).toBeGreaterThanOrEqual(2);
+    const sections = screen.getByTestId("context-breakdown-sections");
+    expect(sections.textContent).toContain("100 (estimated)");
+    expect(sections.textContent).toContain("400 (estimated)");
   });
 
-  it("no estimate footnote when the total comes from provider truth", async () => {
-    getContextBreakdown.mockResolvedValue(breakdown);
+  it("no suffix when the total and categories are exact", async () => {
+    getContextBreakdown.mockResolvedValue({ ...breakdown, sections: [] });
     wrap(<ContextBreakdownCard agentId={7} />);
-    await screen.findByTestId("context-breakdown-total");
-    expect(screen.queryByTestId("context-breakdown-estimate-note")).toBeNull();
+    const total = await screen.findByTestId("context-breakdown-total");
+    expect(total.textContent).not.toContain("estimated");
+    expect(screen.getByTestId("context-breakdown-categories").textContent).not.toContain("estimated");
   });
 });

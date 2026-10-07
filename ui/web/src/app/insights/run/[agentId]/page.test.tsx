@@ -102,6 +102,9 @@ const lifetimeResponse: RunTimelineResponse = {
       source: "user",
       preview: "please fix the bug",
       parent: "1",
+      context_tokens: null,
+      generation_tokens: null,
+      estimated: null,
     },
     {
       kind: "output",
@@ -112,6 +115,9 @@ const lifetimeResponse: RunTimelineResponse = {
       source: null,
       preview: "look at the failing test",
       parent: "1",
+      context_tokens: null,
+      generation_tokens: null,
+      estimated: null,
     },
     {
       kind: "text",
@@ -122,12 +128,15 @@ const lifetimeResponse: RunTimelineResponse = {
       source: null,
       preview: "on it",
       parent: "1",
+      context_tokens: null,
+      generation_tokens: null,
+      estimated: null,
     },
   ],
   events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
   requests: [
-    { idx: 2, ts: "2026-10-04T12:04:00.000000Z", session: 0, input_tokens: 1000 },
-    { idx: 7, ts: "2026-10-04T14:00:00.000000Z", session: 1, input_tokens: 400 },
+    { idx: 2, ts: "2026-10-04T12:04:00.000000Z", session: 0, input_tokens: 1000, output_tokens: 50 },
+    { idx: 7, ts: "2026-10-04T14:00:00.000000Z", session: 1, input_tokens: 400, output_tokens: 20 },
   ],
 };
 
@@ -149,12 +158,13 @@ const messagesResponse: RunTimelineMessages = {
 
 const cbdFixture: ContextBreakdownResponse = {
   total_input_tokens: 1000,
-  estimated_total: 250,
+  estimated: false,
+  exact_fraction: 1,
   max_input_tokens: 1_000_000,
   soft_compact_tokens: 374_000,
   hard_compact_tokens: 512_000,
-  sections: [{ name: "(preamble)", tokens: 100 }],
-  categories: [{ kind: "system_prompt", tokens: 400 }],
+  sections: [{ name: "(preamble)", tokens: 100, estimated: true }],
+  categories: [{ kind: "system_prompt", tokens: 400, estimated: false, exact_fraction: 1 }],
 };
 
 function render() {
@@ -182,9 +192,9 @@ beforeEach(() => {
     return Promise.resolve({
       ...cbdFixture,
       categories: [
-        { kind: "system_prompt", tokens: 300 },
-        { kind: "user_input", tokens: 200 },
-        { kind: "reasoning", tokens: 100 },
+        { kind: "system_prompt", tokens: 300, estimated: false, exact_fraction: 1 },
+        { kind: "user_input", tokens: 200, estimated: false, exact_fraction: 1 },
+        { kind: "reasoning", tokens: 100, estimated: true, exact_fraction: 0 },
       ],
       request: request.idx,
       session: request.session,
@@ -541,6 +551,9 @@ describe("failure and loading", () => {
           source: null,
           preview: "need a plan",
           parent: "1",
+          context_tokens: null,
+          generation_tokens: null,
+          estimated: null,
         },
         {
           kind: "call",
@@ -551,6 +564,9 @@ describe("failure and loading", () => {
           source: null,
           preview: "ls",
           parent: "1",
+          context_tokens: null,
+          generation_tokens: null,
+          estimated: null,
         },
       ],
     });

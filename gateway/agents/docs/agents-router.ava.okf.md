@@ -125,9 +125,8 @@ standard gateway authentication, returns `expired` or `not_open`, and returns
   it is kept deliberately light: no neighbor ranking, no Loki live tail.
 - `/api/agents/{id}/token-usage` exposes per-model soft and hard compact
   thresholds for the ContextMeter gauge.
-- `/api/agents/{id}/context-breakdown` reports checkpoint messages by kind and
-  the system prompt by `#` section; character counts are normalized by the
-  observed input-token ratio. It is a pure one-read view in
-  `gateway/agents/context_breakdown.py`.
+- `/api/agents/{id}/context-breakdown` sums per-message token counts
+  (`base/agents/history/message_tokens.py`) of the latest request into kind
+  buckets, each with `estimated` / `exact_fraction`; `context_breakdown.py`.
 
 System-note receipt and retry semantics: [[system-note.ava.okf.md]].

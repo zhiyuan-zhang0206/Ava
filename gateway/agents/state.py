@@ -14,7 +14,6 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from langchain_core.messages import BaseMessage
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import (
@@ -33,6 +32,7 @@ from base.daemon.schedules.completion_notices import (
     delivery_required_for_agent,
 )
 from base.db import agent_exists, list_pending_inbounds
+from gateway.agents.context_breakdown import RequestBreakdown
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.agents.eval_guard import caller_eval_isolation, deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance
@@ -682,14 +682,13 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
     """How the agent's context window is spent, for the composer's breakdown
     panel (lazy-loaded on expand).
 
-    Buckets the checkpoint messages by kind + splits the system prompt into its
-    top-level sections, each a chars/4 estimate proportionally normalized to the
-    last LLM call's real `input_tokens` (so the categories sum to the truth). Pure
-    gateway-side view logic (`gateway/agents/context_breakdown.py`) — one checkpoint read,
-    no kernel/agent involvement. A checkpoint read failure / no checkpoint yields
-    an empty breakdown with zeroed totals (same tolerance as token-usage: the
-    panel re-opens fine later)."""
-    from base.lm.context_budget import latest_input_tokens
+    The breakdown of the latest LLM request's input: each message's tokens anchored to the
+    provider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed
+    from them, only the inside of a message split by an estimator. Pure gateway-side view logic
+    (`gateway/agents/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
+    A checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown
+    with zeroed totals (same tolerance as token-usage: the panel re-opens fine later)."""
+    from gateway.agents.context_breakdown import latest_request_breakdown
 
     try:
         messages = load_checkpoint_messages(request.app.state.db, agent_id)
@@ -700,23 +699,22 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
             exc,
         )
         messages = []
-    return context_breakdown_response(
-        request, agent_id, messages, latest_input_tokens(messages) or 0
-    )
+    return context_breakdown_response(request, agent_id, latest_request_breakdown(messages))
 
 
 def context_breakdown_response(
-    request: Request, agent_id: int, messages: list[BaseMessage], total_input_tokens: int
+    request: Request, agent_id: int, breakdown: RequestBreakdown
 ) -> ContextBreakdownResponse:
-    """The breakdown of `messages` (one LLM request's input) anchored to the provider's
-    `total_input_tokens`, with the agent's resolved window and compaction thresholds."""
+    """`breakdown` (one LLM request's input) with the agent's resolved window and compaction
+    thresholds."""
     from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
-    from gateway.agents.context_breakdown import SectionNode, compute_breakdown
+    from gateway.agents.context_breakdown import SectionNode
 
     def _to_context_section(node: SectionNode) -> ContextSection:
         return ContextSection(
             name=node.name,
             tokens=node.tokens,
+            estimated=node.estimated,
             children=[_to_context_section(child) for child in node.children],
         )
 
@@ -731,13 +729,21 @@ def context_breakdown_response(
     except UnknownModelWindowError as exc:
         _log.warning("context-breakdown: %s", exc)
 
-    categories, sections, estimated_total = compute_breakdown(messages, total_input_tokens)
     return ContextBreakdownResponse(
-        total_input_tokens=total_input_tokens,
-        estimated_total=estimated_total,
+        total_input_tokens=breakdown.total.tokens,
+        estimated=breakdown.total.estimated,
+        exact_fraction=breakdown.total.exact_fraction,
         max_input_tokens=max_input_tokens,
         soft_compact_tokens=soft_compact_tokens,
         hard_compact_tokens=hard_compact_tokens,
-        sections=[_to_context_section(node) for node in sections],
-        categories=[ContextCategory(kind=kind, tokens=tokens) for kind, tokens in categories],
+        sections=[_to_context_section(node) for node in breakdown.sections],
+        categories=[
+            ContextCategory(
+                kind=c.kind,
+                tokens=c.total.tokens,
+                estimated=c.total.estimated,
+                exact_fraction=c.total.exact_fraction,
+            )
+            for c in breakdown.categories
+        ],
     )
