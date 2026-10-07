@@ -41,7 +41,7 @@ from pathlib import Path
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from base.agents.messages.kwargs import read_ava_kwargs
+from base.agents.messages.kwargs import message_read_time
 from base.host.env.agent_slices import HistoryDump
 from base.log import logger
 from base.paths import workspace_dir
@@ -59,7 +59,7 @@ def history_dump_dir(agent_id: int) -> Path:
 
 
 def _earliest_message_ts(messages: list[AnyMessage]) -> datetime | None:
-    """The earliest ``ava_created_at`` across the dumped messages, or None.
+    """The earliest read time (``message_read_time``) across the dumped messages, or None.
 
     Every message shape but the SystemMessage carries the stamp (the
     ``agent/messages/__init__.py`` builders and the AIMessage stamp in
@@ -69,7 +69,7 @@ def _earliest_message_ts(messages: list[AnyMessage]) -> datetime | None:
     """
     earliest: datetime | None = None
     for msg in messages:
-        raw = read_ava_kwargs(msg).get("ava_created_at")
+        raw = message_read_time(msg)
         if raw is None:
             continue
         try:
@@ -92,7 +92,7 @@ def dump_history(messages: list[AnyMessage], agent_id: int, config: HistoryDump)
     dump directory down to the newest ``history_dump_keep`` files.
 
     The name is ``<start>__<end>.jsonl``, both UTC: start = the earliest
-    message ``ava_created_at`` (second precision; falls back to the write
+    message read time (second precision; falls back to the write
     moment when no stamp is parseable), end = the write moment (microsecond
     precision, so consecutive dumps can never share a name). Both stamps are
     fixed-width, and a dump's start is non-decreasing from one dump to the

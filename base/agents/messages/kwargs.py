@@ -121,6 +121,7 @@ class AvaMessageKwargs(TypedDict, total=False):
     ava_source: str
     ava_inbound_id: int
     ava_created_at: str
+    ava_picked_up_at: str
     ava_compact_id: str
     ava_image_urls: list[str]
     ava_note_tag: str
@@ -141,6 +142,24 @@ def read_ava_kwargs(msg: BaseMessage) -> AvaMessageKwargs:
     Third-party keys sharing the dict are simply not surfaced by the type.
     """
     return cast("AvaMessageKwargs", message_addl_kwargs(msg))
+
+
+def kwargs_read_time(kwargs: AvaMessageKwargs) -> str | None:
+    """`message_read_time` over an already-read kwargs view."""
+    return kwargs.get("ava_picked_up_at") or kwargs.get("ava_created_at")
+
+
+def message_read_time(msg: BaseMessage) -> str | None:
+    """ISO wall-clock the message entered the LLM context, or None for legacy.
+
+    `ava_picked_up_at` when present (injected messages: inbound, notes,
+    attachments), else `ava_created_at` (AIMessage and tool output are produced
+    inside the context, so their creation IS their read time; messages
+    persisted before `ava_picked_up_at` existed fall back to it too). Readers
+    that order or display by when the model read a message use this, never
+    `ava_created_at` directly.
+    """
+    return kwargs_read_time(read_ava_kwargs(msg))
 
 
 # ── Typed accessors for the loosely-typed LangChain message members ──

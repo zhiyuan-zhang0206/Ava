@@ -124,3 +124,26 @@ class TestBuildTimelineItemsStartOffset:
             "s2.1f0b9b12-0000-6000-8000-000000000000.1.0",
             "s2.1f0b9b12-0000-6000-8000-000000000000.1.1",
         ]
+
+
+def test_inbound_item_ts_is_read_time_not_arrival() -> None:
+    """A message that arrived mid-stream (arrival < the AIMessage's stamp) is
+    placed on the timeline at its pickup time, after the AIMessage."""
+    from langchain_core.messages import HumanMessage
+
+    from base.agents.history.timeline import build_timeline_items
+
+    messages = [
+        HumanMessage(
+            content="[2026-01-01 00:00:01]\n\nhi",
+            additional_kwargs={
+                "ava_msg_type": "inbound",
+                "ava_source": "user",
+                "ava_inbound_id": 1,
+                "ava_created_at": "2026-01-01T00:00:01+00:00",
+                "ava_picked_up_at": "2026-01-01T00:00:20+00:00",
+            },
+        ),
+    ]
+    items, _ = build_timeline_items(messages, [])
+    assert items[0].created_at == "2026-01-01T00:00:20+00:00"
