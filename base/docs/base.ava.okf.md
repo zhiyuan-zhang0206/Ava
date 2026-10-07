@@ -34,6 +34,9 @@ tags:
 - **Health envelope** (`base/daemon/health_schema.py`, `base/daemon/health.py`): daemon `/healthz` and gateway `/api/health` return identity, liveness, readiness, components, and reasons; a degraded component is HTTP 503 for watchdog recovery.
 - **Native process identity** (`base/native_process/`): dependency-free boot scope and birth keys are separate from process observation and signaling. Linux requires exact start ticks; reconstructed wall timestamps are diagnostic. Independent observations use native keys while retained receipt bytes remain exact. Descendant enumeration is a hint: capture validates each current ancestry edge against native generations before accepting a member. Repeated captures preserve the original receipt per birth. Linux signals retain a pidfd through identity verification and delivery; a stdlib-only libc adapter serves it, independent of optional Python build bindings; unknown identity never grants cleanup or recovery authority.
 
+The graph groups component documentation under the existing `base/` package
+directories. Expand these package overviews to inspect their local contracts.
+
 ## Key dependencies
 
 The domain dependency map lives in [[dependencies.ava.okf.md]].

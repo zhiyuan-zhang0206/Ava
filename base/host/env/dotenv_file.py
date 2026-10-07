@@ -129,7 +129,7 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         if existing and existing[-1].read_text() == content:
             return None
         # Backups are local filesystem metadata: the stamp is the HOST clock,
-        # not the cluster's (docs/decisions/2026-09-28-env-backup-names-use-the-host-clock.md
+        # not the cluster's (docs/decisions/data/backup/2026-09-28-env-backup-names-use-the-host-clock.md
         # — the ruling exception to the 2026-08-27 one-cluster-clock rule). This
         # writer also runs before first-start identity, so it must not load
         # runtime Settings to find a cluster clock in the first place.

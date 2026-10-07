@@ -21,7 +21,7 @@ there are no Unix sockets). It holds each session's pty master and an in-memory
 session table; `base/sessions/backend.PtySessionBackend` is its client, and the
 SDK keeps its named-session surface (`ava.shell.sessions`, watchers,
 schedules) unchanged. Decision:
-[2026-10-03-pty-sessions-service](../../../../../docs/decisions/2026-10-03-pty-sessions-service.md).
+[2026-10-03-pty-sessions-service](../../../../../docs/decisions/runtime/processes/sessions/2026-10-03-pty-sessions-service.md).
 
 Client side, in this package:
 
@@ -114,7 +114,7 @@ allocation lock.
 ## Boundaries
 
 - POSIX-only (`pty.fork`; see
-  [Windows host guidance](../../../../../docs/conventions/windows-setup.md)).
+  [Windows host guidance](../../../../../docs/conventions/operations/windows-setup.md)).
 - One pty per session counts against the host-wide `kern.tty.ptmx_max`
   ceiling (macOS default 511) — see `base/native_process/os_platform.py`. The
   service raises its soft descriptor limit toward 10240 at start.
@@ -127,4 +127,4 @@ allocation lock.
   is current; superseded exact sessions are reaped instead. A reboot ends every
   session; the ScheduleManager rebuilds its own, page servers recover via
   heartbeat, and a watcher — no desired-state record — rebuilds nothing
-  (docs/decisions/2026-09-27-watchers-are-never-restarted.md).
+  (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md).

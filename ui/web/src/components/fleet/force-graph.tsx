@@ -17,12 +17,12 @@
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { useForceLayout, type Pos, type SimLink, type SimNode } from "@/lib/use-force-layout";
-import { useSvgZoomPan, type SvgViewport } from "@/lib/use-svg-zoom-pan";
-import { cn } from "@/lib/utils";
+import { useForceLayout, type Pos, type SimLink, type SimNode } from "@/lib/fleet/use-force-layout";
+import { useSvgZoomPan, type SvgViewport } from "@/lib/fleet/use-svg-zoom-pan";
+import { cn } from "@/lib/format/utils";
 
 import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
-import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
 // ── Shared node / edge model ──
 // Each view adapts its own data (FleetGraphNode / TaskRow) into this shape.

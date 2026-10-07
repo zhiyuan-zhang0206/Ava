@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ConfigFieldView } from "@/lib/types";
+import type { ConfigFieldView } from "@/lib/contracts/types";
 
 import { GROUP_ENV_VARS, HIDDEN_ENV_VARS, displayGroupId } from "./_config_groups";
 

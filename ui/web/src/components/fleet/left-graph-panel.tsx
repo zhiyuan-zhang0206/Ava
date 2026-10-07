@@ -13,9 +13,9 @@ import { useTranslations } from "next-intl";
 
 import { GraphView } from "@/components/fleet/graph-view";
 import { TaskGraph } from "@/components/fleet/task-graph";
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { cn } from "@/lib/utils";
+import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { cn } from "@/lib/format/utils";
 
 type LeftView = "graph" | "tasks";
 

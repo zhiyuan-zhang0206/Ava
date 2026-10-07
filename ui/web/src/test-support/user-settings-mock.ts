@@ -7,7 +7,7 @@
 // a synchronous, in-memory store so a setSetting flips the value and re-renders
 // consumers immediately (no debounce, no network). Wire it up per test file:
 //
-//   vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
+//   vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 //   import { resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
 //   beforeEach(() => resetMockSettings());              // back to defaults
 //   beforeEach(() => resetMockSettings({ "display.x": 1 })); // seed overrides
@@ -17,7 +17,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-import { USER_SETTING_DEFAULTS } from "@/lib/types";
+import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 
 let store: Record<string, unknown> = { ...USER_SETTING_DEFAULTS };
 const listeners = new Set<() => void>();

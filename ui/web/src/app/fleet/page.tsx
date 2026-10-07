@@ -9,10 +9,10 @@
 // stays fresh across page navigation without the fleet view running its own SSE
 // merge.
 
-import { ErrorBoundary } from "@/components/error-boundary";
+import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { FleetView } from "@/components/fleet/fleet-view";
-import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export default function FleetPage() {
   return (

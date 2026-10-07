@@ -17,7 +17,7 @@ its agent's own schedule (`agent/graph/llm/_retry.py`).
 Cold admission repairs claimed inbound/checkpoint disagreements and dangling tool
 pairs, and establishes the workspace. A watcher (`ava.watcher.at/cron/launch`) is
 just a shell session running a generated script — nothing here tracks or restarts
-one (docs/decisions/2026-09-27-watchers-are-never-restarted.md). No per-agent process
+one (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md). No per-agent process
 or global identity is created.
 
 Native restart/terminate flushes the final checkpoint and applies its exact-owner

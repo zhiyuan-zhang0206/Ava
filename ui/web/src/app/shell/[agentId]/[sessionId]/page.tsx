@@ -23,14 +23,14 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { api } from "@/lib/api";
-import { useDisplayLimit } from "@/lib/display-limits";
-import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/scroll-memory";
-import { useNow } from "@/lib/use-now";
-import { useUserSettings } from "@/lib/use-user-settings";
-import { formatShort, formatUptime } from "@/lib/time";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { api } from "@/lib/transport/api";
+import { useDisplayLimit } from "@/lib/format/display-limits";
+import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
+import { useNow } from "@/lib/format/use-now";
+import { useUserSettings } from "@/lib/state/use-user-settings";
+import { formatShort, formatUptime } from "@/lib/format/time";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 const POLL_MS = 3000;
 // Baked fallbacks: the live default comes from

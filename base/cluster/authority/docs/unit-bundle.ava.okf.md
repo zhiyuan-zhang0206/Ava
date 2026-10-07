@@ -37,4 +37,4 @@ secret (`scripts/data_plane_ops/rotate_cluster_secret.py`), the Redis runtime
 password bootstrap served with
 `scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner`, and the
 provider keys at each provider. Why nothing rotates the generation:
-[decision](../../../../docs/decisions/2026-10-03-retire-write-generation-rotation.md).
+[decision](../../../../docs/decisions/runtime/updates/execution/converge/2026-10-03-retire-write-generation-rotation.md).

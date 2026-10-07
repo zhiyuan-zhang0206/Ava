@@ -10,10 +10,10 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
-import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/types";
-import { formatShort } from "@/lib/time";
-import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
+import { formatShort } from "@/lib/format/time";
+import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 import { buttonVariants } from "@/components/ui/button";
 

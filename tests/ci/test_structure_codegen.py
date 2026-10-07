@@ -437,11 +437,11 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "base/host/resource_sample.py",
         "ops/rpc_schemas/__init__.py",
         "ops/rpc_schemas/terminate.py",
-        "ui/web/src/lib/types-generated.ts",
+        "ui/web/src/lib/contracts/types-generated.ts",
         "ui/web/openapi.json",
         "base/events/live/projection.py",
         "scripts/codegen/dump_frontend_constants.py",
-        "ui/web/src/lib/constants-generated.ts",
+        "ui/web/src/lib/contracts/constants-generated.ts",
         "base/events/contract.py",
         "base/events/vocabulary.py",
         "base/events/loader.py",
@@ -578,4 +578,7 @@ def test_prepush_migration_keeps_direct_ci_owners() -> None:
     assert any(step.get("run") == "uv run pyright" for step in backend)
     assert any(step.get("run") == "npx tsc --noEmit" for step in frontend)
     assert any(step.get("run") == "npm run lint" for step in frontend)
-    assert any(step.get("run") == "npx vitest run --coverage" for step in frontend)
+    assert any(
+        step.get("run") == "npx vitest run --config tests/vitest.config.mts --coverage"
+        for step in frontend
+    )

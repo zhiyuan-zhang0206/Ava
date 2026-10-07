@@ -1,6 +1,6 @@
 """The Tart run recipe keeps to its boundary, offline, against a fake `tart` binary.
 
-The rules (future/infra/verification-boundaries.md): at most two VMs run at once; the one
+The rules (future/infra/engineering/verification-boundaries.md): at most two VMs run at once; the one
 share is a read-only export of the commit; nothing of the host's cluster, credentials,
 keychain or VM store enters; the golden image and earlier VMs are never deleted; the VM a
 run made is deleted whatever happens. A real run needs Tart, a golden image and a few

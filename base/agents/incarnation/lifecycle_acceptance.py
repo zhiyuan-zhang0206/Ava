@@ -105,7 +105,7 @@ def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -
 # A terminate command may carry `{"kill_all_shell_sessions": true}` in its
 # payload: every shell session of the agent on its home machine (watchers
 # included) is killed with a graceful termination, right before it commits
-# (docs/decisions/2026-09-27-terminate-has-no-closed-state.md). The request counts
+# (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md). The request counts
 # while ANY unapplied terminate of the agent's current life carries it — the
 # command the runtime accepted may be a different one (a self-terminate that
 # won acceptance first), and the requester's kill still rides that death. A
@@ -324,7 +324,7 @@ def supersede_lifecycle_for_force(conn: psycopg.Connection, agent_id: int, force
 
 
 # Resurrection needs positive evidence that no earlier incarnation can still
-# write (docs/decisions/2026-09-29-unowned-termination-resurrects.md). A row this
+# write (docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md). A row this
 # runtime terminated while no incarnation owned it carries that evidence as two
 # facts only this runtime writes, both new values in existing columns:
 #

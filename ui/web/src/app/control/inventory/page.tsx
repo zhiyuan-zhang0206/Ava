@@ -32,7 +32,7 @@ import { Check, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback } from "react";
 
-import { PackageDraftEntry } from "@/components/package-draft-entry";
+import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -42,19 +42,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
-import { useStore } from "@/lib/store";
+import { api } from "@/lib/transport/api";
+import { errMsg } from "@/lib/contracts/errors";
+import { useStore } from "@/lib/state/store";
 import type {
   InventoryAggregate,
   InventoryItemAggregate,
   InventoryItemHostState,
   InventoryWriteResult,
-} from "@/lib/types";
+} from "@/lib/contracts/types";
 
 import { useSectionVisible } from "../_visibility";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 const INVENTORY_QUERY_KEY = ["inventory"] as const;
 

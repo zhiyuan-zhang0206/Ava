@@ -24,7 +24,7 @@ Gateway-owned background daemon (`services/upkeep/events_maintenance/daemon.py`)
 - **Per-loop progress health**: dispatch and class resolution own separate progress trackers with hard deadlines; a timed-out worker wedges its tracker and makes the aggregate `/healthz` return 503 while the sibling loop stays healthy — [[progress-health.ava.okf.md]].
 
 ## Key dependencies
-- [[db.ava.okf.md]] — writes the two rollup tables (the frozen `events` archive was dropped; see the task #1281/#1823 cleanup)
+- [[agent/db/docs/db.ava.okf.md]] — writes the two rollup tables (the frozen `events` archive was dropped; see the task #1281/#1823 cleanup)
 - `telemetry_events` — the source of the rollup, the class counts and the observation recovery
 
 ## Entry points

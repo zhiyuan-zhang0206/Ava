@@ -7,7 +7,7 @@ Run: `.venv/bin/python scripts/content_lint/check_doc_references.py` (exit 1 on 
 
 Two escapes, hours apart, from the same class:
 
-- `docs/conventions/windows-setup.md` told readers to run
+- `docs/conventions/operations/windows-setup.md` told readers to run
   `install.sh --skip-native-infra`. That flag has never existed.
 - `ava_builtins/skills/ava-self-development/SKILL.md` — a skill agents load and
   *execute* — told them `ava start --cluster preview`, eight days after
@@ -30,7 +30,7 @@ Three doc trees get exemptions, not a blanket skip:
 
 - `docs/decisions/` is skipped entirely (flags and links both). A decision
   record legitimately names the flag it removed or the file it deleted (see
-  `docs/decisions/2026-07-20-path-only-cluster-identity.md`) and history is
+  `docs/decisions/runtime/hosts/2026-07-20-path-only-cluster-identity.md`) and history is
   never rewritten to satisfy a linter.
 - `docs/postmortems/` is skipped entirely, for the same reason: an incident
   narrative is frozen, and the code path, flag, or file it names is the one

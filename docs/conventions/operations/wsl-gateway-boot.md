@@ -1,0 +1,149 @@
+# Unattended boot for a WSL gateway
+
+A WSL gateway needs two boot owners: Windows starts and holds the intended
+distribution open; Linux starts the installed Ava home. The Windows task below
+anchors the WSL distribution and does not launch a native Ava runner.
+
+Windows `WSLService` being automatic does not establish a distribution boot
+trigger. A logon task needs a logged-on user, and
+[systemd services do not themselves keep WSL alive](https://learn.microsoft.com/en-us/windows/wsl/systemd).
+The opt-in renderer below produces a separate distribution anchor; it does not
+install, register, start, stop, or update anything.
+
+## The two boot owners
+
+1. **Windows Task Scheduler:** an explicit distribution-owning Windows account
+   uses S4U, without a stored password or interactive desktop. A boot trigger
+   repeats every minute. Its action is the absolute local `wsl.exe` path with
+   `--distribution <name> --user <linux-owner> --exec /usr/bin/sleep infinity`.
+   `IgnoreNew` retains one running anchor; a later tick starts a new one after
+   either a failed or a successful client exit. The task has no execution-time
+   limit, battery restriction, or idle-only condition. It does not wake a sleeping
+   Windows host.
+2. **Linux:** ordinary start convergence registers and enables the home-scoped
+   systemd unit `ava-boot.service` (`base/host/system/boot_unit.py`). It runs
+   ordinary start directly with the exact home, checkout and registry. Systemd
+   supplies retry (`Restart=on-failure`, `RestartSec=60`, no attempt cap), and
+   `TimeoutStartSec=900` bounds initial readiness. The successful start publishes
+   the birth-validated root PID; `Type=forking` adopts root after the starter
+   exits. Root owns application supervision. Automatic startup requires systemd;
+   interactive start can launch root directly. No cron boot route is registered.
+
+
+The anchor belongs to the distribution, not an Ava home: it may keep other Linux
+workloads alive too. It is deliberately outside `\Ava\<home-slug>\` and is not
+removed by `ava cluster destroy`. Do not install competing anchors for the same
+distribution. Inventory any existing logon/keepalive wrappers before replacing
+them during a coordinated maintenance window.
+
+Cron does not activate an interactive shell's custom PATH. For a gateway that
+needs a separately installed Redis build, persist the unit-local `redis_bin_dir`
+with the [runbook's config command](../runbook.md), rather than changing the Windows
+anchor or the user's global PATH. The fresh `ava boot`/update child reads that
+same home-bound setting; other homes retain their own tool selection.
+An authenticated Linux gateway binds Redis to loopback and its configured
+reachable address directly after the bounded address wait. It needs no copy of
+the macOS Redis relay. An unauthenticated unit remains loopback-only.
+
+[S4U has no Windows network or encrypted-file access](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-logontype-principaltype-element).
+That restriction alone does not prove whether Linux networking inside WSL works.
+Validate the real distribution, local data paths, and required Linux network
+operations from that task identity. Do not switch to SYSTEM: WSL distribution
+ownership must remain the actual Windows user's. If S4U fails the host's
+acceptance test, resolve that evidence before installing an unattended gateway.
+
+## Prepare and inspect without registration
+
+Use the real distribution name from `wsl.exe --list --quiet`, its Linux account,
+and the Windows account that owns it. In PowerShell at this checkout:
+
+```powershell
+$distribution = 'Ubuntu-24.04'
+$linuxUser = 'linux-owner'
+$windowsUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$wslExecutable = Join-Path $env:SystemRoot 'System32\wsl.exe'
+$xml = (python scripts/host_ops/render_wsl_boot_task.py `
+    --distribution $distribution --linux-user $linuxUser `
+    --windows-user $windowsUser --wsl-executable $wslExecutable | Out-String)
+if ($LASTEXITCODE -ne 0) { throw 'WSL task rendering failed' }
+
+# Parse using the real scheduler without registering a task.
+$scheduler = New-Object -ComObject Schedule.Service
+$scheduler.Connect()
+$definition = $scheduler.NewTask(0)
+$definition.XmlText = $xml
+$definition.Principal.UserId
+$definition.Principal.LogonType
+$definition.Actions.Item(1).Arguments
+```
+
+The renderer uses only Python's standard library and can also generate XML on
+another machine. It never needs Ava settings, the cluster secret, a Windows
+password, or a running Ava installation. Parsing verifies schema acceptance,
+not account rights or a successful cold boot.
+
+## Install only during the coordinated host change
+
+First verify the Linux owner's installed home, `systemd=true`, enabled/active
+systemd home unit, and its exact checkout/home binding. Confirm that the gateway
+home will be the sole active data-plane owner before any automatic bring-up.
+Use an elevated PowerShell **as the distribution owner** if registering the boot
+trigger requires administrator rights; do not run as a different account.
+
+Choose a distinct name after inspecting existing tasks. Registration below does
+not use `-Force`, so an existing task is not silently overwritten:
+
+```powershell
+$taskName = 'Ava-WSL-Gateway-Ubuntu-24.04'
+Register-ScheduledTask -TaskName $taskName -Xml $xml -ErrorAction Stop
+Start-ScheduledTask -TaskName $taskName
+Get-ScheduledTask -TaskName $taskName
+Get-ScheduledTaskInfo -TaskName $taskName
+```
+
+`Start-ScheduledTask` starts the current instance; it does not fire the
+BootTrigger. Do not assume minute retries are armed before that trigger has
+actually fired at boot. Verify recovery after the real boot-triggered start.
+
+Keep the exact registered task name in the host's operational record. A running
+sleep task proves only the anchor is alive. Verify authenticated gateway status,
+direct data-plane readiness, runner connectivity, and a real agent operation
+separately. Changing `.wslconfig` requires a coordinated WSL restart; a warm
+identity probe does not validate newly configured networking.
+
+## Maintenance, rollback, and acceptance
+
+**Disable the task before stopping its process or shutting down WSL.** Otherwise
+the repeating trigger can boot the distribution again during a migration or
+repair. Disabling the task does not itself stop the current anchor:
+
+```powershell
+Disable-ScheduledTask -TaskName $taskName
+Stop-ScheduledTask -TaskName $taskName
+Get-ScheduledTask -TaskName $taskName
+```
+
+Stopping the anchor does not stop the cluster or establish data-plane quiescence.
+Follow the [cluster runbook](../runbook.md) for the coordinated stop and confirm
+other distribution anchors are also quiesced before a planned WSL shutdown.
+Remove only this registered task when abandoning the setup; never blanket-delete
+Windows tasks or Linux cron entries. After a planned restart, enabling the task
+alone need not replay its boot trigger; explicitly start it as well:
+
+```powershell
+Enable-ScheduledTask -TaskName $taskName
+Start-ScheduledTask -TaskName $taskName
+```
+
+Before calling unattended recovery ready, validate a Windows reboot **with no
+user login** in the approved maintenance window. Observe the task's correct user
+and running state, Linux boot ID and systemd (for the home unit:
+`systemctl status ava-boot.*` and its adopted root `MainPID`), the native
+journal, authenticated gateway/data-plane readiness, Linux network access, and
+runner/agent recovery.
+Test that ending only the anchor makes the repeating trigger recover it, and
+that disabling it prevents resurrection during maintenance. Until these checks
+pass, describe the result as prepared boot wiring, not verified cold recovery.
+
+The trigger/repetition contract is specified by Microsoft's
+[BootTrigger schema](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-boottrigger-triggergroup-element).

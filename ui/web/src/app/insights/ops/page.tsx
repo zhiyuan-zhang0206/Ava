@@ -6,7 +6,7 @@
 
 import { useTranslations } from "next-intl";
 
-import { API_BASE } from "@/lib/api";
+import { API_BASE } from "@/lib/transport/api";
 
 const OPS_DASHBOARD_URL = `${API_BASE}/grafana/d/ava-ops-main?from=now-24h&to=now`;
 

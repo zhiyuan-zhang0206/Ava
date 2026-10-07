@@ -5,8 +5,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { resolveTimelineColors } from "@/lib/timeline-colors";
-import type { BackendTimelineItem } from "@/lib/types";
+import { resolveTimelineColors } from "@/lib/timeline/timeline-colors";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 import { cardConfigFor } from "./row";
 

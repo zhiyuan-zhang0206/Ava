@@ -50,7 +50,7 @@ Signature-style `**kwargs` (no closing pair) is not matched.
 
 The judgement-residue siblings of these rules (rare-error Raises sections,
 cross-stage lifecycle narration, zero-based budget calls) stay manual /
-sweeper territory — see docs/conventions/lint-vs-sweeper.md.
+sweeper territory — see docs/conventions/engineering/lint-vs-sweeper.md.
 
 ## Exemption
 
