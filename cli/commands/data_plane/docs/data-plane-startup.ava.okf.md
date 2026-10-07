@@ -80,3 +80,7 @@ timezone and locale only. The gateway login, write generation and API token
 the boot pass delivered to `ava start`, and the human secret and Redis admin
 password `.env` gives it, never reach a data-plane daemon's environment.
 Nothing the postmaster runs needs more.
+
+Startup ordering and remote stop/status contracts are tested beside the data-plane
+owner in `../tests/test_start_data_plane.py` and `../tests/test_remote_data_plane.py`.
+The lifecycle tests retain the `ava start` caller dispatch contracts.

@@ -131,7 +131,7 @@ def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     monkeypatch.setattr(os, "_exit", fake_exit)
     monkeypatch.setattr(loguru_logger, "remove", keep)
     monkeypatch.setattr(logging, "shutdown", keep)
-    monkeypatch.setattr(code_version, "_version", _VERSION)
+    monkeypatch.setattr(code_version, "get", lambda: _VERSION)
     monkeypatch.setattr(code_version, "_db_gate_exempt", False)
     monkeypatch.setattr(gate, "_last_read_at", None)
     return exits
@@ -417,7 +417,7 @@ def test_the_raise_is_greatest_and_never_lowers_the_minimum(
     skips the read, carrying an older version."""
     _set_minimum(_VERSION + 25)
     code_version.exempt_from_db_gate()
-    monkeypatch.setattr(code_version, "_version", _VERSION)
+    monkeypatch.setattr(code_version, "get", lambda: _VERSION)
 
     assert gate.raise_min_code_version(database) == _VERSION + 25
     assert _read_minimum() == _VERSION + 25
@@ -515,7 +515,6 @@ def test_an_exempt_process_dials_as_the_cli_without_a_version(
 ) -> None:
     _set_minimum(_VERSION + 1)
     code_version.exempt_from_db_gate()
-    monkeypatch.setattr(code_version, "_version", None)
     monkeypatch.setattr(code_version, "get", lambda: pytest.fail("the CLI needs no version"))
 
     with db.connect() as conn:
