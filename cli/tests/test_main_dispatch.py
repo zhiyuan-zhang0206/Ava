@@ -3,9 +3,8 @@
 main() builds the argparse parser, parses argv, then calls `args.func(args)`
 where `func` was bound at parser-build time via `set_defaults(func=...)`,
 referring to the `_h_*` handler defined in its owning parser module. Each handler
-lazy-imports the cmd_X impl; this test patches the
-handler binding (on the module that defines it, before the parser is built)
-to record routing without invoking real cmd_start / cmd_cluster_status / etc.
+lazy-imports the cmd_X impl; tests replace selected handlers on the real parser
+bindings to record routing without invoking real cmd_start / cmd_cluster_status.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from typing import cast
 import pytest
 
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
-from base.native_process import code_version
 from cli import main as _main
 from cli.commands.agents import parsers as _agents
 from cli.commands.extensions.parsers import mcp as _mcp
@@ -725,11 +723,29 @@ assert 'base.config' not in sys.modules
 
 
 def test_main_declares_the_cli_exempt_from_the_database_code_gate(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """`ava stop` writes to the database to drain agents, so a host left on stale
     code must still be able to run it: the CLI entry point exempts itself first."""
-    monkeypatch.setattr(code_version, "_db_gate_exempt", False)
-    with pytest.raises(SystemExit):
-        _main.main(["--help"])
-    assert code_version.db_gate_applies() is False
+    code = """
+from base.native_process import code_version
+from cli import main
+assert code_version.db_gate_applies() is True
+try:
+    main.main(['--help'])
+except SystemExit as exc:
+    assert exc.code == 0
+else:
+    raise AssertionError('help must exit')
+assert code_version.db_gate_applies() is False
+"""
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
+        [sys.executable, "-B", "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
