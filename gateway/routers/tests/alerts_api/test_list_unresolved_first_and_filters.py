@@ -13,7 +13,14 @@ from fastapi.testclient import TestClient
 from base.config import settings
 from gateway.alerts import router as alerts_router
 from gateway.app import app
-from tests.gateway.test_alerts_api import _alert, _capture_im, _ingest, _seed, _webhook
+from tests.gateway.test_alerts_api import (
+    _alert,
+    _capture_im,
+    _ingest,
+    _seed,
+    _webhook,
+    native_sender,
+)
 from tests.gateway.test_alerts_api import (
     _alerts_auth_and_im as _alerts_auth_and_im,
 )
@@ -267,7 +274,7 @@ def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resen
             sent.append(text)
             return True
 
-        monkeypatch.setattr(alerts_router, "notify_im", _ok)
+        monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_ok))
         assert _ingest(client, _webhook(alerts=alerts)).json()["notified"] == 2
     assert len(sent) == 1
 

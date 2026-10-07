@@ -184,3 +184,57 @@ async def test_legacy_manifest_json_without_new_fields_still_dispatches() -> Non
         adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.send_prepared_outbound(intent.chat_id, intent.prepared)
     assert bodies == [{"chat_id": "42", "text": "frozen"}]
+
+
+async def test_native_telegram_owner_freezes_plain_alert_without_buttons() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("getMe"), "preparation cannot externally send"
+        return httpx.Response(200, json={"ok": True, "result": {"id": 123}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        target, prepared = await adapter.prepare_alert_owner("**alert** <user>")
+        assert target == "42" and prepared.account_id == "123"
+        assert prepared.chunks[0].text == "**alert** &lt;user&gt;"
+        assert prepared.buttons == () and not prepared.markdown
+        assert "TEST-TOKEN" not in prepared.model_dump_json()
+
+
+async def test_native_weixin_owner_uses_login_user_and_holds_missing_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from services.entrypoints.im_bridge.adapters import weixin
+
+    account = {
+        "account_id": "bot",
+        "user_id": "owner",
+        "bot_token": "PRIVATE",
+        "base_url": "https://ilink.example",
+    }
+    monkeypatch.setattr(weixin, "load_account", lambda: account)
+    adapter = WeixinAdapter(FakeCore())
+    target, prepared = await adapter.prepare_alert_owner("plain")
+    assert target == "owner" and prepared.chunks[0].text == "plain"
+    assert "PRIVATE" not in prepared.model_dump_json()
+    account["user_id"] = ""
+    with pytest.raises(SendNotStartedError, match="owner"):
+        await adapter.prepare_alert_owner("plain")
+
+
+async def test_native_feishu_owner_uses_last_open_id_and_holds_unknown() -> None:
+    from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
+    from services.entrypoints.im_bridge.tests.slices import feishu_config
+
+    adapter = FeishuAdapter(
+        FakeCore(),
+        feishu_config(
+            feishu_app_id="app",
+            feishu_app_secret="PRIVATE",  # noqa: S106 — mock credential
+        ),
+    )
+    with pytest.raises(SendNotStartedError, match="owner"):
+        await adapter.prepare_alert_owner("plain")
+    adapter._last_open_id = "ou-owner"
+    target, prepared = await adapter.prepare_alert_owner("plain")
+    assert target == "ou-owner" and prepared.account_id == "app"
+    assert prepared.chunks[0].text == "plain" and "PRIVATE" not in prepared.model_dump_json()

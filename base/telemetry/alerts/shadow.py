@@ -1,4 +1,4 @@
-"""Immutable alert transition/group observations, with delivery deliberately inactive."""
+"""Immutable alert transition/group facts; native origin never promotes shadow history."""
 
 import json
 from collections import defaultdict
@@ -18,6 +18,7 @@ from base.telemetry.alerts import (
     parse_alertname,
     resolve_alert_key,
 )
+from base.telemetry.alerts.native import AlertGroupOrigin
 
 
 class ShadowTransitionReason(StrEnum):
@@ -47,11 +48,20 @@ class AlertShadowBatch:
     """
 
     def __init__(
-        self, conn: psycopg.Connection, alerts: list[dict[str, Any]], language: str
+        self,
+        conn: psycopg.Connection,
+        alerts: list[dict[str, Any]],
+        language: str,
+        *,
+        native: bool = False,
     ) -> None:
         self.conn = conn
         self.language = language
-        self.members: dict[tuple[str, str], list[ShadowMember]] = defaultdict(list)
+        self.native = native
+        self.native_ids: set[int] = set()
+        self.members: dict[tuple[str, str, AlertGroupOrigin], list[ShadowMember]] = defaultdict(
+            list
+        )
         self.items = alerts
         for fp in sorted({alert_instance_fingerprint(alert) for alert in alerts}):
             identity = json.dumps(["alert-shadow-fingerprint", fp])
@@ -83,6 +93,14 @@ class AlertShadowBatch:
             return
         reason = self._reason(row, previous)
         if reason is None:
+            previous_group = self.conn.execute(
+                "SELECT g.id FROM alert_notification_members m "
+                "JOIN alert_notification_groups g ON g.id=m.group_id "
+                "WHERE m.alert_id=%s AND m.notification_revision=%s AND g.origin='native-v1'",
+                (row["id"], previous["notification_revision"] if previous else 0),
+            ).fetchone()
+            if previous_group is not None:
+                self.native_ids.add(int(previous_group[0]))
             return
         revision = self.conn.execute(
             "UPDATE alerts SET notification_revision=notification_revision+1 WHERE id=%s "
@@ -100,6 +118,9 @@ class AlertShadowBatch:
         group = (
             normalize_status(str(alert.get("status") or "")),
             parse_alertname(alert.get("labels") or {}),
+            AlertGroupOrigin.NATIVE
+            if self.native and reason != ShadowTransitionReason.LEGACY_UNCONFIRMED
+            else AlertGroupOrigin.SHADOW,
         )
         self.members[group].append(member)
 
@@ -122,14 +143,16 @@ class AlertShadowBatch:
 
     def freeze(self) -> None:
         """Freeze newly minted groups using the existing renderer and member order."""
-        for (status, alertname), members in self.members.items():
+        for (status, alertname, origin), members in self.members.items():
             text = notify_group_text([member.alert for member in members], self.language)
             group = self.conn.execute(
-                "INSERT INTO alert_notification_groups(status,alertname,language,render_version,text) "
-                "VALUES (%s,%s,%s,'alert-group-v1',%s) RETURNING id",
-                (status, alertname, self.language, text),
+                "INSERT INTO alert_notification_groups(status,alertname,language,render_version,text,origin) "
+                "VALUES (%s,%s,%s,'alert-group-v1',%s,%s) RETURNING id",
+                (status, alertname, self.language, text, origin.value),
             ).fetchone()
             assert group is not None  # noqa: S101 — INSERT RETURNING always yields one row
+            if origin == AlertGroupOrigin.NATIVE:
+                self.native_ids.add(int(group[0]))
             for ordinal, member in enumerate(members):
                 self.conn.execute(
                     "INSERT INTO alert_notification_members "
