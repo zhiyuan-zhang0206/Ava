@@ -90,6 +90,8 @@ before reaching their old launch handler, so they cannot force-terminate the
 committed row. New runners still accept the legacy `spawn-launch` operation
 from an old gateway during the update window.
 
+Guarded creation: [[guarded-creation.ava.okf.md]].
+
 ## List projections
 
 `GET /api/agents` is a bounded, newest-first directory page with explicit

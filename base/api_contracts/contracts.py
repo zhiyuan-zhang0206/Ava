@@ -112,6 +112,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="explicit same-ID launch retry rotates the attempt key; each call dispatches once",
     ),
+    ("POST", "/api/keyed/v1/agents"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="guarded plain creation requires a verified principal-v1 key; no legacy fallback",
+        transactional_idempotency=True,
+    ),
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
     # ── gateway/alerts/router.py ───────────────────────────────────

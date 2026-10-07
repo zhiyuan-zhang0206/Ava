@@ -452,6 +452,67 @@
         }
       }
     },
+    "/api/keyed/v1/agents": {
+      "post": {
+        "summary": "Post Guarded Agents",
+        "description": "Create a plain agent through a versioned, principal-bound keyed entry.\n\nOlder routing cannot execute this path. Callers must keep it fixed for an\nintent and never fall back to the legacy path after an uncertain response.",
+        "operationId": "post_guarded_agents_api_keyed_v1_agents_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpawnAgentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpawnedAgent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/retry-launch": {
       "post": {
         "summary": "Retry Agent Launch",

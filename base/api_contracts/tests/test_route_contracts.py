@@ -35,6 +35,10 @@ def test_sdk_inherits_idempotency_from_contracts() -> None:
     creation_contract = contracts.contract_for("POST", "/api/agents")
     assert creation_contract is not None and creation_contract.transactional_idempotency
     assert not creation_contract.legacy_keyed_retry
+    guarded_contract = contracts.contract_for("POST", "/api/keyed/v1/agents")
+    assert guarded_contract is not None and guarded_contract.transactional_idempotency
+    assert guarded_contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
+    assert not guarded_contract.legacy_keyed_retry
     message_contract = contracts.contract_for("POST", "/api/agents/7/messages")
     assert message_contract is not None and message_contract.transactional_idempotency
     reconcile_contract = contracts.contract_for("POST", "/api/agents/7/messages/reconcile")
