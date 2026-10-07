@@ -6365,6 +6365,67 @@
         }
       }
     },
+    "/api/keyed/v1/mcp/clients": {
+      "post": {
+        "summary": "Post Guarded Mcp Client",
+        "description": "Create once; replay only original metadata, never the one-time plaintext token.",
+        "operationId": "post_guarded_mcp_client_api_keyed_v1_mcp_clients_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialCreationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialCreationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/fleet/graph": {
       "get": {
         "summary": "Get Fleet Graph",
@@ -9939,6 +10000,73 @@
         "title": "ConversationSnapshotResponse",
         "description": "The selected agent's three conversation read models, one point in time.\n\n`timeline` carries the same head window `GET .../timeline` serves (no\ncursor); `token_usage` and `pending` mirror their standalone endpoints\nsection-for-section (drift is caught by the side-by-side contract test)."
       },
+      "CredentialCreationRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/McpClientScope",
+            "default": "read"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CredentialCreationRequest",
+        "description": "One credential creation intent; its caller key is supplied separately."
+      },
+      "CredentialCreationResult": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/McpClientScope"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "scope",
+          "created_at",
+          "replayed",
+          "token"
+        ],
+        "title": "CredentialCreationResult",
+        "description": "Original creation metadata; replay deliberately cannot recover a token."
+      },
       "DefaultModelView": {
         "properties": {
           "model": {
@@ -11860,12 +11988,7 @@
             "title": "Name"
           },
           "scope": {
-            "type": "string",
-            "enum": [
-              "read",
-              "write"
-            ],
-            "title": "Scope",
+            "$ref": "#/components/schemas/McpClientScope",
             "default": "read"
           }
         },
@@ -11886,12 +12009,7 @@
             "title": "Name"
           },
           "scope": {
-            "type": "string",
-            "enum": [
-              "read",
-              "write"
-            ],
-            "title": "Scope"
+            "$ref": "#/components/schemas/McpClientScope"
           },
           "token": {
             "type": "string",
@@ -11920,6 +12038,15 @@
         ],
         "title": "McpClientRevoked"
       },
+      "McpClientScope": {
+        "type": "string",
+        "enum": [
+          "read",
+          "write"
+        ],
+        "title": "McpClientScope",
+        "description": "Supported credential privileges; stored and wire values remain stable."
+      },
       "McpClientView": {
         "properties": {
           "id": {
@@ -11931,12 +12058,7 @@
             "title": "Name"
           },
           "scope": {
-            "type": "string",
-            "enum": [
-              "read",
-              "write"
-            ],
-            "title": "Scope"
+            "$ref": "#/components/schemas/McpClientScope"
           },
           "created_at": {
             "type": "string",

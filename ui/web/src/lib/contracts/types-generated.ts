@@ -3345,6 +3345,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/mcp/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Guarded Mcp Client
+         * @description Create once; replay only original metadata, never the one-time plaintext token.
+         */
+        post: operations["post_guarded_mcp_client_api_keyed_v1_mcp_clients_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/graph": {
         parameters: {
             query?: never;
@@ -5077,6 +5097,36 @@ export interface components {
             pending: components["schemas"]["PendingInbound"][];
         };
         /**
+         * CredentialCreationRequest
+         * @description One credential creation intent; its caller key is supplied separately.
+         */
+        CredentialCreationRequest: {
+            /** Name */
+            name: string;
+            /** @default read */
+            scope: components["schemas"]["McpClientScope"];
+        };
+        /**
+         * CredentialCreationResult
+         * @description Original creation metadata; replay deliberately cannot recover a token.
+         */
+        CredentialCreationResult: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            scope: components["schemas"]["McpClientScope"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Replayed */
+            replayed: boolean;
+            /** Token */
+            token: string | null;
+        };
+        /**
          * DefaultModelView
          * @description GET/PUT /api/config/default-model — the model a new agent is born on.
          *
@@ -6014,12 +6064,8 @@ export interface components {
         McpClientCreate: {
             /** Name */
             name: string;
-            /**
-             * Scope
-             * @default read
-             * @enum {string}
-             */
-            scope: "read" | "write";
+            /** @default read */
+            scope: components["schemas"]["McpClientScope"];
         };
         /** McpClientCreated */
         McpClientCreated: {
@@ -6027,11 +6073,7 @@ export interface components {
             id: number;
             /** Name */
             name: string;
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "read" | "write";
+            scope: components["schemas"]["McpClientScope"];
             /** Token */
             token: string;
         };
@@ -6040,17 +6082,19 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /**
+         * McpClientScope
+         * @description Supported credential privileges; stored and wire values remain stable.
+         * @enum {string}
+         */
+        McpClientScope: "read" | "write";
         /** McpClientView */
         McpClientView: {
             /** Id */
             id: number;
             /** Name */
             name: string;
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "read" | "write";
+            scope: components["schemas"]["McpClientScope"];
             /**
              * Created At
              * Format: date-time
@@ -12708,6 +12752,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["McpClientRevoked"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_guarded_mcp_client_api_keyed_v1_mcp_clients_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialCreationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialCreationResult"];
                 };
             };
             /** @description Validation Error */
