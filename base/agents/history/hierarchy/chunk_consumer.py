@@ -22,7 +22,8 @@ skipped with an event; a grouping reply still refused after the corrections is a
 generation failure (retried, then failed). Each poll samples the queue's depth, with this
 runner's in-flight jobs, as the `understanding_backlog` event. A job that ends
 `done` is followed, in the same task, by the upper-level grouping checks of its agent
-(`group_consumer.py`).
+(`group_consumer.py`). A manual build's upper-level rebuild (`rebuild.py`) is claimed by the same
+loop once its agent has no chunk job left.
 
 The loop never raises — a raise would cancel the whole host's task group — and neither does a
 job: each runs in a task of the loop's own `TaskGroup`, which catches everything, so one job's
@@ -75,6 +76,15 @@ from base.agents.history.hierarchy.chunks import (
 )
 from base.agents.history.hierarchy.generate import GenerateError, GenParams, build_generation_llm
 from base.agents.history.hierarchy.group_consumer import run_blocking, run_group_checks
+from base.agents.history.hierarchy.rebuild import (
+    MAX_REBUILD_ATTEMPTS,
+    RebuildJob,
+    claim_rebuild,
+    finish_rebuild,
+    rebuild_pending,
+    release_rebuild,
+    run_rebuild,
+)
 from base.agents.history.hierarchy.units import divide_units
 from base.agents.observation.snapshot import agent_model_target
 from base.config import settings
@@ -396,6 +406,12 @@ class _Consumer:
             if job is not None:
                 tg.create_task(self._process(job))
                 return True
+            # A replay leaves the upper levels to its tool's own regroup; live consumers rebuild
+            # an agent's tree once its chunk jobs have all ended (`rebuild.py`).
+            rebuild = await claim_rebuild(self.pool) if self.replay is None else None
+            if rebuild is not None:
+                tg.create_task(self._process_rebuild(rebuild))
+                return True
             self.in_flight -= 1
             return False
         except BaseException:
@@ -444,8 +460,13 @@ class _Consumer:
                 )
                 outcome = Outcome("failed", f"{type(exc).__name__}: {exc}")
             await _settle(self.pool, job, outcome)
-            if outcome.status == "done" and self.replay is None:
-                # The nodes just written may make a level due for grouping (group_consumer.py).
+            if (
+                outcome.status == "done"
+                and self.replay is None
+                and not await rebuild_pending(self.pool, job.agent_id)
+            ):
+                # The nodes just written may make a level due for grouping (group_consumer.py);
+                # a pending rebuild groups every leaf itself, so checks now would be redone.
                 await run_group_checks(
                     self.pool, self.db, self.models, job.agent_id, executor=executor
                 )
@@ -455,6 +476,66 @@ class _Consumer:
                 "understanding chunk {job} (agent {agent}) could not be settled",
                 job=job.id,
                 agent=job.agent_id,
+            )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+            self.in_flight -= 1
+            self.finished.set()
+
+    async def _process_rebuild(self, rebuild: RebuildJob) -> None:
+        """Run and settle one claimed upper-level rebuild; never raises."""
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="understanding")
+        try:
+            try:
+                leaves = await run_rebuild(
+                    self.pool, self.db, self.models, rebuild.agent_id, executor=executor
+                )
+            except asyncio.CancelledError:
+                try:
+                    await asyncio.shield(
+                        release_rebuild(
+                            self.pool, rebuild.id, error="host stopping", count_attempt=False
+                        )
+                    )
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "understanding rebuild {rebuild} could not be put back; its lease will lapse",
+                        rebuild=rebuild.id,
+                    )
+                raise
+            except _TRANSIENT as exc:
+                await release_rebuild(
+                    self.pool, rebuild.id, error=f"{type(exc).__name__}: {exc}", count_attempt=False
+                )
+            except Exception as exc:
+                logger.opt(exception=True).warning(
+                    "understanding rebuild {rebuild} (agent {agent}) failed",
+                    rebuild=rebuild.id,
+                    agent=rebuild.agent_id,
+                )
+                error = f"{type(exc).__name__}: {exc}"
+                if rebuild.attempts >= MAX_REBUILD_ATTEMPTS:
+                    await finish_rebuild(self.pool, rebuild.id, status="failed", error=error)
+                    telemetry.emit(
+                        "telemetry",
+                        "understanding_rebuild_failed",
+                        attributes={
+                            "agent_id": rebuild.agent_id,
+                            "rebuild_id": rebuild.id,
+                            "attempts": rebuild.attempts,
+                            "error": error,
+                        },
+                    )
+                else:
+                    await release_rebuild(self.pool, rebuild.id, error=error)
+            else:
+                await finish_rebuild(self.pool, rebuild.id, status="done", leaves=leaves)
+        except Exception:
+            # A settle that failed leaves the row `running`; its lease lapses and it is retaken.
+            logger.opt(exception=True).warning(
+                "understanding rebuild {rebuild} (agent {agent}) could not be settled",
+                rebuild=rebuild.id,
+                agent=rebuild.agent_id,
             )
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
