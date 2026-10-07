@@ -8,10 +8,10 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from tests.base.test_runner_role import (
     _assert_alert_writes_denied,
-    _exercise_understanding_queue_grants,
     _exercise_impersonation_entry_grants,
     _exercise_pause_grants,
     _exercise_understanding_node_grants,
+    _exercise_understanding_queue_grants,
     _grant_runner,
     _identity_url,
     _runner_url,
