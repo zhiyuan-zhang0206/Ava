@@ -13,12 +13,14 @@ from base.agents import GatewayUnavailable
         ("POST", "/api/cancel"),
         ("POST", "/api/agents"),
         ("POST", "/api/agents/7/restart"),
+        ("POST", "/api/agents/7/pages"),
         ("POST", "/api/agents/7/compact"),
         ("POST", "/api/agents/7/notices/1/resolve"),
         ("POST", "/api/schedules/1/restart"),
         ("PATCH", "/api/tasks/1"),
         ("PATCH", "/api/unknown"),
         ("DELETE", "/api/cluster/machines/host"),
+        ("DELETE", "/api/agents/7/pages/report"),
         ("DELETE", "/api/unknown"),
     ],
 )
@@ -70,7 +72,7 @@ def test_natural_idempotent_write_retries(method: str) -> None:
         response = (
             transport.patch("/api/agents/1", {"label": "new"})
             if method == "PATCH"
-            else transport._delete("/api/agents/1/pages/report")
+            else transport._delete("/api/presets/1")
         )
     assert response.status_code == 200
     assert len(requests) == 2
@@ -156,3 +158,36 @@ def test_task_patch_rejects_invalid_caller_key_before_network(key: object) -> No
     ):
         transport.patch("/api/tasks/1", idempotency_key=key)  # type: ignore[arg-type]
     assert requests == []
+
+
+@pytest.mark.parametrize("operation", ["register", "close"])
+@pytest.mark.parametrize("failure", ["timeout", "server_error"])
+@pytest.mark.usefixtures("retry_waits")
+def test_public_page_call_does_not_replay_an_ambiguous_effect(operation: str, failure: str) -> None:
+    from ava.gateway_client import close_page, register_page
+
+    requests: list[httpx.Request] = []
+
+    def committed_then_response_failed(request: httpx.Request) -> httpx.Response:
+        # A real gateway may already have replaced/closed the page. Retrying
+        # would apply that old intent to whatever page is now current.
+        requests.append(request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("page effect committed; response lost", request=request)
+        return httpx.Response(503)
+
+    with (
+        httpx.Client(
+            transport=httpx.MockTransport(committed_then_response_failed), base_url="http://gateway"
+        ) as client,
+        transport.use_client(client),
+    ):
+        expected_error = GatewayUnavailable if failure == "timeout" else httpx.HTTPStatusError
+        with pytest.raises(expected_error):
+            if operation == "register":
+                register_page(7, name="report", port=8001, host="test-host", title=None)
+            else:
+                close_page(7, "report")
+    assert len(requests) == 1
+    assert requests[0].method == ("POST" if operation == "register" else "DELETE")
+    assert "Idempotency-Key" not in requests[0].headers
