@@ -1,8 +1,7 @@
 """Telegram notice bridge (Task #884).
 
-Polls the gateway's /api/notices/live for new fleet notices (an agent's
-``ava.ui.notify`` -> agent_notices rows) and pushes each to the Telegram owner
-chat — a channel independent of the /switch conversation flow. Pushed notices
+Reads new fleet notices (an agent's ``ava.ui.notify`` -> agent_notices rows)
+and durably accepts normal pushes for the Telegram owner chat — a channel independent of the /switch conversation flow. Pushed notices
 carry inline buttons:
 
 - [Reply] (both kinds, Task #1061 made FYI answerable too) arms a reply-mode
@@ -13,9 +12,8 @@ carry inline buttons:
 - [OK] / [Close] resolve an FYI as read or dismiss a response-required notice.
 
 A ``/notice filter`` command restricts what gets pushed (minimum priority
-and/or a single agent). Filter + the poll cursor persist under
-``$AVA_HOME/state/im_bridge/`` so a daemon restart resumes without replaying
-resolved notices.
+and/or a single agent). Filters and a diagnostic cursor persist under ``$AVA_HOME/state/im_bridge/``;
+normal-poll source receipts and the immutable cutover live in Postgres.
 """
 
 from __future__ import annotations
@@ -32,6 +30,13 @@ from base.db.transaction import write_transaction
 from base.paths import ava_home
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
+from services.entrypoints.im_bridge.notice_poll_store import NoticePollStore
+from services.entrypoints.im_bridge.outbound_types import (
+    NoticePollImportReason,
+    OutboundIntent,
+    OutboundSource,
+    OutboundSourceKind,
+)
 
 _log = logging.getLogger("services.entrypoints.im_bridge.notice_bridge")
 
@@ -102,7 +107,10 @@ class NoticeBridge:
         self._config = config
         self.core = core
         self.db_pool = db_pool
+        self.poll_store = NoticePollStore(core.outbound_store)
         self._cursor = 0
+        self._legacy_cursor: int | None = None
+        self._cutover_warned = False
         self._reply_modes: dict[str, dict[str, Any]] = {}  # chat_id -> mode
         self._filters: dict[str, Any] = {"min_priority": None, "agent": None}
         self._load_state()
@@ -112,16 +120,14 @@ class NoticeBridge:
     def _load_state(self) -> None:
         d = _state_dir()
         d.mkdir(parents=True, exist_ok=True)
-        for name, attr in (("notice_cursor.json", "_cursor"), ("notice_filters.json", "_filters")):
-            with suppress(FileNotFoundError, json.JSONDecodeError):
-                setattr(self, attr, json.loads((d / name).read_text()))
+        with suppress(FileNotFoundError, json.JSONDecodeError):
+            value = json.loads((d / "notice_cursor.json").read_text())
+            if type(value) is int and value >= 0:
+                self._legacy_cursor = self._cursor = value
+        with suppress(FileNotFoundError, json.JSONDecodeError):
+            self._filters = json.loads((d / "notice_filters.json").read_text())
         if not isinstance(self._filters, dict):
             self._filters = {"min_priority": None, "agent": None}
-        if not isinstance(self._cursor, int):
-            # A corrupted cursor (list/dict/str) would make every _notices_after
-            # SQL parameter wrong — a permanent 3s error loop instead of a
-            # recoverable state (audit round 2, P2).
-            self._cursor = 0
 
     def _save(self, name: str, value: Any) -> None:
         try:
@@ -144,55 +150,98 @@ class NoticeBridge:
 
     # -- polling -----------------------------------------------------------
 
-    async def poll_once(self) -> None:
-        """Fetch notices newer than the cursor — directly from agent_notices
-        (R3 door ④) — push the ones that pass the filter, advance the cursor.
+    def initialize_poll(self) -> None:
+        """Establish native cutover before daemon readiness and first poll."""
+        _, diagnostic, reason = self.poll_store.initialize_notice_poll(self._legacy_cursor)
+        self._cursor = max(self._cursor, diagnostic)
+        if reason == NoticePollImportReason.LEGACY_HISTORY_UNKNOWN and not self._cutover_warned:
+            self._cutover_warned = True
+            _log.warning(
+                "normal notice poll retains unknown legacy history; explicit listing remains available"
+            )
 
-        Same semantics as the old /api/notices/live poll: open notices only
-        (resolved rows stop being returned), FYI expiry honored (an expired FYI
-        is excluded once the open feed auto-resolved it — the cursor must not
-        stall on it)."""
+    async def poll_once(self) -> None:
+        """Accept normal notice decisions; the shared worker owns provider calls."""
         try:
-            if self.db_pool is not None:
-                notices = await asyncio.to_thread(self._notices_after, self._cursor)
-            else:
-                notices = await self._get("/api/notices/live", {"after": self._cursor})
-        except Exception:
-            _log.warning("notice poll failed", exc_info=True)
+            await asyncio.to_thread(self.initialize_poll)
+            notices = await asyncio.to_thread(self._notices_after, 0)
+        except Exception as exc:
+            _log.warning("notice acceptance read held class=%s", type(exc).__name__)
             return
-        if not notices:
-            return
-        # Advance the cursor only past notices that were delivered (or
-        # deliberately filtered out). The old code moved it unconditionally,
-        # so a failed push (Telegram send error, adapter absent) silently
-        # dropped the notice forever — at-most-once (audit round 2, P1).
-        # Holding the cursor retries the notice on the next round instead.
-        last_delivered = self._cursor
-        for n in notices:
-            if self._passes_filter(n) and not await self._push(n):
-                self._warn_push_held(n)
+        for notice in notices:
+            if not await self._accept_normal_notice(notice):
+                self._warn_push_held(notice)
                 break
-            last_delivered = int(n["id"])
-        if last_delivered > self._cursor:
-            self._cursor = last_delivered
+            self._cursor = max(self._cursor, int(notice["id"]))
             self._save("notice_cursor.json", self._cursor)
 
+    async def _accept_normal_notice(self, notice: dict[str, Any]) -> bool:
+        filtered = not self._passes_filter(notice)
+        snapshot = {
+            key: notice[key]
+            for key in (
+                "id",
+                "agent_id",
+                "title",
+                "content",
+                "priority",
+                "require_response",
+                "agent_label",
+            )
+        }
+        snapshot["filters"] = dict(self._filters)
+        intent = None
+        if not filtered:
+            adapter = self.core.adapters.get("telegram")
+            if adapter is None:
+                return False
+            text, buttons = self._render_notice(notice)
+            try:
+                recipient, prepared = await adapter.prepare_notice_owner(text, tuple(buttons))
+            except Exception as exc:
+                _log.warning(
+                    "notice target unavailable notice=%s class=%s", notice["id"], type(exc).__name__
+                )
+                return False
+            intent = OutboundIntent(
+                channel="telegram",
+                chat_id=recipient,
+                agent_id=int(notice["agent_id"]),
+                source=OutboundSource(
+                    kind=OutboundSourceKind.NOTICE, identity=str(notice["id"]), block_idx=0
+                ),
+                prepared=prepared,
+            )
+        try:
+            await asyncio.to_thread(
+                self.poll_store.accept_notice,
+                int(notice["id"]),
+                snapshot,
+                intent,
+                filtered=filtered,
+            )
+        except Exception as exc:
+            _log.warning(
+                "notice acceptance held notice=%s class=%s", notice["id"], type(exc).__name__
+            )
+            return False
+        return True
+
     def _notices_after(self, after: int, limit: int | None = None) -> list[dict[str, Any]]:
-        """Open notices with id > after, both kinds, oldest-first — the
-        direct-DB twin of the gateway's /api/notices/live query. Without an
-        explicit limit the read caps at the same display default the gateway
-        endpoint applies (one source, task #3696)."""
+        """Unaccepted open notices above the immutable cutover, regardless of high ID."""
         from base.db import NOTICE_FYI_TTL_DAYS
 
+        del after  # Diagnostic compatibility argument, never an eligibility watermark.
         if limit is None:
             limit = self._config.notices_open_default_limit
-
         with self.db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                _SELECT_NOTICE
-                + "WHERE n.id > %s AND n.resolved_at IS NULL AND (n.require_response OR "
-                "n.created_at > now() - make_interval(days => %s)) " + "ORDER BY n.id ASC LIMIT %s",
-                (after, NOTICE_FYI_TTL_DAYS, limit),
+                _SELECT_NOTICE + "JOIN im_bridge_notice_poll_state s ON s.singleton "
+                "LEFT JOIN im_bridge_notice_acceptances a ON a.notice_id=n.id "
+                "WHERE n.id > s.legacy_floor AND a.notice_id IS NULL "
+                "AND n.resolved_at IS NULL AND (n.require_response OR "
+                "n.created_at > now() - make_interval(days => %s)) ORDER BY n.id ASC LIMIT %s",
+                (NOTICE_FYI_TTL_DAYS, limit),
             )
             return [_row_to_notice(r) for r in cur.fetchall()]
 
@@ -233,11 +282,10 @@ class NoticeBridge:
             return True  # decisions always push
         return _PRIORITY_RANK.get(n["priority"], 9) <= _PRIORITY_RANK.get(min_prio, 9)
 
-    async def _push(self, n: dict[str, Any], *, prefix: str | None = None) -> bool:
-        """Deliver one notice; return True when it was sent."""
-        adapter = self.core.adapters.get("telegram")
-        if adapter is None:
-            return False
+    @staticmethod
+    def _render_notice(
+        n: dict[str, Any], prefix: str | None = None
+    ) -> tuple[str, list[tuple[str, str]]]:
         lines = [f"🔔 {n['title']}"]  # emoji-ok: Telegram notification icon (user-facing)
         if prefix:
             lines.append(prefix)
@@ -261,8 +309,16 @@ class NoticeBridge:
                 ("✓ Got it", f"{_CB_READ}{cb}"),  # emoji-ok: button
             ]
         buttons.append(("📋 Queue", _CB_LIST))  # emoji-ok: queue-view button
+        return "\n\n".join(lines), buttons
+
+    async def _push(self, n: dict[str, Any], *, prefix: str | None = None) -> bool:
+        """Deliver one notice; return True when it was sent."""
+        adapter = self.core.adapters.get("telegram")
+        if adapter is None:
+            return False
+        text, buttons = self._render_notice(n, prefix)
         try:
-            await adapter.send_to_owner("\n\n".join(lines), buttons=buttons)
+            await adapter.send_to_owner(text, buttons=buttons)
             return True
         except Exception:
             _log.warning("notice push failed (notice %s)", n["id"], exc_info=True)
@@ -280,7 +336,7 @@ class NoticeBridge:
             return
         self._push_held_warned_at = now
         _log.warning(
-            "notice %s not pushed (adapter missing or send failed) — cursor held, retrying next round",
+            "notice %s acceptance held or response lost; retained receipt governs the next poll",
             n["id"],
         )
 

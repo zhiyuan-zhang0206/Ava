@@ -14,6 +14,12 @@ import pytest
 
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.notice_bridge import NoticeBridge, _state_dir
+from services.entrypoints.im_bridge.outbound_types import (
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
+)
+from services.entrypoints.im_bridge.tests import test_im_bridge_core
 from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
 
 
@@ -68,14 +74,34 @@ class FakeAdapter:
     channel = "telegram"
 
     def __init__(self) -> None:
-        self.sent: list[tuple[str, str, list | None]] = []
+        self.sent: list[tuple[str, str, list[tuple[str, str]] | None]] = []
+
+    async def outbound_account_id(self) -> str:
+        return "test-account"
+
+    async def prepare_notice_owner(
+        self, text: str, buttons: tuple[tuple[str, str], ...]
+    ) -> tuple[str, PreparedOutboundSend]:
+        return "owner", PreparedOutboundSend(
+            adapter_kind=OutboundAdapterKind.TELEGRAM,
+            account_id="test-account",
+            chunks=(OutboundChunk(text=text),),
+            markdown=False,
+            buttons=buttons,
+        )
+
+    async def send_prepared_outbound(self, chat_id: str, prepared: PreparedOutboundSend) -> None:
+        for chunk in prepared.chunks:
+            await self.send_to_owner(
+                chunk.text, buttons=list(prepared.buttons) if prepared.buttons else None
+            )
 
     async def send_to_owner(
         self,
         text: str,
         *,
         markdown: bool = False,
-        buttons: list | None = None,
+        buttons: list[tuple[str, str]] | None = None,
     ) -> None:
         del markdown
         self.sent.append((text, "owner", buttons))  # pyright: ignore[reportUnknownMemberType]
@@ -100,10 +126,27 @@ def _bridge(
     tmp_path: Any, gateway: FakeGateway, monkeypatch: pytest.MonkeyPatch, **config: Any
 ) -> tuple[NoticeBridge, FakeAdapter]:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    core = IMBridgeCore(im_bridge_config(**config), gateway)  # type: ignore[arg-type]
+    core = IMBridgeCore(im_bridge_config(**config), gateway, db_pool=test_im_bridge_core.TEST_POOL)  # type: ignore[arg-type]
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
-    bridge = NoticeBridge(core, core.config)
+    bridge = NoticeBridge(core, core.config, db_pool=test_im_bridge_core.TEST_POOL)
+
+    def fake_feed(_after: int, limit: int | None = None) -> list[dict[str, Any]]:
+        with test_im_bridge_core.TEST_POOL.connection() as conn:
+            ids = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT notice_id FROM im_bridge_notice_acceptances"
+                ).fetchall()
+            }
+        return [notice for notice in gateway.notices if notice["id"] not in ids][:limit]
+
+    monkeypatch.setattr(bridge, "_notices_after", fake_feed)
+
+    def fake_open(limit: int | None = None) -> list[dict[str, Any]]:
+        return gateway.open_notices[:limit]
+
+    monkeypatch.setattr(bridge, "_open_notices", fake_open)
     return bridge, adapter
 
 
@@ -115,6 +158,8 @@ def test_poll_pushes_new_notices_and_advances_cursor(
     bridge, adapter = _bridge(tmp_path, gateway, monkeypatch)
 
     asyncio.run(bridge.poll_once())
+    for _ in range(2):
+        asyncio.run(bridge.core.outbound_worker.run_once())
     assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert "A" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
     assert bridge._cursor == 2
@@ -125,6 +170,7 @@ def test_poll_pushes_new_notices_and_advances_cursor(
         _notice(4, "decide", require_response=True),
     ]
     asyncio.run(bridge.poll_once())
+    asyncio.run(bridge.core.outbound_worker.run_once())
     assert (
         len(adapter.sent) == 3  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )  # low filtered, decide pushed
@@ -140,6 +186,7 @@ def test_filter_agent_restricts_pushes(tmp_path: Any, monkeypatch: pytest.Monkey
     import asyncio
 
     asyncio.run(bridge.poll_once())
+    asyncio.run(bridge.core.outbound_worker.run_once())
     assert len(adapter.sent) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert "from 2" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
 
@@ -366,6 +413,8 @@ def _direct_bridge(
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
     bridge = NoticeBridge(core, core.config, db_pool=pool)
+    bridge._legacy_cursor = 0
+    core.notice_bridge.poll_store.initialize_notice_poll(0)
     return bridge, adapter, pool
 
 
@@ -398,6 +447,7 @@ def test_poll_reads_directly_from_db(
     bridge, adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
     try:
         asyncio.run(bridge.poll_once())
+        asyncio.run(bridge.core.outbound_worker.run_once())
         assert len(adapter.sent) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         assert "direct db notice" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
         assert bridge._cursor == nid, "cursor advanced past the new notice"
@@ -487,7 +537,7 @@ class _FlakyAdapter(FakeAdapter):
         text: str,
         *,
         markdown: bool = False,
-        buttons: list | None = None,
+        buttons: list[tuple[str, str]] | None = None,
     ) -> None:
         if self._failures_left > 0:
             self._failures_left -= 1
@@ -495,27 +545,27 @@ class _FlakyAdapter(FakeAdapter):
         await super().send_to_owner(text, markdown=markdown, buttons=buttons)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_poll_holds_cursor_when_push_fails(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression (audit round 2, P1): a failed push used to advance the
-    cursor anyway, silently dropping the notice forever. The cursor must
-    hold at the failed notice so the next round retries it, and notices
-    behind it stay queued."""
+def test_poll_accepts_before_uncertain_send_and_never_retries(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     gateway = FakeGateway()
     gateway.notices = [_notice(1, "A"), _notice(2, "B"), _notice(3, "C")]
     bridge, _ = _bridge(tmp_path, gateway, monkeypatch)
-    flaky = _FlakyAdapter(fail_first=1)  # first send fails, then succeeds
+    flaky = _FlakyAdapter(fail_first=1)
     bridge.core.adapters["telegram"] = flaky  # type: ignore[assignment]
-
     asyncio.run(bridge.poll_once())
-    assert bridge._cursor == 0, "cursor must not advance past a failed push"
-    assert (
-        flaky.sent == []  # pyright: ignore[reportUnknownMemberType]
-    )  # notice 1 failed; 2 and 3 not attempted yet
-
-    # next round: 1 succeeds, 2 and 3 pushed, cursor reaches 3
+    assert bridge._cursor == 3, "accepted means durable intent, not provider success"
+    assert flaky.sent == []
+    for _ in range(3):
+        asyncio.run(bridge.core.outbound_worker.run_once())
+    assert len(flaky.sent) == 2
     asyncio.run(bridge.poll_once())
-    assert len(flaky.sent) == 3  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert bridge._cursor == 3
+    asyncio.run(bridge.core.outbound_worker.run_once())
+    assert len(flaky.sent) == 2, "ambiguous first send is retained, never poll-replayed"
+    with test_im_bridge_core.TEST_POOL.connection() as conn:
+        assert [
+            r[0] for r in conn.execute("SELECT status FROM im_bridge_outbound_intents ORDER BY id")
+        ] == ["uncertain", "sent", "sent"]
 
 
 def test_poll_holds_cursor_when_adapter_absent(

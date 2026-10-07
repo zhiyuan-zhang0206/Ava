@@ -6,7 +6,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
-from services.entrypoints.im_bridge.outbound_store import TimelineOutboxStore
+from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import candidate
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
 
@@ -35,7 +35,7 @@ def test_durable_cursor_orders_compact_and_numeric_tail(
     item.item["item_id"] = item_id
     if item_stamp is not None:
         item.item["created_at"] = item_stamp
-    result = TimelineOutboxStore(pool).accept("telegram", "bot", "chat", 7, [item])
+    result = IMOutboxStore(pool).accept("telegram", "bot", "chat", 7, [item])
     assert bool(result.intent_ids) is accepted
     expected = (
         PushWatermark(item_stamp, item_id) if accepted else PushWatermark(saved_stamp, saved_id)
@@ -48,7 +48,7 @@ def test_legacy_numbering_rollback_cannot_advance_without_an_intent(pool: Connec
     original = PushWatermark(None, "377.1")
     cursors.save_push("telegram", "chat", 7, original)
     item = candidate(128, qualified=False)
-    result = TimelineOutboxStore(pool).accept("telegram", "bot", "chat", 7, [item])
+    result = IMOutboxStore(pool).accept("telegram", "bot", "chat", 7, [item])
     assert not result.intent_ids
     assert cursors.load_push() == {("telegram", "chat", 7): original}
 
@@ -78,11 +78,11 @@ async def test_equal_stamp_blocks_keep_numeric_order_and_distinct_source_ordinal
     ]
     await core._push_snapshot(("telegram", "chat"), state, {})
     assert core.cursor_store.load_push() == {("telegram", "chat", 7): PushWatermark(stamp, "1.10")}
-    await core.timeline_worker.run_once()
-    await core.timeline_worker.run_once()
+    await core.outbound_worker.run_once()
+    await core.outbound_worker.run_once()
     assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
         ("chat", "[Ava #7] block 9"),
         ("chat", "[Ava #7] block 10"),
     ]
     await core._push_snapshot(("telegram", "chat"), state, {})
-    assert core.timeline_outbox.pending_streams({"telegram": "test-account"}) == []
+    assert core.outbound_store.pending_streams({"telegram": "test-account"}) == []

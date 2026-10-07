@@ -7,7 +7,7 @@ from collections.abc import Awaitable
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import logger
-from services.entrypoints.im_bridge.outbound_store import TimelineOutboxStore
+from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound_types import OutboundStatus
 from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 
@@ -44,15 +44,15 @@ async def _complete_before_cancel[T](work: Awaitable[T]) -> T:
     return result[0]
 
 
-class TimelineOutboxWorker:
-    def __init__(self, store: TimelineOutboxStore, adapters: dict[str, IMAdapter]) -> None:
+class IMOutboxWorker:
+    def __init__(self, store: IMOutboxStore, adapters: dict[str, IMAdapter]) -> None:
         self.store = store
         self.adapters = adapters
         self._serial = asyncio.Lock()
 
     def validate_pool(self) -> None:
         if self.store._pool().max_size < 2:
-            raise ValueError("timeline outbound worker requires a database pool with max_size >= 2")
+            raise ValueError("IM outbound worker requires a database pool with max_size >= 2")
 
     async def run_once(self) -> None:
         """At most one active whole-send per daemon; old accounts remain queued."""
@@ -63,10 +63,10 @@ class TimelineOutboxWorker:
             accounts: dict[str, str] = {}
             for channel, adapter in self.adapters.items():
                 try:
-                    accounts[channel] = await adapter.timeline_account_id()
+                    accounts[channel] = await adapter.outbound_account_id()
                 except Exception as exc:
                     logger.warning(
-                        "timeline account unavailable channel={} class={}",
+                        "IM outbound account unavailable channel={} class={}",
                         channel,
                         type(exc).__name__,
                     )
@@ -95,14 +95,14 @@ class TimelineOutboxWorker:
             adapter = self.adapters[stream[0]]
             try:
                 await _complete_before_cancel(
-                    adapter.send_prepared_timeline(intent.chat_id, intent.prepared)
+                    adapter.send_prepared_outbound(intent.chat_id, intent.prepared)
                 )
             except SendNotStartedError:
                 status, reason = OutboundStatus.FAILED, "adapter_proved_no_effect"
             except Exception as exc:
                 status, reason = OutboundStatus.UNCERTAIN, "external_send_ambiguous"
                 logger.warning(
-                    "timeline send uncertain intent={} class={}", intent_id, type(exc).__name__
+                    "IM outbound send uncertain intent={} class={}", intent_id, type(exc).__name__
                 )
             else:
                 status, reason = OutboundStatus.SENT, None
@@ -110,4 +110,4 @@ class TimelineOutboxWorker:
                 asyncio.to_thread(self.store.finish, intent_id, attempt, status, reason)
             )
             if not recorded:
-                logger.warning("timeline outcome CAS rejected intent={}", intent_id)
+                logger.warning("IM outbound outcome CAS rejected intent={}", intent_id)
