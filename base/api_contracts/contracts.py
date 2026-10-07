@@ -429,7 +429,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/tasks"): RouteContract(),
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
-        note="update resets reminders and owner notification is outside the transaction",
+        note="task effect and notification share a transaction; request has no replay receipt",
     ),
     # ── gateway/agents/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),

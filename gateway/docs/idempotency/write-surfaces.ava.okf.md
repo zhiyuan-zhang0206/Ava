@@ -15,7 +15,8 @@ policy is always the route-contract owner above, not this table. `natural`
 means repeatable effects/CAS; `keyed` requires the business receipt; `one-shot`
 forbids ambiguous automatic retries. Later domain PRs update their live
 contracts only after proving their effects, then refresh affected inventory
-rows. Login intentionally mints another session; telemetry intentionally
+rows. Newly protected optional-key routes preserve keyless single-attempt callers;
+SDK ambiguous retry remains gated until server support is positively known. Login intentionally mints another session; telemetry intentionally
 inserts events; upstream proxy writes inherit no safe-retry promise. Machine
 control remains a separately audited operator boundary.
 
@@ -56,8 +57,8 @@ control remains a separately audited operator boundary.
 | `POST /api/mcp/clients/{client_id}/revoke` | natural | client revocation — guarded update; repeats cannot revoke twice |
 | `POST /api/memory/refresh` | natural | re-scan — repeats are harmless |
 | `POST /api/memory/search` | natural | pure read |
-| `POST /api/agents/{agent_id}/notices/{notice_id}/resolve` | one-shot | read with reply can insert another inbound; resolved answers do not replay receipts |
-| `POST /api/agents/{agent_id}/notices` | one-shot | create notice — supersedes the previous open one; a retry supersedes twice (harmless but pointless), duplicate row |
+| `POST /api/agents/{agent_id}/notices/{notice_id}/resolve` | keyed | operation receipt and reply inbound commit together; intentional later replies use new keys |
+| `POST /api/agents/{agent_id}/notices` | keyed | immutable request and original notice snapshot replay before mutable expiry/task checks |
 | `PATCH /api/agents/{agent_id}/notices/current` | natural | edit current open notice — repeats are harmless |
 | `POST /api/agents/{agent_id}/notices/current/dismiss` | natural | withdraw current open notice — CAS, repeats are harmless |
 | `POST /api/packages/draft` | one-shot | LLM generation incurs a fresh external request and token cost |
@@ -77,6 +78,6 @@ control remains a separately audited operator boundary.
 | `PUT /api/skills` | natural | full replace — PUT is idempotent |
 | `POST /api/agents/{agent_id}/messages` | keyed | enqueue chat inbound — one logical message must land exactly once; clients retry with an Idempotency-Key |
 | `POST /api/agents/{agent_id}/messages/reconcile` | natural | idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery |
-| `POST /api/agents/{agent_id}/system-note` | one-shot | deliver a framework system note (task assign/update/reminder) — renders as a system marker, not peer chat; resurrect is a body choice |
-| `PATCH /api/tasks/{task_id}` | one-shot | update resets reminders and owner notification is outside the transaction |
+| `POST /api/agents/{agent_id}/system-note` | keyed | optional principal-scoped identity reuses one system-note inbound; changed payload or resurrection policy conflicts |
+| `PATCH /api/tasks/{task_id}` | one-shot | task effect and notification share a transaction; request has no replay receipt |
 | `POST /api/agents/{agent_id}/uploads` | one-shot | save files to disk + enqueue inbound; a retry duplicates files |
