@@ -3163,6 +3163,146 @@
         }
       }
     },
+    "/api/agents/{agent_id}/notices/current/guarded-v1": {
+      "patch": {
+        "summary": "Edit Current",
+        "description": "Return the immutable acceptance of an observed global notice edit.",
+        "operationId": "edit_current_api_agents__agent_id__notices_current_guarded_v1_patch",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardedNoticeEdit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoticeItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/notices/current/dismiss/guarded-v1": {
+      "post": {
+        "summary": "Dismiss Current",
+        "description": "Withdraw only the observed global row and replay its original acceptance.",
+        "operationId": "dismiss_current_api_agents__agent_id__notices_current_dismiss_guarded_v1_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservedNotice"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoticeItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/cluster/stopping": {
       "post": {
         "summary": "Post Cluster Stopping",
@@ -10924,6 +11064,66 @@
         ],
         "title": "ForceExpireImpersonationResponse"
       },
+      "GuardedNoticeEdit": {
+        "properties": {
+          "observed_notice_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Observed Notice Id",
+            "description": "Global NoticeItem.id from the feed/inspector; not the SDK notify local id."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Priority"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blocking": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "observed_notice_id"
+        ],
+        "title": "GuardedNoticeEdit",
+        "description": "Edit explicitly supplied fields on the observed global notice row."
+      },
       "GuideDraftRequest": {
         "properties": {
           "nl": {
@@ -13272,6 +13472,23 @@
         ],
         "title": "NoticesFeed",
         "description": "GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,\ndecision Q1=A). One request carries the whole Inbox panel: the OPEN\nqueue split by kind (open = FYI notices that need no response, awaiting\n= require_response notices that ride the agent snapshot today) plus one\nkeyset page of the RESOLVED history.\n\nThe contract shape was chosen so a panel = one request = one hook:\nthe client no longer merges three independent pipes (agent snapshot +\n/api/notices/open + the resolved history). `next_cursor` is None when\n`resolved_page` is the last page (short page or exhausted); pass it back\nas before_at/before_id for the next strictly-older page."
+      },
+      "ObservedNotice": {
+        "properties": {
+          "observed_notice_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Observed Notice Id",
+            "description": "Global NoticeItem.id from the feed/inspector; not the SDK notify local id."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "observed_notice_id"
+        ],
+        "title": "ObservedNotice",
+        "description": "Target the positive global feed ID, never notify()'s zero-based local ID."
       },
       "OpenNotice": {
         "properties": {

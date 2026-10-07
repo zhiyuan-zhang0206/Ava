@@ -40,7 +40,7 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.inbound_provenance import request_inbound_provenance
-from gateway.agents.notice_receipts import (
+from gateway.agents.notice_operations.receipts import (
     existing_receipt,
     notice_key,
     resolve_once,
