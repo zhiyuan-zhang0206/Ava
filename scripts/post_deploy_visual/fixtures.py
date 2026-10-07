@@ -6,6 +6,7 @@ contracts so the gate exercises the same selection path as the application.
 
 AGENT: dict[str, object] = {
     "agent_id": 1,
+    "last_launch_attempt_id": None,
     "spawner": "user",
     "status": "idling",
     "pid": 100,
