@@ -114,10 +114,6 @@ _HEALTH_PORT_OVERRIDES: dict[str, str] = {
 MAX_BODY_BYTES = 64 * 1024
 
 
-# Daemons already warned about the Windows iphlpsvc 8106 collision (above).
-_warned_windows_8106: set[str] = set()
-
-
 def _health_port(name: str) -> int:
     """Return the healthz port for daemon `name`; read by `ServiceEndpoints.from_settings` only.
 
@@ -129,22 +125,7 @@ def _health_port(name: str) -> int:
     """
     override_attr = _HEALTH_PORT_OVERRIDES.get(name)
     override = None if override_attr is None else get_field(override_attr)
-    port = DEFAULT_PORTS[name] if override is None else int(override)
-    if os.name == "nt" and port == 8106 and name not in _warned_windows_8106:
-        # The Windows iphlpsvc service (svchost -k NetSvcs -s iphlpsvc) binds
-        # 8106 at boot on Windows hosts; a daemon pointed there fails to bind
-        # on every launch (2026-08-11, #1179 — ops default WAS 8106, moved to
-        # 8113; win's events_maintenance was also hand-set to 8106). Checked
-        # for BOTH the override and the default, so an explicit (mis)configured
-        # AVA_<NAME>_HEALTH_PORT=8106 is named too — once per daemon.
-        _warned_windows_8106.add(name)
-        _log.warning(
-            "health port 8106 for %s is held by the Windows iphlpsvc service - "
-            "set AVA_%s_HEALTH_PORT to a free port or the daemon cannot bind",
-            name,
-            name.upper(),
-        )
-    return port
+    return DEFAULT_PORTS[name] if override is None else int(override)
 
 
 class Liveness:

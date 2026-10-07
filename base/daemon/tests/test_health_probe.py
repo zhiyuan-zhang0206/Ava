@@ -482,31 +482,6 @@ def test_probe_home_always_returns_a_verdict(monkeypatch: pytest.MonkeyPatch) ->
     assert "RuntimeError" in probe.detail
 
 
-def test_health_port_warns_once_on_windows_8106(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog,
-) -> None:
-    """#1179: Windows iphlpsvc permanently holds 8106 — a daemon whose port
-    resolves there (default OR explicit override) must be named loudly, once
-    per daemon per process, so the misconfiguration is not silent."""
-    import os as _os
-
-    monkeypatch.setattr(_os, "name", "nt")
-    monkeypatch.setattr(health, "_warned_windows_8106", set())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        health,
-        "get_field",
-        lambda _name: 8106,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    with caplog.at_level(logging.WARNING, logger="base.daemon.health"):  # pyright: ignore[reportUnknownMemberType]
-        assert health._health_port("events_maintenance") == 8106
-        assert health._health_port("events_maintenance") == 8106  # same daemon: silent now
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]  # pyright: ignore[reportUnknownMemberType]
-    assert len(warnings) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert "8106" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
-    assert "iphlpsvc" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
-
-
 def test_probe_fails_closed_on_any_unexpected_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail CLOSED — reporting alive on an unreadable probe would make the
     watchdog skip a genuinely dead gateway forever."""

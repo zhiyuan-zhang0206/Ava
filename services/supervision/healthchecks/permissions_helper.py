@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import psutil
@@ -31,8 +32,6 @@ LWCR_STUCK = "lwcr-stuck"
 SPAWN_FAILED = "spawn-failed"
 UNRESPONSIVE = "unresponsive"
 ABSENT = "absent"
-
-_reported_unhealthy: bool = False
 
 
 class _ParentEvidenceError(RuntimeError):
@@ -167,14 +166,19 @@ def _observe() -> _Observation:
     return _Observation(classification, _detail(classification, job, ping_failure), job)
 
 
-def report(result: DaemonProbe) -> None:
-    """Record one observed unhealthy episode; recovery rearms reporting."""
-    global _reported_unhealthy  # noqa: PLW0603
-    if result.alive:
-        _reported_unhealthy = False
-    elif not _reported_unhealthy:
-        _reported_unhealthy = True
-        _emit_unhealthy(_Observation(result.detail.split(";", 1)[0], result.detail))
+def episode_reporter() -> Callable[[DaemonProbe], None]:
+    """Bind one diagnostic's reporting memory; a healthy sample rearms its episode."""
+    reported_unhealthy = False
+
+    def report(result: DaemonProbe) -> None:
+        nonlocal reported_unhealthy
+        if result.alive:
+            reported_unhealthy = False
+        elif not reported_unhealthy:
+            reported_unhealthy = True
+            _emit_unhealthy(_Observation(result.detail.split(";", 1)[0], result.detail))
+
+    return report
 
 
 def _job_fields(observation: _Observation) -> dict[str, object]:
