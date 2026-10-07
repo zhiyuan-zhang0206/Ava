@@ -305,6 +305,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Guarded Agents
+         * @description Create a plain agent through a versioned, principal-bound keyed entry.
+         *
+         *     Older routing cannot execute this path. Callers must keep it fixed for an
+         *     intent and never fall back to the legacy path after an uncertain response.
+         */
+        post: operations["post_guarded_agents_api_keyed_v1_agents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/retry-launch": {
         parameters: {
             query?: never;
@@ -8577,6 +8600,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRoster"];
+                };
+            };
+        };
+    };
+    post_guarded_agents_api_keyed_v1_agents_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpawnAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpawnedAgent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

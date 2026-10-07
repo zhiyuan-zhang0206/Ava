@@ -47,6 +47,7 @@ from gateway.agents import forward
 from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
 from gateway.agents.forward import forward_spawn_to_remote
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
+from gateway.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
 from gateway.inspect import neighbors
 from gateway.inspect.schemas import BornChainResponse, BornChainRow
 from gateway.schemas.models import ModelsResponse
@@ -614,8 +615,35 @@ async def post_agents(
     (wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the
     registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).
     """
-    target = body.machine if body.machine is not None else machine_name()
     key = scoped_creation_key(request, idempotency_key)
+    return await _create_agent_http(body, request, key)
+
+
+@router.post("/api/keyed/v1/agents", status_code=201, response_model_exclude_none=True)
+async def post_guarded_agents(
+    body: SpawnAgentRequest,
+    request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    idempotency_scope: str = Header(alias=SCOPE_HEADER),
+) -> SpawnedAgent:
+    """Create a plain agent through a versioned, principal-bound keyed entry.
+
+    Older routing cannot execute this path. Callers must keep it fixed for an
+    intent and never fall back to the legacy path after an uncertain response.
+    """
+    if idempotency_scope != PRINCIPAL_SCOPE:
+        raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
+    key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
+    if body.fork_from is not None:
+        raise HTTPException(status_code=422, detail="guarded v1 creation does not support forks")
+    return await _create_agent_http(body, request, key)
+
+
+async def _create_agent_http(
+    body: SpawnAgentRequest, request: Request, key: str | None
+) -> SpawnedAgent:
+    """Share the existing HTTP birth/launch behavior without changing other entry scopes."""
+    target = body.machine if body.machine is not None else machine_name()
     try:
         return await create_and_launch_agent(
             body,
