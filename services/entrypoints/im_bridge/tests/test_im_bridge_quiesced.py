@@ -36,12 +36,12 @@ async def test_a_quiesced_unit_polls_no_notices(
 
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_timeline_acceptance_and_dispatch_loop_hold_during_maintenance(
-    monkeypatch, quiesced
+    monkeypatch: pytest.MonkeyPatch, quiesced: bool
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     real_sleep = asyncio.sleep
 
-    async def short_sleep(_seconds):
+    async def short_sleep(_seconds: float):
         await real_sleep(0.01)
 
     monkeypatch.setattr(daemon.asyncio, "sleep", short_sleep)
