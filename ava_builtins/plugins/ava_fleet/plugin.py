@@ -138,6 +138,7 @@ def notify(
     priority: str = "P2",
     task: int | None = None,
     expire_at: datetime | timedelta | str | None = None,
+    idempotency_key: str | None = None,
 ) -> "Notice":
     """Post one notice, replacing any previous open notice.
 
@@ -160,6 +161,8 @@ def notify(
             user can reply with one letter (the reply is always free text).
         task: groups your notices by task in the user's queue.
         expire_at: expiration deadline; omit it to use the configured lifetime.
+        idempotency_key: reuse for the same notice across explicit retries.
+            Use an absolute expire_at when retrying with a key.
 
     Returns:
         The notice id (an int); its `.superseded` attribute lists the ids
@@ -189,6 +192,9 @@ def notify(
             )
         expire_at_iso = due_at.isoformat()
 
+    idempotency_key = coerce_str(idempotency_key, "idempotency_key", allow_none=True)
+    if idempotency_key is not None and not 1 <= len(idempotency_key) <= 128:
+        raise ValueError("idempotency_key must contain 1 to 128 characters")
     aid = ava.sdk_surface.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway performs the whole
@@ -207,6 +213,7 @@ def notify(
             "task_id": task,
             "expire_at": expire_at_iso,
         },
+        idempotency_key=idempotency_key,
     )
     _raise_as_value_error(resp)
     data = resp.json()
