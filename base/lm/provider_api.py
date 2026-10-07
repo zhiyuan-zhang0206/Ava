@@ -106,6 +106,8 @@ class PriceWindow(NamedTuple):
     cache_miss: str | Decimal
     cache_hit: str | Decimal
     output: str | Decimal
+    cache_write_5m: str | Decimal | None = None
+    cache_write_1h: str | Decimal | None = None
 
 
 class PriceTier(NamedTuple):
@@ -117,6 +119,8 @@ class PriceTier(NamedTuple):
     cache_hit: str | Decimal
     output: str | Decimal
     windows: tuple[PriceWindow, ...] = ()
+    cache_write_5m: str | Decimal | None = None
+    cache_write_1h: str | Decimal | None = None
 
 
 class PricePeriod(NamedTuple):
@@ -146,6 +150,8 @@ class PriceRates:
     source_checked_at: str  # YYYY-MM-DD
     vendor: str | None = None  # stable billing vocabulary; absent for older plugins
     periods: tuple[PricePeriod, ...] = ()
+    cache_write_5m: float | None = field(default=None, kw_only=True)
+    cache_write_1h: float | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
