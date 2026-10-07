@@ -4,16 +4,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { ChatMarkdown } from "@/components/markdown";
-import { OpenNoticeDetail } from "@/components/open-notice-detail";
-import { formatRelativeTime } from "@/lib/sidebar";
-import { dropOpenNotices } from "@/lib/use-notices";
-import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/types";
+import { ChatMarkdown } from "@/components/content/markdown";
+import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
+import { formatRelativeTime } from "@/lib/agents/sidebar";
+import { dropOpenNotices } from "@/lib/notifications/use-notices";
+import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
 
 import { fmtLabel, openKey, type OpenItem } from "./keys";
 import { AgentContextHeader, PriorityBadge } from "./rows";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export function CompactDetail({
   label,

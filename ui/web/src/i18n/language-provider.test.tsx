@@ -20,7 +20,7 @@ vi.mock("next-intl", async (importOriginal) => {
   return actual;
 });
 
-vi.mock("@/lib/use-user-settings", () =>
+vi.mock("@/lib/state/use-user-settings", () =>
   import("@/test-support/user-settings-mock"),
 );
 

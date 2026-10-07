@@ -19,14 +19,14 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
-import { groupedModels, isSuperseded, providerLabel } from "@/lib/models";
-import { useStore } from "@/lib/store";
+import { api } from "@/lib/transport/api";
+import { errMsg } from "@/lib/contracts/errors";
+import { groupedModels, isSuperseded, providerLabel } from "@/lib/contracts/models";
+import { useStore } from "@/lib/state/store";
 
 import { useSectionVisible } from "../_visibility";
-import { FLEX } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 const DEFAULT_MODEL_QUERY_KEY = ["default-model"] as const;
 const MODELS_QUERY_KEY = ["models"] as const;

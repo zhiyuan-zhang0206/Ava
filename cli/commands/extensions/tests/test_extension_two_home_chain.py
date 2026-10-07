@@ -1,6 +1,6 @@
 """The S2 headline lock: install on home A, materialize on home B, one Postgres.
 
-`future/infra/extension-ownership.md`'s own S2 test lock is *"install on home A
+`future/infra/extensions/extension-ownership.md`'s own S2 test lock is *"install on home A
 materializes on home B (two homes, one PG)"*, and it is the entire claim the
 slice exists to make: the cluster owns extensions, so a machine that never ran
 the install still ends up with the content.

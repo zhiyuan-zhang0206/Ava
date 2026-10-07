@@ -39,4 +39,4 @@ plugin allocated at import time (a connection, a thread, a file handle) is
 re-created; disposing it is the plugin-spec-v2 S4 dispose contract, not
 implemented. This is also not in-process hot reload:
 the reload boundary stays the agent process's `self.restart`
-([plugin-spec-v2](../../../docs/conventions/plugin-spec-v2.md)).
+([plugin-spec-v2](../../../docs/conventions/extensions/plugin-spec-v2.md)).

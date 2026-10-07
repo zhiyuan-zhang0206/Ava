@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent
-description: Overview index of the Agent subsystem. Contains 25 sub-concepts.
+description: Overview index of the Agent subsystem.
 tags:
   - agent-core
   - agent-lifecycle

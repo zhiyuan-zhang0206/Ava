@@ -30,8 +30,8 @@ import { ControlSection } from "@/app/control/_section";
 import OpsPage from "@/app/insights/ops/page";
 import AlertsSection from "@/components/ops/alerts-section";
 import StatusPage from "@/app/insights/status/page";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 export default function InsightsPage() {
   const t = useTranslations("insights");

@@ -1338,7 +1338,7 @@ CREATE INDEX IF NOT EXISTS idx_mcp_clients_token_hash ON mcp_clients (token_hash
 -- ─────────────── extension registry ───────────────
 -- The cluster owns which extensions exist and their default enablement; the
 -- machine owns only capabilities. Slice S2 of
--- future/infra/extension-ownership.md (issue #39); the ownership model is
+-- future/infra/extensions/extension-ownership.md (issue #39); the ownership model is
 -- decisions/2026-08-21-extension-ownership-three-tiers.md.
 
 CREATE TABLE extension_blobs (

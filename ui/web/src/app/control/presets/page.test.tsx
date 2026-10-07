@@ -9,8 +9,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
-import type { PresetView } from "@/lib/types";
+import { api } from "@/lib/transport/api";
+import type { PresetView } from "@/lib/contracts/types";
 
 import PresetsPage from "./page";
 

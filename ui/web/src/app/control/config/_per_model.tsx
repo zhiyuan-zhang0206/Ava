@@ -21,14 +21,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { api } from "@/lib/api";
-import { groupedModels, providerLabel } from "@/lib/models";
-import type { ResolvedFieldView } from "@/lib/types";
+import { api } from "@/lib/transport/api";
+import { groupedModels, providerLabel } from "@/lib/contracts/models";
+import type { ResolvedFieldView } from "@/lib/contracts/types";
 
 import { fieldLabel, formatConfigValue } from "../_config_groups";
 import { useSectionVisible } from "../_visibility";
-import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
-import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
+import { cn } from "@/lib/format/utils";
 
 const MODELS_QUERY_KEY = ["models"] as const;
 const resolvedQueryKey = (model: string) => ["config-resolved", model] as const;

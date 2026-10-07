@@ -244,7 +244,7 @@ def wrap_saver_writes_with_nstep_interval(
     checkpoint scrambles the replay (the fold orders batches by checkpoint
     position only; within one checkpoint it sorts by opaque task-id hash). The
     retirement is the wrapper slice of the delta rebuild
-    (`future/infra/checkpoint-storage-rebuild.md`): deltas persist every
+    (`future/infra/data/checkpoint-storage-rebuild.md`): deltas persist every
     super-step, and the throttle's blob merge is a no-op there. A crash on
     such a thread therefore replays at most the in-flight super-step, not
     ``interval - 1`` of them.

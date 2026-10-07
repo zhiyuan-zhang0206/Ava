@@ -144,7 +144,7 @@ logger.remove()
 # The deferred binding rather than a bare "-": a process that binds no turn
 # still resolves to "-", so gateway / daemon / CLI attribution is unchanged —
 # but a process that binds a TURN gets that turn's agent. That is the hosted
-# agent-runner (`future/infra/agent-runner-as-server.md`), which inits through
+# agent-runner (`future/infra/lifecycle/agent-runner-as-server.md`), which inits through
 # `init_gateway_process` and would otherwise stamp every hosted agent's records
 # with the `-` sentinel, throwing away the attribution the turn contextvar knows.
 logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})

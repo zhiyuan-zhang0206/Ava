@@ -4,7 +4,7 @@
 // publishes them; the 30s poll beneath stays as the reconciliation fallback
 // for non-SDK writes). Debounce owned by the fold owner.
 
-import type { SystemEvent } from "../types";
+import type { SystemEvent } from "../contracts/types";
 import type { FoldOutcome } from "./types";
 import { NO_FOLD } from "./types";
 

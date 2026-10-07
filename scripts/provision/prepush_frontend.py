@@ -16,31 +16,30 @@ _WEB = "ui/web/"
 _CODE = (".ts", ".tsx", ".js", ".mjs", ".mts")
 # Canonical HTTP schema/type artifacts have no runtime imports. Their consumers
 # are checked by project tsc and the existing codegen-freshness hook.
-_TYPE_INPUTS = {"ui/web/openapi.json", "ui/web/src/lib/types-generated.ts"}
+_TYPE_INPUTS = {"ui/web/openapi.json", "ui/web/src/lib/contracts/types-generated.ts"}
 _GLOBAL = {
     "ui/web/package.json",
     "ui/web/package-lock.json",
     "ui/web/tsconfig.json",
-    "ui/web/vitest.config.mts",
-    "ui/web/vitest.flaky.config.mts",
-    "ui/web/vitest.setup.ts",
+    "ui/web/tests/vitest.config.mts",
+    "ui/web/tests/vitest.flaky.config.mts",
+    "ui/web/tests/vitest.setup.ts",
     "ui/web/eslint.config.mjs",
     "ui/web/next.config.ts",
     "ui/web/postcss.config.mjs",
-    "ui/web/scripts/eslint-warning-baseline.json",
 }
 # Consumers read these inputs from disk, outside Vitest's import graph.
 _DISK_CONSUMERS = (
-    ("ui/web/src/", "src/lib/localstorage-policy.test.ts"),
+    ("ui/web/src/", "src/lib/auth/localstorage-policy.test.ts"),
     ("ui/web/messages/", "src/i18n/messages-layout.test.ts"),
     ("ui/web/src/app/globals.css", "src/app/globals-font-stack.test.ts"),
     ("ui/web/src/app/globals.css", "src/app/color-scheme.test.ts"),
     ("ui/web/src/app/layout.tsx", "src/app/color-scheme.test.ts"),
-    ("ui/web/package.json", "src/lib/frontend-bind.test.ts"),
+    ("ui/web/package.json", "src/lib/transport/frontend-bind.test.ts"),
     ("ui/app/app-ui/", "src/app/app-ui-locale.test.ts"),
-    ("tests/fixtures/events/", "src/lib/event-fixtures.test.ts"),
-    ("services/entrypoints/gate/static/login.html", "src/lib/gate-login.test.ts"),
-    ("base/packages/plugins/ui_contributions.py", "src/components/plugin-nav-icon.test.ts"),
+    ("tests/fixtures/events/", "src/lib/contracts/event-fixtures.test.ts"),
+    ("services/entrypoints/gate/static/login.html", "src/lib/transport/gate-login.test.ts"),
+    ("base/packages/plugins/ui_contributions.py", "src/components/plugins/plugin-nav-icon.test.ts"),
     ("ui/web/scripts/fixtures/route-bundle-stats.json", "scripts/check-first-load-js.test.ts"),
 )
 
@@ -79,6 +78,8 @@ def _vitest(paths: list[str], *, related: bool = False) -> int:
             'cd ui/web && exec npx --no-install vitest "$@"',
             "vitest",
             *(["related", "--run"] if related else ["run"]),
+            "--config",
+            "tests/vitest.config.mts",
             "--passWithNoTests=false",
             *paths,
         ],
@@ -100,7 +101,7 @@ def _eslint(existing: list[str]) -> int:
             "-o",
             "pipefail",
             "-c",
-            'cd ui/web && npx --no-install eslint --no-warn-ignored --format json "$@" | node scripts/check-eslint-warnings.mjs',
+            'cd ui/web && npx --no-install eslint --no-warn-ignored --max-warnings 0 "$@"',
             "eslint",
             *files,
         ],
