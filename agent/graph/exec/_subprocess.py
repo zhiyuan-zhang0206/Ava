@@ -36,7 +36,6 @@ from agent.graph.exec._result import (
 )
 from agent.graph.exec._stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
 from agent.graph.exec.protocol import (
-    KILL_GRACE_S,
     ResultPayload,
     make_request_path,
     make_result_path,
@@ -48,6 +47,7 @@ from base.db import Database
 from base.deploy.release import editable_install
 from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.log import logger
+from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.turn_identity import current_hosted_resources
 from base.paths import exec_run_dir
@@ -183,7 +183,7 @@ def _spawn(
     *,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
-) -> tuple[subprocess.Popen[bytes], _process.ExecProcessDomain]:
+) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
     """Spawn one child. POSIX raw subprocesses stay in its process group;
     persistent ``ava.shell.sessions`` are backend-hosted and outside it."""
     env = _build_child_env(
@@ -195,7 +195,7 @@ def _spawn(
     )
     argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.execution.child"]
     try:
-        return _process.ExecProcessDomain.launch_posix(
+        return ExecProcessDomain.launch_posix(
             argv,
             new_session=True,
             stdin=subprocess.DEVNULL,
@@ -468,7 +468,7 @@ async def _run_legacy_subprocess(
         return request_error, None
 
     stream = StreamingTextIO()
-    domain: _process.ExecProcessDomain | None = None
+    domain: ExecProcessDomain | None = None
     reader: threading.Thread | None = None
     root_exit_task: asyncio.Task[None] | None = None
     reap_task: asyncio.Task[int] | None = None
