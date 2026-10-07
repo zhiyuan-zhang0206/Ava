@@ -68,5 +68,20 @@
   "partCompact": "compact",
   "partInbound": "inbound",
   "partAttach": "attachment",
-  "partPrompt": "system prompt"
+  "partPrompt": "system prompt",
+  "contextRow": "Context size",
+  "legendToggle": "Highlight {kind} blocks (click again to clear)",
+  "legendSource": "Source",
+  "sourceAll": "All sources",
+  "sourceFromAgent": "Inbound from agent {id}",
+  "readoutIdle": "Hover a block or node for details.",
+  "readoutNoSource": "no source",
+  "readoutUnit": "{kind} · #{start}–#{end} · read {time} · {source} · {preview}",
+  "readoutNode": "Level {level} · {from} – {to} · #{start}–#{end} · {summary} · {calls} calls · {input} in · {output} out",
+  "readoutRequest": "LLM request #{idx} · session {session} · {time} · {tokens} input tokens",
+  "ancestorsHeading": "Ancestors",
+  "childrenHeading": "Child nodes",
+  "coveredByHeading": "Summary block",
+  "coveredByNone": "No summary block covers this block yet.",
+  "chipLabel": "Level {level} · {summary}"
 }
