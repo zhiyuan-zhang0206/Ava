@@ -73,6 +73,7 @@ from ops.cluster import operations
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import (
     LaunchAgentRequest,
+    LaunchReconcileRequest,
     LifecyclePayload,
     OpEnvelope,
     OpStatus,
@@ -269,6 +270,14 @@ async def _dispatch(
                 # withdrawn model was rewritten (task #4306) — the common wire
                 # shape stays {"id": ...}.
                 return OpStatus.COMPLETED, spawned.model_dump(mode="json", exclude_none=True)
+            case "launch-reconcile-v1":
+                from ops.lifecycle.launch_reconcile import reconcile_launch_op
+
+                db, bus = _ops_handles()
+                result = await reconcile_launch_op(
+                    db, bus, LaunchReconcileRequest.model_validate(payload), pool
+                )
+                return OpStatus.COMPLETED, result.model_dump(mode="json")
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
                 db, bus = _ops_handles()

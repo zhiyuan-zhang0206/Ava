@@ -108,6 +108,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="spawn — keyed identity commits with birth and first prompt",
         transactional_idempotency=True,
     ),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/retry-launch"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="guarded observed-attempt retry; receipt and pointer commit together",
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+    ),
     ("POST", "/api/agents/{agent_id}/retry-launch"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="explicit same-ID launch retry rotates the attempt key; each call dispatches once",

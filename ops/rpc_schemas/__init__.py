@@ -50,6 +50,18 @@ from ops.rpc_schemas.billing_recovery import (
 from ops.rpc_schemas.billing_recovery import BillingResurrectRequest as BillingResurrectRequest
 from ops.rpc_schemas.billing_recovery import BillingResurrectResponse as BillingResurrectResponse
 from ops.rpc_schemas.content import UserContent
+from ops.rpc_schemas.launch_retry import (
+    LaunchReconciled as LaunchReconciled,
+)
+from ops.rpc_schemas.launch_retry import (
+    LaunchReconcileRequest as LaunchReconcileRequest,
+)
+from ops.rpc_schemas.launch_retry import (
+    RetryLaunchAccepted as RetryLaunchAccepted,
+)
+from ops.rpc_schemas.launch_retry import (
+    RetryLaunchRequest as RetryLaunchRequest,
+)
 from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
 from ops.rpc_schemas.messages import ContentBlock as ContentBlock
 from ops.rpc_schemas.messages import ImageUrlContentBlock as ImageUrlContentBlock
@@ -395,6 +407,7 @@ class SessionInfo(BaseModel):
 OpKind = Literal[
     "spawn-launch",
     "spawn-launch-v2",
+    "launch-reconcile-v1",
     "lifecycle",
     "status_probe",
     "config_read",
