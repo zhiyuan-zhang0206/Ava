@@ -112,18 +112,22 @@ def test_render_is_canonical_sorted_json() -> None:
     assert baseline_shards.render(json.loads(text)) == text
 
 
-def test_merge_rejects_an_entry_filed_under_the_wrong_shard() -> None:
-    """A `files` entry for agent/graph/x.py belongs in the agent.graph shard, not
-    in base.json — merge() must name the shard it actually belongs in."""
+def test_merge_preserves_an_entry_in_its_original_shard_after_a_move() -> None:
+    """Storage names do not constrain file moves or change frozen permissions."""
     texts = {"base": json.dumps({"files": {"agent/graph/x.py": 900}})}
+    assert baseline_shards.merge(texts, ("files",)) == {"files": {"agent/graph/x.py": 900}}
 
+
+def test_merge_rejects_duplicate_entries_across_shards() -> None:
+    entry = {"files": {"agent/graph/x.py": 900}}
+    texts = {"base": json.dumps(entry), "agent.graph": json.dumps(entry)}
     with pytest.raises(ValueError) as exc_info:
         baseline_shards.merge(texts, ("files",))
 
     message = str(exc_info.value)
     assert "base.json" in message
     assert "agent/graph/x.py" in message
-    assert "belongs in agent.graph.json" in message
+    assert "duplicates files entry" in message
 
 
 def test_merge_rejects_an_unknown_section() -> None:
