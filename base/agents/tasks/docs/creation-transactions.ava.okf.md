@@ -35,7 +35,7 @@ Gateway code can use these native primitives without importing a plugin or SDK
 actor context. Metadata actors describe provenance, not a new security ACL.
 
 These primitives allow one caller transaction to roll back birth, task, audit
-and inbound together. They do not make the existing `create_and_assign` recipe
-atomic, introduce a compound endpoint, or guarantee launch/execution recovery.
-A future compound acceptance owner must define its verified-principal scope,
-frozen request, retained original result and post-commit launch separately.
+and inbound together. The keyless `create_and_assign` recipe remains multi-transaction. Explicit
+[[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|guarded compound acceptance]]
+uses these primitives in one transaction with its own principal-scoped receipt.
+Launch/execution remain outside that transaction.
