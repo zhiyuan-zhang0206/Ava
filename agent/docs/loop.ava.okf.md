@@ -28,7 +28,15 @@ its slot.
 `AgentHost._invoke_until_done()` invokes the same checkpoint thread until idle
 or a native lifecycle command ends the turn. Each invocation has its own trace.
 Normal return flushes the final checkpoint before lifecycle application; a
-failed flush cannot acknowledge a maintenance drain.
+failed flush cannot acknowledge a maintenance drain. A completed graph result
+and its flush/trace phase remain in the original single-flight continuation.
+Database recovery finishes that result's idle settlement or lifecycle application
+before another invocation can claim newly queued work; it retains the original
+trace context. This is an in-process settlement boundary, not a durable work
+identity or a strong cancel execution receipt. Lifecycle settlement freezes
+the original command ID and fences application to it. If commit loses its
+response and releases ownership, the original target-bound applied receipt
+(and observed termination) proves the outcome; mutable status does not.
 
 The final durable checkpoint is linked to the still-current turn trace, including
 when N-step buffering delayed its write. Node-exit aggregates flush at invocation
