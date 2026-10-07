@@ -8,6 +8,8 @@
     "test_pgbouncer_stop_isolation.py",
     "test_pooler_stop.py",
     "test_status_data_plane.py",
+    "test_start_data_plane.py",
+    "test_remote_data_plane.py",
 ]
 "tests.path_scoped.services_tests" = [
     "test_native_storage_diagnostics.py",
