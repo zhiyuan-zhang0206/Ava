@@ -74,8 +74,8 @@ class IdempotencyStore:
         with write_transaction(self._pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM api_idempotency "
-                "WHERE completed_at < now() - make_interval(days => %s) "
-                "OR (status IS NULL AND created_at < now() - make_interval(days => %s))",
+                "WHERE method <> 'ops' AND (completed_at < now() - make_interval(days => %s) "
+                "OR (status IS NULL AND created_at < now() - make_interval(days => %s)))",
                 (_RETENTION_DAYS, _RETENTION_DAYS),
             )
             cur.execute(
@@ -84,10 +84,10 @@ class IdempotencyStore:
                 "ON CONFLICT (key) DO UPDATE SET method = EXCLUDED.method, "
                 "    path = EXCLUDED.path, status = NULL, response_body = NULL, "
                 "    response_headers = NULL, completed_at = NULL, created_at = now() "
-                "WHERE api_idempotency.method <> EXCLUDED.method "
+                "WHERE api_idempotency.method <> 'ops' AND (api_idempotency.method <> EXCLUDED.method "
                 "    OR api_idempotency.path <> EXCLUDED.path "
                 "    OR (api_idempotency.status IS NULL AND api_idempotency.created_at "
-                "        < now() - make_interval(days => %s)) "
+                "        < now() - make_interval(days => %s))) "
                 "RETURNING key",
                 (key, method, path, _RETENTION_DAYS),
             )

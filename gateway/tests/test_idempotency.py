@@ -591,3 +591,19 @@ def test_owner_non_streaming_response_releases_key(
     )
     assert _rows(pool).claim(key, "POST", path), "the key must be claimable again"
     _rows(pool).release(key)
+
+
+def test_http_cache_cannot_prune_or_overwrite_ops_receipt(
+    client: TestClient, db_conn: psycopg.Connection
+) -> None:
+    db_conn.execute(
+        "INSERT INTO api_idempotency(key,method,path,op_status,response_body,completed_at) "
+        "VALUES ('ops-intent','ops','lifecycle','completed','{}',now()-interval '8 days')"
+    )
+    db_conn.commit()
+    store = _rows(app.state.db_pool)
+    assert store.claim("http-intent", "POST", "/api/example")
+    assert not store.claim("ops-intent", "POST", "/api/example")
+    assert db_conn.execute(
+        "SELECT method, path, op_status FROM api_idempotency WHERE key='ops-intent'"
+    ).fetchone() == ("ops", "lifecycle", "completed")

@@ -29,9 +29,22 @@ retired actions rather than silently dropping their guards. `OpFailure` carries
 reconstruct the same business failure.
 
 The shared envelope lives in `base/api_contracts/op_envelope.py`; per-operation
-models live below gateway in `ops`. Supported non-idempotent deliveries retain
-one bounded database dedupe outcome per key; removed updater operations have no
-special duration or concurrency policy.
+models live below gateway in `ops`. Supplied keys contain 1 to 128 characters.
+Ops replay records retain a canonical SHA-256 of kind plus immutable payload.
+A changed kind/payload, collision with another channel, or legacy record lacking
+that identity returns a failed result without dispatch. JSON object key order
+does not change identity. Legacy keys keep their namespace, but a lost historical
+request identity cannot be recovered by guessing or issuing a fresh command.
+
+Claims, effects and response writes are separate commits. Exceptions, cancellation
+and result-write failures retain the pending claim; duplicates wait within a
+bounded budget, then report an uncertain outcome that requires inspection. The
+record is not a transactionally committed business receipt. Ops records are not
+TTL-pruned or stolen by HTTP response-cache claims; retiring an old command must
+wait for domain-owned recovery and expiry rules. Inspect request_hash, original
+pending payload, op_status and completed_at in api_idempotency before recovery.
+No change here authorizes redispatch with a new key after an uncertain effect.
+Removed updater operations have no special duration or concurrency policy.
 
 `OpStatus` in `ops/rpc_schemas/__init__.py` owns `completed` / `failed`,
 independent of each operation's business result. Dispatch and closure-notice

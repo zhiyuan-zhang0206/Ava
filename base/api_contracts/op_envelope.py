@@ -21,9 +21,12 @@ class OpEnvelope(BaseModel):
     (spawn / lifecycle): every retry of one logical op carries
     the SAME key, and the ops server replays the first run's stored outcome
     instead of re-executing (services/agent_runner/agent_ops/daemon.py:_dispatch_idempotent),
-    so a lost response cannot duplicate the effect. Absent (None) for
-    idempotent ops and for version-skewed old callers -- no dedup then."""
+    while changed requests fail closed. An unresolved claim is retained after
+    errors and returns uncertainty instead of dispatching again. This replay
+    record is not an atomic business receipt. Legacy records lacking request
+    identity require inspection, never blind re-execution. Absent (None) for
+    idempotent ops and version-skewed old callers -- no dedup then."""
 
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)
-    idempotency_key: str | None = Field(default=None, max_length=128)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)

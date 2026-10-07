@@ -37,6 +37,7 @@ if __name__ == "__main__":
 
 import asyncio
 import functools
+import hashlib
 import json
 import logging
 import time
@@ -102,15 +103,11 @@ def _pidfile() -> Path:
     return _endpoint().pidfile
 
 
-# ── Idempotency-key dedup (Task #961) ────────────────────────────────────────
-# A request with `idempotency_key` is deduplicated against the shared
-# `api_idempotency` table (method='ops' rows — see `_dispatch_idempotent`): the
-# first dispatch owns the key, runs the op, and stores the outcome; later ones
-# replay it, so the gateway's retry of one logical op cannot duplicate its
-# effect (legacy launch prompt insertion and lifecycle commands). The
-# versioned launch wake keeps the same dedupe envelope per attempt. Rows are kept 7 days (matching the HTTP
-# channel's retention, one shared table) and pruned on each new-key insert.
-_DEDUP_TTL_S = 7 * 86_400.0
+# ── Ops request identity and response replay ────────────────────────────────
+# Acceptance and execution are not one transaction. Keep claims across errors
+# and retain all ops identities until domain recovery/expiry can prove it safe
+# to retire them. A pending row is inspectable uncertainty, never permission to
+# execute again. The immutable hash rejects key reuse for another operation.
 # A same-key dispatch while the owner is still executing is a caller bug
 # (gateway attempts are sequential); wait briefly for the stored outcome,
 # then fail loud instead of re-executing.
@@ -343,50 +340,29 @@ async def _dispatch_idempotent(
 async def _dispatch_idempotent_pass(
     kind: str, payload: dict[str, Any], key: str, pool: ConnectionPool, *, active_ops: ActiveOps
 ) -> tuple[OpStatus, dict[str, object]]:
-    """Execute one op, deduplicated by `key` — the retry-safe path for
-    non-idempotent ops (spawn / lifecycle).
+    """Replay one immutable request; unresolved execution never frees its identity.
 
-    The first dispatch with a given key runs the op and stores its
-    (status, result) outcome in the shared `api_idempotency` table (method =
-    'ops' rows — the same table the gateway's HTTP idempotency middleware
-    uses); every later dispatch with the same key replays the stored outcome
-    instead of re-executing. The owner is decided atomically
-    (`INSERT ... ON CONFLICT DO NOTHING`), so two racing dispatches with the
-    same key cannot both execute. A same-key dispatch that arrives while the
-    owner is still executing waits for the owner's outcome, bounded by the
-    fixed duplicate-wait budget, then fails loud
-    rather than re-executing.
-
-    An unexpected crash inside the op deletes the row and re-raises: no outcome
-    was stored, so a future same-key dispatch must re-execute, not replay or
-    hang.
-
-    Returns the same (status, result) contract as `_dispatch`.
+    A claim cannot prove an external effect happened, so a lost result or owner
+    crash leaves the record pending. Duplicates wait briefly, then fail with an
+    explicit uncertain outcome without dispatching. A domain receipt must own
+    recovery; this response record is not an exactly-once execution framework.
     """
+    request_hash = hashlib.sha256(
+        json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        # Opportunistic TTL prune: one indexed-range delete per new key keeps
-        # the shared table bounded (ops are rare; rows are small).
         cur.execute(
-            "DELETE FROM api_idempotency WHERE completed_at < now() - make_interval(secs => %s)",
-            (_DEDUP_TTL_S,),
-        )
-        cur.execute(
-            "INSERT INTO api_idempotency (key, method, path, response_body) "
-            "VALUES (%s, 'ops', %s, %s) "
+            "INSERT INTO api_idempotency (key, method, path, response_body, request_hash) "
+            "VALUES (%s, 'ops', %s, %s, %s) "
             "ON CONFLICT (key) DO NOTHING RETURNING key",
-            (key, kind, json.dumps(payload, default=str)),
+            (key, kind, json.dumps(payload), request_hash),
         )
         owned = cur.fetchone() is not None
     if owned:
-        try:
-            status, result = await _dispatch(kind, payload, active_ops=active_ops)
-            status = OpStatus(status)
-        except Exception:
-            # No outcome was stored — a future same-key dispatch must be able to
-            # re-execute rather than replay a half-done op or wait forever.
-            with write_transaction(pool) as conn, conn.cursor() as cur:
-                cur.execute("DELETE FROM api_idempotency WHERE key = %s AND method = 'ops'", (key,))
-            raise
+        # Exceptions, cancellation and result-write failure retain the committed
+        # claim. A retry cannot infer that execution had no side effects.
+        status, result = await _dispatch(kind, payload, active_ops=active_ops)
+        status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE api_idempotency SET op_status = %s, response_body = %s, "
@@ -398,18 +374,24 @@ async def _dispatch_idempotent_pass(
     for _ in range(_DEDUP_WAIT_ATTEMPTS):
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT op_status, response_body FROM api_idempotency "
-                "WHERE key = %s AND method = 'ops'",
+                "SELECT method, path, request_hash, op_status, response_body FROM api_idempotency "
+                "WHERE key = %s",
                 (key,),
             )
             row = cur.fetchone()
-        if row is not None and row[0] is not None:
-            result: dict[str, object] = row[1] or {}
-            return OpStatus(row[0]), result
+        if row is not None:
+            if row[0] != "ops" or row[1] != kind or row[2] != request_hash:
+                return OpStatus.FAILED, {
+                    "error": "idempotency request identity conflict or legacy identity unavailable; "
+                    "the stored operation was not re-executed"
+                }
+            if row[3] is not None:
+                result: dict[str, object] = row[4] or {}
+                return OpStatus(row[3]), result
         await _sleep(_DEDUP_WAIT_STEP_S)
     return OpStatus.FAILED, {
         "error": f"idempotency key {key!r} is owned by another dispatch that never "
-        "completed (concurrent duplicate dispatch of one logical op?)"
+        "completed; outcome uncertain, inspect the stored operation before recovery"
     }
 
 
