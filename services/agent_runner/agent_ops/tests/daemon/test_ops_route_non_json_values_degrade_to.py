@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
 from base.daemon.tests.fakes import pin_endpoints
 from services.agent_runner.agent_ops import daemon
@@ -38,90 +40,94 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
     """
     from datetime import UTC
 
-    daemon._dispatch_sem = asyncio.Semaphore(1)
+    dispatch_sem = asyncio.Semaphore(1)
 
-    async def _fake_dispatch(kind, payload):  # type: ignore[no-untyped-def]
+    async def _fake_dispatch(kind, payload, *, active_ops: daemon.ActiveOps):  # type: ignore[no-untyped-def]
         return "completed", {"at": datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)}
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-    status, body, ctype = await daemon._ops_route(json.dumps({"kind": "status_probe"}).encode())
+    status, body, ctype = await daemon._ops_route(
+        json.dumps({"kind": "status_probe"}).encode(), active_ops={}, dispatch_sem=dispatch_sem
+    )
     assert status == 200
     assert ctype == "application/json"
     parsed = json.loads(body)
     assert parsed["status"] == "completed"
     assert parsed["result"]["at"] == "2026-06-11 08:30:00+00:00"
-    daemon._dispatch_sem = None
 
 
 @pytest.mark.asyncio
 async def test_ops_route_failed_status_is_still_http_200(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 'failed' dispatch is a semantic outcome the gateway re-raises, not an
     HTTP error — the envelope carries it at HTTP 200."""
-    daemon._dispatch_sem = asyncio.Semaphore(1)
+    dispatch_sem = asyncio.Semaphore(1)
 
-    async def _fake_dispatch(kind, payload):  # type: ignore[no-untyped-def]
+    async def _fake_dispatch(kind, payload, *, active_ops: daemon.ActiveOps):  # type: ignore[no-untyped-def]
         return "failed", {"error": "boom"}
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     status, body, _ = await daemon._ops_route(
-        json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode()
+        json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode(),
+        active_ops={},
+        dispatch_sem=dispatch_sem,
     )
     assert status == 200
     assert json.loads(body) == {"status": "failed", "result": {"error": "boom"}}
-    daemon._dispatch_sem = None
 
 
 @pytest.mark.asyncio
 async def test_ops_route_malformed_body_400() -> None:
     """Non-JSON body and a body missing `kind` both return 400 without dispatching."""
-    daemon._dispatch_sem = asyncio.Semaphore(1)
-    status, body, _ = await daemon._ops_route(b"not json")
+    dispatch_sem = asyncio.Semaphore(1)
+    status, body, _ = await daemon._ops_route(b"not json", active_ops={}, dispatch_sem=dispatch_sem)
     assert status == 400
     assert "invalid JSON" in json.loads(body)["error"]
-    status, body, _ = await daemon._ops_route(json.dumps({"payload": {}}).encode())
+    status, body, _ = await daemon._ops_route(
+        json.dumps({"payload": {}}).encode(), active_ops={}, dispatch_sem=dispatch_sem
+    )
     assert status == 400
     assert "kind" in json.loads(body)["error"]
-    daemon._dispatch_sem = None
 
 
 @pytest.mark.asyncio
 async def test_ops_route_crash_becomes_failed_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """A crash inside _dispatch is caught and returned as a failed result (HTTP 200),
     never leaks as a 500 the gateway can't interpret."""
-    daemon._dispatch_sem = asyncio.Semaphore(1)
+    dispatch_sem = asyncio.Semaphore(1)
 
-    async def _boom(kind, payload):  # type: ignore[no-untyped-def]
+    async def _boom(kind, payload, *, active_ops: daemon.ActiveOps):  # type: ignore[no-untyped-def]
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(daemon, "_dispatch", _boom)  # pyright: ignore[reportUnknownArgumentType]
     status, body, _ = await daemon._ops_route(
-        json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode()
+        json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode(),
+        active_ops={},
+        dispatch_sem=dispatch_sem,
     )
     assert status == 200
     parsed = json.loads(body)
     assert parsed["status"] == "failed"
     assert "kaboom" in parsed["result"]["error"]
-    daemon._dispatch_sem = None
+    await asyncio.wait_for(dispatch_sem.acquire(), 1)
+    dispatch_sem.release()
 
 
-@pytest.mark.asyncio
-async def test_ops_route_raises_when_sem_uninitialized() -> None:
-    """Calling _ops_route before _main initializes the semaphore raises RuntimeError."""
-    daemon._dispatch_sem = None
-    with pytest.raises(RuntimeError, match="_dispatch_sem not initialized"):
-        await daemon._ops_route(json.dumps({"kind": "spawn-launch"}).encode())
+def test_ops_route_requires_its_daemon_semaphore() -> None:
+    """A route cannot be bound without the daemon's shared concurrency owner."""
+    with pytest.raises(TypeError, match="dispatch_sem"):
+        inspect.signature(daemon._ops_route).bind(b"{}", active_ops={})
 
 
 @pytest.mark.asyncio
 async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
     """Concurrent /ops requests run at most ops_concurrency dispatches in parallel."""
     cap = 3
-    daemon._dispatch_sem = asyncio.Semaphore(cap)
+    dispatch_sem = asyncio.Semaphore(cap)
     in_flight = 0
     peak = 0
     lock = asyncio.Lock()
 
-    async def _fake_dispatch(kind, payload):  # type: ignore[no-untyped-def]
+    async def _fake_dispatch(kind, payload, *, active_ops: daemon.ActiveOps):  # type: ignore[no-untyped-def]
         nonlocal in_flight, peak
         async with lock:
             in_flight += 1
@@ -137,10 +143,16 @@ async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPa
     bodies = [
         json.dumps({"kind": "spawn-launch", "payload": {"agent_id": i}}).encode() for i in range(20)
     ]
-    results = await asyncio.gather(*[daemon._ops_route(b) for b in bodies])
-    assert peak <= cap, f"peak concurrency {peak} exceeded cap {cap}"
+    results = await asyncio.gather(
+        *[daemon._ops_route(b, active_ops={}, dispatch_sem=dispatch_sem) for b in bodies]
+    )
+    assert peak == cap, f"peak concurrency {peak} did not use the shared cap {cap}"
+    for _ in range(cap):
+        await asyncio.wait_for(dispatch_sem.acquire(), 1)
+    assert dispatch_sem.locked()
+    for _ in range(cap):
+        dispatch_sem.release()
     assert all(status == 200 for status, _, _ in results)
-    daemon._dispatch_sem = None
 
 
 def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> None:
@@ -291,6 +303,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
         {"agent_id": 777},
         "key-1",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
 
     assert status == "completed"
@@ -322,12 +335,14 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         {"agent_id": 777},
         "key-2",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
     second = await daemon._dispatch_idempotent(
         "spawn-launch",
         {"agent_id": 777},
         "key-2",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
 
     assert first == ("completed", {"id": 777})
@@ -347,7 +362,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
     started = asyncio.Event()
 
     async def _slow_dispatch(
-        kind: str, payload: dict[str, object]
+        kind: str, payload: dict[str, object], *, active_ops: daemon.ActiveOps
     ) -> tuple[str, dict[str, object]]:
         calls["n"] = calls.get("n", 0) + 1
         started.set()
@@ -356,7 +371,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
 
     monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
-        daemon._dispatch_idempotent("lifecycle", {}, "slow-lifecycle", ops_pool)  # type: ignore[arg-type]
+        daemon._dispatch_idempotent("lifecycle", {}, "slow-lifecycle", ops_pool, active_ops={})  # type: ignore[arg-type]
     )
     await started.wait()
     duplicate = await daemon._dispatch_idempotent(
@@ -364,6 +379,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         {},
         "slow-lifecycle",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
     first = await owner
 
@@ -383,7 +399,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
     started = asyncio.Event()
 
     async def _slow_dispatch(
-        kind: str, payload: dict[str, object]
+        kind: str, payload: dict[str, object], *, active_ops: daemon.ActiveOps
     ) -> tuple[str, dict[str, object]]:
         calls["n"] = calls.get("n", 0) + 1
         started.set()
@@ -392,7 +408,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
 
     monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
-        daemon._dispatch_idempotent("lifecycle", {}, "stuck-lifecycle", ops_pool)  # type: ignore[arg-type]
+        daemon._dispatch_idempotent("lifecycle", {}, "stuck-lifecycle", ops_pool, active_ops={})  # type: ignore[arg-type]
     )
     await started.wait()
     status, result = await daemon._dispatch_idempotent(
@@ -400,6 +416,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         {},
         "stuck-lifecycle",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
     await owner
 
@@ -423,12 +440,14 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         {"agent_id": 777},
         "key-a",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
     await daemon._dispatch_idempotent(
         "spawn-launch",
         {"agent_id": 777},
         "key-b",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
 
     assert calls["n"] == 2
@@ -461,12 +480,14 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         {"path": "garbage"},
         "key-3",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
     second = await daemon._dispatch_idempotent(
         "lifecycle",
         {"path": "garbage"},
         "key-3",
         ops_pool,  # type: ignore[arg-type]
+        active_ops={},
     )
 
     assert first[0] == "failed"
@@ -480,7 +501,7 @@ async def test_ops_route_dedupes_by_envelope_key(
     """End-to-end through _ops_route: an envelope carrying idempotency_key goes
     through the dedup path — two identical POSTs execute the op once."""
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
-    monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(4))
+    dispatch_sem = asyncio.Semaphore(4)
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
@@ -488,14 +509,13 @@ async def test_ops_route_dedupes_by_envelope_key(
         {"kind": "spawn-launch", "payload": {"agent_id": 1}, "idempotency_key": "route-key"}
     ).encode()
 
-    code1, payload1, _ = await daemon._ops_route(body)
-    code2, payload2, _ = await daemon._ops_route(body)
+    code1, payload1, _ = await daemon._ops_route(body, active_ops={}, dispatch_sem=dispatch_sem)
+    code2, payload2, _ = await daemon._ops_route(body, active_ops={}, dispatch_sem=dispatch_sem)
 
     assert code1 == 200 and code2 == 200
     assert json.loads(payload1) == {"status": "completed", "result": {"id": 777}}
     assert json.loads(payload2) == {"status": "completed", "result": {"id": 777}}
     assert calls["n"] == 1
-    daemon._dispatch_sem = None
 
 
 @pytest.mark.asyncio
@@ -505,19 +525,18 @@ async def test_ops_route_without_key_does_not_dedupe(
     """An envelope WITHOUT idempotency_key takes the plain _dispatch path — no
     dedup row is written (idempotent ops have nothing to dedupe)."""
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
-    monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(4))
+    dispatch_sem = asyncio.Semaphore(4)
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     body = json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode()
-    await daemon._ops_route(body)
-    await daemon._ops_route(body)
+    await daemon._ops_route(body, active_ops={}, dispatch_sem=dispatch_sem)
+    await daemon._ops_route(body, active_ops={}, dispatch_sem=dispatch_sem)
 
     assert calls["n"] == 2  # no key → no dedup → both execute
     with ops_pool.connection() as conn, conn.cursor() as cur:  # type: ignore[union-attr]
         cur.execute("SELECT count(*) FROM api_idempotency WHERE method = 'ops'")  # pyright: ignore[reportUnknownMemberType]
         assert cur.fetchone()[0] == 0  # pyright: ignore[reportUnknownMemberType]
-    daemon._dispatch_sem = None
 
 
 @pytest.mark.asyncio
@@ -527,7 +546,7 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
     """A pass that dies on a closed connection is re-run; the outcome is returned."""
     calls: list[int] = []
 
-    async def _flaky_pass(kind, payload, key, pool):  # type: ignore[no-untyped-def]
+    async def _flaky_pass(kind, payload, key, pool, *, active_ops: daemon.ActiveOps):  # type: ignore[no-untyped-def]
         calls.append(1)
         if len(calls) < 3:
             raise psycopg.OperationalError("the connection is closed")
@@ -540,6 +559,7 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
         {"agent_id": 1},
         "key-1",
         _stub_pool(),  # type: ignore[arg-type]
+        active_ops={},
     )
     assert status == "completed"
     assert result == {"ok": True}
@@ -553,14 +573,16 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
     """A persistently dying connection raises after the bounded attempts."""
     calls: list[int] = []
 
-    async def _always_dead(kind, payload, key, pool):  # type: ignore[no-untyped-def]
+    async def _always_dead(kind, payload, key, pool, *, active_ops: daemon.ActiveOps):  # type: ignore[no-untyped-def]
         calls.append(1)
         raise psycopg.OperationalError("the connection is closed")
 
     monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _always_dead)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
     with pytest.raises(psycopg.OperationalError):
-        await daemon._dispatch_idempotent("spawn-launch", {"agent_id": 1}, "key-2", _stub_pool())  # type: ignore[arg-type]
+        await daemon._dispatch_idempotent(
+            "spawn-launch", {"agent_id": 1}, "key-2", ConnectionPool(open=False), active_ops={}
+        )
     assert len(calls) == daemon._DISPATCH_RETRY_ATTEMPTS
 
 
@@ -571,14 +593,16 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
     """Any non-OperationalError propagates on the first pass — no retry."""
     calls: list[int] = []
 
-    async def _boom(kind, payload, key, pool):  # type: ignore[no-untyped-def]
+    async def _boom(kind, payload, key, pool, *, active_ops: daemon.ActiveOps):  # type: ignore[no-untyped-def]
         calls.append(1)
         raise ValueError("not a connection problem")
 
     monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _boom)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
     with pytest.raises(ValueError):
-        await daemon._dispatch_idempotent("spawn-launch", {"agent_id": 1}, "key-3", _stub_pool())  # type: ignore[arg-type]
+        await daemon._dispatch_idempotent(
+            "spawn-launch", {"agent_id": 1}, "key-3", ConnectionPool(open=False), active_ops={}
+        )
     assert len(calls) == 1
 
 
@@ -587,7 +611,11 @@ async def test_dispatch_idempotent_no_pool_fails_cleanly() -> None:
     """Without a pool the wrapper returns failed without retrying (the pass
     would crash on `pool.connection()`)."""
     status, result = await daemon._dispatch_idempotent(
-        "spawn-launch", {"agent_id": 1}, "key-4", None
+        "spawn-launch",
+        {"agent_id": 1},
+        "key-4",
+        None,
+        active_ops={},
     )
     assert status == "failed"
     assert isinstance(result["error"], str)
@@ -618,7 +646,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
 
     monkeypatch.setattr(daemon, "_dispatch_sync", _wedged)
 
-    task = asyncio.ensure_future(daemon._dispatch("config_read", {}))
+    task = asyncio.ensure_future(daemon._dispatch("config_read", {}, active_ops={}))
     await asyncio.to_thread(started.wait, 10)
 
     # The loop is still ours: this only completes if nothing is holding it.
