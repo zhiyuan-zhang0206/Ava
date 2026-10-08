@@ -124,10 +124,7 @@ async def _force_circuit_compact(
     compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode=CompactionMode.AUTO)
     try:
         summary = await emergency_compact_summary(
-            state.messages,
-            ctx.llm,
-            ctx.require_agent(),
-            **({"binding": ctx.llm_binding} if ctx.llm_binding is not None else {}),
+            state.messages, ctx.llm, ctx.require_agent(), binding=ctx.llm_binding
         )
     except CompactionFailedError:
         # Transient failures exhausted — the fallback rescue did not
