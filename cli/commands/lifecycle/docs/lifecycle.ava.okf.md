@@ -63,6 +63,16 @@ once the unit serves and before the hold releases. These reuse the
 [durable maintenance journal](../../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../../../docs/conventions/operations/graceful-maintenance.md).
 
+The native stop tests create fresh PTY sessions and wait for their requested
+job's bare readiness output before treating a terminal as busy. A login-profile
+child can exist before the initial command runs; child presence alone is not
+job readiness. `cli/commands/lifecycle/tests/stop_support.py:busy_session` keeps cleanup custody of the
+shell before waiting, then records the running job. Regular jobs print
+`job-ready`; stubborn jobs print `stubborn-ready` after installing their signal
+handlers. Fresh-session creation refuses reuse; the public capture wait requires
+bare output rather than shell echo. Native closure, notice count and
+stop-before-data-plane assertions remain intact.
+
 ## Start
 
 `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` is deliberately
