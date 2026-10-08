@@ -412,6 +412,8 @@ def test_quality_boundaries(
 def test_function_qualnames_duplicates_and_lambda_exclusion() -> None:
     tree = ast.parse(
         "class Outer:\n    class Inner:\n        def method(self): pass\ndef p():\n    def c(): pass\n    def c(): pass\n    return lambda: 1\nasync def p(): pass\n"
+        "try:\n    pass\nexcept Exception:\n    def recovered(): pass\n"
+        "match value:\n    case 1:\n        def matched(): pass\n"
     )
     measured = quality.measure_quality(tree, "tests/q.py")
     expected = {
@@ -420,6 +422,8 @@ def test_function_qualnames_duplicates_and_lambda_exclusion() -> None:
         "tests/q.py::p.<locals>.c",
         "tests/q.py::p.<locals>.c#2",
         "tests/q.py::p#2",
+        "tests/q.py::recovered",
+        "tests/q.py::matched",
     }
     assert set(measured["complexity"]) == set(measured["nesting"]) == expected
     assert set(measured["complexity"].values()) == {1}

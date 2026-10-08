@@ -577,7 +577,7 @@ def test_prepush_migration_keeps_direct_ci_owners() -> None:
         assert HOOKS[hook_id]["always_run"] is True
     backend = WORKFLOW["jobs"]["backend-static"]["steps"]
     frontend = WORKFLOW["jobs"]["frontend"]["steps"]
-    assert any(step.get("run") == "uv run pyright" for step in backend)
+    assert any(step.get("run") == "uv run pyright --stats" for step in backend)
     assert any(step.get("run") == "npx tsc --noEmit" for step in frontend)
     assert any(step.get("run") == "npm run lint" for step in frontend)
     assert any(
