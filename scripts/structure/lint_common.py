@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tomllib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import cast
 
 # The framework code: every production Python package at the repo root. Lints
 # whose scope is "the framework" import this instead of keeping their own copy,
@@ -27,6 +29,47 @@ FRAMEWORK_DIRS = (
 # and shared-support tests) or a package's own `<pkg>/**/tests/`. Every lint that
 # exempts tests, or scans them on purpose, decides it with this one pattern.
 TEST_DIR = re.compile(r"(^|/)tests?/")
+
+
+def pytest_test_hosts(pyproject_text: str) -> tuple[str, ...]:
+    """Test hosts owned by pytest's required `testpaths`, without a second registry.
+
+    Supported roots are `tests` and `<host>/**/tests`. Reject other patterns instead
+    of silently giving pytest, the CI selector and generated type checking different scopes.
+    """
+    try:
+        paths = cast(
+            object, tomllib.loads(pyproject_text)["tool"]["pytest"]["ini_options"]["testpaths"]
+        )
+    except KeyError as error:
+        raise ValueError(
+            "pyproject.toml must configure tool.pytest.ini_options.testpaths"
+        ) from error
+    if not isinstance(paths, list) or not paths:
+        raise ValueError("pytest testpaths must be a nonempty list of directory patterns")
+    hosts: list[str] = []
+    for pattern in cast(list[object], paths):
+        host = _pytest_test_host(pattern)
+        if host in hosts:
+            raise ValueError(f"duplicate pytest test host: {host!r}")
+        hosts.append(host)
+    return tuple(hosts)
+
+
+def _pytest_test_host(pattern: object) -> str:
+    if not isinstance(pattern, str):
+        raise TypeError("pytest testpaths entries must be strings")
+    if pattern == "tests":
+        return pattern
+    host, separator, tail = pattern.partition("/")
+    if (
+        not separator
+        or tail != "**/tests"
+        or host in ("", ".", "..", "tests")
+        or any(char in host for char in "*?[]\\")
+    ):
+        raise ValueError(f"unsupported pytest testpaths pattern: {pattern!r}")
+    return host
 
 
 def is_test_path(rel_path: str) -> bool:
