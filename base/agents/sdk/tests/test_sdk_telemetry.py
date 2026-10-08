@@ -8,10 +8,13 @@ its emitted `sdk_call` event `detail`.
 
 from __future__ import annotations
 
+import asyncio
 import random
 from typing import Any
 
+import httpx
 import pytest
+from pydantic import ValidationError
 
 from base import telemetry
 from base.agents.sdk import call_policy
@@ -232,6 +235,105 @@ def test_live_sampling_keeps_tally_complete(
         sdk_usage_telemetry.run_metered("files.read", lambda: None, (), {})
     assert [row["sample_rate"] for row in captured] == [10, 1]
     assert tally == {"files.read": 11}
+
+
+@pytest.mark.parametrize("async_call", [False, True])
+@pytest.mark.parametrize("failure", ["auth", "schema", "code"])
+async def test_invalid_policy_blocks_sdk_side_effects(
+    monkeypatch: pytest.MonkeyPatch, async_call: bool, failure: str
+) -> None:
+    cache = call_policy._PolicyCache()
+    cache.value = SamplingPolicy()
+
+    def invalid() -> SamplingPolicy:
+        if failure == "auth":
+            httpx.Response(
+                401, request=httpx.Request("GET", "https://gateway/bootstrap")
+            ).raise_for_status()
+        if failure == "schema":
+            return SamplingPolicy(sample_every=0)
+        raise TypeError("policy reader bug")
+
+    monkeypatch.setattr(call_policy, "_read_policy", invalid)
+    cache.refresh()
+    monkeypatch.setattr(call_policy, "policy", cache.read)
+    calls: list[str] = []
+
+    def body() -> None:
+        calls.append("side effect")
+
+    async def async_body() -> None:
+        body()
+
+    error = {"auth": httpx.HTTPStatusError, "schema": ValidationError, "code": TypeError}[failure]
+    with sdk_usage_telemetry.recording() as tally:
+        for _ in range(2):
+            with pytest.raises(error):
+                if async_call:
+                    await sdk_usage_telemetry.run_metered_async("files.write", async_body, (), {})
+                else:
+                    sdk_usage_telemetry.run_metered("files.write", body, (), {})
+        assert tally == {}
+    assert calls == []
+    assert sdk_usage_telemetry._frames.get() == ()
+
+
+@pytest.mark.parametrize("async_call", [False, True])
+@pytest.mark.parametrize("original", [ValueError("SDK failed"), asyncio.CancelledError()])
+async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    captured: list[dict[str, Any]],
+    async_call: bool,
+    original: BaseException,
+) -> None:
+    cache = call_policy._PolicyCache()
+    cache.value = SamplingPolicy()
+    cache.next_refresh = float("inf")
+    reads: list[str] = []
+
+    def current() -> SamplingPolicy:
+        reads.append("read")
+        return cache.read()
+
+    def invalid() -> SamplingPolicy:
+        raise TypeError("new invalid policy")
+
+    monkeypatch.setattr(call_policy, "policy", current)
+    monkeypatch.setattr(call_policy, "_read_policy", invalid)
+    nested: list[str] = []
+
+    def body() -> None:
+        cache.refresh()
+        sdk_usage_telemetry.run_metered("inner.call", lambda: nested.append("ran"), (), {})
+        raise original
+
+    async def async_body() -> None:
+        body()
+
+    with pytest.raises(type(original)) as caught:
+        if async_call:
+            await sdk_usage_telemetry.run_metered_async("outer.call", async_body, (), {})
+        else:
+            sdk_usage_telemetry.run_metered("outer.call", body, (), {})
+    assert caught.value is original
+    assert reads == ["read"]
+    assert nested == ["ran"]
+    assert captured[0]["fn"] == "outer.call"
+    with pytest.raises(TypeError, match="new invalid policy"):
+        sdk_usage_telemetry.run_metered("next.call", lambda: nested.append("must not run"), (), {})
+    assert nested == ["ran"]
+
+
+def test_direct_emit_propagates_policy_errors_without_creating_events(
+    monkeypatch: pytest.MonkeyPatch, captured: list[dict[str, Any]]
+) -> None:
+    def invalid() -> SamplingPolicy:
+        raise TypeError("invalid policy")
+
+    monkeypatch.setattr(call_policy, "policy", invalid)
+    with pytest.raises(TypeError, match="invalid policy"):
+        sdk_usage_telemetry.emit("files.write")
+    assert captured == []
 
 
 def test_tally_counts_a_failed_top_level_call_too(monkeypatch: pytest.MonkeyPatch) -> None:

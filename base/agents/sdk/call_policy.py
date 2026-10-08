@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
+from types import TracebackType
 
+import httpx
 from pydantic import BaseModel, Field
 
 from base.log import logger
@@ -49,6 +51,7 @@ class _PolicyCache:
         self.next_refresh = 0.0
         self.lock = threading.Lock()
         self.refreshing = False
+        self.error: tuple[Exception, TracebackType | None] | None = None
 
     def read(self) -> SamplingPolicy:
         from base.config import settings
@@ -62,6 +65,9 @@ class _PolicyCache:
             if time.monotonic() >= self.next_refresh and not self.refreshing:
                 self.refreshing = True
                 threading.Thread(target=self.refresh, name="sdk-call-policy", daemon=True).start()
+            if self.error is not None:
+                error, traceback = self.error
+                raise error.with_traceback(traceback)
             return self.value
 
     def refresh(self) -> None:
@@ -69,10 +75,21 @@ class _PolicyCache:
             value = _read_policy()
             with self.lock:
                 self.value = value
-        except Exception:
-            logger.bind(_no_emitter=True).opt(exception=True).warning(
-                "SDK sampling config refresh failed; retaining the last valid policy",
-            )
+                self.error = None
+        except Exception as exc:
+            expected = isinstance(
+                exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)
+            ) or (isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429)
+            if expected:
+                logger.bind(_no_emitter=True).opt(exception=True).warning(
+                    "SDK sampling config fetch unavailable; retaining the last valid policy",
+                )
+            else:
+                with self.lock:
+                    self.error = (exc, exc.__traceback__)
+                logger.bind(_no_emitter=True).opt(exception=True).error(
+                    "SDK sampling config refresh failed; SDK calls will reject the invalid policy",
+                )
         finally:
             with self.lock:
                 self.next_refresh = time.monotonic() + _REFRESH_SECONDS

@@ -1,9 +1,11 @@
 """Live sampling uses validated snapshots and never blocks SDK calls on a fetch."""
 
 import threading
+import traceback
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -66,7 +68,7 @@ def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPat
     cache.value = SamplingPolicy(sampling_enabled=True, sample_every=5)
 
     def read() -> SamplingPolicy:
-        raise OSError("gateway unavailable")
+        raise httpx.ConnectError("gateway unavailable")
 
     reports: list[Any] = []
     monkeypatch.setattr(call_policy, "_read_policy", read)
@@ -80,7 +82,8 @@ def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPat
     assert cache.value.sample_every == 5
     warned = [row for row in reports if row["level"].name == "WARNING"]
     assert warned and warned[0]["exception"] is not None  # the traceback rides it (#4979)
-    assert warned[0]["exception"].type is OSError
+    assert warned[0]["exception"].type is httpx.ConnectError
+    assert warned[0]["extra"]["_no_emitter"] is True
     assert not cache.refreshing
 
 
@@ -104,3 +107,146 @@ def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
     assert call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
     assert requests == [{"timeout": 2.0, "attempts": 1}]
+
+
+def _http_failure(status: int) -> httpx.HTTPStatusError:
+    response = httpx.Response(status, request=httpx.Request("GET", "https://gateway/api/bootstrap"))
+    return httpx.HTTPStatusError("bootstrap rejected", request=response.request, response=response)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.ConnectError("offline"),
+        httpx.ReadError("connection lost"),
+        httpx.ReadTimeout("timed out"),
+        httpx.PoolTimeout("busy"),
+        httpx.RemoteProtocolError("connection closed"),
+        _http_failure(429),
+    ],
+)
+def test_expected_fetch_failure_retains_the_valid_snapshot(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    from base.telemetry import emitter
+
+    def initialize(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("a sampling fetch failure must not initialize an event pipeline")
+
+    monkeypatch.setattr(emitter, "init_telemetry", initialize)
+    cache = call_policy._PolicyCache()
+    snapshot = SamplingPolicy(sampling_enabled=True, sample_every=5)
+    cache.value = snapshot
+
+    def read() -> SamplingPolicy:
+        raise error
+
+    monkeypatch.setattr(call_policy, "_read_policy", read)
+    cache.refresh()
+    assert cache.read() is snapshot
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        _http_failure(401),
+        _http_failure(500),
+        httpx.LocalProtocolError("invalid request"),
+        httpx.UnsupportedProtocol("bad URL"),
+        PermissionError("config unreadable"),
+        TypeError("invalid config shape"),
+        RuntimeError("reader bug"),
+    ],
+)
+def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    cache = call_policy._PolicyCache()
+    cache.value = SamplingPolicy(sample_every=5)
+
+    def read() -> SamplingPolicy:
+        raise error
+
+    monkeypatch.setattr(call_policy, "_read_policy", read)
+    cache.refresh()
+    depths: list[int] = []
+    for _ in range(2):
+        with pytest.raises(type(error)) as caught:
+            cache.read()
+        assert caught.value is error
+        depths.append(sum(1 for _ in traceback.walk_tb(caught.value.__traceback__)))
+    assert depths[0] == depths[1]  # Repeated callers do not accumulate each other's stacks.
+
+    def unavailable() -> SamplingPolicy:
+        raise httpx.ConnectError("still offline")
+
+    monkeypatch.setattr(call_policy, "_read_policy", unavailable)
+    cache.refresh()
+    with pytest.raises(type(error)):
+        cache.read()  # An outage must not clear an already-invalid configuration.
+    recovered = SamplingPolicy(sampling_enabled=True, sample_every=7)
+    monkeypatch.setattr(call_policy, "_read_policy", lambda: recovered)
+    cache.refresh()
+    assert cache.read() is recovered
+
+
+def test_invalid_schema_is_not_reported_as_a_retained_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = call_policy._PolicyCache()
+    cache.value = SamplingPolicy()
+    monkeypatch.setattr(call_policy, "_read_policy", lambda: SamplingPolicy(sample_every=0))
+    cache.refresh()
+    with pytest.raises(ValidationError):
+        cache.read()
+
+
+def test_failed_policy_read_still_starts_one_refresh_when_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = call_policy._PolicyCache()
+    cache.value = SamplingPolicy()
+    error = TypeError("invalid policy")
+
+    def fail() -> SamplingPolicy:
+        raise error
+
+    clock = [10.0]
+    monkeypatch.setattr(call_policy.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(call_policy, "_read_policy", fail)
+    cache.refresh()
+    assert cache.next_refresh == 15.0
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    snapshot = SamplingPolicy(sample_every=9)
+
+    fetches: list[str] = []
+
+    def recover() -> SamplingPolicy:
+        fetches.append("fetch")
+        started.set()
+        assert release.wait(5)
+        return snapshot
+
+    monkeypatch.setattr(call_policy, "_read_policy", recover)
+    original = cache.refresh
+
+    def refresh() -> None:
+        try:
+            original()
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(cache, "refresh", refresh)
+    clock[0] = 15.0
+    try:
+        for _ in range(2):
+            with pytest.raises(TypeError, match="invalid policy"):
+                cache.read()
+        assert started.wait(2)
+        assert cache.refreshing
+        assert fetches == ["fetch"]
+    finally:
+        release.set()
+        assert finished.wait(2)
+    assert cache.read() is snapshot
+    assert cache.next_refresh == 20.0
