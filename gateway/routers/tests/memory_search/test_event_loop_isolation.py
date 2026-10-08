@@ -233,7 +233,7 @@ class TestWedgedBackendReleasesPermits:
             recovered = await asyncio.wait_for(_search(client), timeout=10)
 
         assert recovered.status_code == 200
-        assert recovered.json()["paths"] == ["a.md"]
+        assert [item["path"] for item in recovered.json()["results"]] == ["a.md"]
 
 
 class TestAcquireFastFail:
