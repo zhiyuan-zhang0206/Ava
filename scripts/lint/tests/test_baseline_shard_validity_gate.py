@@ -10,8 +10,11 @@ the rest of the gate."""
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -24,15 +27,23 @@ def _clear_baseline_dir(root: pathlib.Path) -> pathlib.Path:
     absent) and carrying its README.md."""
     directory = root / baseline_shards.SHARD_DIR
     if directory.is_dir():
-        for path in directory.glob("*.json"):
+        for path in directory.rglob("*.json"):
             path.unlink()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
     return directory
 
 
+def _run(
+    command: list[str], *, cwd: pathlib.Path, env: dict[str, str] | None = None, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 — fixed test commands, never external input.
+        command, cwd=cwd, env=env, check=check, capture_output=True, text=True
+    )
+
+
 def _git(root: pathlib.Path, *args: str) -> None:
-    subprocess.run(  # noqa: S603 — fixed test commands, never external input.
+    _run(
         [
             "git",
             "-C",
@@ -45,9 +56,7 @@ def _git(root: pathlib.Path, *args: str) -> None:
             "commit.gpgsign=false",
             *args,
         ],
-        check=True,
-        capture_output=True,
-        text=True,
+        cwd=root,
     )
 
 
@@ -55,7 +64,7 @@ def _git(root: pathlib.Path, *args: str) -> None:
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every main() call scans only its own temporary root."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
 
 
 @pytest.mark.parametrize(
@@ -133,3 +142,41 @@ def test_an_empty_committed_baseline_still_enforces_the_guard(
     captured = capsys.readouterr()
     assert "guard skipped" not in captured.err
     assert "added patch_targets entry base/new.py::base.db._pool" in captured.out
+
+
+@pytest.mark.parametrize("command", ["ls-tree", "cat-file", "show", "diff", "merge-base"])
+def test_cli_fails_when_baseline_history_cannot_be_read(
+    tmp_path: pathlib.Path, command: str
+) -> None:
+    real_git = shutil.which("git")
+    assert real_git is not None
+    binary = tmp_path / "bin/git"
+    binary.parent.mkdir()
+    binary.write_text(
+        f"#!{sys.executable}\nimport os, sys\n"
+        f"if {command!r} in sys.argv[1:]:\n"
+        "    sys.stderr.write('injected Git read failure')\n    sys.exit(71)\n"
+        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    binary.chmod(0o755)
+    repo = pathlib.Path(lcs.__file__).resolve().parents[2]
+    env = dict(
+        os.environ,
+        PATH=f"{binary.parent}{os.pathsep}{os.environ['PATH']}",
+        LINT_STRUCTURE_BASELINE_BASE="HEAD",
+    )
+    if command == "merge-base":
+        env.pop("LINT_STRUCTURE_BASELINE_BASE")
+    result = _run(
+        [
+            sys.executable,
+            str(repo / "scripts/lint/code_structure.py"),
+            str(repo / "scripts/structure/baseline_shards.py"),
+        ],
+        cwd=repo,
+        env=env,
+        check=False,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "guard skipped" not in result.stderr

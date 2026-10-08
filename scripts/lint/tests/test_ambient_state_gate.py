@@ -27,7 +27,7 @@ def _baseline(root: pathlib.Path, ambient: dict[str, int] | None = None) -> path
     """Write the baseline as shards, replacing any already there; only this section is filled."""
     directory = root / baseline_shards.SHARD_DIR
     if directory.is_dir():
-        for path in directory.glob("*.json"):
+        for path in directory.rglob("*.json"):
             path.unlink()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
@@ -42,6 +42,7 @@ def _baseline(root: pathlib.Path, ambient: dict[str, int] | None = None) -> path
         ambient_state.SECTION: ambient or {},
     }
     for name, shard in baseline_shards.split(data).items():
+        pathlib.Path(f"{directory}/{name}.json").parent.mkdir(parents=True, exist_ok=True)
         pathlib.Path(f"{directory}/{name}.json").write_text(
             baseline_shards.render(shard), encoding="utf-8"
         )
@@ -71,8 +72,11 @@ def _git(root: pathlib.Path, *args: str) -> None:
 @pytest.fixture
 def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Empty baseline")
     return tmp_path
 
 
@@ -121,6 +125,7 @@ def test_free_floating_background_work_names_the_service_loop_alternative(
 def test_a_frozen_site_passes(_repo: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write(_repo, "base/state.py", "_REGISTRY = {}\n")
     _baseline(_repo, {"base/state.py::ambient-container:_REGISTRY": 1})
+    _commit_base(_repo, with_lint=True)
 
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
@@ -139,6 +144,7 @@ def test_schedules_are_governed_by_this_rule_only(
     assert "schedules/daily.py:6:" in capsys.readouterr().out
 
     _baseline(_repo, {"schedules/daily.py::ambient-container:_STATE": 1})
+    _commit_base(_repo, with_lint=True)
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
 

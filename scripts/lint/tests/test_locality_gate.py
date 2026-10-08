@@ -56,15 +56,16 @@ def _git(root: pathlib.Path, *args: str) -> None:
 def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     """A repo root wired to lcs._REPO_ROOT, with an all-empty baseline already in place."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
+    _commit_baseline(tmp_path, "Empty baseline")
     return tmp_path
 
 
 def _commit_baseline(repo: pathlib.Path, message: str) -> None:
     _git(repo, "init", "--quiet")
     _git(repo, "add", baseline_shards.SHARD_DIR)
-    _git(repo, "commit", "--quiet", "-m", message)
+    _git(repo, "commit", "--quiet", "--allow-empty", "-m", message)
 
 
 def test_a_private_reach_in_fails_directly(

@@ -104,7 +104,8 @@ AST rules retain their governed-package scope.
 File, directory, complexity and nesting budgets have no exemptions. Every
 selected violation fails, including after a file or function rename.
 
-scripts/structure/baseline/*.json temporarily tracks remaining site exemptions.
+scripts/structure/baseline/**/*.json temporarily tracks remaining site exemptions.
+Ordinary component folders organize storage; baseline_shards is its sole reader.
 The guard compares them with the base revision and forbids added keys or raised
 counts, including when a lint rule version changes. Delete resolved entries.
 An explicit file target also checks its parent directory. The guard always runs.
@@ -401,22 +402,16 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _baseline_base() -> str:
+    """Resolve an explicit snapshot or the actual merge base with origin/main."""
     if "LINT_STRUCTURE_BASELINE_BASE" in os.environ:
         ref = os.environ["LINT_STRUCTURE_BASELINE_BASE"]
-        for args in (
-            ("merge-base", "--", "HEAD", ref),
-            ("rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"),
-        ):
-            result = _git(*args)
-            if result.returncode == 0:
-                return result.stdout.strip()
-        raise ValueError(f"LINT_STRUCTURE_BASELINE_BASE={ref!r} cannot resolve to a commit")
-    if _git("rev-parse", "--verify", "origin/main^{commit}").returncode == 0:
-        result = _git("merge-base", "HEAD", "origin/main")
-        if result.returncode == 0:
-            return result.stdout.strip()
-        print("note: origin/main merge-base unavailable; falling back to HEAD", file=sys.stderr)
-    return "HEAD"
+        result = _git("rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
+        if result.returncode:
+            raise ValueError(f"LINT_STRUCTURE_BASELINE_BASE={ref!r} cannot resolve to a commit")
+    else:
+        result = _git("merge-base", "--", "HEAD", "origin/main")
+        result.check_returncode()
+    return result.stdout.strip()
 
 
 def _rename_map(base: str) -> dict[str, str]:
@@ -435,9 +430,7 @@ def _rename_map(base: str) -> dict[str, str]:
     result = _git(
         "diff", "-M", "-B", "-l0", "--name-status", "--diff-filter=RC", "--no-color", base
     )
-    if result.returncode:
-        print(f"note: rename map unavailable ({base} diff failed)", file=sys.stderr)
-        return {}
+    result.check_returncode()
     renames: dict[str, str] = {}
     for line in result.stdout.splitlines():
         status, _, rest = line.partition("\t")
@@ -445,15 +438,6 @@ def _rename_map(base: str) -> dict[str, str]:
         if status.startswith(("R", "C")) and separator and old and new:
             renames[old] = new
     return renames
-
-
-def _rename_map_or_empty() -> dict[str, str]:
-    """The rename map for the guard's comparison base; an unresolvable base maps nothing."""
-    try:
-        return _rename_map(_baseline_base())
-    except ValueError:
-        # The baseline guard reports the unresolvable base itself.
-        return {}
 
 
 def _remap_renamed_keys(entries: dict[str, int], renames: dict[str, str]) -> dict[str, int]:
@@ -511,16 +495,15 @@ def _section_guard(
 
 
 def _baseline_guard(
-    baseline: dict[str, dict[str, int]], *, renames: dict[str, str] | None = None
+    baseline: dict[str, dict[str, int]], *, base: str, renames: dict[str, str] | None = None
 ) -> list[str]:
     try:
-        base = _baseline_base()
-    except ValueError as exc:
+        shards = baseline_shards.read_at(_REPO_ROOT, base)
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return [f"{baseline_shards.SHARD_DIR}: {exc}"]
-    shards = baseline_shards.read_at(_REPO_ROOT, base)
     if shards is None:
         print(
-            f"note: baseline guard skipped: git {base}:{baseline_shards.SHARD_DIR} unavailable",
+            f"note: baseline guard skipped: {base} predates {baseline_shards.SHARD_DIR}",
             file=sys.stderr,
         )
         return []
@@ -530,7 +513,7 @@ def _baseline_guard(
         return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
     try:
         rules_was, rules_now = baseline_shards.read_rules(_REPO_ROOT, base)
-    except ValueError as exc:
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid rule versions: {exc}"]
     errors: list[str] = []
     for kind, entries in baseline.items():
@@ -682,8 +665,13 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         print(f"{baseline_shards.SHARD_DIR}: invalid baseline: {exc}", file=sys.stderr)
         return 1
-    renames = _rename_map_or_empty()
-    errors = _baseline_guard(baseline, renames=renames)
+    try:
+        base = _baseline_base()
+        renames = _rename_map(base)
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        print(f"{baseline_shards.SHARD_DIR}: cannot establish baseline comparison: {exc}")
+        return 1
+    errors = _baseline_guard(baseline, base=base, renames=renames)
     errors.extend(_check_budgets(targets))
     errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full, renames=renames))
     for error in errors:
