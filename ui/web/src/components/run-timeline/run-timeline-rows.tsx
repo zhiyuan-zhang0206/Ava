@@ -5,8 +5,7 @@
 // then one row per understanding-tree level (topmost first), then layer 0 — the
 // message units — at the bottom. All rows share one viewport on the loaded data:
 // the wheel / pinch zooms around the cursor, a drag or a horizontal scroll pans,
-// and nothing refetches. A single click selects a block, a double-click drills
-// into it (the page zooms the viewport to the block's span).
+// and nothing refetches. A click selects a block; the arrow keys move the selection.
 
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -14,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
 import {
   blockClass,
@@ -34,6 +33,8 @@ import {
   UNITS_ROW,
   levelRowId,
   navigate,
+  tokenFits,
+  tokenLabel,
   revealView,
   type NavKey,
   MARKER_HIT_PX,
@@ -58,6 +59,8 @@ import { RowShell } from "./run-timeline-row-shell";
 import { readoutText, requestReadout } from "./run-timeline-readout";
 
 const NODE_LABEL_CHARS = 80;
+// A node keeps at least this much width for its summary before its token count is shown.
+const NODE_LABEL_MIN_PX = 24;
 // The opacity of everything a highlight does not name.
 const FADED = "opacity-[0.12]";
 // Track width assumed until the first measurement.
@@ -127,7 +130,6 @@ export function RunTimelineRows({
   onView,
   selection,
   onSelect,
-  onDrill,
   highlight,
   onHighlight,
 }: {
@@ -138,7 +140,6 @@ export function RunTimelineRows({
   onView: (view: Viewport) => void;
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
-  onDrill: (selection: Selection) => void;
   /** The legend's highlight: every block of one class (or one source) stays lit, the rest fades. */
   highlight: Highlight | null;
   onHighlight: (highlight: Highlight | null) => void;
@@ -162,7 +163,7 @@ export function RunTimelineRows({
   );
   const viewU = axis.viewU(view);
   // A selection lights itself and every ancestor; the rest steps back.
-  const chain = chainIds(selection, data.nodes, data.units);
+  const chain = chainIds(selection, data.nodes, data.units, data.requests);
   const dim = selection !== null;
   const selectedRequest =
     selection?.kind === "request" ? data.requests.find((request) => request.idx === selection.idx) : undefined;
@@ -208,8 +209,11 @@ export function RunTimelineRows({
       const el = event.target instanceof Element ? event.target : null;
       if (el?.closest("input, textarea, select, [contenteditable], [role=textbox], [role=separator], [role=slider], [role=combobox]")) return;
       const s = nav.current;
-      const next = navigate(key, s.selection === null ? null : { row: s.navRow, selection: s.selection }, s.data, s.view);
+      const next = navigate(key, s.selection === null ? null : { row: s.navRow, selection: s.selection }, s.data, s.axis, s.view);
       event.preventDefault();
+      // The clicked block keeps keyboard focus (its focus ring and hover echo) while the selection moves on.
+      if (el !== null && chartRef.current?.contains(el) && el instanceof HTMLElement) el.blur();
+      setHover(null);
       if (next === null) return;
       setNavRow(next.row);
       s.onSelect(next.item.selection);
@@ -405,6 +409,7 @@ export function RunTimelineRows({
               const hoverLight = !picked && !ancestor && lit.nodeIds.has(node.id);
               const faded = highlight !== null && !picked;
               const label = firstLine(node.summary, NODE_LABEL_CHARS);
+              const nodeTokens = tokenLabel(node.context_tokens, node.estimated);
               return (
                 <button
                   key={node.id}
@@ -418,13 +423,12 @@ export function RunTimelineRows({
                   data-faded={faded ? "" : undefined}
                   data-marker={place.marker ? "" : undefined}
                   onClick={() => choose(levelRowId(level), { kind: "node", id: node.id })}
-                  onDoubleClick={() => onDrill({ kind: "node", id: node.id })}
                   {...hoverProps({ kind: "node", id: node.id })}
                   className={cn(
                     "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
                     place.marker
                       ? ""
-                      : "inset-y-0 truncate rounded border px-1 text-left text-[10px] leading-8 border-border bg-primary/20 text-foreground hover:bg-primary/30",
+                      : cn(FLEX, OVERFLOW_HIDDEN, "inset-y-0 items-center rounded border px-1 text-left text-[10px] leading-8 border-border bg-primary/20 text-foreground hover:bg-primary/30"),
                     !place.marker && picked && "bg-primary/45 ring-2 ring-foreground",
                     !place.marker && ancestor && "bg-primary/40 ring-2 ring-foreground/60",
                     !place.marker && hoverLight && "bg-primary/30 ring-1 ring-foreground/40",
@@ -445,7 +449,14 @@ export function RunTimelineRows({
                       }
                     />
                   ) : (
-                    label
+                    <>
+                      <span className={cn(MIN_W_0, "grow truncate")}>{label}</span>
+                      {nodeTokens !== null && tokenFits(nodeTokens, place.width, NODE_LABEL_MIN_PX) ? (
+                        <span data-testid="run-timeline-tokens" className="ml-1 shrink-0 font-mono text-[9px] tabular-nums text-foreground/70">
+                          {nodeTokens}
+                        </span>
+                      ) : null}
+                    </>
                   )}
                 </button>
               );
@@ -478,6 +489,7 @@ export function RunTimelineRows({
               (selection?.kind === "request" && selectedRequest !== undefined && requestCovers(selectedRequest, unit));
             const hovered = hover?.kind === "unit" && isSelected(hover, candidate);
             const hoverLight = hovered || lit.unitKeys.has(key);
+            const unitTokens = tokenLabel(unit.context_tokens, unit.estimated);
             const matched = highlight !== null && matchesHighlight(unit, highlight);
             const faded = highlight !== null && !matched && !picked;
             return (
@@ -495,7 +507,6 @@ export function RunTimelineRows({
                 data-matched={matched ? "" : undefined}
                 data-marker={place.marker ? "" : undefined}
                 onClick={() => choose(UNITS_ROW, candidate)}
-                onDoubleClick={() => onDrill(candidate)}
                 {...hoverProps(candidate)}
                 className={cn(
                   "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
@@ -513,6 +524,13 @@ export function RunTimelineRows({
                     strong={picked || hoverLight}
                     color={picked || hoverLight ? "var(--foreground)" : unitColor(unit)}
                   />
+                ) : unitTokens !== null && tokenFits(unitTokens, place.width) ? (
+                  <span
+                    data-testid="run-timeline-tokens"
+                    className="pointer-events-none absolute right-0 top-0 pr-0.5 font-mono text-[9px] leading-4 tabular-nums text-black/70"
+                  >
+                    {unitTokens}
+                  </span>
                 ) : null}
               </button>
             );
@@ -532,7 +550,6 @@ export function RunTimelineRows({
               units={data.units}
               selection={selection}
               onSelect={(target) => choose(metric === "input" ? INPUT_ROW : ADDED_ROW, target)}
-              onDrill={onDrill}
               hover={hover}
               hoverProps={hoverProps}
               describe={(request) => requestReadout(t, request)}

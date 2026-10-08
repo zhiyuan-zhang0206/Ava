@@ -61,3 +61,12 @@ def _turn_tokens(view: HistoryView, idx: int, part: str) -> BlockTokens:
         generation.tokens if generation is not None else None,
         context.source == "estimated" if context is not None else None,
     )
+
+
+def span_tokens(view: HistoryView, span_start: int, span_end: int) -> BlockTokens:
+    """The context tokens of the messages `span_start`..`span_end` (inclusive), summed."""
+    records = view.tokens[span_start : span_end + 1]
+    if all(r.context_tokens is None for r in records):
+        return BlockTokens(None, None, None)
+    total = total_of(records)
+    return BlockTokens(total.tokens, None, total.estimated)
