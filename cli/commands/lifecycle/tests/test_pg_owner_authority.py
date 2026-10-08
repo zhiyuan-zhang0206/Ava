@@ -141,8 +141,9 @@ def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
+    children: list[subprocess.Popen[bytes]] = []
     try:
-        assert ci._start_pg(pg_port, "") == 0
+        assert ci._start_pg(pg_port, "", retained_children=children) == 0
         yield pg_port
     finally:
         # Re-pin the temp home: teardown must never resolve the operator's home.
@@ -152,6 +153,8 @@ def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
             check=False,
             capture_output=True,
         )
+        for child in children:
+            child.wait(timeout=1)
 
 
 def _data_dir() -> Path:

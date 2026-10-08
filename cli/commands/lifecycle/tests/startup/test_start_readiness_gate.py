@@ -75,7 +75,7 @@ def _hermetic_start(
 
     monkeypatch.setattr(service_selection, "selection_path", lambda: tmp_path / "selection.json")
     monkeypatch.setattr(start, "prod_service_checkout_error", _ignoring_args(lambda: None))
-    monkeypatch.setattr(start, "_ensure_gateway_data_plane", lambda: 0)
+    monkeypatch.setattr(start, "_ensure_gateway_data_plane", _ignoring_retention(lambda: 0))
     monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda: None)
     monkeypatch.setattr(bringup, "complete_gateway_data_plane", _ignoring_args(lambda: None))
     monkeypatch.setattr(materialize, "adopt_local_extensions", lambda: None)
@@ -127,7 +127,7 @@ def test_unready_frontend_is_failure_and_never_serving(monkeypatch: pytest.Monke
         return _probe_commands.ServiceProbe(spec.session != "frontend", "root", "unready")
 
     monkeypatch.setattr(_probe_commands, "_probe_service", probe)
-    assert _start_commands.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
+    assert _start_commands.cmd_start(retained_children=[]) == SERVICES_NOT_READY_EXIT_CODE
     assert not start_serving.is_serving()
 
 
@@ -140,7 +140,7 @@ def test_live_repeat_start_never_runs_mutating_preparation(monkeypatch: pytest.M
     monkeypatch.setattr(
         "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
     )
-    assert _start_commands.cmd_start() == 0
+    assert _start_commands.cmd_start(retained_children=[]) == 0
 
 
 @pytest.mark.parametrize("live", [False, True])
@@ -151,14 +151,14 @@ def test_start_marks_serving_for_live_and_cold_admission(
     monkeypatch.setattr(
         "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
     )
-    assert _start_commands.cmd_start() == 0
+    assert _start_commands.cmd_start(retained_children=[]) == 0
     assert start_serving.is_serving()
 
 
 @pytest.mark.parametrize("argument", ["release_receipt", "updater_telemetry"])
 def test_start_rejects_removed_updater_arguments(argument: str) -> None:
     with pytest.raises(TypeError, match="unexpected keyword argument"):
-        _start_commands.cmd_start(**{argument: True})  # pyright: ignore[reportArgumentType] — rejected API input
+        _start_commands.cmd_start(**{argument: True}, retained_children=[])  # pyright: ignore[reportArgumentType] — rejected API input
 
 
 def test_changed_live_generation_refuses_before_selection_or_converge(
@@ -181,7 +181,7 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
     monkeypatch.setattr(
         start, "cmd_migrations_apply", _ignoring_args(lambda: pytest.fail("no live DDL"))
     )
-    assert _start_commands.cmd_start(all_services=True) == 1
+    assert _start_commands.cmd_start(all_services=True, retained_children=[]) == 1
     assert service_selection.selection_path().read_bytes() == before
 
 
@@ -198,7 +198,7 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
         "_launch_service_tree",
         _ignoring_args(lambda: pytest.fail("no launch")),
     )
-    assert _start_commands.cmd_start() == 1
+    assert _start_commands.cmd_start(retained_children=[]) == 1
 
 
 def test_failed_launch_never_becomes_serving(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -211,7 +211,7 @@ def test_failed_launch_never_becomes_serving(monkeypatch: pytest.MonkeyPatch) ->
         return LaunchOutcome(roster, ("ava-gateway",))
 
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", failed)
-    assert _start_commands.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
+    assert _start_commands.cmd_start(retained_children=[]) == SERVICES_NOT_READY_EXIT_CODE
     assert not start_serving.is_serving()
 
 
@@ -229,14 +229,14 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
         prepared.append(services)
 
     monkeypatch.setattr(converge_host, "converge_host", prepare)
-    assert _start_commands.cmd_start(only_services=("gateway",)) == 0
+    assert _start_commands.cmd_start(only_services=("gateway",), retained_children=[]) == 0
     assert prepared == [frozenset({"gateway"})]
     assert service_selection.read_selection().names == frozenset({"gateway"})
 
 
 def test_lost_generation_never_reports_serving(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(start_serving, "mark_serving", _ignoring_args(lambda: False))
-    assert _start_commands.cmd_start() == 1
+    assert _start_commands.cmd_start(retained_children=[]) == 1
 
 
 def test_only_service_persists_for_repeated_start(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,8 +247,8 @@ def test_only_service_persists_for_repeated_start(monkeypatch: pytest.MonkeyPatc
         return LaunchOutcome(roster, ())
 
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
-    assert _start_commands.cmd_start(only_services=("gateway",)) == 0
-    assert _start_commands.cmd_start() == 0
+    assert _start_commands.cmd_start(only_services=("gateway",), retained_children=[]) == 0
+    assert _start_commands.cmd_start(retained_children=[]) == 0
     assert launched == [("gateway",), ("gateway",)]
 
 
@@ -259,7 +259,7 @@ def test_invalid_selection_never_launches(monkeypatch: pytest.MonkeyPatch) -> No
         _ignoring_args(lambda: pytest.fail("launched invalid roster")),
     )
     with pytest.raises(ValueError, match="unknown"):
-        _start_commands.cmd_start(only_services=("typo",))
+        _start_commands.cmd_start(only_services=("typo",), retained_children=[])
 
 
 def test_storage_schema_migration_grants_pooler_precede_application(
@@ -268,7 +268,11 @@ def test_storage_schema_migration_grants_pooler_precede_application(
     from cli.commands.data_plane import bringup
 
     steps: list[str] = []
-    monkeypatch.setattr(start, "_ensure_gateway_data_plane", lambda: steps.append("storage") or 0)
+    monkeypatch.setattr(
+        start,
+        "_ensure_gateway_data_plane",
+        _ignoring_retention(lambda: steps.append("storage") or 0),
+    )
     monkeypatch.setattr(
         bringup, "prepare_gateway_schema", lambda: steps.append("baseline-checkpoints")
     )
@@ -286,7 +290,7 @@ def test_storage_schema_migration_grants_pooler_precede_application(
         return LaunchOutcome(roster, ())
 
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
-    assert _start_commands.cmd_start() == 0
+    assert _start_commands.cmd_start(retained_children=[]) == 0
     assert steps == ["storage", "baseline-checkpoints", "migrate", "grants-pooler-consumer", "root"]
 
 
@@ -305,4 +309,13 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
     monkeypatch.setattr(
         root_driver, "complete_boot_start", lambda: pytest.fail("public dispatch owns publication")
     )
-    assert _start_commands.cmd_start() == (0 if ready else SERVICES_NOT_READY_EXIT_CODE)
+    assert _start_commands.cmd_start(retained_children=[]) == (
+        0 if ready else SERVICES_NOT_READY_EXIT_CODE
+    )
+
+
+def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:
+    def invoke(*_args: object, **_kwargs: object) -> T:
+        return callback()
+
+    return invoke
