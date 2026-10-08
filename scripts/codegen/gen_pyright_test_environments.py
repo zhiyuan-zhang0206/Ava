@@ -11,7 +11,8 @@ tests standard, silently. So each such directory needs its own entry, listed abo
 entry of its package, and hand-writing one per directory (about 150 are planned) turns
 into hundreds of lines that every test-moving change edits in the same place.
 
-This script owns that list. It scans the tracked `<pkg>/**/tests/` directories and writes
+This script owns that list. It reads test hosts from pytest `testpaths`, scans their
+tracked `<pkg>/**/tests/` directories and writes
 one entry per directory that is not already at the tests standard into the region of
 `pyproject.toml` fenced by the BEGIN/END comments below. Everything outside the region is
 hand-written and left byte-for-byte alone.
@@ -46,15 +47,16 @@ from pathlib import Path
 from typing import Any, cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
 
 BEGIN = (
     "# BEGIN GENERATED pyright tests environments "
     "(scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)"
 )
 END = "# END GENERATED pyright tests environments"
-
-# Where a package's own `tests/` directory may live. The top-level `tests/` is listed by hand.
-HOSTS = ("agent", "ava", "ava_builtins", "base", "cli", "gateway", "ops", "scripts", "services")
 
 CALL_SIGNATURE_RULES = ("reportUnknownMemberType", "reportUnknownArgumentType")
 OTHER_RULES = (
@@ -88,12 +90,12 @@ def effective_rules(config: dict[str, Any], directory: str) -> dict[str, str]:
     return {rule: environment.get(rule, config[rule]) for rule in TESTS_STANDARD}
 
 
-def tests_roots(tracked: Iterable[str]) -> list[str]:
+def tests_roots(tracked: Iterable[str], hosts: tuple[str, ...]) -> list[str]:
     """The outermost `tests/` directory of every tracked module in a package, sorted."""
     roots: set[str] = set()
     for path in tracked:
         parts = path.split("/")
-        if parts[0] in HOSTS and "tests" in parts[:-1]:
+        if parts[0] != "tests" and parts[0] in hosts and "tests" in parts[:-1]:
             roots.add("/".join(parts[: parts.index("tests") + 1]))
     return sorted(roots)
 
@@ -154,7 +156,7 @@ def generate(pyproject_text: str, tracked: Iterable[str]) -> str:
     region = _region(pyproject_text)
     handwritten = pyproject_text[: region.start()] + pyproject_text[region.end() :]
     config = tomllib.loads(handwritten)["tool"]["pyright"]
-    rendered = _render(_entries(config, tests_roots(tracked)))
+    rendered = _render(_entries(config, tests_roots(tracked, pytest_test_hosts(handwritten))))
     return pyproject_text[: region.start()] + rendered + pyproject_text[region.end() :]
 
 

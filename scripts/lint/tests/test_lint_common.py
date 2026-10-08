@@ -45,3 +45,16 @@ def test_missing_scan_dir_is_an_error(tmp_path: Path) -> None:
 def test_framework_scoped_lints_cover_every_framework_dir(scan_dirs: tuple[str, ...]) -> None:
     assert set(lint_common.FRAMEWORK_DIRS) <= set(scan_dirs)
     lint_common.scan_roots(_REPO_ROOT, scan_dirs)
+
+
+@pytest.mark.parametrize(
+    "pattern", ["/**/tests", "*/**/tests", "base/**/test", "base/../tests", "base\\child/**/tests"]
+)
+def test_pytest_test_scope_rejects_unsupported_directory_patterns(pattern: str) -> None:
+    with pytest.raises(ValueError, match="unsupported pytest testpaths"):
+        lint_common.pytest_test_hosts(f"[tool.pytest.ini_options]\ntestpaths = [{pattern!r}]\n")
+
+
+def test_pytest_test_scope_rejects_duplicate_hosts() -> None:
+    with pytest.raises(ValueError, match="duplicate pytest test host"):
+        lint_common.pytest_test_hosts('[tool.pytest.ini_options]\ntestpaths = ["tests", "tests"]\n')
