@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 
 
@@ -103,6 +104,40 @@ def test_resolve_posts_action(
     assert url == "http://gw/api/agents/7/notices/5/resolve"
     assert kw["json"] == {"action": "read", "reply": None}
     assert "resolved" in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("dial")
+@pytest.mark.parametrize(
+    ("action", "reply", "detail"),
+    [
+        ("read", None, "notice 5 does not exist for agent 7"),
+        ("dismiss", None, "notice 5 is FYI (use 'answer' or 'read')"),
+        ("read", None, "notice 5 needs a response (use 'answer' or 'dismiss')"),
+        ("answer", "My answer", "notice 5 is already resolved for agent 7"),
+    ],
+)
+def test_resolve_rejects_conflicts_without_claiming_success(
+    action: str,
+    reply: str | None,
+    detail: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.commands.agents.notices import cmd_notices_resolve
+
+    calls: list[str] = []
+
+    def conflict(url: str, **kw: Any) -> httpx.Response:
+        calls.append(url)
+        return httpx.Response(409, json={"detail": detail}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("base.host.net.http_dial.post", conflict)
+    with pytest.raises(httpx.HTTPStatusError) as error:
+        cmd_notices_resolve(notice_id=5, agent_id=7, action=action, reply=reply)
+
+    assert error.value.response.json() == {"detail": detail}
+    assert calls == ["http://gw/api/agents/7/notices/5/resolve"]
+    assert capsys.readouterr().out == ""
 
 
 def test_clear_resolves_each_open(monkeypatch: pytest.MonkeyPatch) -> None:
