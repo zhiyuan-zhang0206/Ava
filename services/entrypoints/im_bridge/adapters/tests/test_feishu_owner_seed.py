@@ -14,6 +14,7 @@ seam used here only proves the seed resolves the owner.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ import pytest
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
 from services.entrypoints.im_bridge.tests.slices import feishu_config
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 
 
@@ -44,7 +46,7 @@ class BootAdapter(FeishuAdapter):
     def _run_ws(self) -> None:
         pass
 
-    def _start_poller(self) -> None:
+    def _start_poller(self, tasks: asyncio.TaskGroup) -> None:
         pass
 
 
@@ -70,17 +72,18 @@ async def test_start_seeds_owner_open_id_from_switch_state(
 ) -> None:
     """The restart regression: with exactly one feishu chat recorded, boot
     restores the owner open id before the link goes live."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405, "telegram:12345": 405})
-    core = FakeCore()
-    adapter = _boot_adapter(
-        feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x"),  # noqa: S106
-        core,
-    )
+    async with owned_tasks() as _owned_tasks:
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405, "telegram:12345": 405})
+        core = FakeCore()
+        adapter = _boot_adapter(
+            feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x"),  # noqa: S106
+            core,
+        )
 
-    await adapter.start()
+        await adapter.start(_owned_tasks)
 
-    assert adapter._last_open_id == "ou_owner_1"
+        assert adapter._last_open_id == "ou_owner_1"
 
 
 async def test_start_without_credentials_does_not_seed_or_alert(
@@ -88,14 +91,15 @@ async def test_start_without_credentials_does_not_seed_or_alert(
 ) -> None:
     """A disabled feishu link (no credentials) has no outbound leg to rescue:
     no seed, no alert — the alert exists for a live-but-blind leg."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405})
-    core = FakeCore()
-    adapter = _boot_adapter(feishu_config(feishu_app_id="", feishu_app_secret=""), core)
+    async with owned_tasks() as _owned_tasks:
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405})
+        core = FakeCore()
+        adapter = _boot_adapter(feishu_config(feishu_app_id="", feishu_app_secret=""), core)
 
-    await adapter.start()
+        await adapter.start(_owned_tasks)
 
-    assert adapter._last_open_id == ""
+        assert adapter._last_open_id == ""
 
 
 # -- seed semantics ---------------------------------------------------------
@@ -177,22 +181,18 @@ async def test_seed_with_multiple_feishu_chats_emits_the_ambiguity_event(
     assert [(e["reason"], e["chats"]) for e in events] == [("ambiguous", 2)]
 
 
-async def test_seed_with_unreadable_state_emits_and_stays_blind(
+async def test_seed_with_invalid_state_fails_without_blind_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """A loader failure degrades to the old behavior (empty owner, no crash)
-    and still emits — the fallback must not be silent.
-
-    The loader swallows OSError/ValueError by design; a valid-JSON non-object
-    document is the corruption whose AttributeError escapes it.
-    """
+    """An existing invalid switch-state image fails startup."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     path = tmp_path / "state" / "im_bridge" / "switch_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("[1, 2, 3]", encoding="utf-8")
     adapter = FeishuAdapter(FakeCore(), feishu_config())
 
-    await adapter._seed_owner_from_switch_state()
+    with pytest.raises(ValueError):
+        await adapter._seed_owner_from_switch_state()
 
     assert adapter._last_open_id == ""
-    assert [e["reason"] for e in _seed_events(loguru_records)] == ["no_source"]
+    assert _seed_events(loguru_records) == []

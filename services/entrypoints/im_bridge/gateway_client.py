@@ -12,7 +12,14 @@ from typing import Any, Literal
 import httpx
 
 from services.entrypoints.im_bridge.config import ImBridgeConfig
-from services.entrypoints.im_bridge.types import AgentDetail, AgentDirectoryPage
+from services.entrypoints.im_bridge.types import (
+    NETWORK_ERRORS,
+    AgentDetail,
+    AgentDirectoryPage,
+    RetryableTransportError,
+    raise_http_failure,
+    retryable_http_status,
+)
 
 _log = logging.getLogger("services.entrypoints.im_bridge.gateway_client")
 
@@ -53,7 +60,7 @@ class GatewayClient:
             params["before_id"] = before_id
         resp = await client.get("/api/agents", headers=self._headers(), params=params)
         if resp.status_code != 200:
-            raise RuntimeError(f"list agents failed: HTTP {resp.status_code}")
+            raise_http_failure(resp.status_code, f"list agents failed: HTTP {resp.status_code}")
         return resp.json()
 
     async def get_agent(self, agent_id: int) -> AgentDetail | None:
@@ -63,7 +70,9 @@ class GatewayClient:
         if resp.status_code == 404:
             return None
         if resp.status_code != 200:
-            raise RuntimeError(f"get agent {agent_id} failed: HTTP {resp.status_code}")
+            raise_http_failure(
+                resp.status_code, f"get agent {agent_id} failed: HTTP {resp.status_code}"
+            )
         return resp.json()
 
     async def send_message(
@@ -88,8 +97,8 @@ class GatewayClient:
                 )
                 if resp.status_code == 201:
                     return
-                if resp.status_code >= 500:
-                    # gateway mid-rollout — retry; 4xx (validation) never retries
+                if retryable_http_status(resp.status_code):
+                    # Only explicit transient statuses retry with the same delivery key.
                     _log.warning(
                         "send to agent %s failed: HTTP %s (attempt %d, retry in %.0fs)",
                         agent_id,
@@ -99,8 +108,10 @@ class GatewayClient:
                     )
                     await asyncio.sleep(delay)
                     continue
-                raise RuntimeError(f"send to agent {agent_id} failed: HTTP {resp.status_code}")
-            except httpx.HTTPError:
+                raise_http_failure(
+                    resp.status_code, f"send to agent {agent_id} failed: HTTP {resp.status_code}"
+                )
+            except NETWORK_ERRORS:
                 _log.warning(
                     "send to agent %s failed (attempt %d, retry in %.0fs)",
                     agent_id,
@@ -108,7 +119,7 @@ class GatewayClient:
                     delay,
                 )
                 await asyncio.sleep(delay)
-        raise RuntimeError(
+        raise RetryableTransportError(
             f"send to agent {agent_id} failed after {len(self._config.im_send_retry_delays)} attempts"
         )
 
@@ -118,7 +129,7 @@ class GatewayClient:
         client = await self._http()
         resp = await client.get("/api/presets", headers=self._headers())
         if resp.status_code != 200:
-            raise RuntimeError(f"list presets failed: HTTP {resp.status_code}")
+            raise_http_failure(resp.status_code, f"list presets failed: HTTP {resp.status_code}")
         return resp.json()
 
     async def list_models(self) -> dict[str, Any]:
@@ -126,7 +137,7 @@ class GatewayClient:
         client = await self._http()
         resp = await client.get("/api/models", headers=self._headers())
         if resp.status_code != 200:
-            raise RuntimeError(f"list models failed: HTTP {resp.status_code}")
+            raise_http_failure(resp.status_code, f"list models failed: HTTP {resp.status_code}")
         return resp.json()
 
     async def spawn_agent(
@@ -157,7 +168,9 @@ class GatewayClient:
             "/api/agents", headers={**self._headers(), "Idempotency-Key": key}, json=payload
         )
         if resp.status_code != 201:
-            raise RuntimeError(f"spawn failed: HTTP {resp.status_code} - {resp.text[:300]}")
+            raise_http_failure(
+                resp.status_code, f"spawn failed: HTTP {resp.status_code} - {resp.text[:300]}"
+            )
         agent_id = resp.json()["id"]
         if type(agent_id) is not int or agent_id <= 0:
             raise TypeError("spawn response requires a positive integer agent id")
@@ -170,7 +183,7 @@ class GatewayClient:
         client = await self._http()
         resp = await client.get("/api/commands", headers=self._headers())
         if resp.status_code != 200:
-            raise RuntimeError(f"list commands failed: HTTP {resp.status_code}")
+            raise_http_failure(resp.status_code, f"list commands failed: HTTP {resp.status_code}")
         return resp.json()
 
     async def get_timeline(self, agent_id: int, limit: int | None = None) -> list[dict[str, Any]]:
@@ -188,8 +201,10 @@ class GatewayClient:
             params={"limit": limit},
         )
         if resp.status_code != 200:
-            raise RuntimeError(f"timeline {agent_id} failed: HTTP {resp.status_code}")
-        return resp.json().get("items", [])
+            raise_http_failure(
+                resp.status_code, f"timeline {agent_id} failed: HTTP {resp.status_code}"
+            )
+        return resp.json()["items"]
 
     async def stream_events(
         self, agent_id: int
@@ -203,7 +218,9 @@ class GatewayClient:
             timeout=httpx.Timeout(self._config.im_sse_read_timeout_seconds, connect=10.0),
         ) as resp:
             if resp.status_code != 200:
-                raise RuntimeError(f"sse {agent_id} failed: HTTP {resp.status_code}")
+                raise_http_failure(
+                    resp.status_code, f"sse {agent_id} failed: HTTP {resp.status_code}"
+                )
             buf = b""
             async for chunk in resp.aiter_bytes():
                 buf += chunk
@@ -212,17 +229,14 @@ class GatewayClient:
                     # Decode whole frames by byte accumulation: a per-chunk
                     # decode turns a multi-byte character split across
                     # transport chunks into U+FFFD replacements.
-                    frame = frame_bytes.decode("utf-8", errors="replace")
+                    frame = frame_bytes.decode("utf-8")
                     data = None
                     # Split on "\n" only - str.splitlines() also breaks on
                     # U+0085 / U+2028 / U+2029, which are legal unescaped
                     # inside a JSON string; a split there truncates the
-                    # payload and the frame is dropped.
+                    # payload into invalid JSON.
                     for line in frame.split("\n"):
                         if line.startswith("data:"):
                             data = line[5:].strip()
                     if data and data != '{"role":"heartbeat"}':
-                        try:
-                            yield json.loads(data)
-                        except json.JSONDecodeError:
-                            _log.warning("sse unparseable frame: %.120s", data)
+                        yield json.loads(data)
