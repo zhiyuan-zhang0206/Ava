@@ -33,6 +33,7 @@ from base.packages.plugins.config_registration import (
     get_plugin_config,
     is_per_agent_field,
     merge_disk_image_schema,
+    read_authority_config,
     read_config_image,
     resolve_overlay_targets,
     validate_config_overlay,
@@ -44,6 +45,17 @@ class _FixtureConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     flag: bool = Field(default=True)
     marker: str = Field(default=".git", json_schema_extra={"per_agent": True})
+
+
+def test_authority_path_and_reader_do_not_create_a_missing_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "uncreated-home"
+    monkeypatch.setenv("AVA_HOME", str(home))
+    image = disk_image_path("fixture")
+    assert image == home / "configs" / "fixture" / "config.json"
+    assert read_authority_config("fixture", _FixtureConfig, image).flag is True
+    assert not home.exists()
 
 
 def test_read_config_image_defaults_without_creating_home(tmp_path: Path) -> None:
