@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "gateway/mcp_server/endpoint.py::contextvar:_CURRENT_MCP_CLIENT": 1
-  }
-}
