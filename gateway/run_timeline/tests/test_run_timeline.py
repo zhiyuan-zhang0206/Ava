@@ -71,7 +71,7 @@ def view(messages: list[BaseMessage] | None = None) -> HistoryView:
     msgs = history_messages() if messages is None else messages
     read = read_times(msgs)
     units = display_blocks(divide_units(msgs), msgs, read)
-    return HistoryView(single_segment_history(msgs), units, MessageUsage(msgs), read)
+    return HistoryView.of(single_segment_history(msgs), units, MessageUsage(msgs), read)
 
 
 def stored(node_id: int, *, level: int, span: tuple[int, int], start: int, end: int) -> StoredNode:
@@ -366,7 +366,49 @@ def test_a_view_behind_the_tree_is_rebuilt_but_not_more_than_every_two_seconds(
 def test_the_window_lists_the_llm_requests_sent_in_it(monkeypatch: pytest.MonkeyPatch) -> None:
     world = World(monkeypatch)
     everything = read(world)
-    assert [(r.idx, r.input_tokens) for r in everything.requests] == [(2, 100), (4, 200)]
+    assert [(r.idx, r.input_tokens, r.output_tokens) for r in everything.requests] == [
+        (2, 100, 1),
+        (4, 200, 1),
+    ]
     # The first request is sent when the message before it was read (minute 0), the second at minute 2.
     later = read(world, T0 + timedelta(minutes=1), T0 + timedelta(minutes=10))
     assert [r.idx for r in later.requests] == [4]
+
+
+def test_units_carry_their_tokens_and_whether_they_are_estimated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = World(monkeypatch)
+    units = {(u.kind, u.i0): u for u in read(world).units}
+    # The tool result is alone between the two requests: 200 - 100 - 1 (the first reply's output).
+    result = units[("output", 2)]
+    assert (result.context_tokens, result.generation_tokens, result.estimated) == (99, None, False)
+    # The inbound shares the first request's input with the system prompt: a share, so estimated.
+    inbound = units[("inbound", 1)]
+    assert inbound.estimated is True
+    assert 0 < (inbound.context_tokens or 0) < 100
+    # The first reply's one output token is divided between its reasoning and its call.
+    thinking, call = units[("thinking", 2)], units[("call", 2)]
+    assert (thinking.estimated, call.estimated) == (True, True)
+    assert (thinking.context_tokens or 0) + (call.context_tokens or 0) == 1
+    assert (thinking.generation_tokens or 0) + (call.generation_tokens or 0) == 1
+    # A reply that is only text is the provider's own output count.
+    done = units[("text", 4)]
+    assert (done.context_tokens, done.generation_tokens, done.estimated) == (1, 1, False)
+
+
+def test_a_unit_no_request_has_read_has_no_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    world = World(monkeypatch)
+    world.view = view(
+        [
+            *history_messages(),
+            HumanMessage(
+                content="later",
+                additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(20)},
+            ),
+        ]
+    )
+    later = [u for u in read(world).units if u.i0 == 5]
+    assert [(u.context_tokens, u.generation_tokens, u.estimated) for u in later] == [
+        (None, None, None)
+    ]

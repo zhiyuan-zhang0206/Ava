@@ -1648,7 +1648,7 @@
     "/api/agents/{agent_id}/context-breakdown": {
       "get": {
         "summary": "Get Context Breakdown",
-        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nBuckets the checkpoint messages by kind + splits the system prompt into its\ntop-level sections, each a chars/4 estimate proportionally normalized to the\nlast LLM call's real `input_tokens` (so the categories sum to the truth). Pure\ngateway-side view logic (`gateway/agents/context_breakdown.py`) — one checkpoint read,\nno kernel/agent involvement. A checkpoint read failure / no checkpoint yields\nan empty breakdown with zeroed totals (same tolerance as token-usage: the\npanel re-opens fine later).",
+        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nThe breakdown of the latest LLM request's input: each message's tokens anchored to the\nprovider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed\nfrom them, only the inside of a message split by an estimator. Pure gateway-side view logic\n(`gateway/agents/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.\nA checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown\nwith zeroed totals (same tolerance as token-usage: the panel re-opens fine later).",
         "operationId": "get_context_breakdown_api_agents__agent_id__context_breakdown_get",
         "parameters": [
           {
@@ -10436,9 +10436,13 @@
             "type": "integer",
             "title": "Total Input Tokens"
           },
-          "estimated_total": {
-            "type": "integer",
-            "title": "Estimated Total"
+          "estimated": {
+            "type": "boolean",
+            "title": "Estimated"
+          },
+          "exact_fraction": {
+            "type": "number",
+            "title": "Exact Fraction"
           },
           "max_input_tokens": {
             "type": "integer",
@@ -10473,12 +10477,13 @@
         "type": "object",
         "required": [
           "total_input_tokens",
-          "estimated_total",
+          "estimated",
+          "exact_fraction",
           "sections",
           "categories"
         ],
         "title": "ContextBreakdownResponse",
-        "description": "GET /api/agents/{id}/context-breakdown — how the agent's context window is\nspent, for the composer's breakdown panel (lazy-loaded when the panel opens).\n\nEvery token value is a chars/4 estimate proportionally normalized to\n`total_input_tokens` (the last LLM call's real input_tokens), so `categories`\nsum exactly to `total_input_tokens` while the distribution stays approximate —\nzero extra API cost, zero KV-cache impact. `sections` break down the\n`system_prompt` category. When no LLM call has run yet (`total_input_tokens ==\n0`) the values are the raw chars/4 estimates and `estimated_total` is their\nsum. `max_input_tokens` / `soft_compact_tokens` / `hard_compact_tokens` mirror\nthe token-usage endpoint (0 when the model window is unknown)."
+        "description": "GET /api/agents/{id}/context-breakdown — how the agent's context window is\nspent, for the composer's breakdown panel (lazy-loaded when the panel opens).\n\nThe breakdown of the latest LLM request's input. Each message's tokens are anchored to\nthe provider's reported `input_tokens` (see `base/agents/history/message_tokens.py`), so\n`categories` sum exactly to `total_input_tokens`; only the inside of a message\n(reasoning / output / tool_call, system-prompt sections) is split by an estimator.\n`estimated` / `exact_fraction` say whether any part of the total was estimated and how much\nof it was the provider's own number. `sections` break down the `system_prompt` category.\nWith no LLM request yet the total is 0 and nothing is listed. `max_input_tokens` /\n`soft_compact_tokens` / `hard_compact_tokens` mirror the token-usage endpoint (0 when the\nmodel window is unknown)."
       },
       "ContextCategory": {
         "properties": {
@@ -10489,15 +10494,25 @@
           "tokens": {
             "type": "integer",
             "title": "Tokens"
+          },
+          "estimated": {
+            "type": "boolean",
+            "title": "Estimated"
+          },
+          "exact_fraction": {
+            "type": "number",
+            "title": "Exact Fraction"
           }
         },
         "type": "object",
         "required": [
           "kind",
-          "tokens"
+          "tokens",
+          "estimated",
+          "exact_fraction"
         ],
         "title": "ContextCategory",
-        "description": "One context bucket (system_prompt / compact_summary / cluster_memory /\nagent_memory / context_note / user_input / agent_messages / automation /\nreasoning / output / tool_call / tool_response) with its normalized token\nestimate. Inbound messages split by source: user_input (a human turn),\nagent_messages (a peer agent), automation (a machine/framework wakeup)."
+        "description": "One context bucket (system_prompt / compact_summary / cluster_memory /\nagent_memory / context_note / user_input / agent_messages / automation /\nreasoning / output / tool_call / tool_response) with its token count: the sum of its\nmessages' own counts. `estimated` is true when any part was a share of a provider total\nrather than the provider's own number (the UI appends \"(estimated)\"); `exact_fraction` is the\nshare of `tokens` that was exact. Inbound messages split by source: user_input (a human\nturn), agent_messages (a peer agent), automation (a machine/framework wakeup)."
       },
       "ContextSection": {
         "properties": {
@@ -10508,6 +10523,11 @@
           "tokens": {
             "type": "integer",
             "title": "Tokens"
+          },
+          "estimated": {
+            "type": "boolean",
+            "title": "Estimated",
+            "default": true
           },
           "children": {
             "items": {
@@ -10523,7 +10543,7 @@
           "tokens"
         ],
         "title": "ContextSection",
-        "description": "One node of the system prompt's recursive section breakdown: a heading — or\nthe `(preamble)` / `(intro)` prose before the first sub-heading — with its\n(normalized) token estimate. A section over ~1000 tokens is drilled into its\nnext-level sub-headings as `children` (recursively); a smaller section, or one\nwith no deeper heading, is a leaf (`children == []`). When `children` is\nnon-empty their tokens sum to this node's `tokens`."
+        "description": "One node of the system prompt's recursive section breakdown: a heading — or\nthe `(preamble)` / `(intro)` prose before the first sub-heading — with its\ntoken share of the system prompt (always estimated: a section is never measured alone). A section over ~1000 tokens is drilled into its\nnext-level sub-headings as `children` (recursively); a smaller section, or one\nwith no deeper heading, is a leaf (`children == []`). When `children` is\nnon-empty their tokens sum to this node's `tokens`."
       },
       "ConversationSnapshotResponse": {
         "properties": {
@@ -15112,9 +15132,13 @@
             "type": "integer",
             "title": "Total Input Tokens"
           },
-          "estimated_total": {
-            "type": "integer",
-            "title": "Estimated Total"
+          "estimated": {
+            "type": "boolean",
+            "title": "Estimated"
+          },
+          "exact_fraction": {
+            "type": "number",
+            "title": "Exact Fraction"
           },
           "max_input_tokens": {
             "type": "integer",
@@ -15166,7 +15190,8 @@
         "type": "object",
         "required": [
           "total_input_tokens",
-          "estimated_total",
+          "estimated",
+          "exact_fraction",
           "sections",
           "categories",
           "request",
@@ -15450,6 +15475,10 @@
           "input_tokens": {
             "type": "integer",
             "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
           }
         },
         "type": "object",
@@ -15457,10 +15486,11 @@
           "idx",
           "ts",
           "session",
-          "input_tokens"
+          "input_tokens",
+          "output_tokens"
         ],
         "title": "RunTimelineRequest",
-        "description": "One LLM request of the agent: an AIMessage carrying `usage_metadata`.\n\n`idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent\n(the read time of the message before it, the start of the turn's thinking block);\n`session` the zero-based compaction segment it was sent in; `input_tokens` the provider's\ntotal input tokens of that request, the size of its context."
+        "description": "One LLM request of the agent: an AIMessage carrying `usage_metadata`.\n\n`idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent\n(the read time of the message before it, the start of the turn's thinking block);\n`session` the zero-based compaction segment it was sent in; `input_tokens` the provider's\ntotal input tokens of that request, the size of its context, and `output_tokens` what it\ngenerated (both the provider's own numbers, never estimated)."
       },
       "RunTimelineResponse": {
         "properties": {
@@ -15580,6 +15610,39 @@
               }
             ],
             "title": "Parent"
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens"
+          },
+          "generation_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Tokens"
+          },
+          "estimated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated"
           }
         },
         "type": "object",
@@ -15591,10 +15654,13 @@
           "end",
           "source",
           "preview",
-          "parent"
+          "parent",
+          "context_tokens",
+          "generation_tokens",
+          "estimated"
         ],
         "title": "RunTimelineUnit",
-        "description": "One layer-0 block (see `base.agents.history.hierarchy.units`).\n\nA message unit, except that a work unit is served as its parts: `thinking` (the model's\ngeneration for the turn), `call` (an instant at the end of the stream) and `output` (the\nexecution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the\ninclusive message-index span of the block's unit. Blocks without a time are not served.\n`parent` is the level-1 node whose span holds the block's first message, None for a block no\nnode covers (a compaction segment's head, the not yet summarized tail)."
+        "description": "One layer-0 block (see `base.agents.history.hierarchy.units`).\n\nA message unit, except that a work unit is served as its parts: `thinking` (the model's\ngeneration for the turn), `call` (an instant at the end of the stream) and `output` (the\nexecution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the\ninclusive message-index span of the block's unit. Blocks without a time are not served.\n`parent` is the level-1 node whose span holds the block's first message, None for a block no\nnode covers (a compaction segment's head, the not yet summarized tail).\n\n`context_tokens` is what the block occupies in the context (None while no request has read\nit), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether\nany of that was a share rather than the provider's own number (None with `context_tokens`).\nA thinking / output(text) / call block is its share of the turn's AIMessage, so estimated."
       },
       "RunTimelineUsage": {
         "properties": {
@@ -16229,6 +16295,22 @@
             "type": "integer",
             "title": "Peak Input Tokens"
           },
+          "context_tokens": {
+            "type": "integer",
+            "title": "Context Tokens"
+          },
+          "generation_tokens": {
+            "type": "integer",
+            "title": "Generation Tokens"
+          },
+          "estimated": {
+            "type": "boolean",
+            "title": "Estimated"
+          },
+          "exact_fraction": {
+            "type": "number",
+            "title": "Exact Fraction"
+          },
           "coverage": {
             "$ref": "#/components/schemas/SessionCoverage"
           },
@@ -16244,11 +16326,15 @@
           "end",
           "messages",
           "peak_input_tokens",
+          "context_tokens",
+          "generation_tokens",
+          "estimated",
+          "exact_fraction",
           "coverage",
           "estimate"
         ],
         "title": "SessionOut",
-        "description": "One session. `number` 1 is the oldest. `boundary_checkpoint_id` is None for the session in\nprogress. `start` / `end` are the first and last message read times (None when no message has one)."
+        "description": "One session. `number` 1 is the oldest. `boundary_checkpoint_id` is None for the session in\nprogress. `start` / `end` are the first and last message read times (None when no message has one).\n`context_tokens` / `generation_tokens` total the session's messages (`message_tokens`: the head\nand every message a request has read); `estimated` is true when any of that was a share of a\nprovider total rather than the provider's own number, `exact_fraction` the exact share."
       },
       "SessionsResponse": {
         "properties": {

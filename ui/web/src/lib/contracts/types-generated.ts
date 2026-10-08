@@ -1030,13 +1030,12 @@ export interface paths {
          * @description How the agent's context window is spent, for the composer's breakdown
          *     panel (lazy-loaded on expand).
          *
-         *     Buckets the checkpoint messages by kind + splits the system prompt into its
-         *     top-level sections, each a chars/4 estimate proportionally normalized to the
-         *     last LLM call's real `input_tokens` (so the categories sum to the truth). Pure
-         *     gateway-side view logic (`gateway/agents/context_breakdown.py`) — one checkpoint read,
-         *     no kernel/agent involvement. A checkpoint read failure / no checkpoint yields
-         *     an empty breakdown with zeroed totals (same tolerance as token-usage: the
-         *     panel re-opens fine later).
+         *     The breakdown of the latest LLM request's input: each message's tokens anchored to the
+         *     provider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed
+         *     from them, only the inside of a message split by an estimator. Pure gateway-side view logic
+         *     (`gateway/agents/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
+         *     A checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown
+         *     with zeroed totals (same tolerance as token-usage: the panel re-opens fine later).
          */
         get: operations["get_context_breakdown_api_agents__agent_id__context_breakdown_get"];
         put?: never;
@@ -5261,20 +5260,23 @@ export interface components {
          * @description GET /api/agents/{id}/context-breakdown — how the agent's context window is
          *     spent, for the composer's breakdown panel (lazy-loaded when the panel opens).
          *
-         *     Every token value is a chars/4 estimate proportionally normalized to
-         *     `total_input_tokens` (the last LLM call's real input_tokens), so `categories`
-         *     sum exactly to `total_input_tokens` while the distribution stays approximate —
-         *     zero extra API cost, zero KV-cache impact. `sections` break down the
-         *     `system_prompt` category. When no LLM call has run yet (`total_input_tokens ==
-         *     0`) the values are the raw chars/4 estimates and `estimated_total` is their
-         *     sum. `max_input_tokens` / `soft_compact_tokens` / `hard_compact_tokens` mirror
-         *     the token-usage endpoint (0 when the model window is unknown).
+         *     The breakdown of the latest LLM request's input. Each message's tokens are anchored to
+         *     the provider's reported `input_tokens` (see `base/agents/history/message_tokens.py`), so
+         *     `categories` sum exactly to `total_input_tokens`; only the inside of a message
+         *     (reasoning / output / tool_call, system-prompt sections) is split by an estimator.
+         *     `estimated` / `exact_fraction` say whether any part of the total was estimated and how much
+         *     of it was the provider's own number. `sections` break down the `system_prompt` category.
+         *     With no LLM request yet the total is 0 and nothing is listed. `max_input_tokens` /
+         *     `soft_compact_tokens` / `hard_compact_tokens` mirror the token-usage endpoint (0 when the
+         *     model window is unknown).
          */
         ContextBreakdownResponse: {
             /** Total Input Tokens */
             total_input_tokens: number;
-            /** Estimated Total */
-            estimated_total: number;
+            /** Estimated */
+            estimated: boolean;
+            /** Exact Fraction */
+            exact_fraction: number;
             /**
              * Max Input Tokens
              * @default 0
@@ -5299,21 +5301,27 @@ export interface components {
          * ContextCategory
          * @description One context bucket (system_prompt / compact_summary / cluster_memory /
          *     agent_memory / context_note / user_input / agent_messages / automation /
-         *     reasoning / output / tool_call / tool_response) with its normalized token
-         *     estimate. Inbound messages split by source: user_input (a human turn),
-         *     agent_messages (a peer agent), automation (a machine/framework wakeup).
+         *     reasoning / output / tool_call / tool_response) with its token count: the sum of its
+         *     messages' own counts. `estimated` is true when any part was a share of a provider total
+         *     rather than the provider's own number (the UI appends "(estimated)"); `exact_fraction` is the
+         *     share of `tokens` that was exact. Inbound messages split by source: user_input (a human
+         *     turn), agent_messages (a peer agent), automation (a machine/framework wakeup).
          */
         ContextCategory: {
             /** Kind */
             kind: string;
             /** Tokens */
             tokens: number;
+            /** Estimated */
+            estimated: boolean;
+            /** Exact Fraction */
+            exact_fraction: number;
         };
         /**
          * ContextSection
          * @description One node of the system prompt's recursive section breakdown: a heading — or
          *     the `(preamble)` / `(intro)` prose before the first sub-heading — with its
-         *     (normalized) token estimate. A section over ~1000 tokens is drilled into its
+         *     token share of the system prompt (always estimated: a section is never measured alone). A section over ~1000 tokens is drilled into its
          *     next-level sub-headings as `children` (recursively); a smaller section, or one
          *     with no deeper heading, is a leaf (`children == []`). When `children` is
          *     non-empty their tokens sum to this node's `tokens`.
@@ -5323,6 +5331,11 @@ export interface components {
             name: string;
             /** Tokens */
             tokens: number;
+            /**
+             * Estimated
+             * @default true
+             */
+            estimated: boolean;
             /** Children */
             children?: components["schemas"]["ContextSection"][];
         };
@@ -7577,8 +7590,10 @@ export interface components {
         RunTimelineContext: {
             /** Total Input Tokens */
             total_input_tokens: number;
-            /** Estimated Total */
-            estimated_total: number;
+            /** Estimated */
+            estimated: boolean;
+            /** Exact Fraction */
+            exact_fraction: number;
             /**
              * Max Input Tokens
              * @default 0
@@ -7727,7 +7742,8 @@ export interface components {
          *     `idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent
          *     (the read time of the message before it, the start of the turn's thinking block);
          *     `session` the zero-based compaction segment it was sent in; `input_tokens` the provider's
-         *     total input tokens of that request, the size of its context.
+         *     total input tokens of that request, the size of its context, and `output_tokens` what it
+         *     generated (both the provider's own numbers, never estimated).
          */
         RunTimelineRequest: {
             /** Idx */
@@ -7741,6 +7757,8 @@ export interface components {
             session: number;
             /** Input Tokens */
             input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
         };
         /**
          * RunTimelineResponse
@@ -7777,6 +7795,11 @@ export interface components {
          *     inclusive message-index span of the block's unit. Blocks without a time are not served.
          *     `parent` is the level-1 node whose span holds the block's first message, None for a block no
          *     node covers (a compaction segment's head, the not yet summarized tail).
+         *
+         *     `context_tokens` is what the block occupies in the context (None while no request has read
+         *     it), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether
+         *     any of that was a share rather than the provider's own number (None with `context_tokens`).
+         *     A thinking / output(text) / call block is its share of the turn's AIMessage, so estimated.
          */
         RunTimelineUnit: {
             /**
@@ -7804,6 +7827,12 @@ export interface components {
             preview: string;
             /** Parent */
             parent: string | null;
+            /** Context Tokens */
+            context_tokens: number | null;
+            /** Generation Tokens */
+            generation_tokens: number | null;
+            /** Estimated */
+            estimated: boolean | null;
         };
         /**
          * RunTimelineUsage
@@ -8049,6 +8078,9 @@ export interface components {
          * SessionOut
          * @description One session. `number` 1 is the oldest. `boundary_checkpoint_id` is None for the session in
          *     progress. `start` / `end` are the first and last message read times (None when no message has one).
+         *     `context_tokens` / `generation_tokens` total the session's messages (`message_tokens`: the head
+         *     and every message a request has read); `estimated` is true when any of that was a share of a
+         *     provider total rather than the provider's own number, `exact_fraction` the exact share.
          */
         SessionOut: {
             /** Number */
@@ -8063,6 +8095,14 @@ export interface components {
             messages: number;
             /** Peak Input Tokens */
             peak_input_tokens: number;
+            /** Context Tokens */
+            context_tokens: number;
+            /** Generation Tokens */
+            generation_tokens: number;
+            /** Estimated */
+            estimated: boolean;
+            /** Exact Fraction */
+            exact_fraction: number;
             coverage: components["schemas"]["SessionCoverage"];
             estimate: components["schemas"]["CostEstimateOut"];
         };

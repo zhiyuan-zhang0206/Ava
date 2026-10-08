@@ -55,6 +55,7 @@ function SectionRow({ node, depth }: { node: ContextSection; depth: number }) {
         <span className={cn("truncate text-muted-foreground", MIN_W_0, FLEX_1)}>{node.name}</span>
         <span className="ml-1 shrink-0 tabular-nums text-muted-foreground">
           {formatTokens(node.tokens)}
+          {node.estimated ? ` ${t("estimatedSuffix")}` : ""}
         </span>
       </div>
       {open && hasChildren ? <SectionRows nodes={children} depth={depth + 1} /> : null}

@@ -12,7 +12,7 @@
   "sections": "系统提示词分节",
   "expand": "展开 {target}",
   "collapse": "收起 {target}",
-  "estimateNote": "* 总量为估算值",
+  "estimatedSuffix": "(估算)",
   "categories": {
     "system_prompt": "系统提示词",
     "compact_summary": "压缩摘要",

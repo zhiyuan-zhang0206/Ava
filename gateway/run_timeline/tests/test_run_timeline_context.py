@@ -14,7 +14,7 @@ from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
-from gateway.agents.context_breakdown import compute_breakdown
+from gateway.agents.context_breakdown import RequestBreakdown
 from gateway.agents.schemas import ContextBreakdownResponse, ContextCategory
 from gateway.run_timeline import context
 from gateway.run_timeline.history import HistoryView
@@ -57,12 +57,15 @@ def two_sessions() -> HistoryView:
         (messages[0], SystemMessage(content="second prompt")),  # type: ignore[arg-type]
         (1, 3),
     )
-    return HistoryView(history, units, MessageUsage(messages), read)
+    return HistoryView.of(history, units, MessageUsage(messages), read)
 
 
 def test_requests_carry_their_session_input_size_and_send_time() -> None:
     requests = context.llm_requests(two_sessions())
-    assert [(r.idx, r.session, r.input_tokens) for r in requests] == [(2, 0, 100), (4, 1, 40)]
+    assert [(r.idx, r.session, r.input_tokens, r.output_tokens) for r in requests] == [
+        (2, 0, 100, 1),
+        (4, 1, 40, 1),
+    ]
     # A request is sent when the message before it was read.
     assert requests[0].ts == T0
     assert requests[1].ts == T0 + timedelta(minutes=10)
@@ -72,17 +75,6 @@ def test_a_point_resolves_to_the_next_request_else_the_last() -> None:
     requests = context.llm_requests(two_sessions())
     assert [context.request_at(requests, at).idx for at in (0, 2, 3, 4, 99)] == [2, 2, 4, 4, 4]  # type: ignore[union-attr]
     assert context.request_at([], 0) is None
-
-
-def test_a_request_input_is_its_segment_head_and_the_segment_before_it() -> None:
-    view = two_sessions()
-    first, second = context.llm_requests(view)
-
-    def texts(messages: list[BaseMessage]) -> list[str]:
-        return [str(m.content) for m in messages]  # pyright: ignore[reportUnknownMemberType]
-
-    assert texts(context.request_input(view, first)) == ["first prompt", "ask one"]
-    assert texts(context.request_input(view, second)) == ["second prompt", "ask two"]
 
 
 class Views:
@@ -96,15 +88,23 @@ class Views:
 def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch):
 
     def breakdown(
-        _request: Request, _agent: int, messages: list[BaseMessage], total: int
+        _request: Request, _agent: int, found: RequestBreakdown
     ) -> ContextBreakdownResponse:
         # The window and thresholds come from the model registry; the bucketing is the real one.
-        categories, _sections, estimated = compute_breakdown(messages, total)
         return ContextBreakdownResponse(
-            total_input_tokens=total,
-            estimated_total=estimated,
+            total_input_tokens=found.total.tokens,
+            estimated=found.total.estimated,
+            exact_fraction=found.total.exact_fraction,
             sections=[],
-            categories=[ContextCategory(kind=k, tokens=n) for k, n in categories],
+            categories=[
+                ContextCategory(
+                    kind=c.kind,
+                    tokens=c.total.tokens,
+                    estimated=c.total.estimated,
+                    exact_fraction=c.total.exact_fraction,
+                )
+                for c in found.categories
+            ],
         )
 
     monkeypatch.setattr(context, "context_breakdown_response", breakdown)
@@ -113,13 +113,14 @@ def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch):
     return context.get_run_timeline_context(request, 7, at)
 
 
-def test_the_context_is_the_breakdown_of_that_request_anchored_to_its_input_tokens(
+def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     result = call(two_sessions(), 3, monkeypatch)
     assert (result.request, result.session, result.sessions) == (4, 1, 2)
     assert result.ts == T0 + timedelta(minutes=10)
     assert result.total_input_tokens == 40
+    assert result.estimated is False  # the request's own input_tokens
     kinds = {c.kind: c.tokens for c in result.categories}
     assert set(kinds) == {"system_prompt", "user_input"}
     assert sum(kinds.values()) == 40
@@ -130,7 +131,7 @@ def test_the_context_is_the_breakdown_of_that_request_anchored_to_its_input_toke
 def test_an_agent_with_no_request_has_no_context(monkeypatch: pytest.MonkeyPatch) -> None:
     messages: list[BaseMessage] = [human("hello", 0)]
     read = read_times(messages)
-    view = HistoryView(FullHistory(messages, (None,), (0,)), [], MessageUsage(messages), read)
+    view = HistoryView.of(FullHistory(messages, (None,), (0,)), [], MessageUsage(messages), read)
     with pytest.raises(HTTPException) as caught:
         call(view, 0, monkeypatch)
     assert caught.value.status_code == 404

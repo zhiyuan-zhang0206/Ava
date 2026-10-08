@@ -24,6 +24,12 @@ from base.agents.history.hierarchy.units import (
     read_times,
 )
 from base.agents.history.hierarchy.usage import MessageUsage
+from base.agents.history.message_tokens import (
+    MessageTokens,
+    SegmentTokens,
+    history_message_tokens,
+    history_segment_tokens,
+)
 from base.db import Database
 
 # Short enough that a live agent's growth shows within a click or two; the cache
@@ -41,13 +47,30 @@ class HistoryView:
     """The stitched history with its timeline blocks (units, a work unit split in three; on read times) and usage sums.
 
     `read` is the time each message was read by the model (`units.read_times`); units and nodes
-    are placed on it, so neither overlaps its neighbours on the time axis.
+    are placed on it, so neither overlaps its neighbours on the time axis. `segments` are the
+    per-segment token counts (`message_tokens`) and `tokens` the same, one per message of the
+    stitched history.
     """
 
     history: FullHistory
     units: list[DisplayBlock]
     usage: MessageUsage
     read: list[datetime | None]
+    segments: tuple[SegmentTokens, ...]
+    tokens: list[MessageTokens]
+
+    @classmethod
+    def of(
+        cls,
+        history: FullHistory,
+        units: list[DisplayBlock],
+        usage: MessageUsage,
+        read: list[datetime | None],
+    ) -> HistoryView:
+        """The view of `history`, its per-message token counts derived with it."""
+        segments = history_segment_tokens(history)
+        tokens = history_message_tokens(history, segments)
+        return cls(history, units, usage, read, segments, tokens)
 
     @property
     def extent(self) -> tuple[datetime, datetime] | None:
@@ -79,7 +102,7 @@ class HistoryViewCache:
         history = load_checkpoint_history_full(db, agent_id)
         read = read_times(history.messages)
         units = display_blocks(divide_units(history.messages), history.messages, read)
-        view = HistoryView(history, units, MessageUsage(history.messages), read)
+        view = HistoryView.of(history, units, MessageUsage(history.messages), read)
         with self._lock:
             self._entries.pop(agent_id, None)
             self._entries[agent_id] = (now, view)

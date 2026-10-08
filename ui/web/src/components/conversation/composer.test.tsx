@@ -34,12 +34,13 @@ vi.mock("@/lib/transport/api", () => ({
     getContextBreakdown: () =>
       Promise.resolve({
         total_input_tokens: 1000,
-        estimated_total: 250,
+        estimated: false,
+        exact_fraction: 1,
         max_input_tokens: 1_000_000,
         soft_compact_tokens: 600_000,
         hard_compact_tokens: 800_000,
         sections: [],
-        categories: [{ kind: "system_prompt", tokens: 1000 }],
+        categories: [{ kind: "system_prompt", tokens: 1000, estimated: false, exact_fraction: 1 }],
       }),
   },
 }));
