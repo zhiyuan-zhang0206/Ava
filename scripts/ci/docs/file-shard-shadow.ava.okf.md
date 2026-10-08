@@ -85,6 +85,14 @@ filename. The planning job uses the same native binaries and vendored runtime
 as the paired runners, preserving environment-dependent collection. Group checks must match
 their planned node IDs and declared closure before any test body executes.
 
+Planning arms a 60-second repeating thread dump before importing pytest, writing
+to a separate stack file so pytest capture cannot hide a stalled import or
+collection. The collection command has a four-minute timeout and a 15-second
+kill grace within its five-minute step and ten-minute job limits. Logs are
+published even when collection fails; a timeout fails the plan and cannot start
+the paired population. The test-protocol faulthandler option alone does not cover
+collection. The plan artifact is still published only after successful collection.
+
 `scripts/ci/file_shard_runtime.py` requires all worker and controller reports,
 zero exit statuses, version/configuration/duration agreement, exclusive execution
 and the exact complete planned node population. Runtime fixture bindings and
