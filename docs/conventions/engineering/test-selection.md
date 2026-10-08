@@ -63,8 +63,11 @@ documentation, language, content-manifest and security gates run on documentatio
 PRs too.
 
 Tests live in the top-level `tests/` or beside the code they prove in
-`<pkg>/**/tests/` (hosts: agent, ava, ava_builtins, base, cli, gateway, ops, scripts,
-services). A unit test sits in the `tests/` directory of the package it tests; an
+`<pkg>/**/tests/`. The host directories come from
+`tool.pytest.ini_options.testpaths` in `pyproject.toml`, the same owner used by
+pytest collection, the pyright test-environment generator and the fixture-scope lint.
+Supported entries are the literal `tests` and `<host>/**/tests`; missing configuration
+or unsupported patterns fail rather than silently narrowing a tool's scope. A unit test sits in the `tests/` directory of the package it tests; an
 integration test across packages sits in the lowest package that may legally import
 everything it uses; end-to-end tests and contract tests that read repository artifacts
 stay in the top-level `tests/` ([testing guide](../../../tests/README.md#where-to-put-tests)).
