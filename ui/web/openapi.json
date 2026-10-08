@@ -1899,7 +1899,7 @@
     "/api/agents/{agent_id}/context-breakdown": {
       "get": {
         "summary": "Get Context Breakdown",
-        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nThe breakdown of the latest LLM request's input: each message's tokens anchored to the\nprovider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed\nfrom them, only the inside of a message split by an estimator. Pure gateway-side view logic\n(`gateway/agents/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.\nA checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown\nwith zeroed totals (same tolerance as token-usage: the panel re-opens fine later).",
+        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nThe breakdown of the latest LLM request's input: each message's tokens anchored to the\nprovider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed\nfrom them, only the inside of a message split by an estimator. Pure gateway-side view logic\n(`gateway/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.\nA checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown\nwith zeroed totals (same tolerance as token-usage: the panel re-opens fine later).",
         "operationId": "get_context_breakdown_api_agents__agent_id__context_breakdown_get",
         "parameters": [
           {

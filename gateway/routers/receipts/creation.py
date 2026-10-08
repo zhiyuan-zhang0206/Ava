@@ -13,7 +13,7 @@ from typing import Any, NamedTuple
 from fastapi import HTTPException, Request
 from psycopg import Connection
 
-from gateway.auth.request_principal import PrincipalScopeError, optional_request_key
+from gateway.http.auth.request_principal import PrincipalScopeError, optional_request_key
 
 
 class Creation(NamedTuple):

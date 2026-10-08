@@ -34,7 +34,7 @@ owns immutable fields (including defaults, target and execution policy).
 Receipt success means accepted, not delivered or executed. Commit before
 returning acceptance; a later wake failure must not erase the receipt.
 
-`gateway.auth.request_principal.request_key` owns HTTP key scoping. Use the
+`gateway.http.auth.request_principal.request_key` owns HTTP key scoping. Use the
 logical operation method and concrete path on delivery and reconciliation.
 `Idempotency-Key` is optional for legacy routes: absence retains existing
 one-shot behavior and gives no ambiguous-retry promise. Supplied keys contain
@@ -45,7 +45,7 @@ Unknown `Idempotency-Scope` and unverified `principal-v1` fail with 422.
 Legacy REST keys retain their existing raw namespace across mixed versions.
 `principal-v1` binds verified principal, method, path and caller ID;
 `principal-v1:` is a reserved storage prefix. MCP credentials always scope to
-the authenticated client ID. See [[gateway/auth/docs/request_principal.ava.okf.md]].
+the authenticated client ID. See [[gateway/http/auth/docs/request_principal.ava.okf.md]].
 Do not silently change namespaces or try another namespace after a conflict.
 Enable a client scope only after positive server capability negotiation; a
 legacy server can ignore an unknown header. This change does not introduce

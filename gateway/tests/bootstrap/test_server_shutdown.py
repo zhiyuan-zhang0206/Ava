@@ -21,7 +21,7 @@ operator's real channel; a bare environment variable is dropped for
 cluster-scope fields before Settings reads it.
 
 The child runs the production server class (`_server.GatewayServer`), which
-marks the shutdown for streams that end themselves (`gateway.middleware.stopping`):
+marks the shutdown for streams that end themselves (`gateway.http.middleware.stopping`):
 such a stream must cost none of the drain budget, while a stream that never
 ends still costs exactly the budget and no more. The last section checks that the
 two SSE bridges in `gateway.events.sse` are such streams, against a fake Redis.
@@ -52,7 +52,7 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from gateway.cluster import server as _server
 from gateway.events import sse
-from gateway.middleware import stopping
+from gateway.http.middleware import stopping
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 

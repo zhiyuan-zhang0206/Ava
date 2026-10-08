@@ -18,8 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import AIMessage
 
 from base.agents.history.message_tokens import total_of
-from gateway.agents.context_breakdown import request_breakdown
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.agents.history.context_breakdown import request_breakdown
 from gateway.agents.state import context_breakdown_response
 from gateway.run_timeline.history import HistoryView, HistoryViewCache
 from gateway.run_timeline.schemas import RunTimelineContext, RunTimelineRequest

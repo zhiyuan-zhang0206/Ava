@@ -23,7 +23,7 @@ from base.agents.uploads import agent_upload_dir
 from base.db import Database, publish_inbound_wake
 from base.deploy.maintenance.admission import business_paused, quiesced
 from base.events.live.bus import EventBus
-from gateway.middleware.stopping import is_stopping
+from gateway.http.middleware.stopping import is_stopping
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpTargetAbsent, dispatch_to_machine
 from ops.lifecycle import resurrect_if_terminated
 

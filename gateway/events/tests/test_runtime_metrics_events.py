@@ -12,7 +12,7 @@ from fastapi import Request
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from gateway.events import sse
-from gateway.middleware import runtime_metrics
+from gateway.http.middleware import runtime_metrics
 
 
 class _Request:

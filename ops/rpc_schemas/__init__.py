@@ -478,7 +478,7 @@ class ConfigWritePayload(BaseModel):
 
     `actor` / `trace_id` are stamped by the dispatching gateway from verified
     request state for the write audit — deliberately not part of the caller's
-    JSON contract (`gateway/auth/docs/request_principal.ava.okf.md`)."""
+    JSON contract (`gateway/http/auth/docs/request_principal.ava.okf.md`)."""
 
     overrides: dict[str, Any]
     local: bool = False
