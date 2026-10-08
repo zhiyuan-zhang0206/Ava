@@ -35,12 +35,15 @@ sums usage-time prices; `unpriced_calls` exposes missing prices. In-flight calls
 unreported usage, and non-LLM expenses are absent. A recorded zero is not proof
 that every possible expense was observed.
 
-For a reminder, set a positive token or USD threshold and explicit recipients:
+For a reminder, set a positive USD cost threshold and explicit recipients:
+
+Budget thresholds use recorded USD cost only. Token counts remain descriptive
+usage data; model prices and cache discounts make them unsuitable spending limits.
 
 ```sh
 python <skill-dir>/scripts/agent_usage.py \
   --agent-id 123 --lineage all --start 2026-10-06T08:00:00+08:00 \
-  --token-limit 200000 --notify-agent 123 --notify-agent 456 --poll-seconds 30
+  --usd-limit 1 --notify-agent 123 --notify-agent 456 --poll-seconds 30
 ```
 
 Run polling inside a watcher with an explicit lifetime timeout. Each poll
