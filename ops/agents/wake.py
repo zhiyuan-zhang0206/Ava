@@ -85,7 +85,7 @@ def _transition_terminated_to_unclaimed_idling(
             FAILED_RESTART_FOR_CURRENT_TARGET,
             SYSTEM_REAPED_CRASH_ROW,
         )
-        from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
+        from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR
 
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
@@ -242,7 +242,7 @@ def _prepare_resurrect_attempt(
             unowned_termination=unowned_termination,
         )
         if billing_recovery:
-            from base.agents.recovery_breaker import (
+            from base.agents.recovery.breaker import (
                 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
                 PERMANENT_REJECT_REASON_BILLING,
             )

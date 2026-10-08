@@ -105,7 +105,6 @@ from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
 from services.agent_runner.agent_host import maintenance as maintenance_receipts
-from services.agent_runner.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_runner.agent_host.db_recovery import database_phase, recover_database
 from services.agent_runner.agent_host.dispatcher import PendingInboundWake
 from services.agent_runner.agent_host.force_termination import (
@@ -119,7 +118,7 @@ from services.agent_runner.agent_host.invocation import (
     recover_completed_work,
     returned_lifecycle_request,
 )
-from services.agent_runner.agent_host.native_work import (
+from services.agent_runner.agent_host.invocation.native_work import (
     NativeWorkContinuation,
     halt_before_reinvoke,
     hold_native_cancel,
@@ -127,6 +126,7 @@ from services.agent_runner.agent_host.native_work import (
     recover_native_cancel,
     settle_native_invocation,
 )
+from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 from services.agent_runner.agent_host.runtime import (
     HostStats,
     TurnOutcome,

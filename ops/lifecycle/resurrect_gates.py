@@ -32,7 +32,7 @@ def recovery_halted(db: Database, agent_id: int) -> bool:
     consecutive permanent provider rejections) — NOT the wake-suppression
     window, which a claim clears by design; only the streak can carry an
     until-human halt (task #3617)."""
-    from base.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+    from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 
     with db.connect() as conn:
         row = conn.execute(
@@ -86,7 +86,7 @@ def recovery_halt_reason(db: Database, agent_id: int) -> str | None:
     cannot clear; it always reports `permanent_provider_reject`. An active
     wake-suppression window without a tripped breaker reports its
     operator-readable reason (or the `wake_suppressed` fallback)."""
-    from base.agents.recovery_breaker import (
+    from base.agents.recovery.breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
     )

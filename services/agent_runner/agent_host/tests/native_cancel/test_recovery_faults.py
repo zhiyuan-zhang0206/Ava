@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from services.agent_runner.agent_host import native_work as owner
+from services.agent_runner.agent_host.invocation import native_work as owner
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )

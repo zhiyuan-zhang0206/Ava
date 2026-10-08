@@ -8,7 +8,7 @@ from base.agents.compaction.execution import CompactCommand
 from base.agents.compaction.models import CompactHeldError
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
-from services.agent_runner.agent_host.native_work import (
+from services.agent_runner.agent_host.invocation.native_work import (
     recover_native_cancel,
     settle_native_invocation,
 )
