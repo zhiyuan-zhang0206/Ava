@@ -183,6 +183,14 @@ def _get_remote_client() -> _RemoteMCPClient | None:
     return _clients().remote()
 
 
+def _enabled_server_spec(server: str) -> dict[str, Any]:
+    """Require current enable admission before using a cached or new session."""
+    config = _load_config()
+    if server not in config:
+        raise MCPServerNotFound(f"no server {server!r} in `$AVA_HOME/mcp.json`")
+    return config[server]
+
+
 async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
     """Connect to the server in the background loop, return ClientSession (cache reused).
 
@@ -190,6 +198,7 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
       Default None → use mcp SDK default (sys.stderr).
       `subprocess.DEVNULL` → discard subprocess stderr (discovery scenario).
     """
+    _enabled_server_spec(server)
     if server in mcp.sessions:
         return mcp.sessions[server]
 
@@ -199,13 +208,9 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
         mcp.session_locks[server] = lock
 
     async with lock:
+        spec = _enabled_server_spec(server)
         if server in mcp.sessions:
             return mcp.sessions[server]
-
-        cfg = _load_config()
-        if server not in cfg:
-            raise MCPServerNotFound(f"no server {server!r} in `$AVA_HOME/mcp.json`")
-        spec = cfg[server]
         assert_requirements(spec)
         url = server_url(spec)
         if url is not None:
