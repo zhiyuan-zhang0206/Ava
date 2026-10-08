@@ -1778,6 +1778,43 @@
           ]
         }
       ]
+    },
+    "claude-haiku-5-5": {
+      "vendor": "anthropic",
+      "source_url": "https://platform.claude.com/docs/en/models/haiku-5-5/overview",
+      "source_checked_at": "2026-10-08",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 100000,
+              "rates": {
+                "input": "0.10",
+                "cache_read": "0.01",
+                "output": "0.50",
+                "cache_write_5m": "0.125",
+                "cache_write_1h": "0.20"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 100001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.50",
+                "cache_read": "0.05",
+                "output": "2.50",
+                "cache_write_5m": "0.625",
+                "cache_write_1h": "1.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
     }
   }
 }
