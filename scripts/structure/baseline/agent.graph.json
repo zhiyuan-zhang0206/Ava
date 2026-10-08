@@ -11,8 +11,7 @@
     "agent/graph/exec/_subprocess.py::asyncio-task:_retain_late_reader_completion": 1,
     "agent/graph/exec/_subprocess.py::thread:_run_legacy_subprocess": 1,
     "agent/graph/interrupt.py::asyncio-task:interruptible_model": 2,
-    "agent/graph/interrupt.py::asyncio-task:subscribe_interrupt": 1,
-    "agent/graph/prompt/capabilities.py::ambient-container:_warned_unresolved": 1
+    "agent/graph/interrupt.py::asyncio-task:subscribe_interrupt": 1
   },
   "patch_targets": {}
 }

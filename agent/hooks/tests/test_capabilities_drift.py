@@ -305,13 +305,10 @@ async def test_sdk_disabled_skills_never_drift(
     assert await _run_hook(set()) is None
 
 
-async def test_a_stale_config_name_warns_once_not_every_turn(
+async def test_a_stale_config_name_warns_on_each_resolution(
     skills_dir: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Resolution stopped being a per-window event when the drift check started
-    re-resolving before every LLM call. An unresolved configured name is a fact
-    about static config, so repeating its warning for the agent's whole life is
-    noise, not information."""
+    """Each unresolved resolution remains visible without global suppression."""
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["does-not-exist"])
     _install(skills_dir, "alpha", "Alpha desc")
 
@@ -319,7 +316,7 @@ async def test_a_stale_config_name_warns_once_not_every_turn(
         for _ in range(3):
             await _run_hook(set())
 
-    assert caplog.text.count("does-not-exist") == 1
+    assert caplog.text.count("does-not-exist") == 3
     assert "skills_to_inject_into_system_prompt" in caplog.text
 
 

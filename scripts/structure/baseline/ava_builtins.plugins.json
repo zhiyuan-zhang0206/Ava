@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "ava_builtins/plugins/ava_syntax_fix/_imports.py::hidden-singleton:_warn_ruff_missing_once": 1,
     "ava_builtins/plugins/lm_google/gemini_cache.py::ambient-container:_MEMO": 1,
     "ava_builtins/plugins/lm_google/gemini_cache.py::ambient-container:_NEGATIVE": 1
   },
