@@ -176,7 +176,7 @@ def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Pat
 
 def disk_image_path(plugin: str) -> Path:
     """Disk image path — `~/.ava/configs/<plugin>/config.json`. Does not pre-create directory."""
-    return resolve_ava_home() / "configs" / plugin / "config.json"
+    return resolve_ava_home().resolve() / "configs" / plugin / "config.json"
 
 
 def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:

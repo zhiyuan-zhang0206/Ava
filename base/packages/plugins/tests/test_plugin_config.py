@@ -683,3 +683,16 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
         install.uninstall()
     assert not hasattr(ava, "healthy_ns")
     assert "healthy" not in _PLUGIN_CONFIGS
+
+
+def test_authority_path_canonicalizes_a_symlink_home_without_creating_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing_home = tmp_path / "uncreated-target"
+    alias = tmp_path / "home-link"
+    alias.symlink_to(missing_home, target_is_directory=True)
+    monkeypatch.setenv("AVA_HOME", str(alias))
+    path = disk_image_path("canonical-probe")
+    assert path == missing_home.resolve() / "configs" / "canonical-probe" / "config.json"
+    assert read_authority_config("canonical-probe", _FixtureConfig, path) == _FixtureConfig()
+    assert not missing_home.exists()
