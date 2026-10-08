@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import json
 import os
 import sys
@@ -361,7 +362,10 @@ def test_is_transport_error_oserror_epipe() -> None:
 
 
 def test_is_transport_error_oserror_econnreset() -> None:
-    assert daemon_mod._is_transport_error(OSError(54, "Connection reset by peer")) is True
+    assert (
+        daemon_mod._is_transport_error(OSError(errno.ECONNRESET, "Connection reset by peer"))
+        is True
+    )
 
 
 def test_is_transport_error_oserror_other() -> None:
@@ -424,11 +428,9 @@ def test_is_transport_error_mcp_error_tool_code_no_cause() -> None:
 
 
 def test_is_transport_error_anyio_broken_resource() -> None:
-    """anyio.BrokenResourceError should be detected by name match."""
-    try:
-        from anyio import BrokenResourceError
-    except ImportError:
-        pytest.skip("anyio not installed")
+    """The required transport dependency supplies the concrete exception type."""
+    from anyio import BrokenResourceError
+
     assert daemon_mod._is_transport_error(BrokenResourceError()) is True
 
 
