@@ -54,8 +54,29 @@ export function navRowIds(data: NavData): string[] {
   return rows;
 }
 
-/** The items of one row, left to right on the axis. */
+const itemCache = new WeakMap<NavData, WeakMap<object, Map<string, NavItem[]>>>();
+
+/** The items of one row, left to right on the axis (remembered per data and axis: a render, a hover or a keypress asks again and again). */
 export function navItems(row: string, data: NavData, axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">): NavItem[] {
+  let byAxis = itemCache.get(data);
+  if (byAxis === undefined) {
+    byAxis = new WeakMap();
+    itemCache.set(data, byAxis);
+  }
+  let rows = byAxis.get(axis);
+  if (rows === undefined) {
+    rows = new Map();
+    byAxis.set(axis, rows);
+  }
+  let items = rows.get(row);
+  if (items === undefined) {
+    items = buildItems(row, data, axis);
+    rows.set(row, items);
+  }
+  return items;
+}
+
+function buildItems(row: string, data: NavData, axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">): NavItem[] {
   let items: NavItem[];
   if (row === UNITS_ROW) {
     items = data.units.map((unit) => ({
@@ -69,14 +90,23 @@ export function navItems(row: string, data: NavData, axis: Pick<AxisMap, "toU" |
   } else if (row === INPUT_ROW || row === ADDED_ROW) {
     items = data.requests.map((request) => {
       const covered = requestUnits(request, data.units);
-      const sent = Date.parse(request.ts);
+      let start = Date.parse(request.ts);
+      let end = start;
+      if (covered.length > 0) {
+        start = Infinity;
+        end = -Infinity;
+        for (const unit of covered) {
+          start = Math.min(start, Date.parse(unit.start));
+          end = Math.max(end, Date.parse(unit.end));
+        }
+      }
       return {
         row,
         request,
         selection: { kind: "request", idx: request.idx },
-        ...requestSpan(request, data.units, axis),
-        start: covered.length > 0 ? Math.min(...covered.map((unit) => Date.parse(unit.start))) : sent,
-        end: covered.length > 0 ? Math.max(...covered.map((unit) => Date.parse(unit.end))) : sent,
+        ...requestSpan(request, data.units, axis, covered),
+        start,
+        end,
       };
     });
   } else {
