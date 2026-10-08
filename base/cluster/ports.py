@@ -43,6 +43,7 @@ class ClusterPorts(TypedDict):
     pg_backup: int
     ttl_reaper: int
     schedule_manager: int
+    insights: int
     memory_search: int
 
 

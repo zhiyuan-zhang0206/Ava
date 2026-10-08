@@ -232,6 +232,7 @@ class TestConsumptionMatrixDeclarations:
             "pg_backup",
             "ttl_reaper",
             "schedule_manager",
+            "insights",
             "memory_indexer",
             "ops",
             "delivery_watchdog",

@@ -1,6 +1,6 @@
 """Compute a context-window breakdown for one request — pure view logic over the
 checkpoint messages and their per-message token counts (`base/agents/history/message_tokens.py`),
-gateway-side (zero kernel/agent involvement).
+with zero kernel/agent involvement.
 
 Each message is bucketed by kind (system prompt / cluster+agent memory /
 reasoning / output / tool call+response / compact summary / context note, and
@@ -30,7 +30,6 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from agent.messages import COMPACT_SUMMARY_HEADER
 from base.agents.history.message_tokens import (
     MessageTokens,
     SegmentTokens,
@@ -41,7 +40,12 @@ from base.agents.history.message_tokens import (
     segment_tokens,
     total_of,
 )
-from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from base.agents.messages.kwargs import (
+    COMPACT_SUMMARY_HEADER,
+    AvaMsgType,
+    NoteTag,
+    read_ava_kwargs,
+)
 from base.agents.messages.token_estimate import estimate_text_tokens
 
 # Bucket kinds — the canonical enumeration, and the stable tie-break order when

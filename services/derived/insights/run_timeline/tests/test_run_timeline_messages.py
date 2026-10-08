@@ -13,8 +13,9 @@ from base.agents.history.checkpoint import single_segment_history
 from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
-from gateway.run_timeline import messages as route
-from gateway.run_timeline.history import HistoryView
+from services.derived.insights.config import InsightsConfig
+from services.derived.insights.run_timeline import messages as route
+from services.derived.insights.run_timeline.history import HistoryView
 
 STAMP = "2026-10-04T12:00:00+00:00"
 
@@ -46,15 +47,12 @@ class Views:
 
 
 def request(messages: list[BaseMessage]) -> Request:
-    state = SimpleNamespace(db=cast(Database, object()), run_timeline_views=Views(messages))
-    return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
-
-
-@pytest.fixture(autouse=True)
-def small_text_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        route.settings, "display", SimpleNamespace(run_timeline_message_text_max=20), raising=False
+    state = SimpleNamespace(
+        db=cast(Database, object()),
+        run_timeline_views=Views(messages),
+        config=InsightsConfig(run_timeline_message_text_max=20),
     )
+    return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
 
 
 def test_a_range_returns_those_messages_in_order() -> None:

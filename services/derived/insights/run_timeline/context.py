@@ -14,15 +14,14 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from langchain_core.messages import AIMessage
 
+from base.agents.history.context_breakdown import request_breakdown
+from base.agents.history.context_response import context_breakdown_response
 from base.agents.history.message_tokens import total_of
-from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.agents.history.context_breakdown import request_breakdown
-from gateway.agents.state import context_breakdown_response
-from gateway.run_timeline.history import HistoryView, HistoryViewCache
-from gateway.run_timeline.schemas import RunTimelineContext, RunTimelineRequest
+from services.derived.insights.run_timeline.history import HistoryView, HistoryViewCache
+from services.derived.insights.run_timeline.schemas import RunTimelineContext, RunTimelineRequest
 
 router = APIRouter()
 
@@ -67,10 +66,7 @@ def request_at(requests: list[RunTimelineRequest], at: int) -> RunTimelineReques
     return requests[min(found, len(requests) - 1)]
 
 
-@router.get(
-    "/api/agents/{agent_id}/run-timeline/context",
-    dependencies=[Depends(deny_isolated_result_read)],
-)
+@router.get("/api/agents/{agent_id}/run-timeline/context")
 def get_run_timeline_context(
     request: Request, agent_id: int, at: Annotated[int, Query(ge=0)]
 ) -> RunTimelineContext:
@@ -83,7 +79,7 @@ def get_run_timeline_context(
     history = view.history
     start = history.segment_starts[found.session]
     breakdown = context_breakdown_response(
-        request,
+        request.app.state.db_pool,
         agent_id,
         request_breakdown(
             history.segment_heads[found.session],

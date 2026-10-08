@@ -52,6 +52,8 @@ FIXED_PORTS: dict[str, int] = {
     "pg_backup": 8116,
     "ttl_reaper": 8121,
     "schedule_manager": 8122,
+    # The insights read service: it answers on a Unix socket, so this is its /healthz port.
+    "insights": 8123,
     # The memory search service's TCP port (not a health port — its healthcheck
     # probes the real /search endpoint).
     "memory_search": 19531,
