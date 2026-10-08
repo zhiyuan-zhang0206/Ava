@@ -17,9 +17,11 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
 ) -> None:
     built: list[tuple[str, ModelOverrides]] = []
 
-    async def _boot(_agent_id: int, llm_model: str, overrides: ModelOverrides) -> object:
+    async def _boot(
+        _agent_id: int, llm_model: str, overrides: ModelOverrides
+    ) -> tuple[object, None]:
         built.append((llm_model, overrides))
-        return object()
+        return object(), None
 
     monkeypatch.setattr(host_module, "reconcile_claimed_inbounds_at_startup", AsyncMock())
     monkeypatch.setattr(host_module, "repair_dangling_tool_use_at_startup", AsyncMock())

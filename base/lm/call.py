@@ -15,10 +15,51 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, cast
 
+from base.host.env.agent_slices import LlmCallPolicy
 from base.host.net.resilience import extract_retry_after, jittered
 from base.lm.effort import ReasoningEffort
+
+
+@dataclass(frozen=True)
+class ProviderCallContext:
+    """Invocation inputs; the policy is the caller's resolved, same-value snapshot.
+
+    Model and message objects cross the existing lightweight call boundary.
+    Concrete provider adapters validate their own runtime model requirements.
+    """
+
+    llm: object
+    messages: list[Any]
+    tools: list[object]
+    provider_config: LlmCallPolicy
+
+
+@dataclass(frozen=True)
+class LlmInvocation:
+    """Prepared call and an optional attempt-scoped, synchronous recovery."""
+
+    runnable: object
+    messages: list[Any]
+    used_explicit_cache: bool = False
+    recover: Callable[[BaseException], LlmInvocation | None] | None = None
+
+
+def recover_invocation(invocation: LlmInvocation, exc: Exception) -> LlmInvocation | None:
+    """Accept at most one plain recovery; provider callbacks cannot nest retries."""
+    if invocation.recover is None:
+        return None
+    plain = invocation.recover(exc)
+    if plain is not None:
+        if not isinstance(plain, LlmInvocation):
+            raise TypeError("provider recovery must return an invocation or None")
+        if plain.recover is not None or plain.used_explicit_cache:
+            raise ValueError("provider recovery must return a plain invocation without recovery")
+        if not callable(getattr(plain.runnable, "ainvoke", None)):
+            raise TypeError("recovered invocation runnable must support ainvoke")
+    return plain
 
 
 def extract_text(response: Any) -> str:
