@@ -209,47 +209,8 @@ export function layoutSpans(
   return placements;
 }
 
-/** A block drawn narrower than this gets no border or rounding of its own: only its fill, merged with its neighbours in the same pixel column. */
+/** A block drawn narrower than this gets no border or rounding: it is drawn as a fill, one per pixel column. */
 export const NARROW_DRAW_PX = 4;
-
-/** One drawn fill that stands for several narrow blocks of a row that share a pixel column. */
-export interface DrawCell {
-  left: number;
-  width: number;
-  keys: string[];
-}
-
-/**
- * Splits a row's placements into the wide ones (drawn as blocks) and the narrow ones (markers and
- * bodies under `narrowPx`), the narrow ones merged into cells: those touching the same pixel column
- * become one cell, so a pile of sub-pixel blocks is one fill, not a fill per block. Drawing only;
- * every block keeps its own key for selection, hover and navigation.
- */
-export function mergeNarrow(
-  places: readonly RowPlacement[],
-  narrowPx: number = NARROW_DRAW_PX,
-): { wide: RowPlacement[]; cells: DrawCell[] } {
-  const wide: RowPlacement[] = [];
-  const narrow: RowPlacement[] = [];
-  for (const place of places) (place.marker || place.width < narrowPx ? narrow : wide).push(place);
-  narrow.sort((a, b) => a.left - b.left);
-  const cells: DrawCell[] = [];
-  let end = -Infinity;
-  for (const place of narrow) {
-    const start = Math.floor(place.left);
-    const stop = Math.max(Math.ceil(place.left + place.width), start + 1);
-    const tail = cells.at(-1);
-    if (tail !== undefined && start < end) {
-      tail.keys.push(place.key);
-      end = Math.max(end, stop);
-      tail.width = end - tail.left;
-    } else {
-      cells.push({ left: start, width: stop - start, keys: [place.key] });
-      end = stop;
-    }
-  }
-  return { wide, cells };
-}
 
 /** `layoutSpans` for blocks given by time, over a time window. */
 export function layoutRow(
