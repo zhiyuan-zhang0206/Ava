@@ -23,6 +23,7 @@ from services.entrypoints.im_bridge.adapters.feishu import (
     _segment,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 from tests.components.base.poll_until import poll_until_async
 
@@ -72,6 +73,7 @@ class FakeWsClient:
 
     def start(self) -> None:
         self.started.set()
+        self.disconnected.wait()
 
     async def _disconnect(self) -> None:
         self.disconnected.set()
@@ -94,9 +96,15 @@ class FakeRestClient:
     def _create(self, request: Any) -> SimpleNamespace:
         self.created.append(request)
         if self.fail:
-            return SimpleNamespace(success=lambda: False, code=99999, msg="denied")
+            return SimpleNamespace(
+                raw=SimpleNamespace(status_code=200),
+                success=lambda: False,
+                code=99999,
+                msg="denied",
+            )
         # A send resolves its p2p chat id (real responses carry chat_id).
         return SimpleNamespace(
+            raw=SimpleNamespace(status_code=200),
             success=lambda: True,
             code=0,
             msg="ok",
@@ -105,7 +113,9 @@ class FakeRestClient:
 
     def _list(self, request: Any) -> SimpleNamespace:
         if not self.list_responses:
-            return SimpleNamespace(code=0, msg="ok", data=None)
+            return SimpleNamespace(
+                raw=SimpleNamespace(status_code=200), code=0, msg="ok", data=None
+            )
         return self.list_responses.pop(0)
 
 
@@ -176,8 +186,9 @@ async def test_non_text_messages_ignored(adapter: FeishuAdapter, message_type: s
     assert adapter.core.received == []
 
 
-async def test_malformed_content_ignored(adapter: FeishuAdapter) -> None:
-    await adapter._handle_event(make_event(content="not-json"))
+async def test_malformed_content_fails(adapter: FeishuAdapter) -> None:
+    with pytest.raises(ValueError):
+        await adapter._handle_event(make_event(content="not-json"))
     assert adapter.core.received == []
 
 
@@ -201,10 +212,13 @@ async def test_bot_own_message_ignored(adapter: FeishuAdapter) -> None:
 async def test_ws_callback_dispatches_on_main_loop(
     adapter: FeishuAdapter,
 ) -> None:
-    adapter._main_loop = asyncio.get_running_loop()
-    adapter._on_im_message(make_event())
-    await poll_until_async(lambda: bool(adapter.core.received))
-    assert len(adapter.core.received) == 1
+    async with owned_tasks() as tasks:
+        adapter._main_loop = asyncio.get_running_loop()
+        adapter._tasks = tasks
+        adapter._accepting_events = True
+        adapter._on_im_message(make_event())
+        await poll_until_async(lambda: bool(adapter.core.received))
+        assert len(adapter.core.received) == 1
 
 
 async def test_ws_callback_drops_when_no_main_loop(adapter: FeishuAdapter) -> None:
@@ -218,10 +232,11 @@ async def test_ws_callback_drops_when_no_main_loop(adapter: FeishuAdapter) -> No
 
 
 async def test_start_skips_without_credentials() -> None:
-    adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_app_id="", feishu_app_secret=""))
-    await adapter.start()
-    assert adapter._ws_thread is None
-    assert adapter._ws_client is None
+    async with owned_tasks() as _owned_tasks:
+        adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_app_id="", feishu_app_secret=""))
+        await adapter.start(_owned_tasks)
+        assert adapter._ws_thread is None
+        assert adapter._ws_client is None
 
 
 async def test_start_connects_with_credentials() -> None:
@@ -232,22 +247,23 @@ async def test_start_connects_with_credentials() -> None:
     # asyncio.get_event_loop() binds without a deprecation path — leaving the
     # wait to cover only thread startup. Production is untouched: the adapter
     # still imports lark lazily in the ws thread (see FeishuAdapter docstring).
-    import lark_oapi.ws.client  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    async with owned_tasks() as _owned_tasks:
+        import lark_oapi.ws.client  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
-    ws_client = FakeWsClient()
-    credentials = feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x")  # noqa: S106
-    adapter = PatchingAdapter(FakeCore(), credentials, ws_client)
-    await adapter.start()
-    assert (adapter._app_id, adapter._app_secret) == ("cli_x", "secret_x")
-    assert adapter._ws_thread is not None
-    assert ws_client.started.wait(timeout=15)
-    assert adapter._ws_client is ws_client
-    # Point stop() at the live pytest loop so the scheduled disconnect actually
-    # executes (the fake's ws loop never runs); it must return without raising.
-    adapter._ws_loop = asyncio.get_running_loop()
-    await asyncio.wait_for(adapter.stop(), timeout=30.0)
-    await poll_until_async(ws_client.disconnected.is_set)
-    assert ws_client.disconnected.is_set()
+        ws_client = FakeWsClient()
+        credentials = feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x")  # noqa: S106
+        adapter = PatchingAdapter(FakeCore(), credentials, ws_client)
+        await adapter.start(_owned_tasks)
+        assert (adapter._app_id, adapter._app_secret) == ("cli_x", "secret_x")
+        assert adapter._ws_thread is not None
+        assert ws_client.started.wait(timeout=15)
+        assert adapter._ws_client is ws_client
+        # Point stop() at the live pytest loop so the scheduled disconnect actually
+        # executes (the fake's ws loop never runs); it must return without raising.
+        adapter._ws_loop = asyncio.get_running_loop()
+        await asyncio.wait_for(adapter.stop(), timeout=30.0)
+        await poll_until_async(ws_client.disconnected.is_set)
+        assert ws_client.disconnected.is_set()
 
 
 # -- ws proxy (issue #2089) -------------------------------------------------
@@ -659,7 +675,9 @@ def make_list_item_listapi(
 
 def make_list_response(items: list[SimpleNamespace]) -> SimpleNamespace:
     # The API returns newest-first; tests pass items in desc order explicitly.
-    return SimpleNamespace(code=0, msg="ok", data=SimpleNamespace(items=items))
+    return SimpleNamespace(
+        raw=SimpleNamespace(status_code=200), code=0, msg="ok", data=SimpleNamespace(items=items)
+    )
 
 
 def poll_adapter(rest: FakeRestClient) -> FeishuAdapter:
