@@ -1191,6 +1191,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/derived/insights/cluster/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/derived/insights/run_timeline/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

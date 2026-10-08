@@ -30,7 +30,9 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from base.paths import insights_socket
+from base.telemetry.metrics.usage import Lineage
 from gateway.agents.eval_guard import deny_isolated_result_read
+from services.derived.insights.cluster.schemas import ClusterCurves, ClusterLanes, ClusterMessages
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineContext,
     RunTimelineMessages,
@@ -131,6 +133,58 @@ async def get_run_timeline(
 ) -> Response:
     """The understanding tree and the message units in a window; no window means the agent's whole lifetime."""
     return await _forward(request, f"/api/agents/{agent_id}/run-timeline")
+
+
+@router.get(
+    "/api/insights/cluster/curves",
+    response_model=ClusterCurves,
+    dependencies=[Depends(deny_isolated_result_read)],
+)
+async def get_cluster_curves(
+    request: Request,
+    root: Annotated[int, Query(ge=1)],  # noqa: ARG001
+    from_: Annotated[datetime, Query(alias="from")],  # noqa: ARG001
+    to: Annotated[datetime, Query()],  # noqa: ARG001
+    lineage: Annotated[Lineage, Query()] = "all",  # noqa: ARG001
+    buckets: Annotated[int, Query(ge=10, le=400)] = 120,  # noqa: ARG001
+) -> Response:
+    """Cost by agent, active agents, messages and queue time per time bucket of the window."""
+    return await _forward(request, "/api/insights/cluster/curves")
+
+
+@router.get(
+    "/api/insights/cluster/lanes",
+    response_model=ClusterLanes,
+    dependencies=[Depends(deny_isolated_result_read)],
+)
+async def get_cluster_lanes(
+    request: Request,
+    root: Annotated[int, Query(ge=1)],  # noqa: ARG001
+    from_: Annotated[datetime, Query(alias="from")],  # noqa: ARG001
+    to: Annotated[datetime, Query()],  # noqa: ARG001
+    lineage: Annotated[Lineage, Query()] = "all",  # noqa: ARG001
+    level: Annotated[int | None, Query(ge=1)] = None,  # noqa: ARG001
+    bins: Annotated[int, Query(ge=50, le=4000)] = 1200,  # noqa: ARG001
+) -> Response:
+    """One lane per agent in spawn order: understanding nodes of one level and LLM activity bars."""
+    return await _forward(request, "/api/insights/cluster/lanes")
+
+
+@router.get(
+    "/api/insights/cluster/messages",
+    response_model=ClusterMessages,
+    dependencies=[Depends(deny_isolated_result_read)],
+)
+async def get_cluster_messages(
+    request: Request,
+    root: Annotated[int, Query(ge=1)],  # noqa: ARG001
+    from_: Annotated[datetime, Query(alias="from")],  # noqa: ARG001
+    to: Annotated[datetime, Query()],  # noqa: ARG001
+    lineage: Annotated[Lineage, Query()] = "all",  # noqa: ARG001
+    limit: Annotated[int, Query(ge=1, le=5000)] = 2000,  # noqa: ARG001
+) -> Response:
+    """The agent-to-agent messages among the selection, each with its sent and read time."""
+    return await _forward(request, "/api/insights/cluster/messages")
 
 
 @router.get(

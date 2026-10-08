@@ -3124,6 +3124,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/insights/cluster/curves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cluster Curves
+         * @description Cost by agent, active agents, messages and queue time per time bucket of the window.
+         */
+        get: operations["get_cluster_curves_api_insights_cluster_curves_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/insights/cluster/lanes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cluster Lanes
+         * @description One lane per agent in spawn order: understanding nodes of one level and LLM activity bars.
+         */
+        get: operations["get_cluster_lanes_api_insights_cluster_lanes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/insights/cluster/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cluster Messages
+         * @description The agent-to-agent messages among the selection, each with its sent and read time.
+         */
+        get: operations["get_cluster_messages_api_insights_cluster_messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/event-resolutions": {
         parameters: {
             query?: never;
@@ -4321,6 +4381,43 @@ export interface components {
             metadata: components["schemas"]["InspectMetricsMetadata"];
         };
         /**
+         * AgentLane
+         * @description One agent's lane, in tree order.
+         *
+         *     `parent` is the agent that spawned it, or the fork source of a fork, when that agent is in
+         *     the selection (None for the selection's roots); `depth` its distance from a root.
+         */
+        AgentLane: {
+            /** Agent Id */
+            agent_id: number;
+            /** Parent */
+            parent: number | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "root" | "spawn" | "fork";
+            /** Depth */
+            depth: number;
+            /** Status */
+            status: string;
+            /**
+             * Spawned At
+             * Format: date-time
+             */
+            spawned_at: string;
+            /** Calls */
+            calls: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Nodes */
+            nodes: components["schemas"]["LaneNode"][];
+            /** Bars */
+            bars: components["schemas"]["LaneBar"][];
+            /** Events */
+            events: components["schemas"]["LaneEvent"][];
+        };
+        /**
          * AgentLineage
          * @description Immutable relationship facts needed to walk a visible node's ancestors.
          */
@@ -5232,6 +5329,71 @@ export interface components {
          */
         CancelResult: "enqueued" | "already_terminated";
         /**
+         * ClusterAgentCost
+         * @description One agent's recorded LLM spend in one bucket.
+         */
+        ClusterAgentCost: {
+            /** Agent Id */
+            agent_id: number;
+            /** Calls */
+            calls: number;
+            /** Cost Usd */
+            cost_usd: number;
+        };
+        /**
+         * ClusterCurves
+         * @description GET /api/insights/cluster/curves response.
+         *
+         *     `unpriced_calls` counts the window's LLM calls without a recorded cost: their spend is not
+         *     in `costs`. `messages` counts agent-to-agent messages whose sender and receiver are both
+         *     in `agent_ids`.
+         */
+        ClusterCurves: {
+            window: components["schemas"]["ClusterWindow"];
+            /** Bucket Seconds */
+            bucket_seconds: number;
+            /** Agent Ids */
+            agent_ids: number[];
+            /** Unpriced Calls */
+            unpriced_calls: number;
+            /** Buckets */
+            buckets: components["schemas"]["CurveBucket"][];
+        };
+        /**
+         * ClusterLanes
+         * @description GET /api/insights/cluster/lanes response.
+         *
+         *     `level` is the understanding level whose nodes the lanes carry; `auto_level` says the
+         *     service chose it (see `lanes.choose_level`), `levels` lists every level there is something
+         *     to show at. `bin_seconds` is the merge distance of the activity bars.
+         */
+        ClusterLanes: {
+            window: components["schemas"]["ClusterWindow"];
+            /** Level */
+            level: number | null;
+            /** Auto Level */
+            auto_level: boolean;
+            /** Levels */
+            levels: components["schemas"]["LevelCount"][];
+            /** Bin Seconds */
+            bin_seconds: number;
+            /** Lanes */
+            lanes: components["schemas"]["AgentLane"][];
+        };
+        /**
+         * ClusterMessages
+         * @description GET /api/insights/cluster/messages response; `truncated` when more matched than `limit`.
+         */
+        ClusterMessages: {
+            window: components["schemas"]["ClusterWindow"];
+            /** Total */
+            total: number;
+            /** Truncated */
+            truncated: boolean;
+            /** Edges */
+            edges: components["schemas"]["MessageEdge"][];
+        };
+        /**
          * ClusterPanel
          * @description GET /api/status cluster sub-section — multi-machine view.
          *
@@ -5312,6 +5474,22 @@ export interface components {
                 [key: string]: unknown;
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
+        };
+        /**
+         * ClusterWindow
+         * @description The window one response covers: `from` inclusive, `to` exclusive.
+         */
+        ClusterWindow: {
+            /**
+             * From
+             * Format: date-time
+             */
+            from: string;
+            /**
+             * To
+             * Format: date-time
+             */
+            to: string;
         };
         /**
          * CommandItem
@@ -5691,6 +5869,34 @@ export interface components {
             replayed: boolean;
             /** Token */
             token: string | null;
+        };
+        /**
+         * CurveBucket
+         * @description One non-empty time bucket of the cluster curves; an absent bucket is all zeros.
+         *
+         *     `ts` is the bucket's start. `costs` has one entry per agent that made an LLM call in it, so
+         *     `len(costs)` is the active agent count. `queue_*_seconds` is the claimed-minus-created time
+         *     of the inbound rows of the messages sent in the bucket (None when none of them was claimed),
+         *     `queue_samples` how many rows it is over.
+         */
+        CurveBucket: {
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Costs */
+            costs: components["schemas"]["ClusterAgentCost"][];
+            /** Active Agents */
+            active_agents: number;
+            /** Messages */
+            messages: number;
+            /** Queue Samples */
+            queue_samples: number;
+            /** Queue P50 Seconds */
+            queue_p50_seconds: number | null;
+            /** Queue P95 Seconds */
+            queue_p95_seconds: number | null;
         };
         /**
          * DefaultModelSource
@@ -6400,6 +6606,72 @@ export interface components {
             source: "user" | "self";
         };
         /**
+         * LaneBar
+         * @description A stretch of LLM activity: consecutive requests merged when closer than `bin_seconds`.
+         *
+         *     A request occupies `[ts - latency, ts]` of its `llm_usage` event; a single request is a bar
+         *     of `calls == 1`.
+         */
+        LaneBar: {
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Calls */
+            calls: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+        };
+        /**
+         * LaneEvent
+         * @description A lifecycle marker from the audit record (spawn, resurrect, restart, terminate).
+         */
+        LaneEvent: {
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Kind */
+            kind: string;
+        };
+        /**
+         * LaneNode
+         * @description One understanding-tree node on a lane, on the node's stored time extent.
+         *
+         *     `summary` is clipped to the first characters of the node's text.
+         */
+        LaneNode: {
+            /** Id */
+            id: number;
+            /** Level */
+            level: number;
+            /** Parent */
+            parent: number | null;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Summary */
+            summary: string;
+        };
+        /**
          * LastMessageResponse
          * @description GET /api/agents/{id}/last-message response — the text of the last
          *     AI message, or None when no AI message with text content exists yet.
@@ -6407,6 +6679,16 @@ export interface components {
         LastMessageResponse: {
             /** Text */
             text: string | null;
+        };
+        /**
+         * LevelCount
+         * @description How many understanding nodes of the selection intersect the window at one level.
+         */
+        LevelCount: {
+            /** Level */
+            level: number;
+            /** Nodes */
+            nodes: number;
         };
         /**
          * LivenessState
@@ -6844,6 +7126,31 @@ export interface components {
              * @description frontmatter tags, including the note's `type/<x>`, or empty
              */
             tags?: string[];
+        };
+        /**
+         * MessageEdge
+         * @description One agent-to-agent message: sent by `sender` at `sent_at`, read by `receiver` at `read_at`.
+         *
+         *     Both ends are agent-level: the edge says nothing about what the receiver was doing. `read_at`
+         *     is when the receiver's claim step took the message (`inbound_messages.claimed_at`), None
+         *     while unclaimed or once the inbound row has been pruned.
+         */
+        MessageEdge: {
+            /** Inbound Id */
+            inbound_id: number | null;
+            /** Sender */
+            sender: number;
+            /** Receiver */
+            receiver: number;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+            /** Read At */
+            read_at: string | null;
+            /** Preview */
+            preview: string;
         };
         /**
          * MetricEvidence
@@ -13436,6 +13743,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunTimelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_cluster_curves_api_insights_cluster_curves_get: {
+        parameters: {
+            query: {
+                root: number;
+                from: string;
+                to: string;
+                lineage?: "self" | "spawn" | "fork" | "all";
+                buckets?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterCurves"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_cluster_lanes_api_insights_cluster_lanes_get: {
+        parameters: {
+            query: {
+                root: number;
+                from: string;
+                to: string;
+                lineage?: "self" | "spawn" | "fork" | "all";
+                level?: number | null;
+                bins?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterLanes"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_cluster_messages_api_insights_cluster_messages_get: {
+        parameters: {
+            query: {
+                root: number;
+                from: string;
+                to: string;
+                lineage?: "self" | "spawn" | "fork" | "all";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterMessages"];
                 };
             };
             /** @description Validation Error */

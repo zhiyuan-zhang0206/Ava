@@ -11,4 +11,5 @@ Package door — no imports, no re-exports. Modules:
   - `app.py`      — `build_app`: the FastAPI app and the state its routers read
   - `daemon.py`   — pidfile, `/healthz`, the socket and the uvicorn server
   - `run_timeline/` — the single-agent run timeline reads
+  - `cluster/`      — the multi-agent view: cluster curves, agent lanes, message edges
 """

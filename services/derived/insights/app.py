@@ -15,6 +15,7 @@ from psycopg_pool import ConnectionPool
 
 from base.db import Database
 from base.paths import ava_home
+from services.derived.insights.cluster import router as cluster_router
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import history as run_timeline_history
 from services.derived.insights.run_timeline import router as run_timeline_router
@@ -37,4 +38,5 @@ def build_app(db: Database, pool: ConnectionPool[Any], config: InsightsConfig) -
         """Identity for the supervisor's probe: which service, which home, which process."""
         return {"name": "insights", "pid": os.getpid(), "home": str(ava_home())}
 
+    app.include_router(cluster_router.router)
     return app

@@ -6230,6 +6230,290 @@
         }
       }
     },
+    "/api/insights/cluster/curves": {
+      "get": {
+        "summary": "Get Cluster Curves",
+        "description": "Cost by agent, active agents, messages and queue time per time bucket of the window.",
+        "operationId": "get_cluster_curves_api_insights_cluster_curves_get",
+        "parameters": [
+          {
+            "name": "root",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Root"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "To"
+            }
+          },
+          {
+            "name": "lineage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "self",
+                "spawn",
+                "fork",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Lineage"
+            }
+          },
+          {
+            "name": "buckets",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 400,
+              "minimum": 10,
+              "default": 120,
+              "title": "Buckets"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterCurves"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/cluster/lanes": {
+      "get": {
+        "summary": "Get Cluster Lanes",
+        "description": "One lane per agent in spawn order: understanding nodes of one level and LLM activity bars.",
+        "operationId": "get_cluster_lanes_api_insights_cluster_lanes_get",
+        "parameters": [
+          {
+            "name": "root",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Root"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "To"
+            }
+          },
+          {
+            "name": "lineage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "self",
+                "spawn",
+                "fork",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Lineage"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "name": "bins",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 4000,
+              "minimum": 50,
+              "default": 1200,
+              "title": "Bins"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterLanes"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/cluster/messages": {
+      "get": {
+        "summary": "Get Cluster Messages",
+        "description": "The agent-to-agent messages among the selection, each with its sent and read time.",
+        "operationId": "get_cluster_messages_api_insights_cluster_messages_get",
+        "parameters": [
+          {
+            "name": "root",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Root"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "To"
+            }
+          },
+          {
+            "name": "lineage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "self",
+                "spawn",
+                "fork",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Lineage"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 2000,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterMessages"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/event-resolutions": {
       "post": {
         "summary": "Create Event Resolution",
@@ -8631,6 +8915,92 @@
         "title": "AgentInspectStatistics",
         "description": "Window-dependent statistics, with no current control-plane state.\n\n``window_hours`` identifies the requested view;\n``applied_window_hours`` echoes the served hour window without a Loki\nretention clamp. Metadata distinguishes observed, partial, and unavailable\nsource coverage. Unknown sections are null, never invented zero totals.\nCurrent state belongs exclusively to ``AgentInspectLive``."
       },
+      "AgentLane": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "root",
+              "spawn",
+              "fork"
+            ],
+            "title": "Kind"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "spawned_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Spawned At"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/LaneNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "bars": {
+            "items": {
+              "$ref": "#/components/schemas/LaneBar"
+            },
+            "type": "array",
+            "title": "Bars"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LaneEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "parent",
+          "kind",
+          "depth",
+          "status",
+          "spawned_at",
+          "calls",
+          "cost_usd",
+          "nodes",
+          "bars",
+          "events"
+        ],
+        "title": "AgentLane",
+        "description": "One agent's lane, in tree order.\n\n`parent` is the agent that spawned it, or the fork source of a fork, when that agent is in\nthe selection (None for the selection's roots); `depth` its distance from a root."
+      },
       "AgentLineage": {
         "properties": {
           "agent_id": {
@@ -10613,6 +10983,151 @@
         "title": "CancelResult",
         "description": "Acceptance of a durable cancel request; separate from process termination."
       },
+      "ClusterAgentCost": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "calls",
+          "cost_usd"
+        ],
+        "title": "ClusterAgentCost",
+        "description": "One agent's recorded LLM spend in one bucket."
+      },
+      "ClusterCurves": {
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/ClusterWindow"
+          },
+          "bucket_seconds": {
+            "type": "integer",
+            "title": "Bucket Seconds"
+          },
+          "agent_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Agent Ids"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/CurveBucket"
+            },
+            "type": "array",
+            "title": "Buckets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "bucket_seconds",
+          "agent_ids",
+          "unpriced_calls",
+          "buckets"
+        ],
+        "title": "ClusterCurves",
+        "description": "GET /api/insights/cluster/curves response.\n\n`unpriced_calls` counts the window's LLM calls without a recorded cost: their spend is not\nin `costs`. `messages` counts agent-to-agent messages whose sender and receiver are both\nin `agent_ids`."
+      },
+      "ClusterLanes": {
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/ClusterWindow"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "auto_level": {
+            "type": "boolean",
+            "title": "Auto Level"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/LevelCount"
+            },
+            "type": "array",
+            "title": "Levels"
+          },
+          "bin_seconds": {
+            "type": "integer",
+            "title": "Bin Seconds"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/AgentLane"
+            },
+            "type": "array",
+            "title": "Lanes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "level",
+          "auto_level",
+          "levels",
+          "bin_seconds",
+          "lanes"
+        ],
+        "title": "ClusterLanes",
+        "description": "GET /api/insights/cluster/lanes response.\n\n`level` is the understanding level whose nodes the lanes carry; `auto_level` says the\nservice chose it (see `lanes.choose_level`), `levels` lists every level there is something\nto show at. `bin_seconds` is the merge distance of the activity bars."
+      },
+      "ClusterMessages": {
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/ClusterWindow"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/MessageEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "total",
+          "truncated",
+          "edges"
+        ],
+        "title": "ClusterMessages",
+        "description": "GET /api/insights/cluster/messages response; `truncated` when more matched than `limit`."
+      },
       "ClusterPanel": {
         "properties": {
           "current_machine": {
@@ -10793,6 +11308,27 @@
         ],
         "title": "ClusterStatus",
         "description": "`GET /api/cluster/status` response body — this host's snapshot in the\nmulti-machine view.\n\n`ava cluster status` CLI and the future monitoring page consume the\nsame payload."
+      },
+      "ClusterWindow": {
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time",
+            "title": "To"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "ClusterWindow",
+        "description": "The window one response covers: `from` inclusive, `to` exclusive."
       },
       "CommandItem": {
         "properties": {
@@ -11536,6 +12072,68 @@
         ],
         "title": "CredentialCreationResult",
         "description": "Original creation metadata; replay deliberately cannot recover a token."
+      },
+      "CurveBucket": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "costs": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterAgentCost"
+            },
+            "type": "array",
+            "title": "Costs"
+          },
+          "active_agents": {
+            "type": "integer",
+            "title": "Active Agents"
+          },
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          },
+          "queue_samples": {
+            "type": "integer",
+            "title": "Queue Samples"
+          },
+          "queue_p50_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue P50 Seconds"
+          },
+          "queue_p95_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue P95 Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "costs",
+          "active_agents",
+          "messages",
+          "queue_samples",
+          "queue_p50_seconds",
+          "queue_p95_seconds"
+        ],
+        "title": "CurveBucket",
+        "description": "One non-empty time bucket of the cluster curves; an absent bucket is all zeros.\n\n`ts` is the bucket's start. `costs` has one entry per agent that made an LLM call in it, so\n`len(costs)` is the active agent count. `queue_*_seconds` is the claimed-minus-created time\nof the inbound rows of the messages sent in the bucket (None when none of them was claimed),\n`queue_samples` how many rows it is over."
       },
       "DefaultModelSource": {
         "type": "string",
@@ -12972,6 +13570,115 @@
         "title": "LabelPatchRequest",
         "description": "PATCH /api/agents/{id} body — manually set / reset agent label.\n\n`label=\"\"` resets back to NULL; the frontend re-displays fallback\n`#N`. Non-empty strings are stripped; length 1-64 inclusive. `source` names who\nchanged it in the `label_change` audit fact: the operator by default, `\"self\"` when\nthe agent sets its own label."
       },
+      "LaneBar": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "calls",
+          "cost_usd",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "LaneBar",
+        "description": "A stretch of LLM activity: consecutive requests merged when closer than `bin_seconds`.\n\nA request occupies `[ts - latency, ts]` of its `llm_usage` event; a single request is a bar\nof `calls == 1`."
+      },
+      "LaneEvent": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "kind"
+        ],
+        "title": "LaneEvent",
+        "description": "A lifecycle marker from the audit record (spawn, resurrect, restart, terminate)."
+      },
+      "LaneNode": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "level": {
+            "type": "integer",
+            "title": "Level"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "level",
+          "parent",
+          "start",
+          "end",
+          "summary"
+        ],
+        "title": "LaneNode",
+        "description": "One understanding-tree node on a lane, on the node's stored time extent.\n\n`summary` is clipped to the first characters of the node's text."
+      },
       "LastMessageResponse": {
         "properties": {
           "text": {
@@ -12992,6 +13699,25 @@
         ],
         "title": "LastMessageResponse",
         "description": "GET /api/agents/{id}/last-message response — the text of the last\nAI message, or None when no AI message with text content exists yet."
+      },
+      "LevelCount": {
+        "properties": {
+          "level": {
+            "type": "integer",
+            "title": "Level"
+          },
+          "nodes": {
+            "type": "integer",
+            "title": "Nodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "level",
+          "nodes"
+        ],
+        "title": "LevelCount",
+        "description": "How many understanding nodes of the selection intersect the window at one level."
       },
       "LivenessState": {
         "type": "string",
@@ -13977,6 +14703,61 @@
         ],
         "title": "MemorySearchResultItem",
         "description": "A single search result: file path + the frontmatter a caller can judge the\nhit by without opening it."
+      },
+      "MessageEdge": {
+        "properties": {
+          "inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Id"
+          },
+          "sender": {
+            "type": "integer",
+            "title": "Sender"
+          },
+          "receiver": {
+            "type": "integer",
+            "title": "Receiver"
+          },
+          "sent_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Sent At"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "preview": {
+            "type": "string",
+            "title": "Preview"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inbound_id",
+          "sender",
+          "receiver",
+          "sent_at",
+          "read_at",
+          "preview"
+        ],
+        "title": "MessageEdge",
+        "description": "One agent-to-agent message: sent by `sender` at `sent_at`, read by `receiver` at `read_at`.\n\nBoth ends are agent-level: the edge says nothing about what the receiver was doing. `read_at`\nis when the receiver's claim step took the message (`inbound_messages.claimed_at`), None\nwhile unclaimed or once the inbound row has been pruned."
       },
       "MetricEvidence": {
         "properties": {
