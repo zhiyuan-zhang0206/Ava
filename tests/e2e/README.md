@@ -131,6 +131,10 @@ as a separate process: a new fork joins an already observed spawn lineage,
 actual telemetry crosses a threshold, and the reminder reaches the owner's model
 input. Scripted goal and orchestration decisions preserve partial results,
 leave peers alive, and honor a saved pause after a late checkpoint and restart.
+Every JSON handoff writer publishes through the shared atomic-file helper, so
+cross-process readers see complete snapshots during prepare, dispatch and pause.
+`fakes/test_budget_handoff.py` holds a real child writer before publication and
+checks that readers retain the previous snapshot until replacement.
 This validates runtime composition, not unprompted model compliance with skills.
 
 ## Scope (not done in this phase)
