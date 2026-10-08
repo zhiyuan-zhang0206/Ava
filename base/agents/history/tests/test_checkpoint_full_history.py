@@ -19,6 +19,7 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages_full,
     load_checkpoint_messages_segment,
 )
+from base.agents.history.closing_request import ClosingRequest
 from base.config import settings
 from base.db import Database
 
@@ -343,3 +344,39 @@ def test_history_layout_of_a_single_snapshot_and_of_no_checkpoint(
 
     assert history.segment_starts == (1,)
     assert [head.content if head else None for head in history.segment_heads] == ["system"]
+
+
+def test_history_carries_each_sealed_segments_closing_request(db_conn: psycopg.Connection) -> None:
+    """A boundary's `compact_anchor` metadata comes back per segment; a boundary without one
+    (every compaction before the anchor existed, every no-LLM compaction) and the open segment
+    have None."""
+    anchor = {"input_tokens": 1234, "extra_tokens": 56, "model": "m1"}
+    _put_checkpoint(
+        "8",
+        [SystemMessage(content="system-1"), HumanMessage(content="first task")],
+        metadata={
+            "source": "input",
+            "step": 1,
+            "parents": {},
+            "compact_boundary": True,
+            "compact_anchor": anchor,
+        },
+        version="1",
+    )
+    _put_checkpoint(
+        "8",
+        [SystemMessage(content="system-2"), HumanMessage(content="second task")],
+        metadata={"source": "input", "step": 2, "parents": {}, "compact_boundary": True},
+        version="2",
+    )
+    _put_checkpoint("8", [HumanMessage(content="third task")], version="3")
+
+    history = load_checkpoint_history_full(_db(), 8)
+
+    assert history.segment_closings == (ClosingRequest(1234, 56, "m1"), None, None)
+
+
+def test_a_malformed_anchor_is_no_anchor() -> None:
+    assert ClosingRequest.from_metadata({"input_tokens": 0}) is None
+    assert ClosingRequest.from_metadata("nope") is None
+    assert ClosingRequest.from_metadata({"input_tokens": 9}) == ClosingRequest(9, 0, None)

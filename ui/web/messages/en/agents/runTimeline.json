@@ -78,6 +78,8 @@
   "readoutNoSource": "no source",
   "readoutUnit": "{kind} · #{start}–#{end} · read {time} · {source} · {preview}",
   "readoutNode": "Level {level} · {from} – {to} · #{start}–#{end} · {summary} · {calls} calls · {input} in · {output} out",
+  "readoutUnitTokens": "{tokens} tokens",
+  "estimatedSuffix": "(estimated)",
   "readoutRequest": "LLM request #{idx} · session {session} · {time} · {tokens} input tokens",
   "ancestorsHeading": "Ancestors",
   "childrenHeading": "Child nodes",
