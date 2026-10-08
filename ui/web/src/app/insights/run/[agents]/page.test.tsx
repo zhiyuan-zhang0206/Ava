@@ -191,7 +191,7 @@ function render() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return rtlRender(
     <QueryClientProvider client={queryClient}>
-      <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
+      <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
     </QueryClientProvider>,
   );
 }
@@ -350,9 +350,9 @@ describe("selecting", () => {
     expect(within(detail).getAllByText("2.4k").length).toBeGreaterThan(0);
   });
 
-  it("names the agent in the page header with no present-state facts", async () => {
+  it("names the agent above its rows with no present-state facts", async () => {
     render();
-    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Run timeline");
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Agent view");
     await waitFor(() => expect(screen.getByTestId("run-timeline-agent").textContent).toBe("Agent #42 · planner"));
     expect(screen.queryByTestId("run-timeline-status")).toBeNull();
     expect(screen.queryByTestId("run-timeline-model")).toBeNull();
@@ -517,7 +517,7 @@ describe("failure and loading", () => {
   it("offers a retry when the read fails", async () => {
     getRunTimeline.mockRejectedValueOnce(new Error("boom"));
     render();
-    expect(await screen.findByText("Could not load the run timeline.")).toBeTruthy();
+    expect(await screen.findByText("Could not load the timeline of agent 42.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByTestId("run-timeline-chart");
   });

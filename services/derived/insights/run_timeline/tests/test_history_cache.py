@@ -89,3 +89,19 @@ def test_within_the_ttl_the_store_is_not_probed(monkeypatch: pytest.MonkeyPatch)
     cache.get(DB, 9)
     cache.get(DB, 9)
     assert (store.loads, store.probes) == (1, 1)
+
+
+def test_one_page_of_agents_stays_cached_and_the_oldest_is_evicted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(monkeypatch)
+    cache = HistoryViewCache()
+    cap = history._MAX_ENTRIES
+    for agent_id in range(cap):
+        cache.get(DB, agent_id)
+    for agent_id in range(cap):
+        cache.get(DB, agent_id)
+    assert store.loads == cap
+    cache.get(DB, cap)
+    cache.get(DB, 0)
+    assert store.loads == cap + 2

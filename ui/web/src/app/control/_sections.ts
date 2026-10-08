@@ -129,7 +129,7 @@ export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
   },
   {
     id: "run-timeline",
-    label: "Run timeline",
+    label: "Agent view",
     labelKey: "run-timeline",
   },
   {

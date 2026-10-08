@@ -8,7 +8,7 @@ import { vi } from "vitest";
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 
 import { layoutsFor } from "./timeline-canvas-model";
-import { buildAxisMap, viewportOf } from "./timeline-model";
+import { buildAxisMap, viewportOf, type Viewport } from "./timeline-model";
 
 /** One thing a canvas drew: a fill, a stroke or a text, with the color and geometry it used. */
 export interface Drawn {
@@ -111,9 +111,14 @@ export function shapesAt(row: string, x: number): Drawn[] {
   return drawn(row).filter((d) => d.op !== "text" && d.x - 1 <= x && x <= d.x + d.w + 1);
 }
 
-/** The pixel at the middle of an item of a row, on the plain time axis over the response's window and a 1000 px track. */
-export function itemX(data: RunTimelineResponse, row: string, key: string, trackPx = 1000): number {
-  const base = viewportOf(data.window);
+/** The pixel at the middle of an item of a row, on the plain time axis over `base` (default: the response's window) and a 1000 px track. */
+export function itemX(
+  data: RunTimelineResponse,
+  row: string,
+  key: string,
+  trackPx = 1000,
+  base: Viewport = viewportOf(data.window),
+): number {
   const axis = buildAxisMap(data.units, base, "time");
   const layout = layoutsFor(data, axis, axis.viewU(base), trackPx).get(row);
   const place = layout?.wide.find((p) => p.key === key);
