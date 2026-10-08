@@ -24,7 +24,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import lru_cache
 
 
 class Idempotency(StrEnum):
@@ -570,13 +569,12 @@ _TEMPLATE_PATH_PARAM = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*:path\}")
 _TEMPLATE_PARAM = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
 
 
-@lru_cache(maxsize=512)
 def _template_regex(template: str) -> re.Pattern[str]:
     """Compile a FastAPI path template to an anchored regex.
 
     ``{param}`` matches one segment; ``{param:path}`` matches the rest
-    (slashes included). Cached — the pause middleware matches on every
-    request.
+    (slashes included). Python's ``re.compile`` caches compiled patterns;
+    template conversion stays local to each lookup.
     """
     pattern = _TEMPLATE_PATH_PARAM.sub(".*", template)
     pattern = _TEMPLATE_PARAM.sub(r"[^/]+", pattern)
