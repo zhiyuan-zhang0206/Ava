@@ -2,6 +2,7 @@
 
 import hashlib
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
@@ -32,13 +33,14 @@ def _record(conn: psycopg.Connection, status: str | None) -> None:
 
 @pytest.mark.parametrize("status", list(OpStatus))
 async def test_replay_returns_canonical_status_without_reexecution(
+    op_executor: ThreadPoolExecutor,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     status: OpStatus,
 ) -> None:
     _record(db_conn, status.value)
     actual, result = await daemon._dispatch_idempotent_pass(
-        "status_probe", {}, "status-test", pool, active_ops={}, workers=set()
+        "status_probe", {}, "status-test", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert actual is status
     assert result == {}
@@ -46,6 +48,7 @@ async def test_replay_returns_canonical_status_without_reexecution(
 
 @pytest.mark.parametrize("status", ["pending", "", "enqueued"])
 async def test_replay_rejects_unknown_stored_status_without_reexecution(
+    op_executor: ThreadPoolExecutor,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     status: str,
@@ -53,7 +56,13 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
     _record(db_conn, status)
     with pytest.raises(ValueError, match="OpStatus"):
         await daemon._dispatch_idempotent_pass(
-            "status_probe", {}, "status-test", pool, active_ops={}, workers=set()
+            "status_probe",
+            {},
+            "status-test",
+            pool,
+            active_ops={},
+            workers=set(),
+            executor=op_executor,
         )
     assert db_conn.execute(
         "SELECT op_status FROM api_idempotency WHERE key='status-test'"
@@ -61,6 +70,7 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
 
 
 async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
+    op_executor: ThreadPoolExecutor,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -73,7 +83,7 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
 
     monkeypatch.setattr(daemon, "_sleep", sleep)
     status, result = await daemon._dispatch_idempotent_pass(
-        "status_probe", {}, "status-test", pool, active_ops={}, workers=set()
+        "status_probe", {}, "status-test", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert status is OpStatus.FAILED
     assert "never completed" in str(result["error"])

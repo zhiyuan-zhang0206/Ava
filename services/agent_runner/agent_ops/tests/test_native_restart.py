@@ -1,5 +1,6 @@
 """Only the versioned restart receipt owns replay after an Ops response is lost."""
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import psycopg
@@ -51,6 +52,7 @@ async def test_merged_effort_refusal_has_no_restart_or_config_effects(
 
 
 async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
+    op_executor: ThreadPoolExecutor,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     pool: ConnectionPool,
@@ -79,7 +81,13 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     monkeypatch.setattr(daemon, "_dispatch", lose_response)
     with pytest.raises(psycopg.OperationalError):
         await daemon._dispatch_idempotent_pass(
-            "lifecycle", packet, "domain-ops", pool, active_ops={}, workers=set()
+            "lifecycle",
+            packet,
+            "domain-ops",
+            pool,
+            active_ops={},
+            workers=set(),
+            executor=op_executor,
         )
     original = result
     assert original is not None
@@ -87,7 +95,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
         "SELECT count(*) FROM api_idempotency WHERE key='domain-ops'"
     ).fetchone() == (0,)
     status, recovered = await daemon._dispatch_idempotent_pass(
-        "lifecycle", packet, "domain-ops", pool, active_ops={}, workers=set()
+        "lifecycle", packet, "domain-ops", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert status is OpStatus.COMPLETED and recovered == original
     assert db_conn.execute(
@@ -96,7 +104,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     ).fetchone() == (1,)
     bad = packet | {"body": operation.model_dump(mode="json") | {"operation_key": "another"}}
     status, result = await daemon._dispatch_idempotent_pass(
-        "lifecycle", bad, "domain-ops", pool, active_ops={}, workers=set()
+        "lifecycle", bad, "domain-ops", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert status is OpStatus.FAILED
     assert result == {"error": "guarded restart envelope identity differs"}

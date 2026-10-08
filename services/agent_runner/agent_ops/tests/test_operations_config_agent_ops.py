@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -12,6 +13,7 @@ from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 
 @pytest.mark.asyncio
 async def test_dispatch_config_read_calls_config_read_op(
+    op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """config_read kind -> ops.config_read_op, returns completed with its result."""
@@ -26,7 +28,7 @@ async def test_dispatch_config_read_calls_config_read_op(
 
     monkeypatch.setattr(daemon.host_config, "config_read_op", _fake_config_read)
     status, result = await daemon._dispatch(
-        "config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool
+        "config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
     )
     assert status == "completed"
     # _dispatch serializes the result model to a JSON dict for the wire.
@@ -36,6 +38,7 @@ async def test_dispatch_config_read_calls_config_read_op(
 
 @pytest.mark.asyncio
 async def test_dispatch_config_write_passes_overrides(
+    op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """config_write kind -> ops.config_write_op(payload['overrides'] + local/actor/trace_id),
@@ -65,6 +68,7 @@ async def test_dispatch_config_write_passes_overrides(
         active_ops={},
         workers=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
@@ -74,6 +78,7 @@ async def test_dispatch_config_write_passes_overrides(
 
 @pytest.mark.asyncio
 async def test_dispatch_config_write_missing_overrides_key_fails(
+    op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """payload missing 'overrides' key -> failed result (ConfigWritePayload
@@ -85,7 +90,7 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
     # `overrides` is required; a missing key is a caught ValidationError surfaced
     # as a 'failed' op result (the /ops route returns HTTP 200 + status=failed).
     status, result = await daemon._dispatch(
-        "config_write", {}, active_ops={}, workers=set(), pool=dispatch_pool
+        "config_write", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
     )  # no 'overrides' key
     assert status == "failed"
     assert "overrides" in str(result["error"])
