@@ -652,10 +652,10 @@ export type ScheduleRunView = Schemas["ScheduleRunView"];
 export type ScheduleLogsView = Schemas["ScheduleLogsView"];
 export type ScheduleDraftResponse = Schemas["ScheduleDraftResponse"];
 
-// --- Ava Guide (natural-language ops assistant; POST /api/guide/draft) ---
+// --- Ava Guide (natural-language ops assistant; POST /api/keyed/v1/guide/draft) ---
 export type GuideDraftResponse = Schemas["GuideDraftResponse"];
 
-// --- Package install (POST /api/packages/draft) ---
+// --- Package install (POST /api/keyed/v1/packages/draft) ---
 //
 // Every skill / plugin / MCP install starts as a natural-language request that
 // spawns an installer agent — there is no URL form, because the user is not

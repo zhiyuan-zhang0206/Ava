@@ -2,7 +2,7 @@
 
 // The "add a package" entry shared by the Skills / Plugins / MCP sections.
 //
-// Describe a capability in natural language -> POST /api/packages/draft spawns
+// Describe a capability in natural language -> POST /api/keyed/v1/packages/draft spawns
 // an ava-package-installer agent -> jump to that conversation, where the agent
 // finds candidates, confirms before installing anything that runs code,
 // installs, verifies with a test agent, and reports whether it is any good.
@@ -52,6 +52,7 @@ export function PackageDraftEntry({ kind }: { kind: PackageKind }) {
 
   const draftMutation = useMutation({
     mutationFn: (text: string) => api.draftPackage(kind, text),
+    retry: false,
     onSuccess: (res) => {
       setNl("");
       setActiveId(res.agent_id);
@@ -62,7 +63,7 @@ export function PackageDraftEntry({ kind }: { kind: PackageKind }) {
   });
 
   const submit = () => {
-    if (nl.trim()) draftMutation.mutate(nl.trim());
+    if (nl.trim() && !draftMutation.isPending) draftMutation.mutate(nl.trim());
   };
 
   return (
