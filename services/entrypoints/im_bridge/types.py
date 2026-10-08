@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, TypedDict
 
-from services.entrypoints.im_bridge.outbound_types import PreparedOutboundSend
+from services.entrypoints.im_bridge.outbound.types import PreparedOutboundSend
 
 
 class SendNotStartedError(RuntimeError):

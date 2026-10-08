@@ -14,8 +14,8 @@ from psycopg_pool import ConnectionPool
 
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.core import IMBridgeCore
-from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
+from services.entrypoints.im_bridge.outbound.types import (
     NoticePollImportReason,
     OutboundAdapterKind,
     OutboundChunk,
