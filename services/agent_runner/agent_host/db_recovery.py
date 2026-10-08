@@ -28,7 +28,7 @@ from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import AGENT_LEASE_TTL_S
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from services.agent_runner.agent_host.recovery_interrupt import RecoveryInterrupt
+from services.agent_runner.agent_host.recovery.interrupt import RecoveryInterrupt
 
 _PROBE_TIMEOUT_SECONDS = 5.0
 # The observed checkpoint read/recovery band reaches 25-45s under load, and a

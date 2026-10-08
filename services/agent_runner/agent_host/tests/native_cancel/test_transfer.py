@@ -28,7 +28,7 @@ from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.native_work import recover_native_cancel
+from services.agent_runner.agent_host.invocation.native_work import recover_native_cancel
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
@@ -43,7 +43,7 @@ from base.config import settings
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.agents.incarnation.native_work import activate_work
-from services.agent_runner.agent_host.native_work import NativeWorkContinuation, prepare_native_invocation
+from services.agent_runner.agent_host.invocation.native_work import NativeWorkContinuation, prepare_native_invocation
 async def main():
     settings.data_plane.db_url = os.environ["AVA_TEST_NATIVE_DB"]
     async with AsyncConnectionPool(settings.data_plane.db_url, open=False) as pool:

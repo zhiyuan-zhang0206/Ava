@@ -22,7 +22,7 @@ from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_restart import original_guarded_restart_id
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from services.agent_runner.agent_host.db_recovery import database_phase
-from services.agent_runner.agent_host.native_work import (
+from services.agent_runner.agent_host.invocation.native_work import (
     completed_native_cancel,
     settle_native_invocation,
 )

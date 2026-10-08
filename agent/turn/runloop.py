@@ -137,7 +137,7 @@ async def _record_permanent_reject_outcome(
 ) -> None:
     """Count one permanent-class rejection; at the halt threshold trip the breaker.
 
-    `base/agents/recovery_breaker.py` owns the semantics: two consecutive permanent
+    `base/agents/recovery/breaker.py` owns the semantics: two consecutive permanent
     rejections with no successful turn between them halt every automatic
     recovery path until a turn succeeds (task #3617, design #3610 section 12).
     Every halted rejection re-runs the escalation — with automatic recovery
@@ -146,7 +146,7 @@ async def _record_permanent_reject_outcome(
     idempotent. All of it is best-effort: none may mask the provider rejection
     that aborted the turn.
     """
-    from base.agents.recovery_breaker import (
+    from base.agents.recovery.breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
         halt_automatic_recovery,

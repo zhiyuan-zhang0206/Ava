@@ -4,7 +4,7 @@ A `show()` page (no `serve_dir`) is served by the agent's own process, so the
 page-server daemon does not supervise it, and a dead server cannot be rebuilt: the
 row is closed so the dead link stops showing as open, the frontend drops it on the
 `PageClosed` event, and the owner gets one system inbound telling it to re-show the
-page (deduped per agent over six hours, `base/agents/page_recovery.py`). The agent
+page (deduped per agent over six hours, `base/agents/recovery/pages.py`). The agent
 runs the same pass at boot and on each heartbeat, but a busy agent gets no
 heartbeats (task #2260), so this loop scans every open show page of this host every
 `AVA_HEARTBEAT_INTERVAL_SECONDS` as well.
@@ -28,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 
 from psycopg_pool import ConnectionPool
 
-from base.agents import page_recovery
+from base.agents.recovery import pages as page_recovery
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, publish_inbound_wake

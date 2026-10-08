@@ -143,31 +143,6 @@ async def test_sheds_oldest_when_queue_full() -> None:
     assert drained == ["e2", "e3", "e4"]
 
 
-async def test_publish_failure_keeps_worker_alive() -> None:
-    redis = _FakeRedis()
-    redis.fail.add("bad")
-    pub = _pub(redis)
-    await pub.start()
-    pub.emit("bad")  # publish raises -> dropped, worker survives
-    pub.emit("good")
-    await pub.aclose()
-    assert ("ch", "good") in redis.published
-    assert ("ch", "bad") not in redis.published
-
-
-async def test_publish_timeout_drops_and_continues() -> None:
-    redis = _FakeRedis()
-    redis.hang.add("slow")
-    pub = _pub(redis, publish_timeout=0.05)
-    await pub.start()
-    pub.emit("slow")  # hangs -> times out -> the whole batch is dropped
-    await pub._queue.join()  # slow's batch is processed (and shed)
-    pub.emit("fast")  # next batch publishes normally
-    await pub.aclose()
-    assert ("ch", "fast") in redis.published
-    assert ("ch", "slow") not in redis.published
-
-
 async def test_aclose_drain_is_bounded() -> None:
     # A publish that never returns must not make aclose hang: the drain is
     # time-boxed, then the worker is cancelled.

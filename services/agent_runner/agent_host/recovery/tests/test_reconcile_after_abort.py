@@ -44,7 +44,7 @@ from base.agents.history.inbound_sideload import (
 )
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import settlement as settlement_mod
-from services.agent_runner.agent_host.tests.recovery.test_hosted_db_recovery import _admit
+from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
 
 
 def _insert_claimed(
@@ -753,7 +753,7 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
     async def _failed_scan(*args: Any, **kwargs: Any) -> set[int]:
         raise RuntimeError("history unavailable")
 
-    monkeypatch.setattr(sideload_mod, "_committed_ids_from_all_settled_writes", _failed_scan)
+    monkeypatch.setattr(sideload_mod, "committed_ids_for_reconcile", _failed_scan)
     with (
         bind_turn_identity(agent, incarnation=incarnation),
         pytest.raises(RuntimeError, match="history unavailable"),
