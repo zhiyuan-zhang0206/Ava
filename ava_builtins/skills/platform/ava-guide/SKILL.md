@@ -37,11 +37,11 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Check health, triage alerts, diagnose failures, or recover infrastructure | [operations](operations/SKILL.md) |
 | Decide where a change belongs and how it takes effect (L1–L4) | [modification-layers](modification-layers/SKILL.md) |
 | Understand skills/plugins or manage installed packages | [packages](packages/SKILL.md) |
-| Find a capability, compare candidates, install, and verify it | [packages.install](packages/install/SKILL.md) |
+| Find skills, plugins, or MCP providers; compare, install, and verify a capability | [packages.install](packages/install/SKILL.md) |
 | Add, inspect, or remove MCP servers | [mcp](mcp/SKILL.md) |
 | Understand Ava plugins or develop a native plugin | [plugins](plugins/SKILL.md), then [plugins.develop](plugins/develop/SKILL.md) |
 | Create or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
-| Create and manage reusable agent configurations | [presets](presets/SKILL.md) |
+| Make or improve a preset from role instructions, prompts, skills, and MCP tools | [presets](presets/SKILL.md) |
 | Choose a model for an agent | [models](models/SKILL.md) |
 | Write, create, inspect, or change persistent scheduled work | [schedules](schedules/SKILL.md) |
 | Publish an artifact or collect user input through a page | [pages](pages/SKILL.md) |

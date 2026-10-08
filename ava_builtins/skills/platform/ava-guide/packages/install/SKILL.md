@@ -26,7 +26,7 @@ for MCP servers. Read the one that matches the kind before you install.
 |---|---|---|
 | **skill** | an instruction pack an agent reads and follows | text lands in the skills dir; nothing of its own runs |
 | **plugin** | a Claude Code plugin: hooks, sub-agents, a bundled `.mcp.json` | **its code runs inside the agent runtime** |
-| **MCP server** | an external tool server | **it runs as a process on this machine** |
+| **MCP server** | an external tool server | a local process runs here, or a remote endpoint receives tool requests and credentials |
 
 That column is the whole confirm rule:
 
@@ -62,8 +62,9 @@ context on its own. `ava skill trust <name>` — a human's statement that they r
 it — is what lifts that, so recommend it in your step 8 report when the package
 earned it, rather than running it yourself.
 - **plugin / MCP** — **never install before the user has seen and approved the
-  specific candidate in this conversation.** Name the repo, say who publishes it,
-  say what it will run and what secrets it wants, then wait. "The user asked for
+  specific candidate in this conversation.** Name the repo or remote endpoint,
+  say who publishes it, what it runs or can access, and what secrets it wants,
+  then wait. "The user asked for
   a GitHub MCP" is not approval of `some-person/github-mcp-fork`.
 
 ## 1. Clarify
@@ -84,22 +85,33 @@ Run both a registry/index query and a semantic one, then reconcile. The index
 gives you real, resolvable package names; the search gives you the reputation
 signal an index does not carry ("everyone uses X, Y is abandoned").
 
+Read [the source map](references/sources.md) for the major skill publishers,
+skill directories, MCP registries and marketplaces, and prompt sources. Start
+with sources relevant to the task and widen if they miss the capability; do not
+stop at GitHub search or assume any one directory covers every provider.
+Follow a listing to its original publisher and verify its actual package shape.
+For a role assembled from prompts and multiple capabilities, use
+[Preset Maker](../../presets/SKILL.md) to compose the result.
+
 **MCP servers — the official registry** (no auth, no key):
 
 ```python
 import httpx
-r = httpx.get("https://registry.modelcontextprotocol.io/v0/servers",
-              params={"search": "postgres", "limit": 20}, timeout=20)
+r = httpx.get("https://registry.modelcontextprotocol.io/v0.1/servers",
+              params={"search": "postgres", "version": "latest", "limit": 20}, timeout=20)
+r.raise_for_status()
 for e in r.json()["servers"]:
     s = e["server"]
-    print(s["name"], s["version"], s["repository"]["url"], "-", s["description"])
+    print(s["name"], s["version"], s.get("repository", {}).get("url"), "-", s["description"])
 ```
 
 Each entry carries `name`, `description`, `version`, `repository.url`, and
-`packages` and/or `remotes`. `metadata.nextCursor` pages. **Ava's MCP client
-speaks stdio only** — an entry that offers `remotes` (`streamable-http` / `sse`)
-and no `packages` cannot be run here at all, so drop it from the candidate list
-rather than proposing something that will never connect.
+`packages` and/or `remotes`. `metadata.nextCursor` pages. Ava supports local
+**stdio** servers and remote **Streamable HTTP** endpoints. Check the running
+deployment's transport and authentication support before proposing a connection;
+do not discard a hosted server just because it has no local package. An SSE-only
+entry needs a supported alternative, not an invented transport flag. The
+[MCP skill](../../mcp/SKILL.md) owns server configuration.
 
 **Skills and plugins — GitHub search** (unauthenticated is fine for a few
 queries; `gh api` if it is available and you need more):
@@ -128,8 +140,8 @@ twenty for the user to sort.
 
 ## 3. Confirm (plugin / MCP: mandatory)
 
-Show the candidate as: repo + publisher + what it will run + which secrets it
-wants + why this one over the runner-up. Then stop and wait. For a skill, say
+Show the candidate as: repo or endpoint + publisher + execution or data access +
+required secrets + why this one over the runner-up. Then stop and wait. For a skill, say
 what you are installing and go.
 
 ## 4. Install
@@ -150,6 +162,10 @@ command line the entry (or the vendor README) gives you, e.g.
 `{"command": "npx", "args": ["-y", "<identifier>"]}`. Pin `--ref` when a git
 source offers a tag — an unpinned default branch is a package that changes
 under you.
+
+A hosted Streamable HTTP service uses `ava mcp add` with the vendor's `url`
+server object instead; follow the [MCP skill](../../mcp/SKILL.md) for its
+authentication and verification. It does not require a local server package.
 
 Secrets go in with `--env KEY=VALUE` on the install (they land in the installed
 copy's env). **Never commit a key into a config file, and never echo one back
