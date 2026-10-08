@@ -20,6 +20,15 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
     directory = tmp_path / baseline_shards.SHARD_DIR
     directory.mkdir(parents=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
+    for args in (
+        ("init", "--quiet"),
+        ("config", "user.name", "Structure gate test"),
+        ("config", "user.email", "structure-test@example.invalid"),
+        ("add", baseline_shards.SHARD_DIR),
+        ("-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Empty baseline"),
+    ):
+        result = lcs._git(*args)
+        assert result.returncode == 0, result.stderr
 
 
 def _module(path: pathlib.Path) -> None:
