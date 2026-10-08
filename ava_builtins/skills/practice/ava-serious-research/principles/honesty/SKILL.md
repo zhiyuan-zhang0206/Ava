@@ -1,6 +1,6 @@
 ---
 name: honesty
-description: Keeps research records faithful to every run, failure, omission, and inconvenient result. Use whenever results could be selected, framed, dropped, or rewritten, from experiment execution through final reporting.
+description: "Keeps research reporting faithful to observed runs. Use when results risk selective omission, retrospective reframing, or unsupported conclusions."
 ---
 
 # Honesty

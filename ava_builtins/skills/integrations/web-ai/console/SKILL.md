@@ -1,6 +1,6 @@
 ---
 name: console
-description: Asks ChatGPT, Gemini, Claude, and optionally Perplexity the same question and collects their answers. Use for hard or uncertain reasoning, tricky math, edge cases, second opinions, or current questions needing live web search.
+description: "Collects answers from multiple AI web apps. Use when comparing model opinions or seeking a second opinion through a browser."
 ---
 
 # console — a panel of frontier models for one question

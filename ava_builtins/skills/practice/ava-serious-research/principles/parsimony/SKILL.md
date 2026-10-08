@@ -1,6 +1,6 @@
 ---
 name: parsimony
-description: "Requires every component, parameter, model choice, and claim embellishment to earn its complexity through evidence. Use when adding architecture, choosing a model, interpreting ablations, or writing an explanation that may be more elaborate than the data supports."
+description: "Tests whether research complexity earns its place. Use when reviewing added components, ablations, model choices, or elaborate explanations."
 ---
 
 # Parsimony

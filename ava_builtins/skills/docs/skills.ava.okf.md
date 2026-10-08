@@ -21,6 +21,12 @@ reaches a skill's identity. This index lists the skills that carry their own
 OKF node, grouped by what each does — those headings cut across the source-tree
 groups and are informational only.
 
+Descriptions identify the capability and the situations that need it; keyword
+mentions alone do not select an operational workflow. Entrypoints retain shared
+decisions and constraints, while substantial mode procedures, examples, and
+source context load from references only when relevant. Catalog audits follow
+the criteria and evaluation cases owned by `skill-creator/references/audit.md`.
+
 ## Communication & user interaction
 Launch web pages to display content or collect structured replies, read SMS
 verification codes on macOS, and a full Gmail client.
