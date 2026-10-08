@@ -25,4 +25,10 @@ traceback belongs on the call as `logger.opt(exception=True)` (or
 Opt-out `# log-format-ok: <reason>`; scope `lint_common.FRAMEWORK_DIRS` +
 `scripts/`. The authoritative rule text is the script's module docstring.
 
+The required CI `backend-structure` job runs `lint-loguru-format` and
+`lint-logger-add-diagnose` with `pre-commit run --all-files` on both SELECTED and
+FULL backend test paths. These hooks own repository-wide logging compliance.
+Tests in `scripts/lint/tests/logging/` exercise the AST rules and explicit-target
+CLI contracts without repeating the whole-repository scans inside pytest.
+
 Parent: [[scripts/lint/docs/lint.ava.okf.md|lint]].

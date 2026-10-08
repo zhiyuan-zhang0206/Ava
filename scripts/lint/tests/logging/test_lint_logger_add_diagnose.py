@@ -103,12 +103,6 @@ def test_unrelated_add_call_is_not_a_construction():
     assert _violations(src) == []
 
 
-def test_repo_is_clean() -> None:
-    """The gate is only as good as its verdict on the tree it guards: every
-    logger.add(...) call under the scanned directories must already pass."""
-    assert _lint.main([]) == 0
-
-
 def test_explicit_missing_target_is_an_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
