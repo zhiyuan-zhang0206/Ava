@@ -14,16 +14,10 @@ Exports:
 Compaction replaces the whole history with `[system prompt, summary]` — the
 summary retains needed recency; no raw tail is carried into the replacement.
 
-The compaction request is shaped to ride the backend's automatic prefix cache:
-it reuses the conversation exactly as the main llm node already sent it — same
-leading SystemMessage, same message objects, same single bound tool — and
-appends one instruction message. See:
-docs/decisions/agents/context/2026-04-18-in-place-compact.md.
-
-The system-prompt snapshot invariant: messages[0] is built by
-build_system_prompt() exactly once, on the agent's first round, and never
-rebuilt — stable across restarts, upgrades, and config changes precisely so
-the cached prefix survives them.
+The request preserves the conversation's prefix and appends one instruction;
+provider preparation receives the actual model's binding. The system prompt is
+built once on the first round, preserving the cache prefix across restarts and
+configuration changes. See docs/decisions/agents/context/2026-04-18-in-place-compact.md.
 """
 
 __description__ = "Auto-compact history when token count exceeds threshold"
@@ -61,6 +55,7 @@ from base.agents.history.closing_request import ClosingRequest
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.call import ProviderCallBinding
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
@@ -212,27 +207,14 @@ async def generate_summary(
     slices: AgentSlices,
     *,
     single_attempt: bool = False,
+    binding: ProviderCallBinding | None = None,
 ) -> SummaryText:
-    """Run the Compaction LLM over the whole conversation; returns the summary text.
+    """Summarize the complete conversation using the actual model's binding.
 
-    Used by the claim node for handling inbound kind `compact_request`
-    (backend LLM generation); `compact_summary` (agent-written) skips this
-    function. Also used by the LLM node's automatic compaction operation.
-
-    The request = the conversation exactly as the main llm node sends it
-    (same `prepare_invocation` shape — explicit Gemini cache when live,
-    otherwise leading SystemMessage included + `execute_code` bound) + one
-    trailing instruction message. The whole conversation is summarized — the
-    model sees every message, including the most recent, and the summary it
-    returns is the complete replacement memory (no raw tail is kept beside
-    it). The request is the previous turn's request plus one message, so it
-    still hits the backend prefix cache.
-
-    Raises:
-        ValueError: the conversation is empty — nothing to summarize.
-        RuntimeError: the Compaction LLM returned no text (e.g. it disobeyed
-            the instruction and only emitted a tool call) — there is no
-            summary to apply.
+    Manual compact requests and automatic compaction share this operation;
+    agent-written summaries skip generation. The system prefix and instruction
+    use the same provider preparation as streaming. Single-attempt generation
+    forbids stale recovery. Empty conversations and empty responses fail.
     """
     if type(single_attempt) is not bool:
         raise ValueError("single_attempt must be a boolean")
@@ -254,6 +236,7 @@ async def generate_summary(
         llm,
         compaction_input,
         slices.llm_policy,
+        binding=binding,
         **({"retry_stale_cache": False} if single_attempt else {}),
     )
     model = slices.brain.llm_model
@@ -340,7 +323,11 @@ def _emergency_fallback_summary(messages: list[AnyMessage]) -> str:
 
 
 async def emergency_compact_summary(
-    messages: list[AnyMessage], llm: BaseChatModel, slices: AgentSlices
+    messages: list[AnyMessage],
+    llm: BaseChatModel,
+    slices: AgentSlices,
+    *,
+    binding: ProviderCallBinding | None = None,
 ) -> str:
     """The circuit-breaker compaction summary: a real compaction first, then the
     no-LLM fallback — used by the overflow self-rescue path (claim decide).
@@ -367,7 +354,7 @@ async def emergency_compact_summary(
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm, slices)
+            summary = await generate_summary(messages, llm, slices, binding=binding)
         except Exception as e:
             last_error = e
             if _is_permanent_provider_failure(e):
@@ -479,13 +466,14 @@ async def _auto_compact_summary(
     llm: BaseChatModel,
     content_count: int,
     slices: AgentSlices,
+    binding: ProviderCallBinding | None = None,
 ) -> str:
     """Generate and validate a summary without committing any context change."""
     summary: str = ""
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm, slices)
+            summary = await generate_summary(messages, llm, slices, binding=binding)
         except Exception as e:
             last_error = e
             logger.warning(
@@ -575,7 +563,11 @@ async def auto_compact_for_llm(
         async with subscribe_interrupt(runtime.context.ops_pool, agent_id) as interrupted:
             summary = await interruptible_model(
                 _auto_compact_summary(
-                    list(state.messages), llm, len(content_msgs), runtime.context.require_agent()
+                    list(state.messages),
+                    llm,
+                    len(content_msgs),
+                    runtime.context.require_agent(),
+                    binding=runtime.context.llm_binding,
                 ),
                 interrupted,
             )

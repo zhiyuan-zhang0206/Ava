@@ -1,7 +1,7 @@
 """Provider plugin contract — what a plugin's ``provider.py`` declares.
 
 A provider plugin makes one more vendor's models *nameable*. It never decides
-which model an agent runs on — no routing, no fallback, no per-turn hook
+which model an agent runs on — no routing or provider-selected fallback
 (``base/lm/docs/model-providers-as-plugins.md``,
 ``docs/decisions/engineering/design/simplification/2026-07-29-no-runtime-model-routing.md``). A ``provider.py`` registers nothing: it
 exports ``contribute()`` returning a ``PluginContributions`` whose ``providers`` hold one
@@ -49,7 +49,7 @@ Builder contract (plain Python, documented rather than schema'd — see
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import StrEnum
@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.call import LlmInvocation, ProviderCallContext
 from base.lm.registry import ModelSpec, ReferenceTps
 from base.lm.stop import StopSpec
 
@@ -215,6 +216,8 @@ class ProviderBinding:
     receipts fail before accounting. Providers without Fast IDs need none."""
     build_single_attempt: Callable[[BuildContext], BaseChatModel] | None = None
     """Fresh construction with no ambiguous SDK retries; absent is unsupported."""
+    prepare_call: Callable[[ProviderCallContext], Awaitable[LlmInvocation | None]] | None = None
+    """Optional invocation adapter; absent preserves ordinary tool binding."""
 
 
 def provider_key_present(key_env: str) -> bool:
