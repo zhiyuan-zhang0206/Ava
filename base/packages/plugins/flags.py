@@ -31,8 +31,8 @@ from collections.abc import Callable
 from typing import Any
 
 from base.host.env.agent_slices import AgentSlices
-from base.host.env.config_registry import DOMAIN_ATTRS, fields
-from base.packages.plugins.config_registration import _field_is_sensitive
+from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS
+from base.host.env.config_registry import DOMAIN_ATTRS
 
 
 class PluginFlagError(Exception):
@@ -138,13 +138,11 @@ def validate_flag_key(key: str) -> str:
     if domain not in DOMAIN_ATTRS:
         raise UnknownFlag(f"unknown plugin flag {key!r}: {domain!r} is not a Settings domain.")
 
-    field_refs = fields()
-    if field not in field_refs or field_refs[field].domain != domain:
+    if FIELD_DOMAINS.get(field) != domain:
         raise UnknownFlag(
             f"unknown plugin flag {key!r}: {field!r} is not a field in the {domain!r} domain."
         )
-    ref = field_refs[field]
-    if _field_is_sensitive(ref.info.json_schema_extra):
+    if field in SENSITIVE_FIELDS:
         raise UnknownFlag(f"unknown plugin flag {key!r}: secrets are not flags.")
     return key
 

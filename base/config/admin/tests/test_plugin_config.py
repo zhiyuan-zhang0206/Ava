@@ -8,15 +8,13 @@ import pytest
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.config.admin.plugin_config import (
-    PluginConfigOwner,
-    image_digest,
     import_legacy_config,
     patch_owner,
     plugin_metadata,
-    write_config_image,
     write_plugin_patch,
 )
 from base.host.env import runtime_config
+from base.packages.plugin_config_images import PluginConfigOwner, image_digest, write_config_image
 from base.packages.plugins.config_registration import InvalidConfigData, read_authority_config
 
 

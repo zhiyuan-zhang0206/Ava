@@ -11,7 +11,7 @@ materializes the named surfaces every consumer imports:
 - ``LITE_FIELDS`` — the boot-path fields ``base/config/_lite.py`` resolves
   without pydantic;
 - ``FIELD_DOMAINS`` / ``FIELD_ALIASES`` / ``FIELD_SCOPES`` /
-  ``FIELD_CAPABILITIES`` / ``PER_AGENT_FIELDS`` — the all-field indexes the
+  ``FIELD_CAPABILITIES`` / ``PER_AGENT_FIELDS`` / ``SENSITIVE_FIELDS`` — the all-field indexes the
   facade accessors and ``base/host/env/registry.py``'s authority projections serve
   without building the registry;
 - ``REQUIRED_FIELDS`` — the no-default fields ``_lite.prepare`` requires.
@@ -51,6 +51,7 @@ def _read_index() -> dict[str, object]:
         "field_scopes": MappingProxyType(raw["field_scopes"]),
         "field_capabilities": MappingProxyType(raw["field_capabilities"]),
         "per_agent_fields": frozenset(raw["per_agent_fields"]),
+        "sensitive_fields": frozenset(raw["sensitive_fields"]),
         "required_fields": frozenset(raw["required_fields"]),
     }
 
@@ -65,5 +66,6 @@ FIELD_ALIASES = cast(Mapping[str, str], _INDEX["field_aliases"])
 FIELD_SCOPES = cast(Mapping[str, str], _INDEX["field_scopes"])
 FIELD_CAPABILITIES = cast(Mapping[str, str], _INDEX["field_capabilities"])
 PER_AGENT_FIELDS = cast(frozenset[str], _INDEX["per_agent_fields"])
+SENSITIVE_FIELDS = cast(frozenset[str], _INDEX["sensitive_fields"])
 # Fields with no default and no factory — the W1 required check in _lite.prepare().
 REQUIRED_FIELDS = cast(frozenset[str], _INDEX["required_fields"])

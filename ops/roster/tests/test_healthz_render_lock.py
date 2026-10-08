@@ -23,6 +23,7 @@ from typing import cast
 
 import pytest
 
+from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
@@ -38,11 +39,14 @@ _REPO = Path("/checkout/repo")
 
 
 @pytest.fixture(autouse=True)
-def memory_config_image(unit_home: Path) -> None:
-    """The indexer's new birth input is materialized before rendering launch units."""
+def plugin_config_images(unit_home: Path) -> None:
+    """Materialize plugin birth inputs before rendering launch units."""
     image = unit_home / "configs" / "ava_memory" / "config.json"
     image.parent.mkdir(parents=True)
     image.write_text('{"indexer_enabled": true}\n')
+    fleet_image = unit_home / "configs" / "ava_fleet" / "config.json"
+    fleet_image.parent.mkdir(parents=True)
+    fleet_image.write_text(FleetConfig().model_dump_json())
 
 
 @dataclass(frozen=True)
@@ -130,9 +134,13 @@ def _legacy_spec(row: _Legacy) -> ServiceSpec:
         no_profile_marker=row.no_profile_marker,
         db_access=cast("DbAccess | None", row.db_access),
         gate=(lambda: None) if row.gated else None,
-        # The independent indexing gate adds a birth input; all legacy launch
-        # facts below remain the same.
-        config_inputs=(disk_image_path("ava_memory"),) if row.session == "memory-indexer" else (),
+        # Plugin ownership adds an image input; the prior launch facts stay fixed.
+        config_inputs=(disk_image_path("ava_memory"),)
+        if row.session == "memory-indexer"
+        else (disk_image_path("ava_fleet"),)
+        if row.session == "task-maintenance"
+        else (),
+        plugin_config=("ava_fleet", FleetConfig()) if row.session == "task-maintenance" else None,
     )
 
 

@@ -188,7 +188,7 @@ def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
     instance = cls()  # All defaults; cls fields lacking default raise ValidationError
     config_path = disk_image_path(plugin)
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    from base.config.admin.plugin_config import (
+    from base.packages.plugin_config_images import (
         PluginConfigOwner,
         image_revision,
         write_config_image,
@@ -266,7 +266,7 @@ def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str]
             f"(type incompatible, related to plugin upgrade; manual migrate needed {config_path}): {e}"
         ) from e
 
-    from base.config.admin.plugin_config import (
+    from base.packages.plugin_config_images import (
         PluginConfigOwner,
         image_revision,
         write_config_image,

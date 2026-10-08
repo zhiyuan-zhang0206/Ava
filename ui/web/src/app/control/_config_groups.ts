@@ -107,10 +107,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS",
   ],
   "config-daemon-tasks": [
-    "AVA_TASK_MAINTENANCE_ENABLED",
-    "AVA_TASK_MAINTENANCE_INTERVAL_SECONDS",
-    "AVA_TASK_REMINDER_BACKOFF_SECONDS",
-    "AVA_TASK_ESCALATE_N",
     "AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",
   ],
   "config-gateway": [
