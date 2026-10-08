@@ -6813,14 +6813,11 @@ export interface components {
          *     reconstruct absolute paths. fs-neutral makes mismatched gateway
          *     (e.g. /Users/x) and agent-runner (/home/y) filesystems work.
          *
-         *     `results` carries path + description for each match; `paths` is the
-         *     bare list of relative paths (backward-compat for existing consumers).
+         *     `results` carries path, description and tags for each match.
          */
         MemorySearchResponse: {
-            /** Paths */
-            paths?: string[];
             /** Results */
-            results?: components["schemas"]["MemorySearchResultItem"][];
+            results: components["schemas"]["MemorySearchResultItem"][];
         };
         /**
          * MemorySearchResultItem
