@@ -15,6 +15,9 @@ key is refused. CLI/browser mint one legacy key per invocation; they do not
 silently enable principal-v1 or retry unsupported gateways. Names remain unique
 business constraints, separate from creation identity.
 
+Shared `gateway/routers/receipts/creation.py` owns the validated request fingerprint
+and original resource identity for both callers. Each caller owns its transaction.
+
 The resource INSERT, initial schedule version, and receipt complete in one
 transaction. Concurrent identical keys serialize before insertion. Changed
 validated requests conflict with 409; a same-key retry returns the original 201
