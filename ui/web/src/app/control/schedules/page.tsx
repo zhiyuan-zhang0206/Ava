@@ -106,6 +106,7 @@ export default function SchedulesPage() {
   const [nl, setNl] = useState("");
   const draftMutation = useMutation({
     mutationFn: (text: string) => api.draftSchedule(text),
+    retry: false,
     onSuccess: (res) => {
       setNl("");
       setActiveId(res.agent_id);
@@ -178,7 +179,7 @@ export default function SchedulesPage() {
           value={nl}
           onChange={(e) => setNl(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && nl.trim()) draftMutation.mutate(nl.trim());
+            if (e.key === "Enter" && nl.trim() && !draftMutation.isPending) draftMutation.mutate(nl.trim());
           }}
         />
         <Button

@@ -11,6 +11,8 @@ tags:
 
 Server data enters UI via React Query cache, kept live by SSE while visible; hidden pages leave the transport and reconcile when visible again. SSE connects directly to FastAPI (not through Next rewrites — Turbopack dev proxy buffers SSE).
 
+Draft entry acceptance: [[draft-agents.ava.okf.md]].
+
 ## Submitted uploads
 
 Ordinary file delivery submits one batch/key to
