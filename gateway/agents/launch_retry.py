@@ -5,7 +5,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 
 from base.log import logger
-from gateway.auth.request_principal import (
+from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
     SCOPE_HEADER,
     AuthPrincipal,

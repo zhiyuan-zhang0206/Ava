@@ -14,7 +14,7 @@ acceptance, not remote readiness or agent execution.
 
 ## Prior art
 
-- `gateway/routers/upload_batches.py`: retained receiving manifest/reservation,
+- `gateway/routers/upload/batches.py`: retained receiving manifest/reservation,
   per-agent xact quota gate, create-only publication and fsync before ready receipt.
 - `base/host/private_storage.py:create_private_bytes`: complete, fsynced,
   non-overwriting publication; a duplicate verifies the existing object.
@@ -22,7 +22,7 @@ acceptance, not remote readiness or agent execution.
   native chat identity/provenance/audit writer without commit or wake. Its own
   inbound-row identity disappears on deletion; upload needs retained evidence.
 - `gateway/app.py:lifespan`: owns background tasks and closes pools after task
-  shutdown. `gateway/middleware/stopping.py` exposes actual server shutdown;
+  shutdown. `gateway/http/middleware/stopping.py` exposes actual server shutdown;
   `base/deploy/maintenance/admission.py` owns pause/quiesce decisions.
 - `services/agent_runner/agent_ops/daemon.py`: authenticated known-kind admission,
   maintenance request/worker tracking; `dispatch_sync.py` owns blocking receivers.

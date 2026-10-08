@@ -58,7 +58,7 @@ def _request_actor(request: Request) -> tuple[str | None, str | None]:
 
     `source_verified_by` (`cluster_bearer` / `user_session`) is bound by the auth
     middleware after credential validation, with `auth_principal` beside it —
-    never read from caller JSON (`gateway/auth/docs/request_principal.ava.okf.md`). A
+    never read from caller JSON (`gateway/http/auth/docs/request_principal.ava.okf.md`). A
     no-auth mode has no verified principal and records no actor.
     """
     verified_by = getattr(request.state, "source_verified_by", None)

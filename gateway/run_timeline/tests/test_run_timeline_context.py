@@ -14,7 +14,7 @@ from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
-from gateway.agents.context_breakdown import RequestBreakdown
+from gateway.agents.history.context_breakdown import RequestBreakdown
 from gateway.agents.schemas import ContextBreakdownResponse, ContextCategory
 from gateway.run_timeline import context
 from gateway.run_timeline.history import HistoryView

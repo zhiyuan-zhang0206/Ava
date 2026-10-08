@@ -43,7 +43,7 @@ from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 
 # The header prepended to every replacement compact summary (forced / command /
 # spontaneous) — written by `agent.hooks.compact.compose_summary_message`, and
-# the one invariant the read side (gateway/agents/context_breakdown.py) classifies the
+# the one invariant the read side (gateway/agents/history/context_breakdown.py) classifies the
 # untagged summary HumanMessage by. It lives here, in the leaf message-contract
 # module, so the gateway can import it without pulling in agent.hooks.compact
 # (whose agent.graph imports do not resolve inside a gateway process).

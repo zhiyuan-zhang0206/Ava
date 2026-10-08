@@ -77,11 +77,11 @@ SINK_FACADES: dict[str, str] = {
         "the observed-metrics writer: its pool handle and failure counter are written by "
         "emitters and read only by the writer itself"
     ),
-    "gateway/middleware/latency.py": (
+    "gateway/http/middleware/latency.py": (
         "latency aggregation buffer flushed to the event pipeline; written by requests, "
         "read only by the flush"
     ),
-    "gateway/middleware/runtime_metrics.py": (
+    "gateway/http/middleware/runtime_metrics.py": (
         "active-SSE-connection gauge state, incremented and decremented by the stream "
         "handler and read only by the metrics exporter"
     ),

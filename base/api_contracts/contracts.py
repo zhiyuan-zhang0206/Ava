@@ -8,7 +8,7 @@ from the doorplate instead of guessing.
 
 This module is the ONLY place a route contract is declared — the doorplate
 wall. Route authors add one entry per route they own; the pause middleware
-reads exemptions from here (via `gateway.middleware.pause_policy`), the SDK reads
+reads exemptions from here (via `gateway.http.middleware.pause_policy`), the SDK reads
 idempotency from here, and lint forces every gateway route to declare a
 doorplate (`gateway/tests/bootstrap/test_route_contracts_gateway.py`).
 
@@ -159,7 +159,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         pause=PauseSemantics.CONTROL_PLANE,
         note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at); a 503 exhausts Grafana retries and the alert is lost",
     ),
-    # ── gateway/auth/router.py ───────────────────────────────────
+    # ── gateway/http/auth/router.py ───────────────────────────────────
     ("POST", "/api/auth/login"): RouteContract(note="login — repeats just mint a fresh cookie"),
     ("POST", "/api/auth/logout"): RouteContract(note="clear session cookie — idempotent"),
     ("GET", "/api/auth/check"): RouteContract(),
@@ -223,7 +223,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PUT", "/api/config/default-model"): RouteContract(
         note="set default model — PUT is idempotent"
     ),
-    # ── gateway/agents/conversation.py ─────────────────────────────
+    # ── gateway/agents/history/conversation.py ─────────────────────────────
     ("GET", "/api/agents/{agent_id}/conversation-snapshot"): RouteContract(
         note="composed switch refresh — timeline head window + token usage + pending in one read"
     ),
@@ -322,7 +322,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="a repeat dispatches another restart; HTTP intent has no durable receipt",
     ),
-    # ── gateway/agents/understanding.py ────────────────────────────────────
+    # ── gateway/agents/history/understanding.py ────────────────────────────────────
     ("GET", "/api/agents/{agent_id}/sessions"): RouteContract(
         note="read-only: the agent's sessions with their understanding coverage and build estimate"
     ),
@@ -396,7 +396,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="current-notice selector can withdraw a later notice after an ambiguous response",
     ),
-    # ── gateway/routers/okf_graph.py ───────────────────────────────────
+    # ── gateway/inspect/okf_graph.py ───────────────────────────────────
     ("GET", "/api/okf/graph"): RouteContract(),
     # ── gateway/extensions/packages.py ───────────────────────────────────
     ("POST", "/api/keyed/v1/packages/draft"): RouteContract(
@@ -530,7 +530,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         transactional_idempotency=True,
         note="keyed task patch and immutable result share the notification transaction",
     ),
-    # ── gateway/agents/timeline.py ───────────────────────────────────
+    # ── gateway/agents/history/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
     # ── gateway/run_timeline/router.py, messages.py, context.py ──────────────────
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
@@ -544,7 +544,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/extensions/ui_contributions.py ───────────────────────────────────
     ("GET", "/api/ui/contributions"): RouteContract(),
-    # ── gateway/routers/uploads.py ───────────────────────────────────
+    # ── gateway/routers/upload/router.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/uploads/{filename}"): RouteContract(),
     ("POST", "/api/keyed/v1/agents/{agent_id}/uploads"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
@@ -660,7 +660,7 @@ def exempt_from_pause(method: str, path: str) -> bool:
     """Whether ``(method, path)`` is declared control-plane (survives a
     migration).
 
-    The single predicate behind `gateway.middleware.pause_policy.should_bypass_pause`
+    The single predicate behind `gateway.http.middleware.pause_policy.should_bypass_pause`
     — kept here so every consumer shares one matching implementation. The
     method matters: two methods can share one path template with different
     pause semantics (POST /api/alerts is the control-plane webhook while

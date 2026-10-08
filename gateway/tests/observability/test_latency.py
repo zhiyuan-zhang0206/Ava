@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.middleware import latency
+from gateway.http.middleware import latency
 
 
 @pytest.fixture(autouse=True)

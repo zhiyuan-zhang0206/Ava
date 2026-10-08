@@ -24,16 +24,16 @@ from gateway.app import (
     _cluster_pause_middleware,
     app,
 )
-from gateway.auth import rejection_log
-from gateway.auth.cors import cors_allowed_origins
-from gateway.lgtm.backend_failure import raise_backend_unavailable
-from gateway.middleware.error_envelope import request_trace_middleware
-from gateway.middleware.error_handlers import (
+from gateway.http.auth import rejection_log
+from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.middleware.error_envelope import request_trace_middleware
+from gateway.http.middleware.error_handlers import (
     ava_agent_error_handler,
     http_exception_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
 )
+from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.schemas.errors import ErrorEnvelope
 
 
@@ -154,7 +154,7 @@ def test_active_otel_trace_id_wins_over_request_fallback(
     handler_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Envelope correlation uses the active OTel trace when one exists."""
-    from gateway.middleware import error_envelope
+    from gateway.http.middleware import error_envelope
 
     monkeypatch.setattr(error_envelope.telemetry, "capture_trace_ids", lambda: ("a" * 32, None))
     response = handler_client.get("/agent")
@@ -214,7 +214,7 @@ def _auth401_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord
     return [
         record
         for record in caplog.records
-        if record.name == "gateway.auth.rejection_log"
+        if record.name == "gateway.http.auth.rejection_log"
         and record.getMessage().startswith("auth 401:")
     ]
 
@@ -301,7 +301,7 @@ def test_auth_middleware_logs_sse_poll_401_at_debug(
 ) -> None:
     """Stale EventSource reconnects stay forensic-only without changing the response."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
 
     response = _unauthorized_auth_response(
         _request(path=path, headers=[(b"user-agent", b"stale-browser")])
@@ -321,7 +321,7 @@ def test_auth_middleware_logs_browser_ua_401_at_debug(
     at once; the 401 is visible in the UI and still counted in the aggregate,
     but never WARNING-throttled per path (2026-10-03 triage #7)."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
     browser_ua = (
         b"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
         b"(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
@@ -343,7 +343,7 @@ def test_auth_middleware_warns_on_first_non_stream_401(
 ) -> None:
     """A new client/path source remains visible once at WARNING."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
 
     response = _unauthorized_auth_response(_request(headers=[(b"user-agent", b"curl/8.1")]))
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
@@ -359,7 +359,7 @@ def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
 ) -> None:
     """A repeated client/path key is downgraded and counted during cooldown."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
     request = _request()
 
     _unauthorized_auth_response(request)
@@ -380,7 +380,7 @@ def test_auth_middleware_warns_after_cooldown_with_suppressed_count(
     _enable_cluster_auth(monkeypatch)
     now = [100.0]
     monkeypatch.setattr(rejection_log.time, "monotonic", lambda: now[0])
-    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
     request = _request()
 
     _unauthorized_auth_response(request)
@@ -419,7 +419,7 @@ def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
 ) -> None:
     """A warning for one client/path key does not hide either neighboring key."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
     _unauthorized_auth_response(_request())
     caplog.clear()
 

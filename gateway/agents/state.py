@@ -32,9 +32,9 @@ from base.daemon.schedules.completion_notices import (
     delivery_required_for_agent,
 )
 from base.db import agent_exists, list_pending_inbounds
-from gateway.agents.context_breakdown import RequestBreakdown
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.agents.eval_guard import caller_eval_isolation, deny_isolated_result_read
+from gateway.agents.history.context_breakdown import RequestBreakdown
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.model_overrides import agent_overrides, read_agent_overrides
 from gateway.agents.schemas import (
@@ -171,7 +171,7 @@ def _message_content_size_bytes(content: str | list[ContentBlock]) -> int:
 
 def _scoped_message_key(request: Request, agent_id: int, key: str) -> str:
     """Delivery and reconciliation identify the same logical POST operation."""
-    from gateway.auth.request_principal import PrincipalScopeError, request_key
+    from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 
     try:
         return request_key(request, key, method="POST", path=f"/api/agents/{agent_id}/messages")
@@ -331,7 +331,7 @@ async def post_agent_system_note(
                 "to a file and send the file path instead"
             ),
         )
-    from gateway.auth.request_principal import PrincipalScopeError, request_key
+    from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 
     if not isinstance(idempotency_key, str):
         idempotency_key = None
@@ -685,10 +685,10 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
     The breakdown of the latest LLM request's input: each message's tokens anchored to the
     provider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed
     from them, only the inside of a message split by an estimator. Pure gateway-side view logic
-    (`gateway/agents/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
+    (`gateway/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
     A checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown
     with zeroed totals (same tolerance as token-usage: the panel re-opens fine later)."""
-    from gateway.agents.context_breakdown import latest_request_breakdown
+    from gateway.agents.history.context_breakdown import latest_request_breakdown
 
     try:
         messages = load_checkpoint_messages(request.app.state.db, agent_id)
@@ -708,7 +708,7 @@ def context_breakdown_response(
     """`breakdown` (one LLM request's input) with the agent's resolved window and compaction
     thresholds."""
     from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
-    from gateway.agents.context_breakdown import SectionNode
+    from gateway.agents.history.context_breakdown import SectionNode
 
     def _to_context_section(node: SectionNode) -> ContextSection:
         return ContextSection(
