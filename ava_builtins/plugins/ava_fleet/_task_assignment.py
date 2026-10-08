@@ -1,4 +1,4 @@
-"""Explicit guarded compound acceptance; legacy recipes do not use this client."""
+"""Atomic compound task and agent acceptance for the Fleet SDK."""
 
 from typing import Any
 
@@ -15,7 +15,7 @@ def create_and_assign_guarded(
     description: str,
     *,
     parent: int,
-    preset: str,
+    preset: str | None,
     label: str | None,
     config_overlay: dict[str, Any] | None,
     machine: str | None,
@@ -35,9 +35,10 @@ def create_and_assign_guarded(
             raise TypeError("remind_interval_seconds must be an integer")
         validate_remind_interval_seconds(remind_interval_seconds)
     overlay = dict(config_overlay) if config_overlay else {}
-    if "preset" in overlay:
-        raise ValueError("preset given twice; pass it only as preset")
-    overlay["preset"] = preset
+    if preset is not None:
+        if "preset" in overlay:
+            raise ValueError("preset given twice; pass it only as preset")
+        overlay["preset"] = preset
     body = {
         "actor_agent_id": actor,
         "task": {

@@ -9,7 +9,6 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 import ava
-import ava.agents
 import ava.sdk_surface.agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 
@@ -67,12 +66,6 @@ from ._task_update import (
 # resolves to the function, so annotations that mean the builtin container are
 # spelled `builtins.list[...]`.
 __all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", "update"]
-
-
-def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
-    from base.agents.tasks.creation import ensure_parent_exists
-
-    ensure_parent_exists(cur, parent)
 
 
 def create(
@@ -154,45 +147,36 @@ def create_and_assign(
     title: str,
     description: str,
     *,
-    preset: str = "coder",
+    operation_key: str,
+    preset: str | None = None,
     label: str | None = None,
     config_overlay: dict[str, Any] | None = None,
     machine: str | None = None,
     parent: int,
     remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
-    operation_key: str | None = None,
-    require_idempotency: bool = False,
 ) -> tuple[Task, int]:
-    """Spawn an agent and assign it a task in one call.
+    """Create an agent and its assigned task under one operation key.
 
-    The new agent receives the task id, title, and description as its first
-    message; arguments carry the same meaning as in create() and
-    ava.agents.spawn(). ``machine`` defaults to your own machine.
-    ``parent``: same rule as create(). The parent is validated before the
-    agent spawns.
+    Reuse the key and inputs to recover the original pair after a lost reply.
+    The returned pair proves acceptance; query task and agent state to observe
+    current progress. Borrowed leases are unsupported.
 
-    ``require_idempotency``: opt in to atomic server acceptance with an explicit
-    ``operation_key``. Borrowed leases are unsupported in this mode. A returned
-    pair proves acceptance, not launch or execution. Keyless calls keep the
-    existing recipe; a key without opt-in is rejected.
+    Arguments have the same meaning as in create() and ava.agents.spawn().
+    With no preset selected, current defaults apply; machine defaults to your
+    own machine. The parent must exist and be open before either object is born.
 
     Returns:
         (task, agent_id).
     """
     from base.api_contracts.idempotency import validate_idempotency_key
 
-    if not isinstance(require_idempotency, bool):
-        raise TypeError("require_idempotency must be a bool")
-    if operation_key is not None:
-        operation_key = validate_idempotency_key(operation_key)
-    if require_idempotency and operation_key is None:
-        raise ValueError("require_idempotency requires an explicit operation_key")
-    if not require_idempotency and operation_key is not None:
-        raise ValueError("operation_key requires require_idempotency=True")
+    from ._task_assignment import create_and_assign_guarded
+
+    operation_key = validate_idempotency_key(operation_key)
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
-    preset = coerce_str(preset, "preset")
+    preset = coerce_str(preset, "preset", allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
     machine = coerce_str(machine, "machine", allow_none=True)
@@ -201,54 +185,18 @@ def create_and_assign(
         remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
     )
     priority = coerce_str(priority, "priority")
-    if require_idempotency:
-        from ._task_assignment import create_and_assign_guarded
-
-        assert operation_key is not None, "strong admission requires operation_key"  # noqa: S101
-        return create_and_assign_guarded(
-            title,
-            description,
-            parent=parent,
-            preset=preset,
-            label=label,
-            config_overlay=config_overlay,
-            machine=machine,
-            remind_interval_seconds=remind_interval_seconds,
-            priority=priority,
-            operation_key=operation_key,
-        )
-    # 0. Validate the parent before spawning: create() would reject a bad
-    # parent after the agent exists, leaving an orphaned agent behind.
-    with ava.DB.transaction(), ava.DB.cursor() as cur:
-        _ensure_parent_exists(cur, parent)
-
-    # 1. Spawn the agent — must exist before task creation so it can be the owner.
-    # The preset folds into the overlay at the spawn boundary (task #4086).
-    overlay = dict(config_overlay) if config_overlay else {}
-    if "preset" in overlay:
-        raise ValueError(
-            "preset given twice — as `preset` and as config_overlay['preset']; pass only one"
-        )
-    overlay["preset"] = preset
-    agent_id = ava.agents.spawn(
-        label=label,  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
-        config_overlay=overlay,
-        machine=machine,
-    )
-
-    # 2. Create the task with the spawned agent as owner — create() sends the
-    # notification with task id, title, and description.
-    task = create(
-        title=title,
-        description=description,
+    return create_and_assign_guarded(
+        title,
+        description,
         parent=parent,
+        preset=preset,
+        label=label,
+        config_overlay=config_overlay,
+        machine=machine,
         remind_interval_seconds=remind_interval_seconds,
-        owner=agent_id,
         priority=priority,
+        operation_key=operation_key,
     )
-
-    # 3. Return both so the caller can track the task and the agent.
-    return task, agent_id
 
 
 def update(
