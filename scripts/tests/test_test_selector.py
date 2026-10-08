@@ -23,9 +23,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_queue_branch_always_keeps_the_full_suite(tmp_path: Path) -> None:
     """A queue branch must never let a selected subset replace its full net."""
+    repo_root = _selector_repo(tmp_path)
     result = test_selector.select_tests(
         ["cli/commands.py"],
-        repo_root=tmp_path,
+        repo_root=repo_root,
         event="pull_request",
         head_ref="trunk-merge/batch-42",
     )
@@ -47,6 +48,12 @@ def _write(repo_root: Path, relative_path: str, content: str = "") -> None:
 
 def _selector_repo(tmp_path: Path) -> Path:
     """Build a small checkout with direct imports and known test timings."""
+    _write(
+        tmp_path,
+        "pyproject.toml",
+        "[tool.pytest.ini_options]\n"
+        'testpaths = ["tests", "base/**/tests", "cli/**/tests", "scripts/**/tests"]\n',
+    )
     files = {
         "agent/execution/child.py": "",
         "cli/commands.py": "",
@@ -470,12 +477,13 @@ def test_a_package_test_without_a_timing_entry_costs_the_average(tmp_path: Path)
     ],
 )
 def test_relocated_project_docs_skip_backend_tests(tmp_path: Path, path: str) -> None:
-    result = test_selector.select_tests([path], repo_root=tmp_path)
+    result = test_selector.select_tests([path], repo_root=_selector_repo(tmp_path))
     assert result.decision == "SKIP"
     assert result.reason == "docs-only"
 
 
 def test_component_docs_skip_only_the_regular_pr_suite(tmp_path: Path) -> None:
+    _selector_repo(tmp_path)
     paths = [
         "scripts/lint/docs/lint.ava.okf.md",
         "base/lm/docs/lm.ava.okf.md",

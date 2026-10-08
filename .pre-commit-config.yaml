@@ -135,8 +135,8 @@ repos:
         name: lint fixture scope (no session-scoped mutation of a process global)
         entry: .venv/bin/python scripts/lint/fixture_scope.py --only
         language: system
-        # Every tests/ directory: the top-level one and each package's own <pkg>/**/tests/.
-        files: (^|/)tests/.*\.py$
+        # Every tests/ directory; changing their testpaths owner rechecks the full scope.
+        files: (^|/)tests/.*\.py$|^pyproject\.toml$
 
       # A test may not patch a private name of a package it does not belong to
       # (structure Rule 8): every such reach-in is a missing injection seam, and

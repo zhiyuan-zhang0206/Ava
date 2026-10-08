@@ -302,6 +302,9 @@ def test_directory_with_unreadable_member_is_skipped(
     must be skipped like any unreadable entry — the scan must not crash on it,
     and a violating sibling fixture is still reported."""
     monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
+    )
     tests = tmp_path / "tests"
     tests.mkdir()
     (tests / "ok.py").write_text("value = 1\n", encoding="utf-8")
@@ -332,3 +335,47 @@ def test_explicit_missing_target_is_an_error(
     assert _lint.main([str(missing)]) == 1
     assert str(missing) in capsys.readouterr().err
     assert _lint.main([str(good), str(missing)]) == 1
+
+
+def test_configured_new_host_joins_the_default_fixture_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["new_component/**/tests"]\n', encoding="utf-8"
+    )
+    fixture = tmp_path / "new_component/nested/tests/conftest.py"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text(
+        'import os\nimport pytest\n@pytest.fixture(scope="session")\n'
+        'def leaky():\n    os.environ["AVA_SCOPE_PROOF"] = "1"\n',
+        encoding="utf-8",
+    )
+    assert _lint.main([]) == 1
+    assert "new_component/nested/tests/conftest.py" in capsys.readouterr().out
+    assert _lint.main(["--only", "pyproject.toml"]) == 1
+    assert "new_component/nested/tests/conftest.py" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("testpaths", ["[]", '"tests"', "[1]", '["../**/tests"]', '["base/tests"]'])
+def test_fixture_scan_rejects_invalid_test_scope_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, testpaths: str
+) -> None:
+    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.pytest.ini_options]\ntestpaths = {testpaths}\n", encoding="utf-8"
+    )
+    with pytest.raises((ValueError, TypeError), match="pytest testpaths"):
+        _lint.main([])
+
+
+def test_fixture_scan_requires_the_pytest_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[tool.other]\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="must configure"):
+        _lint.main([])
+    (tmp_path / "pyproject.toml").unlink()
+    with pytest.raises(FileNotFoundError):
+        _lint.main([])
