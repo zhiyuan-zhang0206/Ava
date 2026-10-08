@@ -1,6 +1,6 @@
 ---
 name: calibrate
-description: "Synchronizes agent and human mental models with a codebase, system, workflow, tool, or domain through interactive exploration. Use when the user asks how something works, wants to learn, or begins with an open-ended understanding question."
+description: "Explores a system to build shared understanding. Use when the user wants to learn how something works or align mental models."
 ---
 
 # Calibrate — Syncing Models with Reality

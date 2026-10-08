@@ -1,6 +1,6 @@
 ---
 name: capability-timescale
-description: Calibrates AI-dependent feasibility, scheduling, and estimates against current evidence. Use before planning work around an assumed agent capability ceiling, automation limit, or expected development pace.
+description: "Calibrates AI-dependent feasibility and estimates against current evidence. Use when planning depends on an uncertain agent capability."
 ---
 
 # Capability and timescale calibration

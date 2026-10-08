@@ -1,6 +1,6 @@
 ---
 name: agents
-description: Explains Ava agent lifecycle, commands, presets, schedules, and config overlays. Use when creating or managing agents, defining user commands, scheduling work, changing agent configuration, or clarifying how these concepts differ.
+description: "Manages Ava agents and configuration overlays. Use when spawning, inspecting, restarting, stopping, or configuring agents."
 ---
 
 # Agent-Level Concepts

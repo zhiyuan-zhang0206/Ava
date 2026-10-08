@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: "Runs Gemini, ChatGPT, or Perplexity Deep Research in a logged-in browser and retrieves the cited report. Use when the user wants long, multi-source, cited web research rather than a quick answer; expect a long-running job."
+description: "Runs Deep Research in Gemini, ChatGPT, or Perplexity browsers. Use when obtaining a cited research report from those web apps."
 ---
 
 # deep-research — Gemini / ChatGPT / Perplexity Deep Research, fetched as a report

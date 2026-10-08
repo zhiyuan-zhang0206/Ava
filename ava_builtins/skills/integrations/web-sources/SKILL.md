@@ -1,6 +1,6 @@
 ---
 name: web-sources
-description: Fetches internet pages, posts, videos, feeds, and creator updates through source-specific adapters. Use when following a source, checking recent updates, ingesting web content, or retrieving a URL; always choose and load the matching adapter.
+description: "Retrieves web content using source-specific adapters. Use when fetching a URL, feed, channel, or creator's updates."
 ---
 
 # web-sources —— Internet Content Fetching

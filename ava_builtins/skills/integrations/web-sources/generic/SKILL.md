@@ -1,6 +1,6 @@
 ---
 name: generic
-description: Extracts a web page's main text and metadata or enumerates article links by URL pattern. Use for official sites, forums, newsletters, and other sources with no dedicated adapter or RSS feed.
+description: "Extracts webpage text or lists article URLs. Use for sites without a dedicated adapter or usable RSS feed."
 ---
 
 # generic

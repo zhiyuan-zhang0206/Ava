@@ -1,6 +1,6 @@
 ---
 name: modification-layers
-description: Routes Ava deployment changes to install extensions, skill edits, plugin development, or kernel development. Use before modifying Ava itself, especially when deciding where files belong, how changes take effect, or whether an operator cluster update is required.
+description: "Routes Ava changes to packages, skills, plugins, or kernel development. Use when choosing where a customization belongs."
 ---
 
 # Modification layers
