@@ -132,7 +132,8 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     def record(label: str) -> Callable[..., object]:
         return lambda *_args, **_kwargs: events.append(label)
 
-    def record_start(**kwargs: object) -> int:
+    def record_start(operation: pause_owner.PauseOwnerSnapshot | None, **kwargs: object) -> int:
+        assert operation is None
         assert kwargs["persist_services"] is False
         events.append("services-started")
         return 0
