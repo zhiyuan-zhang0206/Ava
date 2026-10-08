@@ -297,6 +297,16 @@ def computer_mcp_socket() -> Path:
     return run_dir() / "computer-mcp.sock"
 
 
+def insights_socket() -> Path:
+    """Unix socket the insights service answers on ($AVA_HOME/run/insights.sock).
+
+    The service has no authentication of its own: the gateway authenticates the caller and
+    proxies to it, and a socket in the home's run directory (mode 0600, bound by the service)
+    is reachable by the home's owner only. The service binds here and the gateway dials here.
+    """
+    return run_dir() / "insights.sock"
+
+
 def mcp_daemon_shared_socket() -> str:
     """Filesystem path of the per-machine shared MCP daemon socket — one
     socket under `$AVA_HOME/run` serving every agent on the machine (the daemon

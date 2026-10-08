@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from gateway.events import audit_rows
+from base.events import audit_rows
 
 router = APIRouter()
 

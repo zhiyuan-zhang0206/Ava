@@ -2,7 +2,7 @@
 
 The programmatic query surface over the unified event stream (audit /
 telemetry / log). One schema and one correlation key (`trace_id`). Audit rows
-are read from `audit_events` (`gateway/events/audit_rows.py`) and telemetry and
+are read from `audit_events` (`base/events/audit_rows.py`) and telemetry and
 log rows from `telemetry_events` (`gateway/events/telemetry_rows.py`), both in
 Postgres and both permanent. A request that spans both is answered by one
 merge, newest first. `telemetry_events` stores only the events a reader queries by name and
@@ -44,9 +44,10 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.config import settings
+from base.events import audit_rows
 from base.events.contract import EVENTS, EventTier, tier_for
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.events import audit_rows, telemetry_rows
+from gateway.events import telemetry_rows
 from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
 
 router = APIRouter()
