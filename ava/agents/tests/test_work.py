@@ -26,7 +26,9 @@ def test_work_namespace_is_discoverable_in_sdk_help() -> None:
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
         ava.help(work)
-    assert "observe" in output.getvalue() and "cancel" in output.getvalue()
+    assert all(
+        name in output.getvalue() for name in ("observe", "cancel", "restart", "restart_status")
+    )
 
 
 @pytest.mark.parametrize("agent_id", [True, 0, -1, 2**63])
@@ -116,9 +118,18 @@ def test_invalid_key_refused_before_http(key: str) -> None:
         work.cancel(TARGET, idempotency_key=key)
 
 
-def test_copied_invalid_target_is_revalidated_before_http() -> None:
-    invalid = TARGET.model_copy(update={"protocol": True})
-    with pytest.raises(ValueError):
+@pytest.mark.parametrize("field", ["protocol", "agent_id"])
+def test_copied_invalid_target_is_revalidated_before_http(field: str) -> None:
+    invalid = TARGET.model_copy(update={field: True})
+
+    def unexpected(_request: httpx.Request) -> httpx.Response:
+        pytest.fail("invalid copied target reached HTTP")
+
+    with (
+        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(unexpected)) as http,
+        transport.use_client(http),
+        pytest.raises(ValueError),
+    ):
         work.cancel(invalid, idempotency_key="intent")
 
 
