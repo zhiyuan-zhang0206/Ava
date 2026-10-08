@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 import ava
 import ava.sdk_surface.agent_identity
@@ -55,6 +56,7 @@ __all_for_ava__ = [
     "commands",
     "get_ancestors",
     "get_last_message",
+    "get_launch_attempt",
     "get_neighbors",
     "get_status",
     "list_agents",
@@ -419,14 +421,49 @@ def spawn(
     )
 
 
-def retry_launch(agent_id: int) -> int:
+def get_launch_attempt(agent_id: int) -> UUID:
+    """Read the current launch attempt ID for an explicit retry.
+
+    Keep this value with the retry's key; a later observation may describe
+    another attempt. Fails when no launch attempt can be observed.
+    """
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    return _client.get_launch_attempt(agent_id)
+
+
+def retry_launch(
+    agent_id: int,
+    *,
+    require_idempotency: bool = False,
+    idempotency_key: str | None = None,
+    expected_prior_attempt_id: str | UUID | None = None,
+) -> int:
     """Retry starting an existing agent after a launch failure.
 
     This keeps its identity and first prompt. Use the agent id returned in the
-    failed creation response.
+    failed creation response. Set `require_idempotency=True` with an explicit
+    `idempotency_key` and the `expected_prior_attempt_id` you observed to retry
+    one fixed attempt. Reuse all three values when recovering a lost response;
+    acceptance does not prove the agent started. A new retry needs a new key
+    and the latest observed attempt.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return _client.retry_launch(agent_id)
+    from ava.gateway_client.launch_retry import validate_retry_admission
+
+    admission = validate_retry_admission(
+        require_idempotency=require_idempotency,
+        key=idempotency_key,
+        prior=expected_prior_attempt_id,
+    )
+    if admission is None:
+        return _client.retry_launch(agent_id)
+    key, request = admission
+    return _client.retry_launch(
+        agent_id,
+        require_idempotency=True,
+        idempotency_key=key,
+        expected_prior_attempt_id=request.expected_prior_attempt_id,
+    )
 
 
 def spawn_impl(
