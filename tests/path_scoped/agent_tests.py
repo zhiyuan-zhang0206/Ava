@@ -1,47 +1,21 @@
-"""Shared fixtures for the agent tests (registered by `tests/fixtures/path_scopes.py`).
+"""Shared isolation fixtures for agent tests.
 
-`fake_cancel_event` replaces llm._cancel / exec.node's `subscribe_interrupt` — lets tests
-trigger the cancel race directly via `event.set()`, avoiding a real DB inbound
-watcher (slow + flaky). The production path always goes through RAII subscribe
-(inbound Redis pub/sub); this fixture only affects name bindings in the import
-path, with zero impact on production.
-
-Shared here rather than in individual test files: test_cancel.py verifies the
-race trigger; test_graph_stream.py runs llm/exec nodes without wanting a real
-Redis SUBSCRIBE (fake_redis is an AsyncMock, no pubsub behavior).
+Registered by `tests/fixtures/path_scopes.py`. The cancel-race fixture lives
+in `agent.graph.llm.tests.cancel_fixture` and is registered as an opt-in root pytest plugin.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncGenerator, Iterator
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
 from typing import Any
 
 import psycopg
 import pytest
-from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.interrupt import InterruptEvent
 from base.config import settings
 from base.db.test_db_guard import assert_test_db_url
 from tests._containers import grant_runner_login
-
-
-@pytest.fixture
-def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
-    event = InterruptEvent()
-
-    @asynccontextmanager
-    async def fake_subscribe(
-        _pool: AsyncConnectionPool | None, _agent_id: int
-    ) -> AsyncGenerator[InterruptEvent]:
-        yield event
-
-    monkeypatch.setattr("agent.graph.llm._cancel.subscribe_interrupt", fake_subscribe)
-    monkeypatch.setattr("agent.graph.exec.node.subscribe_interrupt", fake_subscribe)
-    monkeypatch.setattr("agent.hooks.compact.subscribe_interrupt", fake_subscribe)
-    return event
 
 
 @pytest.fixture(autouse=True)
