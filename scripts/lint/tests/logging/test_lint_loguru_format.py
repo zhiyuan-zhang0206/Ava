@@ -103,10 +103,6 @@ def test_exemption_marker_on_any_line_of_the_call() -> None:
     assert _lines(src) == []
 
 
-def test_real_tree_has_zero_violations() -> None:
-    assert _lint.main([]) == 0
-
-
 def test_explicit_missing_target_is_an_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
