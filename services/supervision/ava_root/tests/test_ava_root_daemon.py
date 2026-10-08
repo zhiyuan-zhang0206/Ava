@@ -653,3 +653,54 @@ def test_failed_shutdown_reports_error_and_exits_without_another_stop(short_tmp:
             assert not (run_dir / "custody").exists()
         finally:
             _kill_quietly(child)
+
+
+@pytest.mark.parametrize("refuses_stop", [False, True])
+def test_unknown_monitor_failure_exits_and_preserves_cleanup_refusal(
+    short_tmp: Path, refuses_stop: bool
+) -> None:
+    ready = short_tmp / "child-ready"
+    fault = short_tmp / "fail-round"
+    units: list[dict[str, object]] = (
+        [{"id": "svc", "exec": _stubborn(ready), "restart": "never"}] if refuses_stop else []
+    )
+    manifests = _write_manifests(short_tmp, units)
+    fixture = short_tmp / "fixtures"
+    fixture.mkdir()
+    (fixture / "unknown_monitor.py").write_text(
+        "from pathlib import Path\n"
+        "from services.supervision.ava_root.selfcheck import TreeSelfCheck, SelfCheckConfig\n"
+        "from services.supervision.ava_root.supervisor import SupervisorConfig\n"
+        "class Monitor(TreeSelfCheck):\n"
+        "    def run_once(self):\n"
+        f"        if Path({str(fault)!r}).exists():\n"
+        "            raise ValueError('unknown-monitor-primary')\n"
+        "def build(context):\n"
+        "    context.supervisor._config = SupervisorConfig(stop_timeout_s=0.15)\n"
+        "    return Monitor(context.supervisor, config=SelfCheckConfig(interval_s=0.01), "
+        "tasks=context.participant_tasks)\n"
+    )
+    run_dir = short_tmp / "run"
+    with _daemon(
+        run_dir,
+        manifests,
+        wiring="unknown_monitor:build",
+        env=_wiring_env(fixture, short_tmp / "markers"),
+    ) as (proc, log):
+        client = _wait_ready(run_dir, proc, log)
+        child = None
+        if refuses_stop:
+            _wait_for(ready.exists, "child did not install its TERM handler")
+            child = cast(int, _units_of(client.status())[0]["pid"])
+        try:
+            fault.touch()
+            assert proc.wait(timeout=5) != 0
+            detail = _read_log(log)
+            assert "unknown-monitor-primary" in detail
+            if child is not None:
+                assert "unit svc did not stop" in detail
+                _assert_alive(child)
+            assert not (run_dir / "custody").exists()
+        finally:
+            if child is not None:
+                _kill_quietly(child)
