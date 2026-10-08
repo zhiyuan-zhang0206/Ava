@@ -74,6 +74,9 @@ def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Pa
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
     _baseline(tmp_path)
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Empty baseline")
     return tmp_path
 
 
@@ -122,6 +125,7 @@ def test_free_floating_background_work_names_the_service_loop_alternative(
 def test_a_frozen_site_passes(_repo: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write(_repo, "base/state.py", "_REGISTRY = {}\n")
     _baseline(_repo, {"base/state.py::ambient-container:_REGISTRY": 1})
+    _commit_base(_repo, with_lint=True)
 
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
@@ -140,6 +144,7 @@ def test_schedules_are_governed_by_this_rule_only(
     assert "schedules/daily.py:6:" in capsys.readouterr().out
 
     _baseline(_repo, {"schedules/daily.py::ambient-container:_STATE": 1})
+    _commit_base(_repo, with_lint=True)
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
 
