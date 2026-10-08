@@ -41,6 +41,7 @@ function Stat({ label, value, title }: { label: string; value: string; title?: s
 function Tokens({ usage, seconds }: { usage: RunTimelineUsage | RunTimelineGeneration; seconds?: number }) {
   const t = useTranslations("runTimeline");
   const hit = cacheHitRate(usage);
+  const own = "cost_usd" in usage ? usage : null;
   return (
     <dl className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
       <Stat label={t("calls")} value={String(usage.calls)} />
@@ -50,7 +51,17 @@ function Tokens({ usage, seconds }: { usage: RunTimelineUsage | RunTimelineGener
         value={formatTokensCompact(usage.cache_read)}
         title={hit === null ? undefined : t("cacheHit", { percent: Math.round(hit * 100) })}
       />
+      {own ? (
+        <Stat label={t("cacheWrite")} value={formatTokensCompact(own.cache_write)} title={String(own.cache_write)} />
+      ) : null}
       <Stat label={t("output")} value={formatTokensCompact(usage.output)} title={String(usage.output)} />
+      {own ? (
+        <Stat
+          label={t("cost")}
+          value={own.cost_calls === 0 ? t("costUnknown") : `$${own.cost_usd.toFixed(4)}`}
+          title={own.cost_calls > 0 && own.cost_calls < own.calls ? t("costPartial", { priced: own.cost_calls, calls: own.calls }) : undefined}
+        />
+      ) : null}
       {seconds !== undefined ? <Stat label={t("seconds")} value={`${seconds.toFixed(1)}s`} /> : null}
     </dl>
   );

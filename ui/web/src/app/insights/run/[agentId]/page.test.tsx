@@ -58,7 +58,7 @@ import Loading from "./loading";
 const LIFETIME = { from: "2026-10-04T12:00:00.000000Z", to: "2026-10-04T16:00:00.000000Z" };
 const LEAF_A = { from: "2026-10-04T12:00:00.123456Z", to: "2026-10-04T13:00:00.654321Z" };
 
-const usage = { calls: 3, input: 3000, cache_read: 2400, output: 120 };
+const usage = { calls: 3, input: 3000, cache_read: 2400, output: 120, cache_write: 0, cost_usd: 0.0123, cost_calls: 3 };
 
 const lifetimeResponse: RunTimelineResponse = {
   agent_id: 42,
@@ -88,7 +88,7 @@ const lifetimeResponse: RunTimelineResponse = {
       span_start: 6,
       span_end: 9,
       summary: "It implemented and tested it.",
-      usage: { calls: 1, input: 100, cache_read: 0, output: 10 },
+      usage: { calls: 1, input: 100, cache_read: 0, output: 10, cache_write: 0, cost_usd: 0, cost_calls: 0 },
       generation: null,
       context_tokens: null,
       estimated: null,
@@ -102,7 +102,7 @@ const lifetimeResponse: RunTimelineResponse = {
       span_start: 1,
       span_end: 9,
       summary: "A whole task, start to finish.",
-      usage: { calls: 4, input: 3100, cache_read: 2400, output: 130 },
+      usage: { calls: 4, input: 3100, cache_read: 2400, output: 130, cache_write: 0, cost_usd: 0, cost_calls: 0 },
       generation: null,
       context_tokens: null,
       estimated: null,

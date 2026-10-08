@@ -347,3 +347,56 @@ def test_no_provenance_labels_when_unknown(loguru_records: list[dict[str, Any]])
     log_llm_usage(msg, model="gemini-3.8-flash")
     assert "cache_mechanism" not in loguru_records[0]["extra"]
     assert "cache_scope" not in loguru_records[0]["extra"]
+
+
+_EVENT_KEYS = (
+    "model",
+    "in_total",
+    "out_total",
+    "cache_read",
+    "cache_write_5m",
+    "cache_write_1h",
+    "reasoning",
+    "cost_usd",
+    "price_miss",
+    "price_hit",
+    "price_out",
+    "price_write_5m",
+    "price_write_1h",
+)
+
+
+def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
+    msg = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 3000,
+            "output_tokens": 80,
+            "total_tokens": 3080,
+            "input_token_details": {
+                "cache_read": 1500,
+                "ephemeral_5m_input_tokens": 400,
+                "ephemeral_1h_input_tokens": 100,
+            },
+            "output_token_details": {"reasoning": 20},
+        },
+    )
+    log_llm_usage(msg, model="claude-opus-4-7")
+    event: dict[str, Any] = loguru_records[0]["extra"]
+    stamped = msg.additional_kwargs["ava_usage"]
+    assert stamped["cost_usd"] > 0
+    assert (stamped["cache_write_5m"], stamped["cache_write_1h"]) == (400, 100)
+    for key in _EVENT_KEYS:
+        assert stamped.get(key) == event.get(key), key
+    assert set(stamped) <= set(_EVENT_KEYS) | {"unpriced"}
+
+
+def test_non_agent_logging_does_not_stamp(loguru_records):
+    from base.lm.usage import log_usage_from_message
+
+    msg = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
+    )
+    log_usage_from_message(msg, "claude-opus-4-7", usage_kind="label")
+    assert "ava_usage" not in msg.additional_kwargs

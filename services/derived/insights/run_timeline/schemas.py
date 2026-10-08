@@ -22,7 +22,10 @@ class RunTimelineWindow(BaseModel):
 class RunTimelineUsage(BaseModel):
     """The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.
 
-    `input` is the provider's total input tokens (cache reads included).
+    `input` is the provider's total input tokens (cache reads and writes included).
+    `cost_usd` sums the usage-time cost recorded on the AIMessages (`ava_usage`); `cost_calls` is
+    how many of `calls` carry one, the rest (older messages, unpriced models) being unknown, not
+    estimated.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -31,6 +34,9 @@ class RunTimelineUsage(BaseModel):
     input: int
     cache_read: int
     output: int
+    cache_write: int
+    cost_usd: float
+    cost_calls: int
 
 
 class RunTimelineGeneration(BaseModel):
