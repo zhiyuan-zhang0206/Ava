@@ -13,10 +13,12 @@ from typing import NoReturn
 import pytest
 
 STATIC_TEST_PATHS = (
-    "scripts/lint/tests/logging/test_lint_loguru_format.py",
-    "scripts/lint/tests/logging/test_lint_logger_add_diagnose.py",
-    "scripts/lint/tests/logging/test_lint_no_emoji.py",
+    "scripts/audit/tests",
+    "scripts/content_lint/tests",
+    "scripts/lint/tests",
+    "scripts/structure/tests",
     "tests/fixtures/tests/test_static_environment.py",
+    "tests/fixtures/tests/test_static_environment_selection.py",
 )
 
 
@@ -46,10 +48,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def _owned_path(config: pytest.Config, path: Path) -> bool:
     try:
-        relative = path.resolve().relative_to(config.rootpath.resolve()).as_posix()
+        relative = path.resolve().relative_to(config.rootpath.resolve())
     except ValueError:
         return False
-    return relative in STATIC_TEST_PATHS
+    return any(
+        relative == Path(owned)
+        or ((config.rootpath / owned).is_dir() and relative.is_relative_to(owned))
+        for owned in STATIC_TEST_PATHS
+    )
 
 
 def _argument_path(config: pytest.Config, arg: str) -> Path:
@@ -95,16 +101,20 @@ def _select_static_paths(config: pytest.Config) -> None:
         config.args[:] = [str(config.rootpath / path) for path in STATIC_TEST_PATHS]
     outside = [arg for arg in config.args if not _owned_path(config, _argument_path(config, arg))]
     if outside:
-        raise pytest.UsageError(f"Static processes accept only owned static test files: {outside}")
+        raise pytest.UsageError(f"Static processes accept only owned static test paths: {outside}")
 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config: pytest.Config) -> None:
     if not static_mode(config) and not config.getoption("omit_static_tests"):
         return
-    missing = [path for path in STATIC_TEST_PATHS if not (config.rootpath / path).is_file()]
+    missing = [
+        path
+        for path in STATIC_TEST_PATHS
+        if not (config.rootpath / path).is_file() and not (config.rootpath / path).is_dir()
+    ]
     if missing:
-        raise pytest.UsageError(f"Static test ownership names missing files: {missing}")
+        raise pytest.UsageError(f"Static test ownership names missing paths: {missing}")
     if not static_mode(config):
         config.args[:] = [
             arg for arg in config.args if not _owned_path(config, _argument_path(config, arg))
