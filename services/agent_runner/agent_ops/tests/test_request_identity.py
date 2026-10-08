@@ -219,7 +219,7 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
 
 def test_request_identity_migration_upgrades_and_replays(db_conn: psycopg.Connection) -> None:
     migration = Path(__file__).resolve().parents[4] / (
-        "migrations/2026/10/07/20261007T103915_ops-request-identity.sql"
+        "migrations/2026/10/07/10/20261007T103915_ops-request-identity.sql"
     )
     with db_conn.transaction():
         db_conn.execute("ALTER TABLE api_idempotency DROP COLUMN request_hash")
