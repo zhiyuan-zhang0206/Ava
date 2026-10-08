@@ -41,7 +41,7 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
             )
 
         monkeypatch.setattr(_probe_commands, "_probe_service", probe)
-        assert _start_commands.cmd_start(persist_services=False) == 0
+        assert _start_commands.cmd_start(persist_services=False, retained_children=[]) == 0
         # Completion must release the real business gate in the same turn,
         # without a sleep that lets an independent posture cache expire.
         resumed = client.get("/api/agents")

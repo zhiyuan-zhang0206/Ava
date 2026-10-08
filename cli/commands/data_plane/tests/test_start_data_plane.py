@@ -1,5 +1,6 @@
 """Data-plane startup ordering, authority and prerequisite contracts."""
 
+import subprocess
 from collections.abc import Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -253,7 +254,11 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
     ],
 )
 def test_storage_refuses_missing_credentials_before_effects(
-    monkeypatch: pytest.MonkeyPatch, secret: str, missing: str, reason: str
+    monkeypatch: pytest.MonkeyPatch,
+    secret: str,
+    missing: str,
+    reason: str,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """Redis always authenticates, so an empty bearer does not excuse missing
     Redis credentials: a home born without them is refused before any native
@@ -273,4 +278,10 @@ def test_storage_refuses_missing_credentials_before_effects(
             cluster_secret=secret,
             redis_user="ava",
             **credentials,
+            retained_children=retained_children,
         )
+
+
+@pytest.fixture
+def retained_children() -> list[subprocess.Popen[bytes]]:
+    return []

@@ -11,6 +11,16 @@ its own POSIX session. The data plane survives application-root replacement.
 It does not use `pg_ctl` to detach, discover, reload or stop the home server.
 Throwaway restore/test PostgreSQL has a separate retained-process boundary.
 
+The CLI invocation owns a plain list of its launched `Popen` handles. Only its
+PostgreSQL handlers receive that list through parser composition; parser inspection
+without an owner cannot launch a postmaster. Direct launch callers supply their own
+list. Callers invoking `cli.main.main` repeatedly in one interpreter can explicitly
+reuse the same list across start and stop. New invocations otherwise have independent
+lists. The handle is retained immediately after spawn, including failed admission;
+it supplies reaping, never native signal authority. After verified native closure,
+stop waits at most one second for the matching retained child and removes its handle.
+Returning from a CLI invocation does not stop a live data plane.
+
 `$AVA_HOME/run/postgres.json` records pending admission before spawn, then the
 captured native child before readiness. Linux identity is boot UUID, PID and
 mandatory kernel start ticks; macOS uses boot UUID and the exact stable kernel

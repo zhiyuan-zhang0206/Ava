@@ -35,7 +35,7 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
     own_calls: list[dict[str, object]] = []
     monkeypatch.setattr(_ci, "ensure_cluster_storage", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _start._ensure_gateway_data_plane() == 0
+    assert _start._ensure_gateway_data_plane(retained_children=[]) == 0
     # The root that holds the secret published the telemetry token the station probe reads.
     from base.cluster.authority.api import read_telemetry_token, telemetry_token
     from base.paths import ava_home
@@ -50,6 +50,7 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
             "redis_admin_password": "redis-admin",
             "redis_password": "redis-runtime",
             "redis_user": "ava",
+            "retained_children": [],
         }
     ]
 
@@ -68,7 +69,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
         "ensure_cluster_storage",
         lambda **_kw: pytest.fail("native effect on a legacy home"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _start._ensure_gateway_data_plane() == 1
+    assert _start._ensure_gateway_data_plane(retained_children=[]) == 1
     assert "no conversion exists" in capsys.readouterr().err
 
 
@@ -81,4 +82,18 @@ def test_gateway_data_plane_no_record_is_error(monkeypatch: pytest.MonkeyPatch) 
         lambda **_kw: pytest.fail("bring-up without a record"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _start._ensure_gateway_data_plane() == 1
+    assert _start._ensure_gateway_data_plane(retained_children=[]) == 1
+
+
+def test_local_launch_without_owner_cannot_publish_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    from cli.commands.data_plane import bringup
+
+    effect = Mock(side_effect=AssertionError("authority must not be published"))
+    monkeypatch.setattr("base.cluster.authority.api.publish_telemetry_token", effect)
+    with pytest.raises(ValueError, match="caller-owned child retention"):
+        bringup.ensure_gateway_data_plane()
+    effect.assert_not_called()

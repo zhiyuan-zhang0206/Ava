@@ -56,7 +56,7 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     def skip_converge(*_args: object, **_kwargs: object) -> None:
         return None
 
-    def ensure_gateway_data_plane() -> int:
+    def ensure_gateway_data_plane(*, retained_children: object) -> int:
         return 0
 
     def prepare_gateway_schema() -> None:

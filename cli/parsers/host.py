@@ -10,6 +10,8 @@ Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+import subprocess
+from functools import partial
 
 
 def _h_init(args: argparse.Namespace) -> int:
@@ -18,13 +20,23 @@ def _h_init(args: argparse.Namespace) -> int:
     return run_init(args)
 
 
-def _h_start(args: argparse.Namespace) -> int:
+def _h_start(
+    args: argparse.Namespace,
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
+    if retained_children is None:
+        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from cli.start_intent import run_start
 
-    return run_start(args)
+    return run_start(args, retained_children=retained_children)
 
 
-def _h_stop(args: argparse.Namespace) -> int:
+def _h_stop(
+    args: argparse.Namespace,
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
     from cli.commands.lifecycle.stop import cmd_stop
 
     return cmd_stop(
@@ -33,13 +45,20 @@ def _h_stop(args: argparse.Namespace) -> int:
         preserve_sessions=frozenset(args.keep_service),
         force=args.force,
         timeout=args.timeout,
+        retained_children=retained_children,
     )
 
 
-def _h_restart(args: argparse.Namespace) -> int:
+def _h_restart(
+    args: argparse.Namespace,
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
+    if retained_children is None:
+        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from cli.commands.lifecycle.stop import cmd_restart
 
-    return cmd_restart(mode=args.mode)
+    return cmd_restart(mode=args.mode, retained_children=retained_children)
 
 
 def _h_status(args: argparse.Namespace) -> int:
@@ -150,7 +169,11 @@ def _add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     init_p.set_defaults(func=_h_init)
 
 
-def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _add_start_parser(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> None:
     # `ava start` — brings up a home `ava init` initialized; the service selection
     # is its only input.
     start_p = sub.add_parser(
@@ -188,10 +211,18 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         metavar="SERVICE",
         help="run only these services (repeatable; persisted for restart)",
     )
-    start_p.set_defaults(func=_h_start)
+    start_p.set_defaults(
+        func=_h_start
+        if retained_children is None
+        else partial(_h_start, retained_children=retained_children)
+    )
 
 
-def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _add_stop_parser(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> None:
     stop_p = sub.add_parser(
         "stop",
         help="[host] stop services, terminals and data plane; preserve data and agent identities",
@@ -230,10 +261,18 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         action="store_true",
         help="explicitly permit force-killing work that cannot exit normally",
     )
-    stop_p.set_defaults(func=_h_stop)
+    stop_p.set_defaults(
+        func=_h_stop
+        if retained_children is None
+        else partial(_h_stop, retained_children=retained_children)
+    )
 
 
-def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _add_restart_parser(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> None:
     restart_p = sub.add_parser(
         "restart",
         help="[host] normal stop then start, retaining the data plane and browser (persistent terminals close, as at stop)",
@@ -246,7 +285,11 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         default="smooth",
         help="'smooth' preserves completed work; 'force' explicitly permits forced resource shutdown",
     )
-    restart_p.set_defaults(func=_h_restart)
+    restart_p.set_defaults(
+        func=_h_restart
+        if retained_children is None
+        else partial(_h_restart, retained_children=retained_children)
+    )
 
 
 def _add_status_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -292,13 +335,17 @@ def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     firewall_sync_p.set_defaults(func=_h_firewall_sync)
 
 
-def _h_lgtm(args: argparse.Namespace) -> int:
+def _h_lgtm(
+    args: argparse.Namespace,
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
     from cli.commands.observability.lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
 
     if args.lgtm_cmd == "on":
-        return cmd_lgtm_on()
+        return cmd_lgtm_on(retained_children=retained_children)
     if args.lgtm_cmd == "off":
-        return cmd_lgtm_off()
+        return cmd_lgtm_off(retained_children=retained_children)
     if args.lgtm_cmd == "render":
         from cli.commands.observability.grafana_render import cmd_grafana_render
 
@@ -306,7 +353,11 @@ def _h_lgtm(args: argparse.Namespace) -> int:
     return cmd_lgtm_status()
 
 
-def _add_lgtm_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _add_lgtm_parser(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> None:
     # `ava lgtm on|off|status` — the observability-stack toggle on THIS host.
     # One command each way so observability's own overhead is measurable:
     # `off` removes the $AVA_HOME/lgtm-host marker (converge + watchdog stop
@@ -323,7 +374,11 @@ def _add_lgtm_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         ("status", "marker + containers + readiness probes"),
     ):
         p = lgtm_sub.add_parser(name, help=help_text)
-        p.set_defaults(func=_h_lgtm)
+        p.set_defaults(
+            func=_h_lgtm
+            if retained_children is None or name == "status"
+            else partial(_h_lgtm, retained_children=retained_children)
+        )
     render_p = lgtm_sub.add_parser(
         "render",
         help="render the ava-ops dashboard from the metric registries and diff it "
