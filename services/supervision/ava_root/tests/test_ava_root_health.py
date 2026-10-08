@@ -439,16 +439,19 @@ async def test_gate_decline_resets_and_later_round_acts(
 
 
 async def test_start_stop_loop(clock: FakeClock) -> None:
-    probe = CellProbe(DaemonProbe.up("ok"))
-    stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(interval_s=0.01))
-    await monitor.start()
-    with pytest.raises(RuntimeError, match="already started"):
+    async with asyncio.TaskGroup() as tasks:
+        probe = CellProbe(DaemonProbe.up("ok"))
+        stub = StubSupervisor()
+        monitor = HealthMonitor(
+            stub, _registry("svc", probe), config=_config(interval_s=0.01), tasks=tasks
+        )
         await monitor.start()
-    await asyncio.sleep(0.05)
-    await monitor.stop()
-    assert probe.calls >= 1
-    await monitor.stop()  # a second stop is a no-op
+        with pytest.raises(RuntimeError, match="already started"):
+            await monitor.start()
+        await asyncio.sleep(0.05)
+        await monitor.stop()
+        assert probe.calls >= 1
+        await monitor.stop()  # a second stop is a no-op
 
 
 # -- integration against the real supervisor -----------------------------------
