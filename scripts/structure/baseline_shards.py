@@ -1,10 +1,10 @@
 """The structure baseline, sharded by directory so unrelated changes touch different files.
 
-`scripts/structure/baseline/<shard>.json` holds every frozen entry whose path
-lives in that shard's directory: the entry's directory cut to its first two
-components (`agent/graph` -> `agent.graph.json`, `cli/commands/_x.py` ->
-`cli.commands.json`, `scripts/lint_x.py` -> `scripts.json`). A shard maps
-section names to their entries and omits empty sections. One file per area
+`scripts/structure/baseline/<component>/<area>.json` groups frozen entries
+by the first two components of their directory (`agent/graph` ->
+`agent/graph.json`, `cli/commands/_x.py` -> `cli/commands.json`,
+`scripts/lint_x.py` -> `scripts.json`). Historical flat shard names remain
+readable. A shard maps section names to their entries and omits empty sections. One file per area
 keeps concurrent PRs off each other's lines. Existing entries can stay in their
 original shard when their files move; duplicate section/key pairs are errors.
 
@@ -34,14 +34,14 @@ _SHARD_DEPTH = 2
 
 
 def shard_of(kind: str, key: str) -> str:
-    """The shard name for one entry: its directory's first two components, dot-joined.
+    """The shard name for one entry: its directory's first two components, slash-joined.
 
     A `directories` key is itself the directory; every other key names a file
     (`path` or `path::target`) whose parent directory decides.
     """
     path = PurePosixPath(key.split("::", 1)[0])
     directory = path if kind == "directories" else path.parent
-    return ".".join(directory.parts[:_SHARD_DEPTH])
+    return "/".join(directory.parts[:_SHARD_DEPTH])
 
 
 def shard_path(kind: str, key: str) -> str:
@@ -103,9 +103,9 @@ def read_worktree(repo_root: Path) -> dict[str, str]:
             f"baseline directory missing: {SHARD_DIR} (its README.md keeps it tracked)"
         )
     return {
-        path.stem: path.read_text(encoding="utf-8")
-        for path in sorted(directory.glob("*.json"))
-        if path.name != RULES_FILE
+        path.relative_to(directory).with_suffix("").as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(directory.rglob("*.json"))
+        if path.relative_to(directory).as_posix() != RULES_FILE
     }
 
 
@@ -125,7 +125,7 @@ def read_at(repo_root: Path, rev: str) -> dict[str, str] | None:
             ["git", "-C", str(repo_root), *args], capture_output=True, text=True, check=False
         )
 
-    listing = git("ls-tree", "--name-only", f"{rev}:{SHARD_DIR}")
+    listing = git("ls-tree", "-r", "--name-only", f"{rev}:{SHARD_DIR}")
     if listing.returncode:
         return None
     filenames = [
