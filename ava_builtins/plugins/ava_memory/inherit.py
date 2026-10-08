@@ -33,8 +33,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from base.agents.context import AvaContext
 from base.config import settings
-from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.paths import workspace_dir_readonly
 
@@ -120,7 +120,7 @@ def parse_inheritable_blocks(text: str) -> list[str]:
     return blocks
 
 
-def _ancestor_chain(agent_id: int) -> list[dict[str, Any]] | None:
+def _ancestor_chain(agent_id: int, ctx: AvaContext) -> list[dict[str, Any]] | None:
     """The birth chain above `agent_id` (nearest ancestor first), or None when
     the gateway read failed.
 
@@ -134,14 +134,14 @@ def _ancestor_chain(agent_id: int) -> list[dict[str, Any]] | None:
     from base.agents import GatewayUnavailable
 
     try:
-        return gateway_client.get_born_chain(agent_id)
+        return gateway_client.get_born_chain(agent_id, context=ctx)
     except (GatewayUnavailable, httpx.HTTPStatusError) as exc:
         logger.warning("[inherited-memory] born-chain read failed (agent {}): {}", agent_id, exc)
         return None
 
 
 def _collect_blocks(
-    agent_id: int, depth: int
+    agent_id: int, depth: int, ctx: AvaContext
 ) -> tuple[list[_InheritedBlock], list[dict[str, Any]]]:
     """Blocks declared by the first `depth` ancestors, plus the ancestors
     skipped for machine locality.
@@ -157,7 +157,7 @@ def _collect_blocks(
     from base.cluster import machine as host_machine
     from base.cluster.machine import MachineNameMissing
 
-    chain = _ancestor_chain(agent_id)
+    chain = _ancestor_chain(agent_id, ctx)
     if chain is None:
         return [], []
     try:
@@ -259,7 +259,7 @@ def _fit_sections(
     return sections, cutoff
 
 
-def inherited_memory_note(slices: AgentSlices) -> HumanMessage | None:
+def inherited_memory_note(ctx: AvaContext) -> HumanMessage | None:
     """The `inheritable` blocks read from the agent's birth chain.
 
     Returns None when the layer is off (`memory_inherit_depth` 0 or eval
@@ -271,6 +271,7 @@ def inherited_memory_note(slices: AgentSlices) -> HumanMessage | None:
     timestamps — so unchanged state renders byte-identical across
     establishments and forks keep their inherited prefix stable.
     """
+    slices = ctx.require_agent()
     if slices.sandbox.eval_isolation:
         return None
     depth = slices.memory.memory_inherit_depth
@@ -279,10 +280,10 @@ def inherited_memory_note(slices: AgentSlices) -> HumanMessage | None:
         return None
     from ava.sdk_surface.agent_identity import agent_id
 
-    aid = agent_id()
-    if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() is None pre-bootstrap.
+    aid = agent_id(ctx)
+    if aid is None:
         return None
-    blocks, remote = _collect_blocks(aid, depth)
+    blocks, remote = _collect_blocks(aid, depth, ctx)
     if not blocks:
         return None
 

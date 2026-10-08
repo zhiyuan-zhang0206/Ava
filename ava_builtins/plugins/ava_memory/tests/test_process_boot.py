@@ -48,10 +48,9 @@ def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
 
         original_path_doc = ava.memory.PATH.__doc__
         os.environ["AVA_AGENT_ID"] = "417"
-        from ava.sdk_surface import process_context
         from base.agents.context import AvaContext
         from base.agents.context.identity import AgentIdentity
-        process_context.bind_process(AvaContext(identity=AgentIdentity(417, True)))
+        ava.context = AvaContext(identity=AgentIdentity(417, True))
         settings.agent.eval_isolation = True
         settings.agent.eval_network_allowlist = []
 
@@ -87,10 +86,9 @@ def test_eval_network_allowlist_preserves_explicitly_allowed_web() -> None:
 
         install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
         os.environ["AVA_AGENT_ID"] = "418"
-        from ava.sdk_surface import process_context
         from base.agents.context import AvaContext
         from base.agents.context.identity import AgentIdentity
-        process_context.bind_process(AvaContext(identity=AgentIdentity(418, True)))
+        ava.context = AvaContext(identity=AgentIdentity(418, True))
         settings.agent.eval_isolation = True
         settings.agent.eval_network_allowlist = ["web"]
 

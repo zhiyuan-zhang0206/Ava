@@ -34,7 +34,7 @@ from agent.state import AgentState
 from agent.tests.claim.claim_status_support import _compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
-from base.host.env.agent_slices import AgentSlices
+from base.agents.context import AvaContext
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.units import spawn_agent
 
@@ -214,7 +214,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     monkeypatch = pytest.MonkeyPatch()
 
-    def fork_notes(_extensions: ExtensionRegistry, _slices: AgentSlices) -> list[HumanMessage]:
+    def fork_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
         return [system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)]
 
     monkeypatch.setattr("agent.graph.prompt.context_notes.fork_notes", fork_notes)
@@ -278,7 +278,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     inherited = [SystemMessage(content="sys"), old_id, old_mem, old_preload, cluster_index]
     monkeypatch = pytest.MonkeyPatch()
 
-    def fork_notes(_extensions: ExtensionRegistry, _slices: AgentSlices) -> list[HumanMessage]:
+    def fork_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
         return [
             system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID),
             system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY),

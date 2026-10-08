@@ -174,7 +174,7 @@ async def test_compact_contract_reaches_request_without_resident_self(
     for section in _COMPACT_SECTIONS:
         assert section in contract, f"section {section!r} missing from the compact contract"
 
-    system_prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    system_prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
     assert "## ava.self\n" not in system_prompt
     head = SystemMessage(content=system_prompt)
     llm = _fake_llm()

@@ -303,11 +303,21 @@ runtime explicitly; helpers receive the values they need as parameters. Outside
 a graph run, use the caller's explicit context or resource owner: `get_runtime()`
 requires an active runnable context and is not a process-wide service locator.
 
+The disposable execution child has no LangGraph runtime. Its bootstrap initializes
+`ava.context`, `ava.state` and `ava.state_update` before user code runs; normal
+imports and threads in that one execution use those same child-local slots.
+SDK modules read context through `ava.context`, not a separate context variable,
+thread inheritance patch or hidden host-current getter. Shared-host code receives
+`Runtime[AvaContext]`, an explicit context or the narrower dependency it needs.
+Plugin context-note builders receive `AvaContext` explicitly. See the
+[process-local SDK decision](../decisions/agents/context/2026-10-09-process-local-sdk-context.md).
+
+
 `contextvars` imports are banned by ruff `TID251` except in the mechanism
 files on the allowlist (`pyproject.toml` — `flake8-tidy-imports.banned-api`
 plus the `per-file-ignores` entries). LangGraph's runtime itself propagates
-contextvars (pregel `copy_context`, `get_runtime`), and the SDK / log /
-telemetry / retry-policy readers sit outside node signatures, so a blanket
+contextvars (pregel `copy_context`, `get_runtime`), and native metadata /
+telemetry readers sit outside node signatures, so a blanket
 ban is not possible — but every use is a mechanism-layer decision. A new use
 point needs a written justification in the PR description before joining the
 allowlist. Each `ContextVar` is also a frozen `contextvar` site of the

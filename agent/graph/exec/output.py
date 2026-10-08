@@ -28,8 +28,6 @@ from pathlib import Path
 
 from langchain_core.messages import BaseMessage
 
-import ava
-import ava.sdk_surface.agent_identity
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
 from base.config import settings
@@ -57,8 +55,8 @@ _OVERFLOW_DIRNAME = ".exec_output"
 _OVERFLOW_KEEP = 20
 
 
-def _overflow_dir() -> Path:
-    return workspace_dir(ava.sdk_surface.agent_identity.require_agent_id()) / _OVERFLOW_DIRNAME
+def _overflow_dir(agent_id: int) -> Path:
+    return workspace_dir(agent_id) / _OVERFLOW_DIRNAME
 
 
 def _marker(
@@ -80,6 +78,7 @@ def _fit_body(
     stream_cap: StreamCap | None,
     referenced_messages: Sequence[BaseMessage],
     max_chars: int,
+    agent_id: int,
 ) -> str:
     """The envelope body for non-empty output: logged, soft-cropped or truncated to fit."""
     # Log the true (pre-truncation) length on every exec — instrumentation
@@ -100,7 +99,7 @@ def _fit_body(
         if over:
             preview = crop_output(
                 output,
-                _overflow_dir(),
+                _overflow_dir(agent_id),
                 settings.sandbox,
                 referenced_messages=referenced_messages,
                 max_chars=max_chars,
@@ -108,13 +107,14 @@ def _fit_body(
     if preview is not None:
         output = preview
     elif len(output) > max_chars:
-        output = truncate_both_ends(output, max_chars, stream_cap=stream_cap)
+        output = truncate_both_ends(output, max_chars, agent_id=agent_id, stream_cap=stream_cap)
     return output if output.endswith("\n") else output + "\n"
 
 
 def wrap_code_output(
     output: str,
     *,
+    agent_id: int,
     cancelled: bool = False,
     cancel_reason: InterruptReason = InterruptReason.USER,
     timed_out: bool = False,
@@ -168,7 +168,7 @@ def wrap_code_output(
     if not output:
         body = "(no output)"
     else:
-        body = _fit_body(output, stream_cap, referenced_messages, max_chars)
+        body = _fit_body(output, stream_cap, referenced_messages, max_chars, agent_id)
     if timed_out:
         # The envelope is the agent's only cue to change strategy — the better
         # primitives must be named here, where the timeout is actually seen.
@@ -206,7 +206,9 @@ def crashed_no_output_body(exc: BaseException, *, code_reached: bool | None) -> 
     return f"[exec crashed: {verdict}]\n{exc_type}: {exc_msg}".rstrip() + "\n"
 
 
-def truncate_both_ends(output: str, max_chars: int, *, stream_cap: StreamCap | None = None) -> str:
+def truncate_both_ends(
+    output: str, max_chars: int, *, agent_id: int, stream_cap: StreamCap | None = None
+) -> str:
     """Keep the first + last `max_chars // 2` chars (head carries an overview /
     a help() listing, tail carries the result / traceback), drop the middle,
     and write the archived text to a file the agent can read or grep.
@@ -222,7 +224,7 @@ def truncate_both_ends(output: str, max_chars: int, *, stream_cap: StreamCap | N
     half = max_chars // 2
     head, tail = output[:half], output[-half:]
     omitted = len(output) - 2 * half
-    path = _write_overflow_file(output, stream_cap=stream_cap)
+    path = _write_overflow_file(output, agent_id=agent_id, stream_cap=stream_cap)
     if stream_cap is None:
         total = f"{len(output):,} chars total"
         source = f"full output at {path}"
@@ -241,7 +243,9 @@ def truncate_both_ends(output: str, max_chars: int, *, stream_cap: StreamCap | N
     return banner + "\n\n" + head + mid + tail
 
 
-def _write_overflow_file(output: str, *, stream_cap: StreamCap | None = None) -> Path:
+def _write_overflow_file(
+    output: str, *, agent_id: int, stream_cap: StreamCap | None = None
+) -> Path:
     """Write `output` to a timestamped file under the workspace overflow dir,
     prune old ones, and return its path.
 
@@ -253,7 +257,7 @@ def _write_overflow_file(output: str, *, stream_cap: StreamCap | None = None) ->
     microsecond timestamp makes names sortable by exec time and unique within
     an agent (execs are serial, and two in the same microsecond cannot happen).
     """
-    d = _overflow_dir()
+    d = _overflow_dir(agent_id)
     d.mkdir(parents=True, exist_ok=True)
     # Stamped in the configured timezone so filenames sort together with the
     # envelope timestamps the agent sees.

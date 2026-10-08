@@ -11,6 +11,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -31,6 +32,7 @@ def _make_runtime(
     llm: Any | None = None,
     event_publisher: Any | None = None,
     extensions: ExtensionRegistry = EMPTY,
+    agent_id: int | None = None,
 ) -> Runtime[AvaContext]:
     """test helper: assemble AvaContext into Runtime.
 
@@ -42,6 +44,7 @@ def _make_runtime(
 
     """
     ctx = AvaContext(
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm(),
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
