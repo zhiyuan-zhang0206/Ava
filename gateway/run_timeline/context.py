@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import AIMessage
 
+from base.agents.history.message_tokens import total_of
 from gateway.agents.context_breakdown import request_breakdown
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.state import context_breakdown_response
@@ -30,9 +31,15 @@ def llm_requests(view: HistoryView) -> list[RunTimelineRequest]:
     """The agent's LLM requests in message order; a request with no placeable time is left out."""
     starts = view.history.segment_starts
     out: list[RunTimelineRequest] = []
+    previous: int | None = None  # the last usage-bearing AIMessage, whether or not it is listed
     for idx, msg in enumerate(view.history.messages):
         if not isinstance(msg, AIMessage) or not msg.usage_metadata:
             continue
+        session = max(bisect_right(starts, idx) - 1, 0)
+        # What this request read for the first time: since the previous request of its session, or since the session began.
+        first = starts[session] if previous is None or previous < starts[session] else previous
+        previous = idx
+        added = total_of(view.tokens[first:idx])
         sent = view.read[idx - 1] if idx > 0 and view.read[idx - 1] is not None else view.read[idx]
         if sent is None:
             continue
@@ -40,9 +47,11 @@ def llm_requests(view: HistoryView) -> list[RunTimelineRequest]:
             RunTimelineRequest(
                 idx=idx,
                 ts=sent,
-                session=max(bisect_right(starts, idx) - 1, 0),
+                session=session,
                 input_tokens=int(msg.usage_metadata["input_tokens"]),
                 output_tokens=int(msg.usage_metadata["output_tokens"]),
+                added_tokens=added.tokens,
+                added_estimated=added.estimated,
             )
         )
     return out

@@ -138,8 +138,8 @@ const lifetimeResponse: RunTimelineResponse = {
   ],
   events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
   requests: [
-    { idx: 2, ts: "2026-10-04T12:04:00.000000Z", session: 0, input_tokens: 1000, output_tokens: 50 },
-    { idx: 7, ts: "2026-10-04T14:00:00.000000Z", session: 1, input_tokens: 400, output_tokens: 20 },
+    { idx: 2, ts: "2026-10-04T12:04:00.000000Z", session: 0, input_tokens: 1000, output_tokens: 50, added_tokens: 900, added_estimated: false },
+    { idx: 7, ts: "2026-10-04T14:00:00.000000Z", session: 1, input_tokens: 400, output_tokens: 20, added_tokens: 380, added_estimated: true },
   ],
 };
 
@@ -230,6 +230,7 @@ describe("the default window", () => {
       "run-timeline-row-level-1",
       "run-timeline-row-units",
       "run-timeline-row-context",
+      "run-timeline-row-added",
     ]);
     expect(screen.getAllByTestId("run-timeline-node")).toHaveLength(3);
     expect(screen.getAllByTestId("run-timeline-unit")).toHaveLength(3);
@@ -836,7 +837,7 @@ describe("context size row", () => {
     expect(heights[1] / heights[0]).toBeCloseTo(0.4);
     fireEvent.mouseEnter(bars[1]);
     expect(screen.getByTestId("run-timeline-readout").textContent).toContain("LLM request #7 · session 2");
-    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("400 input tokens");
+    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("400 input tokens · added 380 (estimated)");
   });
 
   it("has no row for an agent that made no request", async () => {
@@ -844,6 +845,7 @@ describe("context size row", () => {
     render();
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
+    expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
   });
 });
 

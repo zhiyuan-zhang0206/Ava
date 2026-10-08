@@ -23,6 +23,7 @@ export function requestReadout(t: Translate, request: RunTimelineRequest): strin
     session: request.session + 1,
     time: formatShort(request.ts),
     tokens: formatTokensCompact(request.input_tokens),
+    added: `${formatTokensCompact(request.added_tokens)}${request.added_estimated ? ` ${t("estimatedSuffix")}` : ""}`,
   });
 }
 

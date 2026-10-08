@@ -4,8 +4,28 @@ import { categoryColor } from "@/lib/context-colors";
 import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineRequest, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
+  axisBox,
+  barWidths,
+  BAR_FILL,
+  BAR_MAX_PX,
+  BAR_MIN_PX,
+  navigate,
+  requestLit,
+  requestSelection,
+  revealView,
+  ADDED_ROW,
+  INPUT_ROW,
+  UNITS_ROW,
+  axisMapTicks,
   axisTicks,
+  buildAxisMap,
   chainIds,
+  GAP_SHARE,
+  layoutSpans,
+  MIN_BLOCK_SHARE,
+  panView,
+  projectBox,
+  zoomView,
   pendingSpans,
   cacheHitRate,
   clampViewport,
@@ -29,6 +49,7 @@ import {
   hoverLit,
   inboundSources,
   matchesHighlight,
+  maxAdded,
   maxInput,
   nodeAncestors,
   nodeChildren,
@@ -383,7 +404,7 @@ describe("highlight and hover model", () => {
     expect(nodeChildren(nodes[2], nodes).map((n) => n.id)).toEqual(["a", "b"]);
   });
 
-  const request = (idx: number, iso: string, tokens = 10): RunTimelineRequest => ({ idx, ts: iso, session: 0, input_tokens: tokens, output_tokens: 0 });
+  const request = (idx: number, iso: string, tokens = 10): RunTimelineRequest => ({ idx, ts: iso, session: 0, input_tokens: tokens, output_tokens: 0, added_tokens: tokens / 2, added_estimated: false });
   const requests = [request(2, "2026-10-04T12:10:00Z", 50), request(8, "2026-10-04T12:50:00Z", 20)];
   const view = (from: string, to: string) => ({ from: Date.parse(from), to: Date.parse(to) });
 
@@ -402,5 +423,240 @@ describe("highlight and hover model", () => {
   it("scales the context row to the largest input", () => {
     expect(maxInput(requests)).toBe(50);
     expect(maxInput([])).toBe(0);
+  });
+
+  it("scales the added-context row to the largest addition, independently of the input", () => {
+    expect(maxAdded(requests)).toBe(25);
+    expect(maxAdded([])).toBe(0);
+  });
+});
+
+describe("hybrid axis", () => {
+  const T0 = Date.parse("2026-10-04T12:00:00Z");
+  const at = (sec: number) => new Date(T0 + sec * 1000).toISOString();
+  const BASE = { from: T0, to: T0 + 1000 * 1000 };
+  const block = (i0: number, from: number, to: number, tokens: number | null): RunTimelineUnit =>
+    unit({ kind: "text", i0, i1: i0, start: at(from), end: at(to), context_tokens: tokens });
+  const sample = [block(0, 10, 20, 1000), block(1, 20, 30, 3000), block(2, 500, 510, null), block(3, 510, 520, 1000)];
+
+  it("sizes a block by its tokens and a gap by the log of its idle seconds", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    const [a, b, none, d] = sample.map((u) => axis.unitSpan(u));
+    const width = (s: { u0: number; u1: number }) => s.u1 - s.u0;
+    expect(width(b) / width(a)).toBeCloseTo(3);
+    expect(width(d) / width(a)).toBeCloseTo(1);
+    // No token count gets the minimum share of the block weight.
+    expect(width(none)).toBeCloseTo(MIN_BLOCK_SHARE * 5000);
+    // Touching blocks leave no gap; the gaps are the leading, the 470 s and the trailing idle.
+    expect(b.u0).toBeCloseTo(a.u1);
+    const k = (GAP_SHARE * (5000 + MIN_BLOCK_SHARE * 5000)) / (Math.log1p(10) + Math.log1p(470) + Math.log1p(480));
+    expect(a.u0).toBeCloseTo(k * Math.log1p(10));
+    expect(none.u0 - b.u1).toBeCloseTo(k * Math.log1p(470));
+    expect(axis.total).toBeCloseTo(5000 + MIN_BLOCK_SHARE * 5000 + GAP_SHARE * (5000 + MIN_BLOCK_SHARE * 5000));
+  });
+
+  it("is a monotone, invertible map through the blocks and gaps", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    let last = -1;
+    for (let sec = 0; sec <= 1000; sec += 7) {
+      const u = axis.toU(T0 + sec * 1000);
+      expect(u).toBeGreaterThanOrEqual(last);
+      last = u;
+      expect(axis.fromU(u)).toBeCloseTo(T0 + sec * 1000, 3);
+    }
+    expect(axis.toU(BASE.from)).toBe(0);
+    expect(axis.toU(BASE.to)).toBeCloseTo(axis.total);
+    // Half-way through a block is half-way through its width.
+    const a = axis.unitSpan(sample[0]);
+    expect(axis.toU(T0 + 15_000)).toBeCloseTo((a.u0 + a.u1) / 2);
+  });
+
+  it("keeps blocks of no duration visible and in order", () => {
+    const point = unit({ kind: "call", i0: 1, i1: 1, start: at(100), end: at(100), context_tokens: 500 });
+    const after = block(2, 100, 110, 500);
+    const axis = buildAxisMap([after, point], BASE, "hybrid");
+    const p = axis.unitSpan(point);
+    expect(p.u1 - p.u0).toBeGreaterThan(0);
+    expect(axis.unitSpan(after).u0).toBeCloseTo(p.u1);
+    expect(axis.toU(T0 + 100_000, "lo")).toBeCloseTo(p.u0);
+    expect(axis.toU(T0 + 100_000, "hi")).toBeCloseTo(p.u1);
+  });
+
+  it("makes a node span the blocks its message range covers, and its own times when none are loaded", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    const covered = axis.nodeSpan({ start: at(0), end: at(1000), span_start: 1, span_end: 3 });
+    expect(covered.u0).toBeCloseTo(axis.unitSpan(sample[1]).u0);
+    expect(covered.u1).toBeCloseTo(axis.unitSpan(sample[3]).u1);
+    const loose = axis.nodeSpan({ start: at(20), end: at(30), span_start: 40, span_end: 41 });
+    expect(loose.u0).toBeCloseTo(axis.toU(T0 + 20_000, "lo"));
+    expect(loose.u1).toBeCloseTo(axis.toU(T0 + 30_000, "hi"));
+  });
+
+  it("falls back to the linear time map without blocks, and in time mode", () => {
+    const empty = buildAxisMap([], BASE, "hybrid");
+    expect(empty.mode).toBe("time");
+    const time = buildAxisMap(sample, BASE, "time");
+    expect(time.toU(T0 + 250_000)).toBe(250_000);
+    expect(time.unitSpan(sample[0])).toEqual({ u0: 10_000, u1: 20_000 });
+    expect(time.nodeSpan({ start: at(5), end: at(8), span_start: 0, span_end: 3 })).toEqual({ u0: 5000, u1: 8000 });
+  });
+
+  it("gives a view the same boxes in time mode as the plain window math", () => {
+    const time = buildAxisMap(sample, BASE, "time");
+    const view = { from: T0 + 100_000, to: T0 + 600_000 };
+    const box = axisBox(time, at(200), at(300), time.viewU(view));
+    expect(box).toEqual(spanBox(at(200), at(300), { from: new Date(view.from).toISOString(), to: new Date(view.to).toISOString() }));
+    expect(projectBox(0, 1, { from: 2, to: 3 })).toBeNull();
+  });
+
+  it("zooms and pans in axis coordinates and stays inside the extent", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    const base = BASE;
+    const zoomed = zoomView(axis, base, base, 0.5, 0.25);
+    const vu = axis.viewU(zoomed);
+    expect(vu.to - vu.from).toBeCloseTo(axis.total * 0.25, 0);
+    const panned = panView(axis, zoomed, base, 1);
+    expect(axis.viewU(panned).from).toBeGreaterThan(vu.from);
+    expect(panned.to).toBeLessThanOrEqual(base.to);
+    let view = base;
+    for (let i = 0; i < 60; i++) view = zoomView(axis, view, base, 0.5, 0.5);
+    expect(view.to).toBeGreaterThan(view.from);
+    expect(zoomView(axis, base, base, 0.5, 4)).toEqual(base);
+  });
+
+  it("zooming in time mode matches the plain viewport zoom", () => {
+    const time = buildAxisMap(sample, BASE, "time");
+    expect(zoomView(time, BASE, BASE, 0.25, 0.5)).toEqual(zoomViewport(BASE, BASE, 0.25, 0.5));
+    expect(panView(time, BASE, BASE, 0.1)).toEqual(panViewport(BASE, BASE, 0.1));
+  });
+
+  it("lays blocks out on axis coordinates like on time", () => {
+    const places = layoutSpans([{ key: "a", u0: 10, u1: 20 }, { key: "b", u0: 20, u1: 40 }], { from: 0, to: 100 }, 1000);
+    expect(places.map((p) => [p.left, p.width])).toEqual([[100, 100], [200, 200]]);
+  });
+
+  it("labels block starts with their times, keeps them apart, and falls back inside one block", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    const ticks = axisMapTicks(axis, BASE, 1000);
+    expect(ticks.length).toBeGreaterThan(0);
+    const lefts = ticks.map((tick) => tick.left);
+    expect([...lefts].sort((x, y) => x - y)).toEqual(lefts);
+    for (let i = 1; i < lefts.length; i++) expect((lefts[i] - lefts[i - 1]) * 10).toBeGreaterThanOrEqual(70);
+    const edge = axis.boundaries.find((b) => b.ms === T0 + 500_000);
+    expect(edge).toBeDefined();
+    const label = new Date(T0 + 500_000);
+    const hh = String(label.getHours()).padStart(2, "0");
+    expect(ticks.map((tick) => tick.label).some((text) => text.startsWith(hh))).toBe(true);
+    // A view inside one block has no block edge: round times are placed through the map.
+    const inside = axisMapTicks(axis, { from: T0 + 21_000, to: T0 + 29_000 }, 1000);
+    expect(inside.length).toBeGreaterThan(0);
+    for (const tick of inside) {
+      expect(tick.left).toBeGreaterThanOrEqual(0);
+      expect(tick.left).toBeLessThanOrEqual(100);
+    }
+    expect(axisMapTicks(buildAxisMap(sample, BASE, "time"), BASE, 1000)).toEqual(axisTicks(BASE));
+  });
+});
+
+describe("request bars", () => {
+  it("fills a share of the space to the nearest neighbour, within a min and max width", () => {
+    const [a, b, c] = barWidths([100, 200, 210]);
+    expect(b).toBeCloseTo(10 * BAR_FILL);
+    expect(c).toBeCloseTo(10 * BAR_FILL);
+    expect(a).toBe(BAR_MAX_PX);
+    expect(barWidths([0, 0.5])).toEqual([BAR_MIN_PX, BAR_MIN_PX]);
+    expect(barWidths([0, 1000])).toEqual([BAR_MAX_PX, BAR_MAX_PX]);
+    expect(barWidths([5])).toEqual([BAR_MAX_PX * BAR_FILL]);
+  });
+
+  const T = Date.parse("2026-10-04T12:00:00Z");
+  const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
+  const u = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: number, parent: string | null = null): RunTimelineUnit =>
+    unit({ kind, i0, i1: i0, start: iso(from), end: iso(to), parent, preview: `${kind}${i0}` });
+  const req = (idx: number, sec: number): RunTimelineRequest => ({
+    idx,
+    ts: iso(sec),
+    session: 0,
+    input_tokens: 10,
+    output_tokens: 1,
+    added_tokens: 1,
+    added_estimated: false,
+  });
+  const nd = (id: string, level: number, parent: string | null, from: number, to: number, s0: number, s1: number): RunTimelineNode => ({
+    ...node(level, id),
+    parent,
+    start: iso(from),
+    end: iso(to),
+    span_start: s0,
+    span_end: s1,
+  });
+  // Level 2: P over everything; level 1: A (messages 0-1), B (2-3); blocks 0..3; AIMessage 1 and 3 made requests.
+  const data = {
+    nodes: [nd("P", 2, null, 0, 40, 0, 3), nd("A", 1, "P", 0, 20, 0, 1), nd("B", 1, "P", 20, 40, 2, 3)],
+    units: [u("inbound", 0, 0, 10, "A"), u("thinking", 1, 10, 20, "A"), u("inbound", 2, 20, 30, "B"), u("thinking", 3, 30, 40, "B")],
+    requests: [req(1, 10), req(3, 30)],
+  };
+  const whole = { from: T, to: T + 40_000 };
+  const unitSel = (i0: number, kind: RunTimelineUnit["kind"]) => ({ kind: "unit" as const, i0, i1: i0, unitKind: kind });
+  const go = (key: "left" | "right" | "up" | "down", row: string | null, selection: Parameters<typeof navigate>[1] extends infer C ? (C extends { selection: infer S } ? S : never) : never) =>
+    navigate(key, { row, selection }, data, whole);
+
+  it("selects the block of the AIMessage that made the request", () => {
+    expect(requestSelection({ idx: 1 }, data.units)).toEqual(unitSel(1, "thinking"));
+    expect(requestSelection({ idx: 99 }, data.units)).toBeNull();
+    expect(requestLit({ idx: 1 }, unitSel(1, "thinking"), null).selected).toBe(true);
+    expect(requestLit({ idx: 1 }, unitSel(2, "inbound"), null).selected).toBe(false);
+    expect(requestLit({ idx: 3 }, null, { kind: "unit", i0: 3, i1: 3, unitKind: "thinking" }).hovered).toBe(true);
+    expect(requestLit({ idx: 3 }, null, { kind: "request", idx: 3 }).hovered).toBe(true);
+  });
+
+  it("moves left and right within a row and stops at the ends", () => {
+    expect(go("right", UNITS_ROW, unitSel(0, "inbound"))?.item.selection).toEqual(unitSel(1, "thinking"));
+    expect(go("left", UNITS_ROW, unitSel(0, "inbound"))).toBeNull();
+    expect(go("right", "level-1", { kind: "node", id: "A" })?.item.selection).toEqual({ kind: "node", id: "B" });
+    expect(go("right", "level-1", { kind: "node", id: "B" })).toBeNull();
+    expect(go("right", INPUT_ROW, unitSel(1, "thinking"))?.item.selection).toEqual(unitSel(3, "thinking"));
+  });
+
+  it("goes up to the parent and down to the first child", () => {
+    expect(go("up", UNITS_ROW, unitSel(2, "inbound"))).toMatchObject({ row: "level-1", item: { selection: { id: "B" } } });
+    expect(go("up", "level-1", { kind: "node", id: "B" })).toMatchObject({ row: "level-2", item: { selection: { id: "P" } } });
+    expect(go("up", "level-2", { kind: "node", id: "P" })).toBeNull();
+    expect(go("down", "level-2", { kind: "node", id: "P" })).toMatchObject({ row: "level-1", item: { selection: { id: "A" } } });
+    expect(go("down", "level-1", { kind: "node", id: "B" })).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(2, "inbound") } });
+  });
+
+  it("falls back to the item covering, else nearest to, the time when there is no parent or child", () => {
+    // Messages down to the request rows: the block's own request, else the nearest one in time.
+    expect(go("down", UNITS_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { request: { idx: 1 } } });
+    expect(go("down", UNITS_ROW, unitSel(2, "inbound"))?.item.request?.idx).toBe(3);
+    // Request rows up: the request's own block; between the two request rows: the same request.
+    expect(go("up", INPUT_ROW, unitSel(3, "thinking"))).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(3, "thinking") } });
+    expect(go("down", INPUT_ROW, unitSel(3, "thinking"))).toMatchObject({ row: ADDED_ROW, item: { request: { idx: 3 } } });
+    expect(go("up", ADDED_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { request: { idx: 1 } } });
+    expect(go("down", ADDED_ROW, unitSel(1, "thinking"))).toBeNull();
+    // A unit without a parent goes to the level-1 node covering its time.
+    const orphan = { ...data, units: data.units.map((x) => (x.i0 === 2 ? { ...x, parent: null } : x)) };
+    expect(navigate("up", { row: UNITS_ROW, selection: unitSel(2, "inbound") }, orphan, whole)?.item.selection).toEqual({ kind: "node", id: "B" });
+  });
+
+  it("reads the row from the selection when the remembered row does not hold it, and starts at the leftmost item in view", () => {
+    expect(go("right", "level-2", unitSel(0, "inbound"))?.item.selection).toEqual(unitSel(1, "thinking"));
+    const inView = { from: T + 25_000, to: T + 40_000 };
+    expect(navigate("right", null, data, inView)?.item.selection).toEqual(unitSel(2, "inbound"));
+    expect(navigate("left", null, { nodes: [], units: [], requests: [] }, whole)).toBeNull();
+  });
+
+  it("pans to an item outside the view without changing the zoom, and leaves a visible one alone", () => {
+    const axis = buildAxisMap(data.units, { from: T, to: T + 400_000 }, "time");
+    const base = { from: T, to: T + 400_000 };
+    const view = { from: T, to: T + 40_000 };
+    expect(revealView(axis, view, base, T + 10_000, T + 20_000)).toBe(view);
+    const moved = revealView(axis, view, base, T + 200_000, T + 210_000);
+    expect(moved.to - moved.from).toBe(40_000);
+    expect(moved.from).toBeLessThanOrEqual(T + 200_000);
+    expect(moved.to).toBeGreaterThanOrEqual(T + 210_000);
+    const edge = revealView(axis, view, base, T + 399_000, T + 400_000);
+    expect(edge.to).toBe(base.to);
   });
 });
