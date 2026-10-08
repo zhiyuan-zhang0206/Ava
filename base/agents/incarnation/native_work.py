@@ -94,7 +94,10 @@ async def pending_command(conn: psycopg.AsyncConnection, work_id: UUID) -> UUID 
 
 
 async def prepare_work(
-    conn: psycopg.AsyncConnection, target: NativeWorkTarget
+    conn: psycopg.AsyncConnection,
+    target: NativeWorkTarget,
+    *,
+    compact_command_id: UUID | None = None,
 ) -> NativeWorkTarget | None:
     """Retain the metadata lock and caller transaction through pointer admission."""
     row = await (
@@ -107,6 +110,18 @@ async def prepare_work(
     ).fetchone()
     if row is None:
         raise NativeWorkUncertainError("native work has no admitted owner")
+    compact = await (
+        await conn.execute(
+            "SELECT id,execution->>'work_id' FROM native_compact_commands "
+            "WHERE agent_id=%s AND released_at IS NULL",
+            (target.agent_id,),
+        )
+    ).fetchone()
+    if compact is not None and (
+        compact[0] != compact_command_id
+        or (compact[1] is not None and compact[1] != str(target.work_id))
+    ):
+        raise NativeWorkUncertainError("original guarded compact must settle before new work")
     protected = await (
         await conn.execute(
             "SELECT work_id FROM native_cancel_commands WHERE agent_id=%s "

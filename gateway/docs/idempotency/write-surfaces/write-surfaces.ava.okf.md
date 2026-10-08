@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Write Retry Surface Inventory"
-description: "Audit snapshot of non-GET gateway routes and their verified retry policies."
+description: "Non-GET gateway routes and verified retry policies."
 tags:
 - gateway
 - idempotency
@@ -15,10 +15,9 @@ Policy: `base/api_contracts/contracts.py`.
 Versioned routes: [[guarded-creation.ava.okf.md]], [[guarded-pages.ava.okf.md]] and
 [[guarded-notices.ava.okf.md]] and [[guarded-uploads.ava.okf.md]].
 
-Preset/schedule creation and schedule mutations now have optional transactional
-keyed receipts, but their routes conservatively remain `NON_IDEMPOTENT` (`one-shot`
-below). Keyless calls retain legacy semantics. Positive server negotiation and
-ambiguous retry activation remain future work; older gateways may ignore keys.
+Preset/schedule receipts are optional; their routes remain `NON_IDEMPOTENT`.
+Keyless calls stay legacy. Ambiguous retry activation awaits negotiation; older
+gateways may ignore keys.
 Owners:
 [[gateway/routers/docs/resource-creation.ava.okf.md]] and
 [[gateway/schedules/docs/schedule-convergence.ava.okf.md]].
@@ -50,6 +49,7 @@ Owners:
 | `PUT /api/inventory` | natural | full inventory replace — PUT is idempotent |
 | `POST /api/agents/{agent_id}/impersonation/force-expire` | natural | observed-session CAS close — repeated or stale requests leave the lease unchanged |
 | `POST /api/agents/{agent_id}/compact` | one-shot | each request enqueues a new compact command; no durable command receipt |
+| `POST /api/keyed/v1/agents/{agent_id}/compact-history` | keyed | [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md|guarded manual compact owner]]; no automatic retry |
 | `POST /api/cancel` | one-shot | each request enqueues cancel; a delayed retry can cancel later work |
 | `POST /api/agents/{agent_id}/terminate` | one-shot | termination is not bound to the observed incarnation |
 | `POST /api/agents/{agent_id}/resurrect` | one-shot | resurrection is not bound to the observed incarnation |

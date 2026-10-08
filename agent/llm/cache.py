@@ -86,7 +86,11 @@ async def prepare_invocation(
 
 
 async def ainvoke_with_cache_retry(
-    llm: BaseChatModel, messages: list[AnyMessage], policy: LlmCallPolicy
+    llm: BaseChatModel,
+    messages: list[AnyMessage],
+    policy: LlmCallPolicy,
+    *,
+    retry_stale_cache: bool = True,
 ) -> tuple[AIMessage, bool]:
     """Single-shot invoke through `prepare_invocation`, with one stale-cache retry.
 
@@ -111,13 +115,16 @@ async def ainvoke_with_cache_retry(
 
     from base.config import settings
 
+    if type(retry_stale_cache) is not bool:
+        raise ValueError("retry_stale_cache must be a boolean")
+
     async def _invoke() -> tuple[AIMessage, bool]:
         invocation = await prepare_invocation(llm, messages, policy)
         used_explicit_cache = invocation.cache_ref is not None
         try:
             response = await invocation.runnable.ainvoke(invocation.messages)  # pyright: ignore[reportUnknownMemberType]
         except Exception as exc:
-            if invocation.cache_ref is None:
+            if not retry_stale_cache or invocation.cache_ref is None:
                 raise
             from ava_builtins.plugins.lm_google.gemini_cache import (
                 CacheRef as GeminiCacheRef,

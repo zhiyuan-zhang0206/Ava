@@ -255,6 +255,8 @@ _PER_TEST_TRUNCATE_TABLES = (
     "native_graph_work",
     "native_restart_commands",
     "native_cancel_commands",
+    "native_compact_commands",
+    "native_compact_observations",
     "im_bridge_outbound_intents",
     "im_bridge_outbound_replays",
     # ttl-reaper cadence clocks: no FK path; a leaked stamp would make the next

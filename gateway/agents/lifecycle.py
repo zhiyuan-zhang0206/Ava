@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Annotated, Literal
+from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Path, Request
@@ -23,6 +24,15 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from base.agents import AgentNotFound
+from base.agents.compaction.commands import accept as accept_guarded_compact
+from base.agents.compaction.commands import observe as observe_guarded_compact
+from base.agents.compaction.commands import status as guarded_compact_status
+from base.agents.compaction.models import (
+    CompactAcceptance,
+    CompactConflictError,
+    CompactStatus,
+    CompactTarget,
+)
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
 from base.agents.incarnation.native_restart_models import (
@@ -502,3 +512,65 @@ async def native_restart_status(
     if progress is None:
         raise HTTPException(status_code=404, detail="native restart command not found")
     return progress
+
+
+@router.get("/api/keyed/v1/agents/{agent_id}/compact-target")
+async def guarded_compact_target(
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)], request: Request
+) -> CompactTarget:
+    """Observe only actual new-host quiescent, closed-resource source evidence."""
+    try:
+        return await asyncio.to_thread(observe_guarded_compact, request.app.state.db_pool, agent_id)
+    except CompactConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/api/keyed/v1/agents/{agent_id}/compact-history", status_code=202)
+async def guarded_compact_history(
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: CompactTarget, request: Request
+) -> CompactAcceptance:
+    """Accept the original observed history; 202 is not summary/application success."""
+    key = request.headers.get("Idempotency-Key")
+    if (
+        key is None
+        or request.headers.get(SCOPE_HEADER) != PRINCIPAL_SCOPE
+        or not isinstance(getattr(request.state, "auth_principal", None), AuthPrincipal)
+    ):
+        raise HTTPException(
+            status_code=400, detail="guarded compact requires a key and verified principal-v1 scope"
+        )
+    try:
+        scoped = request_key(request, key, method="POST", path=request.url.path)
+    except PrincipalScopeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        accepted = await asyncio.to_thread(
+            accept_guarded_compact, request.app.state.db_pool, scoped, agent_id, body
+        )
+    except CompactConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    current = await asyncio.to_thread(
+        guarded_compact_status, request.app.state.db_pool, agent_id, accepted.command_id
+    )
+    if not current.continuation_released:
+        await asyncio.to_thread(
+            publish_inbound_wake,
+            request.app.state.db,
+            request.app.state.bus,
+            agent_id,
+            str(accepted.command_id),
+        )
+    return accepted
+
+
+@router.get("/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}")
+async def guarded_compact_command(
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)], command_id: UUID, request: Request
+) -> CompactStatus:
+    """Inspect current execution evidence independently of immutable acceptance."""
+    try:
+        return await asyncio.to_thread(
+            guarded_compact_status, request.app.state.db_pool, agent_id, command_id
+        )
+    except CompactConflictError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

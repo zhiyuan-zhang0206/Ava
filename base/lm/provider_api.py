@@ -170,6 +170,8 @@ class BuildContext:
     base_url: str | None = None
     # The agent's explicit tuning values; a builder resolves its per-agent settings through them.
     overrides: ModelOverrides | None = None
+    max_retries: int | None = None
+    """Explicit SDK retry count; absent preserves the provider's legacy default."""
 
 
 def _empty_file_size_limits() -> dict[str, int]:
@@ -211,6 +213,8 @@ class ProviderBinding:
     served_speed: Callable[[Mapping[str, Any]], InferenceSpeed] | None = None
     """Parse the actual service receipt of a Fast call; missing or unsupported
     receipts fail before accounting. Providers without Fast IDs need none."""
+    build_single_attempt: Callable[[BuildContext], BaseChatModel] | None = None
+    """Fresh construction with no ambiguous SDK retries; absent is unsupported."""
 
 
 def provider_key_present(key_env: str) -> bool:

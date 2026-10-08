@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -193,9 +194,15 @@ def build(ctx: BuildContext) -> BaseChatModel:
         api_key=api_key,
         max_tokens=spec.max_output_tokens,  # type: ignore[call-arg]
         timeout=ctx.timeout,
+        **({"max_retries": ctx.max_retries} if ctx.max_retries is not None else {}),
         **claude_kwargs,
         **extra_kwargs,
     )
+
+
+def build_single_attempt(ctx: BuildContext) -> BaseChatModel:
+    """Construct independent Anthropic clients with SDK retries explicitly disabled."""
+    return build(replace(ctx, max_retries=0))
 
 
 PROVIDER = ProviderContribution(
@@ -204,6 +211,7 @@ PROVIDER = ProviderContribution(
         display_name="Anthropic",
         key_env="ANTHROPIC_API_KEY",
         build=build,
+        build_single_attempt=build_single_attempt,
         effort_levels=None,
         vision=True,
         anthropic_protocol=True,

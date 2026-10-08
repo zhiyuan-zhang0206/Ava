@@ -1,25 +1,18 @@
 """Compaction LLM operation and the built-in, model-free reminder hook.
 
-Exhausted compaction attempts raise `CompactionFailedError`; the hosted turn
-boundary reports the failure, preserves history, and durably halts until new
-inbound work arrives. A consumed user compaction request is not replayed.
+Exhausted attempts raise `CompactionFailedError`; the hosted boundary preserves
+history and halts until new input. Consumed legacy requests are not replayed.
 
 Compaction is a core capability (Issue #1284) — this module is always active,
-not gated behind a plugin. Its before_llm hook is one of
-`agent.hooks.framework.framework_hooks()`.
+not gated by plugins; its hook belongs to `framework_hooks()`.
 
 Exports:
-- `generate_summary(messages, llm) -> summary`: pure function that runs the
-  Compaction LLM over the whole conversation and returns the summary text.
+- `generate_summary`: compaction LLM operation over the whole conversation.
 - The compaction live-run events (`emit_compact_started` / `emit_compact_finished`)
-  live in `agent/hooks/compact_events.py` (file line budget).
-
-Redesign plan for forced / command / spontaneous compact:
-`future/agent/compaction-redesign.md`.
+  live in `agent/hooks/compact_events.py`.
 
 Compaction replaces the whole history with `[system prompt, summary]` — the
-summary is the complete memory, nothing raw is carried over. No tail of recent
-messages is appended; recency that matters is captured *inside* the summary.
+summary retains needed recency; no raw tail is carried into the replacement.
 
 The compaction request is shaped to ride the backend's automatic prefix cache:
 it reuses the conversation exactly as the main llm node already sent it — same
@@ -217,6 +210,8 @@ async def generate_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
     slices: AgentSlices,
+    *,
+    single_attempt: bool = False,
 ) -> SummaryText:
     """Run the Compaction LLM over the whole conversation; returns the summary text.
 
@@ -239,6 +234,8 @@ async def generate_summary(
             the instruction and only emitted a tool call) — there is no
             summary to apply.
     """
+    if type(single_attempt) is not bool:
+        raise ValueError("single_attempt must be a boolean")
     has_system = bool(messages) and isinstance(messages[0], SystemMessage)
     system_head = messages[:1] if has_system else []
     content_msgs = messages[1:] if has_system else messages
@@ -254,7 +251,10 @@ async def generate_summary(
     # Gemini explicit cache is live the summary call rides it too (and its
     # stale-retry recovers a lapsed TTL), otherwise plain bind_tools.
     response, used_explicit_cache = await ainvoke_with_cache_retry(
-        llm, compaction_input, slices.llm_policy
+        llm,
+        compaction_input,
+        slices.llm_policy,
+        **({"retry_stale_cache": False} if single_attempt else {}),
     )
     model = slices.brain.llm_model
     if isinstance(model, str) and model:

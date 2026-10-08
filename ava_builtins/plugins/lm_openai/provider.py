@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -94,7 +95,17 @@ def build(ctx: BuildContext) -> BaseChatModel:
         service_tier="fast" if ctx.spec and ctx.spec.fast_of else "default",
         disable_streaming=ctx.disable_streaming,
         timeout=ctx.timeout,
+        **_retry_options(ctx),
     )
+
+
+def _retry_options(ctx: BuildContext) -> dict[str, Any]:
+    return {"max_retries": ctx.max_retries} if ctx.max_retries is not None else {}
+
+
+def build_single_attempt(ctx: BuildContext) -> BaseChatModel:
+    """Construct independent OpenAI clients with SDK retries explicitly disabled."""
+    return build(replace(ctx, max_retries=0))
 
 
 PROVIDER = ProviderContribution(
@@ -103,6 +114,7 @@ PROVIDER = ProviderContribution(
         display_name="OpenAI",
         key_env="OPENAI_API_KEY",
         build=build,
+        build_single_attempt=build_single_attempt,
         effort_levels=_GPT_EFFORT,
         vision=True,
         served_speed=served_speed,

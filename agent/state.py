@@ -93,6 +93,7 @@ from agent.state_channels import (
     MemoryState,
     _memory_state_merge,
 )
+from base.agents.compaction.models import CompactMarker
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.incarnation.native_work_models import NativeCancelMarker, NativeWorkTarget
 from base.agents.messages.security_finding import SecurityFindingEntry
@@ -145,6 +146,7 @@ class BaseAgentState(BaseModel):
     halted: bool = False
     native_work: NativeWorkTarget | None = None
     native_cancel: NativeCancelMarker | None = None
+    native_compact: CompactMarker | None = None
     """Native invocation identity and exact committed halt attribution; not prompt content."""
     turn_active: bool = False
     """This invocation is mid-turn (claim routed work). One invocation = one
@@ -751,8 +753,7 @@ AgentState = BaseAgentState
 def checkpoint_msgpack_allowlist(
     plugin_state_classes: Iterable[type[BaseModel]] = (),
 ) -> frozenset[tuple[str, str]]:
-    """LangGraph checkpoint msgpack allowlist — `(module, name)` pairs the
-    framework's checkpoint serde may deserialize.
+    """Allowed `(module, name)` pairs for framework checkpoint deserialization.
 
     Every nested sub-state channel value (`compact` / `attach` / `memory` /
     `context_reset` / `capabilities`) is a Pydantic v2 model, and
@@ -782,8 +783,8 @@ def checkpoint_msgpack_allowlist(
 
 def process_state_classes() -> frozenset[type[BaseModel]]:
     """The plugin state classes the `agent_runtime` faces loaded into this process declare, for a
-    serializer that runs in a process holding no registry of its own (the exec IPC, an external
-    attachment). Read off the loaded faces, so none before they load."""
+    serializer without its own registry (exec IPC or an external attachment).
+    Read loaded faces; none before they load."""
     from agent.extensions.registry import loaded_state_classes
 
     return loaded_state_classes()

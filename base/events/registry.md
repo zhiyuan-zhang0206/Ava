@@ -184,6 +184,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
 | `fleet_graph_stale` | the fleet-graph route served the stale/last-good graph after a degraded upstream read — one event per degradation episode, not per poll | anomaly | route, reason | — | events | — |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |
+| `native_compact_proof_gap` | the actual serialized host could not establish compact source or uncertainty closure; pending intent remains held, carrying agent_id and bounded error_type without payload | anomaly | — | — | events | — |
 | `impersonation_event_log_incomplete` | an impersonation event log cannot complete on its own (ended lease with an open source, or a failed capture source); re-emitted every reaper pass while it holds | anomaly | condition, lease_id, lease_machine, pending_reason, session | — | events | — |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events | — |

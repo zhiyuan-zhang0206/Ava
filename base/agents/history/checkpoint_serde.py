@@ -22,6 +22,9 @@ unregistered types outright.
 # `agent.state.checkpoint_msgpack_allowlist` starts from this set.
 STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
     {
+        ("base.agents.compaction.models", "CompactMarker"),
+        ("base.agents.compaction.models", "CompactAcceptance"),
+        ("base.agents.compaction.models", "CompactTarget"),
         ("base.agents.incarnation.native_work_models", "NativeWorkTarget"),
         ("base.agents.incarnation.native_work_models", "NativeCancelMarker"),
         # Legacy pairs: checkpoints written before the issue #156 split carry

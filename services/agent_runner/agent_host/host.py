@@ -81,7 +81,6 @@ from agent.turn.runloop import (
     graph_config,
 )
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
-from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
@@ -138,7 +137,7 @@ from services.agent_runner.agent_host.runtime import (
     read_last_active_at,
 )
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
-from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
+from services.agent_runner.agent_host.scheduling.pending_wakes import scan_candidates
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.stall_guard import run_invocation_with_stall_guard
 from services.agent_runner.agent_host.wake_screening import _is_runnable, _read_stored_config
@@ -153,8 +152,7 @@ _RELEASE_OWNER_TIMEOUT_S = 3.0
 
 
 class AgentHost:
-    """Runs one agent's turns on demand, over process-wide shared machinery.
-
+    """Runs one agent's turns on demand, over shared machinery.
     `run_turn` is what `TurnScheduler` calls; the scheduler guarantees at most
     one concurrent call per agent, so nothing here needs a per-agent lock.
     """
@@ -254,14 +252,26 @@ class AgentHost:
             # No-task wakes also take this path without admitting a runtime.
             if cancelled:
                 self.drop_agent(agent_id)
+            from services.agent_runner.agent_host.invocation.compact.source import (
+                finish_force_and_compact,
+            )
+
             settlement = asyncio.create_task(
-                original_host_force(
+                finish_force_and_compact(
+                    original_host_force(
+                        self._control_pool,
+                        agent_id,
+                        self._owner,
+                        self._machine,
+                        quiescent=True,
+                        kill_shell_sessions=kill_terminating_agent_shells,
+                    ),
                     self._control_pool,
+                    self._checkpointer,
+                    self._graph,
                     agent_id,
                     self._owner,
-                    self._machine,
-                    quiescent=True,
-                    kill_shell_sessions=kill_terminating_agent_shells,
+                    resources,
                 )
             )
             while not settlement.done():
@@ -375,7 +385,10 @@ class AgentHost:
                 ):
                     await publish_agent_updated(self._bus, agent_id)
                     slices = AgentSlices.resolve(pins, plugin_pins)
-                    if await recover_native_cancel(
+                    from base.agents.compaction.startup import resumable_compact
+
+                    compact_continuation = await resumable_compact(self._control_pool, incarnation)
+                    if compact_continuation is not None or await recover_native_cancel(
                         self._control_pool, self._checkpointer, self._graph, incarnation
                     ):
                         runtime = await self._runtime_for(agent_id, stored.fingerprint, slices)
@@ -497,24 +510,10 @@ class AgentHost:
         return await read_last_active_at(self._control_pool, agent_id)
 
     async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
-        """Find queued work and expired predecessors missed by Redis wakes.
-
-        Database age identifies backlog; cancellation additionally requires the
-        dispatcher's current turn-progress clock to be stale. Expired foreign
-        owners include quiet idle rows whose lease expires after boot. Wakes
-        retain admission/resource fences; an empty halted claim spends no model
-        call. Held maintenance wakes its restart cohort; outside a hold this
-        scan also keeps the steady held rows on its cadence: an open lease
-        needs the held pass's pull-based supervision (task #3998), never wake
-        delivery alone.
-        """
-        held_wakes = maintenance_receipts.pending_wakes(self._maintenance_failed)
-        if held_wakes is not None:
-            # The drain's held re-drive is update machinery, never the paced
-            # cohort: its pace belongs to the drain windows (task #4652).
-            return held_wakes
-        rows = await scan_rows(self._control_pool, self._owner, self._machine, stale_after_s)
-        return [PendingInboundWake(agent_id=row[0], stale=row[1], recovery=row[2]) for row in rows]
+        """Use the scheduling owner's durable work/maintenance scan."""
+        return await scan_candidates(
+            self._control_pool, self._owner, self._machine, stale_after_s, self._maintenance_failed
+        )
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
@@ -528,17 +527,11 @@ class AgentHost:
     async def _drive_turns(
         self, agent_id: int, runtime: _AgentRuntime, slices: AgentSlices
     ) -> TurnOutcome:
-        """Build this turn task's context and invoke the graph until it is done.
-
-        The event publisher is created per turn task rather than cached with the
-        runtime: it owns a background drain worker, and a worker per idle agent
-        is precisely the per-idle-agent cost the hosted model deletes. It shares
-        the process's Redis client, so creating one is a queue and a task.
-        """
+        """Build an invocation-owned context; the driver owns its publisher
+        lifecycle so cached idle runtimes retain no event drain worker."""
         event_publisher = AgentEventPublisher(
             self._bus.async_redis(), self._bus.channel, agent_id=agent_id
         )
-        await event_publisher.start()
         ctx = AvaContext(
             ops_pool=self._pool,
             llm=runtime.llm,
@@ -554,11 +547,18 @@ class AgentHost:
             clients=self._clients,
             # The dispatcher owns subscriptions; an empty claim ends this task.
         )
-        try:
-            with process_context.scoped(ctx):
-                return await self._invoke_until_done(agent_id, ctx)
-        finally:
-            await event_publisher.aclose()
+        from services.agent_runner.agent_host.invocation.driver import drive_context
+
+        return await drive_context(
+            self._control_pool,
+            self._checkpointer,
+            self._graph,
+            agent_id,
+            ctx,
+            self.database_waits,
+            self._peek_lock,
+            self._invoke_until_done,
+        )
 
     async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:
         """Run to idle or lifecycle completion, settling each returned invocation."""

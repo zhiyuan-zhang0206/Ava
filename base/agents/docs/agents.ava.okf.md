@@ -15,6 +15,7 @@ Its component nodes describe the current contracts and implementation.
 - [[base/agents/history/hierarchy/docs/hierarchy.ava.okf.md]] — Hierarchical Understanding.
 - [[base/agents/history/docs/message-tokens.ava.okf.md]] — Per-message true tokens.
 - [[base/agents/impersonation/docs/impersonation.ava.okf.md]] — Named agent impersonation sessions.
+- [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md]] — Guarded manual history replacement.
 - [[base/agents/incarnation/docs/closed-predecessor.ava.okf.md]] — Closed predecessor.
 - [[base/agents/incarnation/docs/domain-closure.ava.okf.md]] — Exec domain closure.
 - [[base/agents/incarnation/docs/incarnation-resources.ava.okf.md]] — Incarnation resource evidence.
