@@ -75,7 +75,9 @@ def _home(
 
 
 def _start(*flags: str) -> int:
-    return start_intent.run_start(build_parser().parse_args(["start", *flags]))
+    return start_intent.run_start(
+        build_parser().parse_args(["start", *flags]), retained_children=[]
+    )
 
 
 def _bytes(home: Path) -> list[tuple[bytes, int]]:

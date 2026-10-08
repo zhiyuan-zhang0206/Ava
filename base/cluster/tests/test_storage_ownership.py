@@ -179,10 +179,17 @@ def test_closed_postgres_with_unknown_scan_refuses_restart(
 def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
     pg_data: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     pending = _pg_receipt(pg_data, state="pending")
     with pytest.raises(FileNotFoundError):
-        pg._spawn(pg_data, pending, [str(pg_data / "missing-postgres")], {})
+        pg._spawn(
+            pg_data,
+            pending,
+            [str(pg_data / "missing-postgres")],
+            {},
+            retained_children=retained_children,
+        )
     receipt = pg._read(pg_data)
     assert receipt is not None and receipt.state == "not-started"
 
@@ -191,7 +198,7 @@ def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
 
     monkeypatch.setattr(pg.subprocess, "Popen", interrupted)
     with pytest.raises(KeyboardInterrupt):
-        pg._spawn(pg_data, pending, ["postgres"], {})
+        pg._spawn(pg_data, pending, ["postgres"], {}, retained_children=retained_children)
     receipt = pg._read(pg_data)
     assert receipt is not None and receipt.state == "pending"
 
@@ -199,6 +206,7 @@ def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
 def test_real_cancellation_after_pg_spawn_retains_native_receipt(
     pg_data: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     actual = subprocess.Popen
     children: list[subprocess.Popen[bytes]] = []
@@ -217,10 +225,12 @@ def test_real_cancellation_after_pg_spawn_retains_native_receipt(
                 _pg_receipt(pg_data, state="pending"),
                 [sys.executable, "-c", "import time; time.sleep(30)"],
                 {},
+                retained_children=retained_children,
             )
         receipt = pg._read(pg_data)
         assert receipt is not None and receipt.state == "captured"
         assert receipt.process().pid == children[0].pid and receipt.process().live()
+        assert retained_children == children
     finally:
         for child in children:
             child.terminate()
@@ -230,6 +240,7 @@ def test_real_cancellation_after_pg_spawn_retains_native_receipt(
 def test_retained_postgres_cannot_signal_replacement(
     pg_data: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     (pg_data.parent / "run").mkdir(exist_ok=True)
     monkeypatch.setattr(pg, "observe", Mock(return_value=OwnedProcess(123, 100.0, 457)))
@@ -237,4 +248,84 @@ def test_retained_postgres_cannot_signal_replacement(
         pg.OwnedProcess, "send_signal", Mock(side_effect=AssertionError("foreign signal"))
     )
     with pytest.raises(RuntimeError, match="identity changed"):
-        pg.start(pg_data, 15433, [], {}, ready=lambda: True, expected=OwnedProcess(123, 100.0, 456))
+        pg.start(
+            pg_data,
+            15433,
+            [],
+            {},
+            ready=lambda: True,
+            expected=OwnedProcess(123, 100.0, 456),
+            retained_children=retained_children,
+        )
+
+
+@pytest.fixture
+def retained_children() -> list[subprocess.Popen[bytes]]:
+    return []
+
+
+def test_stop_reaps_only_the_matching_home_child_after_native_closure(
+    pg_data: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = _pg_receipt(pg_data)
+    owner = receipt.process()
+    order: list[str] = []
+    first = Mock(pid=owner.pid)
+    other = Mock(pid=owner.pid + 1)
+    children = cast("list[subprocess.Popen[bytes]]", [first, other])
+    first.wait.side_effect = lambda *, timeout: order.append(f"reap:{timeout}")
+    monkeypatch.setattr(pg, "observe", Mock(return_value=owner))
+    monkeypatch.setattr(pg, "_read", Mock(return_value=receipt))
+    monkeypatch.setattr(pg, "capture_tree", Mock(return_value=[]))
+    monkeypatch.setattr(pg.OwnedProcess, "send_signal", Mock(return_value=True))
+
+    def closed(_data: Path, _receipt: pg.Receipt) -> None:
+        order.append("closed")
+
+    monkeypatch.setattr(pg, "_require_closed", closed)
+    monkeypatch.setattr(ownership, "require_listener", Mock(return_value=None))
+    pg.stop(pg_data, retained_children=children)
+    assert order == ["closed", "reap:1"]
+    assert children == [other]
+    other.wait.assert_not_called()
+    sibling = pg_data.parent / "sibling-home" / "pgdata"
+    sibling.mkdir(parents=True)
+    sibling_receipt = _pg_receipt(sibling).model_copy(
+        update={
+            "owner": pg.ExpectedProcess(pid=other.pid, create_time=100.0, starttime=456),
+        }
+    )
+    monkeypatch.setattr(pg, "observe", Mock(return_value=sibling_receipt.process()))
+    monkeypatch.setattr(pg, "_read", Mock(return_value=sibling_receipt))
+    pg.stop(sibling, retained_children=children)
+    other.wait.assert_called_once_with(timeout=1)
+    assert children == []
+    first.wait.assert_called_once_with(timeout=1)
+
+
+def test_failed_birth_capture_keeps_the_callers_spawned_handle(
+    pg_data: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    children: list[subprocess.Popen[bytes]] = []
+    monkeypatch.setattr(
+        pg.OwnedProcess, "capture", Mock(side_effect=PermissionError("birth unavailable"))
+    )
+    try:
+        with pytest.raises(PermissionError, match="birth unavailable"):
+            pg._spawn(
+                pg_data,
+                _pg_receipt(pg_data, state="pending"),
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                {},
+                retained_children=children,
+            )
+        [child] = children
+        assert child.poll() is None
+        receipt = pg._read(pg_data)
+        assert receipt is not None and receipt.state == "pending"
+    finally:
+        for child in children:
+            child.terminate()
+            child.wait(timeout=5)

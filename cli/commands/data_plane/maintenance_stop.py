@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import os
 import socket
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -156,6 +157,7 @@ async def _request_stop(
     *,
     save: bool,
     notes: list[str] | None = None,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> None:
     if name == "postgres":
         # SIGINT requests PostgreSQL's fast, checkpointed shutdown; a fast shutdown stuck
@@ -166,6 +168,7 @@ async def _request_stop(
             timeout=_postgres_fast_budget(deadline),
             immediate_wait=PROCESS_CLEANUP_WAIT_S,
             kill_wait=PROCESS_KILL_WAIT_S,
+            retained_children=retained_children,
         )
         if escalation is not None:
             report_postgres_stop_escalation(escalation, notes)
@@ -189,6 +192,7 @@ async def _stop(
     save: bool = True,
     notes: list[str] | None = None,
     clients: list[str] | None = None,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> list[str]:
     pg = capture_postgres()
     pgb = _capture_pooler()
@@ -229,7 +233,15 @@ async def _stop(
                 raise RuntimeError(f"{name} identity changed before stop")
             if name == "pgbouncer":
                 _report_pooler_clients(identity, clients)
-            await _request_stop(name, identity, client, deadline, save=save, notes=notes)
+            await _request_stop(
+                name,
+                identity,
+                client,
+                deadline,
+                save=save,
+                notes=notes,
+                retained_children=retained_children,
+            )
             wait_for_exit(trees[name], deadline)
             stopped.append(name)
         remaining(deadline)
@@ -257,10 +269,15 @@ def stop(
     save: bool = True,
     notes: list[str] | None = None,
     clients: list[str] | None = None,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> list[str]:
     deadline = deadline_after(timeout)
     if sys.platform == "win32":
         raise RuntimeError("native maintenance data-plane stop requires POSIX")
     if settings.data_plane.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
-    return asyncio.run(_stop(deadline, save=save, notes=notes, clients=clients))
+    return asyncio.run(
+        _stop(
+            deadline, save=save, notes=notes, clients=clients, retained_children=retained_children
+        )
+    )

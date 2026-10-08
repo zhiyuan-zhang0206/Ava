@@ -219,7 +219,7 @@ def test_start_refuses_and_launches_nothing(
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("agent-host", 8113),))
     _verdicts(monkeypatch, {"agent-host": DaemonProbe.port_taken(_FOREIGN)})
-    assert _start_commands.cmd_start() == 1
+    assert _start_commands.cmd_start(retained_children=[]) == 1
     assert launched == []
     message = "".join(capsys.readouterr())
     assert "/home/ava/.ava" in message
@@ -232,7 +232,7 @@ def test_a_clear_roster_starts_normally(
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
     _verdicts(monkeypatch, {"ops": DaemonProbe.down("cold")})
-    assert _start_commands.cmd_start() == 0
+    assert _start_commands.cmd_start(retained_children=[]) == 0
     assert launched == ["ops"]
 
 
@@ -243,7 +243,7 @@ def test_a_disabled_service_cannot_block_start(
     _verdicts(
         monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN), "ops": DaemonProbe.down("cold")}
     )
-    assert _start_commands.cmd_start(disabled_services=("labeler",)) == 0
+    assert _start_commands.cmd_start(disabled_services=("labeler",), retained_children=[]) == 0
     assert launched == ["ops"]
 
 
@@ -252,5 +252,5 @@ def test_optional_port_conflict_does_not_block_core_start(
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103),))
     _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
-    assert _start_commands.cmd_start() == 0
+    assert _start_commands.cmd_start(retained_children=[]) == 0
     assert launched == ["labeler"]
