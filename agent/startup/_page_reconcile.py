@@ -8,14 +8,14 @@ from typing import Any
 
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents import page_recovery
+from base.agents.recovery import pages as page_recovery
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
 
 # The notice wording, dedupe window and statements are shared with the page-server
-# service's synchronous pass (`base/agents/page_recovery.py`).
+# service's synchronous pass (`base/agents/recovery/pages.py`).
 _PAGE_RECOVERY_NOTICE_PREFIX = page_recovery.NOTICE_PREFIX
 _PAGE_RECOVERY_MIN_INTERVAL_S = page_recovery.MIN_INTERVAL_S
 _page_recovery_notice = page_recovery.recovery_notice

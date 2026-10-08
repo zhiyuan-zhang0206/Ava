@@ -21,7 +21,7 @@ Per open row:
 
 - **Boot** — the agent's own scan covers t=0.
 - **Heartbeat** (`agent/graph/claim/_dispatch.py:_handle_heartbeat`) — every check-in of an IDLE agent (~5 min).
-- **Page-server service** (`services/agent_runner/page_server/dead_pages.py`) — a busy agent gets no heartbeats, so without a scan its dead pages stay dead for as long as its turn lasts (2026-09-01 incident: ~4h). The page-server's `dead_show_pages` loop scans every open show() page of the machine every heartbeat interval (first pass at start) and runs the close-and-notify arm above in one transaction through the same notice, dedupe window and statements (`base/agents/page_recovery.py`). A dead `serve()` page needs no scan there: the daemon's own reconcile relaunches its server within one poll.
+- **Page-server service** (`services/agent_runner/page_server/dead_pages.py`) — a busy agent gets no heartbeats, so without a scan its dead pages stay dead for as long as its turn lasts (2026-09-01 incident: ~4h). The page-server's `dead_show_pages` loop scans every open show() page of the machine every heartbeat interval (first pass at start) and runs the close-and-notify arm above in one transaction through the same notice, dedupe window and statements (`base/agents/recovery/pages.py`). A dead `serve()` page needs no scan there: the daemon's own reconcile relaunches its server within one poll.
 
 ## Failure handling
 

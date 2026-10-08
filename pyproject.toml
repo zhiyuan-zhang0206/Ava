@@ -200,7 +200,9 @@ forbidden_modules = ["agent"]
 ignore_imports = [
     "services.agent_runner.agent_host.* -> agent.process_boot",
     "services.agent_runner.agent_host.* -> agent.turn.runloop",
-    "services.agent_runner.agent_host.* -> agent.db",
+    "services.agent_runner.agent_host.host -> agent.db",
+    "services.agent_runner.agent_host.pools -> agent.db",
+    "services.agent_runner.agent_host.recovery.interrupt -> agent.db",
     "services.agent_runner.agent_host.* -> agent.graph",
     # The daemon is the composition root that builds the plugin `ExtensionRegistry` once the graph
     # (and with it every agent_runtime face) is loaded, and hands it to `AgentHost`.
@@ -238,17 +240,26 @@ ignore_imports = [
     # (split out of agent.ownership.hosted at its 800-line budget ceiling):
     # the host's beat runs the grace reap, and the settlement boundary runs
     # the prompt reap of a corpse that re-crashed under its own mark.
-    "services.agent_runner.agent_host.* -> agent.ownership.corpse_reap",
+    "services.agent_runner.agent_host.recovery.crash -> agent.ownership.corpse_reap",
+    "services.agent_runner.agent_host.host -> agent.ownership.corpse_reap",
+    "services.agent_runner.agent_host.settlement -> agent.ownership.corpse_reap",
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.
     "services.agent_runner.agent_host.host -> agent.impersonation",
     # Failure recovery preserves the same pre-settlement takeover preparation.
     "services.agent_runner.agent_host.invocation -> agent.impersonation",
     # The original native work boundary writes and flushes an attributed halt.
-    "services.agent_runner.agent_host.native_work -> agent.impersonation",
-    "services.agent_runner.agent_host.native_work -> agent.ownership.native_cancel",
-    "services.agent_runner.agent_host.* -> agent.startup",
-    "services.agent_runner.agent_host.* -> agent.state",
+    "services.agent_runner.agent_host.invocation.native_work -> agent.impersonation",
+    "services.agent_runner.agent_host.invocation.native_work -> agent.ownership.native_cancel",
+    "services.agent_runner.agent_host.daemon -> agent.startup",
+    "services.agent_runner.agent_host.db_recovery -> agent.startup",
+    "services.agent_runner.agent_host.host -> agent.startup",
+    "services.agent_runner.agent_host.settlement -> agent.startup",
+    "services.agent_runner.agent_host.daemon -> agent.state",
+    "services.agent_runner.agent_host.host -> agent.state",
+    "services.agent_runner.agent_host.invocation.native_work -> agent.state",
+    "services.agent_runner.agent_host.stall_guard -> agent.state",
+    "services.agent_runner.agent_host.invocation -> agent.state",
     # Guarded compact invocation reuses native summary/transition/init owners;
     # these exact dependencies do not expose the kernel to other services.
     "services.agent_runner.agent_host.invocation.compact.apply -> agent.hooks.compact",
@@ -1132,6 +1143,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/verify/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/agent_host/recovery/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

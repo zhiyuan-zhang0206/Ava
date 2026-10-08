@@ -604,7 +604,7 @@ class TestSettlementReconciles:
     WHEN each pass dispatches — after the settle, and never for a crash.
     Their own gates live in `test_agent_host_abort_reconcile.py` /
     `test_agent_host_turn_reconcile.py`; the row-visible split in
-    `services/agent_runner/agent_host/tests/test_reconcile_after_abort.py`.
+    `services/agent_runner/agent_host/recovery/tests/test_reconcile_after_abort.py`.
     """
 
     async def _run_ending(
