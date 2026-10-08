@@ -15,9 +15,10 @@ view of the machine config + any plugin-bundled `.mcp.json`).
 
 This skill is the CLI reference. To go from "I want to reach tool X" to a
 server that is installed and proven to work, read
-`ava.help(ava.skills.ava_guide.packages.install)` — it covers finding candidates in
-the official MCP registry, the confirm gate before running a third party's
-process here, and verifying with a test agent.
+`ava.help(ava.skills.ava_guide.packages.install)` — it covers the major registries
+and providers, approval of a specific process or remote connection, and a real
+capability check. Its [source map](../packages/install/references/sources.md)
+includes the official registry, hosted services, and community marketplaces.
 
 ## Add
 
@@ -38,6 +39,22 @@ ava mcp add <name> --command npx --arg=-y --arg some-mcp-server --env KEY=VALUE
 
 `add` replaces an existing server of the same name. A newly added server
 connects the next time you call one of its tools — no restart.
+
+### Remote servers
+
+Ava also accepts a remote **Streamable HTTP** server object. Copy the endpoint
+from the vendor's current documentation, then add it with `--json`:
+
+```bash
+ava mcp add vendor --json '{"url":"https://vendor.example/mcp"}'
+```
+
+`url` and `command` are mutually exclusive. A remote entry can use static
+`headers` or `"oauth": true`, not both. Follow the vendor's auth instructions
+and the supported browser authorization flow; never put credentials into a
+preset or a source repository. Check the running deployment's support and make
+a real read-only tool call to verify access. An SSE-only endpoint is not a
+Streamable HTTP endpoint.
 
 ## List / Remove / Enable / Disable
 

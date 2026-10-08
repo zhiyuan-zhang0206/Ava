@@ -25,7 +25,11 @@ CRUD (create / update / delete) **is not in the SDK**—presets are operational 
 ## Write Side: CLI / REST / Guide Sub-skill
 - **CLI**: `ava presets ls / get / create / update / delete` (`--name` / `--label` / `--description` / `--config <json>`).
 - **REST**: `/api/presets` ([[gateway/routers/docs/routers.ava.okf.md|gateway router]] `presets.py`, POST 201/409). Optional stable creation keys recover the original resource; see [[gateway/routers/docs/resource-creation.ava.okf.md|creation receipts]].
-- **playbook**: Turn the user's request for "a new agent type / add a preset" into a preset operational manual in the `presets` sub-skill of [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md|ava-guide]] (d31660c8).
+- **Preset Maker**: The `presets` sub-skill of [[ava_builtins/skills/platform/ava-guide/docs/ava-guide.ava.okf.md|ava-guide]] researches role prompts, skills, and MCP sources, adapts standing instructions into a role-card skill, and saves verified reusable settings. The `/control#presets` entry opens an agent with `ava-guide:presets` preloaded; an initial request is optional.
+
+MCP connections remain machine-level prerequisites. A preset neither installs
+servers nor stores their definitions or credentials. The maker verifies the
+intended machines and records those dependencies when handing over the preset.
 
 ## Data Types
 - `Preset`: id, name, label, description, config (dict), created_at, updated_at
