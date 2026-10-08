@@ -1,4 +1,4 @@
-"""The actual compound SDK opts in explicitly and never downgrades its intent."""
+"""Compound SDK acceptance has one keyed route and no separate spawn/create recipe."""
 
 from typing import Any
 from unittest.mock import MagicMock
@@ -37,10 +37,9 @@ def _sdk(body: dict[str, Any], **overrides: Any) -> tuple[Task, int]:
         body["task"]["title"],
         body["task"]["description"],
         parent=body["task"]["parent"],
-        preset="coder",
+        preset=overrides.pop("preset", "coder"),
         machine="local-test",
         operation_key="sdk-compound",
-        require_idempotency=True,
         **overrides,
     )
 
@@ -76,15 +75,15 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
     assert db_conn.execute("SELECT count(*) FROM task_assignment_receipts").fetchone() == (1,)
 
 
-def test_old_router_rejects_strong_compound_without_legacy_fallback(body: dict[str, Any]) -> None:
-    old = FastAPI(lifespan=app.router.lifespan_context, middleware=app.user_middleware)
-    old.exception_handlers = app.exception_handlers.copy()
-    old.include_router(agent_router.router)
+def test_unavailable_atomic_route_refuses_without_separate_spawn(body: dict[str, Any]) -> None:
+    unavailable = FastAPI(lifespan=app.router.lifespan_context, middleware=app.user_middleware)
+    unavailable.exception_handlers = app.exception_handlers.copy()
+    unavailable.include_router(agent_router.router)
     http = MagicMock()
-    with TestClient(old, headers={"Authorization": f"Bearer {SECRET}"}) as older:
+    with TestClient(unavailable, headers={"Authorization": f"Bearer {SECRET}"}) as endpoint:
 
         def submit(path: str, **kwargs: Any) -> httpx.Response:
-            return _response(older.post(path, json=kwargs["json"], headers=kwargs["headers"]))
+            return _response(endpoint.post(path, json=kwargs["json"], headers=kwargs["headers"]))
 
         http.post.side_effect = submit
         with transport.use_client(http), pytest.raises(httpx.HTTPStatusError):
@@ -110,7 +109,6 @@ def test_borrowed_lease_is_rejected_before_http_or_validation(
             "Y",
             parent=body["task"]["parent"],
             operation_key="sdk-compound",
-            require_idempotency=True,
         )
     http.post.assert_not_called()
     validated.assert_not_called()
@@ -119,16 +117,23 @@ def test_borrowed_lease_is_rejected_before_http_or_validation(
 @pytest.mark.parametrize(
     "kwargs,error",
     [
-        ({"require_idempotency": "yes"}, TypeError),
-        ({"require_idempotency": True}, ValueError),
-        ({"operation_key": "x"}, ValueError),
-        ({"operation_key": "", "require_idempotency": True}, ValueError),
-        ({"operation_key": True, "require_idempotency": True}, TypeError),
+        ({}, TypeError),
+        ({"operation_key": None}, TypeError),
+        ({"operation_key": ""}, ValueError),
+        ({"operation_key": "x" * 129}, ValueError),
+        ({"operation_key": True}, TypeError),
+        ({"operation_key": "x", "require_idempotency": True}, TypeError),
+        ({"operation_key": "x", "require_idempotency": False}, TypeError),
+        (
+            {"operation_key": "x", "preset": "coder", "config_overlay": {"preset": "coder"}},
+            ValueError,
+        ),
     ],
 )
-def test_invalid_optin_is_failfast_before_http(
+def test_missing_invalid_key_and_retired_flag_fail_before_http(
     body: dict[str, Any], kwargs: dict[str, Any], error: type[Exception]
 ) -> None:
+    pin_agent(body["actor_agent_id"])
     http = MagicMock()
     with transport.use_client(http), pytest.raises(error):
         task_registry.create_and_assign("X", "Y", parent=body["task"]["parent"], **kwargs)
@@ -154,3 +159,28 @@ def test_same_principal_key_actor_drift_conflicts(
         assert changed.value.response.status_code == 409
         assert _sdk(body) == original
     assert db_conn.execute("SELECT count(*) FROM task_assignment_receipts").fetchone() == (1,)
+
+
+@pytest.mark.parametrize("preset_in_overlay", [False, True])
+def test_assignment_uses_only_the_requested_preset(
+    client: TestClient, body: dict[str, Any], db_conn: psycopg.Connection, preset_in_overlay: bool
+) -> None:
+    http = MagicMock()
+    submitted: list[dict[str, Any]] = []
+
+    def submit(path: str, **kwargs: Any) -> httpx.Response:
+        submitted.append(kwargs["json"])
+        response = client.post(path, json=kwargs["json"], headers=kwargs["headers"])
+        assert response.status_code == 201, response.text
+        return _response(response)
+
+    http.post.side_effect = submit
+    with transport.use_client(http):
+        task, agent_id = _sdk(
+            body, preset=None, config_overlay={"preset": "coder"} if preset_in_overlay else None
+        )
+    assert task.owner == agent_id
+    assert submitted[0]["agent"]["config"] == ({"preset": "coder"} if preset_in_overlay else {})
+    assert db_conn.execute(
+        "SELECT preset_name FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("coder" if preset_in_overlay else None,)
