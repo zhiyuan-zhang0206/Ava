@@ -543,6 +543,38 @@ the PITR step below in the same window, is unchanged by a second run.
    Schedule sessions are not restarted by the rollout: the new service re-adopts the live
    ones (a gateway-less window only delays launches and sync requests).
 
+### Release steps: adding the `insights` port slot (one-time)
+
+The release that moves the run-timeline read model out of the gateway into the `insights`
+service ([decision](../decisions/runtime/processes/2026-10-08-insights-reads-are-their-own-service.md))
+adds one slot to the fixed port table (`insights` 8123), so every gateway home's start
+intent needs that key before any command of the new code (see the rule above). A home
+without it is refused at its next `ava start` / `ava stop` with the missing slot named; the
+refusal changes nothing, rerun after the step. A runner-only home has no reservation and
+needs nothing; a home's `.env` needs nothing either, the unset `AVA_INSIGHTS_HEALTH_PORT`
+binds the table's number. No database migration. The step is idempotent.
+
+1. **Between `down` and `up`, on every gateway home**, add the slot. The file is compact
+   JSON with sorted keys, mode 0600:
+
+   ```bash
+   python3 - <<'EOF'
+   import json, os, pathlib
+   home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
+   path = home / "start-intent.json"
+   data = json.loads(path.read_text())
+   data["record"]["ports"].setdefault("insights", 8123)
+   staged = path.with_name(path.name + ".staged")
+   staged.write_text(json.dumps(data, sort_keys=True) + "\n")
+   staged.chmod(0o600)
+   staged.replace(path)
+   EOF
+   ```
+2. **After `up`**, `ava status` lists `insights` ready, `curl -s localhost:8123/healthz`
+   answers with its name, and `ls -l $AVA_HOME/run/insights.sock` shows a socket with mode
+   `srw-------`. The first run-timeline read of each agent after a restart is a cold build
+   (a few seconds); the service holds no state that needs restoring.
+
 ### Release steps: retiring the PITR stack (one-time)
 
 The release that deletes the self-written PITR stack

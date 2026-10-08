@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import cast
 
 from base.db import Database
-from base.events import audit_rows
+from base.events.reads import audit_rows
 from services.derived.insights.run_timeline.schemas import RunTimelineEvent
 
 # One audit event per user-visible lifecycle step. `resurrect` and

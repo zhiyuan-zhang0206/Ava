@@ -89,7 +89,7 @@ def compose_summary_message(summary: str) -> str:
     framing is identical across forced / command / spontaneous compaction.
     The header itself (with the rationale for its wording) lives in
     `agent/messages/__init__.py:COMPACT_SUMMARY_HEADER` — the read-side classifier
-    (gateway/agents/history/context_breakdown.py) keys on it too."""
+    (base/agents/history/context_breakdown.py) keys on it too."""
     return f"{COMPACT_SUMMARY_HEADER}\n\n{summary}"
 
 
