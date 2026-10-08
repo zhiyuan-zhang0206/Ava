@@ -16,7 +16,9 @@ import asyncio
 import time
 from typing import Any
 
-from base.log import logger
+import requests
+
+from services.entrypoints.im_bridge.types import RetryableTransportError, raise_http_failure
 
 
 def idempotency_key(message_id: str | None) -> str | None:
@@ -116,8 +118,8 @@ async def list_chat(
     replay_window_s: float,
     cursor_id: str | None = None,
     cursor_ms: int | None = None,
-) -> list[Any] | None:
-    """The chat's newest messages, ascending; None when a list call failed.
+) -> list[Any]:
+    """The chat's newest messages, ascending; failed list calls raise.
 
     One page (20) normally. `deep` (the replay after a restart) pages back
     until the cursor, or the replay window, is reached: an outage that held
@@ -138,15 +140,18 @@ async def list_chat(
         )
         if token:
             builder = builder.page_token(token)
-        response = await asyncio.to_thread(rest_client.im.v1.message.list, builder.build())
+        try:
+            response = await asyncio.to_thread(rest_client.im.v1.message.list, builder.build())
+        except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
+            raise
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            raise RetryableTransportError(
+                f"Feishu list request failed: {type(exc).__name__}"
+            ) from None
+        if response.raw is not None and response.raw.status_code != 200:
+            raise_http_failure(response.raw.status_code, "Feishu list request failed")
         if response.code != 0:
-            logger.warning(
-                "FeishuAdapter: poll list failed chat={} code={} msg={}",
-                chat_id,
-                response.code,
-                getattr(response, "msg", ""),
-            )
-            return None
+            raise RuntimeError(f"Feishu list rejected: code={response.code}")
         data = response.data
         items += list((data.items or []) if data is not None else [])
         token = getattr(data, "page_token", None)
