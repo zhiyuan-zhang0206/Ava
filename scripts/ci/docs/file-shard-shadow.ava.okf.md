@@ -79,7 +79,10 @@ costs, but one pair does not establish a statistically stable latency gain.
 Each worker records setup/call/teardown outcomes and times, plus the actual
 resolved fixture name, implementation and scope after the call. This includes
 `getfixturevalue()` bindings through pytest's pinned-version fixture request
-state. Worker reports never share an output filename. Group checks must match
+state. Repeated reports for the same node and phase fail immediately, including
+repeated execution inside one worker. Worker reports never share an output
+filename. The planning job uses the same native binaries and vendored runtime
+as the paired runners, preserving environment-dependent collection. Group checks must match
 their planned node IDs and declared closure before any test body executes.
 
 `scripts/ci/file_shard_runtime.py` requires all worker and controller reports,
