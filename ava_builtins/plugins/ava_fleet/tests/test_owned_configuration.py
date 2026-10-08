@@ -108,7 +108,7 @@ def test_gate_and_daemon_birth_share_one_captured_image(
     assert "disabled" in str(service.gate())
 
 
-def test_legacy_pending_skips_fleet_service_without_default_gate(
+def test_legacy_pending_aborts_service_roster_without_default_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from base.packages.plugins import enable_config, load_report
@@ -124,7 +124,8 @@ def test_legacy_pending_skips_fleet_service_without_default_gate(
     monkeypatch.setattr(load_report, "report_plugin_load_failure", capture)
     disk_image_path("ava_fleet").unlink(missing_ok=True)
     runtime_config.env_file_path().write_text("AVA_TASK_MAINTENANCE_ENABLED=false\n")
-    assert plugin_services() == ()
+    with pytest.raises(InvalidConfigData, match="plugins update"):
+        plugin_services()
     assert len(errors) == 1 and "plugins update" in errors[0]
     assert not disk_image_path("ava_fleet").exists()
     with pytest.raises(InvalidConfigData, match="plugins update"):
