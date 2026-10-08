@@ -501,8 +501,8 @@ class AgentHost:
         """Repair checkpoint/inbound state, then prepare the model."""
         await reconcile_claimed_inbounds_at_startup(self._pool, self._checkpointer, agent_id)
         await repair_dangling_tool_use_at_startup(self._graph, agent_id)
-        llm = await boot_agent_scope(agent_id, slices.brain.llm_model, slices.overrides)
-        return _AgentRuntime(fingerprint=fingerprint, llm=llm)
+        llm, binding = await boot_agent_scope(agent_id, slices.brain.llm_model, slices.overrides)
+        return _AgentRuntime(fingerprint=fingerprint, llm=llm, binding=binding)
 
     def _evict(self) -> None:
         """Evict settled runtimes by idle age and least-recent use."""
@@ -530,14 +530,14 @@ class AgentHost:
     async def _drive_turns(
         self, agent_id: int, runtime: _AgentRuntime, slices: AgentSlices
     ) -> TurnOutcome:
-        """Build an invocation-owned context; the driver owns its publisher
-        lifecycle so cached idle runtimes retain no event drain worker."""
+        """Build this invocation's context; the driver owns its publisher lifecycle."""
         event_publisher = AgentEventPublisher(
             self._bus.async_redis(), self._bus.channel, agent_id=agent_id
         )
         ctx = AvaContext(
             ops_pool=self._pool,
             llm=runtime.llm,
+            llm_binding=runtime.binding,
             event_publisher=event_publisher,
             db=self._db,
             bus=self._bus,

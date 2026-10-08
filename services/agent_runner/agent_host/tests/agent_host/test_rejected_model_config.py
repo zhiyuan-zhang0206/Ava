@@ -35,9 +35,9 @@ class TestRejectedModelConfig:
         boot_calls: list[int] = []
         error_events: list[str] = []
 
-        async def _record_boot(agent_id: int, llm_model: str, *_: object) -> _Model:
+        async def _record_boot(agent_id: int, llm_model: str, *_: object) -> tuple[_Model, None]:
             boot_calls.append(agent_id)
-            return _Model(llm_model)
+            return _Model(llm_model), None
 
         def _record_error(_message: str, *, event: str, **_details: object) -> None:
             error_events.append(event)
@@ -70,9 +70,9 @@ class TestRejectedModelConfig:
             if model == "fable":
                 raise ValueError("unknown model 'fable'")
 
-        async def _record_boot(agent_id: int, llm_model: str, *_: object) -> _Model:
+        async def _record_boot(agent_id: int, llm_model: str, *_: object) -> tuple[_Model, None]:
             boot_calls.append(agent_id)
-            return _Model(llm_model)
+            return _Model(llm_model), None
 
         monkeypatch.setattr(runtime_mod, "validate_model_config", _validate_model)
         monkeypatch.setattr(host_mod, "boot_agent_scope", _record_boot)

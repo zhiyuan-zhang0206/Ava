@@ -548,8 +548,15 @@ class TestResolveOverride:
         mod = _install_fake_module(monkeypatch, "tests._llm_override_e2e")
         mod.build = lambda _model: _FakeLLM()  # type: ignore[attr-defined]
         monkeypatch.setattr(settings.lm, "llm_override", "tests._llm_override_e2e:build")
+        from base.lm.factory import build_chat_model_bound
+
         llm = build_chat_model("claude-opus-4-7")
         assert isinstance(llm, _FakeLLM)
+        bound, binding = build_chat_model_bound("claude-opus-4-7")
+        assert isinstance(bound, _FakeLLM)
+        assert binding is None
+        with pytest.raises(ValueError, match="single-attempt"):
+            build_chat_model_bound("claude-opus-4-7", single_attempt=True)
 
     def test_build_chat_model_override_failure_propagates(
         self, monkeypatch: pytest.MonkeyPatch
