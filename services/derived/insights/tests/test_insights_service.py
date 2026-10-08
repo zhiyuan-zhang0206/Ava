@@ -37,6 +37,12 @@ def test_the_app_serves_the_run_timeline_routes_at_their_public_paths() -> None:
     } <= paths
 
 
+def test_healthz_names_the_service_home_and_process() -> None:
+    body = TestClient(_app()).get("/healthz").json()
+    assert body["name"] == "insights"
+    assert isinstance(body["pid"], int)
+
+
 def test_a_route_validates_before_it_reads_anything() -> None:
     client = TestClient(_app())
     # The state holds no database: only a request rejected at the boundary can answer.

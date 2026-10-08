@@ -34,7 +34,6 @@ _FIXED_PORTS: Mapping[str, int] = {
     "pg_backup": 8116,
     "ttl_reaper": 8121,
     "schedule_manager": 8122,
-    "insights": 8123,
 }
 
 

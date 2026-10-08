@@ -30,7 +30,6 @@ def _rec(tmp_path: Path):
             "pg_backup": 18021,
             "ttl_reaper": 18025,
             "schedule_manager": 18026,
-            "insights": 18027,
             "memory_search": 18024,
             "page_server": 18018,
         },

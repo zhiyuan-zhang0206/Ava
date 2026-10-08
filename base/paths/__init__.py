@@ -307,6 +307,11 @@ def insights_socket() -> Path:
     return run_dir() / "insights.sock"
 
 
+def insights_pidfile() -> Path:
+    """Pidfile of the insights service ($AVA_HOME/run/insights.pid)."""
+    return run_dir() / "insights.pid"
+
+
 def mcp_daemon_shared_socket() -> str:
     """Filesystem path of the per-machine shared MCP daemon socket — one
     socket under `$AVA_HOME/run` serving every agent on the machine (the daemon
