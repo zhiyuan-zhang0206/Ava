@@ -135,6 +135,40 @@ def local_plane(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
 
 
+@pytest.fixture
+def pending_pooler_pidfile(home: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Expose a pending PID read while retaining exact fixture cleanup custody."""
+    record = home / "pgbouncer/pgbouncer.pid"
+    config = home / "pgbouncer/pgbouncer.ini"
+    read_text = Path.read_text
+    pending = True
+    captured: list[stop.OwnedProcess] = []
+
+    def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        nonlocal pending
+        text = read_text(path, encoding=encoding, errors=errors)
+        if path == record and pending and text.strip():
+            pending = False
+            identity = ownership.pooler(config, record)
+            assert identity is not None, "the private pooler must publish its native identity"
+            captured.append(identity)
+            return ""
+        return text
+
+    monkeypatch.setattr(Path, "read_text", read)
+    try:
+        yield
+    finally:
+        if not captured and config.exists():
+            _wait_pidfile()
+        for identity in captured:
+            if identity.live():
+                with contextlib.suppress(psutil.NoSuchProcess):
+                    process = psutil.Process(identity.pid)
+                    process.kill()
+                    process.wait(timeout=5)
+
+
 def test_remote_plane_refuses_without_any_signal(
     local_plane: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -293,7 +327,7 @@ def test_redis_admin_credential_is_independent_of_runtime_url(
 
 
 def test_real_pgbouncer_normal_exit_and_identity_cleanup(
-    local_plane: None, home: Path, monkeypatch: pytest.MonkeyPatch
+    local_plane: None, home: Path, monkeypatch: pytest.MonkeyPatch, pending_pooler_pidfile: None
 ) -> None:
     import shutil
 
@@ -315,7 +349,7 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
     )
     subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
     _wait_port(port, timeout=5)
-    pid = int((directory / "pgbouncer.pid").read_text())
+    pid = _wait_pidfile()
     identity = stop.OwnedProcess.capture(psutil.Process(pid))
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
     seen_alive: list[bool] = []
@@ -335,7 +369,7 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 
 
 def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
-    local_plane: None, home: Path, monkeypatch: pytest.MonkeyPatch
+    local_plane: None, home: Path, monkeypatch: pytest.MonkeyPatch, pending_pooler_pidfile: None
 ) -> None:
     """The 2026-09-12 incident shape: an idle connected client must not hold the
     pooler stop open.
@@ -369,7 +403,7 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
     )
     subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
     _wait_port(port, timeout=5)
-    pid = int((directory / "pgbouncer.pid").read_text())
+    pid = _wait_pidfile()
     identity = stop.OwnedProcess.capture(psutil.Process(pid))
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
     try:
@@ -501,15 +535,24 @@ def _wait_pidfile(timeout: float = 5.0) -> int:
 
     The daemon writes the pidfile asynchronously from binding its listeners:
     reading it straight after `_wait_port` returned races startup (2026-09-12,
-    the run that leaked the pooler).
+    the run that leaked the pooler). Missing or empty content is publication
+    still in progress; nonempty invalid content is an error, never readiness.
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if base_pooler.pidfile_path().exists():
-            with contextlib.suppress(ValueError):
-                return int(base_pooler.pidfile_path().read_text().strip())
+            text = base_pooler.pidfile_path().read_text().strip()
+            if text:
+                return int(text)
         time.sleep(0.05)
     raise AssertionError("the pooler never wrote its pidfile")
+
+
+def test_pidfile_wait_refuses_nonempty_corrupt_publication(home: Path) -> None:
+    record = base_pooler.pidfile_path()
+    record.write_text("not-a-native-pid\n")
+    with pytest.raises(ValueError, match="invalid literal"):
+        _wait_pidfile(timeout=1)
 
 
 def _pidfile_pid() -> set[int]:
