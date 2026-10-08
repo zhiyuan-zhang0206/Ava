@@ -1,47 +1,47 @@
 ---
 type: doc
-title: ava-dynamic-workflow skill — explore→fork→join→reduce
-description: Write an orchestration script to spawn parallel workers, collect results, and reduce—explore→fork→join→reduce pattern, all in a single Python file, no YAML pipeline / DAG config / external scheduler. Use when a task is too large for one agent, can be split into independent subtasks, and requires parallel + result aggregation.
+title: ava-dynamic-workflow skill — script orchestration
+description: Executable peer dispatch, collection, verification, and reduction with proportionate setup and explicit recovery limits.
 tags:
 - extensions
 - agent-instruction
 ---
 
-# ava-dynamic-workflow skill — explore→fork→join→reduce
+# Dynamic Workflow
 
-## What it is
-Write a long-running **orchestration script**: break a complex task into subtasks, fan out to parallel worker agents, collect results, and synthesize a final answer—
-all in a single Python file (`$AVA_HOME/skills/ava-dynamic-workflow/`). Its key argument (**Why Ava**): Ava
-agent is a code-act agent, and `ava.agents.spawn()` / `ava.watcher.launch()` / `ava.files` are just
-ordinary Python calls—you write an orchestrator script in your own turn, run it, and create a team of workers. Other frameworks
-require pre-declared pipelines or external orchestration services; Ava's orchestration is just a Python script, **no YAML / DAG / external
-scheduler**. (The native Ava implementation of the orchestrator-workers + parallelization pattern from Anthropic's "Building effective agents".)
+Dynamic Workflow is a script written by an ordinary persistent peer. Independent
+work can benefit from concurrency without requiring a script or one peer per
+item. The skill starts with one representative dispatch/delivery/verification
+path before expanding. The current agent freely chooses execution, orchestration,
+and evaluation roles; no Fleet labels or task records are prerequisites.
 
-## Pattern
+The entrypoint carries method selection; `references/execution.md` carries
+dispatch, collection, verification, budget handling, and cleanup. Read it when
+script orchestration is selected.
 
-The entrypoint carries applicability and orchestration constraints.
-`references/execution.md` carries the procedure, budget handling, and topology;
-read it once script orchestration is the chosen strategy.
+`references/minimal_dispatch.py` provides a single-writer starting example. It
+stores intent and peer receipts, preserves validated task/input-matching results,
+and stops on ambiguous dispatch instead of automatically repeating remote work.
+Local file writes and remote spawn are not atomic: arbitrary-crash exactly-once
+execution is not claimed. Known assignments require deliberate reconciliation or
+retry, not a missing-file loop. A dispatch failure stops before waiting.
 
-explore (understand the task, determine what subtasks exist) → fork (spawn one worker per subtask) → join (collect results)
-→ reduce (synthesize).
+`references/gather_files.py` wakes at file-existence checkpoints. Readiness must
+be followed by identity, version, schema, and domain-evidence validation. Results
+are written atomically, completed artifacts retained, and watcher IDs recorded
+for re-entry. Blockers, budget decisions, and handoffs still reach the responsible
+peer directly. Idle and self-termination are optional lifecycle choices.
 
-## Completion protocol: silent workers, orchestrator-chosen checkpoints
-A worker finishes by writing its result file and then ending its own process — **it
-never messages the orchestrator**. The file's existence IS the completion signal; a worker never idles after its file lands (the orchestrator resurrects one via a message only when a follow-up is needed). Waking up
-is the orchestrator's decision, expressed as a **checkpoint**: a `gather_files.py` watcher the
-orchestrator script launches, which sends exactly one message when the result files it names
-have landed. The script decides how many checkpoints exist and what each waits for — final-only
-(simple workflow), one per wave (multi-wave), or only the designated reporters whose output gates
-the next step (a 10-worker fan-out can be gated by 2 files, or by a K-of-N count via
-`REQUIRED_COUNT` / `MATCH_GLOB`). The banned shape is one wake-up per worker: N workers messaging
-the orchestrator costs N LLM turns, N-1 of which have nothing to do.
+The one-shot orchestrator template and larger research/sweep demos remain
+illustrations, not resumable defaults. Read references for the current gap.
 
-## Key Dependencies
-- [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava/agents/docs/agents.ava.okf.md|ava.agents]] — `spawn` fan-out; `send_message` is the checkpoint's wake-up channel, not the workers'
-- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — the checkpoint is a watcher
-- [[ava_builtins/plugins/ava_fleet/docs/spawn.ava.okf.md|Spawn]] — fleet-side spawn semantics (label / machine / preset)
+USD accounting uses the existing long-running-agent usage script and explicit
+IDs, birth lineage, and windows. Reminders ask for decisions; preserve handoffs
+and pause state before more dispatch rather than hard-killing peers. Resume
+conditions and scope survive late results and script re-entry.
 
-The core orchestration recipes do not require Fleet labels or task records. Local
-role names and result files are script coordination state, not Fleet SDK fields.
+## Owners
+
+- [Skill](../SKILL.md) owns method selection and orchestration guidance.
+- [[ava/agents/docs/agents.ava.okf.md|Agents]] owns peer lifecycle and communication.
+- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] owns checkpoint execution.
