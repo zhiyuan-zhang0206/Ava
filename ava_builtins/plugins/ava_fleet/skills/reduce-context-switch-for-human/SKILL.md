@@ -1,6 +1,6 @@
 ---
 name: reduce-context-switch-for-human
-description: Rolls delegated progress up the manager tree and reserves user interruptions for real emergencies. Use when the human's attention is elsewhere, when choosing queue versus push, or when pinning a delegation's reporting discipline.
+description: "Coordinates reporting for delegated Ava work. Use when choosing queue versus push updates or protecting the user's attention during delegation."
 ---
 
 # Reduce Context Switch for the Human

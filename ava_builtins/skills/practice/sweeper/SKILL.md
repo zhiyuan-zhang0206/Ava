@@ -1,6 +1,6 @@
 ---
 name: sweeper
-description: "Reconciles a repository's living technical-debt tracker by re-verifying open items, discovering debt, and landing updates as a PR. Use when asked to sweep, audit, or inventory repo debt."
+description: "Reconciles a repository's technical-debt tracker with verified findings. Use when asked to sweep, audit, or inventory repository debt."
 ---
 
 # Sweeper (engine)

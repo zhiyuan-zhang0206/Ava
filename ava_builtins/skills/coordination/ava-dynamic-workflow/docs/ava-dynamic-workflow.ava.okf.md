@@ -18,6 +18,11 @@ require pre-declared pipelines or external orchestration services; Ava's orchest
 scheduler**. (The native Ava implementation of the orchestrator-workers + parallelization pattern from Anthropic's "Building effective agents".)
 
 ## Pattern
+
+The entrypoint carries applicability and orchestration constraints.
+`references/execution.md` carries the procedure, budget handling, and topology;
+read it once script orchestration is the chosen strategy.
+
 explore (understand the task, determine what subtasks exist) → fork (spawn one worker per subtask) → join (collect results)
 → reduce (synthesize).
 

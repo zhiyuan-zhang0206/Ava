@@ -1,6 +1,6 @@
 ---
 name: schedules
-description: Converts natural-language timing needs into resumable gateway-hosted Ava schedules. Use when the user says schedule, cron, nightly, every hour, when a threshold is reached, or asks for recurring or condition-triggered work.
+description: "Creates resumable Ava schedules from timing requirements. Use for recurring, time-triggered, or condition-triggered work."
 ---
 
 # Schedule Writer
