@@ -25,6 +25,9 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[A
     """Install the ava_memory SDK surface against isolated stores."""
     import base.cluster.machine
     import base.paths
+    from base.agents.sdk import call_policy
+
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
 
     workspace = tmp_path / "workspace"
     pool = tmp_path / "pool"
