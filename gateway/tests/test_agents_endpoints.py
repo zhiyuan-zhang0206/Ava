@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from base.lm.plugin_providers import model_catalog
 from gateway.app import app
-from gateway.auth.cors import cors_allowed_origins
+from gateway.http.auth.cors import cors_allowed_origins
 from tests.fixtures.model_catalog import AddModels
 
 

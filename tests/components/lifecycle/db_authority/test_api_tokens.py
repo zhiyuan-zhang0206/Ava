@@ -30,9 +30,9 @@ from base.cluster.machine import MachineRole, gateway_auth_headers
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from cli.commands.data_plane import bringup
-from gateway.auth import request_principal
-from gateway.auth.request_principal import cluster_credential
-from gateway.auth.webhook import authenticate_webhook
+from gateway.http.auth import request_principal
+from gateway.http.auth.request_principal import cluster_credential
+from gateway.http.auth.webhook import authenticate_webhook
 from ops.roster.service_spec import ServiceSpec, api_access
 from services.agent_runner.agent_ops import _boot as ops_boot
 

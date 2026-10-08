@@ -15,7 +15,7 @@ delivery policy. Same-key changes return 409; different keys create new objects.
 Keyed `deliver=true` is unsupported (422 before admission); the whole route remains
 `NON_IDEMPOTENT`. Unsupported gateways are never automatically retried.
 
-`gateway.routers.upload_batches` owns `agent_upload_batches`. A first writable
+`gateway.routers.upload.batches` owns `agent_upload_batches`. A first writable
 transaction takes a per-agent PostgreSQL xact lock, checks existing identity before
 mutable agent existence, and commits the receiving manifest/reservation. A second
 writable transaction takes the same lock, publishes files and commits the original

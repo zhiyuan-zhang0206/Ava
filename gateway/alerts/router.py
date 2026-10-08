@@ -58,8 +58,8 @@ from gateway.alerts.schemas import (
     AlertStatus,
     AlertWebhookPayload,
 )
-from gateway.auth.webhook import authenticate_webhook
 from gateway.events.sse import event_stream
+from gateway.http.auth.webhook import authenticate_webhook
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def _ingest_authorized(request: Request) -> bool:
     """Webhook-token header, else cluster-secret Bearer, else loopback trust.
 
     ``X-Alerts-Token`` carries the webhook token; the Grafana contact point
-    sends it as a notifier-native Bearer instead (see ``gateway.auth.webhook``).
+    sends it as a notifier-native Bearer instead (see ``gateway.http.auth.webhook``).
     Loopback trust only applies when no webhook token is configured — the
     single-box default, where Grafana (127.0.0.1:3003) is the only caller and
     the gateway binds everything anyway. With a token set, loopback is not

@@ -23,7 +23,7 @@ from base.db.code_version_gate import raise_min_code_version
 from base.deploy.schema.migrations import assert_schema_current
 from base.log import init_gateway_process
 from base.native_process.os_platform import raise_fd_limit
-from gateway.middleware import stopping
+from gateway.http.middleware import stopping
 
 _log = logging.getLogger(__name__)
 _GATEWAY_UVICORN_WORKERS = 1

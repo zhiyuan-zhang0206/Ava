@@ -8,7 +8,7 @@ tags: []
 # Preset and schedule creation acceptance identities
 
 `POST /api/presets` and `POST /api/schedules` accept an optional
-`Idempotency-Key`. Shared `gateway.auth.request_principal.optional_request_key`
+`Idempotency-Key`. Shared `gateway.http.auth.request_principal.optional_request_key`
 validates the 1–128 character key and explicit scope using the existing verified
 credential binding. Legacy requests omit scope; unsupported scope or scope without
 key is refused. CLI/browser mint one legacy key per invocation; they do not

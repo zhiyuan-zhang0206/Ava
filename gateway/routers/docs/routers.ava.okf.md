@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Gateway Routers
-description: The gateway's route catalog — feature packages (gateway/<feature>/) plus single-module routers (gateway/routers/<domain>.py), all mounted to /api/* by app.py (grafana outside /api).
+description: Feature API routes, graph views, upload intake and receipts mounted by app.py.
 tags: []
 ---
 
@@ -10,15 +10,17 @@ tags: []
 `gateway/app.py` mounts route modules. Cohesive route/helper/model domains live
 in `gateway/<feature>/`; single-module routers live in
 `gateway/routers/<domain>.py`, with models in `gateway/schemas/<domain>.py`.
+`upload/` owns intake, `receipts/` owns replay, and `gateway/inspect/` owns the
+OKF viewer. Fleet graph keeps its route-local query.
 
 
 | package | routers |
 |---|---|
-| `gateway/agents/` | `router` (agents), `lifecycle`, `state`, `conversation`, `timeline`, `notices`; helpers `forward`, `delivery` |
+| `gateway/agents/` | `router` (agents), `lifecycle`, `state`, `history.conversation`, `history.timeline`, `notices`; helpers `forward`, `delivery` |
 | `gateway/events/` | `router` (events), `agent_events`, `computer_traces`, `resolutions`, `metrics`, `system` |
 | `gateway/cluster/` | `router` (cluster), `machine_pause`, `bootstrap`, `status`, `ops_monitor` |
 | `gateway/extensions/` | `inventory`, `skills`, `plugin_ui`, `ui_contributions`, `packages` |
-| `gateway/alerts/`, `gateway/auth/`, `gateway/mcp_server/`, `gateway/schedules/`, `gateway/run_timeline/`, `gateway/inspect/` | `router` |
+| `gateway/alerts/`, `gateway/http/auth/`, `gateway/mcp_server/`, `gateway/schedules/`, `gateway/run_timeline/`, `gateway/inspect/` | `router` |
 
 ## Router categories
 

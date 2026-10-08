@@ -7,7 +7,7 @@ from fastapi import HTTPException, Request
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
-from gateway.auth.request_principal import PrincipalScopeError, optional_request_key
+from gateway.http.auth.request_principal import PrincipalScopeError, optional_request_key
 
 
 def operation_key(request: Request) -> str | None:

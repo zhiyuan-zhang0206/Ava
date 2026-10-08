@@ -12,7 +12,7 @@ from base.agents.labels import spawn_prompt_with_label
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
-from gateway.auth.request_principal import (
+from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
     SCOPE_HEADER,
     PrincipalScopeError,

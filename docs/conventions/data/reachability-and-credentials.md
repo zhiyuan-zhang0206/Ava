@@ -69,7 +69,7 @@ guard correct.
 
 | Surface | Credential | Verifier |
 |---|---|---|
-| Gateway HTTP API, bootstrap, webhooks | `AVA_CLUSTER_SECRET` bearer (human/operator, gateway only) or the active write generation's machine API token (`AVA_API_TOKEN`) | `gateway.auth.request_principal.cluster_credential` (constant-time; a revoked generation's token never matches) |
+| Gateway HTTP API, bootstrap, webhooks | `AVA_CLUSTER_SECRET` bearer (human/operator, gateway only) or the active write generation's machine API token (`AVA_API_TOKEN`) | `gateway.http.auth.request_principal.cluster_credential` (constant-time; a revoked generation's token never matches) |
 | A unit's `/ops` | its write generation's gateway or runner API token | `base/cluster/auth.py` `verify_bearer_digest` over digests only |
 | Gateway and station OTLP ingress (remote receiver) | the telemetry token (`HMAC(AVA_CLUSTER_SECRET)`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
 | Data plane (Postgres/Redis) | split admin/runtime credentials, gateway-only admin | `docs/conventions/data/data-plane-secret-split.md` |

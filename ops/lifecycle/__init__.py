@@ -11,7 +11,7 @@ ops compose: `launch` (runner-side spawn validation and wake), `termination`
 fan-out), `resurrect_gates` (durable automatic-resurrection gates) and
 `billing_recovery` (the explicit billing batch recovery).
 
-Both the gateway FastAPI handlers (`gateway/agents/lifecycle.py`, `gateway/routers/uploads.py`)
+Both the gateway FastAPI handlers (`gateway/agents/lifecycle.py`, `gateway/routers/upload/router.py`)
 and the agent-runner ops server (`services/agent_runner/agent_ops/daemon.py:_dispatch`) call
 these directly; the ops server runs them in-process. Cross-machine routing stays
 in the FastAPI handler wrappers — forwarding never recurses inside an op. The

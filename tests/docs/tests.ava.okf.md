@@ -65,4 +65,4 @@ Validation ownership across hooks and CI: [[test-ci.ava.okf.md]].
 - **Test strategy**: commit fast + CI full. Locally only run relevant tests, CI is the merge gate
 - **Isolation**: each test gets isolated DB/Redis, avoiding parallel conflicts
 - **Do not** run the full suite locally — Mac mini resources are limited (the `provisioning` and `env_bootstrap` plugins are designed for concurrency isolation: per-session database names + random free ports + Redis channel suffixes, **concurrent sessions will not conflict**, just resource-intensive)
-- `gateway/middleware/tests/test_agent_error_wire_equivalence.py` parametrized verification of agent ↔ gateway error wire protocol consistency
+- `gateway/http/middleware/tests/test_agent_error_wire_equivalence.py` parametrized verification of agent ↔ gateway error wire protocol consistency
