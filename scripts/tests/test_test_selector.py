@@ -207,6 +207,28 @@ def test_uses_average_duration_for_a_new_test_without_a_timing_entry(tmp_path: P
     assert abs(result.full_est_seconds - 40 / 3) < 1e-9
 
 
+def test_measured_fast_files_keep_their_cost_instead_of_the_unknown_average(tmp_path: Path) -> None:
+    repo_root = _selector_repo(tmp_path)
+    _write(repo_root, "tests/unit/test_fast.py", "def test_fast(): pass\n")
+    _write(repo_root, "tests/unit/test_zero.py", "def test_zero(): pass\n")
+    timings = json.loads((repo_root / ".test_durations").read_text())
+    timings.update(
+        {
+            "tests/unit/test_fast.py::test_fast": 0.019,
+            "tests/unit/test_zero.py::test_zero": 0.0,
+        }
+    )
+    _write(repo_root, ".test_durations", json.dumps(timings))
+
+    result = test_selector.select_tests(
+        ["tests/unit/test_fast.py", "tests/unit/test_zero.py"], repo_root=repo_root
+    )
+
+    assert result.decision == "SELECTED"
+    assert result.est_seconds == 0.019
+    assert result.full_est_seconds == 10.019
+
+
 def test_uses_the_average_timing_entry_for_an_unmeasured_test_file(tmp_path: Path) -> None:
     """A multi-test known file must not inflate the cost of one new file."""
     repo_root = _selector_repo(tmp_path)

@@ -4,8 +4,8 @@
 # lane runs everywhere with no canonical-vs-fork gating — and the same economics
 # make SHARDING the speed lever: the pytest suite dominates wall clock, so it
 # fans out over pytest-split shards (LPT duration-balanced via the committed
-# .test_durations and least_duration — slow tests only, >=0.2s, 87% of total runtime; tests
-# absent from it are costed at this run's average. Refreshed nightly by
+# .test_durations and least_duration — refreshes retain all measured tests;
+# unmeasured tests are costed at this run's average. Refreshed nightly by
 # scripts/ci/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
