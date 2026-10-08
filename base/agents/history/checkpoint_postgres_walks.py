@@ -191,7 +191,7 @@ def _fetch_suffix(
     rows: _Rows = []
     body_bytes = body_rows = body_batches = 0
     reset = False
-    decode = getattr(saver, "_ava_delta_reset_decode", saver.serde.loads_typed)
+    decode = saver.serde.loads_typed
     for batch in _body_batches(keys):
         fetched = yield (
             _WRITE_BODIES_SQL,
@@ -203,7 +203,6 @@ def _fetch_suffix(
                 namespace,
             ),
         )
-        _observe_history_rows(saver, fetched)
         if len(fetched) != len(batch):
             raise RuntimeError("message history changed while reading its write bodies")
         body_batches += 1
@@ -230,13 +229,6 @@ def _fetch_suffix(
         reset_found=reset,
     )
     return rows, reset
-
-
-def _observe_history_rows(saver: BasePostgresSaver, rows: _Rows) -> None:
-    """Report transferred bodies before the reader discards an obsolete prefix."""
-    observer = getattr(saver, "_ava_delta_history_rows", None)
-    if observer is not None:
-        observer(rows)
 
 
 def _history_queries(
@@ -276,7 +268,6 @@ def _history_queries(
         seed_inline.clear()
     if seeds["messages"] is not None and "messages" not in seed_inline:
         seed_rows = yield _SEED_SQL, (thread, namespace, seeds["messages"])
-        _observe_history_rows(saver, seed_rows)
         rows.extend(seed_rows)
     return saver._build_delta_channels_writes_history(
         channels=["messages"],
