@@ -110,7 +110,7 @@ def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
         pool.submit(lambda: (pathlib.Path({str(ready)!r}).write_text("1"), time.sleep(3600)))
         while not pathlib.Path({str(ready)!r}).exists():
             time.sleep(0.01)
-        daemon._shutdown_op_pool()
+        daemon._shutdown_op_pool(pool)
         daemon._hard_exit(0)
     """)
     started = time.monotonic()

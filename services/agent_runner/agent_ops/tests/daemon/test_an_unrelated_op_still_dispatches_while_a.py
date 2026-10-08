@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -19,6 +20,7 @@ from services.agent_runner.agent_ops.tests.test_daemon import (
 
 @pytest.mark.asyncio
 async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
+    op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A readiness probe stays reachable while an unrelated worker is blocked."""
@@ -46,12 +48,19 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
 
     stuck = asyncio.ensure_future(
-        daemon._dispatch("inventory_read", {}, active_ops={}, workers=set(), pool=dispatch_pool)
+        daemon._dispatch(
+            "inventory_read",
+            {},
+            active_ops={},
+            workers=set(),
+            pool=dispatch_pool,
+            executor=op_executor,
+        )
     )
     await asyncio.to_thread(started.wait, 10)
 
     status, result = await daemon._dispatch(
-        "status_probe", {}, active_ops={}, workers=set(), pool=dispatch_pool
+        "status_probe", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
     )
     assert (status, result) == ("completed", {"ready": True})
 
@@ -60,7 +69,9 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
 
 
 @pytest.mark.asyncio
-async def test_two_config_writes_cannot_interleave(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_two_config_writes_cannot_interleave(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`config_write` is a read-modify-write: `write_fields` walks the requested
     keys through dotenv's `set_key`, rewriting the whole `.env` once per key. The
     event loop used to serialize that for free; in a worker thread with
@@ -92,10 +103,20 @@ async def test_two_config_writes_cannot_interleave(monkeypatch: pytest.MonkeyPat
 
     await asyncio.gather(
         daemon._dispatch(
-            "config_write", {"overrides": {}}, active_ops={}, workers=set(), pool=dispatch_pool
+            "config_write",
+            {"overrides": {}},
+            active_ops={},
+            workers=set(),
+            pool=dispatch_pool,
+            executor=op_executor,
         ),
         daemon._dispatch(
-            "config_write", {"overrides": {}}, active_ops={}, workers=set(), pool=dispatch_pool
+            "config_write",
+            {"overrides": {}},
+            active_ops={},
+            workers=set(),
+            pool=dispatch_pool,
+            executor=op_executor,
         ),
         daemon._dispatch(
             "inventory_write",
@@ -103,6 +124,7 @@ async def test_two_config_writes_cannot_interleave(monkeypatch: pytest.MonkeyPat
             active_ops={},
             workers=set(),
             pool=dispatch_pool,
+            executor=op_executor,
         ),
     )
 
@@ -110,7 +132,9 @@ async def test_two_config_writes_cannot_interleave(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_config_write_op_receives_actor_and_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_config_write_op_receives_actor_and_trace(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The gateway-stamped actor/trace ride the payload into config_write_op."""
     captured: dict[str, object] = {}
 
@@ -130,6 +154,7 @@ async def test_config_write_op_receives_actor_and_trace(monkeypatch: pytest.Monk
         active_ops={},
         workers=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == "completed"
     assert captured == {
@@ -139,7 +164,9 @@ async def test_config_write_op_receives_actor_and_trace(monkeypatch: pytest.Monk
     }
 
 
-async def test_config_audit_read_op_receives_last(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_config_audit_read_op_receives_last(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The config_audit_read arm forwards `last` into config_audit_read_op."""
     captured: dict[str, object] = {}
 
@@ -154,19 +181,30 @@ async def test_config_audit_read_op_receives_last(monkeypatch: pytest.MonkeyPatc
     dispatch_pool: ConnectionPool = _stub_pool()
     monkeypatch.setattr(daemon.host_config, "config_audit_read_op", _capture)
     status, _ = await daemon._dispatch(
-        "config_audit_read", {"last": 7}, active_ops={}, workers=set(), pool=dispatch_pool
+        "config_audit_read",
+        {"last": 7},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == "completed"
     assert captured == {"last": 7}
 
 
 async def test_config_audit_read_rejects_out_of_range_last(
+    op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`last` outside 1..200 fails payload validation before any read."""
     dispatch_pool: ConnectionPool = _stub_pool()
     status, result = await daemon._dispatch(
-        "config_audit_read", {"last": 201}, active_ops={}, workers=set(), pool=dispatch_pool
+        "config_audit_read",
+        {"last": 201},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == "failed"
     assert "last" in str(result["error"])
@@ -174,6 +212,7 @@ async def test_config_audit_read_rejects_out_of_range_last(
 
 @pytest.mark.asyncio
 async def test_op_arms_do_not_run_on_the_default_executor(
+    op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`asyncio.run` closes by JOINING every default-executor thread, so an arm
@@ -199,22 +238,22 @@ async def test_op_arms_do_not_run_on_the_default_executor(
 
     monkeypatch.setattr(daemon.host_config, "config_read_op", _note_thread)
 
-    await daemon._dispatch("config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool)
+    await daemon._dispatch(
+        "config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool, executor=op_executor
+    )
 
     assert seen and seen[0].startswith("ava-ops-arm"), f"arm ran on {seen!r}"
 
 
-def test_shutting_the_pool_down_does_not_wait_for_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The exit path drops the pool with `wait=False`. A join here would reinstate
-    exactly the stall the own-pool change removes."""
+def test_shutting_the_pool_down_does_not_wait_for_it(
+    monkeypatch: pytest.MonkeyPatch, op_executor: ThreadPoolExecutor
+) -> None:
+    """The invocation closes the executor without waiting for running arms."""
     calls: list[bool] = []
 
-    class _Pool:
-        def shutdown(self, wait: bool = True) -> None:
-            calls.append(wait)
+    def shutdown(wait: bool = True) -> None:
+        calls.append(wait)
 
-    monkeypatch.setattr(daemon, "_op_executor", _Pool())
-    daemon._shutdown_op_pool()
-
+    monkeypatch.setattr(op_executor, "shutdown", shutdown)
+    daemon._shutdown_op_pool(op_executor)
     assert calls == [False]
-    assert daemon._op_executor is None

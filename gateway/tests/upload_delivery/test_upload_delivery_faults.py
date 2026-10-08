@@ -220,13 +220,15 @@ async def test_unknown_remote_kind_holds_without_legacy_fallback(
         return value != "upload-receive-v1" and original(value)
 
     monkeypatch.setattr(daemon, "is_op_kind", old_kind)
-    status, result = await daemon._dispatch(
-        "upload-receive-v1",
-        request.model_dump(),
-        active_ops={},
-        workers=set(),
-        pool=app.state.db_pool,
-    )
+    with daemon._op_thread_pool() as executor:
+        status, result = await daemon._dispatch(
+            "upload-receive-v1",
+            request.model_dump(),
+            active_ops={},
+            workers=set(),
+            pool=app.state.db_pool,
+            executor=executor,
+        )
     assert status == OpStatus.FAILED and "unknown kind" in str(result["error"])
     # Source does not reinterpret an unsupported version as legacy upload_receive.
     recovery = worker.UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
