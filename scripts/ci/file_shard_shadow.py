@@ -1,8 +1,9 @@
-"""Opt-in collection-only proof for whole-file shards; never selects a test gate.
+"""Opt-in collection and runtime proof for whole-file shards.
 
 Create a plan from one complete eligible collection, then collect each group's
 files and compare node IDs and fixture closure with that same snapshot. Both
-stages require --collect-only. pytest-split remains the scheduling algorithm.
+stages require --collect-only unless --file-shard-execute explicitly opts into
+runtime proof. Required CI routing remains unchanged.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import hashlib
 import json
 import time
 from collections import defaultdict
+from collections.abc import Generator
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, Literal, Self, cast
@@ -20,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 from pytest_split.algorithms import LeastDurationAlgorithm
 
 Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+type Phase = Literal["setup", "call", "teardown"]
 DEFAULT_FILE_SHARDS = 16
 MAX_FILE_SHARDS = 64
 _DURATIONS = TypeAdapter(dict[str, Seconds])
@@ -95,6 +98,30 @@ class Plan(BaseModel):
 
 
 _PLAN = pytest.StashKey[Plan]()
+_RUNTIME = pytest.StashKey[dict[str, "RuntimeNode"]]()
+_COLLECTION_SECONDS = pytest.StashKey[float]()
+
+
+class RuntimeNode(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    fixtures: dict[str, str] = Field(default_factory=dict)
+    outcomes: dict[Phase, str] = Field(default_factory=dict[Phase, str])
+    seconds: dict[Phase, Seconds] = Field(default_factory=dict[Phase, Seconds])
+
+
+class RuntimeReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    group: int = Field(ge=1)
+    worker: str
+    exitstatus: int
+    pytest_version: str
+    pytest_split_version: str
+    durations_sha256: str
+    pytest_config_sha256: str
+    collection_seconds: Seconds
+    nodes: dict[str, RuntimeNode]
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -104,6 +131,44 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--file-shard-check", help="Read a plan and collect one group's files.")
     group.addoption("--file-shard-group", type=int)
     group.addoption("--file-shard-report", help="Write the collection comparison JSON.")
+    group.addoption(
+        "--file-shard-execute",
+        action="store_true",
+        help="Execute a checked group for runtime proof.",
+    )
+    group.addoption(
+        "--file-shard-runtime-report", help="Write per-worker runtime evidence at this prefix."
+    )
+
+
+def _worker(config: pytest.Config) -> str:
+    worker = getattr(config, "workerinput", None)
+    return cast(str, worker["workerid"]) if worker is not None else "controller"
+
+
+def _report_path(config: pytest.Config, option: str) -> Path:
+    path = Path(cast(str, config.getoption(option)))
+    return path.with_name(f"{path.stem}-{_worker(config)}{path.suffix}")
+
+
+def _configure_runtime(config: pytest.Config) -> None:
+    if config.getoption("file_shard_execute") and (
+        not config.getoption("file_shard_check")
+        or config.option.collectonly
+        or not config.getoption("file_shard_runtime_report")
+    ):
+        raise pytest.UsageError(
+            "Execution proof requires a checked group, runtime report and test bodies"
+        )
+    if not config.getoption("file_shard_runtime_report"):
+        return
+    if config.option.collectonly:
+        raise pytest.UsageError("Runtime evidence requires test execution")
+    group = config.getoption("file_shard_group") or config.getoption("group")
+    if not isinstance(group, int) or group < 1:
+        raise pytest.UsageError("Runtime evidence requires a shard group")
+    _report_path(config, "file_shard_runtime_report").unlink(missing_ok=True)
+    config.stash[_RUNTIME] = {}
 
 
 def _durations(config: pytest.Config) -> tuple[dict[str, float], str]:
@@ -132,8 +197,12 @@ def _load_group(config: pytest.Config) -> None:
     output = config.getoption("file_shard_report")
     if not output:
         raise pytest.UsageError("--file-shard-check requires --file-shard-report")
-    report = Path(output)
-    if source.resolve() == report.resolve():
+    report = (
+        _report_path(config, "file_shard_report")
+        if config.getoption("file_shard_execute")
+        else Path(output)
+    )
+    if source.resolve() == Path(output).resolve():
         raise pytest.UsageError("Shadow plan and report must use different paths")
     report.unlink(missing_ok=True)
     try:
@@ -168,15 +237,17 @@ def _load_group(config: pytest.Config) -> None:
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config: pytest.Config) -> None:
+    _configure_runtime(config)
     output = config.getoption("file_shard_plan")
     check = config.getoption("file_shard_check")
+    execute = config.getoption("file_shard_execute")
     if not output and not check:
         if config.getoption("file_shard_group") or config.getoption("file_shard_report"):
             raise pytest.UsageError("Shadow group/report options require --file-shard-check")
         return
     if output and check:
         raise pytest.UsageError("Choose plan creation or group checking, not both")
-    if not config.option.collectonly:
+    if not config.option.collectonly and not execute:
         raise pytest.UsageError(
             "File shard shadow requires --collect-only; it cannot run a test gate"
         )
@@ -271,9 +342,12 @@ def _check(session: pytest.Session) -> None:
         "extra": extra,
         "fixture_changes": changed,
     }
-    Path(cast(str, config.getoption("file_shard_report"))).write_text(
-        json.dumps(report, indent=2) + "\n"
+    report_path = (
+        _report_path(config, "file_shard_report")
+        if config.getoption("file_shard_execute")
+        else Path(cast(str, config.getoption("file_shard_report")))
     )
+    report_path.write_text(json.dumps(report, indent=2) + "\n")
     if not matched:
         raise pytest.UsageError(
             "File shard shadow differs from complete collection; see the report"
@@ -282,6 +356,7 @@ def _check(session: pytest.Session) -> None:
 
 def pytest_collection_finish(session: pytest.Session) -> None:
     config = session.config
+    config.stash[_COLLECTION_SECONDS] = time.perf_counter() - _STARTED
     output = config.getoption("file_shard_plan")
     check = config.getoption("file_shard_check")
     if not output and not check:
@@ -292,3 +367,44 @@ def pytest_collection_finish(session: pytest.Session) -> None:
         Path(output).write_text(_plan(session).model_dump_json(indent=2) + "\n")
     else:
         _check(session)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item,
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    report = yield
+    if _RUNTIME not in item.config.stash:
+        return report
+    node = item.config.stash[_RUNTIME].setdefault(item.nodeid, RuntimeNode())
+    phase = report.when
+    node.outcomes[phase] = report.outcome
+    node.seconds[phase] = report.duration
+    if phase == "call" and isinstance(item, pytest.Function):
+        # Pytest's resolved definitions include getfixturevalue() bindings, unlike
+        # item.fixturenames. The proof pins pytest's version in every report.
+        node.fixtures = {
+            name: f"{definition.func.__module__}:{definition.func.__qualname__}:{definition.scope}"
+            for name, definition in item._request._fixture_defs.items()
+        }
+    return report
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    config = session.config
+    if _RUNTIME not in config.stash:
+        return
+    report = RuntimeReport(
+        group=cast(int, config.getoption("file_shard_group") or config.getoption("group")),
+        worker=_worker(config),
+        exitstatus=exitstatus,
+        pytest_version=pytest.__version__,
+        pytest_split_version=version("pytest-split"),
+        durations_sha256=_durations(config)[1],
+        pytest_config_sha256=_configuration_digest(config),
+        collection_seconds=config.stash.get(_COLLECTION_SECONDS, 0.0),
+        nodes=config.stash[_RUNTIME],
+    )
+    _report_path(config, "file_shard_runtime_report").write_text(
+        report.model_dump_json(indent=2) + "\n"
+    )
