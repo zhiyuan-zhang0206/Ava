@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.factory import validate_model_config
+from base.lm.provider_api import ProviderBinding
 from base.lm.registry import resolve_available_model
 from base.log import logger
 
@@ -74,6 +75,7 @@ class _AgentRuntime:
 
     fingerprint: str
     llm: BaseChatModel
+    binding: ProviderBinding | None = None
     last_used: float = field(default_factory=time.monotonic)
 
 
