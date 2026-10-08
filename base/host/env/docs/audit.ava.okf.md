@@ -15,10 +15,18 @@ tags: []
   rotation scripts) and `trace_id` when an HTTP request carried one; the key NAMES written/removed;
   the post-write key set; the post-write sha256 digest; and `changed` — the old→new value diff.
   **Values are recorded only for aliases registered with `sensitive: false`**; a sensitive or
-  unregistered alias keeps its name with `old`/`new` null, and a metadata-lookup failure withholds
-  every value (fail closed). Writers capture the pre-write values under the env lock and hand the
-  raw diff to `record_env_write`, which owns the redaction: `runtime_config.write_fields`,
-  `dotenv_file.upsert_env` / `dotenv_file.remove_env` (actor + diff); the rename/migration helpers record the diff-less form. A write whose rendered
+  unregistered alias keeps its name with `old`/`new` null. Alias, scope and sensitivity
+  come directly from the existing field declarations in `config_registry`; audit preparation
+  does not load panel metadata, current Settings values or a separate metadata cache.
+  Invalid declarations are reported and raised, rather than becoming a names-only record.
+  The three official writers (`runtime_config.write_fields`, `dotenv_file.upsert_env` and
+  `dotenv_file.remove_env`) prepare the redacted diff under their existing env lock **before**
+  snapshotting or changing the file. No-op detection and stale-digest checks precede preparation.
+  `record_env_write` consumes this prepared diff without reloading metadata. Direct callers may
+  still supply a raw diff, which the recorder redacts; those calls describe already-landed bytes
+  and cannot roll them back. Diff-less calls retain the names-only form. This ordering detects
+  declaration errors before an official write; it does not make the env file and audit history
+  crash-atomic. A write whose rendered
   bytes equal the file on disk is not a write: `upsert_env` skips it entirely — no snapshot, no
   rewrite, no record (task #3637: repeated converge runs and boot-retry storms stop manufacturing
   `old == new` records; a quoted or oddly-spaced line still rewrites and normalizes on its first
