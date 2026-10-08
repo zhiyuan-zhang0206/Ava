@@ -50,7 +50,12 @@ Implementation: `scripts/ci/no_silent_resurrection.py` (stdlib + git only).
    stretch - is a **hit** when it holds at least three dead strong lines or one
    distinctive dead line (an identifier of at least 20 characters with an
    underscore or camelCase). A hit is attributed to the commit covering the
-   most of its dead lines (ties: the most recent).
+   most of its dead lines (ties: the most recent). An incomplete expression or
+   declaration ending in an opening `(` remains strong for a three-line block,
+   but cannot qualify as a solo distinctive hit: the prefix alone omits the
+   arguments or body that define the deleted contract. Complete distinctive
+   single lines still fail. This distinguishes extending a current caller
+   from restoring its deleted arguments or implementation.
 6. **Allowances** come from the PR's commit messages (merge-base..head): a
    `Resurrects: <reason>` line allows every hit, or only the hits it names by
    deleting sha (at least 7 hex characters, containing a digit) or path
