@@ -73,7 +73,7 @@ one-off monitors when done, and terminate when the finite task is complete.
 
 ## Usage budget reminders
 
-For agent tokens or recorded API costs, read [usage reports](references/usage.md)
+For agent usage observations and USD cost reminders, read [usage reports](references/usage.md)
 and use `scripts/agent_usage.py`. Select explicit IDs, a time window or lifetime,
 and spawn/fork birth lineage; task records are not a spending ledger. Optional
 polling sends a one-shot reminder to named peers and exits without termination.
