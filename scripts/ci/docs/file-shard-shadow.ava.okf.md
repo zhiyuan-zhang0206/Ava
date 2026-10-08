@@ -68,8 +68,12 @@ collection and resolved runtime bindings with real xdist workers.
 
 ## Paired Linux runtime proof
 
-`Whole-file runtime proof` runs by manual dispatch or on changes to this proof's
-code and workflow. It pins all jobs to the same source SHA, snapshots once, then
+`Whole-file runtime proof` runs by manual dispatch. Its paired experiment executes
+two complete test populations, so ordinary pull requests and merge-queue trees
+do not start it automatically. Use `plan_only=true` to diagnose complete Linux
+collection without starting either test population; that run cannot certify
+execution equivalence. The default dispatch runs the complete comparison.
+It pins all jobs to the same source SHA, snapshots once, then
 runs the existing node split and checked whole-file split sequentially on each
 of 16 runners, with the same four workers, native environment and coverage
 sources. Neither population retries. The baseline always runs first; this
@@ -87,8 +91,10 @@ their planned node IDs and declared closure before any test body executes.
 
 Planning arms a 60-second repeating thread dump before importing pytest, writing
 to a separate stack file so pytest capture cannot hide a stalled import or
-collection. The collection command has a four-minute timeout and a 15-second
-kill grace within its five-minute step and ten-minute job limits. Logs are
+collection. Collection logs contain per-file counts (`-qq`); the plan artifact
+still records every eligible node and fixture closure. The collection command
+has a four-minute timeout and a 15-second kill grace within its five-minute step
+and ten-minute job limits. Logs are
 published even when collection fails; a timeout fails the plan and cannot start
 the paired population. The test-protocol faulthandler option alone does not cover
 collection. The plan artifact is still published only after successful collection.
