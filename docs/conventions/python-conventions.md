@@ -279,6 +279,12 @@ Which package may import which, and how it is enforced:
 
 ## contextvars are allowlisted, not free
 
+Use LangGraph's existing `Runtime[AvaContext]` for graph-run dependencies rather
+than creating a second implicit context with `ContextVar`. Nodes receive the
+runtime explicitly; helpers receive the values they need as parameters. Outside
+a graph run, use the caller's explicit context or resource owner: `get_runtime()`
+requires an active runnable context and is not a process-wide service locator.
+
 `contextvars` imports are banned by ruff `TID251` except in the mechanism
 files on the allowlist (`pyproject.toml` — `flake8-tidy-imports.banned-api`
 plus the `per-file-ignores` entries). LangGraph's runtime itself propagates
