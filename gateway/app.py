@@ -68,6 +68,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents import AvaAgentError
 from base.cluster.auth import cookie_name
+from base.cluster.authority.api import AcceptanceCache
 from base.cluster.rate_limit import LoginRateLimiter
 from base.config import settings
 from base.db import Database
@@ -172,6 +173,8 @@ _log = logging.getLogger(__name__)
 
 def _build_request_resources(app: FastAPI) -> None:
     """Build caches, concurrency gates, and event throttles for one gateway lifespan."""
+    machine_token_acceptance: AcceptanceCache = {}
+    app.state.machine_token_acceptance = machine_token_acceptance
     app.state.telemetry_staleness = TelemetryStaleness()
     app.state.status_cache = StatusCache()
     app.state.identity_mismatch_log = IdentityMismatchLog()
@@ -414,6 +417,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
         request.app.state.session_keys,
         cookie_token,
         secret,
+        cache=request.app.state.machine_token_acceptance,
     )
     return None if fact is None else (cookie_token, fact)
 
@@ -500,7 +504,11 @@ async def _cluster_auth_middleware(
 
     # 2. Check Bearer token: the human secret, or the active write generation's
     # machine API token (a pending generation's never authenticates).
-    verified_by = cluster_credential(request.headers.get("Authorization"), secret)
+    verified_by = cluster_credential(
+        request.headers.get("Authorization"),
+        secret,
+        cache=request.app.state.machine_token_acceptance,
+    )
     if verified_by is not None:
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
         request.state.source_verified_by = verified_by
