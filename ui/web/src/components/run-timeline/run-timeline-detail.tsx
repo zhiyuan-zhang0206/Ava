@@ -152,11 +152,16 @@ function SpanFacts({
   end,
   i0,
   i1,
+  tokens,
+  estimated,
 }: {
   start: string;
   end: string;
   i0: number;
   i1: number;
+  /** What the span occupies in the context, when a request has read it. */
+  tokens: number | null;
+  estimated: boolean | null;
 }) {
   const t = useTranslations("runTimeline");
   return (
@@ -171,6 +176,15 @@ function SpanFacts({
         <dt className="w-20 shrink-0 text-muted-foreground">{t("messageSpan")}</dt>
         <dd className="font-mono">{t("messageSpanValue", { start: i0, end: i1, count: i1 - i0 + 1 })}</dd>
       </div>
+      {tokens !== null ? (
+        <div className={cn(FLEX, "gap-2")}>
+          <dt className="w-20 shrink-0 text-muted-foreground">{t("contextTokens")}</dt>
+          <dd className="font-mono" data-testid="run-timeline-detail-tokens">
+            {t("tokensValue", { tokens: formatTokensCompact(tokens) })}
+            {estimated === true ? ` ${t("estimatedSuffix")}` : ""}
+          </dd>
+        </div>
+      ) : null}
     </dl>
   );
 }
@@ -211,7 +225,6 @@ export function NodeDetail({
   ancestors = [],
   childNodes = [],
   onSelectNode = () => undefined,
-  onDrill,
 }: {
   agentId: number;
   node: RunTimelineNode;
@@ -220,18 +233,19 @@ export function NodeDetail({
   /** The loaded nodes one level down that this node groups. */
   childNodes?: RunTimelineNode[];
   onSelectNode?: (id: string) => void;
-  onDrill: () => void;
 }) {
   const t = useTranslations("runTimeline");
   return (
     <div className="space-y-3" data-testid="run-timeline-node-detail">
-      <div className={cn(FLEX, "items-center justify-between gap-2")}>
-        <h2 className="text-sm font-semibold">{t("nodeTitle", { level: node.level })}</h2>
-        <button type="button" onClick={onDrill} className={buttonVariants({ size: "sm" })}>
-          {t("drill")}
-        </button>
-      </div>
-      <SpanFacts start={node.start} end={node.end} i0={node.span_start} i1={node.span_end} />
+      <h2 className="text-sm font-semibold">{t("nodeTitle", { level: node.level })}</h2>
+      <SpanFacts
+        start={node.start}
+        end={node.end}
+        i0={node.span_start}
+        i1={node.span_end}
+        tokens={node.context_tokens}
+        estimated={node.estimated}
+      />
       <Chips heading={t("ancestorsHeading")} nodes={ancestors} onSelect={onSelectNode} />
       <Chips heading={t("childrenHeading")} nodes={childNodes} onSelect={onSelectNode} />
       <Heading>{t("summaryHeading")}</Heading>
@@ -259,14 +273,12 @@ export function UnitDetail({
   unit,
   parent = null,
   onSelectNode = () => undefined,
-  onDrill,
 }: {
   agentId: number;
   unit: RunTimelineUnit;
   /** The level-1 node that covers this block, when it is loaded. */
   parent?: RunTimelineNode | null;
   onSelectNode?: (id: string) => void;
-  onDrill: () => void;
 }) {
   const t = useTranslations("runTimeline");
   const kind = {
@@ -280,13 +292,15 @@ export function UnitDetail({
   }[blockClass(unit)];
   return (
     <div className="space-y-3" data-testid="run-timeline-unit-detail">
-      <div className={cn(FLEX, "items-center justify-between gap-2")}>
-        <h2 className="text-sm font-semibold">{t("unitTitle", { kind })}</h2>
-        <button type="button" onClick={onDrill} className={buttonVariants({ size: "sm" })}>
-          {t("drill")}
-        </button>
-      </div>
-      <SpanFacts start={unit.start} end={unit.end} i0={unit.i0} i1={unit.i1} />
+      <h2 className="text-sm font-semibold">{t("unitTitle", { kind })}</h2>
+      <SpanFacts
+        start={unit.start}
+        end={unit.end}
+        i0={unit.i0}
+        i1={unit.i1}
+        tokens={unit.context_tokens}
+        estimated={unit.estimated}
+      />
       {unit.source ? (
         <p className="text-xs">
           <span className="text-muted-foreground">{t("source")}: </span>

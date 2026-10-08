@@ -5,8 +5,7 @@
 // then one row per understanding-tree level (topmost first), then layer 0 — the
 // message units — at the bottom. All rows share one viewport on the loaded data:
 // the wheel / pinch zooms around the cursor, a drag or a horizontal scroll pans,
-// and nothing refetches. A single click selects a block, a double-click drills
-// into it (the page zooms the viewport to the block's span).
+// and nothing refetches. A click selects a block; the arrow keys move the selection.
 
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -14,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
 import {
   blockClass,
@@ -29,15 +28,11 @@ import {
   levelsTopFirst,
   matchesHighlight,
   requestCovers,
-  ADDED_ROW,
-  INPUT_ROW,
-  UNITS_ROW,
-  levelRowId,
-  navigate,
-  revealView,
-  type NavKey,
+  mergeNarrow,
+  tokenFits,
+  tokenLabel,
+  NARROW_DRAW_PX,
   MARKER_HIT_PX,
-  MARKER_LINE_PX,
   type RowPlacement,
   panView,
   pendingSpans,
@@ -51,21 +46,34 @@ import {
   type Selection,
   type Viewport,
 } from "./timeline-model";
+import {
+  ADDED_ROW,
+  INPUT_ROW,
+  UNITS_ROW,
+  levelRowId,
+  navigate,
+  overlayBox,
+  selectionSpans,
+  spansExtent,
+  revealView,
+  type NavKey,
+} from "./timeline-nav";
 import { RunTimelineAxis } from "./run-timeline-axis";
+import { NarrowCells, SelectionBox, SelectionLine } from "./run-timeline-cells";
 import { ContextSizeRow } from "./run-timeline-context-row";
 import { RunTimelineLegend } from "./run-timeline-legend";
 import { RowShell } from "./run-timeline-row-shell";
 import { readoutText, requestReadout } from "./run-timeline-readout";
 
 const NODE_LABEL_CHARS = 80;
+// A node keeps at least this much width for its summary before its token count is shown.
+const NODE_LABEL_MIN_PX = 24;
 // The opacity of everything a highlight does not name.
 const FADED = "opacity-[0.12]";
 // Track width assumed until the first measurement.
 const DEFAULT_TRACK_PX = 1000;
 // Height of one marker lane's hit area; markers stacked at one instant take one lane each.
 const MARKER_LANE_PX = 5;
-const LEVEL_ROW_PX = 32;
-const UNIT_ROW_PX = 24;
 // A pointer must travel this far before a press becomes a pan (below it, it is a click).
 const DRAG_THRESHOLD_PX = 4;
 const WHEEL_ZOOM_RATE = 0.0015;
@@ -91,35 +99,6 @@ function placeStyle(place: RowPlacement): React.CSSProperties {
   };
 }
 
-/** The visible line of a marker: the full row height, drawn inside its (smaller) hit strip. */
-function MarkerLine({
-  place,
-  rowPx,
-  color,
-  strong,
-}: {
-  place: RowPlacement;
-  rowPx: number;
-  color: string;
-  strong: boolean;
-}) {
-  return (
-    <span
-      aria-hidden="true"
-      data-testid="run-timeline-marker-line"
-      className="pointer-events-none absolute rounded-[1px]"
-      style={{
-        top: -place.lane * MARKER_LANE_PX,
-        height: rowPx,
-        left: (MARKER_HIT_PX - MARKER_LINE_PX) / 2,
-        width: MARKER_LINE_PX,
-        background: color,
-        boxShadow: strong ? "0 0 0 1px var(--foreground)" : undefined,
-      }}
-    />
-  );
-}
-
 export function RunTimelineRows({
   data,
   base,
@@ -127,7 +106,6 @@ export function RunTimelineRows({
   onView,
   selection,
   onSelect,
-  onDrill,
   highlight,
   onHighlight,
 }: {
@@ -138,7 +116,6 @@ export function RunTimelineRows({
   onView: (view: Viewport) => void;
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
-  onDrill: (selection: Selection) => void;
   /** The legend's highlight: every block of one class (or one source) stays lit, the rest fades. */
   highlight: Highlight | null;
   onHighlight: (highlight: Highlight | null) => void;
@@ -162,7 +139,7 @@ export function RunTimelineRows({
   );
   const viewU = axis.viewU(view);
   // A selection lights itself and every ancestor; the rest steps back.
-  const chain = chainIds(selection, data.nodes, data.units);
+  const chain = chainIds(selection, data.nodes, data.units, data.requests);
   const dim = selection !== null;
   const selectedRequest =
     selection?.kind === "request" ? data.requests.find((request) => request.idx === selection.idx) : undefined;
@@ -181,6 +158,15 @@ export function RunTimelineRows({
     live.current = { base, view, onView, axis };
   });
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
+  // Where the selected items are, per row: drawn as an outlined box in each row and a line through all of them.
+  const selected = selectionSpans(selection, data, axis);
+  const extent = spansExtent([...selected.values()].flat());
+  const lineBox = extent === null ? null : overlayBox(extent, viewU, trackPx, 1);
+  const selectionBoxes = (row: string) =>
+    (selected.get(row) ?? []).map((span, i) => {
+      const box = overlayBox(span, viewU, trackPx);
+      return box === null ? null : <SelectionBox key={`${row}-${i}`} box={box} />;
+    });
   useEffect(() => {
     const track = chartRef.current?.querySelector("[data-track]");
     if (!track) return;
@@ -208,8 +194,11 @@ export function RunTimelineRows({
       const el = event.target instanceof Element ? event.target : null;
       if (el?.closest("input, textarea, select, [contenteditable], [role=textbox], [role=separator], [role=slider], [role=combobox]")) return;
       const s = nav.current;
-      const next = navigate(key, s.selection === null ? null : { row: s.navRow, selection: s.selection }, s.data, s.view);
+      const next = navigate(key, s.selection === null ? null : { row: s.navRow, selection: s.selection }, s.data, s.axis, s.view);
       event.preventDefault();
+      // The clicked block keeps keyboard focus (its focus ring and hover echo) while the selection moves on.
+      if (el !== null && chartRef.current?.contains(el) && el instanceof HTMLElement) el.blur();
+      setHover(null);
       if (next === null) return;
       setNavRow(next.row);
       s.onSelect(next.item.selection);
@@ -318,8 +307,17 @@ export function RunTimelineRows({
           event.preventDefault();
         }
       }}
-      className="select-none space-y-1.5 rounded-[10px] border border-border bg-card p-3"
+      className="relative select-none space-y-1.5 rounded-[10px] border border-border bg-card p-3"
     >
+      {lineBox === null ? null : (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-3 left-[100px] z-10"
+          style={{ width: trackPx }}
+        >
+          <SelectionLine box={lineBox} />
+        </div>
+      )}
       <div className={cn(FLEX, "h-4 items-center gap-2 pl-[88px]")}>
         <p
           data-testid="run-timeline-readout"
@@ -396,61 +394,88 @@ export function RunTimelineRows({
                 trackPx,
               ).map((place) => [place.key, place]),
             );
-            return levelNodes.map((node) => {
-              const place = places.get(node.id);
-              if (place === undefined) return null;
+            const stateOf = (node: (typeof levelNodes)[number]) => {
               const picked = isSelected(selection, { kind: "node", id: node.id });
               const ancestor = !picked && chain.has(node.id);
-              const hovered = hover?.kind === "node" && hover.id === node.id;
               const hoverLight = !picked && !ancestor && lit.nodeIds.has(node.id);
-              const faded = highlight !== null && !picked;
-              const label = firstLine(node.summary, NODE_LABEL_CHARS);
-              return (
-                <button
-                  key={node.id}
-                  type="button"
-                  aria-label={t("nodeAria", { level, summary: label })}
-                  aria-pressed={picked}
-                  data-testid="run-timeline-node"
-                  data-node-id={node.id}
-                  data-highlight={picked ? "self" : ancestor ? "ancestor" : "none"}
-                  data-hover={hovered ? "self" : lit.nodeIds.has(node.id) ? "lit" : undefined}
-                  data-faded={faded ? "" : undefined}
-                  data-marker={place.marker ? "" : undefined}
-                  onClick={() => choose(levelRowId(level), { kind: "node", id: node.id })}
-                  onDoubleClick={() => onDrill({ kind: "node", id: node.id })}
-                  {...hoverProps({ kind: "node", id: node.id })}
-                  className={cn(
-                    "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
-                    place.marker
-                      ? ""
-                      : "inset-y-0 truncate rounded border px-1 text-left text-[10px] leading-8 border-border bg-primary/20 text-foreground hover:bg-primary/30",
-                    !place.marker && picked && "bg-primary/45 ring-2 ring-foreground",
-                    !place.marker && ancestor && "bg-primary/40 ring-2 ring-foreground/60",
-                    !place.marker && hoverLight && "bg-primary/30 ring-1 ring-foreground/40",
-                    !place.marker && hoverLight && hovered && "ring-foreground/70",
-                    faded
-                      ? FADED
-                      : dim && !picked && !ancestor && !hoverLight && "opacity-40",
-                  )}
-                  style={placeStyle(place)}
-                >
-                  {place.marker ? (
-                    <MarkerLine
-                      place={place}
-                      rowPx={LEVEL_ROW_PX}
-                      strong={picked || ancestor || hoverLight}
-                      color={
-                        picked || ancestor || hoverLight ? "var(--foreground)" : "color-mix(in srgb, var(--primary) 70%, transparent)"
-                      }
-                    />
-                  ) : (
-                    label
-                  )}
-                </button>
-              );
-            });
+              return { picked, ancestor, hoverLight, faded: highlight !== null && !picked };
+            };
+            const byId = new Map(levelNodes.map((node) => [node.id, node]));
+            const { cells } = mergeNarrow([...places.values()]);
+            return (
+              <>
+                <NarrowCells
+                  cells={cells}
+                  paint={(keys) => {
+                    const states = keys.flatMap((key) => {
+                      const node = byId.get(key);
+                      return node === undefined ? [] : [stateOf(node)];
+                    });
+                    const strong = states.some((state) => state.picked || state.ancestor || state.hoverLight);
+                    return {
+                      background: strong ? "var(--foreground)" : "color-mix(in srgb, var(--primary) 40%, transparent)",
+                      className: states.every((state) => state.faded)
+                        ? FADED
+                        : dim && !strong
+                          ? "opacity-40"
+                          : undefined,
+                    };
+                  }}
+                />
+                {levelNodes.map((node) => {
+                  const place = places.get(node.id);
+                  if (place === undefined) return null;
+                  const { picked, ancestor, hoverLight, faded } = stateOf(node);
+                  const hovered = hover?.kind === "node" && hover.id === node.id;
+                  const thin = place.marker || place.width < NARROW_DRAW_PX;
+                  const label = firstLine(node.summary, NODE_LABEL_CHARS);
+                  const nodeTokens = tokenLabel(node.context_tokens, node.estimated);
+                  return (
+                    <button
+                      key={node.id}
+                      type="button"
+                      aria-label={t("nodeAria", { level, summary: label })}
+                      aria-pressed={picked}
+                      data-testid="run-timeline-node"
+                      data-node-id={node.id}
+                      data-highlight={picked ? "self" : ancestor ? "ancestor" : "none"}
+                      data-hover={hovered ? "self" : lit.nodeIds.has(node.id) ? "lit" : undefined}
+                      data-faded={faded ? "" : undefined}
+                      data-marker={place.marker ? "" : undefined}
+                      onClick={() => choose(levelRowId(level), { kind: "node", id: node.id })}
+                      {...hoverProps({ kind: "node", id: node.id })}
+                      className={cn(
+                        "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
+                        place.marker
+                          ? ""
+                          : thin
+                            ? "inset-y-0"
+                            : cn(FLEX, OVERFLOW_HIDDEN, "inset-y-0 items-center rounded border px-1 text-left text-[10px] leading-8 border-border bg-primary/20 text-foreground hover:bg-primary/30"),
+                        !thin && picked && "bg-primary/45 ring-2 ring-foreground",
+                        !thin && ancestor && "bg-primary/40 ring-2 ring-foreground/60",
+                        !thin && hoverLight && "bg-primary/30 ring-1 ring-foreground/40",
+                        !thin && hoverLight && hovered && "ring-foreground/70",
+                        !thin && (faded ? FADED : dim && !picked && !ancestor && !hoverLight && "opacity-40"),
+                      )}
+                      style={placeStyle(place)}
+                    >
+                      {thin ? null : (
+                        <>
+                          <span className={cn(MIN_W_0, "grow truncate")}>{label}</span>
+                          {nodeTokens !== null && tokenFits(nodeTokens, place.width, NODE_LABEL_MIN_PX) ? (
+                            <span data-testid="run-timeline-tokens" className="ml-1 shrink-0 font-mono text-[9px] tabular-nums text-foreground/70">
+                              {nodeTokens}
+                            </span>
+                          ) : null}
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
+              </>
+            );
           })()}
+          {selectionBoxes(levelRowId(level))}
         </RowShell>
       ))}
 
@@ -463,61 +488,89 @@ export function RunTimelineRows({
               trackPx,
             ).map((place) => [place.key, place]),
           );
-          return data.units.map((unit) => {
+          const stateOf = (unit: RunTimelineUnit) => {
             const key = unitKey(unit);
-            const place = places.get(key);
-            if (place === undefined) return null;
-            const candidate: Selection = {
-              kind: "unit",
-              i0: unit.i0,
-              i1: unit.i1,
-              unitKind: unit.kind,
-            };
+            const candidate: Selection = { kind: "unit", i0: unit.i0, i1: unit.i1, unitKind: unit.kind };
             const picked =
               isSelected(selection, candidate) ||
               (selection?.kind === "request" && selectedRequest !== undefined && requestCovers(selectedRequest, unit));
             const hovered = hover?.kind === "unit" && isSelected(hover, candidate);
             const hoverLight = hovered || lit.unitKeys.has(key);
             const matched = highlight !== null && matchesHighlight(unit, highlight);
-            const faded = highlight !== null && !matched && !picked;
-            return (
-              <button
-                key={key}
-                type="button"
-                aria-label={t("unitAria", { kind: unitLabel(unit), preview: unit.preview })}
-                aria-pressed={picked}
-                data-testid="run-timeline-unit"
-                data-unit-kind={unit.kind}
-                data-block-class={blockClass(unit)}
-                data-highlight={picked ? "self" : "none"}
-                data-hover={hovered ? "self" : hoverLight ? "lit" : undefined}
-                data-faded={faded ? "" : undefined}
-                data-matched={matched ? "" : undefined}
-                data-marker={place.marker ? "" : undefined}
-                onClick={() => choose(UNITS_ROW, candidate)}
-                onDoubleClick={() => onDrill(candidate)}
-                {...hoverProps(candidate)}
-                className={cn(
-                  "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
-                  !place.marker && "inset-y-1 rounded-sm",
-                  !place.marker && picked && "ring-2 ring-foreground",
-                  !place.marker && !picked && hoverLight && (hovered ? "ring-1 ring-foreground/70" : "ring-1 ring-foreground/40"),
-                  faded ? FADED : highlight === null && selection !== null && !picked && !hoverLight && "opacity-40",
-                )}
-                style={place.marker ? placeStyle(place) : { ...placeStyle(place), background: unitColor(unit) }}
-              >
-                {place.marker ? (
-                  <MarkerLine
-                    place={place}
-                    rowPx={UNIT_ROW_PX}
-                    strong={picked || hoverLight}
-                    color={picked || hoverLight ? "var(--foreground)" : unitColor(unit)}
-                  />
-                ) : null}
-              </button>
-            );
-          });
+            return { key, candidate, picked, hovered, hoverLight, matched, faded: highlight !== null && !matched && !picked };
+          };
+          const byKey = new Map(data.units.map((unit) => [unitKey(unit), unit]));
+          const { cells } = mergeNarrow([...places.values()]);
+          return (
+            <>
+              <NarrowCells
+                inset="inset-y-1"
+                cells={cells}
+                paint={(keys) => {
+                  const members = keys.flatMap((key) => {
+                    const unit = byKey.get(key);
+                    return unit === undefined ? [] : [{ unit, state: stateOf(unit) }];
+                  });
+                  const strong = members.some(({ state }) => state.picked || state.hoverLight);
+                  // The fill takes the color of a member that is not faded, else of the first.
+                  const lead = members.find(({ state }) => !state.faded) ?? members[0];
+                  return {
+                    background: strong ? "var(--foreground)" : unitColor(lead.unit),
+                    className: members.every(({ state }) => state.faded)
+                      ? FADED
+                      : highlight === null && selection !== null && !strong
+                        ? "opacity-40"
+                        : undefined,
+                  };
+                }}
+              />
+              {data.units.map((unit) => {
+                const { key, candidate, picked, hovered, hoverLight, matched, faded } = stateOf(unit);
+                const place = places.get(key);
+                if (place === undefined) return null;
+                const thin = place.marker || place.width < NARROW_DRAW_PX;
+                const unitTokens = tokenLabel(unit.context_tokens, unit.estimated);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-label={t("unitAria", { kind: unitLabel(unit), preview: unit.preview })}
+                    aria-pressed={picked}
+                    data-testid="run-timeline-unit"
+                    data-unit-kind={unit.kind}
+                    data-block-class={blockClass(unit)}
+                    data-highlight={picked ? "self" : "none"}
+                    data-hover={hovered ? "self" : hoverLight ? "lit" : undefined}
+                    data-faded={faded ? "" : undefined}
+                    data-matched={matched ? "" : undefined}
+                    data-marker={place.marker ? "" : undefined}
+                    onClick={() => choose(UNITS_ROW, candidate)}
+                    {...hoverProps(candidate)}
+                    className={cn(
+                      "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
+                      !place.marker && "inset-y-1",
+                      !thin && "rounded-sm",
+                      !thin && picked && "ring-2 ring-foreground",
+                      !thin && !picked && hoverLight && (hovered ? "ring-1 ring-foreground/70" : "ring-1 ring-foreground/40"),
+                      !thin && (faded ? FADED : highlight === null && selection !== null && !picked && !hoverLight && "opacity-40"),
+                    )}
+                    style={thin ? placeStyle(place) : { ...placeStyle(place), background: unitColor(unit) }}
+                  >
+                    {!thin && unitTokens !== null && tokenFits(unitTokens, place.width) ? (
+                      <span
+                        data-testid="run-timeline-tokens"
+                        className="pointer-events-none absolute right-0 top-0 pr-0.5 font-mono text-[9px] leading-4 tabular-nums text-black/70"
+                      >
+                        {unitTokens}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </>
+          );
         })()}
+        {selectionBoxes(UNITS_ROW)}
       </RowShell>
 
       {data.requests.length > 0
@@ -532,7 +585,7 @@ export function RunTimelineRows({
               units={data.units}
               selection={selection}
               onSelect={(target) => choose(metric === "input" ? INPUT_ROW : ADDED_ROW, target)}
-              onDrill={onDrill}
+              overlay={selectionBoxes(metric === "input" ? INPUT_ROW : ADDED_ROW)}
               hover={hover}
               hoverProps={hoverProps}
               describe={(request) => requestReadout(t, request)}

@@ -4,7 +4,7 @@
 // new session, so the bars rise and fall in a sawtooth whose drops are the compact boundaries;
 // sessions alternate in color.
 
-import type { MouseEventHandler } from "react";
+import type { MouseEventHandler, ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import type { RunTimelineRequest, RunTimelineUnit } from "@/lib/contracts/types";
@@ -23,7 +23,9 @@ import {
   type Viewport,
 } from "./timeline-model";
 
-const BAR_AREA_PX = 38;
+// A selected bar's 2px ring is drawn outside it and the track clips: leave that much room below and above the tallest bar.
+const RING_PX = 2;
+const BAR_AREA_PX = 40 - 2 * RING_PX;
 
 export function ContextSizeRow({
   requests,
@@ -34,7 +36,7 @@ export function ContextSizeRow({
   units,
   selection,
   onSelect,
-  onDrill,
+  overlay,
   hover,
   hoverProps,
   describe,
@@ -50,7 +52,8 @@ export function ContextSizeRow({
   units: readonly RunTimelineUnit[];
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
-  onDrill: (selection: Selection) => void;
+  /** The selection's outline in this row, drawn over the bars. */
+  overlay?: ReactNode;
   hover: Hover | null;
   hoverProps: (target: Hover) => {
     onMouseEnter: MouseEventHandler;
@@ -94,7 +97,6 @@ export function ContextSizeRow({
             data-estimated={added && request.added_estimated ? "" : undefined}
             data-selected={selected ? "" : undefined}
             onClick={() => onSelect(target)}
-            onDoubleClick={() => onDrill(target)}
             {...hoverProps({ kind: "request", idx: request.idx })}
             className="absolute bottom-0 h-full outline-none focus-visible:ring-2 focus-visible:ring-foreground"
             style={{ left: box.left, width: box.width }}
@@ -102,18 +104,19 @@ export function ContextSizeRow({
             <span
               aria-hidden="true"
               className={cn(
-                "absolute inset-x-0 bottom-0 block rounded-t-[1px]",
+                "absolute inset-x-0 block rounded-[1px]",
                 request.session % 2 === 0 ? "bg-blue-500/70" : "bg-amber-500/80",
                 (hovered || selected) && (request.session % 2 === 0 ? "bg-blue-500" : "bg-amber-500"),
                 hovered && !selected && "ring-1 ring-foreground/40",
                 selected && "ring-2 ring-foreground",
                 added && request.added_estimated && !selected && "opacity-60",
               )}
-              style={{ height: `${(value(request) / top) * BAR_AREA_PX}px` }}
+              style={{ bottom: RING_PX, height: `${(value(request) / top) * BAR_AREA_PX}px` }}
             />
           </button>
         );
       })}
+      {overlay}
     </RowShell>
   );
 }

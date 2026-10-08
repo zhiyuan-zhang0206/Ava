@@ -16593,6 +16593,28 @@
                 "type": "null"
               }
             ]
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens"
+          },
+          "estimated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated"
           }
         },
         "type": "object",
@@ -16606,10 +16628,12 @@
           "span_end",
           "summary",
           "usage",
-          "generation"
+          "generation",
+          "context_tokens",
+          "estimated"
         ],
         "title": "RunTimelineNode",
-        "description": "One understanding-tree node.\n\n`level` is the engine level, stable across windows: 1 is the finest (leaves),\neach level up groups the one below. `span_start`..`span_end` is the inclusive\nmessage-index span in the stitched history, the indices the raw-message route\nreads. `generation` is None for a node with no understanding-call record."
+        "description": "One understanding-tree node.\n\n`level` is the engine level, stable across windows: 1 is the finest (leaves),\neach level up groups the one below. `span_start`..`span_end` is the inclusive\nmessage-index span in the stitched history, the indices the raw-message route\nreads. `generation` is None for a node with no understanding-call record.\n`context_tokens` is the sum of the context tokens of the messages the span covers (None while\nno request has read any of them), `estimated` whether any of that was a share rather than the\nprovider's own number (None with `context_tokens`)."
       },
       "RunTimelineRequest": {
         "properties": {
