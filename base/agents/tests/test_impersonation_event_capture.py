@@ -16,7 +16,6 @@ from base import telemetry
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import manifest as capture
-from base.agents.impersonation.event_grants import grant_event_log_runner_access
 from base.agents.impersonation.event_signals import emit_incomplete_event_logs
 from base.agents.impersonation.manifest import (
     LocalParticipant,
@@ -32,6 +31,7 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.tests import test_history as history_cases
 from base.agents.messages.caller_identity import CallerIdentity
+from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, create_agent
