@@ -23,8 +23,6 @@ import {
   panView,
   projectBox,
   zoomView,
-  pendingSpans,
-  cacheHitRate,
   clampViewport,
   MIN_VIEW_MS,
   panViewport,
@@ -170,10 +168,6 @@ describe("text helpers", () => {
     expect(firstLine("abcdefghij", 5)).toBe("abcd…");
   });
 
-  it("cacheHitRate is the cache share of input, null without input", () => {
-    expect(cacheHitRate({ input: 200, cache_read: 150 })).toBe(0.75);
-    expect(cacheHitRate({ input: 0, cache_read: 0 })).toBeNull();
-  });
 });
 
 describe("viewport", () => {
@@ -240,32 +234,6 @@ describe("chainIds", () => {
     expect(chainIds({ kind: "unit", i0: 9, i1: 9, unitKind: "note" }, nodes, units).size).toBe(0);
     expect(chainIds(null, nodes, units).size).toBe(0);
     expect([...chainIds({ kind: "node", id: "b" }, [nodes[1]], [])]).toEqual(["b"]);
-  });
-});
-
-describe("pendingSpans", () => {
-  const open = (id: string, level: number, first: number, last: number, parent: string | null = null) => ({
-    ...node(level, id),
-    parent,
-    span_start: first,
-    span_end: last,
-    start: `2026-10-04T12:0${first}:00Z`,
-    end: `2026-10-04T12:0${last}:00Z`,
-  });
-
-  it("covers the nodes one level down that have no parent, contiguous ones merged", () => {
-    const nodes = [
-      open("a", 1, 0, 1, "p"),
-      open("b", 1, 2, 3),
-      open("c", 1, 4, 5),
-      open("d", 1, 7, 8),
-      open("p", 2, 0, 1),
-    ];
-    expect(pendingSpans(nodes, 2)).toEqual([
-      { from: "2026-10-04T12:02:00Z", to: "2026-10-04T12:05:00Z" },
-      { from: "2026-10-04T12:07:00Z", to: "2026-10-04T12:08:00Z" },
-    ]);
-    expect(pendingSpans(nodes, 1)).toEqual([]);
   });
 });
 

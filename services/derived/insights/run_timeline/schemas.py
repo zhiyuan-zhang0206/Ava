@@ -190,7 +190,11 @@ class RunTimelineMessagePart(BaseModel):
 
 
 class RunTimelineMessage(BaseModel):
-    """One raw message of the stitched history, split into its parts."""
+    """One raw message of the stitched history, split into its parts.
+
+    `context_tokens` is what the message occupies in the context (None while no request has read it),
+    `estimated` whether that is a share rather than the provider's own number (None with it).
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -198,6 +202,8 @@ class RunTimelineMessage(BaseModel):
     ts: datetime | None
     source: str | None
     parts: list[RunTimelineMessagePart]
+    context_tokens: int | None
+    estimated: bool | None
 
 
 class RunTimelineMessages(BaseModel):
