@@ -150,9 +150,6 @@ def cmd_notices_resolve(*, notice_id: int, agent_id: int, action: str, reply: st
         headers=headers,
         json={"action": action, "reply": reply},
     )
-    if resp.status_code == 409:
-        print(f"notice #{notice_id} is already resolved (409)")
-        return 0
     resp.raise_for_status()
     print(f"notice #{notice_id} resolved: {action}")
     return 0
