@@ -703,7 +703,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args()) == 0
+    assert start_intent.run_start(_start_args(), retained_children=[]) == 0
 
 
 def test_start_parser_rejects_retired_updater_telemetry() -> None:
@@ -730,7 +730,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args()) == result
+    assert start_intent.run_start(_start_args(), retained_children=[]) == result
     assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
 
 
@@ -756,5 +756,5 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
 
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args()) == 1
+    assert start_intent.run_start(_start_args(), retained_children=[]) == 1
     assert calls == ["cleared"]
