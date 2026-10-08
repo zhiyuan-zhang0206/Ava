@@ -16,7 +16,7 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
     the shard directory must exist (read_worktree() fails fast otherwise), so it
     gets its README.md and no shard files — a legitimate empty baseline."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     directory = tmp_path / baseline_shards.SHARD_DIR
     directory.mkdir(parents=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
