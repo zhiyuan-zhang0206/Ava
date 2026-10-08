@@ -24,7 +24,6 @@ from base.events.live.bus import EventBus
 from ops import lifecycle
 from ops.lifecycle import launch
 from ops.rpc_schemas import (
-    LaunchAgentRequest,
     RestartAgentRequest,
     ResurrectAgentRequest,
     ResurrectAgentResponse,
@@ -134,60 +133,6 @@ def stub_pool() -> object:
     """Sentinel pool — every op call below mocks the gateway/agents helpers so
     the pool is never touched, but the signature still requires an object."""
     return object()
-
-
-@pytest.mark.asyncio
-async def test_legacy_launch_agent_op_delivers_plain_spawn_prompt(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
-) -> None:
-    """An old gateway can still send its plain prompt during a rolling update."""
-    seen: dict[str, object] = {}
-
-    def _fake_insert(_db, _bus, _pool: object, agent_id: int, prompt: str, source: str) -> int:
-        seen["aid"] = agent_id
-        seen["prompt"] = prompt
-        seen["source"] = source
-        return 11
-
-    monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
-    published: list[object] = []
-
-    async def _fake_publish(
-        _bus: object, aid: int, iid: int, kind: str, source: str, prompt: str
-    ) -> None:
-        published.append((aid, iid, kind, source, prompt))
-
-    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", _fake_publish)
-
-    body = LaunchAgentRequest(agent_id=9, prompt="go do X", prompt_source="user", label="runner")
-    result = await lifecycle.launch_agent_op(database, event_bus, body, stub_pool)  # type: ignore[arg-type]
-    assert result.id == 9
-    assert seen["aid"] == 9
-    assert seen["source"] == "user"
-    prompt = str(seen["prompt"])
-    assert "go do X" in prompt
-    assert "runner" in prompt  # the label rides the first prompt
-    assert published == [(9, 11, "chat", "user", prompt)]
-
-
-@pytest.mark.asyncio
-async def test_launch_agent_op_skips_prompt_for_fork(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
-) -> None:
-    """An old gateway's fork prompt was already delivered before launch."""
-    inserted: list[int] = []
-
-    def _fake_insert(_db, _bus, _pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
-        inserted.append(1)
-        return 0
-
-    monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
-    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", lambda *_a, **_k: None)
-
-    body = LaunchAgentRequest(agent_id=10)  # no prompt — a fork
-    result = await lifecycle.launch_agent_op(database, event_bus, body, stub_pool)  # type: ignore[arg-type]
-    assert result.id == 10
-    assert inserted == []
 
 
 class TestSpawnPrechecksBlocking:

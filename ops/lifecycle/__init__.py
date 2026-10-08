@@ -85,9 +85,6 @@ from ops.lifecycle.events import (
 # Re-exported (explicit-alias form) from `launch` so the gateway routers and
 # tests keep their module-qualified call sites.
 from ops.lifecycle.launch import (
-    _insert_prompt_blocking as _insert_prompt_blocking,
-)
-from ops.lifecycle.launch import (
     launch_agent_op as launch_agent_op,
 )
 

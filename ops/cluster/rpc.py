@@ -18,12 +18,12 @@ HTTP call.
   retry with bounded exponential backoff + jitter (see `_retry_delay_s`).
   Business failures (status=="failed") and deterministic rejections (4xx,
   malformed body, unknown machine) never retry. An op whose effect is NOT
-  repeatable — the legacy spawn-launch prompt insert or lifecycle terminate/restart (a second
+  repeatable — lifecycle terminate/restart (a second
   run inserts a second inbound) — is safe to retry only because this module
   attaches an idempotency key to the envelope: the ops server dedupes by key
   and replays the first run's stored outcome instead of re-executing, so a
   lost response cannot duplicate the effect (see
-  `services/agent_runner/agent_ops/daemon.py:_dispatch_idempotent`). A spawn-launch payload
+  `services/agent_runner/agent_ops/daemon.py:_dispatch_idempotent`). A spawn-launch-v2 payload
   business id gives a target-scoped, canonical-payload key for cross-call
   dedup; every other automatic key is fresh unless its caller supplies one.
 
@@ -86,14 +86,12 @@ _log = logging.getLogger(__name__)
 _RETRY_BASE_DELAY_S = 0.5
 _RETRY_MAX_DELAY_S = 4.0
 
-# Ops that retain transport dedupe. The legacy spawn-launch inserts a prompt;
-# v2 only publishes a repeatable wake but still replays one recorded outcome
-# within an attempt. Lifecycle ops have non-repeatable effects.
+# Ops that retain transport dedupe. Launch v2 publishes a repeatable wake
+# and replays one recorded outcome within an attempt. Lifecycle ops have non-repeatable effects.
 # These are retried only under an idempotency key generated once per dispatch call unless
 # the caller supplies one; retries replay the first stored outcome.
 _NON_IDEMPOTENT_KINDS = frozenset(
     {
-        "spawn-launch",
         "spawn-launch-v2",
         "lifecycle",
     }
@@ -101,7 +99,7 @@ _NON_IDEMPOTENT_KINDS = frozenset(
 # A stable cross-dispatch key is only safe for an agent launch: a caller
 # repeating a lifecycle reconciliation needs the runner to
 # execute again rather than replay a stale failed outcome.
-_BUSINESS_ID_KEYS = {"spawn-launch": "agent_id", "spawn-launch-v2": "agent_id"}
+_BUSINESS_ID_KEYS = {"spawn-launch-v2": "agent_id"}
 
 # Module-level alias so tests can pin the retry sleep without patching asyncio.
 _sleep = asyncio.sleep

@@ -95,7 +95,15 @@ async def test_ops_route_failed_status_is_still_http_200(
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     status, body, _ = await daemon._ops_route(
-        json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode(),
+        json.dumps(
+            {
+                "kind": "spawn-launch-v2",
+                "payload": {
+                    "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
+                    "agent_id": 1,
+                },
+            }
+        ).encode(),
         active_ops={},
         dispatch_sem=dispatch_sem,
         workers=set(),
@@ -160,7 +168,15 @@ async def test_ops_route_crash_becomes_failed_result(
 
     monkeypatch.setattr(daemon, "_dispatch", _boom)  # pyright: ignore[reportUnknownArgumentType]
     status, body, _ = await daemon._ops_route(
-        json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode(),
+        json.dumps(
+            {
+                "kind": "spawn-launch-v2",
+                "payload": {
+                    "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
+                    "agent_id": 1,
+                },
+            }
+        ).encode(),
         active_ops={},
         dispatch_sem=dispatch_sem,
         workers=set(),
@@ -218,7 +234,16 @@ async def test_ops_route_semaphore_caps_concurrency(
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     bodies = [
-        json.dumps({"kind": "spawn-launch", "payload": {"agent_id": i}}).encode() for i in range(20)
+        json.dumps(
+            {
+                "kind": "spawn-launch-v2",
+                "payload": {
+                    "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
+                    "agent_id": i,
+                },
+            }
+        ).encode()
+        for i in range(20)
     ]
     results = await asyncio.gather(
         *[
@@ -385,8 +410,8 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     status, result = await daemon._dispatch_idempotent(
-        "spawn-launch",
-        {"agent_id": 777},
+        "spawn-launch-v2",
+        {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-1",
         ops_pool,
         active_ops={},
@@ -404,7 +429,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
             ("key-1",),
         )
         row = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
-    assert row == ("spawn-launch", "completed", {"id": 777})
+    assert row == ("spawn-launch-v2", "completed", {"id": 777})
 
 
 @pytest.mark.asyncio
@@ -418,8 +443,8 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     first = await daemon._dispatch_idempotent(
-        "spawn-launch",
-        {"agent_id": 777},
+        "spawn-launch-v2",
+        {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-2",
         ops_pool,
         active_ops={},
@@ -427,8 +452,8 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         executor=op_executor,
     )
     second = await daemon._dispatch_idempotent(
-        "spawn-launch",
-        {"agent_id": 777},
+        "spawn-launch-v2",
+        {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-2",
         ops_pool,
         active_ops={},
@@ -556,8 +581,8 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     await daemon._dispatch_idempotent(
-        "spawn-launch",
-        {"agent_id": 777},
+        "spawn-launch-v2",
+        {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-a",
         ops_pool,
         active_ops={},
@@ -565,8 +590,8 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         executor=op_executor,
     )
     await daemon._dispatch_idempotent(
-        "spawn-launch",
-        {"agent_id": 777},
+        "spawn-launch-v2",
+        {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-b",
         ops_pool,
         active_ops={},
@@ -633,7 +658,11 @@ async def test_ops_route_dedupes_by_envelope_key(
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     body = json.dumps(
-        {"kind": "spawn-launch", "payload": {"agent_id": 1}, "idempotency_key": "route-key"}
+        {
+            "kind": "spawn-launch-v2",
+            "payload": {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
+            "idempotency_key": "route-key",
+        }
     ).encode()
 
     code1, payload1, _ = await daemon._ops_route(
@@ -672,7 +701,12 @@ async def test_ops_route_without_key_does_not_dedupe(
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
-    body = json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode()
+    body = json.dumps(
+        {
+            "kind": "spawn-launch-v2",
+            "payload": {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
+        }
+    ).encode()
     await daemon._ops_route(
         body,
         active_ops={},

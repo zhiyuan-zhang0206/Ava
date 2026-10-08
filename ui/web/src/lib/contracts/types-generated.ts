@@ -8744,8 +8744,6 @@ export interface components {
             config?: {
                 [key: string]: unknown;
             } | null;
-            /** Preset */
-            preset?: string | null;
             /** Label */
             label?: string | null;
         };
