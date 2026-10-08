@@ -88,6 +88,8 @@ segments stay globally distinct.
   fire-and-forget primitive that never raises, so a redis hiccup degrades the
   live UI without breaking the DB write or the agent lifecycle path that
   triggered it.
+- Each `EventBus` owns warning cadence: sync and async publishers share the
+  per-channel/error-type 60-second throttle; a new bus reports failures afresh.
 - The channel name is cluster-scoped (`ava:*`), which is also the scope of the
   per-cluster redis ACL user.
 

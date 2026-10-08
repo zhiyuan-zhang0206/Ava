@@ -11,10 +11,12 @@ ResponseError → WARNING, transient → DEBUG).
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 import redis
 from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import NoPermissionError
+from redis.exceptions import NoPermissionError, ResponseError
 
 from base.config import settings
 from base.events.live import redis_client
@@ -98,7 +100,6 @@ class TestPublishBestEffortSync:
     ) -> None:
         """An exception that is not a redis/transport error is a bug in the publish path:
         swallowed → None (best-effort), but WARNING with the traceback, never DEBUG."""
-        redis_client._warn_last.clear()
         patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(AttributeError("bug")))
         result = _bus.publish_best_effort_sync("{}", channel="ava:bug", context="unit")
         assert result is None
@@ -113,7 +114,6 @@ class TestPublishBestEffortSync:
     ) -> None:
         """A ResponseError (redis NOPERM — ACL misconfig) is swallowed → None, but
         logged at WARNING because it silently disables live updates fleet-wide."""
-        redis_client._warn_last.clear()  # deterministic first-warn (see throttle)
         patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(NoPermissionError("NOPERM")))
         result = _bus.publish_best_effort_sync("{}", channel="ava:noperm-sync", context="unit")
         assert result is None
@@ -130,7 +130,6 @@ class TestPublishBestEffortSync:
         """A persistent NOPERM outage warns once per channel then drops repeats to
         DEBUG — one event funnels the whole fleet through here, so the WARNING must
         not flood."""
-        redis_client._warn_last.clear()
         patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(NoPermissionError("NOPERM")))
         channel = "ava:noperm-throttle"
         for _ in range(4):
@@ -168,7 +167,6 @@ class TestPublishBestEffortAsync:
         monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
-        redis_client._warn_last.clear()  # deterministic first-warn (see throttle)
         patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(NoPermissionError("NOPERM")))
         result = await _bus.publish_best_effort("{}", channel="ava:noperm-async", context="unit")
         assert result is None
@@ -203,3 +201,42 @@ def test_zero_receivers_distinguished_from_failure() -> None:
     with redis.Redis.from_url(settings.data_plane.redis_url) as _r:  # pyright: ignore[reportUnknownMemberType]
         pass  # sanity: redis reachable
     assert _bus.publish_best_effort_sync("{}", channel="ava:nobody") == 0
+
+
+async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_buses(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """Each bus shares sync/async warning cadence, while a new owner reports afresh."""
+    now = 100.0
+    monkeypatch.setattr(redis_client.time, "monotonic", lambda: now)
+    failure = ResponseError("NOPERM")
+    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(failure))
+    patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(failure))
+    first = EventBus.from_settings()
+    second = EventBus.from_settings()
+    channel = "ava:owner-cadence"
+
+    assert first.publish_best_effort_sync("{}", channel=channel) is None
+    assert await first.publish_best_effort("{}", channel=channel) is None
+    assert await second.publish_best_effort("{}", channel=channel) is None
+    now += 59.0
+    assert first.publish_best_effort_sync("{}", channel=channel) is None
+    now += 1.0
+    assert await first.publish_best_effort("{}", channel=channel) is None
+    assert first.publish_best_effort_sync("{}", channel=f"{channel}:other") is None
+    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(AttributeError("bug")))
+    assert first.publish_best_effort_sync("{}", channel=channel) is None
+    assert first.publish_best_effort_sync("{}", channel=channel) is None
+
+    assert [r["level"].name for r in loguru_records] == [
+        "WARNING",
+        "DEBUG",
+        "WARNING",
+        "DEBUG",
+        "WARNING",
+        "WARNING",
+        "WARNING",
+    ]
+    assert [r["exception"] is not None for r in loguru_records] == [False] * 6 + [True]
+    assert sum("rate-limited" in r["message"] for r in loguru_records) == 2
+    assert "failed unexpectedly" in loguru_records[-1]["message"]
