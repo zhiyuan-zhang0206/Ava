@@ -24,7 +24,7 @@ _SECTIONS = lcs._SITE_SECTIONS
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Each main() call scans only its own temporary root, with an empty baseline."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _write_baseline(tmp_path, {section: {} for section in _SECTIONS})
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", baseline_shards.SHARD_DIR)
