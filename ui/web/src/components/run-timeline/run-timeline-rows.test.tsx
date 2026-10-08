@@ -37,7 +37,7 @@ const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: numbe
   context_tokens: null, generation_tokens: null, estimated: null,
 });
 
-function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null) {
+function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null, hybrid = false) {
   const onSelect = vi.fn();
   render(
     <RunTimelineRows
@@ -52,6 +52,8 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
       onHighlight={vi.fn()}
     />,
   );
+  // These cases are about positions on the plain time axis.
+  if (hybrid) fireEvent.click(screen.getByTestId("run-timeline-axis-mode"));
   return onSelect;
 }
 
@@ -106,5 +108,107 @@ describe("RunTimelineRows instant blocks", () => {
     expect(markers).toHaveLength(3);
     all.forEach((el) => fireEvent.click(el));
     expect(onSelect).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("RunTimelineRows hybrid axis", () => {
+  const tokens = (u: RunTimelineUnit, n: number): RunTimelineUnit => ({ ...u, context_tokens: n });
+
+  it("starts on the time axis and sizes blocks by tokens once switched to hybrid", () => {
+    const units = [tokens(unit("text", 0, 0, 100), 1000), tokens(unit("text", 1, 100, 110), 3000)];
+    renderRows({ units }, null, false);
+    const toggle = screen.getByTestId("run-timeline-axis-mode");
+    expect(toggle.dataset.mode).toBe("time");
+    const [ta, tb] = screen.getAllByTestId("run-timeline-unit");
+    expect(span(ta)).toEqual({ left: 0, right: 100 });
+    expect(span(tb)).toEqual({ left: 100, right: 110 });
+    fireEvent.click(toggle);
+    expect(toggle.dataset.mode).toBe("hybrid");
+    const [a, b] = screen.getAllByTestId("run-timeline-unit");
+    expect(parseFloat(b.style.width) / parseFloat(a.style.width)).toBeCloseTo(3, 0);
+  });
+
+  it("puts a node over the blocks it covers", () => {
+    const units = [tokens(unit("text", 0, 0, 100), 1000), tokens(unit("text", 1, 600, 700), 1000), tokens(unit("text", 2, 900, 950), 1000)];
+    renderRows({ units, nodes: [{ ...node("n", 0, 1000), span_start: 1, span_end: 2 }] }, null, true);
+    const [, second, third] = screen.getAllByTestId("run-timeline-unit");
+    const [covering] = screen.getAllByTestId("run-timeline-node");
+    expect(parseFloat(covering.style.left)).toBeCloseTo(parseFloat(second.style.left));
+    expect(span(covering).right).toBeCloseTo(span(third).right);
+  });
+});
+
+describe("RunTimelineRows context rows", () => {
+  it("draws the absolute and the added context as two rows, each scaled to its own largest (the added one by square root)", () => {
+    const request = (idx: number, ms: number, input: number, added: number, estimated: boolean) => ({
+      idx,
+      ts: at(ms),
+      session: 0,
+      input_tokens: input,
+      output_tokens: 1,
+      added_tokens: added,
+      added_estimated: estimated,
+    });
+    renderRows({ requests: [request(1, 100, 1000, 1000, true), request(2, 500, 2000, 100, false)] });
+    const absolute = screen.getAllByTestId("run-timeline-request");
+    const added = screen.getAllByTestId("run-timeline-added");
+    expect(absolute).toHaveLength(2);
+    expect(added).toHaveLength(2);
+    const height = (el: HTMLElement) => parseFloat(el.querySelector<HTMLElement>("span[aria-hidden]")!.style.height);
+    expect(height(absolute[0]) / height(absolute[1])).toBeCloseTo(0.5);
+    // Square-root scale: 1000 vs 100 tokens is a height ratio of sqrt(10), the largest fills the area.
+    expect(height(added[0]) / height(added[1])).toBeCloseTo(Math.sqrt(10));
+    expect(height(added[0])).toBeCloseTo(height(absolute[1]));
+    expect(added[0].hasAttribute("data-estimated")).toBe(true);
+    expect(added[1].hasAttribute("data-estimated")).toBe(false);
+    expect(screen.getByTestId("run-timeline-row-added")).toBeTruthy();
+    expect(screen.getByTestId("run-timeline-row-context")).toBeTruthy();
+    expect(added[1].style.left).toBe(absolute[1].style.left);
+  });
+});
+
+describe("RunTimelineRows keyboard and request bars", () => {
+  const request = (idx: number, ms: number) => ({
+    idx,
+    ts: at(ms),
+    session: 0,
+    input_tokens: 100,
+    output_tokens: 1,
+    added_tokens: 10,
+    added_estimated: false,
+  });
+  const units = [unit("inbound", 0, 0, 100), unit("thinking", 1, 100, 500), unit("thinking", 2, 600, 900)];
+
+  it("selects the request's own block when a bar is clicked, and drills on double click", () => {
+    const onSelect = renderRows({ units, requests: [request(1, 100), request(2, 600)] });
+    fireEvent.click(screen.getAllByTestId("run-timeline-request")[1]);
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 2, i1: 2, unitKind: "thinking" });
+    fireEvent.click(screen.getAllByTestId("run-timeline-added")[0]);
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
+  });
+
+  it("widens the bars to the space between requests", () => {
+    renderRows({ units, requests: [request(1, 100), request(2, 600)] });
+    const [bar] = screen.getAllByTestId("run-timeline-request");
+    // 500 px apart on a 1000 px track: capped at the maximum width.
+    expect(parseFloat(bar.style.width)).toBeGreaterThan(20);
+  });
+
+  it("moves the selection with the arrow keys and ignores them in an input", () => {
+    const onSelect = renderRows({ units }, { kind: "unit", i0: 0, i1: 0, unitKind: "inbound" });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    onSelect.mockClear();
+    fireEvent.keyDown(input, { key: "ArrowRight" });
+    expect(onSelect).not.toHaveBeenCalled();
+    input.remove();
+  });
+
+  it("starts at the leftmost item in view when nothing is selected", () => {
+    const onSelect = renderRows({ units });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 0, i1: 0, unitKind: "inbound" });
   });
 });

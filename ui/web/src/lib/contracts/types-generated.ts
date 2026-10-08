@@ -8123,6 +8123,12 @@ export interface components {
          *     `session` the zero-based compaction segment it was sent in; `input_tokens` the provider's
          *     total input tokens of that request, the size of its context, and `output_tokens` what it
          *     generated (both the provider's own numbers, never estimated).
+         *
+         *     `added_tokens` is what newly entered the context for this request: the token sum of the
+         *     messages first read by it, i.e. those from the previous request's AIMessage (its output is
+         *     re-sent) up to the message before this one; for a session's first request, from the session's
+         *     first message. The segment head (system prompt) is not counted. `added_estimated` is True when
+         *     any of those counts is a share rather than the provider's own number.
          */
         RunTimelineRequest: {
             /** Idx */
@@ -8138,6 +8144,10 @@ export interface components {
             input_tokens: number;
             /** Output Tokens */
             output_tokens: number;
+            /** Added Tokens */
+            added_tokens: number;
+            /** Added Estimated */
+            added_estimated: boolean;
         };
         /**
          * RunTimelineResponse

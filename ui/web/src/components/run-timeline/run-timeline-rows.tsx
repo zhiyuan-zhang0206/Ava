@@ -1,6 +1,7 @@
 "use client";
 
-// The run timeline's rows on one shared time axis: lifecycle markers on top,
+// The run timeline's rows on one shared axis (plain time by default, or hybrid: block width follows
+// tokens, the space between blocks follows log idle time): lifecycle markers on top,
 // then one row per understanding-tree level (topmost first), then layer 0 — the
 // message units — at the bottom. All rows share one viewport on the loaded data:
 // the wheel / pinch zooms around the cursor, a drag or a horizontal scroll pans,
@@ -8,32 +9,41 @@
 // into it (the page zooms the viewport to the block's span).
 
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import {
   blockClass,
   chainIds,
   firstLine,
   hoverLit,
+  axisBox,
+  buildAxisMap,
   inboundSources,
   isSelected,
-  layoutRow,
+  layoutSpans,
   levelsTopFirst,
   matchesHighlight,
+  ADDED_ROW,
+  INPUT_ROW,
+  UNITS_ROW,
+  levelRowId,
+  navigate,
+  revealView,
+  type NavKey,
   MARKER_HIT_PX,
   MARKER_LINE_PX,
   type RowPlacement,
-  panViewport,
+  panView,
   pendingSpans,
-  spanBox,
   unitColor,
-  viewportWindow,
-  zoomViewport,
+  zoomView,
   unitKey,
+  type AxisMode,
   type BlockClass,
   type Highlight,
   type Hover,
@@ -136,23 +146,36 @@ export function RunTimelineRows({
   const [hover, setHover] = useState<Hover | null>(null);
   const lit = hoverLit(hover, data.nodes, data.units);
   const levels = levelsTopFirst(data.nodes);
-  const visible = viewportWindow(view);
+  const [mode, setMode] = useState<AxisMode>("time");
+  // The row the selection was made in: a request's bar and its message block select the same thing.
+  const [navRow, setNavRow] = useState<string | null>(null);
+  const choose = (row: string, target: Selection) => {
+    setNavRow(row);
+    onSelect(target);
+  };
+  const baseFrom = base.from;
+  const baseTo = base.to;
+  const axis = useMemo(
+    () => buildAxisMap(data.units, { from: baseFrom, to: baseTo }, mode),
+    [data.units, baseFrom, baseTo, mode],
+  );
+  const viewU = axis.viewU(view);
   // A selection lights itself and every ancestor; the rest steps back.
   const chain = chainIds(selection, data.nodes, data.units);
   const dim = selection !== null;
   const chartRef = useRef<HTMLDivElement>(null);
-  const live = useRef({ base, view, onView });
+  const live = useRef({ base, view, onView, axis });
   // The view a wheel event produced that React has not rendered yet.
   const pending = useRef<Viewport | null>(null);
   useEffect(() => {
     const wanted = pending.current;
     if (wanted && (view.from !== wanted.from || view.to !== wanted.to)) {
       // A render of an older view: the wheel's own result is still on its way.
-      live.current = { ...live.current, base, onView };
+      live.current = { ...live.current, base, onView, axis };
       return;
     }
     pending.current = null;
-    live.current = { base, view, onView };
+    live.current = { base, view, onView, axis };
   });
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
   useEffect(() => {
@@ -169,6 +192,30 @@ export function RunTimelineRows({
     observer.observe(track);
     return () => observer.disconnect();
   }, []);
+  const nav = useRef({ data, view, base, axis, selection, navRow, onSelect, onView });
+  useEffect(() => {
+    nav.current = { data, view, base, axis, selection, navRow, onSelect, onView };
+  });
+  // Arrow keys move the selection (see `navigate`) and pan the view to it; editable and resizing controls keep their own arrows.
+  useEffect(() => {
+    const keys: Partial<Record<string, NavKey>> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+    const onKey = (event: KeyboardEvent) => {
+      const key = keys[event.key];
+      if (event.defaultPrevented || key === undefined || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const el = event.target instanceof Element ? event.target : null;
+      if (el?.closest("input, textarea, select, [contenteditable], [role=textbox], [role=separator], [role=slider], [role=combobox]")) return;
+      const s = nav.current;
+      const next = navigate(key, s.selection === null ? null : { row: s.navRow, selection: s.selection }, s.data, s.view);
+      event.preventDefault();
+      if (next === null) return;
+      setNavRow(next.row);
+      s.onSelect(next.item.selection);
+      const shown = revealView(s.axis, s.view, s.base, next.item.start, next.item.end);
+      if (shown !== s.view) s.onView(shown);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const drag = useRef<{ x: number; view: Viewport; panning: boolean; id: number } | null>(null);
   const suppressClick = useRef(false);
 
@@ -179,13 +226,13 @@ export function RunTimelineRows({
     const onWheel = (event: WheelEvent) => {
       const track = chart.querySelector("[data-track]")?.getBoundingClientRect();
       if (!track || track.width <= 0) return;
-      const { base: b, view: v } = live.current;
+      const { base: b, view: v, axis: a } = live.current;
       const horizontal = !event.ctrlKey && Math.abs(event.deltaX) > Math.abs(event.deltaY);
       event.preventDefault();
       const rate = event.ctrlKey ? PINCH_ZOOM_RATE : WHEEL_ZOOM_RATE;
       const next = horizontal
-        ? panViewport(v, b, event.deltaX / track.width)
-        : zoomViewport(v, b, (event.clientX - track.left) / track.width, Math.exp(event.deltaY * rate));
+        ? panView(a, v, b, event.deltaX / track.width)
+        : zoomView(a, v, b, (event.clientX - track.left) / track.width, Math.exp(event.deltaY * rate));
       // Events can arrive faster than React renders: the next one must start from this result.
       pending.current = next;
       live.current = { ...live.current, view: next };
@@ -212,7 +259,7 @@ export function RunTimelineRows({
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- jsdom has no pointer capture
       event.currentTarget.setPointerCapture?.(state.id);
     }
-    onView(panViewport(state.view, base, -dx / track.width));
+    onView(panView(axis, state.view, base, -dx / track.width));
   };
   const endDrag = () => {
     if (drag.current?.panning) {
@@ -270,18 +317,31 @@ export function RunTimelineRows({
       }}
       className="select-none space-y-1.5 rounded-[10px] border border-border bg-card p-3"
     >
-      <p
-        data-testid="run-timeline-readout"
-        data-hovering={readout === null ? undefined : ""}
-        className="h-4 truncate pl-[88px] font-mono text-[10px] text-muted-foreground"
-      >
-        {readout ?? t("readoutIdle")}
-      </p>
+      <div className={cn(FLEX, "h-4 items-center gap-2 pl-[88px]")}>
+        <p
+          data-testid="run-timeline-readout"
+          data-hovering={readout === null ? undefined : ""}
+          className={cn(MIN_W_0, "grow truncate font-mono text-[10px] text-muted-foreground")}
+        >
+          {readout ?? t("readoutIdle")}
+        </p>
+        <button
+          type="button"
+          data-testid="run-timeline-axis-mode"
+          data-mode={mode}
+          aria-pressed={mode === "hybrid"}
+          title={t("axisModeTitle")}
+          onClick={() => setMode(mode === "hybrid" ? "time" : "hybrid")}
+          className="shrink-0 rounded border border-border px-1.5 font-mono text-[10px] text-muted-foreground hover:text-foreground"
+        >
+          {mode === "hybrid" ? t("axisHybrid") : t("axisTime")}
+        </button>
+      </div>
 
       {data.events.length > 0 ? (
         <RowShell label={t("lifecycleRow")} height="h-5" testId="run-timeline-row-lifecycle">
           {data.events.map((event) => {
-            const box = spanBox(event.ts, event.ts, visible);
+            const box = axisBox(axis, event.ts, event.ts, viewU);
             if (box === null) return null;
             const when = formatShort(event.ts);
             return (
@@ -307,7 +367,7 @@ export function RunTimelineRows({
           testId={`run-timeline-row-level-${level}`}
         >
           {pendingSpans(data.nodes, level).map((span) => {
-            const box = spanBox(span.from, span.to, visible);
+            const box = axisBox(axis, span.from, span.to, viewU);
             if (box === null) return null;
             return (
               <div
@@ -327,9 +387,9 @@ export function RunTimelineRows({
           {(() => {
             const levelNodes = data.nodes.filter((node) => node.level === level);
             const places = new Map(
-              layoutRow(
-                levelNodes.map((node) => ({ key: node.id, start: node.start, end: node.end })),
-                visible,
+              layoutSpans(
+                levelNodes.map((node) => ({ key: node.id, ...axis.nodeSpan(node) })),
+                viewU,
                 trackPx,
               ).map((place) => [place.key, place]),
             );
@@ -354,7 +414,7 @@ export function RunTimelineRows({
                   data-hover={hovered ? "self" : lit.nodeIds.has(node.id) ? "lit" : undefined}
                   data-faded={faded ? "" : undefined}
                   data-marker={place.marker ? "" : undefined}
-                  onClick={() => onSelect({ kind: "node", id: node.id })}
+                  onClick={() => choose(levelRowId(level), { kind: "node", id: node.id })}
                   onDoubleClick={() => onDrill({ kind: "node", id: node.id })}
                   {...hoverProps({ kind: "node", id: node.id })}
                   className={cn(
@@ -394,9 +454,9 @@ export function RunTimelineRows({
       <RowShell label={t("messagesRow")} height="h-6" testId="run-timeline-row-units">
         {(() => {
           const places = new Map(
-            layoutRow(
-              data.units.map((unit) => ({ key: unitKey(unit), start: unit.start, end: unit.end })),
-              visible,
+            layoutSpans(
+              data.units.map((unit) => ({ key: unitKey(unit), ...axis.unitSpan(unit) })),
+              viewU,
               trackPx,
             ).map((place) => [place.key, place]),
           );
@@ -429,7 +489,7 @@ export function RunTimelineRows({
                 data-faded={faded ? "" : undefined}
                 data-matched={matched ? "" : undefined}
                 data-marker={place.marker ? "" : undefined}
-                onClick={() => onSelect(candidate)}
+                onClick={() => choose(UNITS_ROW, candidate)}
                 onDoubleClick={() => onDrill(candidate)}
                 {...hoverProps(candidate)}
                 className={cn(
@@ -455,17 +515,27 @@ export function RunTimelineRows({
         })()}
       </RowShell>
 
-      {data.requests.length > 0 ? (
-        <ContextSizeRow
-          requests={data.requests}
-          visible={visible}
-          hover={hover}
-          hoverProps={hoverProps}
-          describe={(request) => requestReadout(t, request)}
-        />
-      ) : null}
+      {data.requests.length > 0
+        ? (["input", "added"] as const).map((metric) => (
+            <ContextSizeRow
+              key={metric}
+              requests={data.requests}
+              metric={metric}
+              axis={axis}
+              viewU={viewU}
+              trackPx={trackPx}
+              units={data.units}
+              selection={selection}
+              onSelect={(target) => choose(metric === "input" ? INPUT_ROW : ADDED_ROW, target)}
+              onDrill={onDrill}
+              hover={hover}
+              hoverProps={hoverProps}
+              describe={(request) => requestReadout(t, request)}
+            />
+          ))
+        : null}
 
-      <RunTimelineAxis view={view} base={base} onView={onView} />
+      <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} trackPx={trackPx} />
 
       <RunTimelineLegend
         highlight={highlight}
