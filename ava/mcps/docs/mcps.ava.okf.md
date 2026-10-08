@@ -66,6 +66,10 @@ overlay raises a configuration error before server selection; it never becomes
 an empty server list or enables servers by default. `ava mcp list` reports the
 error and exits unsuccessfully. Definitions-only inventory can still inspect
 all declared servers, but must read the overlay separately to report enable state.
+Each tool request checks that its server remains enabled before reusing a local
+or daemon session. Disabling a server rejects later requests without terminating
+existing sessions or cancelling an already-started call. Warm help metadata can
+still list prior tools; it does not authorize their execution.
 
 Installed server spawn cwd is given by `installed_mcp_dir(name)` (its package directory), allowing its relative `.venv/bin/python` command to resolve to an isolated venv; builtin/plugin/machine returns None (keeping daemon cwd).
 
