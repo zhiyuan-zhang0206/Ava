@@ -47,7 +47,7 @@ that changes the design:
 
 ### 2. Define the evaluation
 
-Read the shared [evaluation contract](../../skill-creator/references/evaluation.md)
+Read the shared [evaluation contract](../references/evaluation.md)
 before composing settings. Save realistic cases, task-quality metrics,
 acceptance criteria, and the baseline. Snapshot an existing preset's effective
 config and referenced skills before changing them; for a new preset, compare

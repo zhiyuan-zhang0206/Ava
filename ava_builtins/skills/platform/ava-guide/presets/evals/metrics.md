@@ -1,6 +1,6 @@
 # Preset Maker authoring evaluation
 
-Read [the shared contract](../../../skill-creator/references/evaluation.md)
+Read [the shared contract](../../references/evaluation.md)
 before running these cases. `evals.json` contains constructed authoring tasks
 with inventories and input data supplied inline. Use a disposable scratch
 directory. Do not call a live gateway, install packages, authenticate MCPs, or

@@ -1,6 +1,6 @@
 # Skill Creator authoring evaluation
 
-Read [the shared contract](../references/evaluation.md) before running these
+Read [the shared contract](../../ava-guide/references/evaluation.md) before running these
 cases. `evals.json` contains constructed, self-contained authoring scenarios.
 All source data is inline in each prompt; there are no external fixture files.
 Only writes under an isolated scratch directory are permitted. Live Ava

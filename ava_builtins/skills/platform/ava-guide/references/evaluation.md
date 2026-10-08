@@ -3,8 +3,10 @@
 Read this when defining or running an evaluation for a new skill, changed
 instructions, trigger description, or preset composition. `skill-creator` owns
 this authoring evaluation contract; Preset Maker uses it for the complete
-configuration. This is an instruction-level workflow, not a new runtime API or
-automatic evaluation service.
+configuration. The canonical file is bundled with Ava Guide so its external
+Codex and Claude Code copies include every reading dependency. Skill Creator
+links here rather than maintaining a second copy. This is an instruction-level
+workflow, not a new runtime API or automatic evaluation service.
 
 ## Save the evaluation before running it
 
@@ -142,9 +144,11 @@ authorization requirements.
 
 ### Existing Ava evaluation tools
 
-For dataset-derived, replay-safe read/compute tasks, use the
-[`ava-self-evolution` evaluation guide](../../ava-self-evolution/evaluation/SKILL.md)
-and its `scripts/evaluate.py` launch/poll/gather flow. It requires dataset trace
+For dataset-derived, replay-safe read/compute tasks in an Ava deployment, load
+`ava.skills.ava_self_evolution.evaluation` using `ava.help` and follow that
+skill's `scripts/evaluate.py` launch/poll/gather flow. This separate built-in
+is available through Ava's capability index, not bundled with an external
+Guide copy; confirm its availability before choosing replay. It requires dataset trace
 records and a live agent identity for launch; it does not ingest the case JSON
 above, install a candidate skill snapshot, or resolve a preset comparison for
 you. Its completion and efficiency scores are proxies, so also grade the
