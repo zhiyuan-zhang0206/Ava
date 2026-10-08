@@ -32,7 +32,7 @@ auditing and aims to be faithful, so the two do not shape each other.
   a level's open nodes are grouped by a plain-text call with no agent prefix; `group.py` (prompt,
   reply checks), `group_consumer.py` (when a level is due), `group_store.py` (writes).
 - **Reads** (`store.py`, `serve.py`, `usage.py`): the nodes with their deterministic costs for
-  the run-timeline ([[gateway/run_timeline/docs/run_timeline.ava.okf.md|run timeline]]).
+  the run-timeline ([[services/derived/insights/run_timeline/docs/run_timeline.ava.okf.md|run timeline]]).
 - **Provider calls** (`generate.py`): the model built the way the agent builds its own, the
   agent-shaped request with its bounded refusal of tool calls, and the raw record of each call.
 
