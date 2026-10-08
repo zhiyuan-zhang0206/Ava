@@ -59,7 +59,7 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
     />,
   );
   // These cases are about positions on the plain time axis.
-  if (hybrid) fireEvent.click(screen.getByTestId("run-timeline-axis-mode"));
+  if (hybrid) fireEvent.click(screen.getByTestId("run-timeline-axis-hybrid"));
   return onSelect;
 }
 
@@ -197,9 +197,13 @@ describe("RunTimelineRows hybrid axis", () => {
     await paintFrame();
     expect(toggle.dataset.mode).toBe("time");
     expect(fills("units").map((d) => [d.x, d.x + d.w])).toEqual([[0, 100], [100, 110]]);
-    fireEvent.click(toggle);
+    // Both modes are always shown; the current one is the pressed one.
+    expect(screen.getByTestId("run-timeline-axis-time").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("run-timeline-axis-hybrid").getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByTestId("run-timeline-axis-hybrid"));
     await paintFrame();
     expect(toggle.dataset.mode).toBe("hybrid");
+    expect(screen.getByTestId("run-timeline-axis-hybrid").getAttribute("aria-pressed")).toBe("true");
     const [a, b] = fills("units");
     expect(b.w / a.w).toBeCloseTo(3, 0);
   });
