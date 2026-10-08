@@ -28,9 +28,11 @@ def test_on_preserves_explicit_other_service_choices(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     marker, calls = _wire(monkeypatch, tmp_path, ServiceSelection("only", frozenset({"ops"})))
-    assert lgtm.cmd_lgtm_on() == 0
+    assert lgtm.cmd_lgtm_on(retained_children=[]) == 0
     assert marker.exists()
-    assert calls == [{"only_services": ("grafana", "loki", "ops", "prometheus")}]
+    assert calls == [
+        {"only_services": ("grafana", "loki", "ops", "prometheus"), "retained_children": []}
+    ]
 
 
 def test_off_disables_backends_even_on_role_declared_station(
@@ -40,10 +42,14 @@ def test_off_disables_backends_even_on_role_declared_station(
     marker.touch()
     data = tmp_path / "loki-data"
     data.write_bytes(b"durable history")
-    assert lgtm.cmd_lgtm_off() == 0
+    assert lgtm.cmd_lgtm_off(retained_children=[]) == 0
     assert not marker.exists()
     assert calls == [
-        {"disabled_services": ("browser", "grafana", "loki", "prometheus"), "all_services": False}
+        {
+            "disabled_services": ("browser", "grafana", "loki", "prometheus"),
+            "all_services": False,
+            "retained_children": [],
+        }
     ]
     assert data.read_bytes() == b"durable history"
 
@@ -62,8 +68,10 @@ def test_off_only_backend_allowlist_does_not_enable_all_services(
             SimpleNamespace(session=n) for n in ("gateway", "loki", "prometheus", "grafana")
         ),
     )
-    assert lgtm.cmd_lgtm_off() == 0
-    assert calls == [{"disabled_services": ("gateway", "loki", "prometheus", "grafana")}]
+    assert lgtm.cmd_lgtm_off(retained_children=[]) == 0
+    assert calls == [
+        {"disabled_services": ("gateway", "loki", "prometheus", "grafana"), "retained_children": []}
+    ]
 
 
 def test_normal_start_refusal_is_not_reported_as_toggle_success(
@@ -75,4 +83,4 @@ def test_normal_start_refusal_is_not_reported_as_toggle_success(
         return 1
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", refuse)
-    assert lgtm.cmd_lgtm_on() == 1
+    assert lgtm.cmd_lgtm_on(retained_children=[]) == 1

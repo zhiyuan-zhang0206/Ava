@@ -23,6 +23,7 @@ One module per domain:
 from __future__ import annotations
 
 import argparse
+import subprocess
 
 from cli.commands.agents.impersonation_parsers import add_impersonation_parser
 from cli.commands.agents.parsers import add_agents_parser
@@ -52,7 +53,10 @@ from cli.parsers.management import (
 from cli.parsers.pty import _add_pty_parser
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> argparse.ArgumentParser:
     """Build the full `ava` argparse tree; each subparser binds ``func=`` here.
 
     The registration order below IS the `ava --help` listing order — keep it in
@@ -65,14 +69,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     _add_init_parser(sub)
-    _add_start_parser(sub)
-    _add_stop_parser(sub)
-    _add_restart_parser(sub)
+    _add_start_parser(sub, retained_children=retained_children)
+    _add_stop_parser(sub, retained_children=retained_children)
+    _add_restart_parser(sub, retained_children=retained_children)
     _add_status_parser(sub)
     _add_pty_parser(sub)
     _add_converge_parser(sub)
     _add_firewall_parser(sub)
-    _add_lgtm_parser(sub)
+    _add_lgtm_parser(sub, retained_children=retained_children)
     _add_cluster_parser(sub)
     _add_computer_parser(sub)
     _add_trace_parser(sub)
