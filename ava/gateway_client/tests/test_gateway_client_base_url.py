@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from ava.sdk_surface import process_context
+import ava
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 
@@ -13,8 +13,13 @@ from base.agents.context.clients import ClientSet
 @pytest.fixture(autouse=True)
 def _fresh_clients() -> Any:
     """Each test builds the gateway client itself: a context with a clean `ClientSet`."""
-    with process_context.scoped(AvaContext(clients=ClientSet())):
+    context = AvaContext(clients=ClientSet())
+    ava.context = context
+    try:
         yield
+    finally:
+        del ava.context
+        context.clients.close()
 
 
 def test_gateway_client_base_url_is_gateway_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,7 +128,7 @@ def test_use_client_routes_sdk_calls_through_the_injected_client_and_restores_th
 def test_use_client_leaves_the_lazy_default_unbuilt_when_none_was_installed() -> None:
     import ava.gateway_client.transport as gc
 
-    clients = process_context.current().clients
+    clients = ava.context.clients
 
     with pytest.raises(RuntimeError, match="boom"), gc.use_client(_answering("injected", [])):
         raise RuntimeError("boom")
@@ -144,3 +149,54 @@ def test_client_carries_the_configured_timeout(monkeypatch: pytest.MonkeyPatch) 
     client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
     assert client.timeout.read == 20.0
     assert client.timeout.connect == 20.0
+
+
+def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> None:
+    import httpx
+
+    from ava.gateway_client import get_born_chain, memory_search
+    from ava.gateway_client.transport import _agent_jitter_seconds
+    from base.agents.context.identity import AgentIdentity
+    from tests.fixtures.pin_agent import pin_no_identity
+
+    seen: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"results": [], "ancestors": []})
+
+    context = AvaContext(identity=AgentIdentity(44, True))
+    pin_no_identity()
+    with (
+        httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(answer)) as client,
+        context.clients.using_gateway(client),
+    ):
+        assert memory_search("query", 3, context=context) == []
+        assert get_born_chain(44, context=context) == []
+        assert _agent_jitter_seconds(context) == 0.22
+    assert seen == [
+        "http://host.test/api/memory/search",
+        "http://host.test/api/agents/44/born-chain",
+    ]
+    assert getattr(ava, "context", None) is None
+
+
+def test_explicit_host_transport_failure_keeps_its_own_client_and_error() -> None:
+    import httpx
+
+    from ava.gateway_client.transport import get
+    from base.agents import GatewayUnavailable
+    from tests.fixtures.pin_agent import pin_no_identity
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("expected outage", request=request)
+
+    context = AvaContext()
+    pin_no_identity()
+    with (
+        httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(fail)) as client,
+        context.clients.using_gateway(client),
+        pytest.raises(GatewayUnavailable, match=r"host\.test.*expected outage"),
+    ):
+        get("/api/check", max_retries=1, context=context)
+    assert getattr(ava, "context", None) is None

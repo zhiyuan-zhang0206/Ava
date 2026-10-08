@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 import pytest
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
+import ava
 from ava import mcps
 from ava.mcps import _daemon as daemon
 from ava.mcps._clients import McpClients
-from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.packages.plugins.mcp_enabled import McpEnabledConfigError
 
@@ -45,29 +45,29 @@ def test_local_warm_callable_and_raw_reject_changed_overlay(
     spawn = MagicMock(side_effect=AssertionError("no server may start"))
     monkeypatch.setattr(mcp.client.stdio, "stdio_client", spawn)
 
-    def no_remote(_self: McpClients) -> None:
-        return None
-
-    monkeypatch.setattr(McpClients, "remote", no_remote)
+    previous = ava.unbind_context()
+    ava.bind_context(context)
     try:
-        with process_context.scoped(context):
-            clients = context.clients.get(McpClients)
-            clients.sessions["fs"] = session
-            before = mcps.fs.bump
-            assert before() == "effect 1"
-            (unit_home / "mcp_enabled.json").write_text(overlay)
-            with pytest.raises(mcps.MCPCallError) as proxy_error:
-                before()
-            with pytest.raises(mcps.MCPCallError) as raw_error:
-                mcps._call_raw("fs", "bump")
-            error_type = McpEnabledConfigError if overlay == "{not json" else mcps.MCPServerNotFound
-            assert isinstance(proxy_error.value.__cause__, error_type)
-            assert isinstance(raw_error.value.__cause__, error_type)
-            assert session.effects == 1
-            assert clients.sessions["fs"] is session
-            spawn.assert_not_called()
+        clients = context.clients.get(McpClients)
+        clients.sessions["fs"] = session
+        before = mcps.fs.bump
+        assert before() == "effect 1"
+        (unit_home / "mcp_enabled.json").write_text(overlay)
+        with pytest.raises(mcps.MCPCallError) as proxy_error:
+            before()
+        with pytest.raises(mcps.MCPCallError) as raw_error:
+            mcps._call_raw("fs", "bump")
+        error_type = McpEnabledConfigError if overlay == "{not json" else mcps.MCPServerNotFound
+        assert isinstance(proxy_error.value.__cause__, error_type)
+        assert isinstance(raw_error.value.__cause__, error_type)
+        assert session.effects == 1
+        assert clients.sessions["fs"] is session
+        spawn.assert_not_called()
     finally:
+        ava.unbind_context()
         context.clients.close()
+        if previous is not None:
+            ava.bind_context(previous)
 
 
 @pytest.mark.parametrize("shared", [False, True])

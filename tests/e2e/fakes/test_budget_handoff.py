@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from ava.sdk_surface import agent_identity
 from tests.components.base.poll_until import poll_until
 from tests.e2e.fakes.scenarios import budget_handoff
 
@@ -19,7 +18,8 @@ import sys
 import time
 from pathlib import Path
 import ava
-from ava.sdk_surface import agent_identity
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 
 root = Path(sys.argv[1])
 publication = 0
@@ -54,7 +54,7 @@ def held_fdopen(fd, mode='r', *args, **kwargs):
 
 Path.open = held_open
 os.fdopen = held_fdopen
-agent_identity.agent_id = lambda: 1
+ava.context = AvaContext(identity=AgentIdentity(agent_id=1, owns_loop=False))
 ava.agents.spawn = lambda **kwargs: 2
 ava.agents.send_message = lambda *args, **kwargs: None
 exec(sys.argv[2])
@@ -72,7 +72,6 @@ def test_readers_keep_the_previous_snapshot_until_publication(
         return tmp_path
 
     monkeypatch.setattr(budget_handoff, "scratch_root", scenario_root)
-    monkeypatch.setattr(agent_identity, "agent_id", lambda: 1)
     (tmp_path / "owner").write_text("1")
     initial = {
         "status": "running",
@@ -84,9 +83,9 @@ def test_readers_keep_the_previous_snapshot_until_publication(
     state = tmp_path / "1.json"
     state.write_text(json.dumps(initial))
     code = (
-        budget_handoff._pause_code(1)
+        budget_handoff._pause_code(1, 1)
         if transition == "pause"
-        else budget_handoff._prepare_code(transition)
+        else budget_handoff._prepare_code(transition, 1)
     )
     process = subprocess.Popen(  # noqa: S603 — fixed interpreter and generated fixture code
         [sys.executable, "-c", _WRITER, str(tmp_path), code],

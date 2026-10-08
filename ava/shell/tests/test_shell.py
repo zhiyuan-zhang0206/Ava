@@ -23,7 +23,6 @@ import pytest
 import ava
 import ava.sdk_surface.agent_identity
 from ava import shell
-from ava.sdk_surface import process_context
 from base.native_process.os_platform import IS_WINDOWS
 
 pytestmark = [
@@ -176,8 +175,12 @@ def test_run_default_cwd_is_home_before_identity() -> None:
     still finds its fake agent."""
     original_env = os.environ.pop("AVA_AGENT_ID", None)
     try:
-        with process_context.scoped(None):
+        original_context = ava.context
+        del ava.context
+        try:
             out = ava.shell.run("pwd")
+        finally:
+            ava.context = original_context
     finally:
         if original_env is not None:
             os.environ["AVA_AGENT_ID"] = original_env

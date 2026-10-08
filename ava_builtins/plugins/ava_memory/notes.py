@@ -29,8 +29,8 @@ from datetime import UTC, datetime
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from base.agents.context import AvaContext
 from base.config import settings
-from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.paths import memory_dir, workspace_dir
 
@@ -55,9 +55,10 @@ _FRAMING = (
 )
 
 
-def memory_index_note(slices: AgentSlices) -> HumanMessage | None:
+def memory_index_note(ctx: AvaContext) -> HumanMessage | None:
     """The shared `MEMORY.md` pointer index, or `None` when there is nothing to
     inject (the layer is off, or the pool has no index yet)."""
+    slices = ctx.require_agent()
     if slices.sandbox.eval_isolation or not settings.agent.memory_index_inject_enabled:
         return None
     path = memory_dir() / _MEMORY_INDEX_FILE
@@ -131,7 +132,7 @@ def _per_agent_maintenance_suffix(lines: int) -> str:
     return _OVER_CAP_NOTE.format(lines=lines, cap=cap)
 
 
-def per_agent_memory_note(_slices: AgentSlices) -> HumanMessage | None:
+def per_agent_memory_note(ctx: AvaContext) -> HumanMessage | None:
     """The agent's own memory index (`<workspace>/memory/MEMORY.md`).
 
     Returns a note even when the index is absent or empty — the framing plus
@@ -151,8 +152,8 @@ def per_agent_memory_note(_slices: AgentSlices) -> HumanMessage | None:
         return None
     from ava.sdk_surface.agent_identity import agent_id
 
-    aid = agent_id()
-    if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() is None pre-bootstrap.
+    aid = agent_id(ctx)
+    if aid is None:
         logger.debug("[per-agent-memory] agent id not yet established, skipping")
         return None
     ws = workspace_dir(aid)

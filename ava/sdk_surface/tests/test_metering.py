@@ -486,7 +486,9 @@ def test_a_failing_identity_snapshot_is_reported_and_the_call_goes_on(
         raise RuntimeError("identity unreadable")
 
     monkeypatch.setattr(metering, "report_sink_failure", record)
-    monkeypatch.setattr(metering.process_context, "peek", _boom)
+    from base.agents.messages import external_caller
+
+    monkeypatch.setattr(external_caller, "external_caller", _boom)
     with metering._caller():
         pass
 

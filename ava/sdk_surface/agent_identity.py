@@ -1,40 +1,26 @@
-"""Agent identity for host turns, exec children and launched scripts.
+"""Identity derived from the SDK's local context or an explicit host context.
 
-The identity of a process is the `AgentIdentity` of the `AvaContext` it is bound to
-(`ava.sdk_surface.process_context`); this module reads it and holds no state. The agent host binds a turn contextvar
-(`base/native_process/turn_identity.py`) around execution and never establishes one process-wide
-agent id for its many agents. The exec child binds a context built from its request envelope, a
-script an agent launched derives one from AVA_AGENT_ID, and an external controller binds one
-carrying its lease.
-Reads resolve an explicitly borrowed external identity first (with lease validation), then the
-turn contextvar, then the bound context.
-
-The canonical identity is framework-internal; `ava.self.AGENT_ID` re-exports
-it. Disabling the agent-facing `self` namespace does not remove identity from
-framework callers. `owns_loop` authorizes lifecycle self-actions in a turn or
-its exec child; background scripts carry it False so they cannot compact or restart the agent
-whose identity they carry.
-
-This module carries no agent-facing help surface. Cluster configuration and
-credentials remain separate from the agent identity.
+The execution child, launched script and exclusive external attachment initialize
+``ava.context``. Host code passes its own ``AvaContext``; native turn metadata is
+never an SDK identity source. Borrowed leases are validated on each identity use.
 """
 
 from __future__ import annotations
 
-from ava.sdk_surface import process_context
+import ava
+from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
-from base.native_process.turn_identity import current_turn_agent_id
 
 
-def _bound() -> AgentIdentity | None:
-    """The identity of the bound context, or None when no context is bound."""
-    context = process_context.peek()
+def _bound(context: AvaContext | None = None) -> AgentIdentity | None:
+    """Read an explicit host context or the SDK's process-local entry."""
+    context = context if context is not None else getattr(ava, "context", None)
     return None if context is None else context.identity
 
 
-def validate_external_identity() -> int | None:
+def validate_external_identity(context: AvaContext | None = None) -> int | None:
     """Recheck an attached lease; no-op for the existing native runtime paths."""
-    identity = _bound()
+    identity = _bound(context)
     return identity.lease.validate() if identity is not None and identity.lease else None
 
 
@@ -52,32 +38,27 @@ def is_launched_child() -> bool:
     `python x.py` in a persistent shell session gets `ava.tasks` et al. without a
     bootstrap, while the agent process (which loaded plugins explicitly) and
     gateway / cli keep fail-fast on a genuinely unknown `ava.X`. A bound turn
-    context is the hosted runner itself — never a launched child."""
-    if current_turn_agent_id() is not None:
-        return False
+    context cannot bootstrap a launched script in a host turn."""
     identity = _bound()
     return identity is not None and identity.agent_id is not None and not identity.owns_loop
 
 
-def agent_id() -> int | None:
+def agent_id(context: AvaContext | None = None) -> int | None:
     """Resolve the agent id used to attribute this process's work.
 
-    A validated borrowed identity takes precedence, followed by the hosted turn
-    context and the bound context's identity. An invalid borrowed lease raises
+    A validated borrowed identity takes precedence over the supplied or local
+    context's identity. An invalid borrowed lease raises
     instead of falling back. Returns `None` when no source provides an identity;
     callers that tolerate this pre-bootstrap state must check for it explicitly.
     """
-    external = validate_external_identity()
+    external = validate_external_identity(context)
     if external is not None:
         return external
-    turn = current_turn_agent_id()
-    if turn is not None:
-        return turn
-    identity = _bound()
+    identity = _bound(context)
     return None if identity is None else identity.agent_id
 
 
-def require_agent_id() -> int:
+def require_agent_id(context: AvaContext | None = None) -> int:
     """Return this process's agent id, or raise if it has none.
 
     Use this at every call site that stamps the agent id into durable data
@@ -88,7 +69,7 @@ def require_agent_id() -> int:
         RuntimeError: no context carrying an agent id is bound and
         ``AVA_AGENT_ID`` is not set in the environment.
     """
-    resolved = agent_id()
+    resolved = agent_id(context)
     if resolved is None:
         raise RuntimeError(
             "this process has no established agent identity — "
@@ -117,12 +98,12 @@ def require_lease_free_agent_id() -> int:
     return actor
 
 
-def require_actor() -> str:
+def require_actor(context: AvaContext | None = None) -> str:
     """Return this process's asserted provenance, validating a borrowed lease first.
 
-    A borrowed `agent:<id>` identity takes precedence, followed by a hosted turn,
-    an explicit external tool profile, a non-agent actor of the bound context,
-    and its agent identity. An invalid borrowed lease
+    A borrowed `agent:<id>` identity takes precedence. A supplied host context
+    is authoritative; without one, an explicit external tool profile precedes
+    the local SDK context's actor and agent identity. An invalid borrowed lease
     raises instead of falling back. These provenance channels do not replace
     the gateway's credential checks.
 
@@ -134,18 +115,20 @@ def require_actor() -> str:
         RuntimeError: no actor or agent identity is available, or the borrowed
             lease no longer permits this identity.
     """
-    borrowed = validate_external_identity()
+    borrowed = validate_external_identity(context)
     if borrowed is not None:
         return f"agent:{borrowed}"
-    turn = current_turn_agent_id()
-    if turn is not None:
-        return f"agent:{turn}"
+    identity = _bound(context)
+    if context is not None and identity is not None:
+        if identity.actor is not None:
+            return identity.actor
+        if identity.agent_id is not None:
+            return f"agent:{identity.agent_id}"
     from base.agents.messages.external_caller import external_caller
 
     external = external_caller()
     if external is not None:
         return external.source()
-    identity = _bound()
     if identity is not None and identity.actor is not None:
         return identity.actor
     if identity is None or identity.agent_id is None:
@@ -167,9 +150,6 @@ def default_actor() -> str:
     borrowed = validate_external_identity()
     if borrowed is not None:
         return f"agent:{borrowed}"
-    turn = current_turn_agent_id()
-    if turn is not None:
-        return f"agent:{turn}"
     from base.agents.messages.external_caller import external_caller
 
     external = external_caller()
@@ -193,10 +173,6 @@ def assert_self_action(action: str) -> None:
         RuntimeError: this process does not own the agent turn loop (a launched
             background script), or has no established identity.
     """
-    if current_turn_agent_id() is not None:
-        # A hosted turn context: the runner drives this agent's loop, so the
-        # turn is the loop owner by construction.
-        return
     identity = _bound()
     if identity is not None and not identity.owns_loop:
         raise RuntimeError(

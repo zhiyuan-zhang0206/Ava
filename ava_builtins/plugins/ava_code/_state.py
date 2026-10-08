@@ -1,7 +1,7 @@
 """The ava_code plugin's state class — the `ava_code__*` graph channels and their defaults.
 
-Kept apart from `agent_runtime.py` (the host-side face: hooks and contributions), which does
-not import `ava`: the default `cwd` factory asks the process's agent identity, an SDK concern.
+The cwd factory serves direct child-side state construction. The host's after-init hook
+initializes an absent graph channel from the invocation's explicit Runtime context.
 """
 
 from __future__ import annotations
@@ -21,14 +21,13 @@ from base.paths import workspace_dir
 def default_cwd() -> str:
     """Initial cwd for a fresh agent state: the agent's own workspace.
 
-    State is first created inside a bootstrapped agent process, after
-    the process context is bound — so a real run starts in
-    `$AVA_HOME/workspaces/<agent_id>/` (created here on first touch). Direct
-    state construction without a bootstrap (tests, dev REPL) has no agent and
-    therefore no workspace; $HOME is the documented pre-bootstrap placeholder
-    (see `ava.sdk_surface.agent_identity.agent_id`)."""
+    Direct construction in an execution child uses its local SDK identity.
+    Without that identity, the schema default is the $HOME placeholder.
+    In the host, after_init initializes the absent cwd channel from Runtime
+    and persists that value; this schema default is not the host's authority.
+    """
     aid = _ava_identity.agent_id()
-    if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() returns None pre-bootstrap
+    if aid is None:
         return str(Path.home())
     return str(workspace_dir(aid))
 

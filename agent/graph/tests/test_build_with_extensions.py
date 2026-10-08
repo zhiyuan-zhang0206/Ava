@@ -248,7 +248,7 @@ def {name}_section(_slices):
     return "## {name}"
 
 
-def {name}_note(_slices):
+def {name}_note(_ctx):
     return None
 
 

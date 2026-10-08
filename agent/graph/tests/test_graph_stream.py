@@ -413,14 +413,18 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
     from base.config import settings
 
     directory = tmp_path / ".exec_output"
-    monkeypatch.setattr(output, "_overflow_dir", lambda: directory)
+
+    def overflow_dir(_agent_id: int) -> Path:
+        return directory
+
+    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
     # Bodies exceed the 300-line soft-crop trigger; the new body stays under
     # exec_output_max_chars so a reference-protected skip leaves it fully
     # inline (6 x "old payload " = 72 chars + newline -> 340 lines, 24,820 chars).
     old_body = ("old payload " * 6 + "\n") * 340
     new_body = ("new payload " * 6 + "\n") * 340
     monkeypatch.setattr(settings.sandbox, "exec_output_crop_archive_max_bytes", len(old_body))
-    prior_output = output.wrap_code_output(old_body)
+    prior_output = output.wrap_code_output(old_body, agent_id=7)
     archive = next(directory.glob("crop_*.txt"))
     state = AgentState(
         messages=[
