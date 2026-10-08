@@ -13,7 +13,7 @@ import pytest
 
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
-from scripts.structure import quality_budget as quality
+from scripts.structure.budgets import quality_budget as quality
 
 
 def _write(root: pathlib.Path, name: str, n_lines: int) -> pathlib.Path:
