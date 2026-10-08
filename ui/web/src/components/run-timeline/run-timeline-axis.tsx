@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { axisTicks, zoomViewport, type Viewport } from "./timeline-model";
+import { axisMapTicks, zoomView, type AxisMap, type Viewport } from "./timeline-model";
 
 const BUTTON_ZOOM = 0.5;
 
@@ -16,15 +16,19 @@ export function RunTimelineAxis({
   view,
   base,
   onView,
+  axis,
+  trackPx,
 }: {
   view: Viewport;
   /** The whole loaded extent: "reset" returns to it. */
   base: Viewport;
   onView: (view: Viewport) => void;
+  axis: AxisMap;
+  trackPx: number;
 }) {
   const t = useTranslations("runTimeline");
-  const ticks = axisTicks(view);
-  const zoomButton = (factor: number) => onView(zoomViewport(view, base, 0.5, factor));
+  const ticks = axisMapTicks(axis, view, trackPx);
+  const zoomButton = (factor: number) => onView(zoomView(axis, view, base, 0.5, factor));
   const atBase = view.from <= base.from && view.to >= base.to;
   return (
     <div className={cn(FLEX, "gap-2 text-[10px] text-muted-foreground")}>
