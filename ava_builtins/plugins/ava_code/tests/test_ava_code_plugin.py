@@ -23,9 +23,12 @@ from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
-def _load_ava_code_plugin():
+def _load_ava_code_plugin(monkeypatch: pytest.MonkeyPatch):
     """Install ava_code's declared SDK surface (cwd namespace, wraps, skill source) for each
-    test and uninstall it after."""
+    test and uninstall it after. Use a valid local sampling policy for SDK calls."""
+    from base.agents.sdk import call_policy
+
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     install.install(code_registry())
 
     yield
