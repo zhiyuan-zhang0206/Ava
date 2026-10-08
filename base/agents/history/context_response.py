@@ -6,8 +6,6 @@ models and the budget resolution (the agent's model window and compaction thresh
 rather than in either of them.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -34,7 +32,7 @@ class ContextSection(BaseModel):
     name: str
     tokens: int
     estimated: bool = True
-    children: list[ContextSection] = Field(default_factory=list)
+    children: list["ContextSection"] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
 class ContextCategory(BaseModel):
