@@ -8,6 +8,7 @@ import threading
 from typing import Any
 
 import pytest
+import redis
 import redis.asyncio as aredis
 from redis.asyncio.connection import AbstractConnection
 from redis.exceptions import AuthenticationError, NoPermissionError
@@ -74,7 +75,7 @@ class _EventuallyAsyncPublisher:
         self._failures = failures
         self.attempts = 0
 
-    async def publish(self, _channel: str, _payload: str) -> int:
+    async def publish(self, _channel: str, _payload: str, *, auth_retry: bool = True) -> int:
         self.attempts += 1
         if self.attempts <= self._failures:
             raise self._error("ACL is being re-affirmed")
@@ -89,7 +90,7 @@ class _HalfOpenHealthCheckPublisher:
         self.release = asyncio.Event()
         self.cancelled = False
 
-    async def publish(self, _channel: str, _payload: str) -> int:
+    async def publish(self, _channel: str, _payload: str, *, auth_retry: bool = True) -> int:
         self.read_started.set()
         try:
             await self.release.wait()
@@ -106,7 +107,7 @@ class _EventuallySyncPublisher:
         self._failures = failures
         self.attempts = 0
 
-    def publish(self, _channel: str, _payload: str) -> int:
+    def publish(self, _channel: str, _payload: str, *, auth_retry: bool = True) -> int:
         self.attempts += 1
         if self.attempts <= self._failures:
             raise AuthenticationError("ACL is being re-affirmed")
@@ -476,4 +477,103 @@ class TestDeadTransportRecovery:
         conn.next_health_check = 0.0
         with pytest.raises((TypeError, AttributeError)):
             await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=10)  # pyright: ignore[reportUnknownArgumentType]
+        await client.aclose()
+
+
+@pytest.mark.parametrize("best_effort", (False, True))
+async def test_async_command_and_publish_keep_one_auth_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, best_effort: bool
+) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    async def execute(_client: object, *args: object, **options: object) -> int:
+        nonlocal attempts
+        assert "auth_retry" not in options
+        attempts += 1
+        raise AuthenticationError("ACL transition")
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(aredis.Redis, "execute_command", execute)
+    monkeypatch.setattr(mod, "_sleep_async", sleep)
+    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter)
+    client = mod.open_async_redis(settings.data_plane.redis_url)
+    try:
+        if best_effort:
+            result = await mod.publish_via(lambda: client, "channel", "payload", warn_last={})
+            assert result is None
+        else:
+            with pytest.raises(AuthenticationError):
+                await client.get("key")
+    finally:
+        await client.aclose()
+    assert attempts == 10
+    assert len(delays) == 9
+    assert sum(delays) <= 60.0
+
+
+@pytest.mark.parametrize("best_effort", (False, True))
+def test_sync_command_and_publish_keep_one_auth_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, best_effort: bool
+) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def execute(_client: object, *args: object, **options: object) -> int:
+        nonlocal attempts
+        assert "auth_retry" not in options
+        attempts += 1
+        raise NoPermissionError("ACL transition")
+
+    monkeypatch.setattr(redis.Redis, "execute_command", execute)
+    monkeypatch.setattr(mod, "_sleep_sync", delays.append)
+    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter)
+    client = mod.open_sync_redis(settings.data_plane.redis_url)
+    try:
+        if best_effort:
+            assert mod.publish_sync_via(lambda: client, "channel", "payload", warn_last={}) is None
+        else:
+            with pytest.raises(NoPermissionError):
+                client.get("key")
+    finally:
+        client.close()
+    assert attempts == 10
+    assert len(delays) == 9
+    assert sum(delays) <= 60.0
+
+
+async def test_task_started_during_publish_keeps_its_own_command_retry_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: dict[str, int] = {}
+    child: asyncio.Task[object] | None = None
+    client = mod.open_async_redis(settings.data_plane.redis_url)
+
+    async def execute(_client: object, command: str, *args: object, **options: object) -> int:
+        nonlocal child
+        attempts[command] = attempts.get(command, 0) + 1
+        if command == "PUBLISH" and child is None:
+            child = asyncio.create_task(client.execute_command("GET", "independent-key"))
+            await asyncio.sleep(0)
+        if attempts[command] <= 2:
+            raise AuthenticationError("ACL transition")
+        return 3
+
+    async def sleep(_delay: float) -> None:
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(aredis.Redis, "execute_command", execute)
+    monkeypatch.setattr(mod, "_sleep_async", sleep)
+    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter)
+    try:
+        assert await mod.publish_via(lambda: client, "channel", "payload", warn_last={}) == 3
+        assert child is not None
+        assert await asyncio.wait_for(child, timeout=1.0) == 3
+        assert attempts == {"PUBLISH": 3, "GET": 3}
+    finally:
+        if child is not None and not child.done():
+            child.cancel()
+            await asyncio.gather(child, return_exceptions=True)
         await client.aclose()

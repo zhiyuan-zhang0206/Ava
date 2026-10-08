@@ -15,7 +15,6 @@ import random
 import socket
 import time
 from collections.abc import Awaitable, Callable
-from contextvars import ContextVar
 from typing import Any, cast
 
 import redis as _redis_sync
@@ -155,9 +154,6 @@ def _auth_retry_jitter(delay_cap: float) -> float:
     return random.uniform(delay_cap / 2, delay_cap)  # noqa: S311 — scheduling jitter, not a secret
 
 
-_auth_retry_active: ContextVar[bool] = ContextVar("redis_auth_retry_active", default=False)
-
-
 def _next_auth_retry_delay(*, failure_count: int, waited_s: float, started_at: float) -> float:
     """Choose the next jittered delay without exceeding the retry window."""
     remaining_s = min(
@@ -183,68 +179,55 @@ async def retry_auth_failures_async[T](
     intentionally retain their existing caller-specific best-effort behavior.
     A caller that already has a per-operation timeout can keep it on each
     attempt while allowing the whole auth-transition sequence to use its
-    bounded retry window.
+    bounded retry window. Callers composing commands own this one retry loop
+    and explicitly disable command-level retries on those commands.
     """
-    if _auth_retry_active.get():
-        return await operation()
-
-    token = _auth_retry_active.set(True)
-    try:
-        failure_count = 0
-        waited_s = 0.0
-        started_at = time.monotonic()
-        while True:
-            try:
-                if attempt_timeout_s is None:
-                    return await operation()
-                return await asyncio.wait_for(operation(), timeout=attempt_timeout_s)
-            except _AUTH_RETRY_ERRORS:
-                failure_count += 1
-                if failure_count >= _AUTH_RETRY_MAX_ATTEMPTS:
-                    raise
-                delay_s = _next_auth_retry_delay(
-                    failure_count=failure_count, waited_s=waited_s, started_at=started_at
-                )
-                if delay_s <= 0:
-                    raise
-                await _sleep_async(delay_s)
-                waited_s += delay_s
-    finally:
-        _auth_retry_active.reset(token)
+    failure_count = 0
+    waited_s = 0.0
+    started_at = time.monotonic()
+    while True:
+        try:
+            if attempt_timeout_s is None:
+                return await operation()
+            return await asyncio.wait_for(operation(), timeout=attempt_timeout_s)
+        except _AUTH_RETRY_ERRORS:
+            failure_count += 1
+            if failure_count >= _AUTH_RETRY_MAX_ATTEMPTS:
+                raise
+            delay_s = _next_auth_retry_delay(
+                failure_count=failure_count, waited_s=waited_s, started_at=started_at
+            )
+            if delay_s <= 0:
+                raise
+            await _sleep_async(delay_s)
+            waited_s += delay_s
 
 
 def retry_auth_failures_sync[T](operation: Callable[[], T]) -> T:
     """Synchronous counterpart of retry_auth_failures_async."""
-    if _auth_retry_active.get():
-        return operation()
-
-    token = _auth_retry_active.set(True)
-    try:
-        failure_count = 0
-        waited_s = 0.0
-        started_at = time.monotonic()
-        while True:
-            try:
-                return operation()
-            except _AUTH_RETRY_ERRORS:
-                failure_count += 1
-                if failure_count >= _AUTH_RETRY_MAX_ATTEMPTS:
-                    raise
-                delay_s = _next_auth_retry_delay(
-                    failure_count=failure_count, waited_s=waited_s, started_at=started_at
-                )
-                if delay_s <= 0:
-                    raise
-                _sleep_sync(delay_s)
-                waited_s += delay_s
-    finally:
-        _auth_retry_active.reset(token)
+    failure_count = 0
+    waited_s = 0.0
+    started_at = time.monotonic()
+    while True:
+        try:
+            return operation()
+        except _AUTH_RETRY_ERRORS:
+            failure_count += 1
+            if failure_count >= _AUTH_RETRY_MAX_ATTEMPTS:
+                raise
+            delay_s = _next_auth_retry_delay(
+                failure_count=failure_count, waited_s=waited_s, started_at=started_at
+            )
+            if delay_s <= 0:
+                raise
+            _sleep_sync(delay_s)
+            waited_s += delay_s
 
 
 class _AuthRetryAsyncRedis(aredis.Redis):
     """Redis client whose ordinary async commands survive ACL re-affirmation."""
 
-    async def execute_command(self, *args: Any, **options: Any) -> Any:
+    async def execute_command(self, *args: Any, auth_retry: bool = True, **options: Any) -> Any:
         async def _execute() -> Any:
             return await cast(
                 Awaitable[Any],
@@ -253,13 +236,13 @@ class _AuthRetryAsyncRedis(aredis.Redis):
                 ),
             )
 
-        return await retry_auth_failures_async(_execute)
+        return await retry_auth_failures_async(_execute) if auth_retry else await _execute()
 
 
 class _AuthRetrySyncRedis(_redis_sync.Redis):
     """Redis client whose ordinary synchronous commands survive ACL re-affirmation."""
 
-    def execute_command(self, *args: Any, **options: Any) -> Any:
+    def execute_command(self, *args: Any, auth_retry: bool = True, **options: Any) -> Any:
         def _execute() -> Any:
             return cast(
                 Any,
@@ -268,7 +251,7 @@ class _AuthRetrySyncRedis(_redis_sync.Redis):
                 ),
             )
 
-        return retry_auth_failures_sync(_execute)
+        return retry_auth_failures_sync(_execute) if auth_retry else _execute()
 
 
 def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> _AuthRetryAsyncRedis:
@@ -379,7 +362,7 @@ async def publish_via(
         async def _publish() -> int:
             # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
             return await client().publish(  # pyright: ignore[reportUnknownMemberType]
-                channel, payload
+                channel, payload, auth_retry=False
             )
 
         return await retry_auth_failures_async(
@@ -406,7 +389,7 @@ def publish_sync_via(
 
             def _publish() -> int:
                 # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
-                return client.publish(channel, payload)  # pyright: ignore[reportUnknownMemberType]
+                return client.publish(channel, payload, auth_retry=False)  # pyright: ignore[reportUnknownMemberType]
 
             return retry_auth_failures_sync(_publish)
         finally:
