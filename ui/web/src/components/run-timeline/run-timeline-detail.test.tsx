@@ -23,18 +23,25 @@ const node = (summary: string): RunTimelineNode => ({
   summary,
   usage: { calls: 1, input: 10, cache_read: 0, output: 5 },
   generation: null,
+  context_tokens: 1500,
+  estimated: true,
 });
 
 function renderNode(summary: string) {
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NodeDetail agentId={1} node={node(summary)} onDrill={vi.fn()} />
+      <NodeDetail agentId={1} node={node(summary)} />
     </QueryClientProvider>,
   );
   return screen.getByTestId("run-timeline-summary");
 }
 
 describe("NodeDetail summary", () => {
+  it("shows the node's context tokens, marked when estimated", () => {
+    renderNode("s");
+    expect(screen.getByTestId("run-timeline-detail-tokens").textContent).toBe("1.5k tokens (estimated)");
+  });
+
   it("renders Markdown structure", () => {
     const el = renderNode("## Title\n\n- one\n- two\n\n**bold** and `code`");
     expect(el.querySelector("h2")?.textContent).toBe("Title");
