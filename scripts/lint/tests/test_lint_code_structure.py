@@ -29,7 +29,7 @@ def _clear_baseline_dir(root: pathlib.Path) -> pathlib.Path:
     to exist, and the README is what keeps git tracking it even with zero shards."""
     directory = root / baseline_shards.SHARD_DIR
     if directory.is_dir():
-        for path in directory.glob("*.json"):
+        for path in directory.rglob("*.json"):
             path.unlink()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
@@ -58,6 +58,7 @@ def _baseline(
     for name, shard in baseline_shards.split(data).items():
         # String concat, not `/`: a test-only key can produce a shard name
         # starting with "/", which `directory / name` would treat as absolute.
+        pathlib.Path(f"{directory}/{name}.json").parent.mkdir(parents=True, exist_ok=True)
         (pathlib.Path(f"{directory}/{name}.json")).write_text(
             baseline_shards.render(shard), encoding="utf-8"
         )
