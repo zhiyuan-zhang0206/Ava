@@ -262,7 +262,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         rejection_log.auth401_flusher(app.state.auth401_log)
     )
     app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
-    app.state.upload_recovery = UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
+    upload_recovery = UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
+    # The lifespan owns this handle; app.state is only the HTTP exposure and
+    # can be replaced by a nested lifespan on the same app.
+    app.state.upload_recovery = upload_recovery
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
     # lifespan — StreamableHTTPSessionManager.run() can only be entered once
@@ -276,7 +279,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.mcp_manager = mcp_manager
 
     async with asyncio.TaskGroup() as upload_tasks:
-        app.state.upload_recovery.start(upload_tasks)
+        upload_recovery.start(upload_tasks)
         try:
             if mcp_manager is not None:
                 async with mcp_manager.run():
@@ -286,7 +289,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         finally:
             app.state.mcp_manager = None
             try:
-                await app.state.upload_recovery.close()
+                await upload_recovery.close()
             finally:
                 app.state.runtime_metrics.stop()
                 await app.state.grafana_client.aclose()
