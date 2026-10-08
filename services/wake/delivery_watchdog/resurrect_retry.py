@@ -81,7 +81,7 @@ def select_terminated_owners_with_pending(
         SYSTEM_NOTICE_SOURCE,
         SYSTEM_REAPED_CRASH_ROW,
     )
-    from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

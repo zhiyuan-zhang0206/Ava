@@ -18,7 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 
 import base.agents.history.inbound_sideload as sideload_mod
 from base.agents.history.inbound_sideload import sideload_committed_ids
-from services.agent_runner.agent_host.tests.test_reconcile_after_abort import (
+from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort import (
     _insert_checkpoint,
     _insert_write,
 )

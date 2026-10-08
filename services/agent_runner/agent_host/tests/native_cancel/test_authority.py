@@ -18,7 +18,7 @@ from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.native_work import (
+from services.agent_runner.agent_host.invocation.native_work import (
     recover_native_cancel,
     settle_native_invocation,
 )
