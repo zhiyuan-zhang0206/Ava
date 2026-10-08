@@ -213,21 +213,23 @@ export function layoutsFor(data: NavData, axis: Placer, view: Viewport, trackPx:
 }
 
 /**
- * The frame around a set of items of a row: the union of the boxes they are drawn in, at least
- * `minPx` wide (centred on them) and kept inside the track. Null when none of them is drawn.
+ * The frame around a set of items of a row: the union of the parts of their boxes that lie on the
+ * track (an item running past an edge is framed only where it is visible), at least `minPx` wide
+ * (centred on them) and kept inside the track. Null when none of them is on the track.
  */
 export function frameOf(
   boxes: readonly { x0: number; x1: number }[],
   minPx: number,
   trackPx: number,
 ): { left: number; width: number } | null {
-  if (boxes.length === 0) return null;
   let x0 = Infinity;
   let x1 = -Infinity;
   for (const box of boxes) {
-    x0 = Math.min(x0, box.x0);
-    x1 = Math.max(x1, box.x1);
+    if (box.x1 < 0 || box.x0 > trackPx) continue;
+    x0 = Math.min(x0, Math.max(box.x0, 0));
+    x1 = Math.max(x1, Math.min(box.x1, trackPx));
   }
+  if (x0 > x1) return null;
   const width = Math.min(Math.max(x1 - x0, minPx), trackPx);
   const left = Math.min(Math.max((x0 + x1) / 2 - width / 2, 0), trackPx - width);
   return { left, width };
