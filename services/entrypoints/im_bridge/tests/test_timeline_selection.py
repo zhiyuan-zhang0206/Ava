@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 
 from services.entrypoints.im_bridge.core import IMBridgeCore
-from services.entrypoints.im_bridge.outbound_types import OutboundIdentityConflictError
+from services.entrypoints.im_bridge.outbound.types import OutboundIdentityConflictError
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakeGateway,
     FakePlainAdapter,

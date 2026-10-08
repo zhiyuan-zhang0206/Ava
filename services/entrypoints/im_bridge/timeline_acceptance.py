@@ -8,7 +8,7 @@ from typing import Any
 from psycopg import Connection
 
 from base.deploy.maintenance import admission as maintenance
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.types import (
     OutboundIntent,
     TimelineAcceptance,
     TimelineCandidate,

@@ -55,7 +55,7 @@ from services.entrypoints.im_bridge.ingress.types import (
     ProviderSource,
     StalePollBindingError,
 )
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.types import (
     OutboundAdapterKind,
     OutboundChunk,
     PreparedOutboundSend,

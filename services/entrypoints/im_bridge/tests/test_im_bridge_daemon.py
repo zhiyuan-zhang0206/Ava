@@ -25,7 +25,7 @@ from services.entrypoints.im_bridge.config import (
     TelegramCredentialsConfig,
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
-from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 
 
 class _FakeServer:

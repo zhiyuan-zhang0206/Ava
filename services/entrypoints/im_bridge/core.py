@@ -20,9 +20,9 @@ from services.entrypoints.im_bridge.cursor_store import (
     item_key as _item_key,
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
-from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound_types import TimelineAcceptance
-from services.entrypoints.im_bridge.outbound_worker import IMOutboxWorker
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
+from services.entrypoints.im_bridge.outbound.types import TimelineAcceptance
+from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
 from services.entrypoints.im_bridge.spawn_menu import SpawnMenuMixin
 from services.entrypoints.im_bridge.state import (
     _load_outbox,

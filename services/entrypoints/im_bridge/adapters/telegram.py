@@ -27,7 +27,7 @@ import httpx
 from base.log import logger
 from base.paths import ava_home
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.types import (
     OutboundAdapterKind,
     OutboundChunk,
     PreparedOutboundSend,

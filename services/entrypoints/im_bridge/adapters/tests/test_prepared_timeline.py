@@ -118,7 +118,7 @@ async def test_weixin_preparation_uses_existing_login_identity_not_context_or_to
 
 
 async def test_notice_freezes_owner_plain_rendering_and_buttons_before_send() -> None:
-    from services.entrypoints.im_bridge.outbound_types import PreparedOutboundSend
+    from services.entrypoints.im_bridge.outbound.types import PreparedOutboundSend
 
     sent: list[dict[str, object]] = []
 
@@ -153,7 +153,7 @@ async def test_notice_freezes_owner_plain_rendering_and_buttons_before_send() ->
 
 
 async def test_legacy_manifest_json_without_new_fields_still_dispatches() -> None:
-    from services.entrypoints.im_bridge.outbound_types import OutboundIntent
+    from services.entrypoints.im_bridge.outbound.types import OutboundIntent
 
     bodies: list[dict[str, object]] = []
 
