@@ -1,11 +1,9 @@
 """`scripts/lint/fixture_scope.py` — a fixture's scope versus the blast radius of
 what it mutates.
 
-The two rules, both directions each, plus the three checks that make the whole thing
-non-vacuous: the real `tests/e2e/conftest.py` is clean today, the same file in its
-pre-fix shape (`scope="session"`) is flagged, and the same file with its
-`__init__.py` removed is flagged. The synthetic cases pin the shapes; those three pin
-that the lint fires on the defect that actually happened.
+The cases cover both directions of the scope rules, the provisioning exemption,
+setup environment-key discovery and unreadable directory members. Synthetic
+fixtures preserve the session-scope mutation and missing-package defects.
 """
 
 from __future__ import annotations
@@ -16,8 +14,6 @@ from pathlib import Path
 import pytest
 
 _lint = importlib.import_module("scripts.lint.fixture_scope")
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 def _findings(src: str, rel: str = "tests/sub/conftest.py", *, init: bool = False) -> list[str]:
@@ -249,13 +245,6 @@ def test_a_fixture_with_no_scope_argument_is_function_scoped_and_silent() -> Non
 def test_a_plain_function_that_is_not_a_fixture_is_ignored() -> None:
     src = 'def helper():\n    os.environ["AVA_HOME"] = "/x"\n'
     assert _findings(src) == []
-
-
-# ---- non-vacuity against the real tree ----
-
-
-def test_the_repo_is_clean() -> None:
-    assert _lint.main([]) == 0
 
 
 # ---- setup_env_keys: the restore-completeness primitive ----

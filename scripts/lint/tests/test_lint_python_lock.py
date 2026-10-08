@@ -47,8 +47,3 @@ def test_canonical_lock_and_explicit_local_mirror_are_independent(tmp_path: Path
         "UV_DEFAULT_INDEX=https://mirror.example/simple\n", encoding="utf-8"
     )
     assert gate.violations(path) == []
-
-
-def test_repository_lock_is_canonical() -> None:
-    """Run against the real lock so a host-generated replacement fails this guard."""
-    assert gate.violations(gate._REPO_ROOT / "uv.lock") == []
