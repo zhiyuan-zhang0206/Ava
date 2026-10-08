@@ -1,34 +1,14 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.agent_tests" = [
-    "test_boot_extension_materialize.py",
     "test_circuit_breaker.py",
-    "test_hosted_checkpoint_diagnostics.py",
-    "test_hosted_cold_history.py",
-    "test_hosted_compact_failure.py",
-    "test_hosted_db_recovery.py",
-    "test_hosted_failure_settlement_recovery.py",
     "test_maintenance_prior_failure.py",
     "test_maintenance_recovery.py",
-    "test_pooled_checkpoint.py",
     "test_reconcile_after_abort.py",
-    "test_recovery_interrupt.py",
 ]
 "tests.path_scoped.ava_tests" = [
-    "test_hosted_dispatcher_cancellation.py",
 ]
 "tests.path_scoped.services_tests" = [
-    "test_agent_host_abort_reconcile.py",
-    "test_agent_host_boot_defer.py",
-    "test_agent_host_log_rotate.py",
-    "test_agent_host_plugins.py",
-    "test_agent_host_recrash_reap.py",
-    "test_agent_host_shutdown.py",
-    "test_agent_host_turn_reconcile.py",
     "test_crash_recovery.py",
-    "test_host_pool_capacity.py",
-    "test_host_turn_progress_publish.py",
-    "test_hosted_idle_recovery.py",
-    "test_turn_admission.py",
     "test_turn_dispatcher.py",
 ]

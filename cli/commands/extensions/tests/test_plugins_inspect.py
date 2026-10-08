@@ -1,6 +1,6 @@
 """`ava plugins inspect` rendering — the shape an agent greps.
 
-The catalog itself is covered in `agent/tests/test_plugin_catalog.py`; here it is
+The catalog itself is covered in `agent/tests/plugins/test_plugin_catalog.py`; here it is
 handed in ready-made, so these tests fix the OUTPUT contract: the line prefixes,
 the diff vocabulary, and the exit codes.
 """

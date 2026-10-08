@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.tests.test_notices_endpoint import _insert_notice
+from gateway.tests.events.test_notices_endpoint import _insert_notice
 from services.entrypoints.im_bridge.ingress.tests.conftest import NativeWeixin, message
 from services.entrypoints.im_bridge.ingress.types import IngressStatus
 from services.entrypoints.im_bridge.types import SpawnDraft

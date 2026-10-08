@@ -23,8 +23,8 @@ from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading imp
     FC10_HOLDER,
     fc10_hold,
 )
-from tests.agent.test_maintenance import WHEN
-from tests.agent.test_maintenance import isolate as isolate
+from tests.components.agent.test_maintenance import WHEN
+from tests.components.agent.test_maintenance import isolate as isolate
 
 
 @pytest.mark.parametrize("broken_io", ["read", "write"])

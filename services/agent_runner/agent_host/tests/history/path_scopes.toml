@@ -1,0 +1,6 @@
+"tests.path_scoped.agent_tests" = [
+    "test_hosted_checkpoint_diagnostics.py",
+    "test_hosted_cold_history.py",
+    "test_hosted_compact_failure.py",
+    "test_pooled_checkpoint.py",
+]

@@ -19,7 +19,7 @@ from agent.graph.claim.node import claim_node
 from agent.graph.prompt.context_notes import FRAMEWORK_NOTES
 from agent.messages import NoteTag
 from agent.state import AgentState
-from agent.tests.claim_support import _config, _insert_inbound_kind, _make_runtime
+from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from tests.fixtures.units import spawn_agent
 from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor

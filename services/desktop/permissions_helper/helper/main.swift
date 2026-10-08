@@ -371,7 +371,7 @@ func signalSession(_ req: [String: Any]) throws -> [String: Any] {
 
 /// Resolve an allowed path or reject it. A bare prefix is insufficient:
 /// `/Users/ava/DownloadsEvil` is not in `/Users/ava/Downloads`.
-// SECURITY SYNC: tests/services/test_permissions_helper.py::
+// SECURITY SYNC: tests/components/services/test_permissions_helper.py::
 // _is_whitelisted_file_path mirrors this exact resolved-path boundary rule in
 // `resolvedWhitelistedFilePath`. Update both implementations together whenever
 // whitelist containment changes.

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.compaction.models import CompactHeldError
 from base.lm.plugin_providers import model_catalog
 from gateway.tests.test_idempotency import client as client

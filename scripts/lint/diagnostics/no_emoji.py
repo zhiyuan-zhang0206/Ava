@@ -21,7 +21,7 @@ Deliberate-UX surfaces are exempt and NOT scanned (`_EXEMPT_PREFIXES`):
 
 - `cli/` — terminal output where emoji are intentional UX.
 - `ava_builtins/skills/`, the doc axes (`docs/decisions/`, `docs/postmortems/`, `future/`, `docs/conventions/`, `okf/`), `ui/web/`, `migrations/` — prose / generated / content.
-- `tests/cli/` — tests that mirror (and assert) the exempt surfaces.
+- `tests/components/cli/` — tests that mirror (and assert) the exempt surfaces.
 ## What counts as emoji
 
 Pictographic / colored emoji (see `_EMOJI_RANGES`): the supplemental-symbol and
@@ -73,7 +73,7 @@ _EXEMPT_PREFIXES = (
     "schedules/",
     "ui/web/",
     "migrations/",
-    "tests/cli/",
+    "tests/components/cli/",
     "tests/ui/",
 )
 

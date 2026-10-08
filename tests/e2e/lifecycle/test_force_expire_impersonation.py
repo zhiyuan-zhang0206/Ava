@@ -20,7 +20,7 @@ from base.events.live.announce import (
     publish_impersonation_changed_sync,
 )
 from base.events.live.bus import EventBus
-from tests.base.poll_until import poll_until
+from tests.components.base.poll_until import poll_until
 from tests.e2e._env import E2EEnv
 from tests.e2e.fakes._recording import model_inputs, reset_record
 from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY

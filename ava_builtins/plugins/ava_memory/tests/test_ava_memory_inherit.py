@@ -4,7 +4,7 @@ The chain is faked at the client seam (`ava.gateway_client.get_born_chain`)
 and entry files are written into the test home's workspaces, so the note
 builder runs end to end minus the network and the DB. What the real claim node
 does with the note (strip on fork + regraft) is pinned in
-`agent/tests/test_fork_notes.py`.
+`agent/tests/history/test_fork_notes.py`.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def chain(monkeypatch: pytest.MonkeyPatch) -> _FakeChain:
 @pytest.fixture
 def memory_plugin() -> Any:
     """The ava_memory agent-runtime face, so `fork_notes` runs against the notes
-    its `contribute()` declares (mirrors agent/tests/test_fork_notes.py)."""
+    its `contribute()` declares (mirrors agent/tests/history/test_fork_notes.py)."""
     from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
 
     return _plugin

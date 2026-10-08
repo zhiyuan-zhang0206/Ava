@@ -1,0 +1,7 @@
+"tests.path_scoped.cli_tests" = [
+    "test_boot_retry.py",
+    "test_python_install.py",
+    "test_redis_binary_selection.py",
+    "test_start_identity.py",
+    "test_start_runtime.py",
+]

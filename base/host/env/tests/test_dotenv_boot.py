@@ -1,7 +1,7 @@
 """Co-located gateway and runner units each load their own .env: the boot pass
 loads `$AVA_HOME/.env`, forces this unit's cluster declarations over a polluted
 parent environment and drops the cluster values it does not declare. The home
-resolution itself is covered by base/tests/test_home_resolution.py."""
+resolution itself is covered by base/tests/config/test_home_resolution.py."""
 
 from __future__ import annotations
 

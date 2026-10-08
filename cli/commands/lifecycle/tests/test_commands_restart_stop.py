@@ -1,4 +1,4 @@
-"""Restart, stop, and stop announcement commands; split from tests/cli/test_commands.py (task #4554)."""
+"""Restart, stop, and stop announcement commands; split from tests/components/cli/test_commands.py (task #4554)."""
 
 from __future__ import annotations
 

@@ -21,7 +21,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import has_pending_interrupt
 from agent.graph.exec._stream import StreamingTextIO
 from agent.ownership.hosted import admit_hosted_runtime
-from agent.tests.test_inbound_ownership import _agent, _insert
+from agent.tests.claim.test_inbound_ownership import _agent, _insert
 from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.exec_request_evidence import Verdict
 from base.agents.incarnation.hosted_force import original_host_force, recover_orphaned_hosted_forces
@@ -723,7 +723,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     from agent.graph.exec._result import _ExecCrashed
     from agent.graph.exec._subprocess import _run_in_subprocess
     from agent.ownership.hosted import apply_hosted_lifecycle, settle_hosted_runtime
-    from agent.tests.test_inbound_ownership import _admit
+    from agent.tests.claim.test_inbound_ownership import _admit
     from base.native_process.exec_domain import ExecProcessDomain
     from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 

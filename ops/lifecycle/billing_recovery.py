@@ -171,7 +171,7 @@ def _provider_key() -> str | None:
     there while the cluster ``.env`` stays the authoritative source — the same
     fallback shape as ``base/lm/factory.py::_ensure_provider_key``. The file
     read is the sanctioned gateway-side consumption path, registered in
-    ``cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_FALLBACK_CONSUMED_READS``.
+    ``cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py::_FALLBACK_CONSUMED_READS``.
     """
     from base.config import field_alias, settings
     from base.host.env.runtime_config import read_env_aliases

@@ -9,7 +9,7 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.state import AgentState
-from agent.tests.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
@@ -105,7 +105,7 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
     site: str,
 ) -> None:
     from agent.ownership.hosted import apply_hosted_lifecycle
-    from agent.tests.test_inbound_ownership import _admit
+    from agent.tests.claim.test_inbound_ownership import _admit
     from services.agent_runner.agent_host import host as host_owner
 
     incarnation, initial = await managed_work(db_conn, aops_pool)

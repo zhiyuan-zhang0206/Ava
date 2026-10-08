@@ -47,7 +47,7 @@ every other role by scram.
   per-IP `LoginRateLimiter` in [`base/cluster/rate_limit.py`](../../../base/cluster/rate_limit.py);
   [`gateway/auth/router.py`](../../../gateway/auth/router.py) returns 429 with
   `Retry-After` during lockout, and
-  [`gateway/tests/test_login_endpoint.py`](../../../gateway/tests/test_login_endpoint.py)
+  [`gateway/tests/bootstrap/test_login_endpoint.py`](../../../gateway/tests/bootstrap/test_login_endpoint.py)
   pins the threshold, reset, expiry, and IP-isolation contract.
 - macOS ALF manifest drift is reconciled by `ava converge`: manifest globs cover
   the current inbound binaries, direct `socketfilterfw` mutation was empirically

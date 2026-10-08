@@ -59,7 +59,7 @@ class NoDatabaseAuthorityError(RuntimeError):
 # "failed". This constant is therefore the single definition of that posture:
 # `connect()` / `connect_url()` / `pool()` / `async_pool()` apply it, bounded or
 # not (a caller may shorten `connect_url`'s connect timeout for a probe).
-# Fail-fast behaviour is pinned by ava/tests/test_connect_fail_fast.py.
+# Fail-fast behaviour is pinned by ava/tests/bootstrap/test_connect_fail_fast.py.
 PG_KEEPALIVE_KWARGS: dict[str, Any] = {
     "keepalives": 1,
     "keepalives_idle": 30,

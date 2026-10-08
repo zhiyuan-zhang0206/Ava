@@ -85,7 +85,7 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
     ("rel_path", "expected"),
     [
         ("gateway/routers/foo.py", True),
-        ("tests/gateway/foo.py", False),  # tests/ directory
+        ("tests/components/gateway/foo.py", False),  # tests/ directory
         ("gateway/test_foo.py", False),  # test_ prefix
         ("ui/web/src/components/Foo.test.tsx", False),  # *.test.*
         ("ui/web/src/__tests__/foo.tsx", False),  # __tests__/

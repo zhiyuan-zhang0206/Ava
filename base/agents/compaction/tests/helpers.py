@@ -11,8 +11,10 @@ from base.agents.compaction.models import CompactTarget
 from base.config import settings
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.source import produce_source
+from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
+    _prepare_graph,
+)
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
-from services.agent_runner.agent_host.tests.test_hosted_compact_failure import _prepare_graph
 
 
 async def source(conn: psycopg.Connection, pool: AsyncConnectionPool) -> tuple[Any, ...]:

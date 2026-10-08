@@ -160,7 +160,7 @@ Lifecycle = Literal["frozen", "live"]
 _ALLOWED_RESTART_REQUIRED = frozenset({"", "agent", "all", "gateway", "ops", "schedule"})
 # restart_required -> the PROCESS_PROFILES set that must contain the field's
 # domain for the value to make sense (the profile sets ARE the consumption
-# matrix, verified bidirectionally by cli/commands/lifecycle/tests/test_gateway_consumer_guard.py).
+# matrix, verified bidirectionally by cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py).
 # "schedule" / "all" / "" have no named-kind constraint ("schedule" runs without
 # a profile and constructs every domain; "all" is satisfied by any consumer).
 _RESTART_REQUIRED_PROFILE = {
@@ -243,7 +243,7 @@ def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> N
     # Cross-check against the consumption matrix: restart_required names a
     # process kind, so that kind's config profile must contain the field's
     # domain (the profile sets ARE the consumption matrix — verified
-    # bidirectionally by cli/commands/lifecycle/tests/test_gateway_consumer_guard.py). A
+    # bidirectionally by cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py). A
     # field only a gateway daemon reads marked "agent" would have the
     # operator restart the wrong process and the change silently not take
     # effect (the telegram/feishu/im_* 11-field bug this check seals, lost

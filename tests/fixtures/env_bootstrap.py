@@ -125,7 +125,7 @@ os.environ["AVA_CONFIG_FETCH"] = "skip"
 # import) — pin the environment before the first Settings construction instead,
 # and declare the same key in the test home's .env below so the cluster-env
 # authority pass takes its force branch (an undeclared cluster-scope key is
-# DROPPED). Feature tests (agent/tests/test_history_dump.py) flip the singleton
+# DROPPED). Feature tests (agent/tests/history/test_history_dump.py) flip the singleton
 # back on per test.
 os.environ["AVA_COMPACT_HISTORY_DUMP"] = "false"
 
@@ -316,7 +316,7 @@ os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # is a MALFORMED marker, i.e. a broken chain. PORT (which helper instance)
 # is stripped with it so the suite carries no helper spawn context at all —
 # the state CI runs in. A test that needs the marker sets it via monkeypatch
-# (tests/test_helperproc.py).
+# (tests/harness/test_helperproc.py).
 os.environ.pop("AVA_PERMISSIONS_HELPER_PID", None)
 os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
 # ── Off-site backup destination: no ambient AVA_BACKUP_OFFSITE_* in the suite ──
@@ -636,7 +636,7 @@ raise_fd_limit(65536)
 #
 # Snapshotted HERE, at the end of the env block and before any fixture exists, so
 # it holds the environment this file deliberately built and nothing a test or a
-# fixture layered on later. `tests/test_home_isolation.py` compares against it to
+# fixture layered on later. `tests/harness/test_home_isolation.py` compares against it to
 # catch the leak class that motivated it: a fixture whose scope outlives the
 # directory it was written for reassigns a process global and restores it too late,
 # so every test collected after that directory keeps running with the wrong value.

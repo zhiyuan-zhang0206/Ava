@@ -160,7 +160,7 @@ class TestAvaMsgTypeDispatch:
     adapting the renderer" impossible: every member must render as its
     intended kind, never the null-source catch-all.
 
-    Companion cross-stack contract: tests/test_lint_marker_contract.py
+    Companion cross-stack contract: tests/contracts/test_lint_marker_contract.py
     (backend NoteTag ⊆ frontend dispatch sets) + the frontend marker-contract
     tests in ui/web/src/components/timeline/timeline.test.tsx.
     """

@@ -127,7 +127,7 @@ repos:
       # mutates. A session-scoped fixture in a SUBDIRECTORY conftest restores env in
       # a teardown that fires at end-of-session, so every test collected after that
       # directory keeps running with the mutated value — which is how tests/e2e/'s
-      # env layering disarmed tests/test_home_isolation.py on main while CI stayed
+      # env layering disarmed tests/harness/test_home_isolation.py on main while CI stayed
       # green. Also catches `scope="package"` in a directory with no __init__.py,
       # where pytest silently resolves the scope to the session node. Session scope
       # is exempt only in tests/fixtures/provisioning.py; see the script header.
