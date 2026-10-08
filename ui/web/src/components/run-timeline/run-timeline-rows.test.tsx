@@ -97,7 +97,10 @@ describe("RunTimelineRows instant blocks", () => {
     );
     const marker = screen.getAllByTestId("run-timeline-node").find((el) => el.dataset.nodeId === "a");
     expect(marker?.dataset.highlight).toBe("self");
-    expect(marker?.querySelector("[data-testid=run-timeline-marker-line]")).toBeTruthy();
+    // A marker has no drawing of its own: a merged cell is its fill, and the outline box marks the selection.
+    expect(marker?.querySelector("[data-testid=run-timeline-marker-line]")).toBeNull();
+    expect(screen.getAllByTestId("run-timeline-cell").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("run-timeline-selection-box")).toHaveLength(1);
   });
 
   it("gives a run of points each their own clickable marker", () => {
@@ -290,5 +293,40 @@ describe("RunTimelineRows tokens and keyboard", () => {
     fireEvent.keyDown(bar, { key: "ArrowUp" });
     expect(document.activeElement).not.toBe(bar);
     expect(bar.querySelector("span")?.className).not.toContain("ring-foreground/40");
+  });
+});
+
+describe("RunTimelineRows narrow blocks and selection overlay", () => {
+  it("merges nodes sharing a pixel column into one fill while each stays clickable", () => {
+    // Ten 0.2 px nodes on a 1000 px track, within two pixel columns, and one wide node.
+    const narrow = Array.from({ length: 10 }, (_, i) => node(`n${i}`, 100 + i * 0.2, 100.2 + i * 0.2));
+    const onSelect = renderRows({ nodes: [...narrow, node("w", 400, 800)] });
+    const cells = screen.getAllByTestId("run-timeline-cell");
+    // 2 px of nodes make two pixel columns, not ten fills.
+    expect(cells).toHaveLength(2);
+    expect(cells.reduce((sum, el) => sum + Number(el.dataset.count), 0)).toBe(10);
+    const buttons = screen.getAllByTestId("run-timeline-node");
+    expect(buttons).toHaveLength(11);
+    fireEvent.click(buttons.find((el) => el.dataset.nodeId === "n3")!);
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "node", id: "n3" });
+    // The wide node keeps its border and rounding, the narrow ones draw none.
+    expect(buttons.find((el) => el.dataset.nodeId === "w")?.className).toContain("border");
+    expect(buttons.find((el) => el.dataset.nodeId === "n3")?.className).not.toContain("border");
+  });
+
+  it("outlines the selected item at least 6 px wide, and draws a line through the rows", () => {
+    renderRows({ nodes: [node("a", 100, 100.5), node("b", 600, 900)] }, { kind: "node", id: "a" });
+    const box = screen.getByTestId("run-timeline-selection-box");
+    expect(parseFloat(box.style.width)).toBeGreaterThanOrEqual(6);
+    expect(screen.getByTestId("run-timeline-selection-line")).toBeTruthy();
+  });
+
+  it("outlines a selected request's bars and the blocks it read, and one line spans them all", () => {
+    const units = [unit("text", 0, 0, 100), unit("text", 1, 100, 200)];
+    const request = { idx: 2, ts: at(200), session: 0, input_tokens: 5, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: 0, added_to: 2 };
+    renderRows({ units, requests: [request] }, { kind: "request", idx: 2 });
+    // Two blocks in Messages, one bar in each of the two context rows.
+    expect(screen.getAllByTestId("run-timeline-selection-box")).toHaveLength(4);
+    expect(screen.getAllByTestId("run-timeline-selection-line")).toHaveLength(1);
   });
 });

@@ -8,16 +8,11 @@ import {
   barBox,
   BAR_GAP_PX,
   BAR_MIN_PX,
-  navigate,
   requestLit,
   requestReading,
   requestSpan,
   requestUnits,
   requestSelection,
-  revealView,
-  ADDED_ROW,
-  INPUT_ROW,
-  UNITS_ROW,
   axisMapTicks,
   axisTicks,
   buildAxisMap,
@@ -56,7 +51,19 @@ import {
   nodeChildren,
   tokenFits,
   tokenLabel,
+  mergeNarrow,
+  NARROW_DRAW_PX,
 } from "./timeline-model";
+import {
+  navigate,
+  revealView,
+  ADDED_ROW,
+  overlayBox,
+  selectionSpans,
+  spansExtent,
+  INPUT_ROW,
+  UNITS_ROW,
+} from "./timeline-nav";
 
 const WINDOW = { from: "2026-10-04T12:00:00Z", to: "2026-10-04T14:00:00Z" };
 
@@ -723,5 +730,74 @@ describe("token labels", () => {
     expect(tokenFits("1.5k", 80)).toBe(true);
     expect(tokenFits("1.5k", 20)).toBe(false);
     expect(tokenFits("1.5k", 40, 24)).toBe(false);
+  });
+});
+
+describe("mergeNarrow", () => {
+  const place = (key: string, left: number, width: number, marker = false) => ({ key, left, width, marker, lane: 0 });
+
+  it("keeps wide blocks as they are and merges narrow ones that share a pixel column", () => {
+    const { wide, cells } = mergeNarrow([
+      place("a", 10.1, 0.3),
+      place("b", 10.5, 0.2),
+      place("c", 10.9, 0, true),
+      place("w", 50, NARROW_DRAW_PX),
+      place("d", 30, 1.5),
+    ]);
+    expect(wide.map((p) => p.key)).toEqual(["w"]);
+    expect(cells).toEqual([
+      { left: 10, width: 1, keys: ["a", "b", "c"] },
+      { left: 30, width: 2, keys: ["d"] },
+    ]);
+  });
+
+  it("chains narrow blocks that overlap the cell's columns, and splits at a free column", () => {
+    const { cells } = mergeNarrow([place("a", 5, 2.5), place("b", 7, 2), place("c", 8.5, 0.5), place("d", 11, 1)]);
+    expect(cells.map((c) => c.keys)).toEqual([["a", "b", "c"], ["d"]]);
+    expect(cells[0]).toMatchObject({ left: 5, width: 4 });
+  });
+
+  it("does not add up: ten blocks in one column are one cell of the same width as one", () => {
+    const many = mergeNarrow(Array.from({ length: 10 }, (_, i) => place(`k${i}`, 7 + i * 0.05, 0.1)));
+    const one = mergeNarrow([place("x", 7, 0.1)]);
+    expect(many.cells).toHaveLength(1);
+    expect(many.cells[0].width).toBe(one.cells[0].width);
+  });
+});
+
+describe("selection overlay", () => {
+  it("gives a thin span a box of at least 6 px, centred on it and kept inside the track", () => {
+    const view = { from: 0, to: 1000 };
+    expect(overlayBox({ u0: 500, u1: 500.2 }, view, 1000)?.left).toBeCloseTo(497.1)
+    expect(overlayBox({ u0: 500, u1: 500.2 }, view, 1000)).toMatchObject({ width: 6 });
+    expect(overlayBox({ u0: 0, u1: 0 }, view, 1000)).toEqual({ left: 0, width: 6 });
+    expect(overlayBox({ u0: 1000, u1: 1000 }, view, 1000)).toEqual({ left: 994, width: 6 });
+    expect(overlayBox({ u0: 200, u1: 400 }, view, 1000)).toEqual({ left: 200, width: 200 });
+    expect(overlayBox({ u0: 2000, u1: 2100 }, view, 1000)).toBeNull();
+  });
+
+  it("covers several spans by their whole extent", () => {
+    expect(spansExtent([{ u0: 5, u1: 7 }, { u0: 2, u1: 3 }])).toEqual({ u0: 2, u1: 7 });
+    expect(spansExtent([])).toBeNull();
+  });
+
+  it("finds the selected items per row: a request is its two bars and the blocks it read", () => {
+    const T = Date.parse("2026-10-04T12:00:00Z");
+    const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
+    const units = [
+      unit({ kind: "text", i0: 0, i1: 0, start: iso(0), end: iso(10) }),
+      unit({ kind: "text", i0: 1, i1: 1, start: iso(10), end: iso(20) }),
+      unit({ kind: "text", i0: 2, i1: 2, start: iso(20), end: iso(30) }),
+    ];
+    const requests: RunTimelineRequest[] = [
+      { idx: 2, ts: iso(20), session: 0, input_tokens: 1, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: 0, added_to: 2 },
+    ];
+    const data = { nodes: [], units, requests };
+    const axis = buildAxisMap(units, { from: T, to: T + 30_000 }, "time");
+    const spans = selectionSpans({ kind: "request", idx: 2 }, data, axis);
+    expect([...spans.keys()].sort()).toEqual(["added", "input", "units"]);
+    expect(spans.get("units")).toHaveLength(2);
+    expect(spansExtent([...spans.values()].flat())).toEqual({ u0: 0, u1: 20_000 });
+    expect(selectionSpans(null, data, axis).size).toBe(0);
   });
 });
