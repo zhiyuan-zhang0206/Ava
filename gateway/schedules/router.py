@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Any
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
@@ -31,6 +31,7 @@ from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from gateway import creation_receipts
+from gateway.agents.creation import guarded_draft_key
 from gateway.agents.router import create_and_launch_agent
 from gateway.schedules import receipts, session_control
 from ops.rpc_schemas import SpawnAgentRequest
@@ -449,6 +450,20 @@ async def draft_schedule(body: ScheduleDraftRequest, request: Request) -> Schedu
     """Hand a natural-language request to an ava-schedule-writer agent. Spawns the
     agent (which loads ava-guide.schedules, clarifies, writes the script,
     and POSTs it back) and returns its id so the UI can open the conversation."""
+    return await _draft_schedule(body, request)
+
+
+@router.post("/api/keyed/v1/schedules/draft")
+async def guarded_draft_schedule(
+    body: ScheduleDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
+) -> ScheduleDraftResponse:
+    """Replay one raw draft intent and its original birth without legacy fallback."""
+    return await _draft_schedule(body, request, key)
+
+
+async def _draft_schedule(
+    body: ScheduleDraftRequest, request: Request, key: str | None = None
+) -> ScheduleDraftResponse:
     prompt = (
         "You are a schedule writer. Read and follow ava.skills.ava_guide.schedules to turn this "
         "request into a gateway-hosted schedule: clarify the trigger / skip / error-handling, "
@@ -466,6 +481,11 @@ async def draft_schedule(body: ScheduleDraftRequest, request: Request) -> Schedu
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,
+        **(
+            {"creation_key": key, "creation_identity": body.model_dump(mode="json")}
+            if key is not None
+            else {}
+        ),
     )
     return ScheduleDraftResponse(agent_id=spawned.id)
 

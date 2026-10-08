@@ -273,6 +273,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "upload_delivery_batches",
     "upload_delivery_copies",
     "agent_launch_retry_receipts",
+    "agent_creation_snapshots",
     "resource_creation_receipts",
     "page_operation_receipts",
 )

@@ -2611,6 +2611,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/schedules/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guarded Draft Schedule
+         * @description Replay one raw draft intent and its original birth without legacy fallback.
+         */
+        post: operations["guarded_draft_schedule_api_keyed_v1_schedules_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/presets": {
         parameters: {
             query?: never;
@@ -2679,6 +2699,26 @@ export interface paths {
          *     id so the UI can open the conversation.
          */
         post: operations["draft_guide_api_guide_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/guide/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guarded Draft Guide
+         * @description Replay one raw draft intent and its original birth without legacy fallback.
+         */
+        post: operations["guarded_draft_guide_api_keyed_v1_guide_draft_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2779,6 +2819,26 @@ export interface paths {
          *     and return its id so the UI can open the conversation. 422 on an unknown kind.
          */
         post: operations["draft_package_api_packages_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/packages/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guarded Draft Package
+         * @description Replay one raw draft intent and its original birth without legacy fallback.
+         */
+        post: operations["guarded_draft_package_api_keyed_v1_packages_draft_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12286,6 +12346,42 @@ export interface operations {
             };
         };
     };
+    guarded_draft_schedule_api_keyed_v1_schedules_draft_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDraftResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_presets_api_presets_get: {
         parameters: {
             query?: never;
@@ -12471,6 +12567,42 @@ export interface operations {
             };
         };
     };
+    guarded_draft_guide_api_keyed_v1_guide_draft_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuideDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuideDraftResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_inventory_api_inventory_get: {
         parameters: {
             query?: {
@@ -12594,6 +12726,42 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageDraftResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guarded_draft_package_api_keyed_v1_packages_draft_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
             path?: never;
             cookie?: never;
         };
