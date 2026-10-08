@@ -174,7 +174,8 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         order.append("stop")
         return 0
 
-    def fake_cmd_start_body(**kwargs: object) -> int:
+    def fake_cmd_start_body(operation: object, **kwargs: object) -> int:
+        assert operation is None
         from cli.start_runtime import StartRuntime
 
         assert kwargs["persist_services"] is False
@@ -208,7 +209,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda _operation, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     finished: list[int] = []
     monkeypatch.setattr(
         status_journal,
@@ -242,7 +243,7 @@ def test_cmd_restart_short_circuits_on_stop_failure(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         _start_commands,
         "_cmd_start_body",
-        lambda **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _operation, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     rc = _stop_commands.cmd_restart()
     assert rc == 1
@@ -267,7 +268,7 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         _start_commands,
         "_cmd_start_body",
-        lambda **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _operation, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
@@ -299,7 +300,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         _start_commands,
         "_cmd_start_body",
-        lambda **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _operation, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
