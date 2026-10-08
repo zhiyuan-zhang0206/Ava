@@ -47,6 +47,12 @@ git diff --name-only --diff-filter=ACMR -z origin/main...HEAD -- '*.py' \
   | xargs -0 -r .venv/bin/pyright
 ```
 
+The `tool.pytest.ini_options.testpaths` configuration in `pyproject.toml` owns
+the test host directories. The CI selector, generated pyright test environments
+and fixture-scope lint read that configuration rather than separate directory lists.
+Use `tests` or `<host>/**/tests`; regenerate pyright environments after changing
+the configured hosts or their tracked test directories.
+
 Pytest paths are grouped by directory by the collection guard: collecting the
 same directory twice can hide its conftest fixtures. Python children started
 with `-I` ignore `PYTHONPATH`; cross-process tests need this checkout's own

@@ -146,6 +146,7 @@ CASES = [
         "scripts.lint.fixture_scope",
         "tests/sub/conftest.py",
         '@pytest.fixture(scope="session")\ndef _unset():\n    os.environ.pop("AVA_HOME", None)\n    yield\n',
+        extra={"pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'},
     ),
     Case(
         "scripts.lint.no_script_sibling_imports",

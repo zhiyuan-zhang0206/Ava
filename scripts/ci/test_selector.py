@@ -19,6 +19,7 @@ if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
 from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry needs repo root first
     is_doc_path,
 )
+from scripts.structure.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
 
 _FORCED_FULL_ROOTS = (
     "base/",
@@ -42,23 +43,6 @@ _SOURCE_ROOTS = frozenset(
         "scripts",
         "schedules",
     }
-)
-# Where a test directory can live: the top-level `tests/` (e2e, contract and
-# shared-support tests) and the `tests/` directory of any package that carries
-# its own tests. A path is a test path when it sits inside such a `tests/`
-# directory, so a test moving from `tests/<area>/` into `<pkg>/tests/` stays
-# visible to every rule below.
-_TEST_HOSTS = (
-    "tests",
-    "agent",
-    "ava",
-    "ava_builtins",
-    "base",
-    "cli",
-    "gateway",
-    "ops",
-    "scripts",
-    "services",
 )
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 _NON_DOCUMENTATION_PREFIXES = ("schedules/", "tests/")
@@ -127,22 +111,23 @@ def _selection_mode() -> str:
     return os.environ.get("TEST_SELECTION_MODE", "enforce")
 
 
-def _is_test_dir_path(path: str) -> bool:
+def _is_test_dir_path(path: str, hosts: tuple[str, ...]) -> bool:
     """Whether a repo-relative path sits inside a test directory (top-level or a package's)."""
     parts = path.split("/")
-    return parts[0] in _TEST_HOSTS and "tests" in parts[:-1]
+    return parts[0] in hosts and "tests" in parts[:-1]
 
 
 def _test_py_files(repo_root: Path) -> list[Path]:
     """Every .py file inside a test directory, in a stable order."""
     files: list[Path] = []
-    for host in _TEST_HOSTS:
+    hosts = pytest_test_hosts((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    for host in hosts:
         host_root = repo_root / host
         if host_root.is_dir():
             files.extend(
                 path
                 for path in host_root.rglob("*.py")
-                if _is_test_dir_path(path.relative_to(repo_root).as_posix())
+                if _is_test_dir_path(path.relative_to(repo_root).as_posix(), hosts)
             )
     return sorted(files)
 
@@ -190,15 +175,20 @@ def build_import_reverse_map(repo_root: Path) -> dict[str, set[str]]:
 
 
 def _early_decision(
-    changed: tuple[str, ...], *, event: str, head_ref: str, full_estimate: float
+    changed: tuple[str, ...],
+    *,
+    event: str,
+    head_ref: str,
+    full_estimate: float,
+    hosts: tuple[str, ...],
 ) -> SelectionResult | None:
     """The rules that decide from the changed paths alone; None when the import map is needed."""
     if event != "pull_request" or head_ref.startswith(_QUEUE_PREFIXES):
         return _result("FULL", "queue-or-non-pr", full_estimate=full_estimate)
-    if all(_is_documentation_path(path) for path in changed):
+    if all(_is_documentation_path(path, hosts) for path in changed):
         return _result("SKIP", "docs-only", full_estimate=full_estimate)
 
-    forced_roots = _forced_roots(changed)
+    forced_roots = _forced_roots(changed, hosts)
     if forced_roots:
         return _result(
             "FULL",
@@ -228,11 +218,14 @@ def select_tests(
     """Apply the ordered conservative test-selection rules to one changed-file list."""
     repo_root = repo_root.resolve()
     changed = tuple(sorted({path.strip() for path in changed_files if path.strip()}))
+    hosts = pytest_test_hosts((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     collectable = collectable_test_paths(repo_root)
     durations = _load_durations(repo_root / ".test_durations")
     full_estimate = _estimate_seconds(collectable, durations)
 
-    early = _early_decision(changed, event=event, head_ref=head_ref, full_estimate=full_estimate)
+    early = _early_decision(
+        changed, event=event, head_ref=head_ref, full_estimate=full_estimate, hosts=hosts
+    )
     if early is not None:
         return early
 
@@ -240,7 +233,9 @@ def select_tests(
     blind_changed = tuple(
         path
         for path in changed
-        if path not in collectable and path not in reverse_map and not _is_documentation_path(path)
+        if path not in collectable
+        and path not in reverse_map
+        and not _is_documentation_path(path, hosts)
     )
     if blind_changed:
         return _result(
@@ -322,14 +317,13 @@ def main(argv: list[str] | None = None) -> int:
 
 def _is_collectable_test_path(path: str) -> bool:
     return (
-        _is_test_dir_path(path)
-        and not path.startswith("tests/e2e/")
+        not path.startswith("tests/e2e/")
         and Path(path).name != "conftest.py"
         and _TEST_FILE_PATTERN.fullmatch(Path(path).name) is not None
     )
 
 
-def _forced_roots(changed: tuple[str, ...]) -> tuple[str, ...]:
+def _forced_roots(changed: tuple[str, ...], hosts: tuple[str, ...]) -> tuple[str, ...]:
     """The forced-full roots a change touches. A test-only edit beside the code
     (`base/x/tests/test_y.py`) is a test change, not a source change: it goes through
     the reverse map like an edit under `tests/` always did. Component documents
@@ -339,17 +333,17 @@ def _forced_roots(changed: tuple[str, ...]) -> tuple[str, ...]:
         for root in _FORCED_FULL_ROOTS
         if any(
             path.startswith(root)
-            and not _is_test_dir_path(path)
-            and not _is_documentation_path(path)
+            and not _is_test_dir_path(path, hosts)
+            and not _is_documentation_path(path, hosts)
             for path in changed
         )
     )
 
 
-def _is_documentation_path(path: str) -> bool:
+def _is_documentation_path(path: str, hosts: tuple[str, ...]) -> bool:
     return (
         not path.startswith(_NON_DOCUMENTATION_PREFIXES)
-        and not _is_test_dir_path(path)
+        and not _is_test_dir_path(path, hosts)
         and is_doc_path(path)
     )
 
