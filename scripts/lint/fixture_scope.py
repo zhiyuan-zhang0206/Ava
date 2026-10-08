@@ -3,8 +3,8 @@ global it mutates.
 
 Run: `.venv/bin/python scripts/lint/fixture_scope.py [path ...]` (defaults to
 scanning every `tests/` directory: the top-level `tests/` and each package's own
-`<pkg>/**/tests/`; an explicit path that does not exist is an error (stderr +
-exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
+`<pkg>/**/tests/` from pytest `testpaths`; an explicit path that does not exist
+is an error (stderr + exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
 
 ## Why
 
@@ -103,9 +103,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import lint_common  # noqa: E402 - standalone script
-
-# Where a `tests/` directory can live: the top-level one, or inside a package.
-_TEST_HOSTS = ("tests", *lint_common.FRAMEWORK_DIRS, "scripts")
 
 # The one location where session scope and the fixture's own blast radius coincide.
 _SESSION_PROVISIONING = "tests/fixtures/provisioning.py"
@@ -435,7 +432,10 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
 
 
 def _default_targets() -> list[Path]:
-    return [_REPO_ROOT / d for d in _TEST_HOSTS if (_REPO_ROOT / d).is_dir()]
+    hosts = lint_common.pytest_test_hosts(
+        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    return [_REPO_ROOT / host for host in hosts if (_REPO_ROOT / host).is_dir()]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -447,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     targets = [Path(a).resolve() for a in argv] if argv else _default_targets()
-    scope = lint_common.changed_scope(only, _REPO_ROOT)
+    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=("pyproject.toml",))
 
     total = 0
     for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, _REPO_ROOT)):
