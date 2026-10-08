@@ -11,8 +11,8 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from base.agents.history.checkpoint import single_segment_history
-from gateway.run_timeline import history
-from gateway.run_timeline.history import HistoryViewCache
+from services.derived.insights.run_timeline import history
+from services.derived.insights.run_timeline.history import HistoryViewCache
 
 
 class FakeStore:

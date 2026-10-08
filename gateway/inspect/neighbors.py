@@ -1,7 +1,7 @@
 """Neighbor graph read — the computation behind /api/agents/{id}/neighbors.
 
 The tie graph reads the audit record: `audit_events` in Postgres
-(gateway/events/audit_rows.py), aggregated per (agent, target, event) pair. The
+(base/events/reads/audit_rows.py), aggregated per (agent, target, event) pair. The
 retired `agent_neighbors()` SQL function read the old `events` table; the walks
 run in Python (the SQL recursive CTE had no equivalent over the event stream).
 
@@ -27,8 +27,8 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
-from gateway.events import audit_rows
-from gateway.events.audit_rows import LINEAGE_EVENT_NAMES
+from base.events.reads import audit_rows
+from base.events.reads.audit_rows import LINEAGE_EVENT_NAMES
 
 # Bound on the tie read, below the route's client timeouts.
 _TIE_READ_STATEMENT_TIMEOUT_MS = 8_000

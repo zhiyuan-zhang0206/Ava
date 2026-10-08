@@ -49,6 +49,10 @@ def _observe(service: str) -> DaemonProbe:
     }
     if service in sockets:
         return ping(sockets[service]())
+    if service == "insights":
+        from services.supervision.healthchecks.insights import _probe as insights_probe
+
+        return probe_protocol(insights_probe)
     if service == "memory-search":
         from services.supervision.healthchecks.memory_search import _probe
 
