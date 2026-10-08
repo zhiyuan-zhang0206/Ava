@@ -499,6 +499,7 @@ jobs:
         run: |
           mkdir -p tmp
           uv run pytest --test-environment=static -q -n 4 \
+            -W error::pytest.PytestUnhandledThreadExceptionWarning \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
             --cov=ops --cov=services --cov=ava_builtins \
             --junit-xml=tmp/junit-backend-static.xml -o junit_family=xunit1
