@@ -34,11 +34,12 @@ Run explicit files or node IDs, including relevant consumer tests:
 .venv/bin/pytest -n 2 <selected-test-files-or-node-ids>
 ```
 
-For the owned audit, content lint, lint and structure tool contracts, run
+For the owned audit, content lint, lint, structure, CI, path and PTY screen
+unit contracts, run
 `.venv/bin/pytest --test-environment=static`. This scoped process refuses native
 Postgres/Redis and accepts its owned component directories, descendant paths
 and node IDs; other tests keep the native default. CI runs it in the required
-structure job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.ava.okf.md).
+backend static job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.ava.okf.md).
 
 Check changed Python files with pyright:
 
