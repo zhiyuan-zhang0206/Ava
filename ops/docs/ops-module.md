@@ -19,8 +19,9 @@ Each package door is the module it grew from; `ops.agents`,
 `ops.rpc_schemas`, `ops.cluster.operations_status`, `ops.agent_pause` and `ops.roster`
 kept their import paths. Module names never repeat the package name, so the
 op clusters read `ops.lifecycle`, `ops.cluster.operations.operations`, `ops.host_config`,
-`ops.inventory` and `ops.uploads`. `python -m ops.private_files` stays top-level:
-it is an operator entry point beside its `private-files/` manifest.
+`ops.inventory` and `ops.uploads`. `ops/private_files/` owns the private-file
+verifier and its manifest.
+Its operator entry point remains `python -m ops.private_files`.
 
 `build_services()` supplies the application root manifest and local status roster.
 The [checked service inventory](service-roster.md) belongs beside this owner;
