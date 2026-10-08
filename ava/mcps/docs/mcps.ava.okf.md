@@ -76,6 +76,10 @@ After a tool call starts, a lost transport or daemon response returns `MCPCallEr
 with an unknown result; the SDK does not replay the call on a new session or
 fall back to local execution. Tool discovery may retry transport failures;
 a tool call can retry only when session selection fails before it starts.
+The shared retry classifier checks concrete AnyIO, operating-system and MCP SDK
+exception types and this platform's transport errno constants. A matching class
+name alone does not make an unknown error retryable; required dependency import
+failures propagate and are not cached as an empty retry policy.
 Repeating a tool with at-least-once delivery requires a protocol-level
 idempotency key and server deduplication.
 
