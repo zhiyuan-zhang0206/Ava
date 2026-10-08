@@ -11,6 +11,9 @@ tags:
 
 ## Lifecycle and state
 
+`history/` groups conversation, timeline and context read models with their tests.
+Mutation routes remain in `gateway/agents/`.
+
 `/api/agents/*` covers spawn, terminate, resurrect, restart, compact,
 send_message, list, and patch — all in the `gateway/agents/` package. CRUD
 and spawn live in `router.py`; lifecycle actions live in `lifecycle.py`; message

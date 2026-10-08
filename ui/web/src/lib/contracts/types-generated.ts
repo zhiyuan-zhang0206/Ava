@@ -1133,7 +1133,7 @@ export interface paths {
          *     The breakdown of the latest LLM request's input: each message's tokens anchored to the
          *     provider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed
          *     from them, only the inside of a message split by an estimator. Pure gateway-side view logic
-         *     (`gateway/agents/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
+         *     (`gateway/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
          *     A checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown
          *     with zeroed totals (same tolerance as token-usage: the panel re-opens fine later).
          */

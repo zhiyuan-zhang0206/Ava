@@ -17,7 +17,7 @@ its chip and never the alarm — lives in
 `ui/web/src/components/timeline/timeline.test.tsx` ("Marker contract: every
 dispatch-set source renders without the red alarm").
 
-Companion backend-internal contract: `gateway/agents/tests/test_timeline.py`
+Companion backend-internal contract: `gateway/agents/history/tests/test_timeline.py`
 `TestAvaMsgTypeDispatch` asserts every AvaMsgType member dispatches to its
 intended item kind and never hits the HumanMessage catch-all.
 """

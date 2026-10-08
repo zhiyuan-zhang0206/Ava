@@ -428,7 +428,7 @@ class InvalidModelConfig(AvaAgentError):  # noqa: N818 — state description, sa
 # SDK `raise_from_response`. A new wire error = add an enum value + an
 # AvaAgentError subclass with the two ClassVars + one row here; the check
 # below fails at import time when a row, a subclass or an enum value is missing.
-# gateway/middleware/tests/test_agent_error_wire_equivalence.py parametrizes this dict to
+# gateway/http/middleware/tests/test_agent_error_wire_equivalence.py parametrizes this dict to
 # lock the end-to-end loop.
 EXCEPTION_BY_REASON: dict[ErrorReason, type[AvaAgentError]] = {
     ErrorReason.AGENT_NOT_FOUND: AgentNotFound,

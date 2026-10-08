@@ -12,7 +12,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 from base.db.transaction import write_transaction
-from gateway.auth.request_principal import (
+from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
     SCOPE_HEADER,
     AuthPrincipal,

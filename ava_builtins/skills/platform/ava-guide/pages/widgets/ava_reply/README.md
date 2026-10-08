@@ -32,5 +32,5 @@ authenticated integration. Do not infer authorization from an agent id or the
 page-scoped permission system.
 
 The platform message/authentication implementation owns the HTTP contract; see
-`gateway/agents/` and `gateway/auth/` in a source checkout. The helper only
+`gateway/agents/` and `gateway/http/auth/` in a source checkout. The helper only
 encapsulates the request used by these resources.

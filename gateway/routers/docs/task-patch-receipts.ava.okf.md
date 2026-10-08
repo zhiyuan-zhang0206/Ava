@@ -17,7 +17,7 @@ Acceptance does not prove that an agent has processed a notification.
 
 ## Identity and immutable input
 
-The HTTP owner is `gateway.auth.request_principal.optional_request_key`.
+The HTTP owner is `gateway.http.auth.request_principal.optional_request_key`.
 Legacy keys are scoped by the actual request path. Explicit `principal-v1`
 additionally scopes by verified principal, HTTP method and actual path; MCP
 credentials require that scope. A raw key reused for another task path or

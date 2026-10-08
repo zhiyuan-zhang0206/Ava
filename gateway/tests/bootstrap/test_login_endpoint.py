@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from base import config
 from base.cluster import rate_limit
 from gateway.app import app, lifespan
-from gateway.auth.router import router
+from gateway.http.auth.router import router
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

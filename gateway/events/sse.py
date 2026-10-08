@@ -38,7 +38,7 @@ from base.config import settings
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Error
 from base.events.live.redis_client import retry_auth_failures_async
-from gateway.middleware import runtime_metrics, stopping
+from gateway.http.middleware import runtime_metrics, stopping
 
 _log = logging.getLogger(__name__)
 

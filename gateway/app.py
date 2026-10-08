@@ -7,10 +7,10 @@ is caught by the codegen-fresh hook. The docstring does **not** re-list
 endpoints (rot defense).
 
 The non-JSON response surface is deliberately small and enumerated:
-- `GET /api/okf/graph` (`gateway/routers/okf_graph.py`) — the OKF
+- `GET /api/okf/graph` (`gateway/inspect/okf_graph.py`) — the OKF
   knowledge-graph D3 visualization as a self-contained HTML page (dev-tool
   template + build mechanics, not a frontend component).
-- `GET /api/agents/{id}/uploads/...` (`gateway/routers/uploads.py`) —
+- `GET /api/agents/{id}/uploads/...` (`gateway/routers/upload/router.py`) —
   `FileResponse` file downloads.
 - `/pages/{agent_id}-{name}/...` (`gateway/routers/pages.py`) — a
   streaming reverse proxy to an agent's own page server (arbitrary content).
@@ -47,7 +47,7 @@ ui/web/next.config.ts).
 Endpoint implementations live in the gateway's feature packages
 (`gateway/<feature>/`) and single-module `gateway/routers/<domain>.py`, and are
 mounted at the bottom of this file in a fixed order. Lifespan and middleware registration remain
-in this module; exception-to-envelope adapters live in `gateway/middleware/error_handlers.py`.
+in this module; exception-to-envelope adapters live in `gateway/http/middleware/error_handlers.py`.
 
 Start: `.venv/bin/python scripts/entrypoints/gateway.py` (or `python -m gateway`)
 -> uvicorn :8000 on all interfaces, both IPv4 and IPv6 (reachable on the
@@ -74,22 +74,17 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import model_catalog
-from gateway.agents import conversation as conversation_router
 from gateway.agents import launch_retry as agents_launch_retry_router
 from gateway.agents import lifecycle as agents_lifecycle_router
 from gateway.agents import notices as notices_router
 from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
-from gateway.agents import timeline as timeline_router
-from gateway.agents import understanding as agents_understanding_router
+from gateway.agents.history import conversation as conversation_router
+from gateway.agents.history import timeline as timeline_router
+from gateway.agents.history import understanding as agents_understanding_router
 from gateway.agents.notice_operations import router as guarded_notices_router
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.alerts import router as alerts_router
-from gateway.auth import rejection_log
-from gateway.auth import router as auth_router
-from gateway.auth.cors import cors_allowed_origins
-from gateway.auth.request_principal import SessionKeys
-from gateway.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
 from gateway.cluster import alert_classes as alert_classes_router
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
@@ -110,18 +105,24 @@ from gateway.extensions import packages as packages_router
 from gateway.extensions import plugin_ui as plugin_ui_router
 from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
-from gateway.inspect import router as inspect_router
-from gateway.lgtm.telemetry_staleness import TelemetryStaleness
-from gateway.mcp_server import endpoint as mcp_server_endpoint
-from gateway.mcp_server import router as mcp_server_router
-from gateway.middleware import idempotency, latency, pause_policy, runtime_metrics
-from gateway.middleware.error_envelope import error_response, request_trace_middleware
-from gateway.middleware.error_handlers import (
+from gateway.http.auth import rejection_log
+from gateway.http.auth import router as auth_router
+from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.auth.request_principal import SessionKeys
+from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
+from gateway.http.middleware import idempotency, latency, pause_policy, runtime_metrics
+from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
+from gateway.http.middleware.error_handlers import (
     ava_agent_error_handler,
     http_exception_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
 )
+from gateway.inspect import okf_graph as okf_graph_router
+from gateway.inspect import router as inspect_router
+from gateway.lgtm.telemetry_staleness import TelemetryStaleness
+from gateway.mcp_server import endpoint as mcp_server_endpoint
+from gateway.mcp_server import router as mcp_server_router
 from gateway.routers import (
     commands as commands_router,
 )
@@ -131,9 +132,7 @@ from gateway.routers import (
 from gateway.routers import (
     default_model as default_model_router,
 )
-from gateway.routers import (
-    fleet_graph as fleet_graph_router,
-)
+from gateway.routers import fleet_graph as fleet_graph_router
 from gateway.routers import (
     frontend_telemetry as frontend_telemetry_router,
 )
@@ -145,9 +144,6 @@ from gateway.routers import (
 )
 from gateway.routers import (
     memory as memory_router,
-)
-from gateway.routers import (
-    okf_graph as okf_graph_router,
 )
 from gateway.routers import (
     pages as pages_router,
@@ -164,9 +160,7 @@ from gateway.routers import (
 from gateway.routers import (
     tasks as tasks_router,
 )
-from gateway.routers import (
-    uploads as uploads_router,
-)
+from gateway.routers.upload import router as uploads_router
 from gateway.run_timeline import history as run_timeline_history
 from gateway.run_timeline import router as run_timeline_router
 from gateway.schedules import router as schedules_router
@@ -314,10 +308,10 @@ app = FastAPI(
 )
 
 # Pause exemptions are a route-declared attribute: the middleware consumes
-# only the tested decision function `gateway.middleware.pause_policy.should_bypass_pause`,
+# only the tested decision function `gateway.http.middleware.pause_policy.should_bypass_pause`,
 # which reads the CONTROL_PLANE doorplates from `base/api_contracts/contracts.py`. The
 # exempt surface (control plane + agent self-reports) is enumerable and
-# audited by gateway/middleware/tests/test_route_contracts_middleware.py — a new exemption is a
+# audited by gateway/http/middleware/tests/test_route_contracts_middleware.py — a new exemption is a
 # deliberate declaration, not an incident patch.
 
 
@@ -409,7 +403,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
     carrying a cookie consults the session store: bearer and anonymous
     requests never pay its thread hop.
     """
-    from gateway.auth.request_principal import current_session_fact
+    from gateway.http.auth.request_principal import current_session_fact
 
     cookie_token = request.cookies.get(cookie_name())
     if not cookie_token:
@@ -446,7 +440,7 @@ async def _cluster_auth_middleware(
       middleware while keeping the cluster secret for internal
       service-to-service auth (ops / agent-host).
     """
-    from gateway.auth.request_principal import AuthPrincipal, cluster_credential
+    from gateway.http.auth.request_principal import AuthPrincipal, cluster_credential
 
     # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None

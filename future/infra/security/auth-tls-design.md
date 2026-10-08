@@ -73,7 +73,7 @@ forcing function is what produced Phase 2.
 ### Decision: cookie-based session auth
 
 `POST /api/auth/login` verifies the password (the cluster secret) and sets an
-HttpOnly `ava_session` cookie (`gateway/auth/router.py`); the browser then carries
+HttpOnly `ava_session` cookie (`gateway/http/auth/router.py`); the browser then carries
 it automatically on both `fetch()` and `EventSource`. CORS allows exact configured
 origins (or derives the local and gateway-host frontend origins), since the frontend
 (`:3000`) and gateway (`:8000`) are co-located but cross-origin. Cookie-authenticated

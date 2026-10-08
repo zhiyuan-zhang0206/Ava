@@ -21,7 +21,7 @@ from psycopg import sql
 from base.agents.history.checkpoint import CheckpointReadError, FullHistory
 from base.agents.history.hierarchy import build as build_domain
 from base.config import settings
-from gateway.agents import understanding as module
+from gateway.agents.history import understanding as module
 from gateway.app import app
 
 _T0 = datetime(2026, 10, 5, tzinfo=UTC)

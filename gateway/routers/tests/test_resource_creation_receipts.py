@@ -147,7 +147,7 @@ def test_receipt_failure_rolls_back_created_resource_and_version(
 def test_creation_identity_is_bound_to_verified_principal(db_conn: psycopg.Connection) -> None:
     from starlette.requests import Request
 
-    from gateway.auth.request_principal import AuthPrincipal
+    from gateway.http.auth.request_principal import AuthPrincipal
 
     def scoped_key(subject: str) -> str | None:
         request = Request(

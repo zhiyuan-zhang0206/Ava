@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from base.db.transaction import write_transaction
 from gateway.agents.notice_operations.receipts import existing_receipt, save_receipt
 from gateway.agents.schemas import NoticeEditIn, NoticeItem
-from gateway.auth.request_principal import (
+from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
     SCOPE_HEADER,
     AuthPrincipal,

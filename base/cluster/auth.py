@@ -11,7 +11,7 @@ which an accepting side may verify by digest (`verify_bearer_digest`). Every
 bearer is presented as an HTTP `Authorization: Bearer <token>` header and
 verified in constant time. Pure stdlib (no base.config import) so it is safe to use from
 base.host.env.bootstrap, which runs during the Settings import. Database-backed
-session creation, validation, and revocation live in ``gateway.auth.session_store``
+session creation, validation, and revocation live in ``gateway.http.auth.session_store``
 so this foundational module stays importable without application settings.
 """
 
