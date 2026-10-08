@@ -17,6 +17,7 @@ from pathlib import Path
 from base.cluster import is_default_home
 from base.cluster.machine import MachineRoles
 from base.config import settings
+from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
 )
@@ -564,13 +565,13 @@ def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
     )
 
 
-def cmd_converge() -> int:
+def cmd_converge(*, operation: PauseOwnerSnapshot | None = None) -> int:
     """`ava converge` — bring this host to the state the current code expects (idempotent)."""
     from base.deploy.maintenance import admission
     from base.native_process.os_platform import raise_fd_limit
     from cli.commands import _repo
 
-    admission.require_start_allowed()
+    admission.require_start_allowed(operation)
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
     repo = _repo._repo_root()
     roles = _repo._roles_or_none()

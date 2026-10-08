@@ -500,7 +500,7 @@ def _cmd_restart_body(*, mode: str = "smooth") -> int:
     # Keep the captured runtime and the operator's durable selection through
     # startup; neither is recaptured from a later caller or moving selector.
     with status_journal.phase("start"):
-        rc = start._cmd_start_body(persist_services=False, runtime=runtime)
+        rc = start._cmd_start_body(None, persist_services=False, runtime=runtime)
     if owns_journal:
         status_journal.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
     return rc

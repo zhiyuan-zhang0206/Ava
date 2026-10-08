@@ -132,7 +132,8 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     def record(label: str) -> Callable[..., object]:
         return lambda *_args, **_kwargs: events.append(label)
 
-    def record_start(**kwargs: object) -> int:
+    def record_start(operation: pause_owner.PauseOwnerSnapshot | None, **kwargs: object) -> int:
+        assert operation is None
         assert kwargs["persist_services"] is False
         events.append("services-started")
         return 0
@@ -241,15 +242,15 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
     @resume_after_start
-    def start(result: int) -> int:
-        admission.require_start_allowed()
+    def start(operation: pause_owner.PauseOwnerSnapshot | None, result: int) -> int:
+        admission.require_start_allowed(operation)
         assert admission.held()
         return result
 
-    assert start(4) == 4
+    assert start(None, 4) == 4
     assert admission.held()
     assert "hold released" not in capsys.readouterr().out
-    assert start(0) == 0
+    assert start(None, 0) == 0
     assert not admission.held()
     # The start's status snapshot still read paused; the release is reported.
     assert "maintenance hold released" in capsys.readouterr().out
@@ -264,16 +265,16 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
     monkeypatch.setattr("ops.cluster.pause.unpause_local_cluster", unpause)
 
     def child() -> int:
-        assert not admission.start_authorized()
+        assert not admission.start_authorized(None)
         assert admission.held()
         return 0
 
     @resume_after_start
-    def start() -> StartDelegation:
-        assert admission.start_authorized()
+    def start(operation: pause_owner.PauseOwnerSnapshot | None) -> StartDelegation:
+        assert admission.start_authorized(operation)
         return StartDelegation(child)
 
-    assert start() == 0
+    assert start(None) == 0
     assert admission.held()
     unpause.assert_not_called()
 
@@ -338,13 +339,13 @@ def test_two_stop_start_cycles_reuse_identity_not_old_operation(
     monkeypatch.setattr(agent_pause, "machine_name", lambda: "test-machine")
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-    starts = resume_after_start(lambda: 0)
+    starts = resume_after_start(lambda _operation: 0)
     holders: list[str | None] = []
     for _ in range(2):
         assert _restart_stop(timeout=3) == 0
         holders.append(pause_owner.read().holder)
         assert admission.held()
-        assert starts() == 0
+        assert starts(None) == 0
         assert not admission.held()
     assert holders[0] != holders[1]
 
@@ -369,7 +370,7 @@ def test_resource_stop_excludes_concurrent_start(
     start = MagicMock(return_value=0)
 
     def waiting_start() -> None:
-        assert resume_after_start(start)() == 0
+        assert resume_after_start(start)(None) == 0
         start_finished.set()
 
     starter = Thread(target=waiting_start)
@@ -665,3 +666,23 @@ def test_stop_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch, leg
             entry.cmd_stop(require_confirmation=False, timeout=1)
         else:
             _restart_stop(timeout=1)
+
+
+def test_nested_start_receives_the_exact_outer_operation_without_releasing_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    drained()
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+    unpause = MagicMock()
+    monkeypatch.setattr("ops.cluster.pause.unpause_local_cluster", unpause)
+    operation = admission.authorized_start("local", WHEN)
+
+    @resume_after_start
+    def nested(authority: pause_owner.PauseOwnerSnapshot | None) -> int:
+        assert authority is operation
+        admission.require_start_allowed(authority)
+        return 0
+
+    assert nested(operation) == 0
+    assert admission.held()
+    unpause.assert_not_called()

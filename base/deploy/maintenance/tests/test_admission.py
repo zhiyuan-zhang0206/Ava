@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,7 +26,7 @@ def test_maintenance_hold_has_no_expiry() -> None:
 def test_normal_start_cannot_release_maintenance() -> None:
     pause_owner.begin_maintenance("migration", WHEN)
     with pytest.raises(RuntimeError, match="cannot release"):
-        admission.require_start_allowed()
+        admission.require_start_allowed(None)
 
 
 def test_receipts_cannot_substitute_for_a_different_restart_or_generation() -> None:
@@ -216,3 +217,34 @@ def test_clear_failures_drops_blocking_receipts_and_keeps_the_rest() -> None:
 
 def test_clear_failures_outside_a_hold_is_a_no_op() -> None:
     assert admission.clear_failures() == {}
+
+
+@pytest.mark.parametrize("field", ["holder", "acquired_at"])
+def test_start_authority_rechecks_the_exact_journal_generation(field: str) -> None:
+    pause_owner.begin_maintenance("migration", WHEN)
+    operation = admission.authorized_start("migration", WHEN)
+    assert admission.start_authorized(operation)
+    admission.require_start_allowed(operation)
+    with pytest.raises(RuntimeError, match="cannot release"):
+        admission.require_start_allowed(None)
+    journal = json.loads(pause_owner.state_path().read_text())
+    journal[field] = (
+        "other-operation" if field == "holder" else (WHEN + timedelta(seconds=1)).isoformat()
+    )
+    pause_owner.state_path().write_text(json.dumps(journal))
+    assert not admission.start_authorized(operation)
+    with pytest.raises(RuntimeError, match="cannot release"):
+        admission.require_start_allowed(operation)
+    assert admission.held()
+
+
+def test_parallel_start_checks_require_explicit_operation_authority() -> None:
+    pause_owner.begin_maintenance("migration", WHEN)
+    operation = admission.authorized_start("migration", WHEN)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        authorized = workers.submit(admission.require_start_allowed, operation)
+        ordinary = workers.submit(admission.require_start_allowed, None)
+        authorized.result(timeout=5)
+        with pytest.raises(RuntimeError, match="cannot release"):
+            ordinary.result(timeout=5)
+    assert admission.held()
