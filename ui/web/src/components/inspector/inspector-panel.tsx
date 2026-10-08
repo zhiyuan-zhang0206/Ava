@@ -19,7 +19,7 @@ import { Fragment, useCallback, useRef, type ReactNode, useEffect } from "react"
 
 import { LiveSectionsSkeleton, SectionSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector/inspector-widgets";
-import { Section } from "@/components/inspector/inspector-section";
+import { Metric, Section } from "@/components/inspector/inspector-section";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
 import { WindowSelect } from "@/components/agents/window-select";
@@ -848,28 +848,6 @@ function nextHeartbeatCell(
     };
   }
   return { value: "—" };
-}
-
-function Metric({
-  className,
-  label,
-  value,
-  sub,
-}: {
-  className?: string;
-  label: string;
-  value: string;
-  sub?: string;
-}) {
-  return (
-    <div className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1", FLEX, FLEX_COL, className)}>
-      <span className="text-[10px] tracking-wide text-muted-foreground">{label}</span>
-      <span className="font-mono text-xs tabular-nums text-foreground">{value}</span>
-      {sub != null && (
-        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">{sub}</span>
-      )}
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------

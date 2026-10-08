@@ -16457,6 +16457,28 @@
             },
             "type": "array",
             "title": "Parts"
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens"
+          },
+          "estimated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated"
           }
         },
         "type": "object",
@@ -16464,10 +16486,12 @@
           "idx",
           "ts",
           "source",
-          "parts"
+          "parts",
+          "context_tokens",
+          "estimated"
         ],
         "title": "RunTimelineMessage",
-        "description": "One raw message of the stitched history, split into its parts."
+        "description": "One raw message of the stitched history, split into its parts.\n\n`context_tokens` is what the message occupies in the context (None while no request has read it),\n`estimated` whether that is a share rather than the provider's own number (None with it)."
       },
       "RunTimelineMessagePart": {
         "properties": {

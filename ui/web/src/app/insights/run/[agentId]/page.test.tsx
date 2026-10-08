@@ -14,6 +14,7 @@ const {
   getRunTimeline,
   getRunTimelineMessages,
   getRunTimelineContext,
+  getAgentRoster,
   getSettings,
   getContextBreakdown,
   useMediaQuery,
@@ -34,12 +35,13 @@ const {
     getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
     getRunTimelineContext: vi.fn<(agentId: number, at: number) => Promise<RunTimelineContext>>(),
+    getAgentRoster: vi.fn(),
   }));
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getSettings, getContextBreakdown },
+  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getAgentRoster, getSettings, getContextBreakdown },
 }));
 
 import {
@@ -167,6 +169,8 @@ const messagesResponse: RunTimelineMessages = {
         { kind: "text", chars: 5, text: "on it", text_truncated: false },
         { kind: "call", chars: 2, text: "ls", text_truncated: false },
       ],
+      context_tokens: 1234,
+      estimated: true,
     },
   ],
   next_start: null,
@@ -230,6 +234,11 @@ beforeEach(() => {
   getRunTimelineMessages.mockResolvedValue(messagesResponse);
   getSettings.mockReset();
   getSettings.mockResolvedValue({ settings: [] });
+  getAgentRoster.mockReset();
+  getAgentRoster.mockResolvedValue({
+    agents: [{ agent_id: 42, label: "planner", status: "running" }],
+    ancestors: [],
+  });
   getContextBreakdown.mockReset();
   getContextBreakdown.mockResolvedValue(cbdFixture);
   getRunTimelineContext.mockReset();
@@ -295,7 +304,7 @@ describe("the default window", () => {
     render();
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenCalledWith(42, 7));
     expect(getContextBreakdown).not.toHaveBeenCalled();
-    expect((await screen.findByTestId("context-breakdown-heading")).textContent).toContain("request #7 · session 2 of 2");
+    expect((await screen.findByTestId("context-breakdown-heading")).textContent).toContain("request · session 2 of 2");
   });
 });
 
@@ -317,23 +326,6 @@ describe("ancestors", () => {
     expect(await ringOf(await nodeOf("2"))).toBe("none");
   });
 
-  it("marks the stretch the level above has not summarized", async () => {
-    const [first, second, top] = lifetimeResponse.nodes;
-    getRunTimeline.mockResolvedValue({
-      ...lifetimeResponse,
-      nodes: [
-        { ...first, parent: "3" },
-        { ...second, parent: null },
-        { ...top, span_end: 5, end: LEAF_A.to },
-      ],
-    });
-    render();
-    const pending = await screen.findAllByTestId("run-timeline-pending");
-    expect(pending).toHaveLength(1);
-    expect(within(screen.getByTestId("run-timeline-row-level-2")).getByTestId("run-timeline-pending")).toBe(
-      pending[0],
-    );
-  });
 });
 
 describe("selecting", () => {
@@ -345,21 +337,48 @@ describe("selecting", () => {
     expect(within(detail).getByTestId("run-timeline-summary").textContent).toBe(
       "The agent read the repo\nand planned the change.",
     );
-    expect(detail.textContent).toContain("#1–#5 (5)");
-    expect(detail.textContent).toContain("Agent cost over this span");
-    expect(detail.textContent).toContain("Cost of generating this summary");
-    expect(detail.textContent).toContain("31.5s");
+    expect(detail.textContent).toContain("5 messages");
+    // One Details section holds the span's facts and the agent's own usage; the summary's generation cost is not shown.
+    const facts = within(detail).getByTestId("run-timeline-details");
+    expect(facts.textContent).toContain("Time");
+    expect(facts.textContent).toContain("Calls");
+    expect(detail.textContent).not.toContain("Agent cost over this span");
+    expect(detail.textContent).not.toContain("Cost of generating this summary");
+    expect(detail.textContent).not.toContain("of input from cache");
     // the agent's own cost: 3 calls, 3.0k input, 2.4k cache read
     expect(within(detail).getAllByText("3.0k").length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("2.4k").length).toBeGreaterThan(0);
   });
 
-  it("says so when a node has no understanding-call record", async () => {
+  it("names the agent in the page header with no present-state facts", async () => {
     render();
-    clickItem(await nodeOf("2"));
-    expect((await screen.findByTestId("run-timeline-node-detail")).textContent).toContain(
-      "No understanding-call record for this node.",
-    );
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Run timeline");
+    await waitFor(() => expect(screen.getByTestId("run-timeline-agent").textContent).toBe("Agent #42 · planner"));
+    expect(screen.queryByTestId("run-timeline-status")).toBeNull();
+    expect(screen.queryByTestId("run-timeline-model")).toBeNull();
+  });
+
+  it("renders a message's Markdown and shows the tokens it occupies, marked when estimated", async () => {
+    getRunTimelineMessages.mockResolvedValue({
+      messages: [
+        {
+          idx: 2,
+          ts: "2026-10-04T12:05:00.000000Z",
+          source: null,
+          parts: [{ kind: "text", chars: 9, text: "**bold** x", text_truncated: false }],
+          context_tokens: 1234,
+          estimated: true,
+        },
+      ],
+      next_start: null,
+    });
+    render();
+    clickItem(await nodeOf("1"));
+    const list = await screen.findByTestId("run-timeline-messages");
+    expect((await within(list).findByText("bold")).tagName).toBe("STRONG");
+    expect(within(list).getByTestId("run-timeline-message-tokens").textContent).toBe("1.2k tokens (estimated)");
+    const detail = screen.getByTestId("run-timeline-node-detail");
+    expect(within(detail).getByText("Details")).toBeTruthy();
   });
 
   it("reads a unit's own raw parts: a text unit shows the text, not the thinking or the call", async () => {
@@ -367,17 +386,18 @@ describe("selecting", () => {
     clickItem(await unitOf("text"));
 
     const detail = await screen.findByTestId("run-timeline-unit-detail");
-    expect(within(detail).queryByRole("button", { name: /raw messages/i })).toBeNull();
+    expect(within(detail).queryByRole("checkbox")).toBeNull();
     await waitFor(() =>
       expect(getRunTimelineMessages).toHaveBeenCalledWith(42, {
         start: 2,
         end: 2,
         limit: 50,
-        full: false,
+        full: true,
       }),
     );
-    const raw = await within(detail).findByText("on it", { selector: "pre" });
-    expect(raw).toBeTruthy();
+    expect(await within(detail).findByText("on it")).toBeTruthy();
+    // The unit's tokens are its part's share, not the whole message's.
+    expect(within(detail).getAllByTestId("run-timeline-message-tokens")).toHaveLength(1);
     expect(within(detail).queryByText("need a plan")).toBeNull();
     expect(within(detail).queryByText("ls")).toBeNull();
   });
@@ -544,13 +564,13 @@ describe("failure and loading", () => {
     await screen.findByTestId("run-timeline-canvas-units");
     clickAt("units", itemX(response, "units", "uthinking-2-2"));
     let detail = await screen.findByTestId("run-timeline-unit-detail");
-    expect(await within(detail).findByText("need a plan", { selector: "pre" })).toBeTruthy();
+    expect(await within(detail).findByText("need a plan")).toBeTruthy();
     expect(within(detail).queryByText("ls")).toBeNull();
     expect(within(detail).queryByText("on it")).toBeNull();
 
     clickAt("units", itemX(response, "units", "ucall-2-2"));
     detail = await screen.findByTestId("run-timeline-unit-detail");
-    expect(await within(detail).findByText("ls", { selector: "pre" })).toBeTruthy();
+    expect(await within(detail).findByText((_, el) => el?.tagName === "PRE" && el.textContent === "ls")).toBeTruthy();
     expect(within(detail).queryByText("need a plan")).toBeNull();
   });
 
@@ -668,7 +688,7 @@ describe("hover", () => {
     const idle = (await screen.findByTestId("run-timeline-readout")).textContent;
     const human = await unitOf("inbound");
     hoverItem(human);
-    expect(readout()).toContain("Human message · #1–#1 · read");
+    expect(readout()).toContain("Human message · 1 message · read");
     expect(readout()).toContain("user · please fix the bug");
     leaveItem(human);
     expect(readout()).toBe(idle);
@@ -679,7 +699,7 @@ describe("hover", () => {
     hoverItem(await nodeOf("1"));
     const text = readout();
     expect(text).toContain("Level 1");
-    expect(text).toContain("#1–#5");
+    expect(text).toContain("5 messages");
     expect(text).toContain("The agent read the repo");
     expect(text).not.toContain("and planned");
     expect(text).toContain("3 calls · 3.0k in · 120 out");
@@ -762,12 +782,12 @@ describe("context breakdown follows the point", () => {
     clickItem(await unitOf("text"));
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2));
     await waitFor(() =>
-      expect(screen.getByTestId("context-breakdown-heading").textContent).toContain("request #2 · session 1 of 2"),
+      expect(screen.getByTestId("context-breakdown-heading").textContent).toContain("request · session 1 of 2"),
     );
     clickItem(await nodeOf("2"));
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 6));
     await waitFor(() =>
-      expect(screen.getByTestId("context-breakdown-heading").textContent).toContain("request #7 · session 2 of 2"),
+      expect(screen.getByTestId("context-breakdown-heading").textContent).toContain("request · session 2 of 2"),
     );
   });
 
@@ -805,7 +825,7 @@ describe("context size row", () => {
     expect(bars[0].color).toContain("#3b82f6");
     expect(bars[1].color).toContain("#f59e0b");
     pointAt("input", bars[1].x + bars[1].w / 2);
-    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("LLM request #7 · session 2");
+    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("LLM request · session 2");
     expect(screen.getByTestId("run-timeline-readout").textContent).toContain("400 input tokens · added 380 (estimated)");
   });
 

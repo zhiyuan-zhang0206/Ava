@@ -2,10 +2,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { ContextBreakdownCard, type CategoryHighlight } from "@/components/inspector/context-breakdown";
+import { RunTimelineHeader } from "@/components/run-timeline/run-timeline-header";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { RunTimelineRows } from "@/components/run-timeline/run-timeline-rows";
 import { RunTimelineChartSkeleton } from "@/components/run-timeline/run-timeline-skeleton";
@@ -25,7 +25,7 @@ import {
 } from "@/components/run-timeline/timeline-model";
 import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/transport/api";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { formatAbsolute } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
 
@@ -175,14 +175,7 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
 
   return (
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
-      <header className={cn("items-center gap-3 border-b border-border px-4 py-2", FLEX)}>
-        <Link href="/insights" className={buttonVariants({ size: "sm", variant: "ghost" })}>
-          {t("backToInsights")}
-        </Link>
-        <div className={cn(FLEX_1, MIN_W_0)}>
-          <h1 className="truncate text-sm font-semibold">{t("title", { agentId: agentId ?? "—" })}</h1>
-        </div>
-      </header>
+      <RunTimelineHeader agentId={agentId} />
       <RunTimelineWorkspace main={main} side={side} />
     </main>
   );

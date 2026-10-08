@@ -8041,6 +8041,9 @@ export interface components {
         /**
          * RunTimelineMessage
          * @description One raw message of the stitched history, split into its parts.
+         *
+         *     `context_tokens` is what the message occupies in the context (None while no request has read it),
+         *     `estimated` whether that is a share rather than the provider's own number (None with it).
          */
         RunTimelineMessage: {
             /** Idx */
@@ -8051,6 +8054,10 @@ export interface components {
             source: string | null;
             /** Parts */
             parts: components["schemas"]["RunTimelineMessagePart"][];
+            /** Context Tokens */
+            context_tokens: number | null;
+            /** Estimated */
+            estimated: boolean | null;
         };
         /**
          * RunTimelineMessagePart
