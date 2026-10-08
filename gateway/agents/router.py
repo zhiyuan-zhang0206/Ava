@@ -44,7 +44,11 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents import forward
-from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
+from gateway.agents.creation import (
+    CreationLaunchArguments,
+    create_and_launch_agent,
+    scoped_creation_key,
+)
 from gateway.agents.forward import forward_spawn_to_remote
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
@@ -645,6 +649,9 @@ async def _create_agent_http(
     body: SpawnAgentRequest, request: Request, key: str | None
 ) -> SpawnedAgent:
     """Share the existing HTTP birth/launch behavior without changing other entry scopes."""
+    arguments: CreationLaunchArguments = {}
+    if key is not None:
+        arguments["creation_key"] = key
     target = body.machine if body.machine is not None else machine_name()
     try:
         return await create_and_launch_agent(
@@ -653,7 +660,7 @@ async def _create_agent_http(
             request.app.state.db_pool,
             request.app.state.db,
             request.app.state.bus,
-            **({"creation_key": key} if key is not None else {}),
+            **arguments,
         )
     except CreationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

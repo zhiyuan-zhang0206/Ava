@@ -255,9 +255,15 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT, note="reverse proxy — semantics follow upstream"
     ),
     # ── gateway/routers/guide.py ───────────────────────────────────
+    ("POST", "/api/keyed/v1/guide/draft"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="raw draft identity and original immutable birth snapshot",
+    ),
     ("POST", "/api/guide/draft"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
-        note="LLM generation incurs a fresh external request and token cost",
+        note="creates an agent, commits its first prompt, and forwards its launch",
     ),
     # ── gateway/cluster/status.py (health) ───────────────────────────────────
     ("GET", "/api/health"): RouteContract(
@@ -380,9 +386,15 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/okf_graph.py ───────────────────────────────────
     ("GET", "/api/okf/graph"): RouteContract(),
     # ── gateway/extensions/packages.py ───────────────────────────────────
+    ("POST", "/api/keyed/v1/packages/draft"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="raw draft identity and original immutable birth snapshot",
+    ),
     ("POST", "/api/packages/draft"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
-        note="LLM generation incurs a fresh external request and token cost",
+        note="creates an agent, commits its first prompt, and forwards its launch",
     ),
     # ── gateway/routers/pages.py ───────────────────────────────────
     ("GET", "/api/pages"): RouteContract(),
@@ -432,9 +444,15 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/schedules"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="create schedule — pure INSERT; a retry duplicates the row"
     ),
+    ("POST", "/api/keyed/v1/schedules/draft"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="raw draft identity and original immutable birth snapshot",
+    ),
     ("POST", "/api/schedules/draft"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
-        note="LLM generation incurs a fresh external request and token cost",
+        note="creates an agent, commits its first prompt, and forwards its launch",
     ),
     ("POST", "/api/schedules/{schedule_id}/start"): RouteContract(
         Idempotency.NON_IDEMPOTENT,

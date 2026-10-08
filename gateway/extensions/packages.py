@@ -19,10 +19,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from base.cluster.machine import machine_name
+from gateway.agents.creation import CreationLaunchArguments, guarded_draft_key
 from gateway.agents.router import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
 
@@ -59,6 +60,20 @@ class PackageDraftResponse(BaseModel):
 async def draft_package(body: PackageDraftRequest, request: Request) -> PackageDraftResponse:
     """Spawn an ava-package-installer agent for a natural-language install request
     and return its id so the UI can open the conversation. 422 on an unknown kind."""
+    return await _draft_package(body, request)
+
+
+@router.post("/api/keyed/v1/packages/draft")
+async def guarded_draft_package(
+    body: PackageDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
+) -> PackageDraftResponse:
+    """Replay one raw draft intent and its original birth without legacy fallback."""
+    return await _draft_package(body, request, key)
+
+
+async def _draft_package(
+    body: PackageDraftRequest, request: Request, key: str | None = None
+) -> PackageDraftResponse:
     prompt = (
         "You are installing a package for the user. Read and follow "
         "ava.skills.ava_guide.packages.install and run the whole lifecycle it describes: "
@@ -75,11 +90,15 @@ async def draft_package(body: PackageDraftRequest, request: Request) -> PackageD
         prompt_source="user",
         label="ava-package-installer",
     )
+    identity: CreationLaunchArguments = {}
+    if key is not None:
+        identity = {"creation_key": key, "creation_identity": body.model_dump(mode="json")}
     spawned = await create_and_launch_agent(
         body_obj,
         machine_name(),
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,
+        **identity,
     )
     return PackageDraftResponse(agent_id=spawned.id)
