@@ -27,7 +27,7 @@ Agent context window management — how message history is compressed as it appr
 - **Why a ceiling knob at all**: windows grew ~8× (128K→1M) while effective context didn't, so one fraction means a different absolute budget per model; the ceiling is the escape hatch for pinning an absolute trigger (per-model in the registry, or cluster-wide via `AVA_AUTO_COMPACT_CEILING_TOKENS`). Currently unused — 0 everywhere.
 - Unregistered models fail fast with `UnknownModelWindowError`; gateway display endpoints catch it and degrade to 0/0/0
 - **Trigger occupancy unit**: the last LLM call's real `input_tokens` (chars/4 before the first turn) — gauge, ticks, and trigger share one unit, read through the shared `auto_compact_will_fire` predicate.
-- **Display surface**: `/api/agents/{id}/token-usage` carries the resolved thresholds (ContextMeter ticks); `/api/agents/{id}/context-breakdown` (`gateway/agents/history/context_breakdown.py`) sums each message's own token count (`base/agents/history/message_tokens.py`, anchored to the provider's `input_tokens`) into kind buckets and splits only the inside of a message (an AIMessage's parts, the system prompt by `#` section) with the estimator; every category says whether any part was estimated.
+- **Display surface**: `/api/agents/{id}/token-usage` carries the resolved thresholds (ContextMeter ticks); `/api/agents/{id}/context-breakdown` (`base/agents/history/context_breakdown.py`) sums each message's own token count (`base/agents/history/message_tokens.py`, anchored to the provider's `input_tokens`) into kind buckets and splits only the inside of a message (an AIMessage's parts, the system prompt by `#` section) with the estimator; every category says whether any part was estimated.
 
 ## Key Dependencies
 
