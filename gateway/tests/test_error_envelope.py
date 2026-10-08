@@ -19,6 +19,7 @@ from starlette.responses import Response
 
 from base import config
 from base.agents import AgentNotFound, AvaAgentError, ErrorReason
+from base.cluster.authority.api import AcceptanceCache
 from gateway.app import (
     _cluster_auth_middleware,
     _cluster_pause_middleware,
@@ -196,6 +197,10 @@ def _request(
 def _auth401_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each middleware test gets its own gateway-lifetime counters."""
     monkeypatch.setattr(app.state, "auth401_log", rejection_log.AuthRejectionLog(), raising=False)
+    machine_token_acceptance: AcceptanceCache = {}
+    monkeypatch.setattr(
+        app.state, "machine_token_acceptance", machine_token_acceptance, raising=False
+    )
 
 
 def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:

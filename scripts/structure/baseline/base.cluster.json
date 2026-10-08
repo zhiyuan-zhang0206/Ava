@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "base/cluster/authority/api.py::ambient-container:_acceptance_cache": 1,
     "base/cluster/machine.py::ambient-instance:_identity": 1,
     "base/cluster/postgres.py::ambient-container:_CHILDREN": 1
   }
