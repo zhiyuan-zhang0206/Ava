@@ -175,13 +175,9 @@ def cmd_mcp_list() -> int:
     try:
         merged = load_mcp_config(include_disabled=True)
         machine = _read_machine_config(_machine_config_file())
-        try:
-            enabled = read_enabled()
-        except McpEnabledConfigError as e:
-            print(f"[ava mcp list] {e} — treating every MCP server as disabled", file=sys.stderr)
-            enabled = dict.fromkeys(merged, False)
+        enabled = read_enabled()
         installed = installed_mcp_names()
-    except (MCPError, ValueError, json.JSONDecodeError, OSError) as e:
+    except (MCPError, McpEnabledConfigError, ValueError, json.JSONDecodeError, OSError) as e:
         print(f"[ava mcp list] {e}", file=sys.stderr)
         return 1
 
