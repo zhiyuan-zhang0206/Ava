@@ -4,13 +4,13 @@
 import type { RunTimelineNode, RunTimelineRequest, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
+  chainIds,
   isSelected,
   levelsTopFirst,
   requestCovers,
   requestSpan,
   requestUnits,
   type AxisMap,
-  type AxisSpan,
   type Selection,
   type Viewport,
 } from "./timeline-model";
@@ -212,53 +212,76 @@ export function navigate(
   return found === undefined ? null : { row: targetRow, item: found };
 }
 
-/** The narrowest a selection's overlay box is drawn, in pixels, so it stays visible at any zoom. */
+/** The narrowest a selection's frame is drawn, in pixels, so it stays visible at any zoom. */
 export const SELECTION_MIN_PX = 6;
 
+/** The identity of an item across redraws. */
+export function selectionKey(selection: Selection): string {
+  if (selection.kind === "node") return `n${selection.id}`;
+  if (selection.kind === "request") return `r${selection.idx}`;
+  return `u${selection.unitKind}-${selection.i0}-${selection.i1}`;
+}
+
+/** What the selection lights: the one primary item (the row the cursor is in), and the items linked to it, per row. */
+export interface SelectionRoles {
+  primary: { row: string; key: string } | null;
+  linked: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
 /**
- * Where the selected items sit in each row: the item itself; for a request also the blocks it read
- * and its bar in both context rows; for a block also the bar of the request that read it. Rows with nothing selected are absent.
+ * The primary item is the selection in the row it was made in. Its links go one hop: a node links to
+ * its ancestors; a block to its ancestors and the request that read it (both context rows); a
+ * request to the blocks it read, the ancestors of those blocks and the same request in the other
+ * context row. Nothing links back down from a linked node: a request's ancestors never light the
+ * other requests they cover.
  */
-export function selectionSpans(
-  selection: Selection | null,
+export function selectionRoles(
+  current: { row: string | null; selection: Selection } | null,
   data: NavData,
-  axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">,
-): Map<string, AxisSpan[]> {
-  const out = new Map<string, AxisSpan[]>();
-  if (selection === null) return out;
-  const request = selection.kind === "request" ? data.requests.find((candidate) => candidate.idx === selection.idx) : undefined;
-  for (const row of navRowIds(data)) {
-    const lit = navItems(row, data, axis).filter(
-      (item) =>
-        isSelected(selection, item.selection) ||
-        (request !== undefined && item.unit !== undefined && requestCovers(request, item.unit)) ||
-        (selection.kind === "unit" && item.request !== undefined && requestCovers(item.request, { i0: selection.i0 })),
-    );
-    if (lit.length > 0) out.set(row, lit.map(({ u0, u1 }) => ({ u0, u1 })));
+): SelectionRoles {
+  const linked = new Map<string, Set<string>>();
+  if (current === null) return { primary: null, linked };
+  const { selection } = current;
+  const rows = navRowIds(data);
+  // Only a request can sit in either of two rows; a node or a block is in the row of its level or the Messages row.
+  const row =
+    selection.kind === "request" && (current.row === INPUT_ROW || current.row === ADDED_ROW) && rows.includes(current.row)
+      ? current.row
+      : rowOfSelection(selection, data);
+  const add = (target: string, key: string) => {
+    let keys = linked.get(target);
+    if (keys === undefined) {
+      keys = new Set();
+      linked.set(target, keys);
+    }
+    keys.add(key);
+  };
+  const addAncestors = (ids: ReadonlySet<string>) => {
+    for (const id of ids) {
+      const node = data.nodes.find((candidate) => candidate.id === id);
+      if (node !== undefined) add(levelRowId(node.level), `n${id}`);
+    }
+  };
+  const primaryKey = selectionKey(selection);
+  addAncestors(chainIds(selection, data.nodes, data.units, data.requests));
+  if (selection.kind === "request") {
+    const request = data.requests.find((candidate) => candidate.idx === selection.idx);
+    if (request !== undefined) {
+      for (const unit of requestUnits(request, data.units)) add(UNITS_ROW, selectionKey({ kind: "unit", i0: unit.i0, i1: unit.i1, unitKind: unit.kind }));
+      add(row === ADDED_ROW ? INPUT_ROW : ADDED_ROW, primaryKey);
+    }
+  } else if (selection.kind === "unit") {
+    const reader = data.requests.find((candidate) => requestCovers(candidate, { i0: selection.i0 }));
+    if (reader !== undefined) {
+      add(INPUT_ROW, `r${reader.idx}`);
+      add(ADDED_ROW, `r${reader.idx}`);
+    }
   }
-  return out;
-}
-
-/** The span that covers every given span; null for none. */
-export function spansExtent(spans: readonly AxisSpan[]): AxisSpan | null {
-  if (spans.length === 0) return null;
-  return { u0: Math.min(...spans.map((span) => span.u0)), u1: Math.max(...spans.map((span) => span.u1)) };
-}
-
-/** A span's overlay box in pixels on a track `trackPx` wide showing `viewU`: at least `minPx` wide, centred on the span, kept inside the track; null when it lies outside the view. */
-export function overlayBox(
-  span: AxisSpan,
-  viewU: Viewport,
-  trackPx: number,
-  minPx: number = SELECTION_MIN_PX,
-): { left: number; width: number } | null {
-  if (!(viewU.to > viewU.from) || span.u1 < viewU.from || span.u0 > viewU.to) return null;
-  const scale = trackPx / (viewU.to - viewU.from);
-  const left = (span.u0 - viewU.from) * scale;
-  const right = (span.u1 - viewU.from) * scale;
-  const width = Math.min(Math.max(right - left, minPx), trackPx);
-  const centred = (left + right) / 2 - width / 2;
-  return { left: Math.min(Math.max(centred, 0), trackPx - width), width };
+  if (row === null) return { primary: null, linked };
+  const own = linked.get(row);
+  own?.delete(primaryKey);
+  if (own?.size === 0) linked.delete(row);
+  return { primary: { row, key: primaryKey }, linked };
 }
 
 /** The viewport that shows [startMs, endMs] when `view` does not: the same width, centred on it, inside the base extent; `view` itself when it already shows some of it. */

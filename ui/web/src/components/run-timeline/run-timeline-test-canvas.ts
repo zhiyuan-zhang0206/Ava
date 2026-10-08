@@ -22,6 +22,8 @@ export interface Drawn {
   radius: number;
   text: string;
   align: string;
+  /** The dash pattern of a stroke: empty for a solid line. */
+  dash: number[];
 }
 
 const noop = () => undefined;
@@ -33,10 +35,14 @@ class RecordingContext {
   font = "";
   textAlign = "left";
   textBaseline = "alphabetic";
+  dash: number[] = [];
   frame: Drawn[] = [];
   private path: { x: number; y: number; w: number; h: number; radius: number } | null = null;
 
   // The state calls a test has no use for: kept as no-ops so painting runs unchanged.
+  setLineDash(dash: number[]) {
+    this.dash = dash;
+  }
   setTransform = noop;
   save = noop;
   restore = noop;
@@ -57,7 +63,7 @@ class RecordingContext {
     return { width: text.length * 5 };
   }
   private push(op: Drawn["op"], box: { x: number; y: number; w: number; h: number; radius: number }, color: string, text = "") {
-    this.frame.push({ op, ...box, color, lineWidth: this.lineWidth, text, align: this.textAlign });
+    this.frame.push({ op, ...box, color, lineWidth: this.lineWidth, text, align: this.textAlign, dash: this.dash });
   }
   fillRect(x: number, y: number, w: number, h: number) {
     this.push("fill", { x, y, w, h, radius: 0 }, this.fillStyle);
@@ -129,24 +135,22 @@ export function clickAt(row: string, x: number) {
   fireEvent.click(screen.getByTestId(`run-timeline-canvas-${row}`), { clientX: x });
 }
 
-/** How an item of a row looks at pixel `x`: its state (self = inside the selection frame, ancestor, hover) and whether a highlight faded it. */
-export function look(row: string, x: number): { ring: "self" | "ancestor" | "hover" | "none"; faded: boolean } {
+/** How an item of a row looks at pixel `x`: primary (inside the strong frame), linked (inside the light dashed frame), hovered, and whether a highlight faded it. */
+export function look(row: string, x: number): { ring: "primary" | "linked" | "hover" | "none"; faded: boolean } {
   const shapes = shapesAt(row, x);
   const strength = (d: Drawn) => {
     if (d.op === "stroke") {
       if (d.color === "var(--primary)") return 3;
-      if (d.color.includes("var(--primary) 60%")) return 2;
+      if (d.dash.length > 0) return 2;
       if (d.color.includes("var(--primary) 35%")) return 1;
       return 0;
     }
-    // A hairline too narrow for an outline shows its state in its fill.
-    if (d.op === "fill" && d.w < 4 && d.color.includes("var(--primary) 60%")) return 2;
-    if (d.op === "fill" && d.color.includes("var(--foreground) 30%")) return 1;
-    return 0;
+    // A hairline too narrow for an outline shows a hover in its fill.
+    return d.op === "fill" && d.color.includes("var(--foreground) 30%") ? 1 : 0;
   };
   const best = Math.max(0, ...shapes.map(strength));
   return {
-    ring: (["none", "hover", "ancestor", "self"] as const)[best],
+    ring: (["none", "hover", "linked", "primary"] as const)[best],
     faded: shapes.some((d) => d.op === "fill" && d.color.includes("12%")),
   };
 }

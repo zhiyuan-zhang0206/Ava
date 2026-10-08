@@ -306,17 +306,17 @@ describe("ancestors", () => {
   it("lights a node and its ancestors, and steps the others back", async () => {
     render();
     clickItem(await nodeOf("1"));
-    expect(await ringOf(await nodeOf("1"))).toBe("self");
-    expect(await ringOf(await nodeOf("3"))).toBe("ancestor");
+    expect(await ringOf(await nodeOf("1"))).toBe("primary");
+    expect(await ringOf(await nodeOf("3"))).toBe("linked");
     expect(await ringOf(await nodeOf("2"))).toBe("none");
   });
 
   it("lights a message block's covering leaf and every ancestor above it", async () => {
     render();
     clickItem(await unitOf("text"));
-    expect(await ringOf(await unitOf("text"))).toBe("self");
-    expect(await ringOf(await nodeOf("1"))).toBe("ancestor");
-    expect(await ringOf(await nodeOf("3"))).toBe("ancestor");
+    expect(await ringOf(await unitOf("text"))).toBe("primary");
+    expect(await ringOf(await nodeOf("1"))).toBe("linked");
+    expect(await ringOf(await nodeOf("3"))).toBe("linked");
     expect(await ringOf(await nodeOf("2"))).toBe("none");
   });
 
@@ -775,8 +775,8 @@ describe("hover", () => {
     render();
     clickItem(await nodeOf("2"));
     hoverItem(await unitOf("text"));
-    expect(await ringOf(await nodeOf("2"))).toBe("self");
-    expect(await ringOf(await nodeOf("3"))).toBe("ancestor");
+    expect(await ringOf(await nodeOf("2"))).toBe("primary");
+    expect(await ringOf(await nodeOf("3"))).toBe("linked");
     expect(await ringOf(await nodeOf("1"))).toBe("hover");
   });
 });
@@ -792,11 +792,11 @@ describe("side panel links", () => {
 
     detail = await screen.findByTestId("run-timeline-node-detail");
     expect(detail.textContent).toContain("Level 2 summary");
-    expect(await ringOf(await nodeOf("3"))).toBe("self");
+    expect(await ringOf(await nodeOf("3"))).toBe("primary");
     const down = within(detail).getAllByTestId("run-timeline-chip");
     expect(down.map((chip) => chip.getAttribute("data-node-id"))).toEqual(["1", "2"]);
     fireEvent.click(down[1]);
-    expect(await ringOf(await nodeOf("2"))).toBe("self");
+    expect(await ringOf(await nodeOf("2"))).toBe("primary");
   });
 
   it("shows the summary block a message block belongs to, and jumps to it", async () => {
@@ -804,7 +804,7 @@ describe("side panel links", () => {
     clickItem(await unitOf("text"));
     const detail = await screen.findByTestId("run-timeline-unit-detail");
     fireEvent.click(within(detail).getByTestId("run-timeline-chip"));
-    expect(await ringOf(await nodeOf("1"))).toBe("self");
+    expect(await ringOf(await nodeOf("1"))).toBe("primary");
     expect(await screen.findByTestId("run-timeline-node-detail")).toBeTruthy();
   });
 

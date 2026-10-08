@@ -49,16 +49,12 @@ import {
   maxInput,
   nodeAncestors,
   nodeChildren,
-  tokenFits,
-  tokenLabel,
 } from "./timeline-model";
 import {
   navigate,
   revealView,
   ADDED_ROW,
-  overlayBox,
-  selectionSpans,
-  spansExtent,
+  selectionRoles,
   INPUT_ROW,
   UNITS_ROW,
 } from "./timeline-nav";
@@ -717,53 +713,63 @@ describe("request bars", () => {
   });
 });
 
-describe("token labels", () => {
-  it("marks an estimate with a tilde and has nothing for a block no request read", () => {
-    expect(tokenLabel(1500, false)).toBe("1.5k");
-    expect(tokenLabel(1500, true)).toBe("~1.5k");
-    expect(tokenLabel(null, null)).toBeNull();
+describe("selectionRoles", () => {
+  const T = Date.parse("2026-10-04T12:00:00Z");
+  const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
+  const u = (i0: number, parent: string | null): RunTimelineUnit =>
+    unit({ kind: "text", i0, i1: i0, start: iso(i0 * 10), end: iso(i0 * 10 + 10), parent });
+  const nd = (id: string, level: number, parent: string | null, s0: number, s1: number): RunTimelineNode => ({
+    ...node(level, id),
+    parent,
+    start: iso(s0 * 10),
+    end: iso(s1 * 10 + 10),
+    span_start: s0,
+    span_end: s1,
+  });
+  const rq = (idx: number, from: number): RunTimelineRequest => ({
+    idx, ts: iso(idx * 10), session: 0, input_tokens: 1, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: from, added_to: idx,
+  });
+  // P (level 2) over A (0-1) and B (2-3); request 2 read blocks 0-1 (under A), request 4 read blocks 2-3 (under B).
+  const data = {
+    nodes: [nd("P", 2, null, 0, 3), nd("A", 1, "P", 0, 1), nd("B", 1, "P", 2, 3)],
+    units: [u(0, "A"), u(1, "A"), u(2, "B"), u(3, "B")],
+    requests: [rq(2, 0), rq(4, 2)],
+  };
+  const keys = (roles: ReturnType<typeof selectionRoles>, row: string) => [...(roles.linked.get(row) ?? [])].sort();
+
+  it("a request is the one primary item; it links one hop: its blocks, their ancestors, the same request in the other row", () => {
+    const roles = selectionRoles({ row: INPUT_ROW, selection: { kind: "request", idx: 2 } }, data);
+    expect(roles.primary).toEqual({ row: INPUT_ROW, key: "r2" });
+    expect(keys(roles, UNITS_ROW)).toEqual(["utext-0-0", "utext-1-1"]);
+    expect(keys(roles, "level-1")).toEqual(["nA"]);
+    expect(keys(roles, "level-2")).toEqual(["nP"]);
+    expect(keys(roles, ADDED_ROW)).toEqual(["r2"]);
+    // Nothing links back down from the ancestors: the other request under the same top node stays unlit.
+    expect(keys(roles, INPUT_ROW)).toEqual([]);
+    expect(roles.linked.get(UNITS_ROW)?.has("utext-2-2")).toBe(false);
   });
 
-  it("fits only when the block is wide enough for the label and what else it shows", () => {
-    expect(tokenFits("1.5k", 80)).toBe(true);
-    expect(tokenFits("1.5k", 20)).toBe(false);
-    expect(tokenFits("1.5k", 40, 24)).toBe(false);
-  });
-});
-
-describe("selection overlay", () => {
-  it("gives a thin span a box of at least 6 px, centred on it and kept inside the track", () => {
-    const view = { from: 0, to: 1000 };
-    expect(overlayBox({ u0: 500, u1: 500.2 }, view, 1000)?.left).toBeCloseTo(497.1)
-    expect(overlayBox({ u0: 500, u1: 500.2 }, view, 1000)).toMatchObject({ width: 6 });
-    expect(overlayBox({ u0: 0, u1: 0 }, view, 1000)).toEqual({ left: 0, width: 6 });
-    expect(overlayBox({ u0: 1000, u1: 1000 }, view, 1000)).toEqual({ left: 994, width: 6 });
-    expect(overlayBox({ u0: 200, u1: 400 }, view, 1000)).toEqual({ left: 200, width: 200 });
-    expect(overlayBox({ u0: 2000, u1: 2100 }, view, 1000)).toBeNull();
+  it("the cursor row decides which context row is primary, and the other one is linked", () => {
+    const added = selectionRoles({ row: ADDED_ROW, selection: { kind: "request", idx: 2 } }, data);
+    expect(added.primary).toEqual({ row: ADDED_ROW, key: "r2" });
+    expect(keys(added, INPUT_ROW)).toEqual(["r2"]);
+    expect(keys(added, ADDED_ROW)).toEqual([]);
   });
 
-  it("covers several spans by their whole extent", () => {
-    expect(spansExtent([{ u0: 5, u1: 7 }, { u0: 2, u1: 3 }])).toEqual({ u0: 2, u1: 7 });
-    expect(spansExtent([])).toBeNull();
+  it("a block links to its ancestors and the request that read it; a node links only upward", () => {
+    const block = selectionRoles({ row: UNITS_ROW, selection: { kind: "unit", i0: 2, i1: 2, unitKind: "text" } }, data);
+    expect(keys(block, "level-1")).toEqual(["nB"]);
+    expect(keys(block, INPUT_ROW)).toEqual(["r4"]);
+    expect(keys(block, ADDED_ROW)).toEqual(["r4"]);
+    const top = selectionRoles({ row: "level-2", selection: { kind: "node", id: "P" } }, data);
+    expect(top.primary).toEqual({ row: "level-2", key: "nP" });
+    expect([...top.linked.keys()]).toEqual([]);
+    const mid = selectionRoles({ row: "level-1", selection: { kind: "node", id: "A" } }, data);
+    expect(keys(mid, "level-2")).toEqual(["nP"]);
+    expect(mid.linked.has(INPUT_ROW)).toBe(false);
   });
 
-  it("finds the selected items per row: a request is its two bars and the blocks it read", () => {
-    const T = Date.parse("2026-10-04T12:00:00Z");
-    const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
-    const units = [
-      unit({ kind: "text", i0: 0, i1: 0, start: iso(0), end: iso(10) }),
-      unit({ kind: "text", i0: 1, i1: 1, start: iso(10), end: iso(20) }),
-      unit({ kind: "text", i0: 2, i1: 2, start: iso(20), end: iso(30) }),
-    ];
-    const requests: RunTimelineRequest[] = [
-      { idx: 2, ts: iso(20), session: 0, input_tokens: 1, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: 0, added_to: 2 },
-    ];
-    const data = { nodes: [], units, requests };
-    const axis = buildAxisMap(units, { from: T, to: T + 30_000 }, "time");
-    const spans = selectionSpans({ kind: "request", idx: 2 }, data, axis);
-    expect([...spans.keys()].sort()).toEqual(["added", "input", "units"]);
-    expect(spans.get("units")).toHaveLength(2);
-    expect(spansExtent([...spans.values()].flat())).toEqual({ u0: 0, u1: 20_000 });
-    expect(selectionSpans(null, data, axis).size).toBe(0);
+  it("has no roles without a selection", () => {
+    expect(selectionRoles(null, data)).toEqual({ primary: null, linked: new Map() });
   });
 });

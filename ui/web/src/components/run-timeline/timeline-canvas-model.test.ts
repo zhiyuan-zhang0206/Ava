@@ -7,6 +7,7 @@ import {
   barLayout,
   blockLayout,
   buildHitIndex,
+  frameOf,
   hitTest,
   selectionKey,
   snap,
@@ -107,6 +108,10 @@ describe("row layouts", () => {
     expect(layout.wide.map((p) => p.key)).toEqual(["utext-0-0", "utext-1-1"]);
     expect(layout.items.get("utext-1-1")?.selection).toEqual({ kind: "unit", i0: 1, i1: 1, unitKind: "text" });
     expect(selectionKey({ kind: "node", id: "a" })).toBe("na");
+    // A bar's frame hugs the box it is drawn in (the span less its gaps), not the message range it covers.
+    const bars = barLayout(INPUT_ROW, data, axis, axis.viewU(whole), 1000);
+    const bar = bars.wide.find((p) => p.key === "r1");
+    expect(bars.boxes.get("r1")).toEqual({ x0: bar?.x0, x1: bar?.x1 });
     expect(selectionKey({ kind: "request", idx: 4 })).toBe("r4");
   });
 
@@ -116,5 +121,20 @@ describe("row layouts", () => {
     const crowded = barLayout(INPUT_ROW, data, axis, axis.viewU(whole), 3);
     expect(crowded.wide).toEqual([]);
     expect(crowded.cells.length).toBeGreaterThan(0);
+  });
+});
+
+describe("frameOf", () => {
+  it("hugs the union of the drawn boxes exactly when no minimum is asked for", () => {
+    expect(frameOf([{ x0: 10, x1: 14 }, { x0: 30, x1: 33 }], 0, 1000)).toEqual({ left: 10, width: 23 });
+    // A bar 3 px wide is framed at 3 px, not widened to the 6 px minimum of the other rows.
+    expect(frameOf([{ x0: 100, x1: 103 }], 0, 1000)).toEqual({ left: 100, width: 3 });
+  });
+
+  it("widens a thin item to the minimum around its middle and keeps the frame on the track", () => {
+    expect(frameOf([{ x0: 100, x1: 100.5 }], 6, 1000)).toEqual({ left: 97.25, width: 6 });
+    expect(frameOf([{ x0: 0, x1: 1 }], 6, 1000)?.left).toBe(0);
+    expect(frameOf([{ x0: 999, x1: 1000 }], 6, 1000)).toEqual({ left: 994, width: 6 });
+    expect(frameOf([], 6, 1000)).toBeNull();
   });
 });

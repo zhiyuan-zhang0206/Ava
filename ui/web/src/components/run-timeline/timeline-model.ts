@@ -10,7 +10,6 @@ import type {
   RunTimelineUsage,
 } from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
-import { formatTokensCompact } from "@/lib/format/format-number";
 
 export interface TimelineWindow {
   from: string;
@@ -225,20 +224,6 @@ export function layoutRow(
     trackPx,
     minPx,
   );
-}
-
-/** A block's token count as drawn on it: `~` marks an estimate. Null while no request has read it. */
-export function tokenLabel(tokens: number | null, estimated: boolean | null): string | null {
-  return tokens === null ? null : `${estimated === true ? "~" : ""}${formatTokensCompact(tokens)}`;
-}
-
-/** Pixels one character of a block's token label takes, and the padding around it. */
-const TOKEN_CHAR_PX = 6;
-const TOKEN_PAD_PX = 6;
-
-/** Whether the token label fits a block `widthPx` wide while leaving `roomPx` for what else it shows. */
-export function tokenFits(label: string, widthPx: number, roomPx = 0): boolean {
-  return widthPx >= label.length * TOKEN_CHAR_PX + TOKEN_PAD_PX + roomPx;
 }
 
 export function firstLine(text: string, max: number): string {
