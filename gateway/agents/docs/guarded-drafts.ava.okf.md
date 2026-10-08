@@ -13,7 +13,12 @@ including replay. Their identities include the principal, POST and exact
 versioned path. Missing or invalid admission has no birth or launch effects.
 An older router rejects these paths; never downgrade an uncertain intent to a
 legacy draft route. Automatic ambiguous transport retries remain disabled.
-No browser, SDK or MCP consumer activates these new paths in this change.
+The browser's Guide, Schedule Maker and Package Installer entries use these
+paths. Each submission gets one operation key; transport helpers also accept
+an explicit caller key for same-intent replay. They require a 200 receipt with
+a positive agent ID, make one fetch, and never fall back to a legacy route.
+The entry mutations explicitly disable automatic retries and ignore Enter
+while a submission is pending. SDK and MCP draft consumers remain unchanged.
 
 The semantic input is the parsed draft DTO: `nl` and, for packages, `kind`.
 The digest excludes the derived server prompt, label, machine and defaults.
