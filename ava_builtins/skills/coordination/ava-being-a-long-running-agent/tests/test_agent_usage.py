@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from base.telemetry import usage as reader
+from base.telemetry.metrics import usage as reader
 
 usage = importlib.import_module(
     "ava_builtins.skills.coordination.ava-being-a-long-running-agent.scripts.agent_usage"

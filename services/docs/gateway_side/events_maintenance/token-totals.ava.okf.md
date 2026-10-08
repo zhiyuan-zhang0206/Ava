@@ -17,7 +17,7 @@ newly settled days into `agent_model_tokens_total` (every ledger column, per age
 Two readers use it. The fleet graph's node sizes (`gateway/routers/_fleet_tokens.py`) add three
 parts: the totals, the ledger days after the watermark, and the raw `llm_usage` rows of the newest
 two UTC days; a window that starts mid-day also reads that first partial day from the raw rows. The
-independent agent usage script's lifetime read (`base/telemetry/usage.py`) adds the
+independent agent usage script's lifetime read (`base/telemetry/metrics/usage.py`) adds the
 totals, the ledger days after the watermark and each agent's raw tail from its newest ledger day.
 Both do work that does not grow with history. The inspector's metrics read per-day rows of one
 agent below a fixed cutover date, so it needs neither.
