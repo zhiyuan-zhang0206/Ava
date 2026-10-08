@@ -116,6 +116,6 @@ claim and admission consumer for the target before strong callers are enabled.
 The protocol does not promise safe old/new concurrent execution during rolling
 replacement. This PR introduces no SDK/UI activation, fallback or deployment.
 
-Owners: `services/agent_runner/agent_host/native_work.py`,
+Owners: `services/agent_runner/agent_host/invocation/native_work.py`,
 `agent/ownership/native_cancel.py`, `agent/ownership/hosted.py`, and
 [[incarnation-resources.ava.okf.md|incarnation resource evidence]].

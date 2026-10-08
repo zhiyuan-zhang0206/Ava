@@ -93,7 +93,7 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   inputs, revalidate ownership, repair tool state, and validate ownership again. Retry logs identify
   the failed phase, exception type, SQLSTATE and elapsed time. This repairs the
   agent's checkpoint/inbound consistency; it does not mean PostgreSQL crashed.
-- `services/agent_runner/agent_host/recovery_interrupt.py` checks external cancel/terminate
+- `services/agent_runner/agent_host/recovery/interrupt.py` checks external cancel/terminate
   intent during backoff, advancing one retry without claiming the command or
   interrupting a write. At most one optional query runs per control pool; other
   observers skip that check, preserving capacity for ownership and lifecycle.

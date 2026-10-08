@@ -9,6 +9,8 @@ tags: [base]
 
 `base/agents/` owns cross-process agent identity, messages, impersonation, observation and history.
 Its component nodes describe the current contracts and implementation.
+`recovery/` groups shared page-recovery notices and durable automatic-recovery gates;
+`impersonation/event_grants.py` owns runner grants for the impersonation event log.
 
 ## Documented components
 
