@@ -1,4 +1,4 @@
-"""Public SDK retry keeps the committed agent identity."""
+"""An incomplete retry identity cannot rotate a committed agent's attempt."""
 
 from __future__ import annotations
 
@@ -10,9 +10,13 @@ from gateway.tests.agents.test_agents_sdk import _sdk_via_inprocess_gateway, _sp
 
 
 @pytest.mark.usefixtures(_sdk_via_inprocess_gateway.__name__)
-def test_retry_launch_reuses_existing_agent_identity(db_conn: psycopg.Connection) -> None:
+def test_retry_launch_requires_observed_operation_identity(db_conn: psycopg.Connection) -> None:
     agent_id = _spawn_agent()
-    assert ava.agents.retry_launch(agent_id) == agent_id
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agents_meta WHERE id=%s", (agent_id,))
-        assert cur.fetchone() == (1,)
+    prior = ava.agents.get_launch_attempt(agent_id)
+    with pytest.raises(TypeError):
+        ava.agents.retry_launch(agent_id)  # pyright: ignore[reportCallIssue]
+    row = db_conn.execute(
+        "SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    assert row == (prior,)
+    assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (0,)
