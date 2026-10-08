@@ -27,7 +27,8 @@ now share one process:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager
 from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -39,6 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import ava.sdk_surface.agent_identity
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
+from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -100,30 +102,77 @@ class _FakeCursor:
 
 
 class _FakeConn:
-    def __init__(self, rows: dict[int, _Row]) -> None:
-        self._rows = rows
+    def __init__(self, pool: _FakePool) -> None:
+        self._pool = pool
 
-    async def execute(self, _sql: str, params: tuple[Any, ...]) -> _FakeCursor:
-        row = self._rows.get(params[0])
-        return _FakeCursor(row.tuple if row is not None else None)
+    @asynccontextmanager
+    async def transaction(self) -> AsyncGenerator[None]:
+        yield
+
+    async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _FakeCursor:
+        if sql == "SET TRANSACTION READ WRITE":
+            return _FakeCursor(None)
+        if sql == "SELECT id FROM agents_meta WHERE id=%s FOR UPDATE":
+            return _FakeCursor((params[0],) if params[0] in self._pool.rows else None)
+        if sql == (
+            "SELECT i.id FROM agents_meta m JOIN inbound_messages i "
+            "ON i.id=m.lifecycle_command_id WHERE m.id=%s "
+            "AND m.runtime_generation=%s AND m.runtime_owner=%s "
+            "AND i.agent_id=m.id AND i.target_generation=%s AND i.target_owner=%s "
+            "AND i.kind IN ('restart','terminate') AND i.status='claimed' "
+            "AND i.applied_at IS NULL"
+        ):
+            # Legacy graph-return cases carry one synthetic claimed command.
+            return _FakeCursor((params[0],) if params[0] in self._pool.rows else None)
+        if sql == (
+            "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant owner SQL
+            "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
+            "WHERE m.id=%s AND i.id=%s AND i.kind='restart' "
+            "AND i.status='claimed' AND i.applied_at IS NOT NULL "
+            "AND i.target_owner=%s "
+            "AND i.observed_at IS NULL AND m.runtime_owner IS NULL "
+            f"AND {DRAINED_RESOURCES}"
+        ):
+            # A failed orchestration turn has no certified maintenance receipt.
+            return _FakeCursor(None)
+        compact_pending = (
+            "SELECT acceptance,outcome,attempt_id,execution,result,attempt_provider "
+            "FROM native_compact_commands WHERE agent_id=%s AND released_at IS NULL"
+        )
+        compact_closed = (
+            "SELECT c.acceptance,c.outcome,c.attempt_id,c.execution,c.result,c.attempt_provider "
+            "FROM native_compact_commands c JOIN agents_meta m ON m.id=c.agent_id "
+            "JOIN native_graph_work w ON w.id=m.native_work_id "
+            "WHERE m.id=%s AND c.execution->>'work_id'=w.id::text "
+            "AND c.released_at IS NOT NULL AND w.phase='settled' AND w.ended_at IS NOT NULL"
+        )
+        if sql in (compact_pending, compact_pending + " FOR UPDATE", compact_closed):
+            # These orchestration agents have no guarded compact command.
+            return _FakeCursor(None)
+        if sql == (
+            "SELECT machine, status, config_overlay, birth_config FROM agents_meta WHERE id = %s"
+        ):
+            self._pool.reads += 1
+            row = self._pool.rows.get(params[0])
+            return _FakeCursor(row.tuple if row is not None else None)
+        raise AssertionError(f"unexpected host fixture SQL: {sql}")
 
 
 class _FakeConnCtx:
-    """The `async with pool.connection()` shape, counting borrows."""
+    """The `async with pool.connection()` shape."""
 
     def __init__(self, pool: _FakePool) -> None:
         self._pool = pool
 
     async def __aenter__(self) -> _FakeConn:
-        self._pool.reads += 1
-        return _FakeConn(self._pool.rows)
+        return _FakeConn(self._pool)
 
     async def __aexit__(self, *_exc: object) -> bool:
         return False
 
 
 class _FakePool:
-    """Enough of `AsyncConnectionPool` for the host's one query.
+    """Host orchestration SQL without native commands; count stored-config reads.
 
     Deliberately not a live pool: every contract in this file is about
     contextvars, asyncio ordering and cache bookkeeping, none of which a real
@@ -136,7 +185,7 @@ class _FakePool:
         self.rows = rows
         self.reads = 0
 
-    def connection(self) -> _FakeConnCtx:
+    def connection(self, timeout: float | None = None) -> _FakeConnCtx:
         return _FakeConnCtx(self)
 
 
@@ -541,7 +590,8 @@ class TestPoolIsolation:
         await host.run_turn(11)
 
         assert turn_pool.reads == 0
-        assert control_pool.reads == 1
+        # Pre-turn config plus the quiescent compact source qualification.
+        assert control_pool.reads == 2
         assert graph.observations[-1].ops_pool is turn_pool
         assert calls == [("admit", control_pool), ("settle", control_pool), ("force", control_pool)]
 
