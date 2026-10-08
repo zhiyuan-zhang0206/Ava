@@ -33,5 +33,8 @@ a later network outage cannot clear an already-recorded configuration error.
 
 Refresh diagnostics use the existing no-emitter logger path; they do not start
 an event pipeline to report policy failures. Event-sink failures remain a separate
-side-channel contract. Local capture admission and caller-identity capture have
-their own existing error boundaries; this policy does not change them.
+side-channel contract. The fixed lazy import of local capture admission must
+succeed before the SDK body: import, configuration and code errors propagate to
+the caller instead of permitting an uncaptured operation. An absent participant
+is a normal no-op decided by the manifest gate itself; its receipt/admission
+lifecycle remains unchanged. Caller-identity capture retains its separate boundary.
