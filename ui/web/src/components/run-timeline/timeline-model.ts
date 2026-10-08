@@ -753,9 +753,25 @@ export function requestCovers(request: Pick<RunTimelineRequest, "added_from" | "
   return request.added_from <= unit.i0 && unit.i0 < request.added_to;
 }
 
-/** The blocks a request read for the first time, in message order. */
+const byFirstMessage = new WeakMap<readonly RunTimelineUnit[], RunTimelineUnit[]>();
+
+/** The blocks a request read for the first time, in message order (found by binary search over the blocks sorted once per data). */
 export function requestUnits(request: Pick<RunTimelineRequest, "added_from" | "added_to">, units: readonly RunTimelineUnit[]): RunTimelineUnit[] {
-  return units.filter((unit) => requestCovers(request, unit)).sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
+  let sorted = byFirstMessage.get(units);
+  if (sorted === undefined) {
+    sorted = [...units].sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
+    byFirstMessage.set(units, sorted);
+  }
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid].i0 < request.added_from) lo = mid + 1;
+    else hi = mid;
+  }
+  const out: RunTimelineUnit[] = [];
+  for (let i = lo; i < sorted.length && sorted[i].i0 < request.added_to; i += 1) out.push(sorted[i]);
+  return out;
 }
 
 /** The request that first read a block, if it is among `requests`. */
@@ -771,14 +787,20 @@ export function requestSpan(
   request: RunTimelineRequest,
   units: readonly RunTimelineUnit[],
   axis: Pick<AxisMap, "toU" | "unitSpan">,
+  covered: readonly RunTimelineUnit[] = requestUnits(request, units),
 ): AxisSpan {
-  const covered = requestUnits(request, units);
   if (covered.length === 0) {
     const u = axis.toU(Date.parse(request.ts), "lo");
     return { u0: u, u1: u };
   }
-  const spans = covered.map((unit) => axis.unitSpan(unit));
-  return { u0: Math.min(...spans.map((span) => span.u0)), u1: Math.max(...spans.map((span) => span.u1)) };
+  let u0 = Infinity;
+  let u1 = -Infinity;
+  for (const unit of covered) {
+    const span = axis.unitSpan(unit);
+    u0 = Math.min(u0, span.u0);
+    u1 = Math.max(u1, span.u1);
+  }
+  return { u0, u1 };
 }
 
 /** A bar's left edge and width in pixels on a track `trackPx` wide showing `viewU`: the span less the gap each side, at least `BAR_MIN_PX`. */
