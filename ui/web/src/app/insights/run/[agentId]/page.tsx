@@ -22,6 +22,8 @@ import {
   nodeAncestors,
   nodeChildren,
   nodeWindow,
+  requestSelection,
+  requestUnits,
   unitWindow,
   viewportOf,
   type Crumb,
@@ -124,6 +126,17 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
         ...nodeWindow(node),
         label: `${t("levelRow", { level: node.level })} · ${firstLine(node.summary, CRUMB_LABEL_CHARS)}`,
       });
+    } else if (target.kind === "request") {
+      const request = data.requests.find((candidate) => candidate.idx === target.idx);
+      const covered = request === undefined ? [] : requestUnits(request, data.units);
+      const first = covered.at(0);
+      const last = covered.at(-1);
+      if (first === undefined || last === undefined) return;
+      pushCrumb({
+        from: unitWindow(first).from,
+        to: unitWindow(last).to,
+        label: `${t("contextRow")} · #${first.i0}-${last.i1}`,
+      });
     } else {
       const unit = data.units.find(
         (candidate) =>
@@ -147,11 +160,16 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
 
   const selectedNode =
     selection?.kind === "node" ? data?.nodes.find((node) => node.id === selection.id) : undefined;
+  // A selected request shows the details of the block of the AIMessage that made it.
+  const unitTarget: Selection | null =
+    selection?.kind === "request"
+      ? requestSelection({ idx: selection.idx }, data?.units ?? [])
+      : selection;
   const selectedUnit =
-    selection?.kind === "unit"
+    unitTarget?.kind === "unit"
       ? data?.units.find(
           (unit) =>
-            unit.i0 === selection.i0 && unit.i1 === selection.i1 && unit.kind === selection.unitKind,
+            unit.i0 === unitTarget.i0 && unit.i1 === unitTarget.i1 && unit.kind === unitTarget.unitKind,
         )
       : undefined;
 

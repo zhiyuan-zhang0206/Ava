@@ -16641,6 +16641,14 @@
           "added_estimated": {
             "type": "boolean",
             "title": "Added Estimated"
+          },
+          "added_from": {
+            "type": "integer",
+            "title": "Added From"
+          },
+          "added_to": {
+            "type": "integer",
+            "title": "Added To"
           }
         },
         "type": "object",
@@ -16651,10 +16659,12 @@
           "input_tokens",
           "output_tokens",
           "added_tokens",
-          "added_estimated"
+          "added_estimated",
+          "added_from",
+          "added_to"
         ],
         "title": "RunTimelineRequest",
-        "description": "One LLM request of the agent: an AIMessage carrying `usage_metadata`.\n\n`idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent\n(the read time of the message before it, the start of the turn's thinking block);\n`session` the zero-based compaction segment it was sent in; `input_tokens` the provider's\ntotal input tokens of that request, the size of its context, and `output_tokens` what it\ngenerated (both the provider's own numbers, never estimated).\n\n`added_tokens` is what newly entered the context for this request: the token sum of the\nmessages first read by it, i.e. those from the previous request's AIMessage (its output is\nre-sent) up to the message before this one; for a session's first request, from the session's\nfirst message. The segment head (system prompt) is not counted. `added_estimated` is True when\nany of those counts is a share rather than the provider's own number."
+        "description": "One LLM request of the agent: an AIMessage carrying `usage_metadata`.\n\n`idx` is the AIMessage's index in the stitched history; `ts` the time the request was sent\n(the read time of the message before it, the start of the turn's thinking block);\n`session` the zero-based compaction segment it was sent in; `input_tokens` the provider's\ntotal input tokens of that request, the size of its context, and `output_tokens` what it\ngenerated (both the provider's own numbers, never estimated).\n\n`added_tokens` is what newly entered the context for this request: the token sum of the\nmessages first read by it, i.e. those from the previous request's AIMessage (its output is\nre-sent) up to the message before this one; for a session's first request, from the session's\nfirst message. The segment head (system prompt) is not counted. `added_estimated` is True when\nany of those counts is a share rather than the provider's own number. `added_from` / `added_to`\nare that message range as indices into the stitched history, half-open (`added_to` is the\nrequest's own `idx`); the two are equal when the request read nothing new."
       },
       "RunTimelineResponse": {
         "properties": {

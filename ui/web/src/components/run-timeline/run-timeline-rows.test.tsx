@@ -148,6 +148,8 @@ describe("RunTimelineRows context rows", () => {
       output_tokens: 1,
       added_tokens: added,
       added_estimated: estimated,
+      added_from: idx - 1,
+      added_to: idx,
     });
     renderRows({ requests: [request(1, 100, 1000, 1000, true), request(2, 500, 2000, 100, false)] });
     const absolute = screen.getAllByTestId("run-timeline-request");
@@ -176,22 +178,57 @@ describe("RunTimelineRows keyboard and request bars", () => {
     output_tokens: 1,
     added_tokens: 10,
     added_estimated: false,
+    added_from: idx - 1,
+    added_to: idx,
   });
   const units = [unit("inbound", 0, 0, 100), unit("thinking", 1, 100, 500), unit("thinking", 2, 600, 900)];
 
-  it("selects the request's own block when a bar is clicked, and drills on double click", () => {
+  it("selects the request when a bar is clicked, and drills on double click", () => {
     const onSelect = renderRows({ units, requests: [request(1, 100), request(2, 600)] });
     fireEvent.click(screen.getAllByTestId("run-timeline-request")[1]);
-    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 2, i1: 2, unitKind: "thinking" });
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "request", idx: 2 });
     fireEvent.click(screen.getAllByTestId("run-timeline-added")[0]);
-    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "request", idx: 1 });
   });
 
-  it("widens the bars to the space between requests", () => {
+  it("lines a bar up with the blocks it read, less a pixel each side, on the same x as the Messages row", () => {
+    // Request 2 first read message 1 only (100-500 ms): 1 px per ms on the 1000 px track.
     renderRows({ units, requests: [request(1, 100), request(2, 600)] });
-    const [bar] = screen.getAllByTestId("run-timeline-request");
-    // 500 px apart on a 1000 px track: capped at the maximum width.
-    expect(parseFloat(bar.style.width)).toBeGreaterThan(20);
+    const [, bar] = screen.getAllByTestId("run-timeline-request");
+    const block = screen.getAllByTestId("run-timeline-unit")[1];
+    expect(parseFloat(bar.style.left)).toBeCloseTo(parseFloat(block.style.left) + 1);
+    expect(parseFloat(bar.style.width)).toBeCloseTo(parseFloat(block.style.width) - 2);
+    expect(screen.getAllByTestId("run-timeline-added")[1].style.left).toBe(bar.style.left);
+  });
+
+  it("selects every block a request read together with its bar, and lights them on hover", () => {
+    renderRows(
+      { units, requests: [request(1, 100), { ...request(3, 900), added_from: 1, added_to: 3 }] },
+      { kind: "request", idx: 3 },
+    );
+    const blocks = screen.getAllByTestId("run-timeline-unit");
+    expect(blocks.map((el) => el.getAttribute("data-highlight"))).toEqual(["none", "self", "self"]);
+    const [first, second] = screen.getAllByTestId("run-timeline-request");
+    expect(second.hasAttribute("data-selected")).toBe(true);
+    expect(first.hasAttribute("data-selected")).toBe(false);
+    fireEvent.mouseEnter(first);
+    expect(screen.getAllByTestId("run-timeline-unit")[0].getAttribute("data-hover")).toBe("lit");
+  });
+
+  it("keeps the session color on the selected request bar and rings it", () => {
+    renderRows({ units, requests: [request(1, 100), request(2, 600)] }, { kind: "request", idx: 1 });
+    const [first, second] = screen.getAllByTestId("run-timeline-request").map((bar) => bar.querySelector("span[aria-hidden]")!);
+    expect(first.className).toContain("bg-blue-500");
+    expect(first.className).not.toContain("bg-foreground");
+    expect(first.className).toContain("ring-2 ring-foreground");
+    expect(second.className).not.toContain("ring-2");
+  });
+
+  it("lights the bar that read a selected block", () => {
+    renderRows({ units, requests: [request(1, 100), request(2, 600)] }, { kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
+    const [first, second] = screen.getAllByTestId("run-timeline-request");
+    expect(second.hasAttribute("data-selected")).toBe(true);
+    expect(first.hasAttribute("data-selected")).toBe(false);
   });
 
   it("moves the selection with the arrow keys and ignores them in an input", () => {

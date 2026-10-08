@@ -28,6 +28,7 @@ import {
   layoutSpans,
   levelsTopFirst,
   matchesHighlight,
+  requestCovers,
   ADDED_ROW,
   INPUT_ROW,
   UNITS_ROW,
@@ -144,7 +145,7 @@ export function RunTimelineRows({
 }) {
   const t = useTranslations("runTimeline");
   const [hover, setHover] = useState<Hover | null>(null);
-  const lit = hoverLit(hover, data.nodes, data.units);
+  const lit = hoverLit(hover, data.nodes, data.units, data.requests);
   const levels = levelsTopFirst(data.nodes);
   const [mode, setMode] = useState<AxisMode>("time");
   // The row the selection was made in: a request's bar and its message block select the same thing.
@@ -163,6 +164,8 @@ export function RunTimelineRows({
   // A selection lights itself and every ancestor; the rest steps back.
   const chain = chainIds(selection, data.nodes, data.units);
   const dim = selection !== null;
+  const selectedRequest =
+    selection?.kind === "request" ? data.requests.find((request) => request.idx === selection.idx) : undefined;
   const chartRef = useRef<HTMLDivElement>(null);
   const live = useRef({ base, view, onView, axis });
   // The view a wheel event produced that React has not rendered yet.
@@ -470,7 +473,9 @@ export function RunTimelineRows({
               i1: unit.i1,
               unitKind: unit.kind,
             };
-            const picked = isSelected(selection, candidate);
+            const picked =
+              isSelected(selection, candidate) ||
+              (selection?.kind === "request" && selectedRequest !== undefined && requestCovers(selectedRequest, unit));
             const hovered = hover?.kind === "unit" && isSelected(hover, candidate);
             const hoverLight = hovered || lit.unitKeys.has(key);
             const matched = highlight !== null && matchesHighlight(unit, highlight);
