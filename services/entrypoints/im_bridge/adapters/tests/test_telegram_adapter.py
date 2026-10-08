@@ -20,6 +20,8 @@ import services.entrypoints.im_bridge.adapters.telegram as telegram_module
 from services.entrypoints.im_bridge.adapters.telegram import InboundMessage, TelegramAdapter
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
 from services.entrypoints.im_bridge.tests.slices import telegram_config
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.types import RetryableTransportError
 
 
 class FakeCore:
@@ -115,83 +117,86 @@ class _LogRecorder:
 
 async def test_poll_loop_forwards_owner_text(env: None, tmp_path: Any) -> None:
     """Owner text message -> InboundMessage reaches core; offset advances."""
-    core = FakeCore()
-    transport, captured = _transport(
-        [
-            httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
-            httpx.Response(
-                200,
-                json={"ok": True, "result": [_update(5, 42, text="hello", message_id=9)]},
-            ),
-        ]
-    )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
-        try:
-            await adapter.start()
-            await asyncio.wait_for(core.received.wait(), timeout=2)
-        finally:
-            await adapter.stop()
+    async with owned_tasks() as _owned_tasks:
+        core = FakeCore()
+        transport, captured = _transport(
+            [
+                httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
+                httpx.Response(
+                    200,
+                    json={"ok": True, "result": [_update(5, 42, text="hello", message_id=9)]},
+                ),
+            ]
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            adapter = TelegramAdapter(core, _config(), client=client)
+            try:
+                await adapter.start(_owned_tasks)
+                await asyncio.wait_for(core.received.wait(), timeout=2)
+            finally:
+                await adapter.stop()
 
-    assert core.inbound == [
-        InboundMessage(channel="telegram", chat_id="42", text="hello", message_id="9")
-    ]
-    # First getUpdates used offset 0 (no file yet); the persisted offset is 6.
-    first = next(r for r in captured if "getUpdates" in str(r.url))
-    assert int(first.url.params["offset"]) == 0
-    assert _offset_file(tmp_path).read_text() == "6"
+        assert core.inbound == [
+            InboundMessage(channel="telegram", chat_id="42", text="hello", message_id="9")
+        ]
+        # First getUpdates used offset 0 (no file yet); the persisted offset is 6.
+        first = next(r for r in captured if "getUpdates" in str(r.url))
+        assert int(first.url.params["offset"]) == 0
+        assert _offset_file(tmp_path).read_text() == "6"
 
 
 async def test_non_owner_ignored_but_offset_advances(env: None, tmp_path: Any) -> None:
     """A stranger's message is consumed (offset moves) but never forwarded."""
-    core = FakeCore()
-    transport, _captured = _transport(
-        [
-            httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
-            httpx.Response(
-                200,
-                json={"ok": True, "result": [_update(7, 99, text="who are you")]},
-            ),
-        ]
-    )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
-        try:
-            await adapter.start()
-            # poll loop consumes the update; the ack lands after handling
-            await _wait_until(lambda: _offset_file(tmp_path).exists(), timeout=2)
-        finally:
-            await adapter.stop()
+    async with owned_tasks() as _owned_tasks:
+        core = FakeCore()
+        transport, _captured = _transport(
+            [
+                httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
+                httpx.Response(
+                    200,
+                    json={"ok": True, "result": [_update(7, 99, text="who are you")]},
+                ),
+            ]
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            adapter = TelegramAdapter(core, _config(), client=client)
+            try:
+                await adapter.start(_owned_tasks)
+                # poll loop consumes the update; the ack lands after handling
+                await _wait_until(lambda: _offset_file(tmp_path).exists(), timeout=2)
+            finally:
+                await adapter.stop()
 
-    assert core.inbound == []
-    assert _offset_file(tmp_path).read_text() == "8"
+        assert core.inbound == []
+        assert _offset_file(tmp_path).read_text() == "8"
 
 
 async def test_offset_persisted_and_reused(env: None, tmp_path: Any) -> None:
     """The next long poll sends the persisted offset, not 0."""
-    core = FakeCore()
-    transport, captured = _transport(
-        [
-            httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
-            httpx.Response(
-                200,
-                json={"ok": True, "result": [_update(7, 42, text="hi")]},
-            ),
-            httpx.Response(200, json={"ok": True, "result": []}),
-        ]
-    )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
-        try:
-            await adapter.start()
-            await asyncio.wait_for(core.received.wait(), timeout=2)
-            await _wait_until(lambda: len(captured) >= 3)  # setMyCommands + 2 getUpdates
-        finally:
-            await adapter.stop()
+    async with owned_tasks() as _owned_tasks:
+        core = FakeCore()
+        transport, captured = _transport(
+            [
+                httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
+                httpx.Response(
+                    200,
+                    json={"ok": True, "result": [_update(7, 42, text="hi")]},
+                ),
+                httpx.Response(200, json={"ok": True, "result": []}),
+            ]
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            adapter = TelegramAdapter(core, _config(), client=client)
+            try:
+                await adapter.start(_owned_tasks)
+                await asyncio.wait_for(core.received.wait(), timeout=2)
+                await _wait_until(lambda: len(captured) >= 3)  # setMyCommands + 2 getUpdates
+            finally:
+                await adapter.stop()
 
-    offsets = [int(r.url.params["offset"]) for r in captured if "getUpdates" in str(r.url)]
-    assert offsets == [0, 8]
-    assert _offset_file(tmp_path).read_text() == "8"
+        offsets = [int(r.url.params["offset"]) for r in captured if "getUpdates" in str(r.url)]
+        assert offsets == [0, 8]
+        assert _offset_file(tmp_path).read_text() == "8"
 
 
 async def test_send_splits_long_text(env: None) -> None:
@@ -329,11 +334,12 @@ async def test_start_skips_when_not_configured() -> None:
     """No token / no owner id -> start() logs and returns (the daemon stays
     up either way, like the weixin/feishu adapters) — a fresh install with no
     bot token must not kill the im-bridge session."""
-    adapter = TelegramAdapter(
-        FakeCore(), telegram_config(telegram_bot_token="", telegram_owner_id=0)
-    )
-    await adapter.start()
-    assert adapter._poll_task is None
+    async with owned_tasks() as _owned_tasks:
+        adapter = TelegramAdapter(
+            FakeCore(), telegram_config(telegram_bot_token="", telegram_owner_id=0)
+        )
+        await adapter.start(_owned_tasks)
+        assert adapter._poll_task is None
 
 
 # --- v2: HTML rendering / buttons / callback taps / command menu ---
@@ -459,23 +465,24 @@ async def test_callback_tap_runs_command_and_answers(env: Any) -> None:
 async def test_start_installs_command_menu(env: Any) -> None:
     """start() sets the persistent command menu (setMyCommands); failure is
     tolerated (the poll loop still runs)."""
-    transport, captured = _transport([httpx.Response(200, json={"ok": True, "result": True})])
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
-        await adapter.start()
-        try:
-            (request,) = captured
-            assert request.url.path.endswith("/setMyCommands")
-            commands = json.loads(request.content)["commands"]
-            assert {c["command"] for c in commands} == {
-                "list",
-                "spawn",
-                "status",
-                "commands",
-                "help",
-            }
-        finally:
-            await adapter.stop()
+    async with owned_tasks() as _owned_tasks:
+        transport, captured = _transport([httpx.Response(200, json={"ok": True, "result": True})])
+        async with httpx.AsyncClient(transport=transport) as client:
+            adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+            await adapter.start(_owned_tasks)
+            try:
+                (request,) = captured
+                assert request.url.path.endswith("/setMyCommands")
+                commands = json.loads(request.content)["commands"]
+                assert {c["command"] for c in commands} == {
+                    "list",
+                    "spawn",
+                    "status",
+                    "commands",
+                    "help",
+                }
+            finally:
+                await adapter.stop()
 
 
 # --- durability: offset advances only after delivery; no double delivery ---
@@ -491,65 +498,67 @@ class FailingCore:
     async def handle_inbound(self, msg: InboundMessage) -> None:
         if self.fail_first:
             self.fail_first = False
-            raise RuntimeError("gateway down")
+            raise RetryableTransportError("gateway down")
         self.inbound.append(msg)
 
 
 async def test_unacked_update_is_refetched_after_failure(env: Any, tmp_path: Any) -> None:
     """A message whose delivery fails keeps the offset put — the next poll
     re-fetches it, so nothing is dropped in a rollout window."""
-    core = FailingCore()
-    transport, captured = _transport(
-        [
-            httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
-            httpx.Response(
-                200, json={"ok": True, "result": [_update(5, 42, text="hello", message_id=9)]}
-            ),
-            httpx.Response(
-                200, json={"ok": True, "result": [_update(5, 42, text="hello", message_id=9)]}
-            ),
-        ]
-    )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
-        try:
-            await adapter.start()
-            await _wait_until(lambda: len(core.inbound) == 1, timeout=3)
-        finally:
-            await adapter.stop()
+    async with owned_tasks() as _owned_tasks:
+        core = FailingCore()
+        transport, captured = _transport(
+            [
+                httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
+                httpx.Response(
+                    200, json={"ok": True, "result": [_update(5, 42, text="hello", message_id=9)]}
+                ),
+                httpx.Response(
+                    200, json={"ok": True, "result": [_update(5, 42, text="hello", message_id=9)]}
+                ),
+            ]
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            adapter = TelegramAdapter(core, _config(), client=client)
+            try:
+                await adapter.start(_owned_tasks)
+                await _wait_until(lambda: len(core.inbound) == 1, timeout=3)
+            finally:
+                await adapter.stop()
 
-    assert core.inbound == [
-        InboundMessage(channel="telegram", chat_id="42", text="hello", message_id="9")
-    ]
-    # first poll failed (no ack → offset file still 0), second poll re-fetched
-    offsets = [int(r.url.params["offset"]) for r in captured if "getUpdates" in str(r.url)]
-    assert offsets[0] == 0
-    assert offsets[1] == 0  # unacked — re-fetched from the same offset
+        assert core.inbound == [
+            InboundMessage(channel="telegram", chat_id="42", text="hello", message_id="9")
+        ]
+        # first poll failed (no ack → offset file still 0), second poll re-fetched
+        offsets = [int(r.url.params["offset"]) for r in captured if "getUpdates" in str(r.url)]
+        assert offsets[0] == 0
+        assert offsets[1] == 0  # unacked — re-fetched from the same offset
 
 
 async def test_refetched_update_not_delivered_twice(env: Any, tmp_path: Any) -> None:
     """After a successful delivery the offset advances; if the same update
     were re-fetched anyway, the in-process dedup prevents a duplicate."""
-    core = FakeCore()
-    transport, _captured = _transport(
-        [
-            httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
-            httpx.Response(
-                200, json={"ok": True, "result": [_update(5, 42, text="hi", message_id=9)]}
-            ),
-        ]
-    )
-    async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
-        try:
-            await adapter.start()
-            await asyncio.wait_for(core.received.wait(), timeout=2)
-        finally:
-            await adapter.stop()
-    assert len(core.inbound) == 1
-    # simulate a re-fetch of the same update (crash before the offset write)
-    await adapter._handle_update(_update(5, 42, text="hi", message_id=9))
-    assert len(core.inbound) == 1  # dedup: not delivered again
+    async with owned_tasks() as _owned_tasks:
+        core = FakeCore()
+        transport, _captured = _transport(
+            [
+                httpx.Response(200, json={"ok": True, "result": True}),  # setMyCommands
+                httpx.Response(
+                    200, json={"ok": True, "result": [_update(5, 42, text="hi", message_id=9)]}
+                ),
+            ]
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            adapter = TelegramAdapter(core, _config(), client=client)
+            try:
+                await adapter.start(_owned_tasks)
+                await asyncio.wait_for(core.received.wait(), timeout=2)
+            finally:
+                await adapter.stop()
+        assert len(core.inbound) == 1
+        # simulate a re-fetch of the same update (crash before the offset write)
+        await adapter._handle_update(_update(5, 42, text="hi", message_id=9))
+        assert len(core.inbound) == 1  # dedup: not delivered again
 
 
 async def test_spawn_taps_use_event_identity_not_shared_menu_message(env: Any) -> None:

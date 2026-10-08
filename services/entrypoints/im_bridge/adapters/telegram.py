@@ -32,7 +32,15 @@ from services.entrypoints.im_bridge.outbound.types import (
     OutboundChunk,
     PreparedOutboundSend,
 )
-from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
+from services.entrypoints.im_bridge.types import (
+    NETWORK_ERRORS,
+    IMAdapter,
+    InboundMessage,
+    RetryableTransportError,
+    SendNotStartedError,
+    SendOutcomeUncertainError,
+    raise_http_failure,
+)
 
 # Telegram's per-message cap for plain-text messages.
 _MAX_MESSAGE_LEN = 4096
@@ -148,7 +156,7 @@ class TelegramAdapter(IMAdapter):
 
     # -- lifecycle -------------------------------------------------------
 
-    async def start(self) -> None:
+    async def start(self, tasks: asyncio.TaskGroup) -> None:
         # Unconfigured = skip with a log, like the weixin/feishu adapters — the
         # daemon must stay up either way (a fresh install has no bot token, and
         # a raise here kills the session, failing `ava start`'s readiness gate).
@@ -156,7 +164,7 @@ class TelegramAdapter(IMAdapter):
             logger.info("telegram not configured (no bot token / owner id), skipping")
             return
         self._stop_event.clear()
-        self._poll_task = asyncio.create_task(self._poll_loop(), name="telegram-poll")
+        self._poll_task = tasks.create_task(self._poll_loop(), name="telegram-poll")
         await self._install_command_menu()
 
     async def _install_command_menu(self) -> None:
@@ -172,7 +180,7 @@ class TelegramAdapter(IMAdapter):
             )
             if resp.status_code != 200:
                 logger.warning("telegram setMyCommands failed: HTTP {}", resp.status_code)
-        except httpx.HTTPError as exc:
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
             logger.warning("telegram setMyCommands failed: {}", type(exc).__name__)
 
     async def stop(self) -> None:
@@ -207,7 +215,7 @@ class TelegramAdapter(IMAdapter):
                 await asyncio.sleep(_POLL_IDLE_SLEEP)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # the loop must survive any failure
+            except NETWORK_ERRORS as exc:
                 logger.warning("telegram poll failed: {}", exc)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
@@ -229,16 +237,22 @@ class TelegramAdapter(IMAdapter):
                 },
                 timeout=self._config.telegram_poll_timeout_seconds + 10.0,
             )
-        except httpx.HTTPError as exc:
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+        ) as exc:
             # httpx error text can embed the request URL, which carries the token.
-            raise RuntimeError(
+            raise RetryableTransportError(
                 f"telegram getUpdates request failed: {type(exc).__name__}"
             ) from None
         if resp.status_code != 200:
             # Never raise_for_status(): HTTPStatusError embeds the request URL.
             # Response bodies are safe — they never contain the token.
-            raise RuntimeError(
-                f"telegram getUpdates failed: HTTP {resp.status_code} - {resp.text[:200]}"
+            raise_http_failure(
+                resp.status_code,
+                f"telegram getUpdates failed: HTTP {resp.status_code} - {resp.text[:200]}",
             )
         return resp.json()["result"]
 
@@ -305,7 +319,7 @@ class TelegramAdapter(IMAdapter):
             )
             if resp.status_code != 200:
                 logger.warning("telegram answerCallbackQuery failed: HTTP {}", resp.status_code)
-        except httpx.HTTPError as exc:
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
             logger.warning("telegram answerCallbackQuery failed: {}", type(exc).__name__)
 
     # -- outbound --------------------------------------------------------
@@ -324,12 +338,10 @@ class TelegramAdapter(IMAdapter):
                 json={"chat_id": chat_id, "action": "typing"},
                 timeout=10.0,
             )
-        except httpx.HTTPError as exc:
-            raise RuntimeError(f"telegram typing failed: {type(exc).__name__}") from None
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            raise RetryableTransportError(f"telegram typing failed: {type(exc).__name__}") from None
         if resp.status_code != 200:
-            raise RuntimeError(
-                f"telegram typing failed: HTTP {resp.status_code} - {resp.text[:200]}"
-            )
+            raise_http_failure(resp.status_code, f"telegram typing failed: HTTP {resp.status_code}")
 
     async def outbound_account_id(self) -> str:
         if not self._token or self._owner_id == 0:
@@ -340,12 +352,16 @@ class TelegramAdapter(IMAdapter):
                     response = await self._http.get(
                         f"https://api.telegram.org/bot{self._token}/getMe", timeout=10.0
                     )
-                except httpx.HTTPError as exc:
-                    raise RuntimeError(
+                except (
+                    httpx.TimeoutException,
+                    httpx.NetworkError,
+                    httpx.RemoteProtocolError,
+                ) as exc:
+                    raise RetryableTransportError(
                         f"telegram identity request failed: {type(exc).__name__}"
                     ) from None
                 if response.status_code != 200:
-                    raise RuntimeError(f"telegram identity failed: HTTP {response.status_code}")
+                    raise_http_failure(response.status_code, "telegram identity request failed")
                 body = response.json()
                 bot_id = body.get("result", {}).get("id")
                 if (
@@ -438,10 +454,12 @@ class TelegramAdapter(IMAdapter):
                     await self._send_message(
                         chat_id, chunk.fallback_text, buttons=buttons, html=False
                     )
-            except SendNotStartedError:
+            except (SendNotStartedError, RetryableTransportError, SendOutcomeUncertainError):
                 if index == 0:
                     raise
-                raise RuntimeError("telegram send incomplete after acknowledged chunks") from None
+                raise SendOutcomeUncertainError(
+                    "telegram send incomplete after acknowledged chunks"
+                ) from None
 
     async def send_to_owner(
         self,
@@ -480,16 +498,21 @@ class TelegramAdapter(IMAdapter):
                 json=payload,
                 timeout=10.0,
             )
-        except httpx.HTTPError as exc:
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+        ) as exc:
             if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
                 raise SendNotStartedError(
                     f"telegram send not started: {type(exc).__name__}"
                 ) from None
-            raise RuntimeError(f"telegram send failed: {type(exc).__name__}") from None
+            raise SendOutcomeUncertainError(f"telegram send failed: {type(exc).__name__}") from None
         if resp.status_code == 400 and html:
             raise _MarkupRejectedError  # bad entities — caller retries without parse_mode
         if resp.status_code != 200:
-            raise RuntimeError(f"telegram send failed: HTTP {resp.status_code} - {resp.text[:200]}")
+            raise_http_failure(resp.status_code, f"telegram send failed: HTTP {resp.status_code}")
         # Delivery-count surface (task #4250): one line per API-confirmed
         # chunk, never carrying the token. Guarded so a malformed response
         # body cannot fail a send that already landed.

@@ -11,10 +11,17 @@ import concurrent.futures
 import json
 import threading
 from collections import deque
+from collections.abc import Callable, Coroutine
 from typing import Any
+
+import requests
 
 from base.log import logger
 from services.entrypoints.im_bridge.adapters import feishu_poll_cursor as cursors
+from services.entrypoints.im_bridge.adapters.feishu_inbound import (
+    normalize_card_action,
+    normalize_message,
+)
 from services.entrypoints.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
 from services.entrypoints.im_bridge.outbound.types import (
@@ -23,13 +30,18 @@ from services.entrypoints.im_bridge.outbound.types import (
     PreparedOutboundSend,
 )
 from services.entrypoints.im_bridge.state import _load_switch_state
-from services.entrypoints.im_bridge.types import IMAdapter, InboundMessage, SendNotStartedError
+from services.entrypoints.im_bridge.types import (
+    NETWORK_ERRORS,
+    IMAdapter,
+    InboundMessage,
+    RetryableTransportError,
+    SendNotStartedError,
+    SendOutcomeUncertainError,
+    raise_http_failure,
+)
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.
 MAX_SEGMENT_CHARS = 8000
-# A message that repeatedly crashes inbound handling is skipped after this
-# many consecutive failures (see the poller's poison-message handling).
-POISON_MAX_RETRIES = 3
 
 
 def _backoff_delay(interval: float, failures: int) -> float:
@@ -62,6 +74,9 @@ class FeishuAdapter(IMAdapter):
         self._main_loop: asyncio.AbstractEventLoop | None = None
         self._ws_loop: asyncio.AbstractEventLoop | None = None
         self._ws_thread: threading.Thread | None = None
+        self._tasks: asyncio.TaskGroup | None = None
+        self._ws_exit: asyncio.Future[None] | None = None
+        self._accepting_events = False
         self._ws_client: Any = None
         self._rest_client: Any = None
         # Initialized here (not only in _normalize) so send_to_owner before the
@@ -86,12 +101,11 @@ class FeishuAdapter(IMAdapter):
         # of being mistaken for history (a fresh chat's first round is empty).
         self._poll_seeded: set[str] = set()
         self._poll_failures = 0  # consecutive all-chats-failed rounds (backoff)
-        self._poison_retries: dict[str, int] = {}  # "chat:msg" -> inbound failures
         self._seen_messages: deque[str] = deque(maxlen=500)
 
     # -- lifecycle -----------------------------------------------------------
 
-    async def start(self) -> None:
+    async def start(self, tasks: asyncio.TaskGroup) -> None:
         """Connect the long-connection client; no-op (with a log) when the
         credentials are missing so the daemon stays up either way."""
         self._app_id = self._config.feishu_app_id
@@ -105,10 +119,14 @@ class FeishuAdapter(IMAdapter):
         # Seed the memory-only owner open id lost by a restart (task #4930).
         await self._seed_owner_from_switch_state()
         self._main_loop = asyncio.get_running_loop()
+        self._tasks = tasks
+        self._ws_exit = self._main_loop.create_future()
+        self._accepting_events = True
+        tasks.create_task(self._observe_ws_exit(self._ws_exit))
         self._ws_thread = threading.Thread(target=self._run_ws, name="feishu-ws", daemon=True)
         self._ws_thread.start()
         logger.info("FeishuAdapter: ws thread started")
-        self._start_poller()
+        self._start_poller(tasks)
 
     def _run_ws(self) -> None:
         """Connect the long-connection client; blocks for the process lifetime.
@@ -117,6 +135,9 @@ class FeishuAdapter(IMAdapter):
         lark import lives here). A failed connect is logged and the SDK retries
         with backoff; a failure here must never take the daemon down.
         """
+        main_loop = self._main_loop
+        if main_loop is None:
+            raise RuntimeError("Feishu websocket thread has no service loop")
         try:
             self._ws_client = self._build_ws_client()
             import lark_oapi.ws.client as _ws_module  # pyright: ignore[reportUnknownVariableType]
@@ -124,7 +145,14 @@ class FeishuAdapter(IMAdapter):
             self._ws_loop = _ws_module.loop  # pyright: ignore[reportUnknownMemberType]
             self._ws_client.start()  # blocks; SDK reconnects internally
         except Exception as exc:
-            logger.error("FeishuAdapter: ws connection failed: {}", exc)
+            if self._accepting_events:
+                main_loop.call_soon_threadsafe(self._record_ws_exit, exc)
+        else:
+            if not self._accepting_events:
+                return
+            main_loop.call_soon_threadsafe(
+                self._record_ws_exit, RuntimeError("Feishu websocket thread exited unexpectedly")
+            )
 
     async def _seed_owner_from_switch_state(self) -> None:
         """Seed the owner open id lost by a restart from the persisted switch state.
@@ -135,11 +163,7 @@ class FeishuAdapter(IMAdapter):
         if self._last_open_id:
             return
         prefix = f"{self.channel}:"
-        try:
-            keys = [k for k in _load_switch_state() if k.startswith(prefix) and k != prefix]
-        except Exception as exc:
-            logger.warning("FeishuAdapter: switch state unreadable: {!r}", exc)
-            keys = []
+        keys = [k for k in _load_switch_state() if k.startswith(prefix) and k != prefix]
         if len(keys) == 1:
             self._last_open_id = keys[0][len(prefix) :]
             logger.info("FeishuAdapter: seeded owner open id: {}", self._last_open_id)
@@ -151,10 +175,36 @@ class FeishuAdapter(IMAdapter):
             chats=len(keys),
         )
 
+    def begin_shutdown(self) -> None:
+        """Reject queued callbacks and end the owner wait; this does not stop the thread."""
+        self._accepting_events = False
+        self._tasks = None
+        if self._ws_exit is not None and not self._ws_exit.done():
+            self._ws_exit.cancel()
+
+    async def _observe_ws_exit(self, future: asyncio.Future[None]) -> None:
+        await future
+
+    def _record_ws_exit(self, error: Exception) -> None:
+        if self._accepting_events and self._ws_exit is not None and not self._ws_exit.done():
+            self._ws_exit.set_exception(error)
+
+    def _spawn_event(self, handler: Callable[[Any], Coroutine[Any, Any, None]], data: Any) -> None:
+        tasks = self._tasks
+        if not self._accepting_events or tasks is None:
+            return
+        coroutine = handler(data)
+        try:
+            tasks.create_task(coroutine)
+        except RuntimeError as error:
+            coroutine.close()
+            self._record_ws_exit(error)
+
     async def stop(self) -> None:
         """Close the ws connection (the SDK has no public stop; its private
         ``_disconnect`` is scheduled on the SDK's own loop). The ws thread is a
         daemon and lingers harmlessly until process exit."""
+        self.begin_shutdown()
         poll_task = self._poll_task
         self._poll_task = None
         if poll_task is not None:
@@ -221,8 +271,7 @@ class FeishuAdapter(IMAdapter):
         main_loop = self._main_loop
         if main_loop is None or main_loop.is_closed():
             return
-        future = asyncio.run_coroutine_threadsafe(self._handle_event(data), main_loop)
-        future.add_done_callback(_log_future_error)
+        main_loop.call_soon_threadsafe(self._spawn_event, self._handle_event, data)
 
     def _on_card_action(self, data: Any) -> None:
         """Card button callback (ws thread) — the button's value.key is the
@@ -230,95 +279,22 @@ class FeishuAdapter(IMAdapter):
         main_loop = self._main_loop
         if main_loop is None or main_loop.is_closed():
             return
-        future = asyncio.run_coroutine_threadsafe(self._handle_card_action(data), main_loop)
-        future.add_done_callback(_log_future_error)
+        main_loop.call_soon_threadsafe(self._spawn_event, self._handle_card_action, data)
 
     async def _handle_card_action(self, data: Any) -> None:
-        try:
-            action = getattr(data, "event", None)
-            if action is None:
-                return
-            operator = getattr(action, "operator", None)
-            open_id = getattr(operator, "open_id", "") if operator is not None else ""
-            if not open_id:
-                return
-            card_action: Any = getattr(action, "action", None)
-            if card_action is None:
-                return
-            card_value: dict[str, object] = getattr(card_action, "value", None) or {}
-            key = str(card_value.get("key", ""))
-            if not key:
-                return
-            # Button taps are the user pressing a command — same routing as
-            # typed text (commands, notice callbacks, spawn menus).
-            self._last_open_id = open_id
-            await self.core.handle_inbound(
-                InboundMessage(
-                    channel=self.channel,
-                    chat_id=open_id,
-                    text=key,
-                )
-            )
-        except Exception as exc:
-            logger.error("FeishuAdapter: card action failed: {}", exc)
+        message = normalize_card_action(data)
+        if message is not None:
+            self._last_open_id = message.chat_id
+            await self.core.handle_inbound(message)
 
     async def _handle_event(self, data: Any) -> None:
-        try:
-            message = self._normalize(data)
-        except Exception as exc:
-            # A bad payload must not break the event loop.
-            logger.warning("FeishuAdapter: dropped malformed event: {}", exc)
-            return
+        message = normalize_message(data, self._seen_messages)
         if message is None:
-            return  # group chat / non-text / empty — intentionally ignored
-        try:
-            await self.core.handle_inbound(message)
-        except Exception as exc:
-            # Core errors are core's to handle; never crash the event loop here.
-            logger.error("FeishuAdapter: core.handle_inbound failed: {}", exc)
-
-    def _normalize(self, data: Any) -> InboundMessage | None:
-        """Map a ``P2ImMessageReceiveV1`` (or duck-typed stand-in) to an
-        InboundMessage; return None for events we do not bridge."""
-        event = getattr(data, "event", None)
-        message = getattr(event, "message", None)
-        sender = getattr(event, "sender", None)
-        if message is None or sender is None:
-            return None
-        if getattr(message, "chat_type", "") != "p2p":
-            return None  # group chats are not bridged
-        if getattr(message, "message_type", "") != "text":
-            return None  # only plain text is bridged
-        if getattr(sender, "sender_type", "") != "user":
-            return None  # the bot's own messages must not echo back into core
-        content = getattr(message, "content", "") or ""
-        try:
-            payload: dict[str, Any] = json.loads(content)
-            text = str(payload.get("text", "")).strip()
-        except (TypeError, ValueError):
-            logger.warning("FeishuAdapter: unparseable text content: {!r:.120}", content)
-            return None
-        if not text:
-            return None
-        sender_id = getattr(sender, "sender_id", None)
-        open_id = getattr(sender_id, "open_id", "") if sender_id is not None else ""
-        if not open_id:
-            return None
-        message_id = getattr(message, "message_id", None)
-        # The polling fallback may have already fed this message (or vice
-        # versa): a shared seen-set makes the two paths idempotent.
-        if message_id in self._seen_messages:
-            return None
-        if message_id:
-            self._seen_messages.append(message_id)
-        self._last_open_id = open_id  # remember the p2p peer for notify_user
-        return InboundMessage(
-            channel=self.channel,
-            chat_id=open_id,  # contract: the feishu session IS the user's open_id
-            text=text,
-            message_id=message_id,
-            idempotency_key=cursors.idempotency_key(message_id),
-        )
+            return
+        self._last_open_id = message.chat_id
+        await self.core.handle_inbound(message)
+        if message.message_id:
+            self._seen_messages.append(message.message_id)
 
     # -- outbound ------------------------------------------------------------
 
@@ -339,7 +315,7 @@ class FeishuAdapter(IMAdapter):
 
     # -- polling fallback ------------------------------------------------------
 
-    def _start_poller(self) -> None:
+    def _start_poller(self, tasks: asyncio.TaskGroup) -> None:
         """Start the ListMessage poll loop (main loop task)."""
         if self._poll_task is not None and not self._poll_task.done():
             return
@@ -350,7 +326,7 @@ class FeishuAdapter(IMAdapter):
             return
         if bootstrap:
             self._poll_chats.add(bootstrap)
-        self._poll_task = asyncio.create_task(self._poll_loop(interval))
+        self._poll_task = tasks.create_task(self._poll_loop(interval))
         logger.info(
             "FeishuAdapter: poller started interval={:.1f}s chats={}",
             interval,
@@ -358,41 +334,20 @@ class FeishuAdapter(IMAdapter):
         )
 
     async def _poll_loop(self, interval: float) -> None:
-        """Poll every known p2p chat forever; one bad round never kills it.
-
-        Backoff is all-or-nothing: a round where EVERY chat failed backs off
-        exponentially (a hard-down API is not hammered), while a round where
-        only some chats failed keeps the normal cadence — one chat's
-        persistent failure (e.g. the user deleted the bot) must never slow
-        the healthy chats. Any fully-healthy round resets the backoff.
-        """
-        loaded = False
+        """Poll known chats; only explicit transport failures enter the backoff."""
+        await self._restore_cursors()
         # quiesce-exempt: polls the Feishu API; a cursor is written only when an update arrives, and forwarding goes through the gateway, which refuses business requests in the window
         while True:
-            if not loaded:
-                # before any round: an unrestored chat would seed, not replay
-                try:
-                    await self._restore_cursors()
-                    loaded = True
-                except Exception:
-                    logger.exception("FeishuAdapter: restoring poll cursors failed")
-                    await asyncio.sleep(interval)
-                    continue
             failed = 0
             total = len(self._poll_chats)
-            try:
-                for chat_id in list(self._poll_chats):
-                    try:
-                        if not await self._poll_once(chat_id):
-                            failed += 1
-                    except Exception as exc:
+            for chat_id in list(self._poll_chats):
+                try:
+                    if not await self._poll_once(chat_id):
                         failed += 1
-                        logger.error("FeishuAdapter: poll failed chat={}: {}", chat_id, exc)
-            except Exception:
-                failed = total
-                logger.exception("FeishuAdapter: poll round failed")
-            delay = self._round_delay(failed, total, interval)
-            await asyncio.sleep(delay)
+                except NETWORK_ERRORS as exc:
+                    failed += 1
+                    logger.warning("FeishuAdapter: poll transport failed chat={}: {}", chat_id, exc)
+            await asyncio.sleep(self._round_delay(failed, total, interval))
 
     def _round_delay(self, failed: int, total: int, interval: float) -> float:
         """Poll delay after one round, mutating the all-chats-failed counter.
@@ -431,8 +386,6 @@ class FeishuAdapter(IMAdapter):
             cursor_id=self._poll_cursor.get(chat_id),
             cursor_ms=self._poll_cursor_ms.get(chat_id),
         )
-        if items is None:
-            return False
         if chat_id not in self._poll_seeded:
             self._poll_seeded.add(chat_id)
             self._restore_owner_open_id(items)
@@ -512,51 +465,28 @@ class FeishuAdapter(IMAdapter):
                 return
 
     async def _poll_deliver(self, pending: list[Any], chat_id: str) -> str | None:
-        """Feed unseen user texts to core; return the newest message id the
-        cursor may advance to (delivered, skipped, or permanently
-        undeliverable), or None when a delivery failed and the round must
-        not advance past it.
+        """Advance only past delivered or explicitly unsupported messages.
 
-        A message that keeps crashing inbound handling is skipped after
-        POISON_MAX_RETRIES consecutive failures with a loud log, so it cannot
-        wedge the chat forever (core swallows nearly everything, so this is a
-        last resort, not a normal path).
+        A transport failure leaves the cursor before the undelivered message.
+        Unexpected failures reach the service owner without marking it seen.
         """
         last: str | None = None
         for item in pending:
             if not item.message_id:
-                # Cannot dedup or cursor on an id-less item; never deliver.
                 continue
-            key = f"{chat_id}:{item.message_id}"
             if item.message_id in self._seen_messages:
                 last = item.message_id
                 continue
             message = self._normalize_poll_item(item)
             if message is None:
-                # Permanently undeliverable (bot send, non-text, malformed):
-                # safe to pass, otherwise the same item is re-listed forever.
                 last = item.message_id
                 continue
             try:
                 await self.core.handle_inbound(message)
-            except Exception:
-                retries = self._poison_retries.get(key, 0) + 1
-                self._poison_retries[key] = retries
-                if retries < POISON_MAX_RETRIES:
-                    logger.exception("FeishuAdapter: poll inbound failed chat={}", chat_id)
-                    break  # do not advance past the failure; retry next round
-                self._poison_retries.pop(key, None)
-                logger.error(
-                    "FeishuAdapter: poll inbound failed {} times chat={} msg={}; skipping message",
-                    retries,
-                    chat_id,
-                    item.message_id,
-                )
-                self._seen_messages.append(item.message_id)
-                last = item.message_id
-                continue
+            except NETWORK_ERRORS:
+                logger.warning("FeishuAdapter: inbound transport unavailable chat={}", chat_id)
+                break
             self._seen_messages.append(item.message_id)
-            self._poison_retries.pop(key, None)
             last = item.message_id
         return last
 
@@ -641,8 +571,15 @@ class FeishuAdapter(IMAdapter):
         self._check_send_ready()
         if self._rest_client is None:
             self._rest_client = await asyncio.to_thread(self._build_rest_client)
-        for chunk in prepared.chunks:
-            await asyncio.to_thread(self._send_one, self._rest_client, chat_id, chunk.text)
+        for index, chunk in enumerate(prepared.chunks):
+            try:
+                await asyncio.to_thread(self._send_one, self._rest_client, chat_id, chunk.text)
+            except (SendNotStartedError, RetryableTransportError, SendOutcomeUncertainError):
+                if index == 0:
+                    raise
+                raise SendOutcomeUncertainError(
+                    "Feishu send incomplete after acknowledged chunks"
+                ) from None
         await self._register_sent_chat(chat_id)
 
     def _check_send_ready(self) -> None:
@@ -671,8 +608,15 @@ class FeishuAdapter(IMAdapter):
         if buttons:
             await asyncio.to_thread(self._send_card, self._rest_client, chat_id, text, buttons)
         else:
-            for segment in _segment(text, MAX_SEGMENT_CHARS):
-                await asyncio.to_thread(self._send_one, self._rest_client, chat_id, segment)
+            for index, segment in enumerate(_segment(text, MAX_SEGMENT_CHARS)):
+                try:
+                    await asyncio.to_thread(self._send_one, self._rest_client, chat_id, segment)
+                except (SendNotStartedError, RetryableTransportError, SendOutcomeUncertainError):
+                    if index == 0:
+                        raise
+                    raise SendOutcomeUncertainError(
+                        "Feishu send incomplete after acknowledged chunks"
+                    ) from None
         # Register the returned p2p chat for polling.
         await self._register_sent_chat(chat_id)
 
@@ -684,6 +628,22 @@ class FeishuAdapter(IMAdapter):
             # NotImplementedError: the notify fan-out skips (no retry fixes it; #4964).
             raise NotImplementedError("feishu: no known user chat yet")
         await self.send(self._last_open_id, text)
+
+    def _create_message(self, client: Any, request: Any) -> Any:
+        """Classify the actual provider request without concealing SDK/schema failures."""
+        try:
+            response = client.im.v1.message.create(request)
+        except requests.ConnectTimeout as exc:
+            raise SendNotStartedError(f"Feishu send not started: {type(exc).__name__}") from None
+        except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
+            raise
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            raise SendOutcomeUncertainError(
+                f"Feishu send response unavailable: {type(exc).__name__}"
+            ) from None
+        if response.raw is not None and response.raw.status_code != 200:
+            raise_http_failure(response.raw.status_code, "Feishu send request failed")
+        return response
 
     def _send_card(
         self, client: Any, chat_id: str, text: str, buttons: list[tuple[str, str]]
@@ -732,7 +692,7 @@ class FeishuAdapter(IMAdapter):
             )
             .build()
         )
-        response = client.im.v1.message.create(request)
+        response = self._create_message(client, request)
         if not response.success():
             raise RuntimeError(f"feishu card send failed: code={response.code} msg={response.msg}")
         data = response.data
@@ -766,7 +726,7 @@ class FeishuAdapter(IMAdapter):
             )
             .build()
         )
-        response = client.im.v1.message.create(request)
+        response = self._create_message(client, request)
         if not response.success():
             # Sanitized on purpose: the SDK response may embed request internals
             # but never credentials; keep it that way in the raised error.

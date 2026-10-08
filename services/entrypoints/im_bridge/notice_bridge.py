@@ -26,6 +26,9 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
+from psycopg_pool import PoolTimeout
+
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from services.entrypoints.im_bridge import copy
@@ -37,6 +40,7 @@ from services.entrypoints.im_bridge.outbound.types import (
     OutboundSource,
     OutboundSourceKind,
 )
+from services.entrypoints.im_bridge.types import NETWORK_ERRORS, SendNotStartedError
 
 _log = logging.getLogger("services.entrypoints.im_bridge.notice_bridge")
 
@@ -120,20 +124,18 @@ class NoticeBridge:
     def _load_state(self) -> None:
         d = _state_dir()
         d.mkdir(parents=True, exist_ok=True)
-        with suppress(FileNotFoundError, json.JSONDecodeError):
+        with suppress(OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # This retired cursor is a one-time historical import, not current config.
             value = json.loads((d / "notice_cursor.json").read_text())
             if type(value) is int and value >= 0:
                 self._legacy_cursor = self._cursor = value
-        with suppress(FileNotFoundError, json.JSONDecodeError):
+        with suppress(FileNotFoundError):
             self._filters = json.loads((d / "notice_filters.json").read_text())
         if not isinstance(self._filters, dict):
-            self._filters = {"min_priority": None, "agent": None}
+            raise TypeError("notice filters must be an object")
 
     def _save(self, name: str, value: Any) -> None:
-        try:
-            (_state_dir() / name).write_text(json.dumps(value))
-        except OSError:
-            _log.warning("notice state save failed: %s", name)
+        (_state_dir() / name).write_text(json.dumps(value))
 
     # -- gateway -----------------------------------------------------------
 
@@ -165,7 +167,7 @@ class NoticeBridge:
         try:
             await asyncio.to_thread(self.initialize_poll)
             notices = await asyncio.to_thread(self._notices_after, 0)
-        except Exception as exc:
+        except (ConnectionDoesNotExist, ConnectionFailure, PoolTimeout) as exc:
             _log.warning("notice acceptance read held class=%s", type(exc).__name__)
             return
         for notice in notices:
@@ -198,7 +200,7 @@ class NoticeBridge:
             text, buttons = self._render_notice(notice)
             try:
                 recipient, prepared = await adapter.prepare_notice_owner(text, tuple(buttons))
-            except Exception as exc:
+            except (*NETWORK_ERRORS, SendNotStartedError, NotImplementedError) as exc:
                 _log.warning(
                     "notice target unavailable notice=%s class=%s", notice["id"], type(exc).__name__
                 )
@@ -220,7 +222,7 @@ class NoticeBridge:
                 intent,
                 filtered=filtered,
             )
-        except Exception as exc:
+        except (ConnectionDoesNotExist, ConnectionFailure, PoolTimeout) as exc:
             _log.warning(
                 "notice acceptance held notice=%s class=%s", notice["id"], type(exc).__name__
             )
