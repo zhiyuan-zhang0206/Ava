@@ -11,6 +11,7 @@ the `/send` route handler validates the body and returns per-channel results.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -19,6 +20,7 @@ import pytest
 from services.entrypoints.im_bridge import push_watchdog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 
 
@@ -63,7 +65,7 @@ class _RecordingAdapter(IMAdapter):
         self.sent: list[str] = []
         self.attempts = 0
 
-    async def start(self) -> None:  # pragma: no cover - abstract contract
+    async def start(self, tasks: asyncio.TaskGroup) -> None:  # pragma: no cover - abstract contract
         return None
 
     async def stop(self) -> None:  # pragma: no cover - abstract contract
@@ -89,95 +91,100 @@ class _RecordingAdapter(IMAdapter):
         self.sent.append(text)
 
 
-def test_notify_user_fans_out_to_all_adapters() -> None:
+async def test_notify_user_fans_out_to_all_adapters() -> None:
     """Every loaded adapter gets the text; results report per-channel ok."""
-    core = IMBridgeCore(im_bridge_config(), gateway_client())
-    a1, a2 = _RecordingAdapter(), _RecordingAdapter()
-    core.register(a1)
-    core.register(a2)
+    async with owned_tasks() as _owned_tasks:
+        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        a1, a2 = _RecordingAdapter(), _RecordingAdapter()
+        core.register(a1)
+        core.register(a2)
 
-    async def run() -> dict[str, str]:
-        return await core.notify_user(
-            "🚨 Alert test-rule (P1)"  # emoji-ok: mirrors production IM text
-        )
+        async def run() -> dict[str, str]:
+            return await core.notify_user(
+                "🚨 Alert test-rule (P1)"  # emoji-ok: mirrors production IM text
+            )
 
-    results = asyncio_run(run())
-    assert a1.sent == ["🚨 Alert test-rule (P1)"]  # emoji-ok: mirrors production IM text
-    assert a2.sent == ["🚨 Alert test-rule (P1)"]  # emoji-ok: mirrors production IM text
-    assert set(results.values()) == {"ok"}
+        results = await run()
+        assert a1.sent == ["🚨 Alert test-rule (P1)"]  # emoji-ok: mirrors production IM text
+        assert a2.sent == ["🚨 Alert test-rule (P1)"]  # emoji-ok: mirrors production IM text
+        assert set(results.values()) == {"ok"}
 
 
-def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]) -> None:
+async def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]) -> None:
     """A channel without an owner chat is skipped; a failing channel does not
     stop the others from receiving the message. The skipped channel pays no
     retry (a permanent condition); the unknown failure is not repeated."""
-    core = IMBridgeCore(im_bridge_config(), gateway_client())
-    skipped, broken, ok = (
-        _RecordingAdapter(skipped=True),
-        _RecordingAdapter(error=RuntimeError("platform down")),
-        _RecordingAdapter(),
-    )
-    core.register(skipped)
-    core.register(broken)
-    core.register(ok)
+    async with owned_tasks() as _owned_tasks:
+        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        skipped, broken, ok = (
+            _RecordingAdapter(skipped=True),
+            _RecordingAdapter(error=RuntimeError("platform down")),
+            _RecordingAdapter(),
+        )
+        core.register(skipped)
+        core.register(broken)
+        core.register(ok)
 
-    async def run() -> dict[str, str]:
-        return await core.notify_user("hi")
+        async def run() -> dict[str, str]:
+            return await core.notify_user("hi")
 
-    results = asyncio_run(run())
-    assert ok.sent == ["hi"]
-    assert skipped.sent == []
-    assert broken.sent == []
-    assert results[skipped.channel] == "skipped"
-    assert results[broken.channel].startswith("error:")
-    assert skipped.attempts == 1  # NotImplementedError is permanent — never retried
-    assert broken.attempts == 1  # unknown outcome cannot authorize another send
-    assert retry_sleeps == []
+        results = await run()
+        assert ok.sent == ["hi"]
+        assert skipped.sent == []
+        assert broken.sent == []
+        assert results[skipped.channel] == "skipped"
+        assert results[broken.channel].startswith("error:")
+        assert skipped.attempts == 1  # NotImplementedError is permanent — never retried
+        assert broken.attempts == 1  # unknown outcome cannot authorize another send
+        assert retry_sleeps == []
 
 
-def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float]) -> None:
+async def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float]) -> None:
     """A transient failure (the ~0.65s connection window, task #4252) is
     healed by exactly one retry after the bounded jitter backoff."""
-    core = IMBridgeCore(im_bridge_config(), gateway_client())
-    flaky = _RecordingAdapter(error=SendNotStartedError("connect jitter"), fail_times=1)
-    core.register(flaky)
+    async with owned_tasks() as _owned_tasks:
+        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        flaky = _RecordingAdapter(error=SendNotStartedError("connect jitter"), fail_times=1)
+        core.register(flaky)
 
-    async def run() -> dict[str, str]:
-        return await core.notify_user("hi")
+        async def run() -> dict[str, str]:
+            return await core.notify_user("hi")
 
-    results = asyncio_run(run())
-    assert results[flaky.channel] == "ok"
-    assert flaky.sent == ["hi"]
-    assert flaky.attempts == 2
-    assert len(retry_sleeps) == 1
-    base = core.config.im_push_retry_backoff_seconds
-    jitter = core.config.im_push_retry_jitter_seconds
-    assert base <= retry_sleeps[0] <= base + jitter
+        results = await run()
+        assert results[flaky.channel] == "ok"
+        assert flaky.sent == ["hi"]
+        assert flaky.attempts == 2
+        assert len(retry_sleeps) == 1
+        base = core.config.im_push_retry_backoff_seconds
+        jitter = core.config.im_push_retry_jitter_seconds
+        assert base <= retry_sleeps[0] <= base + jitter
 
 
-def test_notify_user_double_failure_reports_error(retry_sleeps: list[float]) -> None:
+async def test_notify_user_double_failure_reports_error(retry_sleeps: list[float]) -> None:
     """An unknown failure retains the compatible error result without retry."""
-    core = IMBridgeCore(im_bridge_config(), gateway_client())
-    broken = _RecordingAdapter(error=ValueError("boom"))
-    core.register(broken)
+    async with owned_tasks() as _owned_tasks:
+        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        broken = _RecordingAdapter(error=ValueError("boom"))
+        core.register(broken)
 
-    async def run() -> dict[str, str]:
-        return await core.notify_user("hi")
+        async def run() -> dict[str, str]:
+            return await core.notify_user("hi")
 
-    results = asyncio_run(run())
-    assert results[broken.channel] == "error: ValueError"
-    assert broken.attempts == 1
-    assert retry_sleeps == []
+        results = await run()
+        assert results[broken.channel] == "error: ValueError"
+        assert broken.attempts == 1
+        assert retry_sleeps == []
 
 
-def test_notify_user_empty_core() -> None:
+async def test_notify_user_empty_core() -> None:
     """No adapters loaded -> empty results, no error (daemon serves nothing)."""
-    core = IMBridgeCore(im_bridge_config(), gateway_client())
+    async with owned_tasks() as _owned_tasks:
+        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
 
-    async def run() -> dict[str, str]:
-        return await core.notify_user("hi")
+        async def run() -> dict[str, str]:
+            return await core.notify_user("hi")
 
-    assert asyncio_run(run()) == {}
+        assert await run() == {}
 
 
 # -- daemon /send route handler ----------------------------------------------

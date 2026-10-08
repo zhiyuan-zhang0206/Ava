@@ -12,14 +12,16 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from services.entrypoints.im_bridge.core import IMBridgeCore
+from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.types import ChatState, IMAdapter, InboundMessage
 
 _KEY = ("telegram", "12345")
@@ -80,7 +82,7 @@ class _Adapter(IMAdapter):
         super().__init__(core=None)
         self.sent: list[str] = []
 
-    async def start(self) -> None:
+    async def start(self, tasks: asyncio.TaskGroup) -> None:
         pass
 
     async def stop(self) -> None:
@@ -99,11 +101,19 @@ class _Adapter(IMAdapter):
 
 
 def _core(
-    gateway: _Gateway, pool: ConnectionPool[Any] | None = None
+    gateway: _Gateway,
+    pool: ConnectionPool[Any] | None = None,
+    *,
+    tasks: asyncio.TaskGroup | None = None,
 ) -> tuple[IMBridgeCore, _Adapter]:
     from services.entrypoints.im_bridge.tests import test_im_bridge_core
 
-    core = IMBridgeCore(im_bridge_config(), gateway, db_pool=pool or test_im_bridge_core.TEST_POOL)  # type: ignore[arg-type]
+    core = IMBridgeCore(
+        im_bridge_config(),
+        cast(GatewayClient, gateway),
+        db_pool=pool or test_im_bridge_core.TEST_POOL,
+        tasks=tasks if tasks is not None else asyncio.TaskGroup(),
+    )
     adapter = _Adapter()
     core.register(adapter)
     return core, adapter
@@ -115,103 +125,107 @@ def _bound_state(core: IMBridgeCore) -> ChatState:
     return state
 
 
-def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
+async def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
     pool: ConnectionPool,
 ) -> None:
     async def scenario() -> None:
-        core, adapter = _core(_Gateway([_item("1.0", "old")]), pool)
-        state = _bound_state(core)
-        await core._push_snapshot(_KEY, state, {"items": []})
-        await core.outbound_worker.run_once()
-        assert adapter.sent == ["[Ava #405] old"]
+        async with owned_tasks() as _owned_tasks:
+            core, adapter = _core(_Gateway([_item("1.0", "old")]), pool, tasks=_owned_tasks)
+            state = _bound_state(core)
+            await core._push_snapshot(_KEY, state, {"items": []})
+            await core.outbound_worker.run_once()
+            assert adapter.sent == ["[Ava #405] old"]
 
-        core2, adapter2 = _core(
-            _Gateway([_item("1.0", "old"), _item("2.0", "new")]), pool
-        )  # daemon restart
-        await core2.restore_subscriptions()
-        state2 = _bound_state(core2)
-        await core2._push_snapshot(
-            _KEY, state2, {"items": [_item("1.0", "old"), _item("2.0", "new")]}
-        )
-        await core2.outbound_worker.run_once()
-        assert adapter2.sent == ["[Ava #405] new"]
+            core2, adapter2 = _core(
+                _Gateway([_item("1.0", "old"), _item("2.0", "new")]), pool, tasks=_owned_tasks
+            )  # daemon restart
+            await core2.restore_subscriptions()
+            state2 = _bound_state(core2)
+            await core2._push_snapshot(
+                _KEY, state2, {"items": [_item("1.0", "old"), _item("2.0", "new")]}
+            )
+            await core2.outbound_worker.run_once()
+            assert adapter2.sent == ["[Ava #405] new"]
 
-    asyncio.run(scenario())
+    await scenario()
 
 
-def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
+async def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
     pool: ConnectionPool,
 ) -> None:
     async def scenario() -> None:
-        core, _ = _core(_Gateway([_item("1.0", "seen")]), pool)
-        state = _bound_state(core)
-        core._persist_switch(state)
-        await core._push_snapshot(_KEY, state, {"items": []})
-        await core.outbound_worker.run_once()
+        async with owned_tasks() as _owned_tasks:
+            core, _ = _core(_Gateway([_item("1.0", "seen")]), pool, tasks=_owned_tasks)
+            state = _bound_state(core)
+            core._persist_switch(state)
+            await core._push_snapshot(_KEY, state, {"items": []})
+            await core.outbound_worker.run_once()
 
-        # the bridge is down; the agent says two more things (timeline only)
-        gateway2 = _Gateway(
-            [_item("1.0", "seen"), _item("2.0", "missed one"), _item("3.0", "missed two")]
-        )
-        core2, adapter2 = _core(gateway2, pool)
-        await core2.restore_subscriptions()
-        await asyncio.sleep(0.05)
-        await core2.outbound_worker.run_once()
-        await core2.outbound_worker.run_once()
+            # the bridge is down; the agent says two more things (timeline only)
+            gateway2 = _Gateway(
+                [_item("1.0", "seen"), _item("2.0", "missed one"), _item("3.0", "missed two")]
+            )
+            core2, adapter2 = _core(gateway2, pool, tasks=_owned_tasks)
+            await core2.restore_subscriptions()
+            await asyncio.sleep(0.05)
+            await core2.outbound_worker.run_once()
+            await core2.outbound_worker.run_once()
 
-        assert adapter2.sent == ["[Ava #405] missed one", "[Ava #405] missed two"]
-        for task in core2._subscriptions.values():
-            task.cancel()
+            assert adapter2.sent == ["[Ava #405] missed one", "[Ava #405] missed two"]
+            for task in core2._subscriptions.values():
+                task.cancel()
 
-    asyncio.run(scenario())
+    await scenario()
 
 
-def test_restore_without_a_saved_watermark_pushes_nothing(pool: ConnectionPool[Any]) -> None:
+async def test_restore_without_a_saved_watermark_pushes_nothing(pool: ConnectionPool[Any]) -> None:
     """A chat that was never pushed to has no position to resume from: the
     catch-up must not dump the timeline window on it."""
 
     async def scenario() -> None:
-        core, _ = _core(_Gateway(), pool)
-        state = _bound_state(core)
-        core._persist_switch(state)
+        async with owned_tasks() as _owned_tasks:
+            core, _ = _core(_Gateway(), pool, tasks=_owned_tasks)
+            state = _bound_state(core)
+            core._persist_switch(state)
 
-        from base.db.transaction import write_transaction
+            from base.db.transaction import write_transaction
 
-        with write_transaction(pool) as conn:
-            conn.execute("INSERT INTO im_bridge_cursors(channel,chat_id) VALUES (%s,%s)", _KEY)
-        gateway2 = _Gateway([_item("1.0", "history")])
-        core2, adapter2 = _core(gateway2, pool)
-        await core2.restore_subscriptions()
-        await asyncio.sleep(0.05)
+            with write_transaction(pool) as conn:
+                conn.execute("INSERT INTO im_bridge_cursors(channel,chat_id) VALUES (%s,%s)", _KEY)
+            gateway2 = _Gateway([_item("1.0", "history")])
+            core2, adapter2 = _core(gateway2, pool, tasks=_owned_tasks)
+            await core2.restore_subscriptions()
+            await asyncio.sleep(0.05)
 
-        assert adapter2.sent == []
-        assert gateway2.timeline_calls > 0
-        assert core2.outbound_store.pending_streams({"telegram": "test-account"}) == []
-        for task in core2._subscriptions.values():
-            task.cancel()
+            assert adapter2.sent == []
+            assert gateway2.timeline_calls > 0
+            assert core2.outbound_store.pending_streams({"telegram": "test-account"}) == []
+            for task in core2._subscriptions.values():
+                task.cancel()
 
-    asyncio.run(scenario())
+    await scenario()
 
 
-def test_idempotency_key_reaches_the_gateway() -> None:
+async def test_idempotency_key_reaches_the_gateway() -> None:
     """The adapter's platform-stable key is the gateway delivery key, so a
     message the bridge re-reads after a restart cannot become a second inbound."""
 
     async def scenario() -> None:
-        gateway = _Gateway()
-        core, _ = _core(gateway)
-        _bound_state(core)
-        await core.handle_inbound(
-            InboundMessage(
-                channel="telegram",
-                chat_id="12345",
-                text="hello",
-                message_id="m1",
-                idempotency_key="telegram:m1",
+        async with owned_tasks() as _owned_tasks:
+            gateway = _Gateway()
+            core, _ = _core(gateway, tasks=_owned_tasks)
+            _bound_state(core)
+            await core.handle_inbound(
+                InboundMessage(
+                    channel="telegram",
+                    chat_id="12345",
+                    text="hello",
+                    message_id="m1",
+                    idempotency_key="telegram:m1",
+                )
             )
-        )
-        for task in core._subscriptions.values():
-            task.cancel()
-        assert gateway.sent == [(405, "hello", "telegram:m1")]
+            for task in core._subscriptions.values():
+                task.cancel()
+            assert gateway.sent == [(405, "hello", "telegram:m1")]
 
-    asyncio.run(scenario())
+    await scenario()
