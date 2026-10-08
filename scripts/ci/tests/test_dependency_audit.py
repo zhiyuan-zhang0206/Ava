@@ -7,8 +7,39 @@ here they are replaced by recorded shapes.
 from __future__ import annotations
 
 import urllib.error
+from pathlib import Path
+from subprocess import CompletedProcess
+
+import pytest
 
 from scripts.ci import dependency_audit as audit
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_audit_accepts_complete_findings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exit_code: int
+) -> None:
+    def run(*args: object, **kwargs: object) -> CompletedProcess[str]:
+        return CompletedProcess(["npm", "audit"], exit_code, '{"vulnerabilities": {}}', "")
+
+    monkeypatch.setattr(audit.subprocess, "run", run)
+    assert audit._run_json(["npm", "audit"], tmp_path) == {"vulnerabilities": {}}
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "stdout"),
+    [(1, '{"error": {"code": "ENOAUDIT"}}'), (2, '{"vulnerabilities": {}}')],
+)
+def test_audit_rejects_registry_and_tool_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exit_code: int, stdout: str
+) -> None:
+    def run(*args: object, **kwargs: object) -> CompletedProcess[str]:
+        return CompletedProcess(["npm", "audit"], exit_code, stdout, "private registry details")
+
+    monkeypatch.setattr(audit.subprocess, "run", run)
+    with pytest.raises(RuntimeError, match="npm reported an audit error") as error:
+        audit._run_json(["npm", "audit"], tmp_path)
+    assert "private registry details" not in str(error.value)
 
 
 def _osv(severity: str | None):
