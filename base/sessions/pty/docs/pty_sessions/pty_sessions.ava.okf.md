@@ -64,6 +64,11 @@ every request that can block (a fork, a bounded kill, a
 capture render) runs on the executor, and `ping` is answered on the loop so the
 ownership probe, which times out at three seconds, never queues behind them.
 
+The native concurrency regression forks forty new shells from eight callers
+while twenty sessions stream output, five through live screen models. Each new
+shell must execute a command and produce its own output under the same load;
+those independent checks also use eight callers, and a failed check fails the test.
+
 A shell's base environment is the service's, minus `AVA_PROCESS_PROFILE` and
 `VIRTUAL_ENV`, overlaid by the caller's forwarded env. A variable that only the
 creating process held does not ride into the shell unless it is forwarded.
