@@ -8,6 +8,7 @@ branch + body passthrough.
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -215,7 +216,7 @@ class TestRouting:
         launch_body = captured["body"]
         assert launch_body.agent_id > 0
         assert launch_body.config is None
-        assert launch_body.prompt is None  # first prompt, if any, was committed with the row
+        assert "prompt" not in launch_body.model_dump()
         assert launch_body.launch_attempt_id is not None
 
     def test_registered_remote_runner_is_forwarded(
@@ -344,7 +345,9 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
         await forward.forward_spawn_to_remote(
-            Database.from_settings(), "runner", LaunchAgentRequest(agent_id=4)
+            Database.from_settings(),
+            "runner",
+            LaunchAgentRequest(agent_id=4, launch_attempt_id=uuid4()),
         )
     assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED
     assert "invalid_model_config: key missing" in str(raised.value)

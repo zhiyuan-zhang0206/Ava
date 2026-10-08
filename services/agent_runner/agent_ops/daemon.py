@@ -255,7 +255,7 @@ async def _dispatch(
 
     try:
         match kind:
-            case "spawn-launch" | "spawn-launch-v2":
+            case "spawn-launch-v2":
                 db, bus = _ops_handles()
                 spawned = await lifecycle.launch_agent_op(
                     db, bus, LaunchAgentRequest.model_validate(payload), pool

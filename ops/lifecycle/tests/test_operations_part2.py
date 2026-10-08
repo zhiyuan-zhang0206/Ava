@@ -9,13 +9,14 @@ endpoint smoke tests live in tests/components/gateway/test_cluster_endpoints.py.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 
 from base.db import Database
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
 from ops import lifecycle
-from ops.lifecycle import launch
 from ops.rpc_schemas import (
     LaunchAgentRequest,
     TerminateAgentRequest,
@@ -31,37 +32,6 @@ def stub_pool() -> object:
     """Sentinel pool — every op call below mocks the gateway/agents helpers so
     the pool is never touched, but the signature still requires an object."""
     return object()
-
-
-@pytest.mark.asyncio
-async def test_launch_agent_op_hosted_fork_still_wakes(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
-) -> None:
-    """A fork's inbounds were pre-inserted by create_agent_row as raw SQL (no
-    wake inside) — the hosted launch must publish the wake explicitly, and must
-    not insert a second prompt."""
-    inserted: list[int] = []
-
-    def _fake_insert(_db, _bus, _pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
-        inserted.append(1)
-        return 0
-
-    monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
-
-    async def _fake_publish(*_a: object, **_k: object) -> None:
-        return None
-
-    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", _fake_publish)
-    wakes: list[tuple[int, str]] = []
-    monkeypatch.setattr(
-        launch, "publish_inbound_wake", lambda _db, _bus, aid, payload: wakes.append((aid, payload))
-    )
-
-    body = LaunchAgentRequest(agent_id=8)
-    result = await lifecycle.launch_agent_op(database, event_bus, body, stub_pool)  # type: ignore[arg-type]
-    assert result.id == 8
-    assert inserted == []  # fork prompt is delivered pre-launch, never here
-    assert wakes == [(8, "0")]
 
 
 async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
@@ -114,34 +84,6 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
 
 @pytest.mark.asyncio
-async def test_launch_agent_op_hosted_failure_preserves_its_row(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
-) -> None:
-    """A failed legacy prompt insert leaves the row for explicit repair."""
-
-    def _boom(
-        _db: object, _bus: object, _pool: object, _agent_id: int, _prompt: str, _source: str
-    ) -> int:
-        raise RuntimeError("prompt insert failed")
-
-    monkeypatch.setattr(launch, "_insert_prompt_blocking", _boom)
-    reclaimed: list[tuple[int, str]] = []
-
-    def _fake_reclaim(
-        _db: object, _bus: object, agent_id: int, _pool: object, *, source: str
-    ) -> list[str]:
-        reclaimed.append((agent_id, source))
-        return []
-
-    monkeypatch.setattr(lifecycle, "force_mark_terminated", _fake_reclaim)
-
-    body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
-    with pytest.raises(RuntimeError, match="prompt insert failed"):
-        await lifecycle.launch_agent_op(database, event_bus, body, stub_pool)  # type: ignore[arg-type]
-    assert reclaimed == []
-
-
-@pytest.mark.asyncio
 async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object, database: Database, event_bus: EventBus
 ) -> None:
@@ -164,8 +106,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
 
     body = LaunchAgentRequest(
         agent_id=7,
-        prompt="go",
-        prompt_source="user",
+        launch_attempt_id=UUID("00000000-0000-0000-0000-000000000001"),
         birth_config={"llm_model": "deepseek-flash", "reasoning_effort": "high"},
         config={"reasoning_effort": "max"},
     )

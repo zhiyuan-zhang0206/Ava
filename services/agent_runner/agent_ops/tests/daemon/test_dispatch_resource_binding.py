@@ -22,7 +22,7 @@ def test_dispatch_idempotent_requires_daemon_pool() -> None:
     """Idempotency cannot run without its invocation's pool binding."""
     with pytest.raises(TypeError, match="pool"):
         inspect.signature(daemon._dispatch_idempotent).bind(
-            "spawn-launch", {"agent_id": 1}, "key-4", active_ops={}, workers=set()
+            "spawn-launch-v2", {"agent_id": 1}, "key-4", active_ops={}, workers=set()
         )
 
 
