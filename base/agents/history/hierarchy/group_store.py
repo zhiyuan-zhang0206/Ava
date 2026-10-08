@@ -14,7 +14,9 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
+from typing import Any
 
+from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
@@ -28,6 +30,11 @@ from base.agents.history.hierarchy.group import (
 from base.agents.history.hierarchy.store import SCHEMA_VERSION
 from base.db.transaction import async_write_transaction
 from base.log import logger
+
+
+class GroupOrderError(RuntimeError):
+    """A group would be closed across an earlier node of its level that is still open."""
+
 
 # A claim older than this is a crashed runner's and is taken over.
 CLAIM_LEASE_SECONDS = 3600.0
@@ -141,6 +148,7 @@ async def write_groups(
         for group in groups:
             children = nodes[index[group.first] : index[group.last] + 1]
             span = (children[0].span_start, children[-1].span_end)
+            await _require_no_earlier_open_node(cur, agent_id, level, children)
             input_hash = hashlib.sha256(
                 f"{GROUP_ENGINE_VERSION}|{GROUP_PROMPT_VERSION}|{agent_id}|{level}|"
                 f"{[c.id for c in children]}".encode()
@@ -185,6 +193,31 @@ async def write_groups(
         remaining = int(row[0])
         await cur.execute(_RELEASE_SQL, (remaining, agent_id, level))
     return remaining
+
+
+async def _require_no_earlier_open_node(
+    cur: AsyncCursor[Any], agent_id: int, level: int, children: Sequence[OpenNode]
+) -> None:
+    """Raise `GroupOrderError` when an open node of the level starts before the group's end without
+    being one of its children (a leaf landed out of message order and stayed behind).
+
+    Groups are always a prefix of the open set, so any such node is an invariant violation, not a
+    case to group around: only the rebuild (`rebuild.py`) repairs it.
+    """
+    await cur.execute(
+        "SELECT id, span_start FROM understanding_nodes WHERE agent_id = %s AND depth = %s"
+        " AND parent_id IS NULL AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')"
+        " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
+        " AND span_start < %s AND NOT (id = ANY(%s)) ORDER BY span_start LIMIT 1",
+        (agent_id, level, children[-1].span_end, [c.id for c in children]),
+    )
+    row = await cur.fetchone()
+    if row is not None:
+        raise GroupOrderError(
+            f"agent {agent_id} level {level}: group over spans {children[0].span_start}-"
+            f"{children[-1].span_end} would close across open node {row[0]} (span_start {row[1]});"
+            " leaves landed out of message order and the upper levels need a rebuild"
+        )
 
 
 _INSERT_CALL_SQL = """

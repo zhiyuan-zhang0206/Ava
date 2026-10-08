@@ -57,3 +57,9 @@ Compaction segments are independent (a chunk is described on its own). `understa
 one segment's jobs in order, and skips upper-level checks (later segments' leaves land first and
 would leave gaps); `regroup` builds the upper levels in message order afterwards. Live consumers
 never claim per segment.
+
+## Order of leaves
+
+Live jobs of one agent run serially in enqueue order, which is message order. A leaf that
+nevertheless lands before an already grouped one (`write_group_nodes`) joins or queues the agent's
+pending rebuild and emits `understanding_leaf_out_of_order`; the rebuild regroups in message order.

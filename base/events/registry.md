@@ -308,6 +308,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `understanding_chunk_gap` | a chunk was described only in part: the listed stretches (overlap leftovers, turns missing from a closing snapshot) have no node | anomaly | agent_id, job_id, gaps | — | events | — |
 | `understanding_snapshot_lag` | a compaction stamped its boundary before the checkpoint held the last message (the bounded wait timed out) | anomaly | agent_id, waited_seconds | — | events | — |
 | `understanding_group_failed` | an upper-level understanding grouping check failed; the level's open nodes stay ungrouped until its next check threshold of new nodes arrives | anomaly | agent_id, level, open_nodes, error | — | events | — |
+| `understanding_leaf_out_of_order` | an understanding leaf landed before an already grouped one; an upper-level rebuild was queued for the agent | anomaly | agent_id, job_id, span_end | — | events | — |
 | `understanding_backlog` | one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age | observation | pending, running, oldest_pending_age_seconds | — | events | — |
 | `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events | — |
 | `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events | — |
