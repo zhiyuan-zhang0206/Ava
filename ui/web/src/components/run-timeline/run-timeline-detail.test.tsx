@@ -21,16 +21,17 @@ const node = (summary: string): RunTimelineNode => ({
   span_start: 0,
   span_end: 3,
   summary,
-  usage: { calls: 1, input: 10, cache_read: 0, output: 5 },
+  usage: { calls: 1, input: 10, cache_read: 0, output: 5, cache_write: 0, cost_usd: 0, cost_calls: 0 },
   generation: null,
   context_tokens: 1500,
   estimated: true,
 });
 
-function renderNode(summary: string) {
+function renderNode(summary: string, usage?: Partial<RunTimelineNode["usage"]>) {
+  const base = node(summary);
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NodeDetail agentId={1} node={node(summary)} />
+      <NodeDetail agentId={1} node={{ ...base, usage: { ...base.usage, ...usage } }} />
     </QueryClientProvider>,
   );
   return screen.getByTestId("run-timeline-summary");
@@ -40,6 +41,14 @@ describe("NodeDetail summary", () => {
   it("shows the node's context tokens, marked when estimated", () => {
     renderNode("s");
     expect(screen.getByTestId("run-timeline-detail-tokens").textContent).toBe("1.5k tokens (estimated)");
+  });
+
+  it("shows the recorded cost, and says unknown rather than estimating when none is recorded", () => {
+    renderNode("s", { calls: 2, cost_usd: 0.0123, cost_calls: 2, cache_write: 1200 });
+    expect(screen.getByText("$0.0123")).toBeTruthy();
+    cleanup();
+    renderNode("s");
+    expect(screen.queryByText("$0.0000")).toBeNull();
   });
 
   it("renders Markdown structure", () => {
