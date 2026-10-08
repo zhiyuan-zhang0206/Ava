@@ -21,7 +21,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents import ResurrectRefused
-from base.agents.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
+from base.agents.recovery.breaker import PERMANENT_REJECT_REASON_BILLING
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.telemetry import Event

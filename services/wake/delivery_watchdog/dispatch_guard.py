@@ -70,7 +70,7 @@ def select_pending_for_dispatch(
     are frozen instead: nothing is published and the row resumes here once the
     verdict is fresh again (task #4872 route D).
     """
-    from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

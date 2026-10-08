@@ -34,7 +34,7 @@ from base.native_process.turn_identity import bind_native_work
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph, apply_prepared
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.invocation.compact.completion import close_terminal
-from services.agent_runner.agent_host.native_work import settle_native_invocation
+from services.agent_runner.agent_host.invocation.native_work import settle_native_invocation
 
 
 @dataclass

@@ -36,7 +36,7 @@ from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.recovery.test_hosted_db_recovery import _admit
+from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
 from tests.components.base.poll_until import poll_until_async
 
 

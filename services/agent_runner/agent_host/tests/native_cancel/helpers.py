@@ -12,7 +12,7 @@ from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.incarnation.resources import ResourceBirth
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from services.agent_runner.agent_host.native_work import (
+from services.agent_runner.agent_host.invocation.native_work import (
     NativeWorkContinuation,
     prepare_native_invocation,
 )

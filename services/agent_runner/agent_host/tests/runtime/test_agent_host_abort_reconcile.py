@@ -4,7 +4,7 @@ An aborted turn's settlement must dispose the inbounds that turn claimed, and
 every gap must skip the pass and leave them to the next cold admission: the
 soft switch off, an unresolved turn resource, a replaced runtime, and any
 failure of the pass itself. The DB-visible split it performs is locked in
-`services/agent_runner/agent_host/tests/test_reconcile_after_abort.py`; the settlement trigger that
+`services/agent_runner/agent_host/recovery/tests/test_reconcile_after_abort.py`; the settlement trigger that
 dispatches it is locked in `test_agent_host.py`.
 """
 

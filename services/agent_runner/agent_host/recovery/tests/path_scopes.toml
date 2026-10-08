@@ -1,0 +1,10 @@
+"tests.path_scoped.agent_tests" = [
+    "test_hosted_db_recovery.py",
+    "test_recovery_interrupt.py",
+    "test_database_interrupt.py",
+    "test_reconcile_after_abort.py",
+]
+
+"tests.path_scoped.services_tests" = [
+    "test_crash_recovery.py",
+]
