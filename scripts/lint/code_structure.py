@@ -104,7 +104,8 @@ AST rules retain their governed-package scope.
 File, directory, complexity and nesting budgets have no exemptions. Every
 selected violation fails, including after a file or function rename.
 
-scripts/structure/baseline/*.json temporarily tracks remaining site exemptions.
+scripts/structure/baseline/**/*.json temporarily tracks remaining site exemptions.
+Ordinary component folders organize storage; baseline_shards is its sole reader.
 The guard compares them with the base revision and forbids added keys or raised
 counts, including when a lint rule version changes. Delete resolved entries.
 An explicit file target also checks its parent directory. The guard always runs.

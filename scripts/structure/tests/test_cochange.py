@@ -94,6 +94,7 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
             "scripts/structure/baseline/agent.graph.json",
             False,
         ),  # generated (glob + not src ext anyway)
+        ("scripts/structure/baseline/agent/graph.json", False),
         ("ui/web/openapi.json", False),  # generated
         ("ui/web/src/lib/api-generated.ts", False),  # generated glob
         ("db/schema.sql", False),  # generated
