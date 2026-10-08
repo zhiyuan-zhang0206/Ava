@@ -29,5 +29,5 @@ Original display filenames are not physical paths.
 `source` owns retained acceptance and single-inbound outcome with no TTL/cleanup FK.
 Accepted outcome is consulted before mutable target facts; HOLD cannot accept a
 late proof. New placement and inbound acceptance share locks and transaction.
-See the [Gateway domain contract](../../../../gateway/upload_delivery/docs/delivered-uploads.ava.okf.md)
+See the [Gateway domain contract](../../../../gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.ava.okf.md)
 for source rounds, remote Ops proof, authentication and legacy compatibility.

@@ -1,7 +1,7 @@
 # Delivered upload recovery
 
 Approved design with an implementation candidate; repository merge and deployment are not implied.
-Current contract: [delivered upload owner](../../../gateway/upload_delivery/docs/delivered-uploads.ava.okf.md).
+Current contract: [delivered upload owner](../../../gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.ava.okf.md).
 Issue #4476. Audited from fourth integration `ae2b2f903266ade04a7831f83ee06d44bd40a8fb`.
 
 ## Scope

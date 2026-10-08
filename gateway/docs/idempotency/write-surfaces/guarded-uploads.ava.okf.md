@@ -19,5 +19,5 @@ Old consumers cannot effect the new path/kind. 202 reports historical source acc
 agent execution. Retained status distinguishes pending retries from inspectable
 HOLD; there is no time-based reservation expiration or operator cancel endpoint.
 
-Current owner: [delivered uploads](../../../upload_delivery/docs/delivered-uploads.ava.okf.md).
+Current owner: [delivered uploads](../../../upload_delivery/docs/delivered-uploads/delivered-uploads.ava.okf.md).
 Silent/native-image compatibility: [upload batches](../../../routers/docs/upload-batches.ava.okf.md).

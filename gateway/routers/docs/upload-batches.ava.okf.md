@@ -49,4 +49,4 @@ Browser silent uploads mint one key per `uploadFiles` invocation or accept an
 explicit reusable key. Cross-call recovery requires retaining that key and files;
 there is no browser outbox, persistence or automatic ambiguous retry. Upload
 progress measures transferred bytes, not committed acceptance. Remote pull,
-`deliver=true` notifications remain legacy one-shot. The separate [guarded delivered owner](../../upload_delivery/docs/delivered-uploads.ava.okf.md) closes remote-copy and one-chat recovery without activating these consumers.
+`deliver=true` notifications remain legacy one-shot. The separate [guarded delivered owner](../../upload_delivery/docs/delivered-uploads/delivered-uploads.ava.okf.md) closes remote-copy and one-chat recovery without activating these consumers.

@@ -1,6 +1,7 @@
 """Guarded restart freezes one command and uses the original lifecycle proof."""
 
 from concurrent.futures import ThreadPoolExecutor
+from typing import LiteralString
 
 import psycopg
 import pytest
@@ -83,7 +84,7 @@ async def test_unknown_source_transition_is_not_execution_or_no_effect_proof(
     request = NativeRestartRequest(target=target)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accepted = accept_native_restart(pool, "bad-source", target.agent_id, request, _overlay)
-        statements = {
+        statements: dict[str, LiteralString] = {
             "done": "status='done'",
             "foreign_owner": "target_owner=gen_random_uuid()",
             "observation_without_apply": "observed_at=now(),status='done'",
