@@ -327,6 +327,17 @@ describe("RunTimelineRows keyboard and request bars", () => {
     expect(strokes("input", 2)).toHaveLength(1);
   });
 
+  it("frames only the visible part of a bar that starts left of the track", async () => {
+    const early = [unit("text", 0, -300, 400)];
+    const request = { idx: 1, ts: at(400), session: 0, input_tokens: 5, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: 0, added_to: 1 };
+    renderRows({ units: early, requests: [request] }, { kind: "request", idx: 1 });
+    await paintFrame();
+    const [bar] = fills("input");
+    const [frame] = strokes("input", 2);
+    // The bar runs from before the track to 399 px; the frame's right edge is 3 px past that, as for any bar.
+    expect(frame.x + frame.w).toBeCloseTo(bar.x + bar.w + 2);
+  });
+
   it("draws the selected bar over a hairline of another request that falls inside its range", async () => {
     const wideUnits = [unit("text", 0, 0, 400), unit("text", 1, 400, 401), unit("text", 2, 401, 500)];
     // Request 1 read blocks 0-1 (0..401 ms) in one bar; request 2 read block 2 (a later, narrower bar) and the instant request 3 sits inside the first range in time.
