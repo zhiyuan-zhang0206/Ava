@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import cast
 
 from base.db import Database
-from gateway.events import audit_rows
-from gateway.run_timeline.schemas import RunTimelineEvent
+from base.events.reads import audit_rows
+from services.derived.insights.run_timeline.schemas import RunTimelineEvent
 
 # One audit event per user-visible lifecycle step. `resurrect` and
 # `restart_completed` are the two ways an agent comes back.
