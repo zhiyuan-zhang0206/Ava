@@ -1,6 +1,6 @@
 // Pure model of the run-timeline page: where a span sits on the window's axis,
-// what a drill into a node or unit asks for, and which raw-message parts belong
-// to a unit. No React, no I/O.
+// which raw-message parts belong to a unit, and how the arrow keys move over the rows.
+// No React, no I/O.
 
 import type {
   RunTimelineMessagePart,
@@ -10,13 +10,14 @@ import type {
   RunTimelineUsage,
 } from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
+import { formatTokensCompact } from "@/lib/format/format-number";
 
 export interface TimelineWindow {
   from: string;
   to: string;
 }
 
-/** One step of the drill path: the window it narrowed to. */
+/** One step of the zoom path: the window a session zoom narrowed to. */
 export interface Crumb extends TimelineWindow {
   label: string;
 }
@@ -48,30 +49,37 @@ export function unitKey(unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1">): stri
 
 /**
  * The ids of the nodes a selection lights up: the selected node and every ancestor above it, or,
- * for a layer-0 block, the level-1 node covering it and every ancestor above that. The chain stops
- * where a parent is not in `nodes` (outside the loaded window).
+ * for a layer-0 block, the level-1 node covering it and every ancestor above that; for a request, the
+ * same for every block it read. The chain stops where a parent is not in `nodes` (outside the loaded window).
  */
 export function chainIds(
   selection: Selection | null,
   nodes: readonly RunTimelineNode[],
   units: readonly RunTimelineUnit[],
+  requests: readonly RunTimelineRequest[] = [],
 ): Set<string> {
   const byId = new Map(nodes.map((node) => [node.id, node]));
-  let next: string | null = null;
-  if (selection?.kind === "node") next = selection.id;
+  const starts: (string | null)[] = [];
+  if (selection?.kind === "node") starts.push(selection.id);
   else if (selection?.kind === "unit") {
-    next =
+    starts.push(
       units.find(
         (unit) =>
           unit.i0 === selection.i0 && unit.i1 === selection.i1 && unit.kind === selection.unitKind,
-      )?.parent ?? null;
+      )?.parent ?? null,
+    );
+  } else if (selection?.kind === "request") {
+    const request = requests.find((candidate) => candidate.idx === selection.idx);
+    if (request !== undefined) starts.push(...requestUnits(request, units).map((unit) => unit.parent));
   }
   const chain = new Set<string>();
-  while (next !== null && !chain.has(next)) {
-    const node = byId.get(next);
-    if (node === undefined) break;
-    chain.add(next);
-    next = node.parent;
+  for (let next = starts.shift(); next !== undefined; next = starts.shift()) {
+    while (next !== null && !chain.has(next)) {
+      const node = byId.get(next);
+      if (node === undefined) break;
+      chain.add(next);
+      next = node.parent;
+    }
   }
   return chain;
 }
@@ -201,6 +209,48 @@ export function layoutSpans(
   return placements;
 }
 
+/** A block drawn narrower than this gets no border or rounding of its own: only its fill, merged with its neighbours in the same pixel column. */
+export const NARROW_DRAW_PX = 4;
+
+/** One drawn fill that stands for several narrow blocks of a row that share a pixel column. */
+export interface DrawCell {
+  left: number;
+  width: number;
+  keys: string[];
+}
+
+/**
+ * Splits a row's placements into the wide ones (drawn as blocks) and the narrow ones (markers and
+ * bodies under `narrowPx`), the narrow ones merged into cells: those touching the same pixel column
+ * become one cell, so a pile of sub-pixel blocks is one fill, not a fill per block. Drawing only;
+ * every block keeps its own key for selection, hover and navigation.
+ */
+export function mergeNarrow(
+  places: readonly RowPlacement[],
+  narrowPx: number = NARROW_DRAW_PX,
+): { wide: RowPlacement[]; cells: DrawCell[] } {
+  const wide: RowPlacement[] = [];
+  const narrow: RowPlacement[] = [];
+  for (const place of places) (place.marker || place.width < narrowPx ? narrow : wide).push(place);
+  narrow.sort((a, b) => a.left - b.left);
+  const cells: DrawCell[] = [];
+  let end = -Infinity;
+  for (const place of narrow) {
+    const start = Math.floor(place.left);
+    const stop = Math.max(Math.ceil(place.left + place.width), start + 1);
+    const tail = cells.at(-1);
+    if (tail !== undefined && start < end) {
+      tail.keys.push(place.key);
+      end = Math.max(end, stop);
+      tail.width = end - tail.left;
+    } else {
+      cells.push({ left: start, width: stop - start, keys: [place.key] });
+      end = stop;
+    }
+  }
+  return { wide, cells };
+}
+
 /** `layoutSpans` for blocks given by time, over a time window. */
 export function layoutRow(
   items: readonly RowItem[],
@@ -216,19 +266,18 @@ export function layoutRow(
   );
 }
 
-/** The window of a drill into a node: exactly its time span. */
-export function nodeWindow(node: RunTimelineNode): TimelineWindow {
-  return { from: node.start, to: node.end };
+/** A block's token count as drawn on it: `~` marks an estimate. Null while no request has read it. */
+export function tokenLabel(tokens: number | null, estimated: boolean | null): string | null {
+  return tokens === null ? null : `${estimated === true ? "~" : ""}${formatTokensCompact(tokens)}`;
 }
 
-const MIN_DRILL_MS = 1000;
+/** Pixels one character of a block's token label takes, and the padding around it. */
+const TOKEN_CHAR_PX = 6;
+const TOKEN_PAD_PX = 6;
 
-/** The window of a drill into a unit; a unit with no extent (one instant) gets one second so the window is valid. */
-export function unitWindow(unit: RunTimelineUnit): TimelineWindow {
-  const start = Date.parse(unit.start);
-  const end = Date.parse(unit.end);
-  if (end - start >= MIN_DRILL_MS) return { from: unit.start, to: unit.end };
-  return { from: unit.start, to: new Date(start + MIN_DRILL_MS).toISOString() };
+/** Whether the token label fits a block `widthPx` wide while leaving `roomPx` for what else it shows. */
+export function tokenFits(label: string, widthPx: number, roomPx = 0): boolean {
+  return widthPx >= label.length * TOKEN_CHAR_PX + TOKEN_PAD_PX + roomPx;
 }
 
 export function firstLine(text: string, max: number): string {
@@ -435,7 +484,7 @@ export function hoverLit(
   if (hover.kind === "request") {
     const request = requests.find((candidate) => candidate.idx === hover.idx);
     const covered = request === undefined ? [] : requestUnits(request, units);
-    return { nodeIds: new Set(), unitKeys: new Set(covered.map(unitKey)) };
+    return { nodeIds: chainIds(hover, nodes, units, requests), unitKeys: new Set(covered.map(unitKey)) };
   }
   const nodeIds = chainIds(hover, nodes, units);
   const node = hover.kind === "node" ? nodes.find((candidate) => candidate.id === hover.id) : undefined;
@@ -803,179 +852,4 @@ export function requestLit(
     (target?.kind === "request" && target.idx === request.idx) ||
     (target?.kind === "unit" && requestCovers(request, { i0: target.i0 }));
   return { selected: lit(selection), hovered: lit(hover) };
-}
-
-/** What keyboard navigation moves over. */
-export interface NavData {
-  nodes: readonly RunTimelineNode[];
-  units: readonly RunTimelineUnit[];
-  requests: readonly RunTimelineRequest[];
-}
-
-export type NavKey = "left" | "right" | "up" | "down";
-
-/** One selectable thing of a row: a node, a block, or a request (its bar, spanning the blocks it read). */
-export interface NavItem {
-  row: string;
-  selection: Selection;
-  /** Its extent and middle in epoch milliseconds (a request is one instant). */
-  start: number;
-  end: number;
-  at: number;
-  node?: RunTimelineNode;
-  unit?: RunTimelineUnit;
-  request?: RunTimelineRequest;
-}
-
-export const UNITS_ROW = "units";
-export const INPUT_ROW = "input";
-export const ADDED_ROW = "added";
-export const levelRowId = (level: number) => `level-${level}`;
-
-/** The rows top to bottom, as the page draws them. */
-export function navRowIds(data: NavData): string[] {
-  const rows = levelsTopFirst(data.nodes).map(levelRowId);
-  rows.push(UNITS_ROW);
-  if (data.requests.length > 0) rows.push(INPUT_ROW, ADDED_ROW);
-  return rows;
-}
-
-function span(startIso: string, endIso: string) {
-  const start = Date.parse(startIso);
-  const end = Date.parse(endIso);
-  return { start, end, at: (start + end) / 2 };
-}
-
-/** The items of one row, left to right. */
-export function navItems(row: string, data: NavData): NavItem[] {
-  if (row === UNITS_ROW) {
-    return [...data.units]
-      .sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || a.i0 - b.i0 || a.i1 - b.i1)
-      .map((unit) => ({
-        row,
-        unit,
-        selection: { kind: "unit", i0: unit.i0, i1: unit.i1, unitKind: unit.kind },
-        ...span(unit.start, unit.end),
-      }));
-  }
-  if (row === INPUT_ROW || row === ADDED_ROW) {
-    const items: NavItem[] = [];
-    for (const request of [...data.requests].sort((a, b) => a.idx - b.idx)) {
-      const covered = requestUnits(request, data.units);
-      const sent = Date.parse(request.ts);
-      const start = covered.length > 0 ? Math.min(...covered.map((unit) => Date.parse(unit.start))) : sent;
-      const end = covered.length > 0 ? Math.max(...covered.map((unit) => Date.parse(unit.end))) : sent;
-      items.push({ row, request, selection: { kind: "request", idx: request.idx }, start, end, at: (start + end) / 2 });
-    }
-    return items;
-  }
-  return data.nodes
-    .filter((node) => levelRowId(node.level) === row)
-    .sort((a, b) => a.span_start - b.span_start || Date.parse(a.start) - Date.parse(b.start))
-    .map((node) => ({ row, node, selection: { kind: "node", id: node.id }, ...span(node.start, node.end) }));
-}
-
-function indexOfSelection(items: readonly NavItem[], selection: Selection): number {
-  return items.findIndex((item) => isSelected(selection, item.selection));
-}
-
-/** The item covering the instant `at`, else the closest one; of several, the one whose middle is nearest. */
-function nearest(items: readonly NavItem[], at: number): NavItem | undefined {
-  const covering = items.filter((item) => item.start <= at && at <= item.end);
-  const pool = covering.length > 0 ? covering : items;
-  return pool.reduce<NavItem | undefined>(
-    (best, item) => (best === undefined || Math.abs(item.at - at) < Math.abs(best.at - at) ? item : best),
-    undefined,
-  );
-}
-
-/** The row a selection lives in when no row is remembered for it. */
-function rowOfSelection(selection: Selection, data: NavData): string | null {
-  if (selection.kind === "unit") return UNITS_ROW;
-  if (selection.kind === "request") return INPUT_ROW;
-  const node = data.nodes.find((candidate) => candidate.id === selection.id);
-  return node === undefined ? null : levelRowId(node.level);
-}
-
-/**
- * The next selection of an arrow key. `row` is the row the current selection was made in (the
- * two context rows select the same request, so the row cannot be read off it).
- *
- * left / right: the previous / next item of the row (none past either end).
- * up: the parent when the item has one in the row above (a node's, a block's level-1 node); otherwise
- *   the item of the row above that covers, else is closest to, the item's time. From a request's bar
- *   to the Messages row it is the last block the request read, and between the two context rows the same request.
- * down: the node's first child when it has one in the row below (a level-1 node's first block);
- *   otherwise covering / closest in time; Messages down to the request that read the block.
- * No current selection: the leftmost item in the viewport (Messages first), else the row's first.
- * Returns null when there is nowhere to go.
- */
-export function navigate(
-  key: NavKey,
-  current: { row: string | null; selection: Selection } | null,
-  data: NavData,
-  view: Viewport,
-): { row: string; item: NavItem } | null {
-  const rows = navRowIds(data);
-  if (current === null) {
-    const order = [UNITS_ROW, ...rows.filter((row) => row !== UNITS_ROW).reverse()];
-    for (const row of order) {
-      const items = navItems(row, data);
-      const inView = items.find((item) => item.end >= view.from && item.start <= view.to);
-      if (inView !== undefined) return { row, item: inView };
-    }
-    return null;
-  }
-  let row = current.row !== null && rows.includes(current.row) ? current.row : null;
-  let items = row === null ? [] : navItems(row, data);
-  let at = row === null ? -1 : indexOfSelection(items, current.selection);
-  if (at < 0) {
-    row = rowOfSelection(current.selection, data);
-    items = row === null ? [] : navItems(row, data);
-    at = indexOfSelection(items, current.selection);
-  }
-  if (row === null || at < 0) return navigate(key, null, data, view);
-  const here = items[at];
-  if (key === "left" || key === "right") {
-    const to = at + (key === "left" ? -1 : 1);
-    const next = to < 0 ? undefined : items.at(to);
-    return next === undefined ? null : { row, item: next };
-  }
-  const to = rows.indexOf(row) + (key === "up" ? -1 : 1);
-  const targetRow = to < 0 ? undefined : rows.at(to);
-  if (targetRow === undefined) return null;
-  const targets = navItems(targetRow, data);
-  const sameRequest = (item: NavItem) => item.request !== undefined && item.request.idx === here.request?.idx;
-  let found: NavItem | undefined;
-  if (here.request !== undefined && targetRow === UNITS_ROW) {
-    // From a bar up to Messages: the last block it read.
-    const last = requestUnits(here.request, data.units).at(-1);
-    found = targets.find((item) => item.unit === last);
-  } else if (here.request !== undefined) {
-    found = targets.find(sameRequest);
-  } else if (here.unit !== undefined && targetRow !== UNITS_ROW && !targetRow.startsWith("level-")) {
-    // From a block down to the context rows: the request that read it.
-    const reader = requestReading(here.unit, data.requests);
-    found = targets.find((item) => item.request === reader);
-  } else if (key === "up") {
-    const parent = here.node?.parent ?? here.unit?.parent ?? null;
-    found = parent === null ? undefined : targets.find((item) => item.node?.id === parent);
-  } else if (here.node !== undefined) {
-    const id = here.node.id;
-    found = targets.find((item) => (item.node ?? item.unit)?.parent === id);
-  }
-  found ??= nearest(targets, here.at);
-  return found === undefined ? null : { row: targetRow, item: found };
-}
-
-/** The viewport that shows [startMs, endMs] when `view` does not: the same width, centred on it, inside the base extent; `view` itself when it already shows some of it. */
-export function revealView(axis: AxisMap, view: Viewport, base: Viewport, startMs: number, endMs: number): Viewport {
-  const u0 = axis.toU(startMs, "lo");
-  const u1 = axis.toU(endMs, "hi");
-  const shown = axis.viewU(view);
-  if (u1 >= shown.from && u0 <= shown.to) return view;
-  const width = shown.to - shown.from;
-  const baseU = axis.viewU(base);
-  const from = Math.min(Math.max((u0 + u1) / 2 - width / 2, baseU.from), baseU.to - width);
-  return axis.viewFromU({ from, to: from + width });
 }
