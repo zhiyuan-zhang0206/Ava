@@ -1,6 +1,6 @@
 ---
 name: evaluation
-description: "Designs trustworthy self-evolution evaluations from real traces without ground truth. Use when creating eval cases, running evaluation batches, auditing agent traces for cheating, or judging whether an evaluation set is strong, diverse, and representative."
+description: "Evaluates Ava self-evolution cases from real traces. Use when selecting replay-safe tasks, auditing evidence leakage, or grading replay results."
 ---
 
 # Why evaluation is hard

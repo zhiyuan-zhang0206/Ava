@@ -1,6 +1,6 @@
 ---
 name: ava-goal
-description: Sustains pursuit of a terminal goal across turns with evidence-based completion checks. Use when work must continue beyond a first attempt or turn, whether executing directly, collaborating with peers, or supervising delegated work; not for perpetual trigger-driven roles.
+description: "Sustains a finite Ava goal across turns. Use when pursuing a verifiable outcome that requires continued execution or supervision."
 ---
 
 # Goal Mode

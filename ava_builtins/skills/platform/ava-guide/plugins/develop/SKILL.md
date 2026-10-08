@@ -1,6 +1,6 @@
 ---
 name: develop
-description: Develops Ava plugins locally, verifies them across restart, and promotes stable plugins to independent git repositories. Use when creating or changing an Ava plugin, even if the user initially calls it a feature or integration.
+description: "Develops and verifies native Ava plugins. Use when creating, changing, testing across restart, or promoting a plugin."
 ---
 
 # Develop a plugin (L3)

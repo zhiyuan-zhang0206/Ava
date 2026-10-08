@@ -45,6 +45,9 @@ that the job needs. Keep run artifacts outside the instruction package.
 The description guides implicit selection. Explicit invocation and preset
 preloading also load skills, so test discovery separately from execution.
 
+For a catalog audit or substantial discovery/resource-routing change, read
+[audit guidance](references/audit.md) for criteria and focused evaluation cases.
+
 ## Authoring flow
 
 ### 1. Understand the job and define success

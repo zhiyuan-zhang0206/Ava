@@ -1,6 +1,6 @@
 ---
 name: ava-corp
-description: Organizes an Ava fleet into CEO, project leads, personal services, and shared infrastructure roles. Use when opening a cluster, assigning ownership, creating long-lived roles, spawning or resurrecting role agents, or deciding who reports to whom.
+description: "Designs enduring roles and ownership for an Ava fleet. Use when organizing a cluster's management and reporting structure."
 ---
 
 # Ava Corp — the organization template

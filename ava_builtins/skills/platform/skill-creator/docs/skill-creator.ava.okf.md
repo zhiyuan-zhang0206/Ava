@@ -17,6 +17,11 @@ to Ava's tools. `SKILL.md` carries the concise workflow;
 presets. `evals/evals.json` and `evals/metrics.md` carry the creator's own
 authoring cases and grading definitions. Run artifacts stay outside the package.
 
+`references/audit.md` owns catalog-audit criteria and primary guidance.
+`evals/catalog-audit.json` and `evals/catalog-audit-metrics.md` carry portable
+metadata-routing and operational-navigation probes. These are offline evaluator
+inputs; the metrics distinguish packaging checks, proxies, and live execution.
+
 ## Judgments carried
 - **Three-level loading model**: metadata (name+description, always in context) / SKILL.md body (loaded when triggered) / bundled resources (scripts/references/assets, on demand). When writing a skill, distribute content across these three levels — description should let the agent determine "when to reach for it."
 - **When to create a skill**: when an instruction has no existing config field to carry it, and will be used repeatedly, creating a small skill is cleaner and more reusable than piling into config (same origin as [[ava/docs/presets.ava.okf.md|presets]]'s "no carrying field, just create a small skill").

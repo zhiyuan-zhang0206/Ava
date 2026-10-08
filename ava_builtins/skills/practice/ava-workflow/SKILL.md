@@ -1,6 +1,6 @@
 ---
 name: ava-workflow
-description: "Chooses and adjusts how to work: direct execution, calibration, alignment, goal definition, sustained supervision, peer collaboration, script orchestration, and evaluation. Use automatically for non-trivial, ambiguous, consequential, sustained, or parallel tasks; choose only the capabilities the task needs."
+description: "Selects a working strategy for complex or unclear tasks. Use when calibration, planning, coordination, or sustained verification would improve execution."
 ---
 
 # Ava Workflow — Choose How to Work

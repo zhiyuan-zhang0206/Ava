@@ -1,6 +1,6 @@
 ---
 name: evaluation-paradigm-shift
-description: Evaluates AI-produced results beyond static benchmark scores through process evidence and a verification hierarchy. Use when trusting a benchmark number, comparing eval methods, checking contamination, or confronting the AI verification gap.
+description: "Assesses AI evaluation beyond static benchmark scores. Use when examining contamination, process evidence, or the verification gap in AI-produced results."
 ---
 
 # Evaluation Paradigm Shift
@@ -38,21 +38,6 @@ description: Evaluates AI-produced results beyond static benchmark scores throug
 - [ ] Main comparison pre-registered; test set sealed
 - [ ] The evaluation choice (benchmark vs environment vs process audit) is justified, not inherited
 
-## Anti-patterns
-
-- **Self-certification**: the agent that produced the result declares it done → Instead: independent verification point (`principles/honesty`, `practices/present`).
-- **Benchmark-as-truth**: "SOTA on X" with no provenance → Instead: provenance + contamination check + claim scoped to what the benchmark can support.
-- **Output-only review**: reading the paper, not the logs → Instead: re-derive the key numbers from logs + code (82% detection).
-- **Evals nostalgia**: assuming the old eval still measures the new system → Instead: re-derive what signal substitutes for human judgment in this system.
-- **Verification theater**: a checklist with no check stronger than self-assessment → Instead: at least one formal- or process-level check per project.
-
-## Bad → good
-
-- **bad**: "The model's self-assessment says the result is correct, and the benchmark says SOTA — ship it." (two weakest signals, no provenance, producer self-certifies)
-- **good**: "Claim: our method improves F1 by 3.2±0.4 (10 seeds). Verification: (1) key numbers re-derived from logs by an independent agent; (2) paired statistical test pre-registered; (3) benchmark provenance checked, contamination check documented; (4) self-assessment reported as such, used for exploration only."
-- **bad**: "We evaluated on the standard benchmark everyone uses." (inherited choice, no justification)
-- **good**: "We evaluated on a private held-out set from the target distribution (protocol per `practices/design`), plus the standard benchmark for comparability — with its provenance and contamination caveats stated."
-
 ## Relationships
 
 - Verification levels and presenter ≠ judge: `principles/honesty` + `practices/present`; claim–evidence alignment under the new regime: `principles/claim-evidence-alignment`.
@@ -60,12 +45,8 @@ description: Evaluates AI-produced results beyond static benchmark scores throug
 - Trace-log discipline: `principles/reproducibility` + `practices/reproduce`.
 - Failure modes that motivate this file: `ai-era/ai-failure-modes`; the tool landscape being evaluated: `ai-era/ai-research-landscape`; the upgrade/invalidation map: `ai-era/guidance.md`.
 
-## Sources
+## Examples and sources
 
-- Tworek at Auto-Research Summit / AGI House (X @agihouse_org/status/2085133996137259312, 2026-08); the-decoder.com on Core Automation
-- burny_tech, *Recursive Self-Improvement in AI* RSI survey (X @burny_tech/status/2085462603610861802, 2026-08) [unverified: arXiv ID]
-- Luo et al., CMU evaluation of AI Scientist (arXiv 2509.08713)
-- Cursor benchmark-retrieval research (2026, via X @v_shakthi) [unverified: original report]; Gizmodo bogus-benchmarks (2026)
-- Zhen Wang on the Nature week and trainable environments (X @zhenwang9102/status/2057207629227667544, 2026-05)
-- Jeff Dean, Discovery Loop announcement (X @JeffDean/status/2085034604172603724, 2026-08)
-- Gelman & Loken, The Garden of Forking Paths (pre-registration rationale, via `principles/honesty`)
+Read [examples and sources](references/examples-and-sources.md) when a concrete
+counterexample, worked example, or source context would clarify these decisions.
+Use the core guidance above directly for routine work.

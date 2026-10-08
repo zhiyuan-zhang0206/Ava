@@ -1,6 +1,6 @@
 ---
 name: ava-being-a-long-running-agent
-description: Manages lifecycle, waiting, persistence, reporting, and recovery for long-running agents. Use when owning a long task, ongoing domain, service, queue, monitor, or peer coordination, even if the user did not explicitly ask for a persistent agent.
+description: "Manages persistent Ava work and recovery. Use when a task spans turns, waits for events, or resumes after interruption."
 ---
 
 # Being a Long-Running Agent
@@ -66,99 +66,10 @@ the only difference is whether you speak up.
 
 ## Wait with watchers, never with loops
 
-When you are waiting on an external event, arm a watcher and idle. A few common
-cases:
-
-- **Peer agent reply**: a message addressed to you wakes you — nothing to poll.
-  `ava.agents.get_last_message(target)` is not a reply signal: it returns the
-  peer's last AI *turn text*, `None` when that turn had no text (e.g. the peer
-  answered by `send_message`, task #3656). Poll it only when the signal you
-  await genuinely is turn text; for liveness use `ava.agents.get_status(target)`.
-- **Scheduled time**: `ava.watcher.at(...)`.
-- **File to land**: poll `os.path.exists(...)` in a custom watcher.
-- **Temporary recurring model check**: `ava.watcher.cron(...)`; durable recurring work belongs in a schedule.
-
-Read `ava.help(ava.watcher)` for watcher contracts and
-`ava.help(ava.shell.sessions)` to inspect or stop the returned session.
-Use temporary watchers for a bounded wait you own. Use
-`ava.skills.ava_guide.schedules` for recurring work that must resume after an
-interruption. Peer messages already provide a wake path; do not add a watcher
-when the existing delivery meets the need.
-
-Record a baseline when arming a custom probe, along with its target and as-of
-time. Wake only when the awaited condition needs action, including if it already
-holds on the first check. Keep healthy samples in logs. Treat probe failures as
-failures, not as an unmet condition; alert after repeated failures and stop when
-the target is definitively gone. Use stable paths and refresh copied state before
-checking it. Arrange bounded, visible delivery retries when a lost wake would
-leave the task unattended.
-
-The bundled `scripts/watch_idle.py` is a reference body for an idle-agent wait.
-Read it only when implementing that wait; it uses authoritative status checks
-and bounded delivery retries. Do not start a duplicate monitor.
-
-### pause_heartbeat
-
-When you are deliberately waiting (a watcher is armed, a peer is working),
-suppress the idle check-in nudge with `ava.self.pause_heartbeat(duration)`. Use
-a watcher to know when the wait is over. Do not use one in place of the other —
-the heartbeat wake carries no signal about the event you are waiting for. And
-do not use either in place of ending yourself: when the wait is over and the
-task is done, terminate — do not re-pause the heartbeat.
-
-#### Exponential backoff
-
-Each `pause_heartbeat` call and each heartbeat wake costs a turn — the model
-runs, a token budget is consumed. When the user or a peer is away for hours or
-days, a fixed-duration pause (e.g. 1h) causes many wasted turns. Use exponential
-backoff to stretch the pause window while keeping the agent reachable:
-
-| Consecutive idle turns | Pause duration |
-|------------------------|---------------|
-| 1st | 1 hour |
-| 2nd | 2 hours |
-| 3rd | 4 hours |
-| 4th+ | 8 hours (cap) |
-
-**How to track**: count how many consecutive turns you have idled without
-performing meaningful work. Each time you wake up, check your watchers or
-pending messages. If nothing has changed, increment the idle count and pause
-with the next duration in the sequence. When you actually do work — process a
-message, act on a watcher firing, deliver a result — reset the count to zero.
-
-**Rationale**: this example reduces repeated idle check-ins. Choose the cap from
-the required response time; it is not a guaranteed token saving or delivery bound.
-
-**Trade-off**: polling intervals determine how soon a watcher detects a condition.
-Heartbeat pauses suppress check-ins, not delivery of messages or watcher events.
-Do not rely on a heartbeat wake as the signal for an awaited event; arrange its
-own delivery and choose polling intervals to satisfy the response requirement.
-
-### Monitoring without a model turn on every tick
-
-Use `ava.watcher.cron` or a schedule when the recurring work itself needs model
-judgment. For mechanical CI, file, queue, or health checks, use a custom background
-watcher that checks the condition and sends a message only when you must act.
-Read `ava.help(ava.watcher)` for API semantics. Set the interval and lifetime from
-the response requirement, and reuse existing event delivery or a monitor when it
-already covers the wait.
-
-Compare the condition relevant to action, not raw readings: disk usage moving
-within a healthy range is not a wake trigger; reaching the intervention threshold
-is. Keep ordinary samples in a log. A wake message should name the condition,
-the relevant evidence, and the durable record to resume from.
-
-When the wait resolves or is cancelled, stop the owned monitor if it is no longer
-needed. Keep recurring role monitors while that role remains active. On recovery,
-inspect recorded monitor references and current status before replacing them.
-
-### Coordinating a wait with peers
-
-Use the fleet communication contract for milestones, blockers, commitments, and
-handoffs. When another agent relies on your acceptance or timing, send that
-commitment with the useful update; do not send a preliminary status solely because
-you are about to work for a long stretch. Persist intermediate progress in the
-task file so recovery does not depend on a sequence of messages.
+Use a watcher or existing event delivery for a wait. Before choosing heartbeat
+pauses, backoff, mechanical monitors, or peer wait coordination, read
+[waiting](references/waiting.md). Wake only on actionable changes; stop owned
+one-off monitors when done, and terminate when the finite task is complete.
 
 ## Usage budget reminders
 
@@ -173,84 +84,15 @@ existing authority. Bound the observer lifetime and retain its session identity
 if it needs cancellation or recovery. A reminder does not authorize more spending.
 
 ## Two kinds of state, three destinations
-Your state splits across three stores with different audiences:
 
-| Store | Audience | What goes there |
-|-------|----------|-----------------|
-| **Workspace** (`ava.cwd`) | You (on demand) | Task files, drafts, logs, artifacts. Detailed working files you read when needed. |
-| **Your memory** (`<workspace>/memory/`) | You (index always injected) | Your durable state: role, preferences, ongoing responsibilities, known pitfalls. `memory/MEMORY.md` is the index — injected into every context; each memory is one file beside it, read on demand. |
-| **Shared memory** (`ava.memory`) | Every agent | Facts another agent would need to take over your role. Shared, searchable. |
+Keep detailed progress in workspace files, durable personal state in
+memory, and shared facts in the pool. Read [durable state](references/durable-state.md)
+when choosing destinations or preparing for compaction/recovery.
 
-### Your memory vs compact summary
-
-| | Compact summary | Your memory |
-|---|---|---|
-| **What** | What happened in one conversation round | Who you are as an agent |
-| **When** | Replaced at each compaction | Persists across compactions |
-| **Contains** | Requests, progress, dead ends, verbatim tail | Role, preferences, responsibilities, pitfalls |
-
-Each compaction also dumps the raw pre-compact message history into your
-workspace under `message-history/` (JSONL, one message per line) — grep it when
-the summary misses a detail you need.
-
-### Maintaining your memory
-
-Your memory index (`memory/MEMORY.md`) is injected into your context after
-every compaction and at session start — even when empty (it shows
-"(no content)" to remind you). Write it so your future self can resume
-immediately:
-
-- **Role** — what domain do you own? What is your label?
-- **Preferences** — language, style, tools you prefer
-- **Ongoing responsibilities** — watchers you armed, peers you delegated to
-- **Pitfalls** — things you learned the hard way
-- **Workspace pointers** — reference paths to detailed task files, logs, artifacts
-
-Each memory is one file in `memory/` holding one fact; the index carries one
-line per memory (`- [Title](<slug>.md) — <hook>`), never entry content. Read
-an entry on demand with `ava.files.read("memory/<slug>.md")`. Update an
-existing entry rather than duplicating it; delete entries that turn out wrong.
-Detailed task notes, logs, and artifacts belong in workspace files; reference
-them from the index. The index must be named `MEMORY.md` (uppercase).
-
-### Dual memory discipline
-
-- **Your memory (`memory/`)**: your durable state — role, preferences,
-  responsibilities. Index always injected, always visible.
-- **Shared memory (`ava.memory`)**: what *another agent* needs. User facts,
-  global constraints, reusable workflows. Found via `ava.memory.search(...)`.
-
-Before compaction, persist to all: task progress to workspace files, state to
-your memory, durable facts to shared memory.
 ## The task file
 
-A simple markdown checklist in your workspace, updated as you work, read after
-compaction to resume.
-
-```markdown
-# Task: <one-line goal>
-
-## Status: <IN_PROGRESS | BLOCKED | DONE>
-
-## Checklist
-- [x] Step one completed
-- [ ] Step two — currently working on this
-- [ ] Step three — blocked on <reason>
-
-## Key files
-- `/path/to/output.json` — the generated data
-
-## Decisions made
-- Chose X over Y because <reason> (2026-07-01)
-
-## Pitfalls
-- The API rate-limits at 1 req/s
-
-## Next action
-- [ ] Unblock step three by asking agent #NNN for the schema
-```
-
-Update on every meaningful state change, and before compaction.
+Read the [task-file example](references/durable-state.md#the-task-file) when a
+resumable checklist is useful. Update it on meaningful changes and before compaction.
 
 ## Lifecycle
 

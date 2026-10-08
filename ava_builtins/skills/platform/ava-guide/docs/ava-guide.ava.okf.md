@@ -53,6 +53,13 @@ Maker. `ava-self-development` and `impersonator-guide`
 remain project-local contributor/executor manuals. Guide membership changes
 neither kernel contribution requirements nor operator authorization.
 
+Sub-skills load substantial conditional procedures on demand. External-agent
+Mode A reads `references/delegated-workers.md`; takeover keeps its own mode
+boundary. Onboarding separates preference questions, intent branches, and
+shared-memory note formats. `ops` separates resources and sessions; `operations`
+separates diagnosis and authorized-rollout verification. Each entrypoint states
+when to read the relevant reference.
+
 ## Consumers and distribution
 
 Package and schedule draft endpoints load `ava.skills.ava_guide.packages.install`
