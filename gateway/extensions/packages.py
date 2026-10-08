@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from base.cluster.machine import machine_name
-from gateway.agents.creation import guarded_draft_key
+from gateway.agents.creation import DraftCreationArguments, guarded_draft_key
 from gateway.agents.router import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
 
@@ -90,16 +90,15 @@ async def _draft_package(
         prompt_source="user",
         label="ava-package-installer",
     )
+    identity: DraftCreationArguments = {}
+    if key is not None:
+        identity = {"creation_key": key, "creation_identity": body.model_dump(mode="json")}
     spawned = await create_and_launch_agent(
         body_obj,
         machine_name(),
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,
-        **(
-            {"creation_key": key, "creation_identity": body.model_dump(mode="json")}
-            if key is not None
-            else {}
-        ),
+        **identity,
     )
     return PackageDraftResponse(agent_id=spawned.id)
