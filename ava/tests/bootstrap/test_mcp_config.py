@@ -11,6 +11,7 @@ from whatever the real repo `plugins/` ship.
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -360,6 +361,60 @@ def test_assert_requirements_gates_chrome_on_a_windows_shaped_host(
 
 
 # ─── server_capability ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "requires",
+    [
+        [],
+        ["display"],
+        "",
+        "display",
+        0,
+        1,
+        False,
+        {"gpu": False},
+        {"gpu": True},
+        {"display": "false"},
+        {"display": 1},
+        {"unix_socket": None},
+        {"display": True, "unix_socket": "false"},
+    ],
+)
+@pytest.mark.parametrize("reader", [cfg_mod.assert_requirements, cfg_mod.server_capability])
+def test_invalid_requirements_fail_before_host_probe(
+    requires: object,
+    reader: Callable[[dict[str, Any]], object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_probe() -> bool:
+        pytest.fail("invalid declarations must fail before probing host capabilities")
+
+    monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", unexpected_probe)
+    with pytest.raises(cfg_mod.MCPError):
+        reader({"requires": requires})
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {},
+        {"requires": None},
+        {"requires": {}},
+        {"requires": {"display": False, "unix_socket": False}},
+    ],
+)
+def test_optional_or_false_requirements_need_no_host_probe(
+    spec: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unexpected_probe() -> bool:
+        pytest.fail("optional or false requirements must not probe host capabilities")
+
+    monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", unexpected_probe)
+    cfg_mod.assert_requirements(spec)
+    assert cfg_mod.server_capability(spec) == (True, None)
 
 
 def test_server_capability_ok_when_host_has_both(monkeypatch: pytest.MonkeyPatch) -> None:

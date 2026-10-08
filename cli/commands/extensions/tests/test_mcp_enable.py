@@ -55,3 +55,66 @@ def test_overlay_file_shape(unit_home: Path) -> None:
     cmd_mcp_disable("foo")
     data = json.loads(local_config_path().read_text())
     assert data["mcp_servers"]["foo"]["enabled"] is False
+
+
+@pytest.mark.parametrize("requires", [[], {"gpu": False}, {"display": "false"}])
+def test_enable_rejects_invalid_requirements_without_writing(
+    unit_home: Path, requires: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from base.packages.plugins.mcp_enabled import local_config_path
+
+    spec = json.dumps({"command": "server-foo", "requires": requires})
+    assert cmd_mcp_add("foo", spec, None, [], []) == 0
+    assert cmd_mcp_disable("foo") == 0
+    before = local_config_path().read_bytes()
+    capsys.readouterr()
+
+    assert cmd_mcp_enable("foo") == 1
+    output = capsys.readouterr()
+    assert "requires" in output.err
+    assert output.out == ""
+    assert local_config_path().read_bytes() == before
+
+
+def test_disable_preserves_invalid_requirements_as_a_close_operation(unit_home: Path) -> None:
+    from base.packages.plugins.mcp_enabled import read_enabled
+
+    spec = {"command": "server-foo", "requires": {"gpu": "invalid"}}
+    assert cmd_mcp_add("foo", json.dumps(spec), None, [], []) == 0
+    assert cmd_mcp_disable("foo") == 0
+    assert read_enabled() == {"foo": False}
+    assert json.loads((unit_home / "mcp.json").read_text())["mcpServers"]["foo"] == spec
+
+
+@pytest.mark.parametrize("requires", [None, {}, {"display": True, "unix_socket": True}])
+def test_enable_and_list_validate_declarations_without_host_probes(
+    unit_home: Path, requires: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ava.mcp_config as cfg_mod
+    from base.packages.plugins.mcp_enabled import read_enabled
+
+    def unexpected_probe() -> bool:
+        pytest.fail("CLI declaration validation must not probe host capabilities")
+
+    monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", unexpected_probe)
+    spec = json.dumps({"command": "server-foo", "requires": requires})
+    assert cmd_mcp_add("foo", spec, None, [], []) == 0
+    assert cmd_mcp_enable("foo") == 0
+    assert read_enabled() == {"foo": True}
+    assert cmd_mcp_list() == 0
+
+
+@pytest.mark.parametrize("requires", [[], {"gpu": False}, {"display": "false"}])
+def test_list_rejects_invalid_requirements_before_printing_inventory(
+    unit_home: Path, requires: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    spec = json.dumps({"command": "server-foo", "requires": requires})
+    assert cmd_mcp_add("foo", spec, None, [], []) == 0
+    assert cmd_mcp_disable("foo") == 0
+    capsys.readouterr()
+
+    assert cmd_mcp_list() == 1
+    output = capsys.readouterr()
+    assert "requires" in output.err
+    assert output.out == ""
