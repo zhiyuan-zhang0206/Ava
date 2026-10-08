@@ -129,7 +129,7 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
 
 def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
     jobs = _workflow_jobs()
-    static = _step(jobs["backend-structure"], "Run static pytest contracts")
+    static = _step(jobs["backend-static"], "Run static pytest contracts")
     assert static["if"] == "needs.classify.outputs.backend == 'true'"
     assert "--test-environment=static" in static["run"]
     assert "--junit-xml=tmp/junit-backend-static.xml" in static["run"]
