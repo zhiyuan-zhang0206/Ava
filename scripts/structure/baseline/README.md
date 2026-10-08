@@ -16,6 +16,11 @@ the combined entries and permits no additional targets or counts.
 The guard still checks each key and count when that version changes; a rule upgrade
 or a newly introduced lint cannot add exemptions.
 
+Historical absence is accepted only after Git resolves a valid revision: no
+baseline directory means it predates the shard migration, and no `rules.json`
+means rule version 1. Unknown revisions, failed Git reads, and incomplete blobs
+fail the gate instead of disabling the comparison.
+
 This directory is temporary while the existing exemptions are removed. Keep its
 README while the shrink-only gate still reads it. After the final exemption is
 fixed, remove the baseline directory and its supporting machinery instead of
