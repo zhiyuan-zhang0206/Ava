@@ -112,6 +112,7 @@ def invoke_response(
     retry_max_delay_seconds: float = 30.0,
     model: str | None = None,
     usage_source: str | None = None,
+    usage_agent_id: int | None = None,
 ) -> Any:
     """Invoke `runnable` on an already-built message list; return the response.
 
@@ -143,7 +144,9 @@ def invoke_response(
 
     A successful invoke logs its
     `llm_usage` row (with `usage_source` as the discriminator) before
-    returning; an exhausted or permanent provider failure raises `error_type`
+    returning; a daemon call made on an agent's behalf passes `usage_agent_id`
+    so the row is attributed to that agent (outside an agent turn nothing else
+    would). An exhausted or permanent provider failure raises `error_type`
     with the reason. Unknown errors retain their original type and traceback. Empty-response
     rejection stays with the callers — they differ on what empty means.
     """
@@ -200,6 +203,7 @@ def invoke_response(
             usage_kind="chat",
             latency_ms=latency_ms,
             source=usage_source,
+            for_agent_id=usage_agent_id,
         )
     return response
 
