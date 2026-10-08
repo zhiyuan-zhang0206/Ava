@@ -94,6 +94,32 @@ class NoteTag(StrEnum):
     TIMEZONE = "timezone"
 
 
+class AvaUsage(TypedDict, total=False):
+    """`ava_usage` on an agent turn's final AIMessage: the figures of the `llm_usage` event
+    emitted at the same moment, from the same `quote`.
+
+    `cost_usd` and the `price_*` rates (USD per 1M tokens) are the usage-time snapshot; an
+    unpriced call carries `unpriced: 1` and none of them. `in_total` includes `cache_read`
+    and the cache writes. A message without this key predates it: its cost is unknown,
+    never estimated.
+    """
+
+    model: str
+    in_total: int
+    out_total: int
+    cache_read: int
+    cache_write_5m: int
+    cache_write_1h: int
+    reasoning: int
+    cost_usd: float
+    price_miss: float
+    price_hit: float
+    price_out: float
+    price_write_5m: float
+    price_write_1h: float
+    unpriced: int
+
+
 class AvaMessageKwargs(TypedDict, total=False):
     """The `ava_*` metadata bag on a message's `additional_kwargs`. Every key is
     contextual to the message kind (total=False): an `inbound` carries source /
@@ -132,6 +158,7 @@ class AvaMessageKwargs(TypedDict, total=False):
     ava_reasoning_ms_by_block: dict[str, int]
     ava_code_ms_by_block: dict[str, int]
     ava_reasoning_ms: int
+    ava_usage: AvaUsage
 
 
 def read_ava_kwargs(msg: BaseMessage) -> AvaMessageKwargs:
