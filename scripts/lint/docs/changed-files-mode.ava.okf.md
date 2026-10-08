@@ -34,4 +34,20 @@ and both lock checks. Their unit tests exercise positive, negative and
 temporary-repository contracts; repository compliance belongs to these CI
 gates rather than duplicate assertions over the shipped tree in pytest.
 
+## Scan costs
+
+Function names and nesting follow statement bodies, including exception handlers
+and match cases; expression subtrees cannot contain function definitions or add
+statement nesting. Radon still measures complexity on the complete AST. The
+time-bomb test rules share one module traversal for imports and calendar bindings;
+their clock analysis and diagnostic rules are unchanged.
+
+CI's full Pyright invocation includes `--stats` to expose parse, bind and check
+costs before changing how it runs; its scope and diagnostic policy stay the same.
+The required structure job caches pre-commit's tool environments by OS,
+architecture, hook configuration, Python version and Python lockfile. It saves
+after a successful lint step and always executes every configured structural
+hook, including on a cache hit; the cache does not contain verdicts or project
+virtualenvs.
+
 Parent: [[scripts/lint/docs/lint.ava.okf.md|lint]].
