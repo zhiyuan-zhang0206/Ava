@@ -43,6 +43,7 @@ from services.entrypoints.im_bridge.timeline_acceptance import (
 )
 from services.entrypoints.im_bridge.timeline_acceptance import truncate as _truncate
 from services.entrypoints.im_bridge.types import (
+    NETWORK_ERRORS,
     AgentRow,
     ChatState,
     IMAdapter,
@@ -85,8 +86,6 @@ def _is_dialog_item(it: dict[str, Any]) -> bool:
     return True
 
 
-# SSE timeout and inbound enqueue backoff come from the service config slice.
-
 # Refresh Telegram's ~5-second typing indicator every 4s, for at most 5 minutes.
 _TYPING_INTERVAL_S = 4.0
 _TYPING_MAX_S = 300.0
@@ -98,7 +97,15 @@ _render_item = render_item  # Compatibility for the existing renderer consumer.
 class IMBridgeCore(SpawnMenuMixin):
     """Owns per-channel chat state, command routing, and subscription pushes."""
 
-    def __init__(self, config: ImBridgeConfig, gateway: GatewayClient, db_pool: Any = None) -> None:
+    def __init__(
+        self,
+        config: ImBridgeConfig,
+        gateway: GatewayClient,
+        db_pool: Any = None,
+        *,
+        tasks: asyncio.TaskGroup,
+    ) -> None:
+        self._tasks = tasks
         self.config = config
         self.gateway = gateway
         self.cursor_store = CursorStore(db_pool)
@@ -116,6 +123,18 @@ class IMBridgeCore(SpawnMenuMixin):
         self._switch_state = _load_switch_state()
         self._disabled_channels: set[str] = set(config.im_disabled_adapters)
         self._outbox_replay_task: asyncio.Task[Any] | None = None
+
+    async def stop(self) -> None:
+        """Cancel service-owned loops before closing their adapters and database."""
+        tasks = [*self._subscriptions.values(), *self._typing_tasks.values()]
+        if self._outbox_replay_task is not None:
+            tasks.append(self._outbox_replay_task)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._subscriptions.clear()
+        self._typing_tasks.clear()
+        self._outbox_replay_task = None
 
     def register(self, adapter: IMAdapter) -> None:
         register_adapter(self, adapter)
@@ -148,8 +167,8 @@ class IMBridgeCore(SpawnMenuMixin):
                         "notify_user: %s send_to_owner retry failed: %r", channel, retry_exc
                     )
                     results[channel] = f"error: {type(retry_exc).__name__}"
-            except Exception as exc:  # isolate this uncertain channel from the fan-out
-                _log.warning("notify_user: %s outcome uncertain; no retry: %r", channel, exc)
+            except Exception as exc:  # RPC fan-out reports each failed channel.
+                _log.warning("notify_user: %s send failed; no retry: %r", channel, exc)
                 results[channel] = f"error: {type(exc).__name__}"
         return results
 
@@ -180,56 +199,51 @@ class IMBridgeCore(SpawnMenuMixin):
     async def handle_inbound(self, msg: InboundMessage) -> None:
         """Normalize entry point from adapters. Replies via the originating
         adapter; returns nothing (agent replies arrive via SSE push)."""
-        try:
-            nb = self.notice_bridge
-            if msg.text.startswith("notice:"):
-                hint = await nb.handle_callback(msg.chat_id, msg.text)
-            elif msg.text.startswith("/notice"):
-                cmd = msg.text[len("/notice") :].strip()
-                hint = await nb.list_queue() if cmd == "list" else nb.cmd_notice(cmd)
-            else:
-                hint = await nb.handle_inbound(msg.chat_id, msg.text)
-            if hint is not None:
-                await self._send(msg.channel, msg.chat_id, Reply(hint))
+        nb = self.notice_bridge
+        if msg.text.startswith("notice:"):
+            hint = await nb.handle_callback(msg.chat_id, msg.text)
+        elif msg.text.startswith("/notice"):
+            cmd = msg.text[len("/notice") :].strip()
+            hint = await nb.list_queue() if cmd == "list" else nb.cmd_notice(cmd)
+        else:
+            hint = await nb.handle_inbound(msg.chat_id, msg.text)
+        if hint is not None:
+            await self._send(msg.channel, msg.chat_id, Reply(hint))
+            return
+        state = self._get_or_create_state(msg.channel, msg.chat_id)
+        text = msg.text.strip()
+        if text.startswith("spawn:"):
+            # inline-keyboard navigation of the /spawn menu (only
+            # callbacks carry this prefix; typed text never does)
+            reply = await self._handle_spawn_menu(state, text, idempotency_key=msg.idempotency_key)
+        elif text.startswith("/"):
+            reply = await self._handle_command(
+                state,
+                text,
+                msg.idempotency_key,
+                replay_id=msg.idempotency_key or msg.message_id or uuid.uuid4().hex,
+            )
+        else:
+            try:
+                reply = await self._handle_chat(state, text, msg.idempotency_key)
+            except NETWORK_ERRORS:
+                # Gateway enqueue failed after every retry — the platform
+                # offset has moved, so only the outbox can save this
+                # message (Task #1032: it used to be silently dropped).
+                _log.exception(
+                    "chat enqueue failed channel=%s chat=%s — outboxing",
+                    msg.channel,
+                    msg.chat_id,
+                )
+                self._stop_typing(state)
+                await self._enqueue_outbox(state, text, msg.idempotency_key)
+                await self._send(msg.channel, msg.chat_id, Reply(copy.QUEUED_NOTICE))
                 return
-            state = self._get_or_create_state(msg.channel, msg.chat_id)
-            text = msg.text.strip()
-            if text.startswith("spawn:"):
-                # inline-keyboard navigation of the /spawn menu (only
-                # callbacks carry this prefix; typed text never does)
-                reply = await self._handle_spawn_menu(
-                    state, text, idempotency_key=msg.idempotency_key
-                )
-            elif text.startswith("/"):
-                reply = await self._handle_command(
-                    state,
-                    text,
-                    msg.idempotency_key,
-                    replay_id=msg.idempotency_key or msg.message_id or uuid.uuid4().hex,
-                )
-            else:
-                try:
-                    reply = await self._handle_chat(state, text, msg.idempotency_key)
-                except Exception:
-                    # Gateway enqueue failed after every retry — the platform
-                    # offset has moved, so only the outbox can save this
-                    # message (Task #1032: it used to be silently dropped).
-                    _log.exception(
-                        "chat enqueue failed channel=%s chat=%s — outboxing",
-                        msg.channel,
-                        msg.chat_id,
-                    )
-                    self._stop_typing(state)
-                    await self._enqueue_outbox(state, text, msg.idempotency_key)
-                    await self._send(msg.channel, msg.chat_id, Reply(copy.QUEUED_NOTICE))
-                    return
-            if reply:
-                replies = reply if isinstance(reply, list) else [reply]
-                for r in replies:
-                    await self._send(msg.channel, msg.chat_id, r)
-                await push_watchdog.hint_recovered(self, msg)
-        except Exception:
-            _log.exception("handle_inbound failed channel=%s chat=%s", msg.channel, msg.chat_id)
+        if reply:
+            replies = reply if isinstance(reply, list) else [reply]
+            for r in replies:
+                await self._send(msg.channel, msg.chat_id, r)
+            await push_watchdog.hint_recovered(self, msg)
 
     # -- inbound outbox (Task #1032) -----------------------------------------
 
@@ -259,12 +273,10 @@ class IMBridgeCore(SpawnMenuMixin):
         self.ensure_outbox_replay()
 
     def ensure_outbox_replay(self) -> None:
-        """Start the replay loop if it is not already running (idempotent).
-        Called on first outbox enqueue and at daemon startup — a restart
-        must drain what the previous process left behind."""
+        """Start one replay loop on enqueue or startup to drain persisted messages."""
 
         if self._outbox_replay_task is None or self._outbox_replay_task.done():
-            self._outbox_replay_task = asyncio.create_task(self._outbox_replay_loop())
+            self._outbox_replay_task = self._tasks.create_task(self._outbox_replay_loop())
 
     async def _outbox_replay_loop(self) -> None:
         """Drain the existing inbound journal through the keyed gateway API."""
@@ -295,7 +307,7 @@ class IMBridgeCore(SpawnMenuMixin):
                     entry.text,
                     idempotency_key=entry.idempotency_key,
                 )
-            except Exception:
+            except NETWORK_ERRORS:
                 _log.exception("im_bridge: outbox replay failed id=%s (kept for retry)", entry.id)
                 remaining.append(entry)
             else:
@@ -605,7 +617,7 @@ class IMBridgeCore(SpawnMenuMixin):
         existing = self._typing_tasks.get(key)
         if existing is not None and not existing.done():
             return  # already typing in this chat
-        self._typing_tasks[key] = asyncio.create_task(self._typing_loop(key, state, adapter))
+        self._typing_tasks[key] = self._tasks.create_task(self._typing_loop(key, state, adapter))
 
     async def _typing_loop(
         self, key: tuple[str, str], state: ChatState, adapter: IMAdapter
@@ -615,7 +627,7 @@ class IMBridgeCore(SpawnMenuMixin):
             while time.monotonic() < deadline:
                 try:
                     await adapter.typing(state.chat_id)
-                except Exception:
+                except NETWORK_ERRORS:
                     # cosmetic feature — a failing indicator gives up quietly
                     _log.warning("typing failed channel=%s chat=%s", state.channel, state.chat_id)
                     return
@@ -654,7 +666,7 @@ class IMBridgeCore(SpawnMenuMixin):
             try:
                 async with self._selection_lock(state):
                     await self._sync_selection(state)
-            except Exception as exc:
+            except NETWORK_ERRORS as exc:
                 _log.warning(
                     "selection restore held channel=%s class=%s", channel, type(exc).__name__
                 )
@@ -674,7 +686,7 @@ class IMBridgeCore(SpawnMenuMixin):
             if state.current_agent_id == prev_agent:
                 return  # unchanged — nothing to do
             existing.cancel()  # switched to another agent: restart the stream
-        task = asyncio.create_task(self._subscription_loop(key, state, catch_up=catch_up))
+        task = self._tasks.create_task(self._subscription_loop(key, state, catch_up=catch_up))
         self._subscriptions[key] = task
 
     async def _subscription_loop(
@@ -697,7 +709,7 @@ class IMBridgeCore(SpawnMenuMixin):
                     failures = 0  # a live event stream is the reset
             except asyncio.CancelledError:
                 return
-            except Exception:
+            except NETWORK_ERRORS:
                 failures += 1
                 # Report the first failure and sustained reconnect failures.
                 if failures == 1 or failures >= _sse_reconnect_warn_after:
@@ -778,7 +790,7 @@ class IMBridgeCore(SpawnMenuMixin):
                     selected = await self._sync_selection(state)
                     if selected is not None:
                         await self._catch_up_locked(key, state, selected)
-            except Exception as exc:
+            except NETWORK_ERRORS as exc:
                 _log.warning(
                     "committed timeline pull failed channel=%s class=%s",
                     state.channel,
