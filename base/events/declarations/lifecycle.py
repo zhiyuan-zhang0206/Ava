@@ -81,7 +81,21 @@ class AgentBootFailed(TypedDict):
     error: str
 
 
+class NativeCancelUncertain(TypedDict):
+    """`native_cancel_uncertain` identifies the original work held for proof recovery."""
+
+    agent_id: int
+    work_id: str
+
+
 EVENTS: dict[str, EventSpec] = {
+    "native_cancel_uncertain": telemetry_event(
+        "native_cancel_uncertain",
+        "native cancel recovery lacks exact execution or certified stop proof; "
+        "the supported consumer holds new work",
+        payload=NativeCancelUncertain,
+        tier="anomaly",
+    ),
     "agent_continuation_lost": telemetry_event(
         "agent_continuation_lost",
         "an agent's continuation failed at a maintenance hold and its restart pointer is gone, "
