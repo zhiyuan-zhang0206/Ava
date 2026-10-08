@@ -6,10 +6,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { ContextBreakdownCard, type CategoryHighlight } from "@/components/inspector/context-breakdown";
-import { RunTimelineCrumbs } from "@/components/run-timeline/run-timeline-crumbs";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { RunTimelineRows } from "@/components/run-timeline/run-timeline-rows";
-import { RunTimelineSessions } from "@/components/run-timeline/run-timeline-sessions";
 import { RunTimelineChartSkeleton } from "@/components/run-timeline/run-timeline-skeleton";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import {
@@ -21,10 +19,8 @@ import {
   nodeChildren,
   requestSelection,
   viewportOf,
-  type Crumb,
   type Highlight,
   type Selection,
-  type TimelineWindow,
   type Viewport,
 } from "@/components/run-timeline/timeline-model";
 import { buttonVariants } from "@/components/ui/button";
@@ -35,13 +31,11 @@ import { cn } from "@/lib/format/utils";
 
 /** The agent's run timeline: every level of its understanding tree and, under them, its
  *  message units. The backend answers once with the agent's whole lifetime; zooming and
- *  panning move a viewport over that loaded data (no further reads). Zooming to a session
- *  pushes a breadcrumb, the breadcrumbs step back. */
+ *  panning move a viewport over that loaded data (no further reads). */
 export default function RunTimelinePage({ params }: { params: Promise<{ agentId: string }> }) {
   const t = useTranslations("runTimeline");
   const [agentId, setAgentId] = useState<number | null>(null);
   const [paramsResolved, setParamsResolved] = useState(false);
-  const [trail, setTrail] = useState<Crumb[]>([]);
   const [selection, setSelection] = useState<Selection | null>(null);
   // The legend's (or a context breakdown row's) highlight of one kind of block; it survives zoom and pan.
   const [highlight, setHighlight] = useState<Highlight | null>(null);
@@ -66,10 +60,9 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
     };
   }, [params]);
 
-  // The zoom path belongs to one agent: the route resolving to another invalidates it.
+  // The selection, highlight and viewport belong to one agent: the route resolving to another invalidates them.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- identity-keyed reset, not a render loop
-    setTrail((previous) => (previous.length === 0 ? previous : []));
     setSelection(null);
     setHighlight(null);
     setViewport(null);
@@ -91,18 +84,6 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
       </main>
     );
   }
-
-  const pushCrumb = (crumb: TimelineWindow & { label: string }) => {
-    setTrail((previous) => [...previous, crumb]);
-    setViewport(viewportOf(crumb));
-  };
-
-  const stepBack = (index: number) => {
-    const kept = index < 0 ? [] : trail.slice(0, index + 1);
-    setTrail(kept);
-    const crumb = kept.at(-1);
-    setViewport(crumb ? viewportOf(crumb) : null);
-  };
 
   const selectedNode =
     selection?.kind === "node" ? data?.nodes.find((node) => node.id === selection.id) : undefined;
@@ -133,7 +114,6 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
 
   const main = (
     <>
-      <RunTimelineCrumbs trail={trail} onSelect={stepBack} />
       {data && base && view ? (
         <>
           <p className="text-xs text-muted-foreground" data-testid="run-timeline-window">
@@ -165,13 +145,6 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
           </button>
         </div>
       )}
-      {agentId !== null && data ? (
-        <RunTimelineSessions
-          agentId={agentId}
-          onZoom={(window, label) => pushCrumb({ ...window, label })}
-          onBuildEnded={() => void query.refetch()}
-        />
-      ) : null}
       {/* Agent-scoped context details follow the timeline. */}
       {agentId !== null && contextAt !== undefined ? (
         <ContextBreakdownCard agentId={agentId} at={contextAt} categoryHighlight={categoryHighlight} />
