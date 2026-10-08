@@ -19,7 +19,6 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import has_pending_interrupt
-from agent.graph.exec._stream import StreamingTextIO
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.tests.claim.test_inbound_ownership import _agent, _insert
 from base.agents.incarnation import exec_request_evidence
@@ -47,13 +46,7 @@ def _allow_model_config(
 
 @pytest.fixture(autouse=True)
 def _host_wakes_need_no_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AgentHost validates the wake's model config before admitting a turn.
-
-    Main's reject-invalid-hosted-model-wake gate (#1494) needs a provider key
-    for the cluster-default model; fake-host force-quiescence tests keep turns
-    independent of installed credentials (same stance as
-    services/agent_runner/agent_host/tests/test_agent_host.py's wired fixture).
-    """
+    """Keep fake-host wakes independent of installed provider credentials."""
 
     monkeypatch.setattr(
         "services.agent_runner.agent_host.runtime.validate_model_config", _allow_model_config
@@ -91,19 +84,27 @@ def _observed_host(
     return host, errors
 
 
-def _configure_late_reader(kind: str, patch: pytest.MonkeyPatch, release: threading.Event) -> None:
+def _configure_late_reader(
+    kind: str, patch: pytest.MonkeyPatch, release: threading.Event, agent_id: int
+) -> None:
     if kind != "reader":
         return
-    from agent.graph.exec import _subprocess
+    reader_name = f"exec-reader-{agent_id}"
+    original_run = threading.Thread.run
+    original_join = threading.Thread.join
 
-    original = _subprocess._drain_output
+    def delayed(thread: threading.Thread) -> None:
+        original_run(thread)
+        if thread.name == reader_name:
+            assert release.wait(20), "test must release real output reader"
 
-    def delayed(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
-        original(proc, stream)
-        assert release.wait(20), "test must release real output reader"
+    def bounded_join(thread: threading.Thread, timeout: float | None = None) -> None:
+        if thread.name == reader_name and timeout is not None:
+            timeout = min(timeout, 0.01)
+        original_join(thread, timeout)
 
-    patch.setattr(_subprocess, "_drain_output", delayed)
-    patch.setattr("agent.graph.exec._process._READER_JOIN_TIMEOUT_S", 0.01)
+    patch.setattr(threading.Thread, "run", delayed)
+    patch.setattr(threading.Thread, "join", bounded_join)
 
 
 async def _assert_pending_force(
@@ -180,7 +181,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
 ) -> None:
     agent_id = _agent(db_conn)
     entered, release = threading.Event(), threading.Event()
-    _configure_late_reader(work_kind, monkeypatch, release)
+    _configure_late_reader(work_kind, monkeypatch, release, agent_id)
     marker, release_file = tmp_path / "entered", tmp_path / "release"
     successor_entered, successor_release = asyncio.Event(), asyncio.Event()
     calls = 0

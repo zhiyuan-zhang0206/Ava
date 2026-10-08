@@ -753,7 +753,7 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
     async def _failed_scan(*args: Any, **kwargs: Any) -> set[int]:
         raise RuntimeError("history unavailable")
 
-    monkeypatch.setattr(sideload_mod, "_committed_ids_from_all_settled_writes", _failed_scan)
+    monkeypatch.setattr(sideload_mod, "committed_ids_for_reconcile", _failed_scan)
     with (
         bind_turn_identity(agent, incarnation=incarnation),
         pytest.raises(RuntimeError, match="history unavailable"),
