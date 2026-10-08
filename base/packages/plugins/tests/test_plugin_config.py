@@ -33,6 +33,7 @@ from base.packages.plugins.config_registration import (
     get_plugin_config,
     is_per_agent_field,
     merge_disk_image_schema,
+    read_config_image,
     resolve_overlay_targets,
     validate_config_overlay,
     write_default_disk_image,
@@ -43,6 +44,38 @@ class _FixtureConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     flag: bool = Field(default=True)
     marker: str = Field(default=".git", json_schema_extra={"per_agent": True})
+
+
+def test_read_config_image_defaults_without_creating_home(tmp_path: Path) -> None:
+    image = tmp_path / "absent-home" / "configs" / "fixture" / "config.json"
+    config = read_config_image(_FixtureConfig, image)
+    assert config.flag is True
+    assert config.marker == ".git"
+    assert not image.parent.parent.parent.exists()
+
+
+def test_read_config_image_returns_disk_values_without_registration(tmp_path: Path) -> None:
+    image = tmp_path / "config.json"
+    content = '{"flag": false, "marker": "custom"}\n'
+    image.write_text(content)
+    before = (dict(_PLUGIN_CONFIG_CLASSES), dict(_PLUGIN_CONFIGS))
+    config = read_config_image(_FixtureConfig, image)
+    assert (config.flag, config.marker) == (False, "custom")
+    assert image.read_text() == content
+    assert before == (_PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS)
+
+
+@pytest.mark.parametrize(
+    "content", ['{"flag": false}', '{"flag": false, "marker": ".git", "extra": 1}']
+)
+def test_read_config_image_rejects_schema_drift_without_repair(
+    tmp_path: Path, content: str
+) -> None:
+    image = tmp_path / "config.json"
+    image.write_text(content)
+    with pytest.raises(SchemaDriftError, match="schema drift"):
+        read_config_image(_FixtureConfig, image)
+    assert image.read_text() == content
 
 
 @pytest.fixture
