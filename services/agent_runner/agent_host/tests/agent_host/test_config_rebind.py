@@ -84,7 +84,9 @@ class TestConfigRebind:
         host, _, pool = wired({1: _Row()})
         await asyncio.wait_for(host.run_turn(1), 2)
         await asyncio.wait_for(host.run_turn(1), 2)
-        assert pool.reads == 2
+        # Each turn reads config before work and again for quiescent compact
+        # source qualification; neither read may reuse the cached runtime.
+        assert pool.reads == 4
 
 
 class TestTurnLoop:

@@ -9,7 +9,12 @@ import pytest
 
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
-from services.agent_runner.agent_host.tests.test_agent_host import _Build, _Row
+from services.agent_runner.agent_host.tests.test_agent_host import (
+    _Build,
+    _FakeConnCtx,
+    _FakePool,
+    _Row,
+)
 from services.agent_runner.agent_host.tests.test_agent_host import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.test_agent_host import wired as wired
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import (
@@ -69,13 +74,18 @@ async def test_failure_is_latched_before_any_journal_io(
 
 
 class _BlockedRead:
-    """A control pool whose row read never returns until the task is cancelled."""
+    """The first row read is cancelled; subsequent cleanup can read no receipts."""
 
     def __init__(self) -> None:
         self.entered = asyncio.Event()
+        self._first_read = True
+        self._cleanup_pool = _FakePool({})
 
-    def connection(self) -> "_BlockedRead":
-        return self
+    def connection(self, timeout: float | None = None) -> "_BlockedRead | _FakeConnCtx":
+        if self._first_read:
+            self._first_read = False
+            return self
+        return self._cleanup_pool.connection(timeout=timeout)
 
     async def __aenter__(self) -> None:
         self.entered.set()
@@ -144,4 +154,5 @@ async def test_a_settled_members_held_wake_claims_nothing(
     fc10_hold(phase, parked=(5,))
     await host.run_turn(agent)
     control.assert_not_awaited()
-    assert pool.reads == 1
+    # Pre-turn qualification and the closed-pump compact source read.
+    assert pool.reads == 2
