@@ -6,12 +6,15 @@ The child does only what cannot wait on a lock another thread held at the fork
 continuously, a few of them with a live screen model, while threads allocate more.
 A fork child that deadlocks shows as a shell that never answers; a starved accept
 loop shows as a slow ping, which is what the ownership probe times out on.
+Every new shell must produce its own output under that same load; independent
+checks use a bounded pool so socket round trips do not serialize forty checks.
 """
 
 from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -100,6 +103,11 @@ def _allocate_concurrently(home: Path) -> tuple[dict[str, bool], list[BaseExcept
     return created, errors
 
 
+def _assert_shell_responds(name: str) -> None:
+    type_line(name, f"echo alive-{name}")
+    support.output_until(name, f"alive-{name}")
+
+
 def test_new_sessions_fork_cleanly_while_other_sessions_stream_output(unit_home: Path) -> None:
     streaming = _start_streaming(unit_home)
 
@@ -114,10 +122,9 @@ def test_new_sessions_fork_cleanly_while_other_sessions_stream_output(unit_home:
     assert worst < _PING_BUDGET_S, f"ping stalled for {worst:.2f}s"
 
     # Every freshly forked shell is a working shell, not a child stuck between fork and exec.
-    for name in created:
-        type_line(name, f"echo alive-{name}")
-    for name in created:
-        support.output_until(name, f"alive-{name}")
+    with ThreadPoolExecutor(max_workers=_THREADS) as checks:
+        # Consume every result: a failed shell check must fail the test in the caller.
+        list(checks.map(_assert_shell_responds, created))
     # The streaming sessions kept streaming through all of it.
     assert wait_for(lambda: "streaming-output" in client.capture(streaming[0], 5, scrollback=False))
     assert {s.name for s in client.list_sessions()} == set(streaming) | set(created)
