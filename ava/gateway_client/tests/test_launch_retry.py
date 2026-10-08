@@ -45,7 +45,6 @@ def requests() -> Iterator[list[httpx.Request]]:
 
 def submit(**changes: Any) -> int:
     arguments: dict[str, Any] = {
-        "require_idempotency": True,
         "idempotency_key": "retry-intent",
         "expected_prior_attempt_id": PRIOR,
     }
@@ -68,6 +67,7 @@ def test_sdk_uses_fixed_path_key_and_observed_body(requests: list[httpx.Request]
     "changes",
     [
         {"require_idempotency": 1},
+        {"require_idempotency": True},
         {"idempotency_key": None},
         {"idempotency_key": ""},
         {"idempotency_key": "x" * 129},
@@ -81,7 +81,6 @@ def test_invalid_admission_has_no_http(
     requests: list[httpx.Request], boundary: Any, changes: dict[str, Any]
 ) -> None:
     args = {
-        "require_idempotency": True,
         "idempotency_key": "retry-intent",
         "expected_prior_attempt_id": PRIOR,
     }
@@ -97,7 +96,6 @@ def test_guarded_client_refuses_invalid_agent_ids(
     with pytest.raises((TypeError, ValueError)):
         gateway_client.retry_launch(
             agent_id,
-            require_idempotency=True,
             idempotency_key="intent",
             expected_prior_attempt_id=PRIOR,
         )
@@ -175,21 +173,17 @@ def test_malformed_acceptance_cannot_report_success(bad: dict[str, Any]) -> None
     assert len(calls) == 1
 
 
-def test_legacy_sdk_keeps_its_original_endpoint() -> None:
-    calls: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(200, json={"id": 42})
-
-    with (
-        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
-    ):
-        assert agents.retry_launch(42) == 42
-    assert len(calls) == 1
-    assert calls[0].url.path == "/api/agents/42/retry-launch"
-    assert "Idempotency-Scope" not in calls[0].headers
+@pytest.mark.parametrize("boundary", [agents.retry_launch, gateway_client.retry_launch])
+@pytest.mark.parametrize(
+    "arguments",
+    [{}, {"idempotency_key": "intent"}, {"expected_prior_attempt_id": PRIOR}],
+)
+def test_missing_retry_identity_has_no_http(
+    requests: list[httpx.Request], boundary: Any, arguments: dict[str, Any]
+) -> None:
+    with pytest.raises(TypeError):
+        boundary(42, **arguments)
+    assert requests == []
 
 
 @pytest.mark.parametrize(

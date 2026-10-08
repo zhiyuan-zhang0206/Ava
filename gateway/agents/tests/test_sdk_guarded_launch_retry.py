@@ -44,7 +44,6 @@ def test_sdk_observation_lost_response_and_historical_replay(
         with pytest.raises(GatewayUnavailable):
             agents.retry_launch(
                 agent_id,
-                require_idempotency=True,
                 idempotency_key="intent",
                 expected_prior_attempt_id=observed,
             )
@@ -55,7 +54,6 @@ def test_sdk_observation_lost_response_and_historical_replay(
             assert (
                 agents.retry_launch(
                     agent_id,
-                    require_idempotency=True,
                     idempotency_key="intent",
                     expected_prior_attempt_id=observed,
                 )
@@ -65,7 +63,6 @@ def test_sdk_observation_lost_response_and_historical_replay(
         with pytest.raises(httpx.HTTPStatusError) as conflict:
             agents.retry_launch(
                 agent_id,
-                require_idempotency=True,
                 idempotency_key="intent",
                 expected_prior_attempt_id=replacement,
             )
@@ -75,7 +72,6 @@ def test_sdk_observation_lost_response_and_historical_replay(
         assert (
             agents.retry_launch(
                 agent_id,
-                require_idempotency=True,
                 idempotency_key="intent",
                 expected_prior_attempt_id=observed,
             )

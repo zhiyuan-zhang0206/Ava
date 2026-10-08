@@ -13,18 +13,16 @@ Observe the attempt once, then retain its UUID and the key for this intent:
 prior = ava.agents.get_launch_attempt(agent_id)
 ava.agents.retry_launch(
     agent_id,
-    require_idempotency=True,
     idempotency_key="one-deliberate-retry",
     expected_prior_attempt_id=prior,
 )
 ```
 
-The strong mode posts to `/api/keyed/v1/agents/{id}/retry-launch` with verified
-`principal-v1` scope. Both SDK boundaries reject missing/invalid keys, missing
-or invalid observed UUIDs, and non-bool admission flags before HTTP. Supplying
-the key or observed UUID without strong mode is rejected rather than silently
-calling the legacy path. `get_launch_attempt` refuses absent old fields or
-invalid observations; it does not negotiate a write capability.
+Every SDK retry posts to `/api/keyed/v1/agents/{id}/retry-launch` with verified
+`principal-v1` scope. The caller key and observed prior UUID are required
+arguments. Missing or invalid identities fail before HTTP; there is no opt-in
+flag or default one-shot call. `get_launch_attempt` refuses missing or invalid
+observations rather than guessing an attempt.
 
 Same-intent recovery reuses the original agent ID, key and observed prior UUID.
 It must not refresh the observation before replay: that could change the intent
@@ -36,7 +34,9 @@ or execution evidence, and survives deletion of current target metadata.
 
 There is no legacy fallback, discovery cache, automatic ambiguous-failure retry
 or client journal. Connect-family retries retain the same path, body and key.
-Default `retry_launch(agent_id)` preserves its legacy one-shot route. Browser,
-CLI and MCP launch retry consumers remain separate; no runtime rollout occurs.
+The project does not retain SDK compatibility for the former single-argument
+call or admission flag. Browser HTTP entry cleanup is tracked separately in
+#4473; old installed consumers are not an adoption or completion gate. No
+runtime rollout occurs.
 
 Server and native owner: [[gateway/agents/docs/launch-retry.ava.okf.md]].
