@@ -327,6 +327,23 @@ describe("RunTimelineRows keyboard and request bars", () => {
     expect(strokes("input", 2)).toHaveLength(1);
   });
 
+  it("draws the selected bar over a hairline of another request that falls inside its range", async () => {
+    const wideUnits = [unit("text", 0, 0, 400), unit("text", 1, 400, 401), unit("text", 2, 401, 500)];
+    // Request 1 read blocks 0-1 (0..401 ms) in one bar; request 2 read block 2 (a later, narrower bar) and the instant request 3 sits inside the first range in time.
+    const requests = [
+      { ...request(1, 0), added_from: 0, added_to: 2 },
+      { ...request(2, 450), added_from: 2, added_to: 3 },
+      { ...request(3, 100), added_from: 3, added_to: 4 },
+    ];
+    renderRows({ units: [...wideUnits, { ...unit("text", 3, 150, 151) }], requests }, { kind: "request", idx: 1 });
+    await paintFrame();
+    const atX = fills("input").filter((d) => d.x <= 150 && 150 <= d.x + d.w);
+    expect(atX.length).toBeGreaterThan(1);
+    // The last thing painted over x = 150 is the selected bar, in its full color.
+    expect(atX.at(-1)?.color).toContain("#3b82f6");
+    expect(atX.at(-1)?.color).not.toContain("50%");
+  });
+
   it("frames the selected block strongly and the bar that read it lightly", async () => {
     renderRows({ units, requests: [request(1, 100), request(2, 600)] }, { kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
     await paintFrame();
