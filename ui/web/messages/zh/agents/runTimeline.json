@@ -39,7 +39,7 @@
   "zoomOut": "缩小",
   "axisHybrid": "Token 轴",
   "axisTime": "时间轴",
-  "axisModeTitle": "Token 轴：块宽按 token，间隔按空闲时间的对数。点击切换为纯时间轴。",
+  "axisModeTitle": "在纯时间轴和 Token 轴之间切换（Token 轴：块宽按 token，间隔按空闲时间的对数）。",
   "zoomReset": "重置缩放",
   "drill": "下钻",
   "timeSpan": "时间",

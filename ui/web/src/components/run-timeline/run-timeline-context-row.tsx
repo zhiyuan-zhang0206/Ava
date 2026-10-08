@@ -42,8 +42,9 @@ export function ContextSizeRow({
 }) {
   const t = useTranslations("runTimeline");
   const added = metric === "added";
-  const value = (request: RunTimelineRequest) => (added ? request.added_tokens : request.input_tokens);
-  const top = added ? maxAdded(requests) : maxInput(requests);
+  // Additions are mostly small next to the few big ones, so their height is the square root of the count.
+  const value = (request: RunTimelineRequest) => (added ? Math.sqrt(request.added_tokens) : request.input_tokens);
+  const top = added ? Math.sqrt(maxAdded(requests)) : maxInput(requests);
   return (
     <RowShell
       label={t(added ? "addedContextRow" : "contextRow")}

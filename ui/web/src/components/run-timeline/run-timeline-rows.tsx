@@ -1,7 +1,7 @@
 "use client";
 
-// The run timeline's rows on one shared axis (hybrid by default: block width follows tokens, the
-// space between blocks follows log idle time; or plain time): lifecycle markers on top,
+// The run timeline's rows on one shared axis (plain time by default, or hybrid: block width follows
+// tokens, the space between blocks follows log idle time): lifecycle markers on top,
 // then one row per understanding-tree level (topmost first), then layer 0 — the
 // message units — at the bottom. All rows share one viewport on the loaded data:
 // the wheel / pinch zooms around the cursor, a drag or a horizontal scroll pans,
@@ -139,7 +139,7 @@ export function RunTimelineRows({
   const [hover, setHover] = useState<Hover | null>(null);
   const lit = hoverLit(hover, data.nodes, data.units);
   const levels = levelsTopFirst(data.nodes);
-  const [mode, setMode] = useState<AxisMode>("hybrid");
+  const [mode, setMode] = useState<AxisMode>("time");
   const baseFrom = base.from;
   const baseTo = base.to;
   const axis = useMemo(
