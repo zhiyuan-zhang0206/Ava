@@ -30,13 +30,35 @@ jobs:
       - uses: ./.github/actions/uv-sync
       - uses: ./.github/actions/vendor-pg-runtime
       - name: Snapshot the complete eligible population
+        timeout-minutes: 5
         run: |
+          set -euo pipefail
           mkdir -p tmp
-          uv run pytest -c pyproject.toml --rootdir=. --collect-only -q \
-            --ignore=tests/e2e -m 'not flaky' --omit-static-tests \
-            -o junit_family=xunit1 -o faulthandler_timeout=300 \
-            -p scripts.ci.file_shard_shadow --file-shard-count=16 \
-            --file-shard-plan=tmp/file-plan.json
+          timeout --kill-after=15s 4m uv run python -u - <<'PY' 2>&1 | tee tmp/file-plan-collection.log
+          import faulthandler
+
+          with open("tmp/file-plan-stacks.log", "w") as stacks:
+              faulthandler.dump_traceback_later(60, repeat=True, file=stacks)
+              try:
+                  import pytest
+
+                  raise SystemExit(pytest.main([
+                      "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-q",
+                      "--ignore=tests/e2e", "-m", "not flaky", "--omit-static-tests",
+                      "-o", "junit_family=xunit1", "-o", "faulthandler_timeout=300",
+                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=16",
+                      "--file-shard-plan=tmp/file-plan.json",
+                  ]))
+              finally:
+                  faulthandler.cancel_dump_traceback_later()
+          PY
+      - name: Publish planning diagnostics, including failed collection
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: file-shard-plan-diagnostics
+          path: tmp/file-plan-*.log
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: file-shard-plan
