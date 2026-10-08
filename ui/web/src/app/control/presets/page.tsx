@@ -1,30 +1,9 @@
 "use client";
 
-// /control#presets — config-preset management: list, create (natural-language
-// via a preset-writer agent), tweak label/description, delete.
-//
-// A preset is a named per-agent config-overlay template (llm_model, plugin
-// per_agent fields, ...). Selecting one in the spawn picker seeds the new
-// agent's config from it; an explicit spawn config still wins per field.
-// Backed by /api/presets (gateway/routers/presets.py). `config` is stored as
-// an opaque JSON object — it is validated when a spawned agent applies it, not
-// on this page, so a bad overlay surfaces as a failed spawn, not a failed save.
-//
-// Hand-writing that config JSON is not a UI task — the field names and skill
-// combinations that make a good preset live in ava-guide.presets, not in a
-// frontend form. So creation mirrors the Schedules page's natural-language
-// create, composed straight from existing primitives: a short prompt pointing
-// a new agent at ava.skills.ava_guide.presets plus the user's ask, spawned via
-// the plain api.spawnAgent() (no dedicated backend endpoint), then handing
-// over its conversation; this page never opens a raw config editor. Reshaping
-// a preset's config is the same agent-driven path — delete and re-describe
-// rather than hand-edit; label/description are plain text, so those stay
-// editable in place.
-//
-// Each preset renders as a full-width horizontal card (metadata + actions on
-// the left, the pretty-printed JSON overlay on the right) with a stable
-// element id (presetAnchorId) — the nav's dynamic Presets sub-links jump to
-// these anchors.
+// /control#presets — preset management and the Preset Maker conversation.
+// Creation uses a plain agent spawn, like the schedule writer handoff. The
+// skill owns discovery and composition; an empty request opens the maker so
+// the user can describe the role in its conversation.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Pencil, Sparkles, Trash2 } from "lucide-react";
@@ -44,6 +23,9 @@ import { PRESETS_QUERY_KEY, presetAnchorId } from "../_sections";
 import { useSectionVisible } from "../_visibility";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+
+const PRESET_MAKER_PROMPT =
+  "Read and follow ava.skills.ava_guide.presets as the preset maker to create or improve a reusable agent preset. Request:\n\n";
 
 export default function PresetsPage() {
   const t = useTranslations("presets");
@@ -69,18 +51,14 @@ export default function PresetsPage() {
     onError: (e: unknown) => showToast(t("deleteFailed", { error: errMsg(e) })),
   });
 
-  // --- natural-language create: spawn a writer agent, open its conversation ---
-  //
-  // No dedicated backend endpoint — a plain spawn whose first message points
-  // the new agent at the skill that knows how to write a preset. The prompt
-  // stays minimal: HOW to write a preset lives in ava-guide.presets, not here.
   const [nl, setNl] = useState("");
   const draftMutation = useMutation({
     mutationFn: (text: string) =>
       api.spawnAgent({
-        prompt: t("followSkill", { text }),
+        prompt: PRESET_MAKER_PROMPT + (text || "Help me design a reusable agent preset."),
         prompt_source: "user",
-        label: "preset_writer",
+        label: "ava-preset-maker",
+        config: { skills_to_expand_at_start: ["ava-guide:presets"] },
       }),
     onSuccess: (res) => {
       setNl("");
@@ -122,13 +100,13 @@ export default function PresetsPage() {
           value={nl}
           onChange={(e) => setNl(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && nl.trim()) draftMutation.mutate(nl.trim());
+            if (e.key === "Enter" && !draftMutation.isPending) draftMutation.mutate(nl.trim());
           }}
         />
         <Button
           type="button"
           size="sm"
-          disabled={!nl.trim() || draftMutation.isPending}
+          disabled={draftMutation.isPending}
           onClick={() => draftMutation.mutate(nl.trim())}
         >
           {draftMutation.isPending ? (

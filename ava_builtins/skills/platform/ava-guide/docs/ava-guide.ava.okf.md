@@ -30,9 +30,14 @@ sub-skills carry executable procedures and their bundled resources.
 - `modification-layers`: route L1 installation, L2 skill edits, L3 native plugin
   development, and L4 kernel contributions; built-in changes are L4.
 - `packages` / `packages.install`: installed-package mechanics and the full
-  discovery, approval, installation, verification, and judgment flow.
+  discovery, approval, installation, verification, and judgment flow. The
+  install skill's `references/sources.md` owns the shared map of skill
+  publishers, MCP directories and providers, and prompt sources.
 - `mcp`, `plugins` / `plugins.develop`: MCP management and native plugin development.
-- `agents`, `presets`, `models`: agent concepts, configuration, and model choice.
+- `agents`, `models`: agent concepts, configuration, and model choice.
+- `presets`: Preset Maker composes role instructions, researched prompts,
+  skills, MCP prerequisites, and registered model settings into reusable
+  configurations; role cards remain instance-owned skills.
 - `schedules`: persistent work; [[ava_builtins/skills/platform/ava-guide/schedules/docs/schedules.ava.okf.md]].
 - `pages`: artifact publishing, user input, and frontend resources;
   [[ava_builtins/skills/platform/ava-guide/pages/docs/pages.ava.okf.md]].
@@ -48,7 +53,9 @@ neither kernel contribution requirements nor operator authorization.
 ## Consumers and distribution
 
 Package and schedule draft endpoints load `ava.skills.ava_guide.packages.install`
-and `ava.skills.ava_guide.schedules`. External copies use independent
+and `ava.skills.ava_guide.schedules`. The Presets page uses plain agent spawn,
+preloads `ava-guide:presets`, and opens the maker conversation with an optional
+initial request. External copies use independent
 `<client>-ava-guide` ledgers; legacy deployment/operator copies and their ledgers
 are preserved and are no longer refreshed by this bridge.
 

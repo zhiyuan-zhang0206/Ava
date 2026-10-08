@@ -48,7 +48,11 @@ scan — no restart.
 The usual trigger for this job is a good `<role>` system prompt found somewhere
 — a repo, a blog post, another product. Do not paste it into `SKILL.md`.
 
-Save it verbatim under `references/` and write the body yourself. The reason is
+Keep the source under `references/` and write the body yourself. Record its URL,
+publisher, version or checked date, and what you adapted; retain permitted source
+text or link to the original. Use the shared
+[source map](../../packages/install/references/sources.md) when looking for
+prompts, persona settings, or supporting capabilities. The reason is
 authority, not tidiness. Whatever sits in the body is read as this agent's
 standing instructions, and that text was written for a different harness: it
 assumes tools that do not exist here, addresses an agent shaped differently, and
