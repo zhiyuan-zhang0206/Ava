@@ -34,4 +34,5 @@ def log_llm_usage(
         usage_kind=usage_kind,
         cache_mechanism=cache_mechanism,
         cache_scope=cache_scope,
+        stamp_message=True,
     )

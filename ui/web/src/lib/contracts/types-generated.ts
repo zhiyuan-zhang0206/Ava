@@ -8243,7 +8243,10 @@ export interface components {
          * RunTimelineUsage
          * @description The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.
          *
-         *     `input` is the provider's total input tokens (cache reads included).
+         *     `input` is the provider's total input tokens (cache reads and writes included).
+         *     `cost_usd` sums the usage-time cost recorded on the AIMessages (`ava_usage`); `cost_calls` is
+         *     how many of `calls` carry one, the rest (older messages, unpriced models) being unknown, not
+         *     estimated.
          */
         RunTimelineUsage: {
             /** Calls */
@@ -8254,6 +8257,12 @@ export interface components {
             cache_read: number;
             /** Output */
             output: number;
+            /** Cache Write */
+            cache_write: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Cost Calls */
+            cost_calls: number;
         };
         /**
          * RunTimelineWindow
