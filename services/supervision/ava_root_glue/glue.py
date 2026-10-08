@@ -85,14 +85,18 @@ def assemble(
         context.supervisor,
         registry,
         config=health_config,
+        tasks=context.participant_tasks,
         startup_graces=startup_graces,
     )
-    check = TreeSelfCheck(context.supervisor, config=selfcheck_config)
+    check = TreeSelfCheck(
+        context.supervisor, config=selfcheck_config, tasks=context.participant_tasks
+    )
     if diagnostics is not None:
         rounds = RootHealthRounds(
             monitor,
             DiagnosticMonitor(diagnostics),
             interval_s=60 if health_config is None else health_config.interval_s,
+            tasks=context.participant_tasks,
         )
         context.supervisor.attach_health(rounds)
         context.supervisor.attach_metrics(check)

@@ -79,8 +79,8 @@ class TreeSelfCheck:
     """Periodic walk of the tree: running state + parent-child chain integrity.
 
     One round is a bounded stream of cheap reads (one OS query per running
-    unit), and every read is isolated: a failure downgrades that unit to
-    `unverifiable` rather than aborting the walk.
+    unit). Explicit unverifiable process evidence is reported per unit;
+    unexpected inspection errors propagate to the root lifecycle.
     """
 
     def __init__(
@@ -88,11 +88,13 @@ class TreeSelfCheck:
         host: TreeHost,
         *,
         config: SelfCheckConfig | None = None,
+        tasks: asyncio.TaskGroup | None = None,
     ) -> None:
         self._host = host
         self._config = config if config is not None else SelfCheckConfig()
         self._state = _ChainState()
         self._task: asyncio.Task[None] | None = None
+        self._tasks = tasks
 
     def run_once(self) -> None:
         """Walk every unit once, folding the verdicts into the episode state."""
@@ -123,11 +125,7 @@ class TreeSelfCheck:
                 broken.append(unit_id)
                 reasons[unit_id] = "running without a recorded pid"
                 continue
-            try:
-                verdict = child_state(cast("int", pid), root_pid)
-            except Exception:
-                _log.exception("[selfcheck] unit %s: chain read raised", unit_id)
-                verdict = "unverifiable"
+            verdict = child_state(cast("int", pid), root_pid)
             if verdict == "attached":
                 continue
             if verdict == "unverifiable":
@@ -200,7 +198,9 @@ class TreeSelfCheck:
         """Run rounds until `stop()` — sleep first, one round per interval."""
         if self._task is not None:
             raise RuntimeError("self-check already started")
-        self._task = asyncio.create_task(self._loop())
+        if self._tasks is None:
+            raise RuntimeError("monitor requires the root participant task group")
+        self._task = self._tasks.create_task(self._loop())
 
     async def stop(self) -> None:
         """Stop the round loop; safe to call when not started."""
@@ -216,13 +216,7 @@ class TreeSelfCheck:
         # quiesce-exempt: probes the root's own state; no database
         while True:
             await asyncio.sleep(self._config.interval_s)
-            try:
-                self.run_once()
-            except Exception:
-                # `run_once` isolates per unit; this catches a defect in the
-                # walk itself. A dead loop would stop the self-proof silently,
-                # so the loop survives its own bug — loudly.
-                _log.exception("[selfcheck] round raised; continuing")
+            self.run_once()
 
     def _emit_chain_broken(self, broken: list[str], reasons: dict[str, str], root_pid: int) -> None:
         """The one alert per broken episode — a registered event (loguru `event=`)."""
