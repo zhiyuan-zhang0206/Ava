@@ -189,21 +189,25 @@ def upsert_env(
         # the write, so no other writer can race the comparison.
         if path.exists() and path.read_bytes() == payload:
             return
-        snapshot_env(path)
-        before: dict[str, str] = {}
+        prepared = None
         if audit_site is not None:
-            from base.host.env.audit import env_values_from_text
+            from base.host.env.audit import (
+                env_values_from_text,
+                prepare_env_changes,
+            )
 
             before = env_values_from_text("\n".join(lines))
-        write_private_bytes(path, payload)
-        if audit_site is not None:
-            from base.host.env.audit import record_env_write
-
             changes = [
                 {"alias": key, "old": before.get(key), "new": value}
                 for key, value in updates.items()
             ]
             changes.sort(key=lambda change: str(change["alias"]))
+            prepared = prepare_env_changes(changes)
+        snapshot_env(path)
+        write_private_bytes(path, payload)
+        if audit_site is not None:
+            from base.host.env.audit import record_env_write
+
             record_env_write(
                 path,
                 set(updates),
@@ -211,7 +215,7 @@ def upsert_env(
                 site=audit_site,
                 actor=actor,
                 trace_id=trace_id,
-                changes=changes,
+                changes=prepared,
             )
 
 
@@ -236,21 +240,25 @@ def remove_env(
         out = [line for line in lines if env_line_key(line) not in keys]
         if len(out) == len(lines):
             return  # nothing to remove — no snapshot churn
-        before: dict[str, str] = {}
+        prepared = None
         if audit_site is not None:
-            from base.host.env.audit import env_values_from_text
+            from base.host.env.audit import (
+                env_values_from_text,
+                prepare_env_changes,
+            )
 
             before = env_values_from_text("\n".join(lines))
-        snapshot_env(path)
-        write_private_bytes(path, ("\n".join(out) + "\n").encode())
-        if audit_site is not None:
-            from base.host.env.audit import record_env_write
-
             changes = [
                 {"alias": key, "old": before.get(key), "new": None}
                 for key in sorted(keys)
                 if key in before
             ]
+            prepared = prepare_env_changes(changes)
+        snapshot_env(path)
+        write_private_bytes(path, ("\n".join(out) + "\n").encode())
+        if audit_site is not None:
+            from base.host.env.audit import record_env_write
+
             record_env_write(
                 path,
                 set(),
@@ -258,5 +266,5 @@ def remove_env(
                 site=audit_site,
                 actor=actor,
                 trace_id=trace_id,
-                changes=changes,
+                changes=prepared,
             )
