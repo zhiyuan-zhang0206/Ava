@@ -1,4 +1,4 @@
-"""Process-level environment for explicitly owned file/AST contracts.
+"""Process-level environment for explicitly owned pure unit contracts.
 
 The membership below owns both CI's static run and its native exclusions.
 It declares execution requirements; it grants no lint or isolation exemption.
@@ -17,6 +17,10 @@ STATIC_TEST_PATHS = (
     "scripts/content_lint/tests",
     "scripts/lint/tests",
     "scripts/structure/tests",
+    "scripts/ci/tests",
+    "tests/ci",
+    "base/paths/tests",
+    "base/sessions/pty/tests/test_pty_sessions_screen.py",
     "tests/fixtures/tests/test_static_environment.py",
     "tests/fixtures/tests/test_static_environment_selection.py",
 )
