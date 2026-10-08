@@ -57,4 +57,4 @@ success. The RPC client validates the response envelope before interpreting it.
 explicit integer version and actual native unit check before effects. Its own
 receiving reservation and create-only files own recovery; no transport key/cache
 or overwrite fallback is used. Ready retries verify actual objects. See
-[[gateway/upload_delivery/docs/delivered-uploads.ava.okf.md]].
+[[gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.ava.okf.md]].

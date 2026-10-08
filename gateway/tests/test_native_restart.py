@@ -21,6 +21,7 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from gateway.agents import lifecycle
+    from gateway.app import app
 
     _inc, target = await managed_work(db_conn, aops_pool)
     headers = _headers(monkeypatch)
@@ -39,7 +40,7 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
         operation = NativeRestartOperation.model_validate(packet)
         assert idempotency_key == operation.operation_key
         original = await restart_native_work_op(
-            client.app.state.db, client.app.state.bus, agent_id, operation, client.app.state.db_pool
+            app.state.db, app.state.bus, agent_id, operation, app.state.db_pool
         )
         if original.status == "refused":
             return original.model_dump(mode="json")
