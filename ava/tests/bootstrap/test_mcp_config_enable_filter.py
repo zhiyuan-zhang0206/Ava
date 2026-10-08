@@ -15,7 +15,12 @@ from pathlib import Path
 import pytest
 
 import ava.mcp_config as cfg_mod
-from base.packages.plugins.mcp_enabled import McpEnabledConfig, McpServerEntry, write_local
+from base.packages.plugins.mcp_enabled import (
+    McpEnabledConfig,
+    McpEnabledConfigError,
+    McpServerEntry,
+    write_local,
+)
 
 
 def _write_machine(unit_home: Path, servers: dict[str, dict[str, str]]) -> None:
@@ -52,3 +57,29 @@ def test_overlay_enabled_true_keeps_server(_two_servers: Path) -> None:
     """An explicit enabled=True entry leaves the server in place."""
     write_local(McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=True)}))
     assert set(cfg_mod.load_mcp_config()) == {"fs", "github"}
+
+
+@pytest.mark.parametrize("content", ["{not json", '{"mcp_servers":{"fs":{"enabled":[]}}}'])
+def test_invalid_overlay_raises_instead_of_hiding_servers(_two_servers: Path, content: str) -> None:
+    (_two_servers / "mcp_enabled.json").write_text(content)
+    with pytest.raises(McpEnabledConfigError):
+        cfg_mod.load_mcp_config()
+
+
+def test_definition_inventory_can_inspect_disabled_entries_with_invalid_overlay(
+    _two_servers: Path,
+) -> None:
+    (_two_servers / "mcp_enabled.json").write_text("{not json")
+    assert set(cfg_mod.load_mcp_config(include_disabled=True)) == {"fs", "github"}
+
+
+def test_sdk_servers_and_help_surface_the_overlay_error(_two_servers: Path) -> None:
+    from ava import mcps
+
+    (_two_servers / "mcp_enabled.json").write_text("{not json")
+    with pytest.raises(McpEnabledConfigError):
+        mcps.servers()
+    with pytest.raises(McpEnabledConfigError):
+        mcps.help()
+    with pytest.raises(McpEnabledConfigError):
+        _ = mcps.fs
