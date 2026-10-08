@@ -10,6 +10,9 @@ full-run guard (`pytest_configure`), the non-test-database refusal
 (`pytest_sessionstart`), and the leaked OS-job, runaway-memory and home cleanup
 (`pytest_sessionfinish`).
 
+The explicit static process skips native provisioning and resets; its owning
+plugin refuses data-plane effects, while these session hooks still run.
+
 Sync vs async connection fixtures:
 - `db_conn`  (sync `psycopg.Connection`) — for root `db.py` shared helpers and
   UI related tests
@@ -37,7 +40,12 @@ from base.events.live.bus import EventBus
 from tests._containers import postgres, redis_server
 from tests._os_jobs import host_ava_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
-from tests.fixtures.env_bootstrap import _TEST_AVA_HOME
+from tests.fixtures.env_bootstrap import (
+    _TEST_AVA_HOME,
+    UNPROVISIONED_DB_URL,
+    UNPROVISIONED_REDIS_URL,
+)
+from tests.fixtures.static_environment import static_mode
 
 # Host job inventory as it stood BEFORE this session — `pytest_sessionfinish`
 # diffs against it and fails the run on anything new (see tests/_os_jobs.py).
@@ -46,7 +54,7 @@ _OS_JOBS_AT_START = host_ava_os_jobs()
 
 # ── Container provisioning: the fixture owns the database ──
 #
-# A throwaway Postgres + Redis is started once per pytest-session worker
+# In the default native mode, a throwaway Postgres + Redis starts once per worker
 # (autouse), and settings + env are pointed at it (replacing the import-time
 # sentinel). Every test runs against a real, clean DB + Redis — `_clean_state`
 # truncates tables and flushes Redis before each test. This is deliberately
@@ -58,7 +66,10 @@ _OS_JOBS_AT_START = host_ava_os_jobs()
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _provisioned_db() -> Iterator[str]:
+def _provisioned_db(pytestconfig: pytest.Config) -> Iterator[str]:
+    if static_mode(pytestconfig):
+        yield UNPROVISIONED_DB_URL
+        return
     with postgres() as url:
         # Belt: the throwaway provisioning must itself stay on a test database.
         # If the throwaway db name ever changes, this assertion makes the
@@ -74,7 +85,10 @@ def _provisioned_db() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _provisioned_redis() -> Iterator[str]:
+def _provisioned_redis(pytestconfig: pytest.Config) -> Iterator[str]:
+    if static_mode(pytestconfig):
+        yield UNPROVISIONED_REDIS_URL
+        return
     with redis_server() as url:
         settings.data_plane.redis_url = url
         os.environ["AVA_REDIS_URL"] = url
@@ -287,6 +301,7 @@ def _clean_state(
     _provisioned_db: str,
     _provisioned_redis: str,
     monkeypatch: pytest.MonkeyPatch,
+    pytestconfig: pytest.Config,
 ) -> Iterator[None]:
     """Per-test isolation: truncate all tables and flush Redis before each test,
     so every test starts against an empty DB + Redis on the session's native pg/redis.
@@ -298,6 +313,9 @@ def _clean_state(
     cluster_secret is no longer a bypass — auth is fail-closed and the gateway
     refuses to start without a secret — so the explicit flag is what disables it.
     """
+    if static_mode(pytestconfig):
+        yield
+        return
     monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "")
     monkeypatch.setattr("base.config.settings.gateway.auth_middleware_enabled", False)
     # Barrier before the TRUNCATE: the telemetry drain thread may hold a batch
