@@ -95,7 +95,6 @@ class _CaptureAdmission:
 
 _participant_lock = Lock()
 _active_participant: LocalParticipant | None = None
-_active_capture_gate: _CaptureGate | None = None
 _capture_gates: dict[LocalParticipant, _CaptureGate] = {}
 _sdk_capture_admission: ContextVar[_CaptureAdmission | None] = ContextVar(
     "impersonation_event_sdk_capture_admission", default=None
@@ -141,23 +140,21 @@ def open_local_participant(db: Database, lease_id: str, *, agent_id: int, source
 
 def bind_local_participant(participant: LocalParticipant) -> None:
     """Bind the current external controller to its already durable receipt."""
-    global _active_capture_gate, _active_participant  # noqa: PLW0603 - one external attachment per process
+    global _active_participant  # noqa: PLW0603 - one external attachment per process
     with _participant_lock:
         if _active_participant is not None:
             raise RuntimeError("An impersonation event participant is already bound")
         _active_participant = participant
         gate = _CaptureGate(participant)
         _capture_gates[participant] = gate
-        _active_capture_gate = gate
 
 
 def unbind_local_participant(participant: LocalParticipant) -> None:
     """Remove a participant binding only after its receipt closure path ran."""
-    global _active_capture_gate, _active_participant  # noqa: PLW0603 - one external attachment per process
+    global _active_participant  # noqa: PLW0603 - one external attachment per process
     with _participant_lock:
         if _active_participant == participant:
             _active_participant = None
-            _active_capture_gate = None
 
 
 def _bound_participant() -> LocalParticipant | None:
@@ -167,7 +164,7 @@ def _bound_participant() -> LocalParticipant | None:
 
 def _bound_capture_gate() -> _CaptureGate | None:
     with _participant_lock:
-        return _active_capture_gate
+        return None if _active_participant is None else _capture_gates.get(_active_participant)
 
 
 def _capture_gate(participant: LocalParticipant) -> _CaptureGate | None:
