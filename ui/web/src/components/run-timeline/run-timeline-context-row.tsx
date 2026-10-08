@@ -107,8 +107,9 @@ export function ContextSizeRow({
               className={cn(
                 "absolute inset-x-0 bottom-0 block rounded-t-[1px]",
                 request.session % 2 === 0 ? "bg-blue-500/70" : "bg-amber-500/80",
-                hovered && "bg-foreground/80",
-                selected && "bg-foreground ring-1 ring-foreground",
+                (hovered || selected) && (request.session % 2 === 0 ? "bg-blue-500" : "bg-amber-500"),
+                hovered && !selected && "ring-1 ring-foreground/40",
+                selected && "ring-2 ring-foreground",
                 added && request.added_estimated && !selected && "opacity-60",
               )}
               style={{ height: `${(value(request) / top) * BAR_AREA_PX}px` }}
