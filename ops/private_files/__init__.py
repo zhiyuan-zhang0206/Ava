@@ -14,7 +14,7 @@ from typing import Literal, TypedDict, cast
 
 from base.host.env.dotenv_boot import resolve_ava_home
 
-_DEFAULT_MANIFEST = Path(__file__).with_name("private-files") / "manifest.json"
+_DEFAULT_MANIFEST = Path(__file__).with_name("manifest.json")
 _HASH_CHUNK_SIZE = 1024 * 1024
 
 
@@ -218,7 +218,3 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"FAIL {outcome.entry_id} {outcome.path}: {'; '.join(outcome.errors)}\n"
                 )
     return 0 if all(outcome.ok for outcome in outcomes) else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
