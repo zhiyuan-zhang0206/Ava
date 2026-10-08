@@ -237,6 +237,15 @@ class UnderstandingGroupFailed(TypedDict):
     error: str
 
 
+class UnderstandingLeafOutOfOrder(TypedDict):
+    """`understanding_leaf_out_of_order` payload — a level-1 node landed before one that already
+    has a parent, and an upper-level rebuild was queued (or already pending) for the agent."""
+
+    agent_id: int
+    job_id: int
+    span_end: int
+
+
 class UnderstandingBacklog(TypedDict):
     """`understanding_backlog` payload — one sample of the chunk queue per
     consumer round: rows waiting, rows in flight, and how long the oldest
@@ -364,6 +373,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=UnderstandingGroupFailed,
         tier="anomaly",
         site="base/agents/history/hierarchy/group_consumer.py:_check_level",
+    ),
+    "understanding_leaf_out_of_order": telemetry_event(
+        "understanding_leaf_out_of_order",
+        "an understanding leaf landed before an already grouped one; an upper-level rebuild was queued for the agent",
+        payload=UnderstandingLeafOutOfOrder,
+        tier="anomaly",
+        site="base/agents/history/hierarchy/chunks.py:write_group_nodes",
     ),
     "understanding_backlog": telemetry_event(
         "understanding_backlog",
