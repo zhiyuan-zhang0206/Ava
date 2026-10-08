@@ -412,8 +412,10 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     monkeypatch.setattr(host_mod, "repair_dangling_tool_use_at_startup", _noop_reconcile)
     monkeypatch.setattr(host_mod, "publish_agent_updated", _noop_reconcile)
 
-    async def _fake_boot_agent_scope(_agent_id: int, llm_model: str, *_: object) -> _Model:
-        return _Model(llm_model)
+    async def _fake_boot_agent_scope(
+        _agent_id: int, llm_model: str, *_: object
+    ) -> tuple[_Model, None]:
+        return _Model(llm_model), None
 
     monkeypatch.setattr(host_mod, "boot_agent_scope", _fake_boot_agent_scope)
 

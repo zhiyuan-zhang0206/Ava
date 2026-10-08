@@ -384,6 +384,34 @@ def build_chat_model(
         RuntimeError: a provider path needs its API key env; if missing,
             blows up immediately rather than reaching a server 401.
     """
+    return build_chat_model_bound(
+        model,
+        thinking=thinking,
+        reasoning_effort=reasoning_effort,
+        streaming=streaming,
+        timeout=timeout,
+        media_resolution=media_resolution,
+        media_thinking_level=media_thinking_level,
+        base_url=base_url,
+        overrides=overrides,
+        single_attempt=single_attempt,
+    )[0]
+
+
+def build_chat_model_bound(
+    model: str,
+    *,
+    thinking: ThinkingConfig | None = None,
+    reasoning_effort: str | None = None,
+    streaming: bool | None = None,
+    timeout: float | None = None,
+    media_resolution: str | None = None,
+    media_thinking_level: str | None = None,
+    base_url: str | None = None,
+    overrides: ModelOverrides | None = None,
+    single_attempt: bool = False,
+) -> tuple[BaseChatModel, provider_api.ProviderBinding | None]:
+    """Internal companion: return the client and binding selected by this build."""
     # e2e tests inject fake chat model via AVA_LLM_OVERRIDE (tests/e2e/README.md);
     # if set, warn loudly — a dev accidentally leaving it in .env would route
     # all agents through a fake LLM, and production observability must be fail-loud.
@@ -396,7 +424,7 @@ def build_chat_model(
         logger.warning(
             f"AVA_LLM_OVERRIDE active: model={model!r} does not go through real LLM, routed via {override!r}"
         )
-        return _resolve_override(override, model)
+        return _resolve_override(override, model), None
 
     # Every process that builds a model loads the provider plugins (once per
     # process) through the catalog, including the labeler daemon and the eval
@@ -432,7 +460,7 @@ def build_chat_model(
             builder = binding.build_single_attempt if single_attempt else binding.build
             if builder is None:
                 raise ValueError("provider does not declare single-attempt construction")
-            return builder(
+            client = builder(
                 provider_api.BuildContext(
                     model=model,
                     spec=spec,
@@ -447,6 +475,8 @@ def build_chat_model(
                     overrides=overrides,
                 )
             )
+
+            return client, binding
 
     raise ValueError(
         f"Unknown model {model!r} — add a {model.split('-', maxsplit=1)[0]}-* "

@@ -224,7 +224,7 @@ async def test_defer_predicate_matches_real_gate(
     # Stub generate_summary so a "would fire" path produces a real replacement
     # dict without invoking a live Compaction LLM. Long enough to clear the
     # auto-compact retry floor on the first attempt.
-    async def _fake_generate_summary(messages, llm, _model):
+    async def _fake_generate_summary(messages, llm, _model, *, binding: object = None):
         return "stub summary " * 100
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
@@ -259,7 +259,7 @@ async def test_real_runner_compaction_wins_no_note(
     # Long enough to clear the auto-compact retry floor on the first attempt.
     long_summary = "compacted summary " * 100
 
-    async def _fake_generate_summary(messages, llm, _model):
+    async def _fake_generate_summary(messages, llm, _model, *, binding: object = None):
         return long_summary
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
