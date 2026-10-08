@@ -11,6 +11,7 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import _committed_publishes, _set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
@@ -18,10 +19,6 @@ from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
-from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
-from tests.path_scoped.agent_tests import (
-    _fresh_unresolved_skill_warnings as _fresh_unresolved_skill_warnings,
-)
 
 
 async def test_claim_first_entry_keeps_boot_claim_running(

@@ -20,6 +20,11 @@ tags:
 
 ## Canonical Codex lifecycle
 
+The entrypoint retains the mode choice and takeover contract. The file-driven
+worker procedure lives in `references/delegated-workers.md`, read after Mode A
+is selected; a takeover does not load it. Per-tool and interruption references
+remain available independently.
+
 `scripts/spawn_codex.py` is a thin command-line entry over
 [[ava/shell/coding_tools/docs/coding-tools.ava.okf.md|ava.shell.coding_tools]] (so is
 `scripts/spawn_claude.py`). Every launch owns a generation of its own under the

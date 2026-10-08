@@ -1,6 +1,6 @@
 ---
 name: packages
-description: Installs, upgrades, enables, disables, and removes Ava skills and plugins. Use when the user mentions packages, skill or plugin lifecycle, git-sourced capabilities, config reconciliation, or asks whether something should be a skill or plugin.
+description: "Manages installed Ava skills and plugins. Use when installing, upgrading, enabling, disabling, removing, or reconciling extension packages."
 ---
 
 # Packages — Skills & Plugins

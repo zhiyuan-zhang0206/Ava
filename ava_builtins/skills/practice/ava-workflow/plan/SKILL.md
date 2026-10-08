@@ -1,6 +1,6 @@
 ---
 name: plan
-description: "Turns aligned intent into an executable task graph with dependencies, concurrency, checkpoints, and done criteria. Use when work is clear but too large or parallel for one continuous session; smaller aligned tasks should proceed directly."
+description: "Turns agreed work into an executable task graph. Use when dependencies, parallelism, or checkpoints need planning before execution."
 ---
 
 # Plan — Turn Aligned Intent into an Executable Specification

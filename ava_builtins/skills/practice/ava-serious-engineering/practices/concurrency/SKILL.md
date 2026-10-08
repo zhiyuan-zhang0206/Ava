@@ -1,6 +1,6 @@
 ---
 name: concurrency
-description: "Designs safe shared state, async boundaries, connection lifecycles, and backpressure across concurrent flows. Use when threads, async tasks, processes, agents, queues, or callbacks share state or resources, even if no race has appeared yet."
+description: "Designs concurrency controls for shared state and resources. Use when diagnosing races, async lifecycles, backpressure, or cross-task coordination."
 ---
 
 # Concurrency

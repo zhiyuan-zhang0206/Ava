@@ -5,7 +5,8 @@ from anthropic.types import Message, RawMessageDeltaEvent, RawMessageStartEvent
 from langchain_core.messages import AIMessage
 
 from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
-from base.lm.factory import build_chat_model
+from base.lm.factory import build_chat_model, build_chat_model_bound
+from base.lm.plugin_providers import model_catalog
 from base.lm.usage import usage_model
 
 
@@ -29,8 +30,9 @@ def test_nonstream_receipt_survives_output_conversion(
     monkeypatch: pytest.MonkeyPatch, speed: str
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    model = build_chat_model("claude-opus-5-5-fast")
+    model, binding = build_chat_model_bound("claude-opus-5-5-fast")
     assert isinstance(model, ThinkingTokensChatAnthropic)
+    assert binding is model_catalog().bindings["claude-"]
     result = model._format_output(_message(speed))
     message = result.generations[0].message
     assert isinstance(message, AIMessage)

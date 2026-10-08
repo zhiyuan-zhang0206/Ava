@@ -18,7 +18,6 @@ import pytest
 
 from ava_builtins.plugins.ava_syntax_fix._imports import (
     _ruff_undefined_names,
-    _warn_ruff_missing_once,
 )
 from ava_builtins.plugins.ava_syntax_fix._punct import (
     _FULLWIDTH_QUOTE_MAP,
@@ -589,18 +588,14 @@ class TestRuffGiveUpLogging:
         assert any("did not finish within 5s" in m and "char source" in m for m in msgs), msgs
 
     @patch("subprocess.run")
-    def test_ruff_missing_logs_once_per_process(self, mock_run, loguru_records):
-        """A host without ruff logs its absence once, not once per call."""
-        _warn_ruff_missing_once.cache_clear()
+    def test_ruff_missing_reports_each_skipped_stage(self, mock_run, loguru_records):
+        """Every skipped stage remains visible and passes through its source."""
         mock_run.side_effect = FileNotFoundError
-        try:
-            _ruff_fix("a = 1\n")
-            _ruff_fix("b = 2\n")
-            _ruff_format("c = 3\n")
-            msgs = [r["message"] for r in loguru_records]
-            assert sum("not found" in m for m in msgs) == 1, msgs
-        finally:
-            _warn_ruff_missing_once.cache_clear()
+        for code in ("a = 1\n", "b = 2\n"):
+            assert _ruff_fix(code) == code
+        assert _ruff_format("c = 3\n") == "c = 3\n"
+        msgs = [r["message"] for r in loguru_records]
+        assert sum("not found" in m for m in msgs) == 3, msgs
 
     @patch("subprocess.run")
     def test_undefined_names_timeout_logs_warning(self, mock_run, loguru_records):

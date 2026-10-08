@@ -5,7 +5,8 @@
 # make SHARDING the speed lever: the pytest suite dominates wall clock, so it
 # fans out over pytest-split shards (LPT duration-balanced via the committed
 # .test_durations and least_duration — refreshes retain all measured tests;
-# unmeasured tests are costed at this run's average. Refreshed nightly by
+# unmeasured tests are costed at this run's average. Refreshed every 20 main changes
+# with existing CI timings, with nightly fallback measurements by
 # scripts/ci/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
@@ -867,6 +868,8 @@ jobs:
       - name: Run pytest shard
         id: pytest-shard
         shell: bash
+        env:
+          RECORD_DURATIONS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         # Native pytest failure makes this job red; JUnit validation also
         # catches missing evidence and a success exit with recorded failures.
         # Hang forensics (task #3328): the canary shard has stalled silently
@@ -886,10 +889,16 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          mkdir -p tmp
+          mkdir -p tmp/durations
+          DURATION_ARGS=()
+          DURATION_FILE="tmp/durations/backend-${{ matrix.group }}.json"
+          if [ "$RECORD_DURATIONS" = true ]; then
+            cp .test_durations "$DURATION_FILE" || exit 1
+            DURATION_ARGS=(--store-durations --clean-durations --durations-path "$DURATION_FILE")
+          fi
           uv run pytest -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
             --splits 16 --group ${{ matrix.group }} \
-            --splitting-algorithm least_duration \
+            --splitting-algorithm least_duration "${DURATION_ARGS[@]}" \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
             --cov=ops --cov=services --cov=ava_builtins \
             --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a1.xml -o junit_family=xunit1 \
@@ -907,9 +916,12 @@ jobs:
             # file (coverage.py appends by default) and flatten the combine;
             # drop it so the retry writes a clean per-shard file.
             rm -f "$COVERAGE_FILE"
+            if [ "$RECORD_DURATIONS" = true ]; then
+              cp .test_durations "$DURATION_FILE" || exit 1
+            fi
             uv run pytest -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
               --splits 16 --group ${{ matrix.group }} \
-              --splitting-algorithm least_duration \
+              --splitting-algorithm least_duration "${DURATION_ARGS[@]}" \
               --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
               --cov=ops --cov=services --cov=ava_builtins \
               --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a2.xml -o junit_family=xunit1 \
@@ -917,6 +929,15 @@ jobs:
             status=$?
           fi
           exit "$status"
+
+      - name: Upload backend duration measurement
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-durations-backend-${{ matrix.group }}
+          path: tmp/durations/backend-${{ matrix.group }}.json
+          if-no-files-found: error
 
       - name: Report executed test counts
         # What this shard actually ran, from the JUnit report pytest already wrote
@@ -1936,11 +1957,30 @@ jobs:
         # 40/93/157/83s per group under the count-based split, vs 93/93/93/93s
         # once e2e carries refreshed durations + LPT. Before any e2e entry
         # lands, absent tests cost the average = an even split by count.
-        run: >
-          uv run pytest tests/e2e/ -v -n 2
-          --splits 4 --group ${{ matrix.group }}
-          --splitting-algorithm least_duration
-          --junit-xml=tmp/junit-e2e-shard-${{ matrix.group }}.xml -o junit_family=xunit1
+        env:
+          RECORD_DURATIONS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        shell: bash
+        run: |
+          mkdir -p tmp/durations
+          DURATION_ARGS=()
+          DURATION_FILE="tmp/durations/e2e-${{ matrix.group }}.json"
+          if [ "$RECORD_DURATIONS" = true ]; then
+            cp .test_durations "$DURATION_FILE"
+            DURATION_ARGS=(--store-durations --clean-durations --durations-path "$DURATION_FILE")
+          fi
+          uv run pytest tests/e2e/ -v -n 2 \
+            --splits 4 --group ${{ matrix.group }} \
+            --splitting-algorithm least_duration "${DURATION_ARGS[@]}" \
+            --junit-xml=tmp/junit-e2e-shard-${{ matrix.group }}.xml -o junit_family=xunit1
+
+      - name: Upload e2e duration measurement
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-durations-e2e-${{ matrix.group }}
+          path: tmp/durations/e2e-${{ matrix.group }}.json
+          if-no-files-found: error
 
       - name: Validate native test results
         if: ${{ !cancelled() }}

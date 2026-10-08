@@ -1,6 +1,6 @@
 ---
 name: onboarding
-description: Onboards new Ava users by learning preferences and intent, recording them to memory, and starting useful work. Use when someone just installed Ava, asks "what can you do," lacks a user note, joins a cluster, or migrates from another agent tool.
+description: "Onboards new Ava users or migrants from another agent tool. Use when initial preferences and a first useful task need setup."
 ---
 
 # Onboarding — First Use of a Cluster
@@ -106,100 +106,15 @@ impatient, but keep the order.
 
 ## Question list
 
-Wording below is a floor, not a script — ask naturally, but capture every
-group.
-
-### Language
-
-- "What language should I use when talking to you?"
-- Follow up only if ambiguous: "Same for reports and pages, or different?"
-- Record: `type/user` (an attribute of the person); add `type/feedback` if
-  the user states it as a rule ("always Chinese, including reports").
-
-### Notification channel
-
-- "When you are not in this dialog, how should I reach you — a notice in
-  the queue, or something else?"
-- "Which decisions should I wait for your OK on instead of deciding
-  myself?" (Expect: irreversible actions, outward-facing actions, spending
-  real money, contacting real people.)
-- Record: `type/feedback` — it is how you work, with the reason the user
-  gave.
-
-### Timezone
-
-- "Which timezone should schedules and reminders use?" Offer to derive it
-  from their location if they are unsure.
-- Record: `type/user`; add `type/feedback` if it changes how you schedule
-  (e.g. "never schedule anything before 9 AM local").
-
-### Update rhythm
-
-- "How fast should this cluster take updates — as soon as a release lands,
-  on a schedule, or only when you say?"
-- "Are there hours when I should avoid maintenance?"
-- Record: `type/feedback` (and `type/env` if the window is a machine fact).
-
-### Confirmation gates
-
-- "What should I never do without checking with you first?"
-- Record: `type/feedback` — a standing rule, not a one-off.
-
-### Reporting style
-
-- "Do you want finished work as a served page, a short chat summary, or
-  both? How often should progress updates arrive while something is
-  running?"
-- Record: `type/feedback`.
+Read [preference questions](references/preferences.md) only for missing initial
+preferences. Use recorded answers first; choose the relevant questions rather
+than presenting the whole bank.
 
 ## Intent branches
 
-The answer to "what do you want this cluster for?" falls into one of four
-branches. Follow the branch; if the user is undecided, walk branch B until
-they land somewhere.
-
-### A. A concrete goal ("track my health", "watch this company")
-
-1. Restate the goal in one sentence and ask "is this the target?" — lock
-   the target before proposing anything.
-2. Ask what done looks like and the constraints (cadence, budget, what not
-   to touch).
-3. Record goal + constraints as `type/project`.
-4. Decompose into tasks. If it is large, load `ava.skills.ava_workflow`
-   (calibrate → align → plan) and `ava.skills.ava_fleet` for
-   parallelization. For the first task, one small real step beats a grand
-   plan: create the task (`ava.tasks.create`) or spawn the first worker,
-   and tell the user what is running.
-
-### B. "What can you do?" / vague
-
-1. Do not recite the skill catalog. Show one capability on the user's own
-   material — "paste a link and I will summarize it", "give me a topic and
-   I will research it". One live demo beats a tour.
-2. Ask what they spend their time on; route the demo toward that.
-3. End by proposing the first small task drawn from what they mentioned,
-   and start it.
-
-### C. Ongoing services ("keep an eye on X", "manage my Y")
-
-1. For each domain they name, propose one dedicated role agent — long-
-   running, owns that domain, reports on a cadence.
-2. Agree each role's boundary before spawning: what it owns, what it may
-   never touch.
-3. Record each role as `type/role` with its boundary.
-4. For time-triggered work, load `ava.skills.ava_guide.schedules` and
-   create the schedule; spawn the first role agent with a self-contained
-   prompt naming the domain and the cadence.
-
-### D. Evaluating Ava itself
-
-1. Explain in one paragraph: agents + one tool (`execute_code`) + skills +
-   memory; you are one agent in a fleet, peers get spawned per task.
-2. State honest limits: you can be wrong; irreversible and outward-facing
-   actions always ask first; skills are instructions you read, not
-   guarantees.
-3. Offer a contained trial: one small task, a clear success criterion, no
-   standing commitments. If the trial succeeds, treat it as branch A.
+Read the matching [intent branch](references/intent-branches.md) when the user
+needs a first goal, an introduction, an ongoing service, or a contained trial.
+Do not establish a standing role for a one-off request.
 
 ## Migrating from another tool
 
@@ -228,54 +143,9 @@ stuff go" part of the conversation.
 
 ## Record to memory
 
-User preferences go into the **shared pool** (`ava.memory.PATH`), never only
-personal memory — every agent must see them. Write with absolute paths: a
-relative path resolves against `ava.cwd`, not your workspace, and the note
-lands in the wrong directory.
-
-Pool note template (fields the pool validator requires):
-
-```markdown
----
-type: memory
-title: <short title>
-description: <one line — the only thing a pointer/search result shows>
-tags: [type/<x>, <extra tags>]      # exactly one type/ tag
-timestamp: 'YYYY-MM-DDTHH:MM:SS+00:00'
-ava_agent: all
-authors:
-- '#<your agent id>'
-ava_machine: <your machine name>
----
-<!-- agent-<your id> @ <your machine>, YYYY-MM-DD HH:MM -->
-
-<body>
-```
-
-### Which tag takes what
-
-| You learned | Tag | File | Example |
-|---|---|---|---|
-| Who the user is — name, contact, language, timezone, accounts | `type/user` | `<pool>/user-profile.md` (one consolidated note) | "User is on Beijing time" |
-| How to work with them — channels, gates, cadence, corrections | `type/feedback` | one note per rule or per cluster of related rules | "Serve pages, never email reports" |
-| An ongoing goal and its constraints | `type/project` | `<pool>/projects/<slug>.md` | "Track competitor X, weekly" |
-| A role an agent was given and its boundary | `type/role` | `<pool>/agents/<name>.md` | "Health steward: owns health domain only" |
-| A machine or cluster fact discovered | `type/env` | `<pool>/infra/...` | "Backups run at 3 AM" |
-| A pointer to an external resource | `type/reference` | `<pool>/...` | "Their Notion workspace URL" |
-
-A `type/feedback` body leads with the rule, then the reason, then how to
-apply it:
-
-```markdown
-## Rule
-<the rule>
-
-Why: <what the user said, or what broke when this was ignored>
-How to apply: <when it fires and what to do>
-```
-
-Keep agent-private workflow state (your own checklist, drafts) in your
-personal `memory/` instead — the pool is for facts other agents need.
+Before writing shared onboarding notes, read [memory records](references/memory-records.md)
+for frontmatter, tags, and destinations. User preferences belong in the shared
+pool at absolute paths; personal working state belongs in workspace memory.
 
 ## Anti-patterns
 

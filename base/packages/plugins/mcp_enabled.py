@@ -80,20 +80,20 @@ def _read_local() -> dict[str, Any] | None:
     if not p.exists():
         return None
     try:
-        data = json.loads(p.read_text() or "{}")
+        data = json.loads(p.read_text())
     except (OSError, json.JSONDecodeError) as e:
-        _log.error(
-            "mcp_enabled: local file %s is malformed — treating every MCP server as disabled", p
-        )
+        _log.error("mcp_enabled: local file %s is malformed — refusing MCP configuration", p)
         raise _MalformedOverlayError(f"mcp_enabled.json unreadable: {e}") from e
-    return dict(cast("dict[str, Any]", data)) if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise SchemaInvalid(f"mcp_enabled.json must be a JSON object, got {type(data).__name__}")
+    return dict(cast("dict[str, Any]", data))
 
 
 def write_local(cfg: McpEnabledConfig) -> None:
     """Full-replace the per-machine MCP-enable overlay file. The write path for
     `set_mcp_enabled` (and `ava mcp enable/disable`). Atomic (temp + replace):
     a crash mid-write must not produce the malformed file that fail-closed
-    reads treat as all-disabled (audit 2026-08-08 P2)."""
+    reads reject (audit 2026-08-08 P2)."""
     p = local_config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
@@ -112,13 +112,13 @@ def read_enabled() -> dict[str, bool]:
     entries only. Absent file -> {}. A present-but-malformed file RAISES
     `McpEnabledConfigError` (fail-closed): a corrupt overlay's intent is
     unknown, and the caller must not inherit "everything enabled" by default
-    (audit 2026-08-08 P2). Consumers catch it and disable every server.
+    (audit 2026-08-08 P2). Consumers propagate the configuration error.
 
     A server NOT present in the returned map means "enabled" (default-on); that
     default is applied by the consumer, not here.
     """
     raw = _read_local()
-    if not raw or not raw.get("mcp_servers"):
+    if raw is None:
         return {}
     cfg = _validate_schema(raw)
     return {name: entry.enabled for name, entry in cfg.mcp_servers.items()}
@@ -133,7 +133,7 @@ def set_mcp_enabled(name: str, *, enabled: bool) -> McpEnabledConfig:
     filters nothing.
     """
     raw = _read_local() or {}
-    existing = _validate_schema(raw).mcp_servers if raw.get("mcp_servers") else {}
+    existing = _validate_schema(raw).mcp_servers
     servers = dict(existing)
     servers[name] = McpServerEntry(enabled=enabled)
     cfg = McpEnabledConfig(mcp_servers=servers)

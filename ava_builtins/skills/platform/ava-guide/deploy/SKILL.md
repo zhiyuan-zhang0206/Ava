@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Sets up dependencies and starts Ava on a fresh machine or joins a runner to an existing gateway. Use for single-box or split deployment, WSL, private-network configuration, or package mirrors.
+description: "Sets up Ava on a new machine or joins a runner. Use for initial deployment, environment prerequisites, or network setup."
 ---
 
 # Deploy an Ava cluster

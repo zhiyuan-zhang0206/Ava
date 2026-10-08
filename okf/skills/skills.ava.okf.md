@@ -37,6 +37,11 @@ One load directory: `~/.ava/skills/`; converge syncs repo built-ins (`ava_builti
 ## Skill Structure
 `SKILL.md` = frontmatter (`name` + `description`) + a markdown body; `description` is the capabilities line in the system prompt. This format **is** the [Agent Skills](https://agentskills.io) open standard — a Claude Code skill folder installs unmodified: [[okf/skills/agent-skills-standard.ava.okf.md]].
 
+`skill-creator` owns catalog-audit criteria: precise descriptions, shared
+decisions in the entrypoint, and conditional procedures/examples in references
+with explicit read conditions. Its offline cases distinguish metadata selection
+and instruction navigation from actual runtime behavior.
+
 ## Key Dependencies
 - [[system-prompt.ava.okf.md]] — the capabilities section that indexes them (whole catalog by default)
 - Discovery/merging in `ava/skills/__init__.py` (`_scan_tree` / `_mount` / `_flatten`); `ava/sdk_surface/skill_sources.py` is just a registry for plugin skill-root providers (register/clear/roots), **unrelated to agents-contract**

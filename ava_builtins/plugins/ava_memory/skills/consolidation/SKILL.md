@@ -1,6 +1,6 @@
 ---
 name: consolidation
-description: Consolidates the shared memory pool through commit, push, merge, and search refresh. Use for daily memory maintenance, threshold-triggered cleanup, or whenever spawned as a multi-host arbiter or per-machine steward.
+description: "Consolidates Ava's shared memory. Use for assigned single-box maintenance or multi-host arbiter/steward work."
 ---
 
 # Memory pool consolidation
@@ -13,7 +13,7 @@ procedure.
 All git / gh / refresh operations are wrapped in self-contained scripts under
 `../scripts/` — the agent calls one script per step instead of hand-typing
 shell pipelines:
-- `python ../scripts/consolidate.py -m "..."` — single-box: stage, commit, push, refresh
+- `python ../scripts/consolidate.py -m "..."` — remote-backed single-box: stage, commit, push, refresh
 - `python ../scripts/steward.py -m "..."` — per-machine: stage, commit, push, create PR
 - `python ../scripts/arbiter_merge.py` — merge all open PRs + refresh (exit 1 = alert)
 - `ava memory refresh` — the one remaining memory CLI (gateway index rebuild)
@@ -199,86 +199,15 @@ Two values used below:
 
 ## Single box
 
-You are the only consolidator; the checkout tracks `main` directly and there is
-no pull-request fan-out.
-
-If this host runs in keep-local mode (`AVA_MEMORY_KEEP_LOCAL` set), the pool has
-no git remote: `../scripts/consolidate.py` still commits and refreshes the local
-index, it just prints `(keep-local mode — skipping push)` and does not push.
-That is expected, not an error — the notes stay on this host.
-
-**On first run, arm the schedule (idempotent).** If `ava.watcher.list()` is empty,
-call `ava.watcher.cron("0 3 * * *", "ava-memory: consolidate the pool")`, then idle.
-
-**Each time you are woken to consolidate:**
-
-1. Run `python ../scripts/consolidate.py -m "<date>: <short summary>"`.
-   This stages, commits, pushes, and refreshes the gateway index in one command.
-   If the commit is rejected by the pre-commit hook, read the error, fix the
-   offending file(s), and re-run.
-2. Re-curate `MEMORY.md`: it is what every agent sees each session, so keep it a
-   tight, current index under the 16000-char cap — promote into it what is being
-   reached for often, demote stale or rarely-used lines into pointed-to notes,
-   keep the `## Setup` header. Commit it:
-   `ava.shell.run("cd <POOL> && git add MEMORY.md && git commit -m 'curate MEMORY.md' && git push")`.
-   (The cap hook rejects an over-long `MEMORY.md` — split it if so.)
+On a single-box deployment, read [single-box consolidation](references/single-box.md).
+Keep-local mode stays local; ignore multi-host roles.
 
 ## Arbiter (multi-host only)
 
-You orchestrate the nightly consolidation and hold the schedule.
-
-**On first run, arm the schedule (idempotent).** If `ava.shell.sessions.list()`
-has no session named `"watcher"`, call
-`ava.watcher.cron("0 3 * * *", "ava-memory: consolidate the pool")` so you are
-woken once a day, then idle. You are also woken immediately whenever the user asks
-you to consolidate now.
-
-**Each time you are woken to consolidate:**
-
-1. `machines = ava.agents.list_machines()`. For each machine, spawn a steward on it and
-   pass your own id so it can report back:
-   `ava.agents.spawn(prompt=f"Read and follow ava.skills.ava_memory.consolidation as the STEWARD. Report to arbiter agent {ava.self.AGENT_ID}.", machine=m.name)`.
-   Remember the returned steward ids.
-2. Wait for every steward to message you that its pull request is ready (or that it had
-   nothing to commit). Idle between messages; each steward message wakes you. If one
-   stays silent far longer than the others,
-   `ava.agents.resurrect(steward_id, prompt="Status? Your pull request has not arrived.")`.
-3. Merge all open pull requests into `main`:
-   `ava.shell.run("python ../scripts/arbiter_merge.py")`.
-   This squash-merges every open PR targeting `main` sequentially **and then
-   refreshes the index** (the refresh is bundled — it is what keeps the
-   gateway checkout and search index in sync with `main`; the F3 staleness
-   incident happened because it used to be a separate, skippable step). If a merge
-   conflicts, the CLI prints the failure reason — find the author from the note's
-   stamp (`<!-- agent-<id> @ <machine> ... -->`) or `git -C POOL blame`,
-   `ava.agents.resurrect(author_id, prompt="<what you need clarified>")`, use the
-   answer to resolve it in POOL, and push `main`. A non-zero exit means a merge
-   was skipped and/or the refresh failed — do not send the stewards the
-   "rebase now" step (step 5) until it is resolved, and report the failure.
-4. When every request is merged, the new notes are made searchable
-   automatically: `../scripts/arbiter_merge.py` bundles the post-merge refresh
-   (POSTs to the gateway so the indexer re-embeds the changed files). Treat a
-   non-zero exit as an alert — a merge was skipped or the refresh failed —
-   and report it rather than moving on silently. Run `ava memory refresh`
-   manually only when you need an immediate refresh outside the merge flow
-   (or to retry a failed one).
-5. Tell every steward to rebase: `ava.agents.send_message(steward_id, "rebase now")`.
-6. Re-curate `MEMORY.md` and commit it to `main`: it is injected into every
-   agent's context, so keep it a tight, current index under the 16000-char cap —
-   promote what is reached for often, demote stale lines into pointed-to notes,
-   keep the `## Setup` header. (The cap hook rejects an over-long `MEMORY.md`.)
+Only when assigned the multi-host arbiter role, read [arbiter](references/arbiter.md).
+The arbiter owns cross-machine merges and post-merge search refresh.
 
 ## Steward (multi-host only)
 
-You publish one machine's day of notes. Your prompt carries the arbiter's id.
-
-1. Run `python ../scripts/steward.py -m "<machine> <date>: <short summary>"`.
-   This stages, commits, pushes, and creates a PR (if none exists for your branch)
-   in one command. If the commit is rejected by the pre-commit hook, read the
-   error, fix the offending file, and re-run. If there is nothing to commit, the
-   command prints "(nothing to commit)" — message the arbiter "nothing to commit"
-   and go to step 3's wait.
-2. Tell the arbiter your request is ready:
-   `ava.agents.send_message(arbiter_id, "PR ready: branch <your branch>")`.
-3. When the arbiter messages you "rebase now":
-   `git -C <POOL> pull --rebase origin main`.
+Only when assigned the per-machine steward role, read [steward](references/steward.md).
+Publish the local branch and report readiness; never merge other machine PRs.
