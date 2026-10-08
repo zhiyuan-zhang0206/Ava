@@ -29,6 +29,12 @@ def test_work_namespace_is_discoverable_in_sdk_help() -> None:
     assert "observe" in output.getvalue() and "cancel" in output.getvalue()
 
 
+@pytest.mark.parametrize("agent_id", [True, 0, -1, 2**63])
+def test_invalid_observation_id_is_refused_before_http(agent_id: int) -> None:
+    with pytest.raises(ValueError):
+        work.observe(agent_id)
+
+
 def test_observation_and_cancel_use_scoped_routes_and_exact_target() -> None:
     calls: list[httpx.Request] = []
 

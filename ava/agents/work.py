@@ -16,7 +16,7 @@ def observe(agent_id: int) -> NativeWorkTarget:
     cancellation's key; observing again may describe another turn.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    if not 0 < agent_id < 2**63:
+    if type(agent_id) is not int or not 0 < agent_id < 2**63:
         raise ValueError("work observation requires a positive agent ID")
     agent_identity.validate_external_identity()
     response = transport.get(f"/api/keyed/v1/agents/{agent_id}/native-work")
