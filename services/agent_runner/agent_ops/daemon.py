@@ -40,6 +40,7 @@ import functools
 import hashlib
 import json
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -49,6 +50,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from base.agents import AvaAgentError, ResurrectRefused
+from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.cluster.machine import machine_name
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import settings
@@ -366,6 +368,18 @@ async def _dispatch_idempotent_pass(
     explicit uncertain outcome without dispatching. A domain receipt must own
     recovery; this response record is not an exactly-once execution framework.
     """
+    if (
+        kind == "lifecycle"
+        and isinstance(payload.get("path"), str)
+        and re.fullmatch(r"/api/agents/[1-9][0-9]*/restart-work-v1", payload["path"])
+    ):
+        try:
+            operation = NativeRestartOperation.model_validate(payload.get("body"))
+        except ValidationError:
+            return OpStatus.FAILED, {"error": "invalid guarded restart envelope"}
+        if operation.operation_key != key:
+            return OpStatus.FAILED, {"error": "guarded restart envelope identity differs"}
+        return await _dispatch(kind, payload, active_ops=active_ops, workers=workers, pool=pool)
     request_hash = hashlib.sha256(
         json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()

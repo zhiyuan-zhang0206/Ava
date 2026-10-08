@@ -68,7 +68,6 @@ from agent.ownership.hosted import (
 )
 from agent.ownership.hosted_completion import (
     completed_hosted_lifecycle_kind,
-    pending_hosted_lifecycle_id,
 )
 from agent.process_boot import boot_agent_scope
 from agent.startup import (
@@ -119,6 +118,7 @@ from services.agent_runner.agent_host.invocation import (
     PendingWorkResult,
     finish_pending_failure,
     recover_completed_work,
+    returned_lifecycle_request,
 )
 from services.agent_runner.agent_host.native_work import (
     NativeWorkContinuation,
@@ -705,16 +705,12 @@ class AgentHost:
             if not pending.trace_attached:
                 await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
                 pending.trace_attached = True
-        if pending.result["exit_requested"] or pending.result["restart_requested"]:
+        if await returned_lifecycle_request(self._control_pool, agent_id, pending):
             incarnation = current_incarnation(agent_id)
             if incarnation is None:
                 raise RuntimeError("hosted lifecycle return has no admitted incarnation")
             self.drop_agent(agent_id)
             async with database_phase():
-                if pending.lifecycle_command_id is None:
-                    pending.lifecycle_command_id = await pending_hosted_lifecycle_id(
-                        self._control_pool, incarnation
-                    )
                 if pending.lifecycle_command_id is None:
                     return TurnOutcome(exited=False, crashed=False)
                 kind = await apply_hosted_lifecycle(

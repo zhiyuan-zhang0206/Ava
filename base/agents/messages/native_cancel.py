@@ -33,16 +33,23 @@ class NativeCancelConflictError(ValueError):
 def observe_native_work(pool: ConnectionPool, agent_id: int) -> NativeWorkTarget | None:
     """Advertise only actual ACTIVE work with the same admitted managed owner."""
     with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT w.id,w.agent_id,w.machine,w.generation,w.owner,w.protocol,w.phase,w.transfer_chain,"
-            "m.incarnation_resources FROM agents_meta m "
-            "JOIN native_graph_work w ON w.id=m.native_work_id WHERE m.id=%s "
-            "AND w.phase='active' AND w.machine=m.machine AND w.generation=m.runtime_generation "
-            "AND w.owner=m.runtime_owner AND m.runtime_kind='hosted' AND m.status='running' "
-            "AND m.lease_expires_at>clock_timestamp() "
-            "AND NOT EXISTS(SELECT 1 FROM agent_impersonations p WHERE p.agent_id=m.id AND p.status='active')",
-            (agent_id,),
-        ).fetchone()
+        return observe_native_work_in_transaction(conn, agent_id)
+
+
+def observe_native_work_in_transaction(
+    conn: psycopg.Connection, agent_id: int
+) -> NativeWorkTarget | None:
+    """Read the same qualification on a caller-owned connection/metadata lock."""
+    row = conn.execute(
+        "SELECT w.id,w.agent_id,w.machine,w.generation,w.owner,w.protocol,w.phase,w.transfer_chain,"
+        "m.incarnation_resources FROM agents_meta m "
+        "JOIN native_graph_work w ON w.id=m.native_work_id WHERE m.id=%s "
+        "AND w.phase='active' AND w.machine=m.machine AND w.generation=m.runtime_generation "
+        "AND w.owner=m.runtime_owner AND m.runtime_kind='hosted' AND m.status='running' "
+        "AND m.lease_expires_at>clock_timestamp() "
+        "AND NOT EXISTS(SELECT 1 FROM agent_impersonations p WHERE p.agent_id=m.id AND p.status='active')",
+        (agent_id,),
+    ).fetchone()
     if row is None:
         return None
     work = decode_work(row[:8])

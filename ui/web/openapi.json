@@ -1052,6 +1052,111 @@
         }
       }
     },
+    "/api/keyed/v1/agents/{agent_id}/restart-work": {
+      "post": {
+        "summary": "Native Restart",
+        "description": "Accept the original ACTIVE restart once through its versioned executor.",
+        "operationId": "native_restart_api_keyed_v1_agents__agent_id__restart_work_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeRestartRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeRestartAcceptance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}": {
+      "get": {
+        "summary": "Native Restart Status",
+        "description": "Observe retained original execution facts; no mutable current-owner inference.",
+        "operationId": "native_restart_status_api_keyed_v1_agents__agent_id__restart_commands__command_id__get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "command_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Command Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeRestartProgress"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/sessions": {
       "get": {
         "summary": "Get Agent Sessions",
@@ -13851,6 +13956,150 @@
         ],
         "title": "NativeCancelAcceptance",
         "description": "Immutable command acceptance; it does not claim execution completed."
+      },
+      "NativeRestartAcceptance": {
+        "properties": {
+          "command_id": {
+            "type": "integer",
+            "exclusiveMaximum": 9.223372036854776e+18,
+            "exclusiveMinimum": 0.0,
+            "title": "Command Id"
+          },
+          "target": {
+            "$ref": "#/components/schemas/NativeWorkTarget"
+          },
+          "config_overlay": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Overlay"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "command_id",
+          "target",
+          "config_overlay"
+        ],
+        "title": "NativeRestartAcceptance",
+        "description": "The original source command, not a claim that restart executed."
+      },
+      "NativeRestartOutcome": {
+        "type": "string",
+        "enum": [
+          "accepted",
+          "applied",
+          "observed",
+          "superseded",
+          "uncertain"
+        ],
+        "title": "NativeRestartOutcome"
+      },
+      "NativeRestartProgress": {
+        "properties": {
+          "acceptance": {
+            "$ref": "#/components/schemas/NativeRestartAcceptance"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/NativeRestartOutcome"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NativeRestartReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "acceptance",
+          "outcome",
+          "applied_at",
+          "observed_at",
+          "reason"
+        ],
+        "title": "NativeRestartProgress",
+        "description": "Retained execution facts copied by the original source transaction."
+      },
+      "NativeRestartReason": {
+        "type": "string",
+        "enum": [
+          "target_replaced",
+          "resurrect",
+          "force_terminate",
+          "invalid_source_transition",
+          "source_command_unavailable"
+        ],
+        "title": "NativeRestartReason"
+      },
+      "NativeRestartRequest": {
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/NativeWorkTarget"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source",
+            "default": "user"
+          },
+          "config_overlay": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Overlay"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "target"
+        ],
+        "title": "NativeRestartRequest",
+        "description": "Validate shape without consulting mutable overlay configuration on replay."
       },
       "NativeWorkTarget": {
         "properties": {

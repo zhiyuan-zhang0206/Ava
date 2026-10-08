@@ -231,6 +231,18 @@ async def accept_lifecycle_command_async(
     return _decode(await cursor.fetchone())
 
 
+def accept_lifecycle_command(
+    conn: psycopg.Connection, target: RuntimeIncarnation
+) -> LifecycleIntent | None:
+    """Sync transport of the same target writer in the caller's transaction."""
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise RuntimeError("lifecycle acceptance requires an explicit transaction")
+    _settle_superseded_by_resurrect(conn, target.agent_id)
+    return _decode(
+        conn.execute(_ACCEPT, (target.agent_id, target.generation, target.owner)).fetchone()
+    )
+
+
 def _settle_superseded_by_resurrect(conn: psycopg.Connection, agent_id: int) -> None:
     """Close every unapplied command below the agent's resurrection fence.
 

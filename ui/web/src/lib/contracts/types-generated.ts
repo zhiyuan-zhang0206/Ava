@@ -666,6 +666,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/agents/{agent_id}/restart-work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Native Restart
+         * @description Accept the original ACTIVE restart once through its versioned executor.
+         */
+        post: operations["native_restart_api_keyed_v1_agents__agent_id__restart_work_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Native Restart Status
+         * @description Observe retained original execution facts; no mutable current-owner inference.
+         */
+        get: operations["native_restart_status_api_keyed_v1_agents__agent_id__restart_commands__command_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/sessions": {
         parameters: {
             query?: never;
@@ -6825,6 +6865,58 @@ export interface components {
             target: components["schemas"]["NativeWorkTarget"];
         };
         /**
+         * NativeRestartAcceptance
+         * @description The original source command, not a claim that restart executed.
+         */
+        NativeRestartAcceptance: {
+            /** Command Id */
+            command_id: number;
+            target: components["schemas"]["NativeWorkTarget"];
+            /** Config Overlay */
+            config_overlay: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * NativeRestartOutcome
+         * @enum {string}
+         */
+        NativeRestartOutcome: "accepted" | "applied" | "observed" | "superseded" | "uncertain";
+        /**
+         * NativeRestartProgress
+         * @description Retained execution facts copied by the original source transaction.
+         */
+        NativeRestartProgress: {
+            acceptance: components["schemas"]["NativeRestartAcceptance"];
+            outcome: components["schemas"]["NativeRestartOutcome"];
+            /** Applied At */
+            applied_at: string | null;
+            /** Observed At */
+            observed_at: string | null;
+            reason: components["schemas"]["NativeRestartReason"] | null;
+        };
+        /**
+         * NativeRestartReason
+         * @enum {string}
+         */
+        NativeRestartReason: "target_replaced" | "resurrect" | "force_terminate" | "invalid_source_transition" | "source_command_unavailable";
+        /**
+         * NativeRestartRequest
+         * @description Validate shape without consulting mutable overlay configuration on replay.
+         */
+        NativeRestartRequest: {
+            target: components["schemas"]["NativeWorkTarget"];
+            /**
+             * Source
+             * @default user
+             */
+            source: string;
+            /** Config Overlay */
+            config_overlay?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
          * NativeWorkTarget
          * @description The immutable original work and actual hosted owner observed by a caller.
          */
@@ -10055,6 +10147,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NativeCancelAcceptance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    native_restart_api_keyed_v1_agents__agent_id__restart_work_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NativeRestartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeRestartAcceptance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    native_restart_status_api_keyed_v1_agents__agent_id__restart_commands__command_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+                command_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeRestartProgress"];
                 };
             };
             /** @description Validation Error */

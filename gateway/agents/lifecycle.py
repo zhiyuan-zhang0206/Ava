@@ -20,11 +20,19 @@ from typing import Annotated, Literal
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Path, Request
 from psycopg_pool import ConnectionPool, PoolTimeout
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from base.agents import AgentNotFound
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
+from base.agents.incarnation.native_restart_models import (
+    NativeRestartAcceptance,
+    NativeRestartAccepted,
+    NativeRestartOperation,
+    NativeRestartProgress,
+    NativeRestartRefused,
+    NativeRestartRequest,
+)
 from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
 from base.agents.messages.control_delivery import ControlConflictError, accept_control
 from base.agents.messages.inbound import InboundKind
@@ -32,6 +40,11 @@ from base.agents.messages.native_cancel import (
     NativeCancelConflictError,
     accept_native_cancel,
     observe_native_work,
+)
+from base.agents.messages.native_restart import (
+    NativeRestartConflictError,
+    lookup_native_restart,
+    native_restart_progress,
 )
 from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
@@ -406,6 +419,16 @@ async def native_cancel(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeWorkTarget, request: Request
 ) -> NativeCancelAcceptance:
     """Accept one exact work intent; acceptance does not prove checkpoint execution."""
+    scoped = _native_control_key(request)
+    try:
+        return await asyncio.to_thread(
+            accept_native_cancel, request.app.state.db_pool, scoped, agent_id, body
+        )
+    except NativeCancelConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _native_control_key(request: Request) -> str:
     key = request.headers.get("Idempotency-Key")
     if (
         key is None
@@ -413,15 +436,69 @@ async def native_cancel(
         or not isinstance(getattr(request.state, "auth_principal", None), AuthPrincipal)
     ):
         raise HTTPException(
-            status_code=400, detail="native cancel requires a key and verified principal-v1 scope"
+            status_code=400,
+            detail="guarded native control requires a key and verified principal-v1 scope",
         )
     try:
-        scoped = request_key(request, key, method="POST", path=request.url.path)
+        return request_key(request, key, method="POST", path=request.url.path)
     except PrincipalScopeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/keyed/v1/agents/{agent_id}/restart-work")
+async def native_restart(
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeRestartRequest, request: Request
+) -> NativeRestartAcceptance:
+    """Accept the original ACTIVE restart once through its versioned executor."""
+    key = _native_control_key(request)
     try:
-        return await asyncio.to_thread(
-            accept_native_cancel, request.app.state.db_pool, scoped, agent_id, body
+        previous = await asyncio.to_thread(
+            lookup_native_restart, request.app.state.db_pool, key, agent_id, body
         )
-    except NativeCancelConflictError as exc:
+    except NativeRestartConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if previous is not None:
+        return previous
+    operation = NativeRestartOperation(operation_key=key, request=body)
+    reply = await forward_to_home_machine(
+        agent_id,
+        f"/api/agents/{agent_id}/restart-work-v1",
+        operation.model_dump(mode="json"),
+        idempotency_key=key,
+    )
+    try:
+        adapter: TypeAdapter[NativeRestartAccepted | NativeRestartRefused] = TypeAdapter(
+            NativeRestartAccepted | NativeRestartRefused
+        )
+        result = adapter.validate_python(reply)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=502, detail="native restart executor protocol is unsupported"
+        ) from exc
+    if isinstance(result, NativeRestartRefused):
+        raise HTTPException(
+            status_code=409 if result.reason == "identity_conflict" else 422, detail=result.detail
+        )
+    stored = await asyncio.to_thread(
+        lookup_native_restart, request.app.state.db_pool, key, agent_id, body
+    )
+    if stored is None or stored != result.acceptance:
+        raise HTTPException(
+            status_code=502, detail="native restart executor has no matching durable acceptance"
+        )
+    return stored
+
+
+@router.get("/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}")
+async def native_restart_status(
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)],
+    command_id: Annotated[int, Path(gt=0, lt=2**63)],
+    request: Request,
+) -> NativeRestartProgress:
+    """Observe retained original execution facts; no mutable current-owner inference."""
+    progress = await asyncio.to_thread(
+        native_restart_progress, request.app.state.db_pool, agent_id, command_id
+    )
+    if progress is None:
+        raise HTTPException(status_code=404, detail="native restart command not found")
+    return progress

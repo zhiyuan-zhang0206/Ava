@@ -253,6 +253,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "im_bridge_notice_poll_state",
     "im_bridge_alert_acceptances",
     "native_graph_work",
+    "native_restart_commands",
     "native_cancel_commands",
     "im_bridge_outbound_intents",
     "im_bridge_outbound_replays",
