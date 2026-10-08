@@ -5,12 +5,14 @@ import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineRequest, RunTi
 
 import {
   axisBox,
-  barWidths,
-  BAR_FILL,
-  BAR_MAX_PX,
+  barBox,
+  BAR_GAP_PX,
   BAR_MIN_PX,
   navigate,
   requestLit,
+  requestReading,
+  requestSpan,
+  requestUnits,
   requestSelection,
   revealView,
   ADDED_ROW,
@@ -47,6 +49,7 @@ import {
   classCategory,
   contextPoint,
   hoverLit,
+  unitKey,
   inboundSources,
   matchesHighlight,
   maxAdded,
@@ -404,7 +407,7 @@ describe("highlight and hover model", () => {
     expect(nodeChildren(nodes[2], nodes).map((n) => n.id)).toEqual(["a", "b"]);
   });
 
-  const request = (idx: number, iso: string, tokens = 10): RunTimelineRequest => ({ idx, ts: iso, session: 0, input_tokens: tokens, output_tokens: 0, added_tokens: tokens / 2, added_estimated: false });
+  const request = (idx: number, iso: string, tokens = 10): RunTimelineRequest => ({ idx, ts: iso, session: 0, input_tokens: tokens, output_tokens: 0, added_tokens: tokens / 2, added_estimated: false, added_from: idx - 1, added_to: idx });
   const requests = [request(2, "2026-10-04T12:10:00Z", 50), request(8, "2026-10-04T12:50:00Z", 20)];
   const view = (from: string, to: string) => ({ from: Date.parse(from), to: Date.parse(to) });
 
@@ -559,21 +562,19 @@ describe("hybrid axis", () => {
 });
 
 describe("request bars", () => {
-  it("fills a share of the space to the nearest neighbour, within a min and max width", () => {
-    const [a, b, c] = barWidths([100, 200, 210]);
-    expect(b).toBeCloseTo(10 * BAR_FILL);
-    expect(c).toBeCloseTo(10 * BAR_FILL);
-    expect(a).toBe(BAR_MAX_PX);
-    expect(barWidths([0, 0.5])).toEqual([BAR_MIN_PX, BAR_MIN_PX]);
-    expect(barWidths([0, 1000])).toEqual([BAR_MAX_PX, BAR_MAX_PX]);
-    expect(barWidths([5])).toEqual([BAR_MAX_PX * BAR_FILL]);
+  it("spans the blocks a request read, less a gap each side, never thinner than the minimum", () => {
+    const view = { from: 0, to: 1000 };
+    expect(barBox({ u0: 100, u1: 300 }, view, 1000)).toEqual({ left: 100 + BAR_GAP_PX, width: 200 - 2 * BAR_GAP_PX });
+    expect(barBox({ u0: 100, u1: 100.5 }, view, 1000).width).toBe(BAR_MIN_PX);
+    // Zoomed to half the axis, the same span is twice as wide.
+    expect(barBox({ u0: 100, u1: 300 }, { from: 0, to: 500 }, 1000).width).toBe(400 - 2 * BAR_GAP_PX);
   });
 
   const T = Date.parse("2026-10-04T12:00:00Z");
   const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
   const u = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: number, parent: string | null = null): RunTimelineUnit =>
     unit({ kind, i0, i1: i0, start: iso(from), end: iso(to), parent, preview: `${kind}${i0}` });
-  const req = (idx: number, sec: number): RunTimelineRequest => ({
+  const req = (idx: number, sec: number, from: number): RunTimelineRequest => ({
     idx,
     ts: iso(sec),
     session: 0,
@@ -581,6 +582,8 @@ describe("request bars", () => {
     output_tokens: 1,
     added_tokens: 1,
     added_estimated: false,
+    added_from: from,
+    added_to: idx,
   });
   const nd = (id: string, level: number, parent: string | null, from: number, to: number, s0: number, s1: number): RunTimelineNode => ({
     ...node(level, id),
@@ -594,20 +597,50 @@ describe("request bars", () => {
   const data = {
     nodes: [nd("P", 2, null, 0, 40, 0, 3), nd("A", 1, "P", 0, 20, 0, 1), nd("B", 1, "P", 20, 40, 2, 3)],
     units: [u("inbound", 0, 0, 10, "A"), u("thinking", 1, 10, 20, "A"), u("inbound", 2, 20, 30, "B"), u("thinking", 3, 30, 40, "B")],
-    requests: [req(1, 10), req(3, 30)],
+    requests: [req(1, 10, 0), req(3, 30, 1)],
   };
   const whole = { from: T, to: T + 40_000 };
   const unitSel = (i0: number, kind: RunTimelineUnit["kind"]) => ({ kind: "unit" as const, i0, i1: i0, unitKind: kind });
   const go = (key: "left" | "right" | "up" | "down", row: string | null, selection: Parameters<typeof navigate>[1] extends infer C ? (C extends { selection: infer S } ? S : never) : never) =>
     navigate(key, { row, selection }, data, whole);
 
-  it("selects the block of the AIMessage that made the request", () => {
+  it("maps a request to the blocks it read for the first time, and back", () => {
+    const [first, second] = data.requests;
+    expect(requestUnits(first, data.units).map((x) => x.i0)).toEqual([0]);
+    // The second request re-reads nothing: it starts at the previous reply (message 1) and ends before its own (3).
+    expect(requestUnits(second, data.units).map((x) => x.i0)).toEqual([1, 2]);
+    expect(requestReading(data.units[2], data.requests)).toBe(second);
+    expect(requestReading(data.units[3], data.requests)).toBeUndefined();
+  });
+
+  it("puts a request's bar from the start of its first block to the end of its last, on either axis", () => {
+    for (const mode of ["time", "hybrid"] as const) {
+      const axis = buildAxisMap(data.units, whole, mode);
+      const span = requestSpan(data.requests[1], data.units, axis);
+      expect(span.u0).toBe(axis.unitSpan(data.units[1]).u0);
+      expect(span.u1).toBe(axis.unitSpan(data.units[2]).u1);
+    }
+  });
+
+  it("selects the block of the AIMessage that made the request, for the details pane", () => {
     expect(requestSelection({ idx: 1 }, data.units)).toEqual(unitSel(1, "thinking"));
     expect(requestSelection({ idx: 99 }, data.units)).toBeNull();
-    expect(requestLit({ idx: 1 }, unitSel(1, "thinking"), null).selected).toBe(true);
-    expect(requestLit({ idx: 1 }, unitSel(2, "inbound"), null).selected).toBe(false);
-    expect(requestLit({ idx: 3 }, null, { kind: "unit", i0: 3, i1: 3, unitKind: "thinking" }).hovered).toBe(true);
-    expect(requestLit({ idx: 3 }, null, { kind: "request", idx: 3 }).hovered).toBe(true);
+  });
+
+  it("lights a request's bar for the request, or any block it read, selected or hovered", () => {
+    const [first, second] = data.requests;
+    expect(requestLit(second, { kind: "request", idx: 3 }, null).selected).toBe(true);
+    expect(requestLit(second, unitSel(2, "inbound"), null).selected).toBe(true);
+    expect(requestLit(second, unitSel(3, "thinking"), null).selected).toBe(false);
+    expect(requestLit(first, unitSel(2, "inbound"), null).selected).toBe(false);
+    expect(requestLit(second, null, unitSel(1, "thinking")).hovered).toBe(true);
+    expect(requestLit(second, null, { kind: "request", idx: 3 }).hovered).toBe(true);
+  });
+
+  it("lights every block a hovered request read, and follows a request to the context breakdown", () => {
+    const lit = hoverLit({ kind: "request", idx: 3 }, data.nodes, data.units, data.requests);
+    expect([...lit.unitKeys].sort()).toEqual([unitKey(data.units[1]), unitKey(data.units[2])].sort());
+    expect(contextPoint({ kind: "request", idx: 3 }, data.nodes, data.requests, whole)).toBe(3);
   });
 
   it("moves left and right within a row and stops at the ends", () => {
@@ -615,7 +648,7 @@ describe("request bars", () => {
     expect(go("left", UNITS_ROW, unitSel(0, "inbound"))).toBeNull();
     expect(go("right", "level-1", { kind: "node", id: "A" })?.item.selection).toEqual({ kind: "node", id: "B" });
     expect(go("right", "level-1", { kind: "node", id: "B" })).toBeNull();
-    expect(go("right", INPUT_ROW, unitSel(1, "thinking"))?.item.selection).toEqual(unitSel(3, "thinking"));
+    expect(go("right", INPUT_ROW, { kind: "request", idx: 1 })?.item.selection).toEqual({ kind: "request", idx: 3 });
   });
 
   it("goes up to the parent and down to the first child", () => {
@@ -627,14 +660,14 @@ describe("request bars", () => {
   });
 
   it("falls back to the item covering, else nearest to, the time when there is no parent or child", () => {
-    // Messages down to the request rows: the block's own request, else the nearest one in time.
-    expect(go("down", UNITS_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { request: { idx: 1 } } });
+    // Messages down to the request rows: the request that read the block.
+    expect(go("down", UNITS_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { request: { idx: 3 } } });
     expect(go("down", UNITS_ROW, unitSel(2, "inbound"))?.item.request?.idx).toBe(3);
-    // Request rows up: the request's own block; between the two request rows: the same request.
-    expect(go("up", INPUT_ROW, unitSel(3, "thinking"))).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(3, "thinking") } });
-    expect(go("down", INPUT_ROW, unitSel(3, "thinking"))).toMatchObject({ row: ADDED_ROW, item: { request: { idx: 3 } } });
-    expect(go("up", ADDED_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { request: { idx: 1 } } });
-    expect(go("down", ADDED_ROW, unitSel(1, "thinking"))).toBeNull();
+    // Request rows up: the last block the request read; between the two request rows: the same request.
+    expect(go("up", INPUT_ROW, { kind: "request", idx: 3 })).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(2, "inbound") } });
+    expect(go("down", INPUT_ROW, { kind: "request", idx: 3 })).toMatchObject({ row: ADDED_ROW, item: { request: { idx: 3 } } });
+    expect(go("up", ADDED_ROW, { kind: "request", idx: 1 })).toMatchObject({ row: INPUT_ROW, item: { request: { idx: 1 } } });
+    expect(go("down", ADDED_ROW, { kind: "request", idx: 1 })).toBeNull();
     // A unit without a parent goes to the level-1 node covering its time.
     const orphan = { ...data, units: data.units.map((x) => (x.i0 === 2 ? { ...x, parent: null } : x)) };
     expect(navigate("up", { row: UNITS_ROW, selection: unitSel(2, "inbound") }, orphan, whole)?.item.selection).toEqual({ kind: "node", id: "B" });

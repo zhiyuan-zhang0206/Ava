@@ -52,6 +52,8 @@ def llm_requests(view: HistoryView) -> list[RunTimelineRequest]:
                 output_tokens=int(msg.usage_metadata["output_tokens"]),
                 added_tokens=added.tokens,
                 added_estimated=added.estimated,
+                added_from=first,
+                added_to=idx,
             )
         )
     return out

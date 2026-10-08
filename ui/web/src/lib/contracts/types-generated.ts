@@ -8131,7 +8131,9 @@ export interface components {
          *     messages first read by it, i.e. those from the previous request's AIMessage (its output is
          *     re-sent) up to the message before this one; for a session's first request, from the session's
          *     first message. The segment head (system prompt) is not counted. `added_estimated` is True when
-         *     any of those counts is a share rather than the provider's own number.
+         *     any of those counts is a share rather than the provider's own number. `added_from` / `added_to`
+         *     are that message range as indices into the stitched history, half-open (`added_to` is the
+         *     request's own `idx`); the two are equal when the request read nothing new.
          */
         RunTimelineRequest: {
             /** Idx */
@@ -8151,6 +8153,10 @@ export interface components {
             added_tokens: number;
             /** Added Estimated */
             added_estimated: boolean;
+            /** Added From */
+            added_from: number;
+            /** Added To */
+            added_to: number;
         };
         /**
          * RunTimelineResponse

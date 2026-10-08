@@ -138,8 +138,8 @@ const lifetimeResponse: RunTimelineResponse = {
   ],
   events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
   requests: [
-    { idx: 2, ts: "2026-10-04T12:04:00.000000Z", session: 0, input_tokens: 1000, output_tokens: 50, added_tokens: 900, added_estimated: false },
-    { idx: 7, ts: "2026-10-04T14:00:00.000000Z", session: 1, input_tokens: 400, output_tokens: 20, added_tokens: 380, added_estimated: true },
+    { idx: 2, ts: "2026-10-04T12:04:00.000000Z", session: 0, input_tokens: 1000, output_tokens: 50, added_tokens: 900, added_estimated: false, added_from: 0, added_to: 2 },
+    { idx: 7, ts: "2026-10-04T14:00:00.000000Z", session: 1, input_tokens: 400, output_tokens: 20, added_tokens: 380, added_estimated: true, added_from: 3, added_to: 7 },
   ],
 };
 
