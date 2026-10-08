@@ -60,7 +60,14 @@ from services.entrypoints.im_bridge.outbound.types import (
     OutboundChunk,
     PreparedOutboundSend,
 )
-from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
+from services.entrypoints.im_bridge.types import (
+    NETWORK_ERRORS,
+    IMAdapter,
+    RetryableTransportError,
+    SendNotStartedError,
+    SendOutcomeUncertainError,
+    raise_http_failure,
+)
 
 ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
 EP_GET_UPDATES = "ilink/bot/getupdates"
@@ -406,7 +413,7 @@ class WeixinAdapter(IMAdapter):
             self._owns_client = True
         return self._client
 
-    async def start(self) -> None:
+    async def start(self, tasks: asyncio.TaskGroup) -> None:
         """Connect and start the long-poll loop; skip when unconfigured."""
         if not self._configured:
             logger.info("weixin not configured, skipping")
@@ -414,7 +421,7 @@ class WeixinAdapter(IMAdapter):
         self._tokens.restore()
         self._restore_activity()
         self._running = True
-        self._poll_task = asyncio.create_task(self._poll_loop(), name="weixin-poll")
+        self._poll_task = tasks.create_task(self._poll_loop(), name="weixin-poll")
         logger.info(
             "weixin connected account={} base={}",
             _safe_id(self._account_id),
@@ -449,7 +456,7 @@ class WeixinAdapter(IMAdapter):
                 failures = 0
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except NETWORK_ERRORS as exc:
                 failures += 1
                 delay = (
                     BACKOFF_DELAY_SECONDS
@@ -650,10 +657,12 @@ class WeixinAdapter(IMAdapter):
             client_id = uuid.uuid4().hex
             try:
                 await self._send_chunk(chat_id, chunk, context_token, client_id)
-            except SendNotStartedError:
+            except (SendNotStartedError, RetryableTransportError, SendOutcomeUncertainError):
                 if idx == 0:
                     raise
-                raise RuntimeError("weixin send incomplete after acknowledged chunks") from None
+                raise SendOutcomeUncertainError(
+                    "weixin send incomplete after acknowledged chunks"
+                ) from None
             if idx < len(chunks) - 1 and self._chunk_delay_seconds > 0:
                 await asyncio.sleep(self._chunk_delay_seconds)
 
@@ -739,13 +748,23 @@ class WeixinAdapter(IMAdapter):
                 ) from None
             if endpoint == EP_GET_UPDATES:
                 raise _LongPollTimeoutError from None
-            raise RuntimeError("weixin send timed out") from None
-        except httpx.HTTPError as exc:
+            raise SendOutcomeUncertainError("weixin send timed out") from None
+        except (
+            httpx.ConnectError,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+        ) as exc:
             if endpoint == EP_SEND_MESSAGE and isinstance(exc, httpx.ConnectError):
                 raise SendNotStartedError("weixin send not started: ConnectError") from None
-            raise RuntimeError(f"weixin {endpoint} request failed: {type(exc).__name__}") from None
+            if endpoint == EP_SEND_MESSAGE:
+                raise SendOutcomeUncertainError(
+                    f"weixin send response unavailable: {type(exc).__name__}"
+                ) from None
+            raise RetryableTransportError(
+                f"weixin {endpoint} request failed: {type(exc).__name__}"
+            ) from None
         if resp.status_code != 200:
-            raise RuntimeError(f"iLink POST {endpoint} HTTP {resp.status_code}: {resp.text[:200]}")
+            raise_http_failure(resp.status_code, f"iLink POST {endpoint} HTTP {resp.status_code}")
         result = resp.json()
         if not isinstance(result, dict):
             raise TypeError("Weixin provider response must be an object")

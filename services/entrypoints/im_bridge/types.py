@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, TypedDict
+from http import HTTPStatus
+from typing import Any, NoReturn, TypedDict
+
+import httpx
 
 from services.entrypoints.im_bridge.outbound.types import PreparedOutboundSend
 
@@ -16,6 +20,44 @@ class SendNotStartedError(RuntimeError):
     Only pre-send transport failures may carry this marker. A send that has
     already acknowledged an earlier chunk must not propagate it to the core.
     """
+
+
+class RetryableTransportError(RuntimeError):
+    """A sanitized connection failure or explicit transient HTTP response.
+
+    Only 429, 502, 503 and 504 responses are retryable. Authentication,
+    schema and programming failures must reach the service task owner.
+    """
+
+
+class SendOutcomeUncertainError(RuntimeError):
+    """An acknowledged prefix or failed response read makes resending unsafe."""
+
+
+NETWORK_ERRORS = (
+    RetryableTransportError,
+    httpx.ConnectError,
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.RemoteProtocolError,
+)
+
+
+def retryable_http_status(status: int) -> bool:
+    """Recognize the bridge's explicit transient-response retry contract."""
+    return status in (
+        HTTPStatus.TOO_MANY_REQUESTS,
+        HTTPStatus.BAD_GATEWAY,
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        HTTPStatus.GATEWAY_TIMEOUT,
+    )
+
+
+def raise_http_failure(status: int, message: str) -> NoReturn:
+    """Raise the explicit transient classification with a caller-sanitized message."""
+    if retryable_http_status(status):
+        raise RetryableTransportError(message)
+    raise RuntimeError(message)
 
 
 @dataclass
@@ -108,10 +150,14 @@ class IMAdapter(ABC):
         self.core = core
 
     @abstractmethod
-    async def start(self) -> None:
+    async def start(self, tasks: asyncio.TaskGroup) -> None:
         """Connect and start receiving. Deliver messages via
         ``await self.core.handle_inbound(InboundMessage(...))``.
         Reconnect with backoff on failure."""
+
+    def begin_shutdown(self) -> None:
+        """Stop receiving cross-thread callbacks before the service group exits."""
+        return
 
     @abstractmethod
     async def stop(self) -> None:
