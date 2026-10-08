@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "cli/python_install.py::import-time-call:sys.path.insert": 1
-  }
-}
