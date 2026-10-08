@@ -66,7 +66,9 @@ that many more open nodes (the accepted gap). No fuzzy matching.
 
 Each closed group is one node at level+1: span from its first child's start to its
 last child's end, times the children's extremes, `children_count`, the children's
-`parent_id` pointing at it — written with the cursor move in one transaction.
+`parent_id` pointing at it — written with the cursor move in one transaction. A group is always a
+prefix of the level's open nodes; `write_groups` raises `GroupOrderError` (writing nothing) when an
+open node of the level starts before the group's end and is not its child.
 `AVA_UNDERSTANDING_GROUP_REASONING` sets these calls' reasoning: empty (default) leaves the
 model's own tier untouched; `off` disables thinking where the provider allows it; any other value
 is passed as the effort. `AVA_UNDERSTANDING_GROUP_MODEL` picks the model (empty = the agent's own via

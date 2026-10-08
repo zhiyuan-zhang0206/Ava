@@ -16,7 +16,15 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy import chunk_consumer as loop
 from base.agents.history.hierarchy import group_consumer as gc
-from base.agents.history.hierarchy.chunks import Chunk, claim_job, enqueue_chunk, finish_job
+from base.agents.history.hierarchy.chunks import (
+    Chunk,
+    ChunkJob,
+    GroupNode,
+    claim_job,
+    enqueue_chunk,
+    finish_job,
+    write_group_nodes,
+)
 from base.agents.history.hierarchy.group import Group, GroupCall, OpenNode
 from base.agents.history.hierarchy.rebuild import (
     claim_rebuild,
@@ -257,3 +265,52 @@ async def test_a_failing_rebuild_is_retried_then_failed(
         )[0]
         assert status[1] == attempt
     assert status[0] == "failed" and "provider down" in status[2]
+
+
+async def _land(pool: AsyncConnectionPool, i: int) -> None:
+    """Land leaf `i` the way a chunk job does (same spans as `_leaf`)."""
+    at = datetime(2026, 10, 5, tzinfo=UTC) + timedelta(hours=i)
+    job = ChunkJob(1, AGENT, 0, i * 10, i * 10 + 9, "m", None, 1)
+    node = GroupNode((i * 10, i * 10 + 9), at, at + timedelta(minutes=30), f"leaf {i}")
+    await write_group_nodes(pool, job, [node], model="m")
+
+
+async def _open_before_parented(pool: AsyncConnectionPool) -> list[tuple[Any, ...]]:
+    return await _rows(
+        pool,
+        "SELECT o.id FROM understanding_nodes o WHERE o.agent_id = %s AND o.depth = 1"
+        " AND o.parent_id IS NULL AND EXISTS (SELECT 1 FROM understanding_nodes p"
+        " WHERE p.agent_id = o.agent_id AND p.depth = 1 AND p.parent_id IS NOT NULL"
+        " AND p.span_start > o.span_end)",
+        AGENT,
+    )
+
+
+async def test_a_leaf_landing_before_a_grouped_one_queues_one_rebuild_that_closes_the_gap(
+    aops_pool: AsyncConnectionPool, _groups: list[list[int]]
+) -> None:
+    """The later segment lands first and is grouped; the earlier one arrives afterwards."""
+    for i in range(5, 10):
+        await _land(aops_pool, i)
+    await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), AGENT)
+    assert not await rebuild_pending(aops_pool, AGENT)  # in order so far: nothing queued
+
+    for i in range(5):
+        await _land(aops_pool, i)
+    assert await rebuild_pending(aops_pool, AGENT)
+    assert len(await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds")) == 1
+    assert await _open_before_parented(aops_pool)  # the gap exists until the rebuild runs
+
+    await run_rebuild(aops_pool, MagicMock(), MagicMock(), AGENT)
+    assert await _open_before_parented(aops_pool) == []
+
+
+async def test_leaves_landing_in_order_queue_no_rebuild(
+    aops_pool: AsyncConnectionPool, _groups: list[list[int]]
+) -> None:
+    for i in range(10):
+        await _land(aops_pool, i)
+        await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), AGENT)
+    assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
+    await _land(aops_pool, 9)  # a rewrite of an existing, grouped span is not out of order
+    assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []

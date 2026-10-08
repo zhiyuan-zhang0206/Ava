@@ -46,6 +46,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
@@ -626,6 +627,54 @@ async def write_group_nodes(
                     job.id,
                 ),
             )
+        requested = await _request_rebuild_if_out_of_order(cur, job.agent_id, nodes)
+    if requested is not None:
+        telemetry.emit(
+            "telemetry",
+            "understanding_leaf_out_of_order",
+            attributes={
+                "agent_id": job.agent_id,
+                "job_id": job.id,
+                "span_end": requested,
+            },
+        )
+
+
+async def _request_rebuild_if_out_of_order(
+    cur: AsyncCursor[Any], agent_id: int, nodes: Sequence[GroupNode]
+) -> int | None:
+    """Queue one upper-level rebuild when a just-written leaf lies before a leaf that already has a
+    parent; the earliest such leaf's span end, else None.
+
+    The upper levels grow on the assumption that leaves land in message order, so open nodes are
+    only ever at the tail. A leaf landing before a grouped one breaks it, and only the rebuild
+    (`rebuild.py`), which replays the leaves in message order, repairs it. Joins the agent's
+    pending rebuild when there is one, under the lock that serializes builds of the agent
+    (`build.enqueue_build`); the live consumer then leaves grouping to the rebuild.
+    """
+    if not nodes:
+        return None
+    earliest_end = min(n.span[1] for n in nodes)
+    await cur.execute(
+        "SELECT EXISTS (SELECT 1 FROM understanding_nodes WHERE agent_id = %s AND depth = 1"
+        " AND parent_id IS NOT NULL AND engine_version LIKE 'chunk-%%'"
+        " AND span_start > %s AND NOT (span_start = ANY(%s)))",
+        (agent_id, earliest_end, [n.span[0] for n in nodes]),
+    )
+    row = await cur.fetchone()
+    assert row is not None, "an EXISTS query always returns one row"  # noqa: S101
+    if not row[0]:
+        return None
+    await cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        (f"understanding-build:{agent_id}",),
+    )
+    await cur.execute(
+        "INSERT INTO understanding_rebuilds (agent_id) SELECT %s WHERE NOT EXISTS"
+        " (SELECT 1 FROM understanding_rebuilds WHERE agent_id = %s AND status = 'pending')",
+        (agent_id, agent_id),
+    )
+    return earliest_end
 
 
 @dataclass(frozen=True)
