@@ -253,6 +253,56 @@ def test_a_held_sdk_call_keeps_its_admission_and_seals_its_source_when_it_drains
     assert _rows(db_conn, lease["id"], "held-call") == 1
 
 
+def test_equal_participant_closes_and_unbinds_the_existing_gate(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+) -> None:
+    participant = _open(lease, owner.agent_id, "equal-participant")
+    equivalent = dataclasses.replace(participant, db=Database.from_settings())
+    assert equivalent == participant and equivalent is not participant
+    bind_local_participant(participant)
+    try:
+        with capture.admitted_local_sdk_call():
+            assert not close_local_participant_admission(equivalent, timeout=0)
+            unbind_local_participant(equivalent)
+            capture_local_event(_sdk_event(owner.agent_id, "equal-held"))
+        assert _state(db_conn, participant) == ("sealed",)
+        with capture.admitted_local_sdk_call():
+            assert not capture.local_sdk_call_was_admitted()
+    finally:
+        unbind_local_participant(participant)
+    assert _rows(db_conn, lease["id"], participant.source_key) == 1
+
+
+def test_rebinding_does_not_redirect_an_unbound_held_admission(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+) -> None:
+    previous = _open(lease, owner.agent_id, "previous-gate")
+    current = _open(lease, owner.agent_id, "current-gate")
+    bind_local_participant(previous)
+    try:
+        with capture.admitted_local_sdk_call():
+            assert not close_local_participant_admission(previous, timeout=0)
+            unbind_local_participant(previous)
+            bind_local_participant(current)
+            capture_local_event(_sdk_event(owner.agent_id, "previous-held"))
+        assert _state(db_conn, previous) == ("sealed",)
+        assert _state(db_conn, current) == ("open",)
+        with capture.admitted_local_sdk_call():
+            assert capture.local_sdk_call_was_admitted()
+            capture_local_event(_sdk_event(owner.agent_id, "current-call"))
+        assert close_local_participant_admission(current, timeout=0)
+        seal_local_participant(current)
+    finally:
+        unbind_local_participant(previous)
+        unbind_local_participant(current)
+    assert _rows(db_conn, lease["id"], previous.source_key) == 1
+    assert _rows(db_conn, lease["id"], current.source_key) == 1
+
+
 def test_a_direct_audit_event_after_close_refuses_and_fails_the_source(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
