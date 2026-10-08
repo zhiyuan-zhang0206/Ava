@@ -171,16 +171,16 @@ def managed_proc(
     on teardown, sends SIGTERM to the whole group -- next dev / uvicorn both fork
     children; a single SIGTERM to the leader is not enough, need group-level kill.
 
-    If `log_path` is given, merges stdout+stderr into that file -- lets the fixture
-    dump child process logs on failure. When None, stdout/stderr inherit (go to
-    pytest terminal).
+    If `log_path` is given, appends merged stdout+stderr to that file, retaining
+    earlier launches' failure evidence in the existing artifact path. When None,
+    stdout/stderr inherit (go to pytest terminal).
 
     Teardown sequence: SIGTERM -> wait(stop_timeout) -> if not reaped, SIGKILL ->
     wait again (_SIGKILL_GRACE_SEC, default 2s). After SIGKILL, normal reaping is
     sub-second; short grace prevents unbounded waiting on D state hangs. Still
     timed out -> raise RuntimeError.
     """
-    log_file = open(log_path, "w") if log_path is not None else None  # noqa: SIM115, PTH123 -- held for process lifetime, finally close
+    log_file = open(log_path, "a") if log_path is not None else None  # noqa: SIM115, PTH123 -- held for process lifetime, finally close
     stdout: int | object = log_file if log_file is not None else None
     stderr: int | object = subprocess.STDOUT if log_file is not None else None
     try:
