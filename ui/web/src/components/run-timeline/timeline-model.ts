@@ -10,16 +10,10 @@ import type {
   RunTimelineUsage,
 } from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
-import { formatTokensCompact } from "@/lib/format/format-number";
 
 export interface TimelineWindow {
   from: string;
   to: string;
-}
-
-/** One step of the zoom path: the window a session zoom narrowed to. */
-export interface Crumb extends TimelineWindow {
-  label: string;
 }
 
 export type Selection =
@@ -209,47 +203,8 @@ export function layoutSpans(
   return placements;
 }
 
-/** A block drawn narrower than this gets no border or rounding of its own: only its fill, merged with its neighbours in the same pixel column. */
+/** A block drawn narrower than this gets no border or rounding: it is drawn as a fill, one per pixel column. */
 export const NARROW_DRAW_PX = 4;
-
-/** One drawn fill that stands for several narrow blocks of a row that share a pixel column. */
-export interface DrawCell {
-  left: number;
-  width: number;
-  keys: string[];
-}
-
-/**
- * Splits a row's placements into the wide ones (drawn as blocks) and the narrow ones (markers and
- * bodies under `narrowPx`), the narrow ones merged into cells: those touching the same pixel column
- * become one cell, so a pile of sub-pixel blocks is one fill, not a fill per block. Drawing only;
- * every block keeps its own key for selection, hover and navigation.
- */
-export function mergeNarrow(
-  places: readonly RowPlacement[],
-  narrowPx: number = NARROW_DRAW_PX,
-): { wide: RowPlacement[]; cells: DrawCell[] } {
-  const wide: RowPlacement[] = [];
-  const narrow: RowPlacement[] = [];
-  for (const place of places) (place.marker || place.width < narrowPx ? narrow : wide).push(place);
-  narrow.sort((a, b) => a.left - b.left);
-  const cells: DrawCell[] = [];
-  let end = -Infinity;
-  for (const place of narrow) {
-    const start = Math.floor(place.left);
-    const stop = Math.max(Math.ceil(place.left + place.width), start + 1);
-    const tail = cells.at(-1);
-    if (tail !== undefined && start < end) {
-      tail.keys.push(place.key);
-      end = Math.max(end, stop);
-      tail.width = end - tail.left;
-    } else {
-      cells.push({ left: start, width: stop - start, keys: [place.key] });
-      end = stop;
-    }
-  }
-  return { wide, cells };
-}
 
 /** `layoutSpans` for blocks given by time, over a time window. */
 export function layoutRow(
@@ -264,20 +219,6 @@ export function layoutRow(
     trackPx,
     minPx,
   );
-}
-
-/** A block's token count as drawn on it: `~` marks an estimate. Null while no request has read it. */
-export function tokenLabel(tokens: number | null, estimated: boolean | null): string | null {
-  return tokens === null ? null : `${estimated === true ? "~" : ""}${formatTokensCompact(tokens)}`;
-}
-
-/** Pixels one character of a block's token label takes, and the padding around it. */
-const TOKEN_CHAR_PX = 6;
-const TOKEN_PAD_PX = 6;
-
-/** Whether the token label fits a block `widthPx` wide while leaving `roomPx` for what else it shows. */
-export function tokenFits(label: string, widthPx: number, roomPx = 0): boolean {
-  return widthPx >= label.length * TOKEN_CHAR_PX + TOKEN_PAD_PX + roomPx;
 }
 
 export function firstLine(text: string, max: number): string {
@@ -792,9 +733,25 @@ export function requestCovers(request: Pick<RunTimelineRequest, "added_from" | "
   return request.added_from <= unit.i0 && unit.i0 < request.added_to;
 }
 
-/** The blocks a request read for the first time, in message order. */
+const byFirstMessage = new WeakMap<readonly RunTimelineUnit[], RunTimelineUnit[]>();
+
+/** The blocks a request read for the first time, in message order (found by binary search over the blocks sorted once per data). */
 export function requestUnits(request: Pick<RunTimelineRequest, "added_from" | "added_to">, units: readonly RunTimelineUnit[]): RunTimelineUnit[] {
-  return units.filter((unit) => requestCovers(request, unit)).sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
+  let sorted = byFirstMessage.get(units);
+  if (sorted === undefined) {
+    sorted = [...units].sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
+    byFirstMessage.set(units, sorted);
+  }
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid].i0 < request.added_from) lo = mid + 1;
+    else hi = mid;
+  }
+  const out: RunTimelineUnit[] = [];
+  for (let i = lo; i < sorted.length && sorted[i].i0 < request.added_to; i += 1) out.push(sorted[i]);
+  return out;
 }
 
 /** The request that first read a block, if it is among `requests`. */
@@ -810,14 +767,20 @@ export function requestSpan(
   request: RunTimelineRequest,
   units: readonly RunTimelineUnit[],
   axis: Pick<AxisMap, "toU" | "unitSpan">,
+  covered: readonly RunTimelineUnit[] = requestUnits(request, units),
 ): AxisSpan {
-  const covered = requestUnits(request, units);
   if (covered.length === 0) {
     const u = axis.toU(Date.parse(request.ts), "lo");
     return { u0: u, u1: u };
   }
-  const spans = covered.map((unit) => axis.unitSpan(unit));
-  return { u0: Math.min(...spans.map((span) => span.u0)), u1: Math.max(...spans.map((span) => span.u1)) };
+  let u0 = Infinity;
+  let u1 = -Infinity;
+  for (const unit of covered) {
+    const span = axis.unitSpan(unit);
+    u0 = Math.min(u0, span.u0);
+    u1 = Math.max(u1, span.u1);
+  }
+  return { u0, u1 };
 }
 
 /** A bar's left edge and width in pixels on a track `trackPx` wide showing `viewU`: the span less the gap each side, at least `BAR_MIN_PX`. */
