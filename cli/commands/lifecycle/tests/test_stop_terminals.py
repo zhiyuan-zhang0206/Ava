@@ -110,7 +110,7 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     stop_env(monkeypatch, home)
     monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", 1.0)
     name = "ava-agent-987-shell-2045-stubborn"
-    _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper)
+    _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
 
     started = time.monotonic()
@@ -425,7 +425,7 @@ def test_force_close_closes_every_session_at_once_without_notices(
     SIGKILLed at once, and no owner notice is written."""
     monkeypatch.setenv("AVA_HOME", str(home))
     name = "ava-agent-987-shell-2055-force"
-    _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper)
+    _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
 
     started = time.monotonic()
