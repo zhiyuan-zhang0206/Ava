@@ -27,7 +27,7 @@ a file lacking that section contributes nothing. A per-host enable overlay
 
 from __future__ import annotations
 
-import functools
+import errno
 import json
 from pathlib import Path
 from typing import Any, TypedDict
@@ -361,19 +361,6 @@ def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, An
     return {k: v for k, v in merged.items() if enabled.get(k, True)}
 
 
-@functools.lru_cache(maxsize=1)
-def _session_death_codes() -> frozenset[int]:
-    """MCP error codes the client SDK synthesizes when a session is unusable:
-    CONNECTION_CLOSED when the stdio peer's read loop hit EOF, REQUEST_TIMEOUT
-    when a call got no reply. Imported lazily so this module still imports
-    where `mcp` is absent."""
-    try:
-        from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
-    except ImportError:
-        return frozenset()
-    return frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
-
-
 def is_transport_error(exc: BaseException) -> bool:
     """True when `exc` means the MCP server process / transport died.
 
@@ -381,32 +368,22 @@ def is_transport_error(exc: BaseException) -> bool:
     only if it was not a side-effectful tool call already in flight.
 
     Shared by the MCP daemon and the in-process SDK so both sides agree on
-    the retry seam.
+    the retry seam. Lazy dependency imports keep config discovery lightweight;
+    dependency failures propagate instead of changing the retry policy.
     """
-    name = type(exc).__name__
-    if name in (
-        "BrokenResourceError",
-        "ClosedResourceError",
-        "BrokenPipeError",
-        "ConnectionResetError",
-        "ConnectionRefusedError",
-        "TimeoutError",
-    ):
+    from anyio import BrokenResourceError, ClosedResourceError
+    from mcp import MCPError as MCPProtocolError
+    from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
+
+    if isinstance(exc, (BrokenResourceError, ClosedResourceError, TimeoutError)):
         return True
-    # OSError with an explicit transport errno (EPIPE / ECONNRESET / ECONNREFUSED).
-    # TimeoutError is a subclass of OSError but has no errno — caught by the
-    # name check above, not this branch.
     if isinstance(exc, OSError):
-        errno = getattr(exc, "errno", None)
-        if errno in (32, 54, 61):  # EPIPE, ECONNRESET, ECONNREFUSED
+        return isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionRefusedError)) or (
+            exc.errno in (errno.EPIPE, errno.ECONNRESET, errno.ECONNREFUSED)
+        )
+    if isinstance(exc, MCPProtocolError):
+        if exc.code in (CONNECTION_CLOSED, REQUEST_TIMEOUT):
             return True
-    # The mcp SDK raises session-death errors `from None` (no __cause__) with
-    # a code — the __cause__ probe alone missed them (2026-08-13 #1229).
-    if name in ("McpError", "MCPError", "JSONRPCError"):
-        code = getattr(exc, "code", None)
-        if code in _session_death_codes():
-            return True
-        cause = getattr(exc, "__cause__", None)
-        if cause is not None:
-            return is_transport_error(cause)
+        if exc.__cause__ is not None:
+            return is_transport_error(exc.__cause__)
     return False
