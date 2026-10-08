@@ -18,10 +18,16 @@ import { api } from "@/lib/transport/api";
 import { ContextBreakdownCard, ContextButton, type ContextButtonProps } from "./context-breakdown";
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getContextBreakdown: vi.fn(), getSettings: vi.fn() },
+  api: { getContextBreakdown: vi.fn(), getRunTimelineContext: vi.fn(), getSettings: vi.fn() },
 }));
 
+/** What `api.ts` rejects with for a non-OK answer: an Error carrying the status. */
+function apiError(status: number, message: string): Error {
+  return Object.assign(new Error(message), { status });
+}
+
 const getContextBreakdown = vi.mocked(api.getContextBreakdown);
+const getRunTimelineContext = vi.mocked(api.getRunTimelineContext);
 const getSettings = vi.mocked(api.getSettings);
 // display.context_meter_width unset — useUserSettings falls back to its
 // USER_SETTING_DEFAULTS entry ("comfortable"), same as an unconfigured user.
@@ -500,6 +506,21 @@ describe("ContextBreakdownCard (P4-3)", () => {
     expect(err.textContent).toContain("the server returned an error");
     fireEvent.click(screen.getByTestId("context-breakdown-retry"));
     await screen.findByTestId("context-breakdown-categories");
+  });
+
+  it("a point with no LLM request (404) is the neutral empty state, not a red failure", async () => {
+    getRunTimelineContext.mockRejectedValue(apiError(404, "the agent has made no LLM request"));
+    wrap(<ContextBreakdownCard agentId={9} at={5} />);
+    await screen.findByTestId("context-breakdown-empty");
+    expect(screen.queryByTestId("context-breakdown-error")).toBeNull();
+  });
+
+  it("an error answer carrying a JSON detail is classified as a server error, not unreachable", async () => {
+    getRunTimelineContext.mockRejectedValue(apiError(503, "cluster is paused"));
+    wrap(<ContextBreakdownCard agentId={9} at={5} />);
+    const err = await screen.findByTestId("context-breakdown-error");
+    expect(err.textContent).toContain("the server returned an error");
+    expect(err.textContent).toContain("cluster is paused");
   });
 
   it("carries the scope subtitle on the card (agent-scoped, not the window)", async () => {
