@@ -40,7 +40,9 @@ def authenticate_webhook(request: Request, *, provider: str) -> WebhookAuthentic
                 source_verified_by=f"webhook:{provider}",
             )
     verified_by = cluster_credential(
-        request.headers.get("Authorization"), settings.data_plane.cluster_secret
+        request.headers.get("Authorization"),
+        settings.data_plane.cluster_secret,
+        cache=request.app.state.machine_token_acceptance,
     )
     if verified_by is not None:
         return WebhookAuthentication(authorized=True, source_verified_by=verified_by)
