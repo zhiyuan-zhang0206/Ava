@@ -32,11 +32,11 @@ def build_app(db: Database, pool: ConnectionPool[Any], config: InsightsConfig) -
     app.state.config = config
     app.state.run_timeline_views = run_timeline_history.HistoryViewCache()
     app.include_router(run_timeline_router.router)
+    app.include_router(cluster_router.router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
         """Identity for the supervisor's probe: which service, which home, which process."""
         return {"name": "insights", "pid": os.getpid(), "home": str(ava_home())}
 
-    app.include_router(cluster_router.router)
     return app
