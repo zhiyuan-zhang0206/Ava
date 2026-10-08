@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import dataclasses
 import logging
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -96,18 +97,29 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
     created_cores: list[Any] = []
 
     class _FakeCore:
-        def __init__(self, config: ImBridgeConfig, gateway: Any, db_pool: Any = None) -> None:
+        def __init__(
+            self,
+            config: ImBridgeConfig,
+            gateway: Any,
+            db_pool: Any = None,
+            *,
+            tasks: asyncio.TaskGroup,
+        ) -> None:
             self.config = config
             self.gateway = gateway
             self.db_pool = db_pool
             self.outbound_store = IMOutboxStore(db_pool)
             self.adapters: dict[str, Any] = {}
             self.outbox_replay_started = False
-            from unittest.mock import MagicMock
+            from unittest.mock import AsyncMock, MagicMock
 
             self.outbound_worker = MagicMock()
             self.notice_bridge = MagicMock()
+            self.notice_bridge.poll_once = AsyncMock()
             created_cores.append(self)
+
+        async def stop(self) -> None:
+            pass
 
         async def restore_subscriptions(self) -> None:
             pass
@@ -265,3 +277,164 @@ def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
         assert "connection pool is full" in caplog.text
     finally:
         httpx_logger.setLevel(previous_level)
+
+
+@pytest.mark.parametrize("cleanup_owner", [None, "core", "adapter"])
+@pytest.mark.parametrize("fault", [RuntimeError("poll bug"), KeyError("missing config")])
+async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    fault: Exception,
+    cleanup_owner: str | None,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    cleanup_fault = RuntimeError("unknown cleanup fault")
+    events: list[str] = []
+    sibling_started = asyncio.Event()
+    pool = MagicMock()
+    pool.close.side_effect = lambda: events.append("pool_closed")
+    monkeypatch.setattr(
+        daemon.Database, "from_settings", lambda: SimpleNamespace(pool=lambda: pool)
+    )
+    monkeypatch.setattr(daemon, "_is_running", lambda: False)
+    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pid_removed"))
+
+    class Core:
+        def __init__(self, config: Any, gateway: Any, db_pool: Any, *, tasks: asyncio.TaskGroup):
+            self.adapters: dict[str, Any] = {}
+            self.outbound_store = IMOutboxStore(db_pool)
+            self.outbound_worker = MagicMock()
+            self.notice_bridge = MagicMock()
+            self.notice_bridge.poll_once = AsyncMock()
+            self.tasks = tasks
+
+        async def stop(self) -> None:
+            events.append("core_stopped")
+            if cleanup_owner == "core":
+                raise cleanup_fault
+
+        async def restore_subscriptions(self) -> None:
+            pass
+
+        def ensure_outbox_replay(self) -> None:
+            pass
+
+    class Adapter:
+        def begin_shutdown(self) -> None:
+            pass
+
+        async def start(self, tasks: asyncio.TaskGroup) -> None:
+            async def sibling() -> None:
+                try:
+                    sibling_started.set()
+                    await asyncio.Event().wait()
+                finally:
+                    events.append("sibling_drained")
+
+            async def broken() -> None:
+                await asyncio.wait_for(sibling_started.wait(), timeout=2)
+                raise fault
+
+            tasks.create_task(sibling())
+            tasks.create_task(broken())
+
+        async def stop(self) -> None:
+            events.append("adapter_stopped")
+            if cleanup_owner == "adapter":
+                raise cleanup_fault
+
+    monkeypatch.setattr("services.entrypoints.im_bridge.core.IMBridgeCore", Core)
+
+    def load_adapters(_core: Any, _disabled: frozenset[str]) -> list[Adapter]:
+        return [Adapter()]
+
+    monkeypatch.setattr(daemon, "_load_adapters", load_adapters)
+    monkeypatch.setattr(daemon, "start_health_server", AsyncMock(return_value=_FakeServer()))
+
+    async def stop_health(server: Any) -> None:
+        events.append("health_stopped")
+
+    monkeypatch.setattr(daemon, "stop_health_server", stop_health)
+    with pytest.raises(ExceptionGroup) as caught:
+        await asyncio.wait_for(daemon.run(), timeout=3)
+    if cleanup_owner is None:
+        assert caught.value.exceptions == (fault,)
+    else:
+        assert isinstance(caught.value.exceptions[0], ExceptionGroup)
+        body = cast(ExceptionGroup[Exception], caught.value.exceptions[0])
+        assert body.exceptions == (fault,)
+        assert caught.value.exceptions[1] is cleanup_fault
+    assert events == [
+        "sibling_drained",
+        "core_stopped",
+        "adapter_stopped",
+        "health_stopped",
+        "pool_closed",
+        "pid_removed",
+    ]
+
+
+def test_invalid_adapter_configuration_is_not_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    class BrokenAdapter:
+        def __init__(self, core: Any, config: Any) -> None:
+            raise ValueError("invalid adapter configuration")
+
+    def import_adapter(_name: str) -> SimpleNamespace:
+        return SimpleNamespace(ADAPTER_CLASS=BrokenAdapter)
+
+    monkeypatch.setattr(daemon, "_import_adapter", import_adapter)
+    with pytest.raises(ValueError, match="invalid adapter configuration"):
+        daemon._load_adapters(object(), frozenset({"weixin", "feishu"}))
+
+
+async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    fault = RuntimeError("unknown adapter stop fault")
+    core = SimpleNamespace(stop=AsyncMock())
+    broken = SimpleNamespace(stop=AsyncMock(side_effect=fault))
+    healthy = SimpleNamespace(stop=AsyncMock())
+    health = object()
+    stop_health = AsyncMock()
+    pool = SimpleNamespace(close=MagicMock())
+    remove_pidfile = MagicMock()
+    monkeypatch.setattr(daemon, "stop_health_server", stop_health)
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile)
+    errors = await asyncio.wait_for(
+        daemon._stop_resources(core, [broken, healthy], health, pool),
+        timeout=2,
+    )
+    assert errors == [fault]
+    core.stop.assert_awaited_once()
+    broken.stop.assert_awaited_once()
+    healthy.stop.assert_awaited_once()
+    stop_health.assert_awaited_once_with(health)
+    pool.close.assert_called_once()
+    remove_pidfile.assert_called_once()
+
+
+def test_cleanup_group_with_cancellation_uses_the_bounded_failure_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import MagicMock
+
+    fault = RuntimeError("cleanup failed during cancellation")
+    group = BaseExceptionGroup("body and cleanup", [asyncio.CancelledError(), fault])
+
+    def run(coroutine: Any) -> None:
+        coroutine.close()
+        raise group
+
+    runner = SimpleNamespace(run=run)
+    exit_process = MagicMock()
+    monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
+    monkeypatch.setattr(daemon, "init_gateway_process", MagicMock())
+    monkeypatch.setattr(daemon, "install_graceful_shutdown", MagicMock())
+    monkeypatch.setattr(daemon, "_gate_httpx_info_logs", lambda: None)
+    monkeypatch.setattr(daemon, "_hard_exit", exit_process)
+    daemon.main()
+    exit_process.assert_called_once_with(1)
+    assert group.exceptions[1] is fault
