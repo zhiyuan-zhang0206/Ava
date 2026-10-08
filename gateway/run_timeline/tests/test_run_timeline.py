@@ -417,3 +417,31 @@ def test_a_unit_no_request_has_read_has_no_tokens(monkeypatch: pytest.MonkeyPatc
     assert [(u.context_tokens, u.generation_tokens, u.estimated) for u in later] == [
         (None, None, None)
     ]
+
+
+def test_a_node_sums_the_context_tokens_of_its_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    world = World(monkeypatch)
+    world.nodes = [stored(1, level=1, span=(1, 3), start=0, end=2)]
+    node = read(world).nodes[0]
+    units = [u for u in read(world).units if node.span_start <= u.i0 <= node.span_end]
+    whole = [u for u in units if u.kind in ("inbound", "output")]
+    assert node.estimated is True
+    assert node.context_tokens is not None and node.context_tokens >= sum(
+        u.context_tokens or 0 for u in whole
+    )
+
+
+def test_a_node_no_request_has_read_has_no_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    world = World(monkeypatch)
+    world.view = view(
+        [
+            *history_messages(),
+            HumanMessage(
+                content="later",
+                additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(20)},
+            ),
+        ]
+    )
+    world.nodes = [stored(1, level=1, span=(5, 5), start=20, end=20)]
+    node = read(world).nodes[0]
+    assert (node.context_tokens, node.estimated) == (None, None)

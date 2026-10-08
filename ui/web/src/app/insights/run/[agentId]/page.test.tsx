@@ -69,6 +69,8 @@ const lifetimeResponse: RunTimelineResponse = {
       summary: "The agent read the repo\nand planned the change.",
       usage,
       generation: { calls: 2, input: 9000, cache_read: 8800, output: 400, seconds: 31.5 },
+      context_tokens: 4200,
+      estimated: true,
     },
     {
       id: "2",
@@ -81,6 +83,8 @@ const lifetimeResponse: RunTimelineResponse = {
       summary: "It implemented and tested it.",
       usage: { calls: 1, input: 100, cache_read: 0, output: 10 },
       generation: null,
+      context_tokens: null,
+      estimated: null,
     },
     {
       id: "3",
@@ -93,6 +97,8 @@ const lifetimeResponse: RunTimelineResponse = {
       summary: "A whole task, start to finish.",
       usage: { calls: 4, input: 3100, cache_read: 2400, output: 130 },
       generation: null,
+      context_tokens: null,
+      estimated: null,
     },
   ],
   units: [
@@ -372,73 +378,74 @@ function wheel(target: Element, init: WheelEventInit, count = 1) {
 
 const summaryText = () => screen.getByTestId("run-timeline-window").textContent;
 
-describe("drilling", () => {
+const sessionsResponse: SessionsResponse = {
+  agent_id: 42,
+  model: "m",
+  understanding_enabled: true,
+  cost_basis: "basis",
+  sessions: [
+    {
+      number: 1,
+      boundary_checkpoint_id: null,
+      start: "2026-10-04T12:00:00.000000Z",
+      end: "2026-10-04T13:00:00.000000Z",
+      messages: 9,
+      peak_input_tokens: 1000,
+      context_tokens: 1000,
+      generation_tokens: 1000,
+      estimated: true,
+      exact_fraction: 0.8,
+      coverage: { status: "none", ratio: 0, covered_messages: 0, total_messages: 9 },
+      estimate: { jobs: 1, input_tokens: 10, output_tokens: 1, cost_usd: null },
+    },
+  ],
+};
+
+describe("zoom path", () => {
   async function node(id: string) {
     return (await screen.findAllByTestId("run-timeline-node")).find(
       (candidate) => candidate.getAttribute("data-node-id") === id,
     )!;
   }
-  async function doubleClickNode(id: string) {
-    fireEvent.doubleClick(await node(id));
+  async function zoomToSession() {
+    fireEvent.click(await screen.findByTestId("run-timeline-sessions-toggle"));
+    fireEvent.click(await screen.findByTestId("run-timeline-session-zoom"));
   }
 
-  it("zooms to the node's span and adds a crumb, without another read", async () => {
-    render();
-    const before = await screen.findByTestId("run-timeline-window");
-    const whole = before.textContent;
-    await doubleClickNode("1");
-    const crumbs = await screen.findByTestId("run-timeline-crumbs");
-    expect(crumbs.textContent).toContain("Level 1 · The agent read the repo");
-    expect(summaryText()).not.toBe(whole);
-    expect(getRunTimeline).toHaveBeenCalledTimes(1);
-    // node 2 starts after node 1 ends: it is outside the zoomed view
-    expect(screen.getAllByTestId("run-timeline-node").map((n) => n.getAttribute("data-node-id"))).not.toContain("2");
-    // the double-click also selected the node
-    expect(await screen.findByTestId("run-timeline-node-detail")).toBeTruthy();
-  });
-
-  it("drills through the Drill button of the side panel too", async () => {
-    render();
-    fireEvent.click(await node("3"));
-    fireEvent.click(await screen.findByRole("button", { name: "Drill in" }));
-    expect(screen.getByTestId("run-timeline-crumbs").textContent).toContain("Level 2");
-  });
-
-  it("a single click selects and does not drill", async () => {
-    render();
-    fireEvent.click(await node("1"));
-    await screen.findByTestId("run-timeline-node-detail");
-    expect(screen.getByTestId("run-timeline-crumbs").textContent).not.toContain("Level 1");
-  });
-
-  it("steps back one level at a time, and to the whole lifetime from the root", async () => {
+  it("a double-click does not zoom or add a crumb, and there is no Drill button", async () => {
     render();
     const whole = (await screen.findByTestId("run-timeline-window")).textContent;
-    await doubleClickNode("3");
-    const level2 = summaryText();
-    await doubleClickNode("1");
-    expect(summaryText()).not.toBe(level2);
+    const target = await node("1");
+    fireEvent.click(target);
+    fireEvent.doubleClick(target);
+    expect(await screen.findByTestId("run-timeline-node-detail")).toBeTruthy();
+    expect(summaryText()).toBe(whole);
+    expect(screen.getByTestId("run-timeline-crumbs").querySelectorAll("button")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Drill in" })).toBeNull();
+  });
 
-    const crumbs = screen.getByTestId("run-timeline-crumbs");
-    fireEvent.click(within(crumbs).getByRole("button", { name: /Level 2/ }));
-    expect(summaryText()).toBe(level2);
-    expect(within(screen.getByTestId("run-timeline-crumbs")).queryByText(/Level 1/)).toBeNull();
-
+  it("steps back to the whole lifetime from the root crumb, without another read", async () => {
+    getAgentSessions.mockResolvedValue(sessionsResponse);
+    render();
+    const whole = (await screen.findByTestId("run-timeline-window")).textContent;
+    await zoomToSession();
+    expect(summaryText()).not.toBe(whole);
     fireEvent.click(within(screen.getByTestId("run-timeline-crumbs")).getByRole("button", { name: "Whole lifetime" }));
     expect(summaryText()).toBe(whole);
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
-  it("clears the drill path when the resolved agentId changes in place", async () => {
+  it("clears the zoom path when the resolved agentId changes in place", async () => {
+    getAgentSessions.mockResolvedValue(sessionsResponse);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { rerender } = rtlRender(
       <QueryClientProvider client={queryClient}>
         <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
       </QueryClientProvider>,
     );
-    await doubleClickNode("1");
+    await zoomToSession();
     await waitFor(() =>
-      expect(screen.getByTestId("run-timeline-crumbs").textContent).toContain("Level 1"),
+      expect(screen.getByTestId("run-timeline-crumbs").textContent).toContain("Sessions 1"),
     );
 
     rerender(
@@ -447,7 +454,7 @@ describe("drilling", () => {
       </QueryClientProvider>,
     );
     await waitFor(() =>
-      expect(screen.getByTestId("run-timeline-crumbs").textContent).not.toContain("Level 1"),
+      expect(screen.getByTestId("run-timeline-crumbs").textContent).not.toContain("Sessions 1"),
     );
   });
 });
@@ -624,17 +631,6 @@ describe("legend highlight", () => {
     expect(legendHuman.getAttribute("aria-pressed")).toBe("false");
     expect(faded(text)).toBe(false);
     expect(faded(await nodeOf("1"))).toBe(false);
-  });
-
-  it("keeps the highlight through a drill", async () => {
-    render();
-    await screen.findByTestId("run-timeline-chart");
-    fireEvent.click(screen.getByTestId("run-timeline-legend-text"));
-    fireEvent.doubleClick(await nodeOf("1"));
-    await screen.findByTestId("run-timeline-crumbs");
-    expect(screen.getByTestId("run-timeline-legend-text").getAttribute("aria-pressed")).toBe("true");
-    expect(faded(await unitOf("inbound"))).toBe(true);
-    expect(faded(await unitOf("text"))).toBe(false);
   });
 
   it("keeps the highlight through a zoom", async () => {
@@ -851,28 +847,7 @@ describe("context size row", () => {
 
 describe("sessions panel", () => {
   it("is collapsed under the chart and zooms the timeline to a session", async () => {
-    getAgentSessions.mockResolvedValue({
-      agent_id: 42,
-      model: "m",
-      understanding_enabled: true,
-      cost_basis: "basis",
-      sessions: [
-        {
-          number: 1,
-          boundary_checkpoint_id: null,
-          start: "2026-10-04T12:00:00.000000Z",
-          end: "2026-10-04T13:00:00.000000Z",
-          messages: 9,
-          peak_input_tokens: 1000,
-          context_tokens: 1000,
-          generation_tokens: 1000,
-          estimated: true,
-          exact_fraction: 0.8,
-          coverage: { status: "none", ratio: 0, covered_messages: 0, total_messages: 9 },
-          estimate: { jobs: 1, input_tokens: 10, output_tokens: 1, cost_usd: null },
-        },
-      ],
-    });
+    getAgentSessions.mockResolvedValue(sessionsResponse);
     render();
     await screen.findByTestId("run-timeline-chart");
     expect(getAgentSessions).not.toHaveBeenCalled();

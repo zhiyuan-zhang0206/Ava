@@ -13,18 +13,13 @@ import { RunTimelineSessions } from "@/components/run-timeline/run-timeline-sess
 import { RunTimelineChartSkeleton } from "@/components/run-timeline/run-timeline-skeleton";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import {
-  blockClass,
   categoryClass,
   classCategory,
   clampViewport,
   contextPoint,
-  firstLine,
   nodeAncestors,
   nodeChildren,
-  nodeWindow,
   requestSelection,
-  requestUnits,
-  unitWindow,
   viewportOf,
   type Crumb,
   type Highlight,
@@ -36,22 +31,19 @@ import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { formatAbsolute } from "@/lib/format/time";
-import type { RunTimelineUnit } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
-const CRUMB_LABEL_CHARS = 40;
-
 /** The agent's run timeline: every level of its understanding tree and, under them, its
- *  message units. The backend answers once with the agent's whole lifetime; zooming,
- *  panning and drilling move a viewport over that loaded data (no further reads). Drilling
- *  a node or unit zooms to its span and pushes a breadcrumb, the breadcrumbs step back. */
+ *  message units. The backend answers once with the agent's whole lifetime; zooming and
+ *  panning move a viewport over that loaded data (no further reads). Zooming to a session
+ *  pushes a breadcrumb, the breadcrumbs step back. */
 export default function RunTimelinePage({ params }: { params: Promise<{ agentId: string }> }) {
   const t = useTranslations("runTimeline");
   const [agentId, setAgentId] = useState<number | null>(null);
   const [paramsResolved, setParamsResolved] = useState(false);
   const [trail, setTrail] = useState<Crumb[]>([]);
   const [selection, setSelection] = useState<Selection | null>(null);
-  // The legend's (or a context breakdown row's) highlight of one kind of block; it survives zoom, pan and drill.
+  // The legend's (or a context breakdown row's) highlight of one kind of block; it survives zoom and pan.
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   // null = the whole loaded extent.
   const [viewport, setViewport] = useState<Viewport | null>(null);
@@ -74,7 +66,7 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
     };
   }, [params]);
 
-  // The drill path belongs to one agent: the route resolving to another invalidates it.
+  // The zoom path belongs to one agent: the route resolving to another invalidates it.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- identity-keyed reset, not a render loop
     setTrail((previous) => (previous.length === 0 ? previous : []));
@@ -100,55 +92,9 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
     );
   }
 
-  const unitKindLabel = (unit: RunTimelineUnit) =>
-    ({
-      human: t("blockHuman"),
-      agent: t("blockAgent"),
-      text: t("blockText"),
-      thinking: t("blockThinking"),
-      call: t("blockCall"),
-      output: t("blockOutput"),
-      note: t("blockNote"),
-    })[blockClass(unit)];
-
   const pushCrumb = (crumb: TimelineWindow & { label: string }) => {
     setTrail((previous) => [...previous, crumb]);
     setViewport(viewportOf(crumb));
-  };
-
-  // A double-click selects as well: the details follow the block the view zoomed to.
-  const drill = (target: Selection) => {
-    if (!data) return;
-    if (target.kind === "node") {
-      const node = data.nodes.find((candidate) => candidate.id === target.id);
-      if (!node) return;
-      pushCrumb({
-        ...nodeWindow(node),
-        label: `${t("levelRow", { level: node.level })} · ${firstLine(node.summary, CRUMB_LABEL_CHARS)}`,
-      });
-    } else if (target.kind === "request") {
-      const request = data.requests.find((candidate) => candidate.idx === target.idx);
-      const covered = request === undefined ? [] : requestUnits(request, data.units);
-      const first = covered.at(0);
-      const last = covered.at(-1);
-      if (first === undefined || last === undefined) return;
-      pushCrumb({
-        from: unitWindow(first).from,
-        to: unitWindow(last).to,
-        label: `${t("contextRow")} · #${first.i0}-${last.i1}`,
-      });
-    } else {
-      const unit = data.units.find(
-        (candidate) =>
-          candidate.i0 === target.i0 && candidate.i1 === target.i1 && candidate.kind === target.unitKind,
-      );
-      if (!unit) return;
-      pushCrumb({
-        ...unitWindow(unit),
-        label: `${unitKindLabel(unit)} · ${firstLine(unit.preview, CRUMB_LABEL_CHARS) || `#${unit.i0}`}`,
-      });
-    }
-    setSelection(target);
   };
 
   const stepBack = (index: number) => {
@@ -205,7 +151,6 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
             onView={setViewport}
             selection={selection}
             onSelect={setSelection}
-            onDrill={drill}
             highlight={highlight}
             onHighlight={setHighlight}
           />
@@ -242,7 +187,6 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
       ancestors={data ? nodeAncestors(selectedNode, data.nodes) : []}
       childNodes={data ? nodeChildren(selectedNode, data.nodes) : []}
       onSelectNode={(id) => setSelection({ kind: "node", id })}
-      onDrill={() => drill({ kind: "node", id: selectedNode.id })}
     />
   ) : selectedUnit ? (
     <UnitDetail
@@ -251,7 +195,6 @@ export default function RunTimelinePage({ params }: { params: Promise<{ agentId:
       unit={selectedUnit}
       parent={data?.nodes.find((node) => node.id === selectedUnit.parent) ?? null}
       onSelectNode={(id) => setSelection({ kind: "node", id })}
-      onDrill={() => drill({ kind: "unit", i0: selectedUnit.i0, i1: selectedUnit.i1, unitKind: selectedUnit.kind })}
     />
   ) : (
     <p className="text-sm text-muted-foreground">{t("detailEmpty")}</p>
