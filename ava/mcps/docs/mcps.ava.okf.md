@@ -73,7 +73,17 @@ still list prior tools; it does not authorize their execution.
 
 Installed server spawn cwd is given by `installed_mcp_dir(name)` (its package directory), allowing its relative `.venv/bin/python` command to resolve to an isolated venv; builtin/plugin/machine returns None (keeping daemon cwd).
 
-Server entries may carry `requires` host-capability pre-checks; when unmet, an actionable capability error is returned rather than an opaque failure from the underlying tool. Two keys are recognized (`ava/mcp_config.py:assert_requirements`): `display` and `unix_socket`; an unknown key fails fast, so a typo can never silently disable a gate. `chrome` declares both — its wrapper reaches the `browser-mcp` daemon over a Unix socket, so the entry is gated off on Windows exactly where that daemon is. Builtin server currently includes only **chrome** (drives a logged-in browser: navigate/click/fill forms/screenshot/read DOM); other servers are installed outside core via `ava mcp install`; rest come from machine-level `mcp.json`.
+Server entries may carry `requires` host-capability pre-checks. The shared
+`ava/mcp_config.py:validate_requirements` accepts missing, null or an empty map
+as no requirements; otherwise only `display` and `unix_socket` with boolean
+values are valid. Invalid declarations fail before a host probe in connections,
+inventory capability checks and CLI list/enable. The CLI checks only declaration
+validity; disabling remains possible even for a broken declaration. An unmet
+valid requirement returns an actionable capability error rather than an opaque
+failure from the underlying tool. `chrome` declares both — its wrapper reaches
+the `browser-mcp` daemon over a Unix socket, so it cannot run on Windows. Builtin
+server currently includes only **chrome**; other servers are installed outside
+core via `ava mcp install`, or declared in machine-level `mcp.json`.
 
 ## Key Dependencies
 - [[mcp-daemon.ava.okf.md]] — MCP subprocess manager (long-lived serial connection process)
