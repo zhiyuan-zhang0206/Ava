@@ -50,6 +50,7 @@ class EventBus:
 
     def __init__(self, config: EventBusConfig) -> None:
         self._config = config
+        self._warn_last: dict[tuple[str, str], float] = {}
         self._clients: dict[asyncio.AbstractEventLoop, _AuthRetryAsyncRedis] = {}
 
     @classmethod
@@ -85,7 +86,11 @@ class EventBus:
         """Publish `payload` on the shared async client (the events channel unless `channel`
         names another), best-effort: never raises. The receiver count, or None on failure."""
         return await publish_via(
-            self.async_redis, self.channel if channel is None else channel, payload, context=context
+            self.async_redis,
+            self.channel if channel is None else channel,
+            payload,
+            warn_last=self._warn_last,
+            context=context,
         )
 
     def publish_best_effort_sync(
@@ -101,5 +106,6 @@ class EventBus:
             lambda: self.sync_redis(decode_responses=decode_responses),
             self.channel if channel is None else channel,
             payload,
+            warn_last=self._warn_last,
             context=context,
         )
