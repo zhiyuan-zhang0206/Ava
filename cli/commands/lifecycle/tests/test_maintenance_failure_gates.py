@@ -190,12 +190,12 @@ class _StartHarness:
         ran: list[bool] = []
 
         @resume_after_start
-        def start() -> int:
-            assert admission.start_authorized()
+        def start(operation: pause_owner.PauseOwnerSnapshot | None) -> int:
+            assert admission.start_authorized(operation)
             ran.append(True)
             return rc
 
-        result = start()
+        result = start(None)
         assert ran == [True]
         return result
 
