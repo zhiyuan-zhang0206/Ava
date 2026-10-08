@@ -187,6 +187,15 @@ describe("RunTimelineRows keyboard and request bars", () => {
     expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
   });
 
+  it("keeps the session color on the selected request bar and rings it", () => {
+    renderRows({ units, requests: [request(1, 100), request(2, 600)] }, { kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
+    const [first, second] = screen.getAllByTestId("run-timeline-request").map((bar) => bar.querySelector("span[aria-hidden]")!);
+    expect(first.className).toContain("bg-blue-500");
+    expect(first.className).not.toContain("bg-foreground");
+    expect(first.className).toContain("ring-2 ring-foreground");
+    expect(second.className).not.toContain("ring-2");
+  });
+
   it("widens the bars to the space between requests", () => {
     renderRows({ units, requests: [request(1, 100), request(2, 600)] });
     const [bar] = screen.getAllByTestId("run-timeline-request");
