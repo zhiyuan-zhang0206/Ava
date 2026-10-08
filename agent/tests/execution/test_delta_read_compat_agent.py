@@ -177,15 +177,11 @@ async def test_delta_read_span_has_phase_fields(
     assert spans
     span = spans[-1]
     assert all(
-        span[field] >= 0 for field in ("tuple_read_ms", "history_read_ms", "decode_ms", "fold_ms")
+        span[field] >= 0 for field in ("tuple_read_ms", "history_read_ms", "fold_ms", "elapsed_ms")
     )
-    assert span["stage1_pages"] >= 1
-    assert span["stage1_rows"] >= span["stage1_pages"]
-    assert span["stage2_rows"] >= 1
-    assert span["stage2_blob_bytes"] > 0
-    assert span["decode_ms"] > 0
-    assert span["history_build_ms"] >= span["decode_ms"]
-    assert span["fold_path"] in {"fast", "fallback"}
+    assert span["elapsed_ms"] >= span["tuple_read_ms"]
+    assert span["outcome"] == "success"
+    assert "decode_ms" not in span and "reset_decode_ms" not in span
 
 
 async def test_recovery_cache_invalidates_on_graph_state_update(

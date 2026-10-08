@@ -351,7 +351,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
 
     from langgraph.checkpoint.base import CheckpointTuple
 
-    from base.agents.history.delta_read_compat import _log_reconstruction
+    from base.agents.history.delta_read_compat import _log_reconstruction, _ReadSpan
 
     tuple_ = cast(
         CheckpointTuple,
@@ -360,7 +360,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
             checkpoint={"id": "checkpoint-1"},
         ),
     )
-    _log_reconstruction(tuple_, 3)
+    _log_reconstruction(tuple_, 3, span=_ReadSpan())
 
     # Find the row by name rather than taking the mirror's last line: ambient
     # metered `sdk_call` rows can land in the per-test mirror after this test's
