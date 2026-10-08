@@ -35,6 +35,17 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         `config_overlay` overrides per-agent settings, currently
         `{"llm_model": "<model id>"}`.
         """,
+    "spawn_agent_guarded_v1": """Create an agent with a retained original birth receipt.
+
+        Requires a 1-128 character idempotency_key scoped to your authenticated
+        MCP client and this tool. Reuse the same tool, key and arguments after
+        response loss; changed requests conflict. A new key creates a new agent.
+        Replay retains the original agent, placement, config and launch attempt.
+        It can wake only the original pending, unadmitted attempt; historical
+        acceptance does not prove execution or revive later work.
+        Older servers reject this tool before effects. Never fall back to
+        spawn_agent for the same intent. No automatic retries are added.
+        """,
     "send_message": """Send a message to a running agent — a new instruction, more context,
         or the answer to a question it is blocked on.
 
