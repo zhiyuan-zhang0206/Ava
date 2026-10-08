@@ -8090,6 +8090,9 @@ export interface components {
          *     each level up groups the one below. `span_start`..`span_end` is the inclusive
          *     message-index span in the stitched history, the indices the raw-message route
          *     reads. `generation` is None for a node with no understanding-call record.
+         *     `context_tokens` is the sum of the context tokens of the messages the span covers (None while
+         *     no request has read any of them), `estimated` whether any of that was a share rather than the
+         *     provider's own number (None with `context_tokens`).
          */
         RunTimelineNode: {
             /** Id */
@@ -8116,6 +8119,10 @@ export interface components {
             summary: string;
             usage: components["schemas"]["RunTimelineUsage"];
             generation: components["schemas"]["RunTimelineGeneration"] | null;
+            /** Context Tokens */
+            context_tokens: number | null;
+            /** Estimated */
+            estimated: boolean | null;
         };
         /**
          * RunTimelineRequest

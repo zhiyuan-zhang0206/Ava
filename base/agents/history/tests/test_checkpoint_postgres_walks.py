@@ -263,46 +263,25 @@ async def test_delta_read_decode_error_emits_partial_span(loguru_records: list[A
     ]
     assert len(spans) == 1
     assert spans[0]["outcome"] == "error"
-    assert spans[0]["failed_phase"] == "decode"
+    assert spans[0]["failed_phase"] == "history_read"
     assert spans[0]["error_type"] == "ValueError"
-    assert spans[0]["stage2_rows"] == 1
-    assert spans[0]["stage2_blob_bytes"] == 1
-    assert spans[0]["decode_ms"] >= 0
-    assert spans[0]["history_build_ms"] >= spans[0]["decode_ms"]
+    assert spans[0]["elapsed_ms"] >= spans[0]["history_read_ms"] >= 0
+    assert "decode_ms" not in spans[0] and "reset_decode_ms" not in spans[0]
     assert spans[0]["message_count"] is None
     assert spans[0]["cache_hit"] is None
 
 
-async def test_decode_instrumentation_reinstalls_after_shared_serde_reverts(
+async def test_checkpoint_reads_leave_shared_serializer_unchanged(
     loguru_records: list[Any],
 ) -> None:
-    """Two savers sharing one `serde` — the normal case for every saver that
-    does not pass its own (`BaseCheckpointSaver.serde` is a class-level
-    default) — must each get decode instrumentation, even if something
-    outside this module put the shared serde's `loads_typed` back to its
-    unwrapped form in between (a `monkeypatch.setattr(saver.serde,
-    "loads_typed", ...)` teardown being the common case, but any direct
-    reassignment has the same effect) without going through this module's
-    uninstall path. The second saver to instrument that reverted serde must
-    notice decode is unwrapped and re-wrap it, rather than trusting a marker
-    that says installation already happened once.
-
-    Uses an explicit, test-scoped `JsonPlusSerializer` rather than the real
-    class-level default so this test's outcome does not depend on whether an
-    earlier test in the same process already wrapped the shared singleton.
-    """
+    """Cold readers sharing a serializer must not install process-wide instrumentation."""
     shared_serde = JsonPlusSerializer()
-    unwrapped_decode = shared_serde.loads_typed
+    decode = shared_serde.loads_typed
     first = AsyncPostgresSaver(cast(Any, object()), serde=shared_serde)
     wrap_saver_reads_with_delta_reconstruction(first)
-    assert first.serde.loads_typed is not unwrapped_decode
-
-    # Simulate the revert: something restores the shared serde's decode to
-    # the unwrapped function, discarding the wrapper installed above.
-    first.serde.loads_typed = unwrapped_decode  # type: ignore[method-assign]
-
     saver = _failing_saver(serde=shared_serde)
     assert saver.serde is first.serde
+    assert shared_serde.loads_typed == decode
 
     async def bad_history(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
         return saver._build_delta_channels_writes_history(  # type: ignore[attr-defined]
@@ -332,8 +311,6 @@ async def test_decode_instrumentation_reinstalls_after_shared_serde_reverts(
         if record["extra"].get("event") == "delta_read_compat"
     ]
     assert len(spans) == 1
-    # Pre-fix, the stale `_ava_delta_decode_instrumented` marker on `serde`
-    # stayed True across the revert, so `wrap_saver_reads_with_delta_reconstruction`
-    # skipped re-wrapping and this failure surfaced from "history_build"
-    # instead of "decode" — the decode phase was silently unrecorded.
-    assert spans[0]["failed_phase"] == "decode"
+    assert spans[0]["failed_phase"] == "history_read"
+    assert spans[0]["error_type"] == "ValueError"
+    assert shared_serde.loads_typed == decode

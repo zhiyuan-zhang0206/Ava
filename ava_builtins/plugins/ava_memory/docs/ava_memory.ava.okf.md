@@ -68,6 +68,13 @@ This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and
 
 ## Configuration
 
+- Host `indexer_enabled` in `default_config.py` defaults to true independently
+  of `AVA_MEMORY_INDEX_INJECT`: disabling prompt injection leaves search available.
+  Run `ava plugins update` (also in start converge), set it false in
+  `$AVA_HOME/configs/ava_memory/config.json`, then use normal stop/start to disable
+  indexing. Agent overlays cannot change it. Read-only roster/status evaluation
+  uses defaults for an absent image without writing; invalid existing data reports
+  a plugin load failure and skips the service. The image is sealed at service birth.
 - Memory pool path = `$AVA_HOME/memory` (computed by `ava/memory.py` at process load using `ava_home()`; no `AVA_MEMORY_POOL` variable)
 - `settings.passive_memory_recall_enabled`: passive recall feature toggle (default in [[ava_builtins/plugins/ava_memory/docs/memory-recall.ava.okf.md]])
 - `settings.agent.memory_inherit_depth`: ancestor hops a descendant inherits `inheritable` blocks from (per-agent, default 1; 0 disables). Size guardrails: `memory_inherit_max_block_chars` / `memory_inherit_max_total_chars` (0 disables one)
