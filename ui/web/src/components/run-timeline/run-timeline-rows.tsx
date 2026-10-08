@@ -13,32 +13,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import {
   blockClass,
   chainIds,
-  firstLine,
   hoverLit,
   axisBox,
   buildAxisMap,
   inboundSources,
-  isSelected,
-  layoutSpans,
   levelsTopFirst,
-  matchesHighlight,
-  requestCovers,
-  mergeNarrow,
-  tokenFits,
-  tokenLabel,
-  NARROW_DRAW_PX,
-  MARKER_HIT_PX,
-  type RowPlacement,
   panView,
   pendingSpans,
-  unitColor,
   zoomView,
-  unitKey,
   type AxisMode,
   type BlockClass,
   type Highlight,
@@ -58,26 +45,24 @@ import {
   revealView,
   type NavKey,
 } from "./timeline-nav";
+import { barTop, layoutsFor, type RowLayout } from "./timeline-canvas-model";
 import { RunTimelineAxis } from "./run-timeline-axis";
-import { NarrowCells, SelectionBox, SelectionLine } from "./run-timeline-cells";
-import { ContextSizeRow } from "./run-timeline-context-row";
+import { TrackCanvas } from "./run-timeline-canvas";
+import { SelectionBox, SelectionLine } from "./run-timeline-cells";
+import { paintBars, paintNodes, paintUnits, type PaintState } from "./run-timeline-paint";
 import { RunTimelineLegend } from "./run-timeline-legend";
 import { RowShell } from "./run-timeline-row-shell";
-import { readoutText, requestReadout } from "./run-timeline-readout";
+import { readoutText } from "./run-timeline-readout";
 
-const NODE_LABEL_CHARS = 80;
-// A node keeps at least this much width for its summary before its token count is shown.
-const NODE_LABEL_MIN_PX = 24;
-// The opacity of everything a highlight does not name.
-const FADED = "opacity-[0.12]";
 // Track width assumed until the first measurement.
 const DEFAULT_TRACK_PX = 1000;
-// Height of one marker lane's hit area; markers stacked at one instant take one lane each.
-const MARKER_LANE_PX = 5;
 // A pointer must travel this far before a press becomes a pan (below it, it is a click).
 const DRAG_THRESHOLD_PX = 4;
 const WHEEL_ZOOM_RATE = 0.0015;
 const PINCH_ZOOM_RATE = 0.01;
+const LEVEL_ROW_PX = 32;
+const UNIT_ROW_PX = 24;
+const CONTEXT_ROW_PX = 40;
 
 // The hatching of a stretch the level above has not summarized yet.
 const PENDING_HATCH =
@@ -85,18 +70,6 @@ const PENDING_HATCH =
 
 function boxStyle(box: { left: number; width: number }) {
   return { left: `${box.left}%`, width: `max(${box.width}%, 3px)` };
-}
-
-/** Position of a block: its body, or for a marker the hit strip of its lane (the line itself is a child). */
-function placeStyle(place: RowPlacement): React.CSSProperties {
-  if (!place.marker) return { left: place.left, width: place.width };
-  return {
-    left: place.left - MARKER_HIT_PX / 2,
-    width: MARKER_HIT_PX,
-    top: place.lane * MARKER_LANE_PX,
-    height: MARKER_LANE_PX + 1,
-    zIndex: 1 + place.lane,
-  };
 }
 
 export function RunTimelineRows({
@@ -140,7 +113,6 @@ export function RunTimelineRows({
   const viewU = axis.viewU(view);
   // A selection lights itself and every ancestor; the rest steps back.
   const chain = chainIds(selection, data.nodes, data.units, data.requests);
-  const dim = selection !== null;
   const selectedRequest =
     selection?.kind === "request" ? data.requests.find((request) => request.idx === selection.idx) : undefined;
   const chartRef = useRef<HTMLDivElement>(null);
@@ -284,12 +256,29 @@ export function RunTimelineRows({
     unitLabel,
     sourceLabel,
   });
-  const hoverProps = (target: Hover) => ({
-    onMouseEnter: () => setHover(target),
-    onMouseLeave: () => setHover(null),
-    onFocus: () => setHover(target),
-    onBlur: () => setHover(null),
-  });
+  // The layout of every row (where each item is drawn) is cached per view: hovering and selecting only repaint.
+  const layouts = layoutsFor(data, axis, viewU, trackPx);
+  const paintState: PaintState = { selection, hover, chain, lit, highlight, selectedRequest };
+  const canvasFor = (row: string, height: number, paint: (p: Parameters<React.ComponentProps<typeof TrackCanvas>["paint"]>[0], layout: RowLayout) => void) => {
+    const layout = layouts.get(row);
+    if (layout === undefined) return null;
+    return (
+      <TrackCanvas
+        width={trackPx}
+        height={height}
+        layout={layout}
+        paint={(p) => paint(p, layout)}
+        testId={`run-timeline-canvas-${row}`}
+        onHit={(key) => setHover(key === null ? null : (layout.items.get(key)?.selection ?? null))}
+        onChoose={(key) => {
+          const item = layout.items.get(key);
+          if (item !== undefined) choose(row, item.selection);
+        }}
+      />
+    );
+  };
+  // The selection read aloud: the canvas is decorative, the arrow keys move through every item.
+  const spoken = readoutText(selection, { data, t, unitLabel, sourceLabel });
 
   return (
     <div
@@ -309,6 +298,9 @@ export function RunTimelineRows({
       }}
       className="relative select-none space-y-1.5 rounded-[10px] border border-border bg-card p-3"
     >
+      <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
+        {spoken ?? ""}
+      </p>
       {lineBox === null ? null : (
         <div
           aria-hidden="true"
@@ -385,211 +377,29 @@ export function RunTimelineRows({
               </div>
             );
           })}
-          {(() => {
-            const levelNodes = data.nodes.filter((node) => node.level === level);
-            const places = new Map(
-              layoutSpans(
-                levelNodes.map((node) => ({ key: node.id, ...axis.nodeSpan(node) })),
-                viewU,
-                trackPx,
-              ).map((place) => [place.key, place]),
-            );
-            const stateOf = (node: (typeof levelNodes)[number]) => {
-              const picked = isSelected(selection, { kind: "node", id: node.id });
-              const ancestor = !picked && chain.has(node.id);
-              const hoverLight = !picked && !ancestor && lit.nodeIds.has(node.id);
-              return { picked, ancestor, hoverLight, faded: highlight !== null && !picked };
-            };
-            const byId = new Map(levelNodes.map((node) => [node.id, node]));
-            const { cells } = mergeNarrow([...places.values()]);
-            return (
-              <>
-                <NarrowCells
-                  cells={cells}
-                  paint={(keys) => {
-                    const states = keys.flatMap((key) => {
-                      const node = byId.get(key);
-                      return node === undefined ? [] : [stateOf(node)];
-                    });
-                    const strong = states.some((state) => state.picked || state.ancestor || state.hoverLight);
-                    return {
-                      background: strong ? "var(--foreground)" : "color-mix(in srgb, var(--primary) 40%, transparent)",
-                      className: states.every((state) => state.faded)
-                        ? FADED
-                        : dim && !strong
-                          ? "opacity-40"
-                          : undefined,
-                    };
-                  }}
-                />
-                {levelNodes.map((node) => {
-                  const place = places.get(node.id);
-                  if (place === undefined) return null;
-                  const { picked, ancestor, hoverLight, faded } = stateOf(node);
-                  const hovered = hover?.kind === "node" && hover.id === node.id;
-                  const thin = place.marker || place.width < NARROW_DRAW_PX;
-                  const label = firstLine(node.summary, NODE_LABEL_CHARS);
-                  const nodeTokens = tokenLabel(node.context_tokens, node.estimated);
-                  return (
-                    <button
-                      key={node.id}
-                      type="button"
-                      aria-label={t("nodeAria", { level, summary: label })}
-                      aria-pressed={picked}
-                      data-testid="run-timeline-node"
-                      data-node-id={node.id}
-                      data-highlight={picked ? "self" : ancestor ? "ancestor" : "none"}
-                      data-hover={hovered ? "self" : lit.nodeIds.has(node.id) ? "lit" : undefined}
-                      data-faded={faded ? "" : undefined}
-                      data-marker={place.marker ? "" : undefined}
-                      onClick={() => choose(levelRowId(level), { kind: "node", id: node.id })}
-                      {...hoverProps({ kind: "node", id: node.id })}
-                      className={cn(
-                        "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
-                        place.marker
-                          ? ""
-                          : thin
-                            ? "inset-y-0"
-                            : cn(FLEX, OVERFLOW_HIDDEN, "inset-y-0 items-center rounded border px-1 text-left text-[10px] leading-8 border-border bg-primary/20 text-foreground hover:bg-primary/30"),
-                        !thin && picked && "bg-primary/45 ring-2 ring-foreground",
-                        !thin && ancestor && "bg-primary/40 ring-2 ring-foreground/60",
-                        !thin && hoverLight && "bg-primary/30 ring-1 ring-foreground/40",
-                        !thin && hoverLight && hovered && "ring-foreground/70",
-                        !thin && (faded ? FADED : dim && !picked && !ancestor && !hoverLight && "opacity-40"),
-                      )}
-                      style={placeStyle(place)}
-                    >
-                      {thin ? null : (
-                        <>
-                          <span className={cn(MIN_W_0, "grow truncate")}>{label}</span>
-                          {nodeTokens !== null && tokenFits(nodeTokens, place.width, NODE_LABEL_MIN_PX) ? (
-                            <span data-testid="run-timeline-tokens" className="ml-1 shrink-0 font-mono text-[9px] tabular-nums text-foreground/70">
-                              {nodeTokens}
-                            </span>
-                          ) : null}
-                        </>
-                      )}
-                    </button>
-                  );
-                })}
-              </>
-            );
-          })()}
+          {canvasFor(levelRowId(level), LEVEL_ROW_PX, (p, layout) => paintNodes(p, layout, paintState))}
           {selectionBoxes(levelRowId(level))}
         </RowShell>
       ))}
 
       <RowShell label={t("messagesRow")} height="h-6" testId="run-timeline-row-units">
-        {(() => {
-          const places = new Map(
-            layoutSpans(
-              data.units.map((unit) => ({ key: unitKey(unit), ...axis.unitSpan(unit) })),
-              viewU,
-              trackPx,
-            ).map((place) => [place.key, place]),
-          );
-          const stateOf = (unit: RunTimelineUnit) => {
-            const key = unitKey(unit);
-            const candidate: Selection = { kind: "unit", i0: unit.i0, i1: unit.i1, unitKind: unit.kind };
-            const picked =
-              isSelected(selection, candidate) ||
-              (selection?.kind === "request" && selectedRequest !== undefined && requestCovers(selectedRequest, unit));
-            const hovered = hover?.kind === "unit" && isSelected(hover, candidate);
-            const hoverLight = hovered || lit.unitKeys.has(key);
-            const matched = highlight !== null && matchesHighlight(unit, highlight);
-            return { key, candidate, picked, hovered, hoverLight, matched, faded: highlight !== null && !matched && !picked };
-          };
-          const byKey = new Map(data.units.map((unit) => [unitKey(unit), unit]));
-          const { cells } = mergeNarrow([...places.values()]);
-          return (
-            <>
-              <NarrowCells
-                inset="inset-y-1"
-                cells={cells}
-                paint={(keys) => {
-                  const members = keys.flatMap((key) => {
-                    const unit = byKey.get(key);
-                    return unit === undefined ? [] : [{ unit, state: stateOf(unit) }];
-                  });
-                  const strong = members.some(({ state }) => state.picked || state.hoverLight);
-                  // The fill takes the color of a member that is not faded, else of the first.
-                  const lead = members.find(({ state }) => !state.faded) ?? members[0];
-                  return {
-                    background: strong ? "var(--foreground)" : unitColor(lead.unit),
-                    className: members.every(({ state }) => state.faded)
-                      ? FADED
-                      : highlight === null && selection !== null && !strong
-                        ? "opacity-40"
-                        : undefined,
-                  };
-                }}
-              />
-              {data.units.map((unit) => {
-                const { key, candidate, picked, hovered, hoverLight, matched, faded } = stateOf(unit);
-                const place = places.get(key);
-                if (place === undefined) return null;
-                const thin = place.marker || place.width < NARROW_DRAW_PX;
-                const unitTokens = tokenLabel(unit.context_tokens, unit.estimated);
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-label={t("unitAria", { kind: unitLabel(unit), preview: unit.preview })}
-                    aria-pressed={picked}
-                    data-testid="run-timeline-unit"
-                    data-unit-kind={unit.kind}
-                    data-block-class={blockClass(unit)}
-                    data-highlight={picked ? "self" : "none"}
-                    data-hover={hovered ? "self" : hoverLight ? "lit" : undefined}
-                    data-faded={faded ? "" : undefined}
-                    data-matched={matched ? "" : undefined}
-                    data-marker={place.marker ? "" : undefined}
-                    onClick={() => choose(UNITS_ROW, candidate)}
-                    {...hoverProps(candidate)}
-                    className={cn(
-                      "absolute outline-none focus-visible:ring-2 focus-visible:ring-foreground",
-                      !place.marker && "inset-y-1",
-                      !thin && "rounded-sm",
-                      !thin && picked && "ring-2 ring-foreground",
-                      !thin && !picked && hoverLight && (hovered ? "ring-1 ring-foreground/70" : "ring-1 ring-foreground/40"),
-                      !thin && (faded ? FADED : highlight === null && selection !== null && !picked && !hoverLight && "opacity-40"),
-                    )}
-                    style={thin ? placeStyle(place) : { ...placeStyle(place), background: unitColor(unit) }}
-                  >
-                    {!thin && unitTokens !== null && tokenFits(unitTokens, place.width) ? (
-                      <span
-                        data-testid="run-timeline-tokens"
-                        className="pointer-events-none absolute right-0 top-0 pr-0.5 font-mono text-[9px] leading-4 tabular-nums text-black/70"
-                      >
-                        {unitTokens}
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </>
-          );
-        })()}
+        {canvasFor(UNITS_ROW, UNIT_ROW_PX, (p, layout) => paintUnits(p, layout, paintState))}
         {selectionBoxes(UNITS_ROW)}
       </RowShell>
 
       {data.requests.length > 0
-        ? (["input", "added"] as const).map((metric) => (
-            <ContextSizeRow
-              key={metric}
-              requests={data.requests}
-              metric={metric}
-              axis={axis}
-              viewU={viewU}
-              trackPx={trackPx}
-              units={data.units}
-              selection={selection}
-              onSelect={(target) => choose(metric === "input" ? INPUT_ROW : ADDED_ROW, target)}
-              overlay={selectionBoxes(metric === "input" ? INPUT_ROW : ADDED_ROW)}
-              hover={hover}
-              hoverProps={hoverProps}
-              describe={(request) => requestReadout(t, request)}
-            />
+        ? ([INPUT_ROW, ADDED_ROW] as const).map((row) => (
+            <RowShell
+              key={row}
+              label={t(row === ADDED_ROW ? "addedContextRow" : "contextRow")}
+              height="h-10"
+              testId={row === ADDED_ROW ? "run-timeline-row-added" : "run-timeline-row-context"}
+            >
+              {canvasFor(row, CONTEXT_ROW_PX, (p, layout) =>
+                paintBars(p, layout, barTop(row, data), row === ADDED_ROW, paintState),
+              )}
+              {selectionBoxes(row)}
+            </RowShell>
           ))
         : null}
 

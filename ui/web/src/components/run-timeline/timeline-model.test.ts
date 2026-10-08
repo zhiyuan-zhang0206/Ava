@@ -51,8 +51,6 @@ import {
   nodeChildren,
   tokenFits,
   tokenLabel,
-  mergeNarrow,
-  NARROW_DRAW_PX,
 } from "./timeline-model";
 import {
   navigate,
@@ -730,38 +728,6 @@ describe("token labels", () => {
     expect(tokenFits("1.5k", 80)).toBe(true);
     expect(tokenFits("1.5k", 20)).toBe(false);
     expect(tokenFits("1.5k", 40, 24)).toBe(false);
-  });
-});
-
-describe("mergeNarrow", () => {
-  const place = (key: string, left: number, width: number, marker = false) => ({ key, left, width, marker, lane: 0 });
-
-  it("keeps wide blocks as they are and merges narrow ones that share a pixel column", () => {
-    const { wide, cells } = mergeNarrow([
-      place("a", 10.1, 0.3),
-      place("b", 10.5, 0.2),
-      place("c", 10.9, 0, true),
-      place("w", 50, NARROW_DRAW_PX),
-      place("d", 30, 1.5),
-    ]);
-    expect(wide.map((p) => p.key)).toEqual(["w"]);
-    expect(cells).toEqual([
-      { left: 10, width: 1, keys: ["a", "b", "c"] },
-      { left: 30, width: 2, keys: ["d"] },
-    ]);
-  });
-
-  it("chains narrow blocks that overlap the cell's columns, and splits at a free column", () => {
-    const { cells } = mergeNarrow([place("a", 5, 2.5), place("b", 7, 2), place("c", 8.5, 0.5), place("d", 11, 1)]);
-    expect(cells.map((c) => c.keys)).toEqual([["a", "b", "c"], ["d"]]);
-    expect(cells[0]).toMatchObject({ left: 5, width: 4 });
-  });
-
-  it("does not add up: ten blocks in one column are one cell of the same width as one", () => {
-    const many = mergeNarrow(Array.from({ length: 10 }, (_, i) => place(`k${i}`, 7 + i * 0.05, 0.1)));
-    const one = mergeNarrow([place("x", 7, 0.1)]);
-    expect(many.cells).toHaveLength(1);
-    expect(many.cells[0].width).toBe(one.cells[0].width);
   });
 });
 
