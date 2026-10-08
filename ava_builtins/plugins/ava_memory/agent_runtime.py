@@ -225,6 +225,7 @@ class _PassiveMemoryRecallHook(Hook):
                     state.messages,
                     injected_paths=state.memory.injected_paths,
                     agent=agent,
+                    context=runtime.context,
                     log_key=runtime.context.recall_log_key,
                 ),
                 timeout=deadline,

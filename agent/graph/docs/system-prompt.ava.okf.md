@@ -1,7 +1,7 @@
 ---
 type: doc
 title: System Prompt — System Prompt
-description: "The system prompt built once per context window. Constructed by `build_system_prompt(extensions, slices)` in order: base guidance → SDK overview → behavior conventions → capability index → plugin sections."
+description: "The system prompt built once per context window. Constructed by `build_system_prompt(extensions, slices, agent_id=...)` in order: base guidance → SDK overview → behavior conventions → capability index → plugin sections."
 tags: []
 ---
 

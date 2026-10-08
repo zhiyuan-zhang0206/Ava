@@ -225,7 +225,7 @@ class ShellSessions:
         activate_venv = cwd_is_inside_checkout(session_cwd, repo_root())
         session_env = forward_env_dict(activate_venv=activate_venv)
         # The session is the agent's own: the owner's id rides the environment so a script run
-        # in it builds a full AvaContext (`process_context._launched_child_context`,
+        # in it builds a full AvaContext (`process_context.launched_context`,
         # `owns_loop=False`) and `ava.DB` / `ava.REDIS` / the gateway-backed calls work as in
         # the exec child (ruling 2026-10-04, docs/decisions/agents/context/2026-10-04-ava-state-and-context.md,
         # source 2). Per-creation, from this session's owner — not the creating process's

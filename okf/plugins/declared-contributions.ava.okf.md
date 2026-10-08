@@ -13,7 +13,7 @@ A plugin does not register hooks, state, system prompt sections or context notes
 frozen declaration.
 
 - `system_prompt_sections` — `(slices: AgentSlices) -> str`; an empty string contributes nothing.
-- `context_notes` — `ContextNote(build, on_fork, rank)`; `build` returns a `HumanMessage` or `None` when it has
+- `context_notes` — `ContextNote(build, on_fork, rank)`; `build(ctx: AvaContext)` returns a `HumanMessage` or `None` when it has
   nothing to say. Lower `rank` sits closer to the SystemMessage; `on_fork` also grafts the note onto a fork.
 - `after_init` / `before_llm` / `before_exec` / `after_exec` — `Hook` instances ([[okf/plugins/graph-edge-hooks.ava.okf.md]]).
 - `state` — `BaseModel` classes whose fields become channels `<plugin>__<field>`; the plugin keeps its own
@@ -39,13 +39,14 @@ serde (state classes), `build_graph(checkpointer, extensions)` (hooks, state fie
 `AvaContext.extensions` (default `EMPTY`: the framework's own sections, notes and hooks only). The graph is compiled
 once, so a changed plugin set takes effect on the next host start (the plugin directory watchdog); there is no
 in-process swap.
-`build_system_prompt(extensions, slices)`, `context_notes(extensions, slices)` and `fork_notes(extensions, slices)`
-read it. The attribution catalog (`ava plugins inspect`) reads each plugin's declaration records and compares them with the `ava-plugin.json` contribution keys.
+`build_system_prompt(extensions, slices, agent_id=...)`, `context_notes(extensions, ctx)` and
+`fork_notes(extensions, ctx)` read it. Context-note builders receive the actual turn context,
+including its identity and clients; they never read `ava.context` in the shared host. The attribution catalog (`ava plugins inspect`) reads each plugin's declaration records and compares them with the `ava-plugin.json` contribution keys.
 
 ## The SDK install
 
 `ava` is a singleton module that agent code reaches by attribute access, so it cannot be passed around as a value; its
-writes are concentrated in `ava/sdk_surface/install.py:install(registry)`, the only place that mutates it. Per plugin, in
+surface installation is concentrated in `ava/sdk_surface/install.py:install(registry)`. The execution bootstrap separately initializes the disposable child's `context`, `state` and `state_update` slots before agent code runs. Per plugin, in
 registry (plugin name) order: namespaces, members, expansions, wraps (a target may be a namespace or member just added),
 skill sources, flags, config. A plugin whose declaration cannot be applied (a conflicting or disabled namespace name, a wrap
 target that does not resolve, a config that does not bind) is rolled back whole, reported as a load failure and absent from

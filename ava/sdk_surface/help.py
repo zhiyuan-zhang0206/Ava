@@ -63,10 +63,9 @@ def help(
     without methods. `hidden_members` omits the named dotted SDK members; when
     omitted, members unavailable to your model are hidden automatically."""
     import ava as _ava
-    from ava.sdk_surface import process_context
 
     if hidden_members is None:
-        if process_context.peek() is None:
+        if getattr(_ava, "context", None) is None:
             hidden_members = frozenset()
         else:
             from ava.sdk_surface.attachment_transport import own_media_gated_members

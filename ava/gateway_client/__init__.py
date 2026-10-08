@@ -83,6 +83,7 @@ from ava.gateway_client.transport import (
     patch as patch,
 )
 from base.agents import GatewayUnavailable as GatewayUnavailable
+from base.agents.context import AvaContext
 from base.log import logger
 
 
@@ -107,7 +108,9 @@ class MemorySearchResult(NamedTuple):
     tags: tuple[str, ...] = ()
 
 
-def memory_search(query: str, k: int, *, timeout: float | None = None) -> list[MemorySearchResult]:
+def memory_search(
+    query: str, k: int, *, timeout: float | None = None, context: AvaContext | None = None
+) -> list[MemorySearchResult]:
     """POST /api/memory/search → list of `MemorySearchResult`.
 
     Gateway-side primary directly calls embedder + the memory-search service; secondary
@@ -135,6 +138,7 @@ def memory_search(query: str, k: int, *, timeout: float | None = None) -> list[M
         {"query": query, "k": k},
         timeout=httpx.Timeout(timeout) if timeout is not None else _memory_search_timeout(),
         max_retries=_MEMORY_SEARCH_MAX_RETRIES,
+        context=context,
     )
     raise_from_response(resp)
     return [
@@ -376,7 +380,7 @@ def get_ancestors(agent_id: int) -> list[dict]:
 _BORN_CHAIN_TIMEOUT_S = 5.0
 
 
-def get_born_chain(agent_id: int) -> list[dict]:
+def get_born_chain(agent_id: int, *, context: AvaContext | None = None) -> list[dict]:
     """GET /api/agents/{id}/born-chain → the `ancestors` rows: the immutable
     birth chain above `agent_id`, nearest ancestor first (1 = direct birth
     parent). Each dict carries agent_id / label / status / machine / depth.
@@ -392,6 +396,7 @@ def get_born_chain(agent_id: int) -> list[dict]:
         f"/api/agents/{agent_id}/born-chain",
         timeout=httpx.Timeout(_BORN_CHAIN_TIMEOUT_S),
         max_retries=1,
+        context=context,
     )
     raise_from_response(resp)
     return resp.json()["ancestors"]

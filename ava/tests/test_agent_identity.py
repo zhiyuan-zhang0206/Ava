@@ -10,13 +10,13 @@ would silently reopen the watcher-compacts-its-own-agent bug) fails loudly.
 import pytest
 
 import ava
-from ava.sdk_surface import agent_identity, process_context
+from ava.sdk_surface import agent_identity
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 def _owns_loop() -> bool:
     """Whether the bound context's identity owns the turn loop."""
-    context = process_context.current()
+    context = ava.context
     assert context.identity is not None
     return context.identity.owns_loop
 
@@ -193,7 +193,7 @@ def test_context_outside_a_bound_process_raises(monkeypatch: pytest.MonkeyPatch)
     """Like `ava.state` outside an exec turn: no bound context, no attribute."""
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    with pytest.raises(AttributeError, match=r"ava\.context exists only"):
+    with pytest.raises(AttributeError, match=r"ava\.context requires an execution child"):
         _ = ava.context
     assert getattr(ava, "context", None) is None
 

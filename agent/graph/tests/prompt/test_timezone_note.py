@@ -14,6 +14,8 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.prompt.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE, timezone_note
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
@@ -27,9 +29,16 @@ def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     pin_agent(7)
 
 
+def _context(agent_id: int | None = 7) -> AvaContext:
+    return AvaContext(
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
+        agent=AgentSlices.resolve(),
+    )
+
+
 def _content(monkeypatch: pytest.MonkeyPatch, tz: str) -> str:
     monkeypatch.setattr(settings.general, "timezone", tz)
-    note = timezone_note(AgentSlices.resolve())
+    note = timezone_note(_context())
     assert note is not None
     return str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
@@ -56,7 +65,7 @@ def test_carries_the_timezone_note_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tag drives the UI chip; an unmapped one renders as a loud alarm
     (`scripts/lint/note_tags.py` enforces the frontend half)."""
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    note = timezone_note(AgentSlices.resolve())
+    note = timezone_note(_context())
     assert note is not None
     assert note.additional_kwargs["ava_note_tag"] == NoteTag.TIMEZONE  # pyright: ignore[reportUnknownMemberType]
 
@@ -75,22 +84,19 @@ def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> 
     rather than producing a head fragment out of context."""
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert timezone_note(AgentSlices.resolve()) is None
+    assert timezone_note(_context(None)) is None
 
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The hosted runner hosts many agents' turns in one process and establishes
-    no process-wide id — the turn contextvar is the identity. The note must
-    resolve through it, not the process slot (task #3939: reading the slot
-    directly silently dropped this note from every hosted head)."""
+    """The explicit host context works without binding the shared SDK."""
     from base.native_process.turn_identity import bind_turn_identity
 
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
 
-    with bind_turn_identity(29):
-        note = timezone_note(AgentSlices.resolve())
+    with bind_turn_identity(97):
+        note = timezone_note(_context(29))
 
     assert note is not None
     assert "Asia/Shanghai" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

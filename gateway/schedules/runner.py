@@ -402,11 +402,12 @@ def run(schedule_id: int, revision: int | None = None) -> int:
 def _bind_schedule_actor(schedule_id: int) -> None:
     """Bind a context whose actor is this schedule so ava.agents.* attributes its spawns/wakes to
     `schedule:<id>` (a .py script, run in-process, shares this binding)."""
+    import ava
     from ava.sdk_surface import process_context
     from base.agents.context import AvaContext
     from base.agents.context.identity import AgentIdentity
 
-    process_context.bind_process(
+    ava.bind_context(
         AvaContext(
             identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
             clients=process_context.process_clients(),

@@ -7,8 +7,7 @@ now share one process:
 1. **Isolation** — two agents' turns running concurrently must not see each
    other's identity, framework config, plugin config, model, or event
    publisher. In process mode the OS gave this for free; here it is bought by
-   three contextvar binds around the invocation, and this file is what proves
-   they hold under real overlap rather than in sequence.
+   explicit invocation contexts, and this file proves isolation under real overlap.
 2. **The config rebind** — a turn reads the agent's stored config fresh, so an
    overlay written between turns takes effect at the next one, and the cached
    per-agent runtime is rebuilt rather than reused. This is the hosted
@@ -37,7 +36,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
-import ava.sdk_surface.agent_identity
+import ava
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
@@ -49,6 +48,7 @@ from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _P
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 def _host(**kwargs: Any) -> AgentHost:
@@ -271,10 +271,8 @@ class _Observation:
 class _FakeGraph:
     """Stands in for the compiled graph.
 
-    `ainvoke` reads the turn's ambient state from inside a CHILD TASK, which is
-    where a LangGraph node actually runs — a bind that only survives in the
-    calling coroutine would pass a naive assertion and fail in production, so
-    the observation deliberately takes the harder path.
+    `ainvoke` reads the explicit invocation context from inside a child task,
+    where a LangGraph node actually runs.
     """
 
     def __init__(self, results: dict[int, list[dict[str, Any]]]) -> None:
@@ -293,7 +291,7 @@ class _FakeGraph:
         agent = context.require_agent()
         plugin_cfg = cast(_HostPluginConfig, agent.plugin_config("hostplug"))
         return _Observation(
-            agent_id=ava.sdk_surface.agent_identity.agent_id(),
+            agent_id=context.require_identity().agent_id,
             model=agent.brain.llm_model,
             plugin_marker=plugin_cfg.marker,
             llm=cast(_Model, context.llm),
@@ -683,17 +681,26 @@ class TestSettlementReconciles:
         assert order == ["settle", "reconcile-turn"]
 
 
+def _assert_sdk_context(expected: AvaContext | None, *, bound: bool) -> None:
+    assert getattr(ava, "context", None) is expected
+    assert hasattr(ava, "context") is bound
+
+
 class TestConcurrentAgentIsolation:
-    async def test_two_overlapping_turns_each_see_their_own_everything(self, wired: _Build) -> None:
+    @pytest.mark.parametrize("sdk_bound", [False, True])
+    async def test_two_overlapping_turns_each_see_their_own_everything(
+        self, wired: _Build, sdk_bound: bool
+    ) -> None:
         """The load-bearing test of the whole hosted model.
 
         Both turns are held INSIDE the graph at the same time, so neither can
         pass by running to completion before the other starts — which is exactly
         how a process-per-agent assumption would sneak through.
         """
-        # Ids 11/22, never 1: tests/fixtures/env_bootstrap.py binds a placeholder context as
-        # agent 1 (`pin_agent(1)`), so an agent numbered 1 would read back correctly even if
-        # the turn bind did nothing at all.
+        if sdk_bound:
+            pin_agent(999)
+        else:
+            pin_no_identity()
         rows = {
             11: _Row(overlay={"llm_model": "model-for-11", "marker": "plug-for-11"}),
             22: _Row(overlay={"llm_model": "model-for-22", "marker": "plug-for-22"}),
@@ -702,15 +709,19 @@ class TestConcurrentAgentIsolation:
         graph.gate(11)
         graph.gate(22)
 
+        child_context = getattr(ava, "context", None)
+        _assert_sdk_context(child_context, bound=sdk_bound)
         t1 = asyncio.create_task(host.run_turn(11))
         t2 = asyncio.create_task(host.run_turn(22))
         await asyncio.wait_for(graph.arrival(11).wait(), 2)
         await asyncio.wait_for(graph.arrival(22).wait(), 2)
 
+        _assert_sdk_context(child_context, bound=sdk_bound)
         # Both are parked in their own turn right now — overlap is real.
         graph.gates[11].set()
         graph.gates[22].set()
         await asyncio.wait_for(asyncio.gather(t1, t2), 2)
+        _assert_sdk_context(child_context, bound=sdk_bound)
 
         seen = {o.agent_id: o for o in graph.observations}
         assert set(seen) == {11, 22}, "identity must not leak between concurrent turns"
@@ -725,22 +736,15 @@ class TestConcurrentAgentIsolation:
         assert seen[22].publisher.agent_id == 22
 
     async def test_nothing_leaks_after_a_turn_ends(self, wired: _Build) -> None:
-        """The binds are scoped to the turn, so the host itself is never left
-        wearing an agent's identity — otherwise host-level code (eviction, the
-        stats route, the daemon's own logging) would attribute itself to whoever
-        ran last.
-
-        Asserted on the turn contextvar rather than `ava.sdk_surface.agent_identity.agent_id()`,
-        because that read legitimately falls through to the process bootstrap
-        slot — which tests/fixtures/env_bootstrap.py pins to 1 for the whole session, and which
-        the real host never sets at all (it never calls `establish`).
-        """
+        """Host turns carry their identity explicitly and never change the shared SDK slot."""
         from base.native_process.turn_identity import current_turn_agent_id
 
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         assert current_turn_agent_id() is None
+        child_context = getattr(ava, "context", None)
         await asyncio.wait_for(host.run_turn(11), 2)
         assert current_turn_agent_id() is None
+        assert getattr(ava, "context", None) is child_context
 
 
 # ── 2. the config rebind ─────────────────────────────────────────────────────

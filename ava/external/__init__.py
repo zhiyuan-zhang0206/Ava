@@ -15,7 +15,8 @@ from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
 
-from ava.sdk_surface import agent_identity, process_context
+import ava
+from ava.sdk_surface import process_context
 from ava.sdk_surface.settings import database
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
@@ -24,6 +25,7 @@ from base.cluster.machine import machine_name
 from base.config.agent_pins import resolve_agent_config_pins
 from base.log import logger
 from base.native_process.ownership import process_metadata
+from base.native_process.turn_identity import current_turn_agent_id
 from base.packages.plugins.config_view import PluginConfigView, resolve_agent_plugin_pins
 
 from .state import (
@@ -73,11 +75,11 @@ def _deliver_telemetry_before_detach() -> None:
 def _refuse_unless_attachable() -> AvaContext | None:
     """The process's own context, when nothing forbids attaching to it: no attachment yet, and
     no native agent runtime."""
-    bound = process_context.peek()
+    bound = getattr(ava, "context", None)
     identity = None if bound is None else bound.identity
     if identity is not None and identity.lease is not None:
         raise RuntimeError("this process already has an external attachment")
-    if agent_identity.current_turn_agent_id() is not None or (
+    if current_turn_agent_id() is not None or (
         identity is not None and identity.agent_id is not None and identity.owns_loop
     ):
         raise RuntimeError("a native agent runtime cannot attach an external controller")
@@ -153,7 +155,7 @@ class Attachment:
         own = (None if bound is None else bound.identity) or AgentIdentity(
             agent_id=None, owns_loop=True
         )
-        process_context.bind_process(
+        ava.bind_context(
             dataclasses.replace(
                 bound or AvaContext(clients=process_context.process_clients()),
                 identity=dataclasses.replace(own, lease=borrowed),
@@ -301,12 +303,13 @@ class Attachment:
                 unbind_local_participant(self._event_participant)
                 self._event_participant = None
             if self._bound and self._prior_context is not None:
-                process_context.bind_process(self._prior_context)
+                ava.bind_context(self._prior_context)
             elif self._bound:
                 # The process had no context of its own: the one this attachment made, and the
                 # clients it built, end with the attachment.
-                process_context.close_process()
-                process_context.unbind_process()
+                context = ava.unbind_context()
+                if context is not None:
+                    context.clients.close()
             ava.unbind_exec_turn()
             self._stack.close()
         finally:

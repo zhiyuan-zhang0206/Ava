@@ -7,13 +7,18 @@ import pytest
 
 from ava.gateway_client import spawn, transport
 from base.agents import GatewayUnavailable
+from base.agents.context import AvaContext
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     client = MagicMock()
-    monkeypatch.setattr(transport, "_http", lambda: client)
+
+    def http_client(_context: AvaContext | None = None) -> MagicMock:
+        return client
+
+    monkeypatch.setattr(transport, "_http", http_client)
 
     def no_delay(*_args: object) -> int:
         return 0

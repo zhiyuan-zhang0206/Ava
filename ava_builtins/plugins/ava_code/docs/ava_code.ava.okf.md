@@ -77,7 +77,7 @@ PluginContributions(sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=
 
 - `ava.cwd.get()` → returns the current logical working directory
 - `ava.cwd.set(path)` → changes the logical working directory (relative path resolved against the current logical value, `~/...` expanded). AvaCode's `files` / `shell` / `understand` wrappers read it explicitly; bare `open`, `Path.cwd`, imports, and user subprocesses retain their Python process cwd. After set, writes `cwd_note` (and when git repo has `.claude/skills` / `.agents/skills` / `.ava/skills` project-local skills, writes `project_skills_note`), which are injected as system notes by the above after_exec hook
-- `_ValidateCwdAfterInitHook` (declared as `after_init`) → after checkpoint restore, validates the persisted logical cwd and repairs a stat failure or non-directory value to the agent workspace; it never calls `os.chdir`
+- `_ValidateCwdAfterInitHook` (declared as `after_init`) initializes an absent cwd channel from the invocation's explicit `Runtime.context` identity and persists it as a state delta. It uses `model_fields_set` to distinguish an absent channel from a saved value. After checkpoint restore it preserves valid directories, including an explicitly saved `$HOME`, and repairs a stat failure or non-directory value to the agent workspace. An eval context without an agent uses `$HOME`; the hook never calls `os.chdir`
 
 ## Key dependencies
 
@@ -88,9 +88,9 @@ PluginContributions(sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=
 ## Configuration
 
 - Project-local skills: discovered when `ava.cwd.set` at git root's `.claude/skills` (Claude Code compatible), `.agents/skills` (open Agent Skills standard) and `.ava/skills` (Ava repo local — last, so it takes priority) (`ava_builtins/plugins/ava_code/_walk.py:project_skill_roots`)
-- `ava.cwd` initial value = plugin's own `AvaCodeState.cwd` Field `default_factory=_default_cwd` (has agent identity → `workspace_dir(agent_id)`, no identity → `$HOME`), **not** injected by agent-runner
+- Direct child-side state construction uses `AvaCodeState.cwd`'s `default_factory=default_cwd` (local SDK identity → `workspace_dir(agent_id)`, no identity → `$HOME`). This schema default is not authoritative for the host: the plugin's `after_init` hook initializes the missing graph channel from the explicit invocation context
 
 ## Notes
 
 - This plugin is crucial for coding agents — disabling it means the agent won't know about AGENTS.md, worktree/PR workflow, or `ava.cwd`
-- `ava.cwd`'s default comes from the plugin's `_default_cwd` (has identity = `workspace_dir(agent_id)`, no identity = `$HOME`); thereafter agent can `set` it on its own
+- The plugin owns cwd initialization and repair; thereafter the agent can change its saved logical cwd through `ava.cwd.set`

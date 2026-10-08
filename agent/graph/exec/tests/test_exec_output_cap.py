@@ -140,7 +140,11 @@ def _overflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from agent.graph.exec import output
 
     pin_agent(7)
-    monkeypatch.setattr(output, "_overflow_dir", lambda: tmp_path / "overflow")
+
+    def overflow_dir(_agent_id: int) -> Path:
+        return tmp_path / "overflow"
+
+    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
     return tmp_path / "overflow"
 
 
@@ -154,7 +158,7 @@ def test_envelope_still_has_both_ends_after_the_accumulation_cap(_overflow: Path
     stream.write("M" * 100_000)
     stream.write("TAIL_END")
 
-    out = wrap_code_output(stream.getvalue(), max_chars=1000, stream_cap=stream.cap())
+    out = wrap_code_output(stream.getvalue(), agent_id=7, max_chars=1000, stream_cap=stream.cap())
 
     assert "HEAD_START" in out, "head must survive both caps"
     assert "TAIL_END" in out, "tail must survive both caps"
@@ -167,7 +171,7 @@ def test_envelope_banner_reports_the_true_produced_length(_overflow: Path) -> No
     stream = StreamingTextIO(max_chars=2000)
     stream.write("X" * 250_000)
 
-    out = wrap_code_output(stream.getvalue(), max_chars=1000, stream_cap=stream.cap())
+    out = wrap_code_output(stream.getvalue(), agent_id=7, max_chars=1000, stream_cap=stream.cap())
 
     assert f"{250_000:,} chars produced" in out
     assert "the dropped middle is unrecoverable" in out
@@ -179,7 +183,7 @@ def test_envelope_still_promises_the_full_output_when_uncapped(_overflow: Path) 
     banner keeps saying so (and the ava_code plugin's reuse of
     `truncate_both_ends` keeps its wording)."""
     big = "HEAD_START" + ("M" * 5000) + "TAIL_END"
-    out = wrap_code_output(big, max_chars=1000)
+    out = wrap_code_output(big, agent_id=7, max_chars=1000)
 
     assert "full output at" in out
     assert "produced" not in out
@@ -193,7 +197,7 @@ def test_overflow_archive_says_it_is_not_the_full_output(_overflow: Path) -> Non
     stream = StreamingTextIO(max_chars=2000)
     stream.write("X" * 250_000)
 
-    wrap_code_output(stream.getvalue(), max_chars=1000, stream_cap=stream.cap())
+    wrap_code_output(stream.getvalue(), agent_id=7, max_chars=1000, stream_cap=stream.cap())
 
     (archived,) = list(_overflow.glob("exec_*.txt"))
     text = archived.read_text(encoding="utf-8")
@@ -221,7 +225,7 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
 
     stream = StreamingTextIO(max_chars=2000)
     stream.write("X" * 250_000)
-    wrap_code_output(stream.getvalue(), max_chars=1000, stream_cap=stream.cap())
+    wrap_code_output(stream.getvalue(), agent_id=7, max_chars=1000, stream_cap=stream.cap())
 
     assert logged == [250_000]
 

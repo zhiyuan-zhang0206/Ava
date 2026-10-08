@@ -32,9 +32,9 @@ def _sdk_via_testclient(monkeypatch: pytest.MonkeyPatch):
 
 def _post_preset(name: str, label: str, **kw: object) -> None:
     """Create a preset through the wired TestClient."""
-    from ava.sdk_surface import process_context
+    import ava
 
-    tc = cast(Any, process_context.current().gateway)
+    tc = cast(Any, ava.context.gateway)
     tc.post("/api/presets", json={"name": name, "label": label, **kw})
 
 

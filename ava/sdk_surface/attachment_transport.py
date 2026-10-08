@@ -103,9 +103,8 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
     path = coerce_str(path, "path", allow_types=(Path,))
     label = coerce_str(label, "label", allow_none=True)
     import ava
-    from ava.sdk_surface import process_context
 
-    bound = process_context.peek()
+    bound = getattr(ava, "context", None)
     borrowed = bound is not None and bound.identity is not None and bound.identity.lease is not None
     if not ava.in_exec_turn() or borrowed:
         raise RuntimeError(

@@ -6,7 +6,6 @@ from threading import Barrier
 import psycopg
 import pytest
 
-from ava.sdk_surface import process_context
 from ava_builtins.plugins.ava_fleet import _task_receipts, task_registry
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
@@ -46,11 +45,9 @@ def test_concurrent_duplicate_note_has_one_business_effect(
     def append(_index: int) -> None:
         clients = ClientSet(database=Database.from_settings)
         try:
-            with process_context.scoped(
-                AvaContext(identity=AgentIdentity(actor, True), clients=clients)
-            ):
-                barrier.wait()
-                task_registry.log(tid, "one progress line", operation_key="same")
+            context = AvaContext(identity=AgentIdentity(actor, True), clients=clients)
+            barrier.wait()
+            task_registry._update(context, tid, note="one progress line", operation_key="same")
         finally:
             clients.close()
 

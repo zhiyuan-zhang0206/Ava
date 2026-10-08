@@ -248,7 +248,10 @@ def _dispatch_exec_result(
             extra = "[system halt] You just called ava.self.compact; your context has been compacted and you will continue as the same agent\n"
             output = (output if not output or output.endswith("\n") else output + "\n") + extra
             result_text = wrap_code_output(
-                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+                output,
+                agent_id=agent_id,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
             )
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info("[{label}] {body}", label="halt", body="system_halt (compact)")
@@ -260,7 +263,10 @@ def _dispatch_exec_result(
             # cleanup, without adding a duplicate "[halt]" annotation here.
             halted = True
             result_text = wrap_code_output(
-                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+                output,
+                agent_id=agent_id,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
             )
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info(
@@ -281,6 +287,7 @@ def _dispatch_exec_result(
             halted = True
             result_text = wrap_code_output(
                 output,
+                agent_id=agent_id,
                 cancelled=True,
                 cancel_reason=reason,
                 stream_cap=stream_cap,
@@ -299,6 +306,7 @@ def _dispatch_exec_result(
             halted = False
             result_text = wrap_code_output(
                 output,
+                agent_id=agent_id,
                 timed_out=True,
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
@@ -327,7 +335,10 @@ def _dispatch_exec_result(
             if not output:
                 output = crashed_no_output_body(exc, code_reached=code_reached)
             result_text = wrap_code_output(
-                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+                output,
+                agent_id=agent_id,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
             )
             logger.info(
                 "[{label}] {body}\n[full traceback]\n{full_traceback}",
@@ -346,7 +357,10 @@ def _dispatch_exec_result(
         case _ExecDone(output=output):
             halted = False
             result_text = wrap_code_output(
-                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+                output,
+                agent_id=agent_id,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
             )
             logger.info("[{label}] {body}", label="exec", body=result_text)
     return halted, result_text
