@@ -154,17 +154,13 @@ def measure(tree: ast.Module, rel: str, repo_root: Path) -> Sites:
 
 
 def _listed_in(rel: str) -> dict[str, str]:
-    """The ALLOWED / DEFERRED entries that name sites of this file."""
+    """The ALLOWED entries that name sites of this file."""
     prefix = f"{rel}::"
-    return {
-        key: why
-        for key, why in {**allow.ALLOWED, **allow.DEFERRED}.items()
-        if key.startswith(prefix)
-    }
+    return {key: why for key, why in allow.ALLOWED.items() if key.startswith(prefix)}
 
 
 def allowlist_errors(tree: ast.Module, rel: str, repo_root: Path) -> list[tuple[int, str]]:
-    """A listed exemption (or deferral) whose site is no longer reported is stale."""
+    """A listed exemption whose site is no longer reported is stale."""
     listed = _listed_in(rel)
     if not listed and rel not in allow.SINK_FACADES:
         return []
@@ -201,7 +197,7 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
     """A listed file or function that no longer exists is stale too."""
     listed_paths = {
         *allow.SINK_FACADES,
-        *(key.partition("::")[0] for key in {**allow.ALLOWED, **allow.DEFERRED}),
+        *(key.partition("::")[0] for key in allow.ALLOWED),
     }
     errors = [
         f"{path}:1: stale ambient_state list entry — the file no longer exists; remove it from {_LIST_FILE}"
