@@ -21,6 +21,10 @@ class PluginConfigOwner:
     path: Path
 
 
+class PluginConfigChangedError(RuntimeError):
+    """The captured authority image changed before the owned write."""
+
+
 def image_digest(path: Path) -> str:
     """Digest the complete authority bytes; an absent image has empty bytes."""
     try:
@@ -49,7 +53,7 @@ def write_config_image(
     owner.path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock(owner.path.with_suffix(".lock"), timeout_s=ENV_LOCK_TIMEOUT_S):
         if image_digest(owner.path) != expected_digest:
-            raise RuntimeError("plugin config changed before owned image write")
+            raise PluginConfigChangedError("plugin config changed before owned image write")
         write_bytes_atomic(
             owner.path,
             (

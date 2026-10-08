@@ -7,14 +7,18 @@ schema, while the image remains the sole persisted authority.
 
 from __future__ import annotations
 
+from pydantic import ValidationError
+
 from base.config.admin.metadata import ConfigFieldMeta
 from base.packages.plugin_config_images import (
+    PluginConfigChangedError,
     PluginConfigOwner,
     image_revision,
     write_config_image,
 )
 from base.packages.plugins.config_face import declared_config_class
 from base.packages.plugins.config_registration import (
+    InvalidConfigOverlay,
     config_from_image,
     disk_image_path,
     read_authority_config,
@@ -61,9 +65,9 @@ def patch_owner(fields: set[str]) -> PluginConfigOwner | None:
         elif name in FIELD_INFOS:
             owners[None] = None
         else:
-            raise ValueError(f"unknown field {name!r}")
+            raise InvalidConfigOverlay(f"unknown field {name!r}")
     if len(owners) > 1:
-        raise ValueError("config patch mixes owners; send one request per config owner")
+        raise InvalidConfigOverlay("config patch mixes owners; send one request per config owner")
     return next(iter(owners.values()), None)
 
 
@@ -138,7 +142,7 @@ def write_plugin_patch(
         captured = None
     captured_digest = image_revision(captured)
     if expected_digest is not None and expected_digest != captured_digest:
-        raise RuntimeError("plugin config changed before owned image write")
+        raise PluginConfigChangedError("plugin config changed before owned image write")
     config = (
         config_from_image(owner.cls, captured.decode(), owner.path)
         if captured is not None
@@ -147,7 +151,10 @@ def write_plugin_patch(
     current = config.model_dump()
     for name in removals:
         current[name] = owner.cls.model_fields[name].get_default(call_default_factory=True)
-    candidate = owner.cls.model_validate({**current, **updates})
+    try:
+        candidate = owner.cls.model_validate({**current, **updates})
+    except ValidationError as exc:
+        raise InvalidConfigOverlay(str(exc)) from exc
     write_config_image(owner, candidate, expected_digest=captured_digest)
 
 

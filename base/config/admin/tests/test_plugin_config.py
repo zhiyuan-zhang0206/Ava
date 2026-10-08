@@ -14,8 +14,17 @@ from base.config.admin.plugin_config import (
     write_plugin_patch,
 )
 from base.host.env import runtime_config
-from base.packages.plugin_config_images import PluginConfigOwner, image_digest, write_config_image
-from base.packages.plugins.config_registration import InvalidConfigData, read_authority_config
+from base.packages.plugin_config_images import (
+    PluginConfigChangedError,
+    PluginConfigOwner,
+    image_digest,
+    write_config_image,
+)
+from base.packages.plugins.config_registration import (
+    InvalidConfigData,
+    InvalidConfigOverlay,
+    read_authority_config,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -49,12 +58,30 @@ def test_metadata_uses_plugin_owner_and_preserves_host_cluster_policy() -> None:
 
 def test_mixed_owner_patch_fails_before_any_image_write(tmp_path: Path) -> None:
     image = tmp_path / "config.json"
-    with pytest.raises(ValueError, match="mixes owners"):
+    with pytest.raises(InvalidConfigOverlay, match="mixes owners"):
         patch_owner({"task_escalate_n", "llm_model"})
     assert not image.exists()
     actual = patch_owner({"task_escalate_n"})
     assert actual is not None and actual.name == "ava_fleet"
     assert patch_owner({"llm_model"}) is None
+
+
+def test_unknown_patch_field_is_a_request_rejection() -> None:
+    with pytest.raises(InvalidConfigOverlay, match="unknown field"):
+        patch_owner({"unknown_plugin_config_field"})
+
+
+def test_duplicate_declaration_is_not_a_request_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from base.config.admin import plugin_config
+
+    first = PluginConfigOwner("first", FleetConfig, tmp_path / "first.json")
+    second = PluginConfigOwner("second", FleetConfig, tmp_path / "second.json")
+    monkeypatch.setattr(plugin_config, "config_owners", lambda: {"first": first, "second": second})
+    with pytest.raises(ValueError, match="more than one declaration owner"):
+        patch_owner({"task_escalate_n"})
+    assert not first.path.exists() and not second.path.exists()
 
 
 def test_image_patch_validates_whole_candidate_and_cas(tmp_path: Path) -> None:
@@ -63,7 +90,7 @@ def test_image_patch_validates_whole_candidate_and_cas(tmp_path: Path) -> None:
     write_plugin_patch(declaration, {"task_escalate_n": 8}, set(), expected_digest=None)
     saved = image.read_bytes()
     revision = image_digest(image)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidConfigOverlay):
         write_plugin_patch(
             declaration, {"task_escalate_n": "nonsense"}, set(), expected_digest=None
         )
@@ -71,7 +98,11 @@ def test_image_patch_validates_whole_candidate_and_cas(tmp_path: Path) -> None:
     write_plugin_patch(
         declaration, {"reduce_context_switch": False}, set(), expected_digest=revision
     )
-    with pytest.raises(RuntimeError, match="changed"):
+    saved = image.read_bytes()
+    with pytest.raises(PluginConfigChangedError, match="changed"):
+        write_plugin_patch(declaration, {"task_escalate_n": 9}, set(), expected_digest=revision)
+    assert image.read_bytes() == saved
+    with pytest.raises(PluginConfigChangedError, match="changed"):
         write_config_image(declaration, FleetConfig(), expected_digest=revision)
     values = json.loads(image.read_text())
     assert values["task_escalate_n"] == 8
