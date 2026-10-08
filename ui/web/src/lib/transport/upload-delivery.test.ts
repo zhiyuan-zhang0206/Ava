@@ -87,6 +87,7 @@ describe("delivered upload source acceptance", () => {
     { ...acceptance(), files: [] },
     { ...acceptance(), files: [{ ...acceptance().files[0], filename: "other.txt" }] },
     { ...acceptance(), files: [{ ...acceptance().files[0], size: 4 }] },
+    { ...acceptance(), files: [{ ...acceptance().files[0], content_type: "image/png" }] },
     { ...acceptance(), files: [{ ...acceptance().files[0], name: `${batchId}-00.txt` }] },
   ])("rejects a mismatched source receipt", async (receipt) => {
     const result = submitUploadedFiles(7, [file], "original-intent");
@@ -102,6 +103,16 @@ describe("delivered upload source acceptance", () => {
     UploadXHR.instances[0].responseText = "{";
     UploadXHR.instances[0].onload?.();
     await failure;
+  });
+
+  it("matches the multipart default for a File without a MIME type", async () => {
+    const untyped = new File(["hello"], "report.txt");
+    const result = submitUploadedFiles(7, [untyped], "original-intent");
+    const receipt = acceptance();
+    receipt.files[0].content_type = "application/octet-stream";
+    UploadXHR.instances[0].responseText = JSON.stringify(receipt);
+    UploadXHR.instances[0].onload?.();
+    await expect(result).resolves.toEqual(receipt);
   });
 
   it("rejects invalid identity and empty batches before transport effects", () => {

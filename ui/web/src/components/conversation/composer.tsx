@@ -1,5 +1,7 @@
 "use client";
 
+import { newOperationKey as newClientMessageId } from "@/lib/transport/operation-key";
+
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -172,21 +174,6 @@ function readSendAttempt(agentId: number): SendAttempt | null {
   } catch {
     return null;
   }
-}
-
-function newClientMessageId(): string {
-  const browserCrypto = crypto as unknown as {
-    randomUUID?: () => string;
-    getRandomValues<T extends ArrayBufferView>(array: T): T;
-  };
-  if (browserCrypto.randomUUID) return browserCrypto.randomUUID();
-  // randomUUID is secure-context-only in some private-HTTP browsers;
-  // getRandomValues remains available and gives the same collision posture.
-  const bytes = browserCrypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details }: Props) {

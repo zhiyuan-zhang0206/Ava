@@ -13,7 +13,9 @@ export function submitUploadedFiles(
     throw new Error("idempotency key must contain 1 to 128 characters");
   }
   if (files.length === 0) throw new Error("upload batch must contain files");
-  const submitted = files.map((file) => ({ file, name: file.name, size: file.size }));
+  const submitted = files.map((file) => ({
+    file, name: file.name, size: file.size, contentType: file.type || "application/octet-stream",
+  }));
   const path = `/api/keyed/v1/agents/${agentId}/uploads`;
   const body = new FormData();
   for (const item of submitted) body.append("files", item.file, item.name);
@@ -54,7 +56,7 @@ export function submitUploadedFiles(
             !("sha256" in item) || typeof item.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(item.sha256) ||
             !("name" in item) || typeof item.name !== "string" ||
             item.name.split(".", 1)[0] !== `${accepted.batch_id}-${ordinal}` ||
-            !("content_type" in item) || typeof item.content_type !== "string" || !item.content_type) {
+            !("content_type" in item) || item.content_type !== submitted[ordinal].contentType) {
             throw new Error("Upload source acceptance is unconfirmed");
           }
         }
