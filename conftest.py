@@ -21,7 +21,9 @@ Order is load-bearing:
    `guards`: pytest sets same-scope autouse fixtures up in registration order,
    so these two restore-after-every-test fixtures see (and put back) whatever
    the later autouse fixtures do.
-4. `provisioning` before `guards`: within `guards`, autouse fixtures are set up
+4. The hook-only `static_environment` loads before `provisioning`, which imports
+   its mode predicate. It changes data-plane setup only for an explicit static
+   process. `provisioning` stays before `guards`: autouse fixtures are set up
    alphabetically, and `_clean_state` (in `provisioning`) sorts ahead of the
    `_guard_*` fixtures. The hooks in `provisioning` also stay registered
    before `collection_guard` and the stall probe, as they were.
@@ -33,6 +35,7 @@ pytest_plugins = [
     "tests.fixtures.leak_guard",
     "tests.fixtures.identity_restore",
     "tests.fixtures.plugin_registrations",
+    "tests.fixtures.static_environment",
     "tests.fixtures.provisioning",
     "tests.fixtures.guards",
     "cli.commands.tests.health_port_guard",

@@ -119,6 +119,26 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
     assert '"$DECISION" = "SELECTED"' in verify
     assert 'check backend-selected "${{ needs.backend-selected.result }}"' in verify
     assert 'check backend-shard "${{ needs.backend-shard.result }}"' in verify
+    assert verify.index('check backend-structure "${{ needs.backend-structure.result }}"') < (
+        verify.index('if [ "$TEST_SELECTION_MODE" = "enforce" ]')
+    )
+
+
+def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
+    jobs = _workflow_jobs()
+    static = _step(jobs["backend-structure"], "Run static pytest contracts")
+    assert static["if"] == "needs.classify.outputs.backend == 'true'"
+    assert "--test-environment=static" in static["run"]
+    assert "--junit-xml=tmp/junit-backend-static.xml" in static["run"]
+    assert "-o junit_family=xunit1" in static["run"]
+    assert "continue-on-error" not in static
+    for job, name in (
+        ("backend-shard", "Run pytest shard"),
+        ("backend-selected", "Run selected pytest subset"),
+        ("backend-serial", "Run flaky pytest bucket serially"),
+    ):
+        run = _step(jobs[job], name)["run"]
+        assert run.count("--omit-static-tests") == run.count("uv run pytest") > 0
 
 
 def test_coverage_gate_stays_on_the_full_fanout() -> None:

@@ -11,7 +11,7 @@ tags:
 
 ## What it is
 
-Every test in the repository runs under the same isolation: a private `AVA_HOME`, a throwaway Postgres + Redis, and a set of autouse guards that keep a test off the host. It lives in plugin modules under `tests/fixtures/`, loaded by the repo-root `conftest.py` (which holds only `pytest_plugins`), so it applies to a test file in any package directory and not only under `tests/`. Overview of the suite: [[tests.ava.okf.md]].
+Every test runs with a private `AVA_HOME` and autouse host guards. The default native environment also provisions throwaway Postgres + Redis. Plugins under `tests/fixtures/`, loaded by the repo-root `conftest.py` (which holds only `pytest_plugins`), apply to every package's tests. Suite overview: [[tests.ava.okf.md]].
 
 ## Core mechanisms
 
@@ -20,6 +20,7 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
 - `leak_guard` — names the test that leaves process-global state different (environment, module attributes, cwd, signal handlers); loads **second**, so its fixture sets up first and compares last, after every function-scoped fixture's undo. Warn by default; findings reach CI through the shard JUnit reports: [[test-leak-guard.ava.okf.md]]
 - `identity_restore` — puts the bound `AvaContext` (the process context variable) and the turn contextvar back after every test, so the hundreds of tests that call `pin_agent(...)` (`tests/fixtures/pin_agent.py`) need no undo; loads **third**, right after the guard: [[test-leak-guard.ava.okf.md]]
 - `plugin_registrations` — per-test reset of plugin registrations
+- `static_environment` — hook-only static process ownership; loads before its consumer `provisioning`
 - `provisioning` — throwaway pg/redis, `_clean_state`, the DB connection fixtures, and the session hooks (full-run guard, non-test-database refusal, leaked OS-job / runaway-memory / home cleanup)
 - `guards` — autouse host guards and the `_stub_everywhere` helper
 - `units` — gateway / runner unit, per-test unit home and workspace, write-generation ledger, `spawn_agent`
@@ -34,7 +35,7 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
 - Hooks (`collect_ignore`, `pytest_configure`) are not fixtures and stay in their conftest: `services` (win32 `collect_ignore`), `lifecycle/native_root` (its `pytest_configure` must work without the repo-root conftest; the directory holds only that conftest today, and `tests/harness/test_home_isolation.py` asserts the hook defers to the root one), `e2e`.
 
 ### Isolation invariants
-- **Per xdist worker / session** a pair of throwaway pg/redis + per-session databases; per-test isolation via autouse TRUNCATE + checkpoint re-setup (**not** a full instance per test)
+- **Per native xdist worker / session** a pair of throwaway pg/redis + per-session databases; per-test isolation via autouse TRUNCATE + checkpoint re-setup (**not** a full instance per test)
 - A killed run (Ctrl-C, SIGKILL, an agent dying mid-run) leaks its throwaway **Postgres**, because the detached postmaster outlives an owner that ran no finalizer. It is bounded not by teardown but by a **sweep at the start of the next spin-up**: `base.cluster.dataplane.pg_tools.sweep_orphaned_throwaway_clusters` reaps the instances whose owner is provably gone, proof being an exclusive `flock` the owner held for the instance's whole life on an `owner.lock` inside that instance's own dir (so the proof shares the cluster's exact lifetime, and two UNIX users on one `/dev/shm` never contend for a shared registry). The throwaway **redis** leaks the same way and is not swept (a redis orphan costs RAM, not the System V segment that wedges the box)
 - **The env block at the top of `tests/fixtures/env_bootstrap.py` must stay above every project import, and that module must stay first in the root `conftest.py`'s `pytest_plugins`.** `base.host.env.dotenv_boot.resolve_ava_home` reads `AVA_HOME` (else `~/.ava`) every time it is called, but the config boot loads `$AVA_HOME/.env` when `base.config` is first imported, so AVA_HOME set after that import leaves the suite booted from the operator's real `~/.ava/.env`, and `_enforce_cluster_env_authority()` force-assigns the production cluster secret / db / redis / gateway URL over the sentinels the suite just set. `_assert_env_precedes_project_imports()` fails the run if a project module was imported early; `tests/harness/test_home_isolation.py` asserts the outcome independently of mechanism
 - A family of autouse **host-resource guards** makes "don't touch the host" the
@@ -43,6 +44,8 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
   opt into an isolated native proof with owned cleanup. The `os.exec*` guard
   protects the test runner itself from process replacement.
 - Plugin registrations (sections, namespaces, state fields) reset together after any test that loaded them, and the `_qualname` stamp `install_namespace` leaves on each namespace module taken off: autouse guard in `tests/fixtures/plugin_registrations.py`, wired via `pytest_plugins`
+
+Static execution ownership and CI artifacts: [[tests/fixtures/docs/static-environment.ava.okf.md]].
 
 Large test modules keep shared fixtures and test doubles in their existing owner.
 Additional cases live in responsibility subdirectories, import those helpers
