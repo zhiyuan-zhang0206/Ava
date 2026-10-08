@@ -473,3 +473,48 @@ def test_relocated_project_docs_skip_backend_tests(tmp_path: Path, path: str) ->
     result = test_selector.select_tests([path], repo_root=tmp_path)
     assert result.decision == "SKIP"
     assert result.reason == "docs-only"
+
+
+def test_component_docs_skip_only_the_regular_pr_suite(tmp_path: Path) -> None:
+    paths = [
+        "scripts/lint/docs/lint.ava.okf.md",
+        "base/lm/docs/lm.ava.okf.md",
+        "ui/web/src/docs/components.ava.okf.md",
+    ]
+    result = test_selector.select_tests(paths, repo_root=tmp_path)
+    assert (result.decision, result.reason) == ("SKIP", "docs-only")
+
+    for event, head_ref in [("push", ""), ("pull_request", "trunk-merge/batch-42")]:
+        queued = test_selector.select_tests(
+            paths, repo_root=tmp_path, event=event, head_ref=head_ref
+        )
+        assert (queued.decision, queued.reason) == ("FULL", "queue-or-non-pr")
+
+
+def test_component_docs_preserve_selection_for_other_changes(tmp_path: Path) -> None:
+    repo_root = _selector_repo(tmp_path)
+    docs = ["scripts/lint/docs/lint.ava.okf.md", "base/lm/docs/lm.ava.okf.md"]
+    for changed_path, expected_tests in [
+        ("tests/unit/test_changed.py", ("tests/unit/test_changed.py",)),
+        ("cli/commands.py", ("tests/unit/test_imports.py",)),
+    ]:
+        result = test_selector.select_tests([changed_path, *docs], repo_root=repo_root)
+        assert (result.decision, result.tests) == ("SELECTED", expected_tests), changed_path
+
+    source = test_selector.select_tests(["base/lm/__init__.py", *docs], repo_root=repo_root)
+    assert (source.decision, source.reason) == ("FULL", "forced-root:base/")
+
+
+def test_okf_test_data_and_operational_markdown_keep_full_selection(tmp_path: Path) -> None:
+    repo_root = _selector_repo(tmp_path)
+    for path, reason in [
+        ("scripts/lint/tests/docs/expected.ava.okf.md", "unmapped"),
+        ("base/lm/tests/docs/expected.ava.okf.md", "unmapped"),
+        ("tests/docs/expected.ava.okf.md", "unmapped"),
+        ("schedules/docs/example.ava.okf.md", "unmapped"),
+        ("gateway/docs/AGENTS.md", "unmapped"),
+        ("ava_builtins/skills/ava-guide/docs/SKILL.md", "forced-root:ava_builtins/"),
+        ("gateway/gateway.ava.okf.md", "unmapped"),
+    ]:
+        result = test_selector.select_tests([path], repo_root=repo_root)
+        assert (result.decision, result.reason) == ("FULL", reason), path
