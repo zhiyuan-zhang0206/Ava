@@ -7,8 +7,8 @@ from collections.abc import Awaitable
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import logger
-from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound_types import OutboundStatus
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
+from services.entrypoints.im_bridge.outbound.types import OutboundStatus
 from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 
 

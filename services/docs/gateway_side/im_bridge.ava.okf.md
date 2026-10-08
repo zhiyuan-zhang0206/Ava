@@ -32,7 +32,7 @@ The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat
 - `services/entrypoints/im_bridge/gateway_client.py` — gateway REST and SSE transport (`GatewayClient`)
 - `services/entrypoints/im_bridge/state.py` — persisted switch state and inbound outbox
 - `services/entrypoints/im_bridge/cursor_store.py` — compatibility push positions and the independent Feishu inbound poll cursor
-- `services/entrypoints/im_bridge/outbound_store.py`, `outbound_worker.py` — atomic timeline acceptance and shared delivery lifecycle
+- `services/entrypoints/im_bridge/outbound/{store,worker,types}.py` — atomic timeline acceptance and shared delivery lifecycle
 - `services/entrypoints/im_bridge/notice_poll_store.py` — normal notice cutover and source receipts
 - `services/entrypoints/im_bridge/types.py` — shared message, chat-state, and adapter contracts
 - Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)

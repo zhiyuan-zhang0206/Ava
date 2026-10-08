@@ -20,9 +20,9 @@ from services.entrypoints.im_bridge.alert_outbound import (
     AlertOutboundBridge,
     AlertOwnerDecision,
 )
-from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound_types import OutboundIntent, PreparedOutboundSend
-from services.entrypoints.im_bridge.outbound_worker import IMOutboxWorker
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
+from services.entrypoints.im_bridge.outbound.types import OutboundIntent, PreparedOutboundSend
+from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
 from services.entrypoints.im_bridge.types import SendNotStartedError
@@ -388,7 +388,7 @@ async def test_inverse_commit_order_recovery_does_not_skip_lower_id(pool: Connec
 
 
 async def test_source_change_before_commit_conflicts_without_effect(pool: ConnectionPool):
-    from services.entrypoints.im_bridge.outbound_types import OutboundIdentityConflictError
+    from services.entrypoints.im_bridge.outbound.types import OutboundIdentityConflictError
 
     [group] = ingest(pool, [item("a")])
     service = bridge(pool, AlertAdapter())
