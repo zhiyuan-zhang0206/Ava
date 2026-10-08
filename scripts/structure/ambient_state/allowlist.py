@@ -163,7 +163,6 @@ PURE_REPO_CALLEES: dict[str, str] = {
 # reported fails as stale.
 ALLOWED: dict[str, str] = {
     "ava/mcp_config.py::hidden-singleton:_session_death_codes": "constants read from mcp.types",
-    "ava/sdk_surface/discovery.py::hidden-cache:_module_ast": "the parse of one module's source: one module, one tree",
     "ava_builtins/plugins/ava_memory/sdk.py::hidden-cache:_documented_pool": "wraps one home's pool path in a documented constant",
     "base/api_contracts/contracts.py::hidden-cache:_template_regex": "a regex compiled from a template string",
     "base/config/admin/candidate.py::hidden-cache:_candidate_validation_model": "builds a validation subclass of a given Settings class",
