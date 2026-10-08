@@ -10,8 +10,9 @@ in `plugin.py` and loads in agent-launched children too (task #3633).
 
 from __future__ import annotations
 
-from base.config import settings
+from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.config_registration import get_plugin_config
 from base.packages.plugins.extensions import PluginContributions
 
 
@@ -42,9 +43,9 @@ def _fleet_self_section(_slices: AgentSlices) -> str:
     )
 
 
-def _reduce_context_switch_section(_slices: AgentSlices) -> str:
+def _reduce_context_switch_section(slices: AgentSlices) -> str:
     """Keep the interruption boundary resident; load the playbook on demand."""
-    if not settings.agent.reduce_context_switch:
+    if not get_plugin_config("ava_fleet", slices, FleetConfig).reduce_context_switch:
         return ""
     return (
         "## Reduce context switch for the human\n\n"

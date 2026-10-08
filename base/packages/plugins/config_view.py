@@ -89,3 +89,39 @@ def resolve_agent_plugin_pins(
             continue  # unknown, or an ambiguity validation would never have stored
         pins.setdefault(owners[0], {})[key] = value
     return pins
+
+
+def with_cluster_policy[C: BaseModel](plugin: str, config: C) -> C:
+    """Combine local host fields with the complete declared gateway projection."""
+    from pydantic import ValidationError
+
+    from base.host.env.bootstrap import (
+        cluster_plugin_config_values,
+        config_source_is_local,
+        should_fetch_from_gateway,
+    )
+    from base.packages.plugins.config_registration import (
+        InvalidConfigData,
+        SchemaDriftError,
+        _schema_extra,
+    )
+
+    cluster_fields = {
+        name
+        for name, info in type(config).model_fields.items()
+        if _schema_extra(info).get("scope") in {"cluster-pinned", "cluster-default"}
+    }
+    projection = cluster_plugin_config_values(plugin)
+    if projection is None:
+        if cluster_fields and should_fetch_from_gateway():
+            raise InvalidConfigData(f"bootstrap lacks cluster config for plugin {plugin!r}")
+        return config
+    if set(projection) != cluster_fields:
+        raise SchemaDriftError(
+            f"plugin {plugin!r} bootstrap cluster fields differ from declaration"
+        )
+    try:
+        composed = type(config).model_validate({**config.model_dump(), **projection})
+    except ValidationError as exc:
+        raise InvalidConfigData(f"invalid cluster config for plugin {plugin!r}: {exc}") from exc
+    return config if config_source_is_local() else composed
