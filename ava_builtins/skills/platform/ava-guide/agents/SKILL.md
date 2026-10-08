@@ -88,11 +88,11 @@ Four paths to manage presets:
 |---|---|
 | **CLI** `ava presets` | Shell-level CRUD — list, get, create, update, delete. Best for operators and agents that prefer a single command over HTTP calls. |
 | **REST API** `/api/presets` | Programmatic CRUD from schedules or scripts (GET list/get, POST create, PATCH update, DELETE). |
-| **Frontend** `/control/presets` | Web UI table with create/edit/delete forms. |
+| **Frontend** `/control#presets` | Open Preset Maker to create or improve a preset; edit metadata or delete a saved preset in place. |
 | **SDK** `ava.agents.presets` | In-agent code: `list()` / `get(name)` for reading (write ops go through CLI or API — the SDK is read-only for presets). |
 
-To create a preset from scratch (translating user needs → skill combination →
-preset), load `ava.skills.presets` (the [presets sub-skill](../presets/SKILL.md)).
+To compose a preset from user needs, prompts, skills, and MCP tools, load
+`ava.skills.ava_guide.presets` ([Preset Maker](../presets/SKILL.md)).
 
 ## Schedules (time-based / condition-triggered persistent tasks)
 
