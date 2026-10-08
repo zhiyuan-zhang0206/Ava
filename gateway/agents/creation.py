@@ -32,6 +32,7 @@ class CreationLaunchArguments(TypedDict, total=False):
 
     creation_key: str
     creation_identity: dict[str, object]
+    immutable_birth: bool
 
 
 class _CreationArguments(TypedDict, total=False):
@@ -71,6 +72,7 @@ async def create_and_launch_agent(
     *,
     creation_key: str | None = None,
     creation_identity: dict[str, object] | None = None,
+    immutable_birth: bool = False,
 ) -> SpawnedAgent:
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
     ROW in-process -> forward a launch-only op to the target runner.
@@ -87,8 +89,10 @@ async def create_and_launch_agent(
     """
     from gateway.agents import router as agent_router
 
-    snapshot = creation_identity is not None
-    arguments = _creation_arguments(body, creation_key, creation_identity)
+    snapshot = immutable_birth or creation_identity is not None
+    arguments = _creation_arguments(
+        body, creation_key, creation_identity, immutable_birth=immutable_birth
+    )
     request_hash = arguments.get("creation_request_hash")
     if creation_key is not None and request_hash is not None:
         existing = await asyncio.to_thread(
@@ -232,10 +236,12 @@ def _creation_arguments(
     body: SpawnAgentRequest,
     key: str | None,
     identity: dict[str, object] | None,
+    *,
+    immutable_birth: bool = False,
 ) -> _CreationArguments:
     if key is None:
-        if identity is not None:
-            raise ValueError("raw creation identity requires a scoped key")
+        if immutable_birth or identity is not None:
+            raise ValueError("immutable birth requires a scoped key")
         return {}
     arguments: _CreationArguments = {
         "creation_key": key,
@@ -243,6 +249,6 @@ def _creation_arguments(
             identity if identity is not None else body.model_dump(mode="json")
         ),
     }
-    if identity is not None:
+    if immutable_birth or identity is not None:
         arguments["immutable_creation_snapshot"] = True
     return arguments

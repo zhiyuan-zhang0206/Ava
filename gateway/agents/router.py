@@ -642,16 +642,18 @@ async def post_guarded_agents(
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
     if body.fork_from is not None:
         raise HTTPException(status_code=422, detail="guarded v1 creation does not support forks")
-    return await _create_agent_http(body, request, key)
+    return await _create_agent_http(body, request, key, immutable_birth=True)
 
 
 async def _create_agent_http(
-    body: SpawnAgentRequest, request: Request, key: str | None
+    body: SpawnAgentRequest, request: Request, key: str | None, *, immutable_birth: bool = False
 ) -> SpawnedAgent:
     """Share the existing HTTP birth/launch behavior without changing other entry scopes."""
     arguments: CreationLaunchArguments = {}
     if key is not None:
         arguments["creation_key"] = key
+    if immutable_birth:
+        arguments["immutable_birth"] = True
     target = body.machine if body.machine is not None else machine_name()
     try:
         return await create_and_launch_agent(

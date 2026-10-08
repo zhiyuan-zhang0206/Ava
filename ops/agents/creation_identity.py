@@ -103,7 +103,7 @@ def record_creation_snapshot(
     prompt_content: str | None,
     prompt_source: str | None,
 ) -> None:
-    """Retain the first guarded draft birth in its caller-owned transaction."""
+    """Retain the first immutable keyed birth in its caller-owned transaction."""
     conn.execute(
         "INSERT INTO agent_creation_snapshots "
         "(creation_key, request_hash, agent_id, machine, config_overlay, birth_config, "

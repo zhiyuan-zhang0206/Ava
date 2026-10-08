@@ -19,8 +19,27 @@ receipt.
 
 The receipt identity includes the principal, POST method, and this versioned
 logical path. Identical keyed requests replay the committed birth; changed
-request data returns 409. Acceptance and launch recovery retain the semantics
-in [[agents-router.ava.okf.md]]; acceptance does not prove native execution.
+request data returns 409. The birth owner commits an immutable
+`agent_creation_snapshots` record with the agent row, first prompt and audit
+event in one transaction. Its manifest retains
+the original agent ID, machine, config overlay, birth config and launch attempt
+UUID. The request digest still uses the existing parsed `SpawnAgentRequest`;
+this does not change the namespace or adopt guarded drafts' raw semantic identity.
+Acceptance does not prove native execution.
+
+Replay reads this retained birth before mutable placement, preset and model
+checks. Only the original attempt, still idling, never admitted and on its
+original machine, can receive the existing launch wake. A deliberate launch
+retry, changed placement, admission, termination or deleted metadata returns
+the original historical acceptance without forwarding a launch. Replay never
+rotates an attempt, restores operator config or creates another first prompt.
+The retained snapshot has no target FK or automatic expiry.
+
+A guarded key created before snapshots were recorded fails with 409 when its
+metadata still identifies the key but the snapshot is unavailable. Current
+mutable metadata cannot prove the original attempt, so it is not backfilled or
+used as a launch fallback. Already deleted unsnapshotted historical identities
+remain unrecoverable; this change cannot reconstruct them.
 
 An older gateway has no route for this versioned POST and rejects it without
 creating an agent. A future strong client must keep the same path, key, and
@@ -36,3 +55,10 @@ same guarded path, scope and key for every attempt without capability discovery
 or fallback. The default SDK helper and MCP continue to use `/api/agents`,
 including MCP's canonical principal-scoped keys. Existing HTTP and MCP identities
 remain intact. Automatic ambiguous keyed retries remain disabled on both paths.
+
+A previous gateway that already exposes this versioned path can still use its
+older mutable launch projection. The path proves keyed admission support, not a
+cluster-wide immutable recovery capability. Operators must stop or drain those
+gateway generations before relying on original-attempt recovery; this change
+does not perform that rollout. Legacy HTTP, MCP and task assignment retain
+their established owners and behavior.
