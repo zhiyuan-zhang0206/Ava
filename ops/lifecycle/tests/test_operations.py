@@ -195,6 +195,15 @@ class TestSpawnPrechecksBlocking:
     inside spawn_agent_op — now called by create_and_launch_agent before the row
     INSERT."""
 
+    @pytest.fixture(autouse=True)
+    def model_preflight(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """These tests isolate checkpoint lookup; DB-backed model checks have their own tests."""
+        from base.lm import model_config
+
+        monkeypatch.setattr(
+            model_config, "validate_spawn_model_config", lambda *_args: "deepseek-flash"
+        )
+
     class _FakeCursor:
         def __enter__(self):
             return self

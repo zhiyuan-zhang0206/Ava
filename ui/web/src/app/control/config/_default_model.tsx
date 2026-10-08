@@ -61,6 +61,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
     onError: (err: unknown) => showToast(t("saveFailed", { error: errMsg(err) })),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: DEFAULT_MODEL_QUERY_KEY });
+      void qc.invalidateQueries({ queryKey: MODELS_QUERY_KEY });
     },
   });
 
