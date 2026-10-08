@@ -96,10 +96,13 @@ no coverage-derived map yet; that is a future option, not an enforcement claim.
 The timing input is the repository-root
 [.test_durations](../../../.test_durations) file, refreshed nightly by
 [refresh-test-durations.yml](../../../.github/workflows/refresh-test-durations.yml).
-It maps pytest node IDs to seconds. The selector sums entries whose node ID
+It maps pytest node IDs to seconds. Refreshes retain every measured node,
+including fast tests and durations that round to zero; only unmeasured nodes
+use pytest-split's average fallback. The selector sums entries whose node ID
 starts with each selected test file plus ::; a file with no timing entry costs
-the average present backend timing entry. The same model estimates the
-complete collectable backend universe, and only subsets at or below 80% run.
+the average present backend timing entry. A recorded zero remains zero. The
+same model estimates the complete collectable backend universe, and only
+subsets at or below 80% run.
 
 ## Selection modes and artifacts
 

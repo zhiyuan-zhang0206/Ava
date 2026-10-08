@@ -304,8 +304,8 @@ jobs:
           ## Data flow
 
           CI-shaped shard measurements (backend 16 × -n 4, e2e 4 × -n 2)
-          → per-shard clean duration artifacts → complete merge + drop <0.2s
-          entries → commit.
+          → per-shard clean duration artifacts → complete merge retaining fast
+          measurements → commit.
 
           This PR is never auto-merged.'
           fi

@@ -401,22 +401,21 @@ def _estimate_seconds(
     reference = test_paths if reference_paths is None else reference_paths
     ordered_reference = tuple(sorted(reference))
     ordered_tests = tuple(sorted(test_paths))
-    reference_by_file = {
-        test_path: sum(
-            seconds
-            for node_id, seconds in durations.items()
-            if node_id.startswith(f"{test_path}::")
-        )
-        for test_path in ordered_reference
-    }
+    reference_set = set(reference)
+    # Group once: the complete timing model has an entry for every measured
+    # node, so scanning it again for each file makes selection unnecessarily slow.
+    by_file: dict[str, list[float]] = {}
+    for node_id, seconds in durations.items():
+        test_path, separator, _ = node_id.partition("::")
+        if separator and test_path in reference_set:
+            by_file.setdefault(test_path, []).append(seconds)
     known_entries = [
-        seconds
-        for test_path in ordered_reference
-        for node_id, seconds in durations.items()
-        if node_id.startswith(f"{test_path}::")
+        seconds for test_path in ordered_reference for seconds in by_file.get(test_path, ())
     ]
     average = sum(known_entries) / len(known_entries) if known_entries else 0.0
-    return sum(reference_by_file.get(test_path, 0.0) or average for test_path in ordered_tests)
+    return sum(
+        sum(by_file[test_path]) if test_path in by_file else average for test_path in ordered_tests
+    )
 
 
 def _result(
