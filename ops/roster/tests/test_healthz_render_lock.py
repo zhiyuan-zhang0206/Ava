@@ -26,6 +26,7 @@ import pytest
 from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
+from base.packages.plugins.config_registration import disk_image_path
 from ops import roster
 from ops.roster.healthz import healthz_url
 from ops.roster.service_spec import DbAccess, ServiceSpec, api_access, db_access, profile_marker
@@ -34,6 +35,14 @@ from services.supervision.ava_root_glue import manifests as gen
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 _RUNNER: frozenset[MachineRole] = frozenset({"agent-runner"})
 _REPO = Path("/checkout/repo")
+
+
+@pytest.fixture(autouse=True)
+def memory_config_image(unit_home: Path) -> None:
+    """The indexer's new birth input is materialized before rendering launch units."""
+    image = unit_home / "configs" / "ava_memory" / "config.json"
+    image.parent.mkdir(parents=True)
+    image.write_text('{"indexer_enabled": true}\n')
 
 
 @dataclass(frozen=True)
@@ -121,6 +130,9 @@ def _legacy_spec(row: _Legacy) -> ServiceSpec:
         no_profile_marker=row.no_profile_marker,
         db_access=cast("DbAccess | None", row.db_access),
         gate=(lambda: None) if row.gated else None,
+        # The independent indexing gate adds a birth input; all legacy launch
+        # facts below remain the same.
+        config_inputs=(disk_image_path("ava_memory"),) if row.session == "memory-indexer" else (),
     )
 
 

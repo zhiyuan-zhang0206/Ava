@@ -22,6 +22,7 @@ from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DEFAULT_PORTS, DaemonProbe
 from base.daemon.tests.fakes import pin_endpoints
+from base.packages.plugins.enable_config import update_all_disk_images
 from ops import roster
 from ops.roster.healthz import (
     daemon_identity,
@@ -192,9 +193,10 @@ def test_the_roster_has_standard_daemons_and_each_one_has_a_port_slot() -> None:
         assert spec.health_name in DEFAULT_PORTS, spec.session
 
 
-def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module() -> None:
+def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module(unit_home: Path) -> None:
     """I4: the unit pid stays a direct child of root, and a declaration cannot smuggle
-    environment, arguments, a stop window or sealed inputs into the rendered unit."""
+    undeclared environment, arguments, a stop window or sealed inputs into the rendered unit."""
+    update_all_disk_images()
     for spec in _healthz_specs().values():
         (unit,) = gen.build_units([spec], capabilities=spec.capabilities, repo_root=_REPO)
         assert unit["exec"] == [
@@ -202,7 +204,8 @@ def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module() -> Non
             "-c",
             f"cd {_REPO} && exec {_PYTHON_M}{_module(spec)}",
         ], spec.session
-        assert unit["inputs"] == [], spec.session
+        inputs = cast("list[dict[str, str]]", unit["inputs"])
+        assert [entry["path"] for entry in inputs] == [str(path) for path in spec.config_inputs]
         assert "stop_timeout_s" not in unit, spec.session
         assert (unit["id"], unit["restart"], unit["attach"]) == (spec.session, "always", "root")
 
