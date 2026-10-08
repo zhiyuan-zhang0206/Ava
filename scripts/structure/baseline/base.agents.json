@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "base/agents/history/delta_read_compat.py::ambient-container:_async_spans": 1,
     "base/agents/history/delta_read_compat.py::contextvar:_recovery_scope": 1,
     "base/agents/history/delta_read_compat.py::import-time-call:base.agents.history.checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch": 1,
     "base/agents/impersonation/manifest.py::ambient-container:_capture_gates": 1,

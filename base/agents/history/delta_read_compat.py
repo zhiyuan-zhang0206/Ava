@@ -38,9 +38,7 @@ from contextlib import aclosing, closing, contextmanager
 from contextvars import ContextVar  # noqa: TID251 — recovery scope must reach LangGraph child tasks
 from copy import deepcopy
 from dataclasses import dataclass, field
-from threading import local
 from typing import Any, Literal, cast
-from weakref import WeakKeyDictionary
 
 from langchain_core.messages import BaseMessage, RemoveMessage, convert_to_messages
 from langchain_core.messages.utils import message_chunk_to_message
@@ -75,24 +73,13 @@ delta-written marker.
 
 @dataclass
 class _ReadSpan:
+    """Timing and outcome of one explicit checkpoint read operation."""
+
+    started_at: float = field(default_factory=time.monotonic)
     phase: str = "tuple_read"
     tuple_read_ms: float = 0.0
     history_read_ms: float = 0.0
-    stage1_pages: int = 0
-    stage1_rows: int = 0
-    stage2_rows: int = 0
-    stage2_blob_bytes: int = 0
-    fetched_rows_observed: bool = False
-    decode_ms: float = 0.0
-    reset_decode_ms: float = 0.0
-    history_build_ms: float = 0.0
     fold_ms: float = 0.0
-    fold_path: str = "none"
-    in_history_build: bool = False
-
-
-_async_spans: WeakKeyDictionary[asyncio.Task[Any], _ReadSpan] = WeakKeyDictionary()
-_sync_span = local()
 
 
 @dataclass(eq=False)
@@ -205,42 +192,6 @@ def recovery_reconstruction_scope(
         _recovery_scope.reset(token)
 
 
-def _current_span() -> _ReadSpan | None:
-    try:
-        task = asyncio.current_task()
-    except RuntimeError:
-        return cast("_ReadSpan | None", getattr(_sync_span, "value", None))
-    return _async_spans.get(task) if task is not None else None
-
-
-def _set_span_phase(phase: str) -> None:
-    span = _current_span()
-    if span is not None:
-        span.phase = phase
-
-
-@contextmanager
-def _bound_span(span: _ReadSpan) -> Generator[None]:
-    try:
-        task = asyncio.current_task()
-    except RuntimeError:
-        task = None
-    previous = _async_spans.get(task) if task is not None else getattr(_sync_span, "value", None)
-    if task is None:
-        _sync_span.value = span
-    else:
-        _async_spans[task] = span
-    try:
-        yield
-    finally:
-        if task is None:
-            _sync_span.value = previous
-        elif previous is None:
-            del _async_spans[task]
-        else:
-            _async_spans[task] = previous
-
-
 def _coerce_group(group: Sequence[Any]) -> list[BaseMessage] | None:
     """Coerce one write group through `add_messages`' conversion pipeline.
 
@@ -297,13 +248,7 @@ def _fold_messages(state: Any, writes: Sequence[Any]) -> Any:
     groups: list[list[Any]] = [w if isinstance(w, list) else [w] for w in writes]
     fast = _fast_append(state, groups)
     if fast is not None:
-        span = _current_span()
-        if span is not None:
-            span.fold_path = "fast"
         return fast
-    span = _current_span()
-    if span is not None:
-        span.fold_path = "fallback"
     result: Any = [] if state is MISSING else normalize_stored_message_ids(state)
     for group in groups:
         result = add_messages(result, normalize_stored_message_ids(group))
@@ -357,7 +302,10 @@ def _exact_config(tuple_: CheckpointTuple) -> RunnableConfig:
 
 
 def _apply_reconstruction(
-    checkpoint: dict[str, Any], kind: Literal["snapshot", "walk"], entry: Mapping[str, Any] | None
+    checkpoint: dict[str, Any],
+    kind: Literal["snapshot", "walk"],
+    entry: Mapping[str, Any] | None,
+    span: _ReadSpan,
 ) -> bool:
     """Replace a delta checkpoint's messages value with its plain equivalent."""
     if kind == "snapshot":
@@ -367,24 +315,24 @@ def _apply_reconstruction(
     if entry is None or (not entry.get("writes") and "seed" not in entry):
         return False
     started = time.monotonic()
-    span = _current_span()
-    if span is not None:
-        span.phase = "fold"
+    span.phase = "fold"
     try:
         checkpoint["channel_values"]["messages"] = _fold_history(entry)
     finally:
-        if span is not None:
-            span.fold_ms = (time.monotonic() - started) * 1000
+        span.fold_ms = (time.monotonic() - started) * 1000
     return True
 
 
-def reconstruct_delta_messages(checkpointer: PostgresSaver, tuple_: CheckpointTuple) -> bool:
+def reconstruct_delta_messages(
+    checkpointer: PostgresSaver, tuple_: CheckpointTuple, *, span: _ReadSpan | None = None
+) -> bool:
     """Materialize a delta-written checkpoint's `messages` value, in place.
 
     Returns True when a value was injected. Safe to call on every read: it
     returns immediately for vanilla-written checkpoints and needs no saver
     call for a stored `_DeltaSnapshot` (which is unwrapped, not folded).
     """
+    span = span or _ReadSpan()
     checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
     normalize_checkpoint_message_ids(tuple_)
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
@@ -393,29 +341,27 @@ def reconstruct_delta_messages(checkpointer: PostgresSaver, tuple_: CheckpointTu
     entry: Mapping[str, Any] | None = None
     if kind == "walk":
         started = time.monotonic()
-        span = _current_span()
-        if span is not None:
-            span.phase = "history_read"
+        span.phase = "history_read"
         try:
             history = checkpointer.get_delta_channel_history(
                 config=_exact_config(tuple_), channels=["messages"]
             )
         finally:
-            if span is not None:
-                span.history_read_ms = (time.monotonic() - started) * 1000
+            span.history_read_ms = (time.monotonic() - started) * 1000
         entry = history.get("messages")
-    elif (span := _current_span()) is not None:
+    else:
         span.phase = "snapshot"
-    repaired = _apply_reconstruction(checkpoint, kind, entry)
+    repaired = _apply_reconstruction(checkpoint, kind, entry, span)
     if repaired:
-        _log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]))
+        _log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]), span=span)
     return repaired
 
 
 async def areconstruct_delta_messages(
-    checkpointer: AsyncPostgresSaver, tuple_: CheckpointTuple
+    checkpointer: AsyncPostgresSaver, tuple_: CheckpointTuple, *, span: _ReadSpan | None = None
 ) -> bool:
     """Async twin of `reconstruct_delta_messages`."""
+    span = span or _ReadSpan()
     checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
     normalize_checkpoint_message_ids(tuple_)
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
@@ -424,27 +370,24 @@ async def areconstruct_delta_messages(
     entry: Mapping[str, Any] | None = None
     if kind == "walk":
         started = time.monotonic()
-        span = _current_span()
-        if span is not None:
-            span.phase = "history_read"
+        span.phase = "history_read"
         try:
             history = await checkpointer.aget_delta_channel_history(
                 config=_exact_config(tuple_), channels=["messages"]
             )
         finally:
-            if span is not None:
-                span.history_read_ms = (time.monotonic() - started) * 1000
+            span.history_read_ms = (time.monotonic() - started) * 1000
         entry = history.get("messages")
-    elif (span := _current_span()) is not None:
+    else:
         span.phase = "snapshot"
-    repaired = _apply_reconstruction(checkpoint, kind, entry)
+    repaired = _apply_reconstruction(checkpoint, kind, entry, span)
     if repaired:
-        _log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]))
+        _log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]), span=span)
     return repaired
 
 
 async def _areconstruct_in_recovery(
-    saver: AsyncPostgresSaver, tuple_: CheckpointTuple, read_generation: int | None
+    saver: AsyncPostgresSaver, tuple_: CheckpointTuple, read_generation: int | None, span: _ReadSpan
 ) -> bool:
     normalize_checkpoint_message_ids(tuple_)
     scope = _recovery_scope.get()
@@ -456,23 +399,23 @@ async def _areconstruct_in_recovery(
         or scope.thread_id != str(configurable["thread_id"])
         or _repair_kind(tuple_.checkpoint, tuple_.metadata or {}) != "walk"
     ):
-        return await areconstruct_delta_messages(saver, tuple_)
+        return await areconstruct_delta_messages(saver, tuple_, span=span)
 
     key = (
         str(configurable["thread_id"]),
         tuple_.checkpoint["id"],
         configurable.get("checkpoint_ns", ""),
     )
-    _set_span_phase("cache_lock")
+    span.phase = "cache_lock"
     async with scope.lock:
         checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
         if scope.key == key and scope.messages is not None and read_generation == scope.generation:
-            _set_span_phase("cache_copy")
+            span.phase = "cache_copy"
             checkpoint["channel_values"]["messages"] = deepcopy(scope.messages)
-            _log_reconstruction(tuple_, len(scope.messages), cache_hit=True)
+            _log_reconstruction(tuple_, len(scope.messages), cache_hit=True, span=span)
             return True
         generation = scope.generation
-        repaired = await areconstruct_delta_messages(saver, tuple_)
+        repaired = await areconstruct_delta_messages(saver, tuple_, span=span)
         if repaired and scope.active and scope.generation == generation == read_generation:
             scope.key = key
             scope.messages = deepcopy(checkpoint["channel_values"]["messages"])
@@ -489,13 +432,13 @@ def _log_reconstruction(
     failed_phase: str | None = None,
     elapsed_ms: float | None = None,
     error_type: str | None = None,
+    span: _ReadSpan,
 ) -> None:
     source_config = tuple_.config if tuple_ is not None else config or {}
     configurable: dict[str, Any] = source_config.get("configurable") or {}
     checkpoint_id = (
         tuple_.checkpoint["id"] if tuple_ is not None else configurable.get("checkpoint_id")
     )
-    span = _current_span() or _ReadSpan()
     logger.info(
         "[{label}] {body}",
         label="delta-read-compat",
@@ -507,19 +450,13 @@ def _log_reconstruction(
         cache_hit=cache_hit,
         outcome=outcome,
         failed_phase=failed_phase,
-        elapsed_ms=elapsed_ms,
+        elapsed_ms=(time.monotonic() - span.started_at) * 1000
+        if elapsed_ms is None
+        else elapsed_ms,
         error_type=error_type,
         tuple_read_ms=span.tuple_read_ms,
         history_read_ms=span.history_read_ms,
-        stage1_pages=span.stage1_pages,
-        stage1_rows=span.stage1_rows,
-        stage2_rows=span.stage2_rows,
-        stage2_blob_bytes=span.stage2_blob_bytes,
-        decode_ms=span.decode_ms,
-        reset_decode_ms=span.reset_decode_ms,
-        history_build_ms=span.history_build_ms,
         fold_ms=span.fold_ms,
-        fold_path=span.fold_path,
         body=(
             f"{'reused' if cache_hit else 'reconstructed'} messages for thread={configurable.get('thread_id')}"
             f" checkpoint={checkpoint_id}: {count} messages"
@@ -528,104 +465,6 @@ def _log_reconstruction(
             f" checkpoint={checkpoint_id}"
         ),
     )
-
-
-def _instrument_suffix_reads(saver: AsyncPostgresSaver) -> None:
-    """Count actual read batches and time reset probes before history assembly."""
-
-    def fetched_history_rows(rows: Sequence[Mapping[str, Any]]) -> None:
-        span = _current_span()
-        if span is not None:
-            span.fetched_rows_observed = True
-            span.stage2_rows += len(rows)
-            span.stage2_blob_bytes += sum(len(row["blob"]) for row in rows)
-
-    saver._ava_delta_history_rows = fetched_history_rows  # type: ignore[attr-defined]
-
-    def decode_reset(value: Any) -> Any:
-        span = _current_span()
-        if span is None:
-            return saver.serde.loads_typed(value)
-        previous_phase = span.phase
-        started = time.monotonic()
-        span.phase = "reset_decode"
-        try:
-            result = saver.serde.loads_typed(value)
-            span.phase = previous_phase
-            return result
-        finally:
-            span.reset_decode_ms += (time.monotonic() - started) * 1000
-
-    saver._ava_delta_reset_decode = decode_reset  # type: ignore[attr-defined]
-
-
-def _instrument_history_callbacks(saver: AsyncPostgresSaver) -> None:
-    """Count the rows and bytes LangGraph has already fetched for a history walk."""
-    orig_ingest = saver._ingest_stage1_page
-    orig_build = saver._build_delta_channels_writes_history
-
-    _instrument_suffix_reads(saver)
-    serde = saver.serde
-    if not getattr(serde.loads_typed, "__ava_delta_decode__", False):
-        # `serde` is frequently the class-level `JsonPlusSerializer` instance
-        # LangGraph's `BaseCheckpointSaver` shares across every saver that
-        # does not pass its own `serde` — so a standalone boolean marker on
-        # `serde` would outlive the wrapper itself: something else (a test's
-        # `monkeypatch.setattr(saver.serde, "loads_typed", ...)`, say) can
-        # restore `loads_typed` to the unwrapped function while the marker
-        # stays set, leaving decode silently uninstrumented. Tagging the
-        # wrapper function and checking the *current* `loads_typed` for that
-        # tag instead makes the check track reality: whatever is currently
-        # installed gets wrapped, and re-running this against our own
-        # wrapper is a no-op rather than a second layer.
-        orig_decode = serde.loads_typed
-
-        def decode(value: Any) -> Any:
-            span = _current_span()
-            if span is None or not span.in_history_build:
-                return orig_decode(value)
-            started = time.monotonic()
-            span.phase = "decode"
-            try:
-                result = orig_decode(value)
-                span.phase = "history_build"
-                return result
-            finally:
-                span.decode_ms += (time.monotonic() - started) * 1000
-
-        decode.__ava_delta_decode__ = True  # type: ignore[attr-defined]
-        serde.loads_typed = decode  # type: ignore[method-assign]
-
-    def ingest_stage1_page(*args: Any, **kwargs: Any) -> Any:
-        span = _current_span()
-        if span is not None:
-            span.stage1_pages += 1
-            span.stage1_rows += len(args[0])
-        return orig_ingest(*args, **kwargs)
-
-    def build_history(*args: Any, **kwargs: Any) -> Any:
-        span = _current_span()
-        if span is None:
-            return orig_build(*args, **kwargs)
-        rows = kwargs["stage2_rows"]
-        if not span.fetched_rows_observed:
-            # Unmodified upstream history readers report through the builder;
-            # the suffix reader reports each fetched batch before truncation.
-            span.stage2_rows = len(rows)
-            span.stage2_blob_bytes = sum(len(row["blob"]) for row in rows)
-        started = time.monotonic()
-        span.in_history_build = True
-        span.phase = "history_build"
-        try:
-            result = orig_build(*args, **kwargs)
-            span.phase = "history_read"
-            return result
-        finally:
-            span.in_history_build = False
-            span.history_build_ms = (time.monotonic() - started) * 1000
-
-    saver._ingest_stage1_page = ingest_stage1_page  # type: ignore[method-assign]
-    saver._build_delta_channels_writes_history = build_history  # type: ignore[method-assign]
 
 
 def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> None:
@@ -647,62 +486,61 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
 
     def get_tuple(config: Any) -> Any:
         span = _ReadSpan()
-        with _bound_span(span):
-            started = time.monotonic()
-            tuple_ = None
+        started = time.monotonic()
+        tuple_ = None
+        try:
             try:
-                try:
-                    tuple_ = orig_get_tuple(config)
-                finally:
-                    span.tuple_read_ms = (time.monotonic() - started) * 1000
-                if tuple_ is not None:
-                    span.phase = "repair_detection"
-                    reconstruct_delta_messages(cast("PostgresSaver", saver), tuple_)
-                return tuple_
-            except Exception as exc:
-                _log_reconstruction(
-                    tuple_,
-                    None,
-                    config=config,
-                    cache_hit=None,
-                    outcome="error",
-                    failed_phase=span.phase,
-                    elapsed_ms=(time.monotonic() - started) * 1000,
-                    error_type=type(exc).__name__,
-                )
-                raise
+                tuple_ = orig_get_tuple(config)
+            finally:
+                span.tuple_read_ms = (time.monotonic() - started) * 1000
+            if tuple_ is not None:
+                span.phase = "repair_detection"
+                reconstruct_delta_messages(cast("PostgresSaver", saver), tuple_, span=span)
+            return tuple_
+        except Exception as exc:
+            _log_reconstruction(
+                tuple_,
+                None,
+                config=config,
+                cache_hit=None,
+                outcome="error",
+                failed_phase=span.phase,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                span=span,
+            )
+            raise
 
     async def aget_tuple(config: Any) -> Any:
         span = _ReadSpan()
-        with _bound_span(span):
-            scope = _recovery_scope.get()
-            read_generation = scope.generation if scope is not None else None
-            started = time.monotonic()
-            tuple_ = None
+        scope = _recovery_scope.get()
+        read_generation = scope.generation if scope is not None else None
+        started = time.monotonic()
+        tuple_ = None
+        try:
             try:
-                try:
-                    tuple_ = await orig_aget_tuple(config)
-                finally:
-                    span.tuple_read_ms = (time.monotonic() - started) * 1000
-                if tuple_ is not None:
-                    span.phase = "repair_detection"
-                    await _areconstruct_in_recovery(saver, tuple_, read_generation)
-                return tuple_
-            except (Exception, asyncio.CancelledError) as exc:
-                _log_reconstruction(
-                    tuple_,
-                    None,
-                    config=config,
-                    cache_hit=None,
-                    outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "error",
-                    failed_phase=span.phase,
-                    elapsed_ms=(time.monotonic() - started) * 1000,
-                    error_type=type(exc).__name__,
-                )
-                raise
+                tuple_ = await orig_aget_tuple(config)
+            finally:
+                span.tuple_read_ms = (time.monotonic() - started) * 1000
+            if tuple_ is not None:
+                span.phase = "repair_detection"
+                await _areconstruct_in_recovery(saver, tuple_, read_generation, span)
+            return tuple_
+        except (Exception, asyncio.CancelledError) as exc:
+            _log_reconstruction(
+                tuple_,
+                None,
+                config=config,
+                cache_hit=None,
+                outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "error",
+                failed_phase=span.phase,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                span=span,
+            )
+            raise
 
     _wrap_history_identity_reads(saver)
-    _instrument_history_callbacks(saver)
     saver.get_tuple = get_tuple  # type: ignore[method-assign]
     saver.aget_tuple = aget_tuple  # type: ignore[method-assign]
 
