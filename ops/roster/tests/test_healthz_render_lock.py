@@ -84,7 +84,6 @@ _LEGACY = (
     _Legacy("pg-backup", "services.backup.scheduler.daemon", _GATEWAY, True),
     _Legacy("ttl-reaper", "services.upkeep.ttl_reaper.daemon", _GATEWAY, True),
     _Legacy("schedule-manager", "services.wake.schedule_manager.daemon", _GATEWAY, True),
-    _Legacy("insights", "services.derived.insights.daemon", _GATEWAY, True),
     _Legacy("page-server", "services.agent_runner.page_server.daemon", _RUNNER, True),
     _Legacy(
         "agent-host",

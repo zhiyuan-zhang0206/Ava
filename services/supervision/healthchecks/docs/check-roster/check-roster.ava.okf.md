@@ -30,6 +30,7 @@ file to this directory and no row to this table.
 | `gateway.py` | Service protocol probe | Gateway serving and database query health |
 | `lgtm.py` | Read-only diagnostic helper | Native backend protocol helpers and Loki write/read round trip |
 | `mcp_daemon.py` | Service protocol probe | Shared MCP protocol ping |
+| `insights.py` | Service protocol probe | `GET /healthz` over the Unix socket: this service, this home, the recorded pid |
 | `memory_search.py` | Service protocol probe | Real exact-search POST |
 | `otel_collector.py` | Service protocol probe | Valid OTLP request accepted |
 | `protocol_probe.py` | Read-only diagnostic helper | Protocol result adapter and bounded Unix ping |
