@@ -1,31 +1,41 @@
 ---
 type: doc
-title: Ava Memory Skills — skills carried by the plugin
-description: "ava_memory plugin is the skill source for memory capability: the SKILL.md at the root of skills is the Memory Steward maintenance manual (loaded flat as ava.skills.ava_memory — daily merge, health check, note consolidation, query service, user-dimension maintenance), with a sub-skill consolidation (`ava memory` CLI daily consolidation workflow)."
+title: Ava Memory Skills — shared memory and assigned maintenance roles
+description: Shared-memory entrypoint carried by ava_memory, with on-demand user-dimension guidance, an assigned Memory Arbiter role guide, and consolidation procedures selected by deployment and role.
 tags:
 - extensions
 - agent-instruction
 ---
 
-# Ava Memory Skills — skills carried by the plugin
+# Ava Memory Skills
 
-## What is it
+The plugin's skill root directly contains SKILL.md, loaded as
+ava.skills.ava_memory. It routes ordinary queries, user-preference maintenance,
+and consolidation without assigning a maintenance identity to the reader.
 
-`ava_memory` plugin is the skill **source** for memory capability (plugin as source — the previously identically named `skills/ava_memory/` in the repo core has been deleted, resolving the naming collision of the mount name `ava_memory`). The **root of `plugins/ava_memory/skills/`** directly contains `SKILL.md`: the Memory Steward maintenance manual, which converge loads flat as a root skill `ava.skills.ava_memory` — daily merge, health check, agent note consolidation, and query services for other agents.
+## Task and role selection
 
-It has one sub-skill:
+- Queries use the available shared-memory search/read capabilities; note ownership
+  is context, not an instruction to adopt the author's role.
+- User-preference writes read reference/user-dimension.md and maintain existing
+  standing notes rather than accumulating duplicate records.
+- Only an assigned Memory Arbiter reads reference/arbiter-role.md for health
+  checks, curation, schedules, and collaboration duties.
+- [[ava_builtins/plugins/ava_memory/skills/consolidation/docs/consolidation.ava.okf.md|consolidation]]
+  selects single-box, multi-host arbiter, or per-machine steward procedures.
+  Each substantial procedure lives in a reference read for that deployment
+  and assigned role. Local-only work does not acquire multi-host responsibilities.
 
-- [[ava_builtins/plugins/ava_memory/skills/consolidation/docs/consolidation.ava.okf.md|consolidation]] —
-  `ava.skills.ava_memory.consolidation`: the daily consolidation workflow of the shared memory pool (`ava memory` CLI one-step commit / push / refresh index; single-box self-managed, multi-host uses arbiter + per-machine steward)
+The Arbiter owns coherence of standing user-profile and preference notes during
+assigned consolidation. Reading this skill does not authorize new schedules,
+messages, merges, or unrelated maintenance.
 
-Beyond the agent dimension, the root skill also maintains the **user
-dimension** — repeatedly expressed preferences, recurring habits, corrected
-behaviors, what the user values — as standing, continuously-maintained notes
-(`user-profile.md`, `user-preference-rules-v2.md`,
-`collaboration-preferences.md`, `user-core-principle.md`) rather than
-one-off records; the Arbiter owns their coherence during consolidation.
+## Distribution and dependencies
 
-## Notes
+The root is itself a skill, with consolidation beneath it. Its package is
+distributed by the plugin's skill-root provider, preserving the existing
+ava-memory identity and Python projection ava_memory.
 
-- Unlike the two-level pattern of ava_fleet where "plugin name = top-level directory, skills hang under it", the skills root of this plugin **is itself a skill** (with SKILL.md at root): `ava_memory` is directly the root skill name, with sub-skills hanging under it.
-- For the skill mechanism and origin axis (origin=plugin), see [[ava/skills/docs/skills.ava.okf.md|Skill System]]; for a line in the ops skill group overview, see [[ava_builtins/skills/docs/skills.ava.okf.md|skills index]]; for the hook surface of the plugin, see [[ava_builtins/plugins/ava_memory/docs/ava_memory.ava.okf.md|ava_memory plugin]].
+- [[ava/skills/docs/skills.ava.okf.md|Skill System]] — plugin-origin skill loading
+- [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — built-in catalog
+- [[ava_builtins/plugins/ava_memory/docs/ava_memory.ava.okf.md|ava_memory plugin]] — runtime hooks

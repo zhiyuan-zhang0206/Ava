@@ -1,6 +1,6 @@
 ---
 name: reproducibility
-description: Makes every experimental result reproducible from seeds, configs, environments, logs, and artifacts. Use when starting any experiment and before trusting any number, even if nobody explicitly requested a reproducibility record.
+description: "Defines evidence needed to reproduce an experiment. Use when recording configurations, seeds, environments, runs, and derivations behind a result."
 ---
 
 # Reproducibility

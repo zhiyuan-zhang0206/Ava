@@ -1,6 +1,6 @@
 ---
 name: claim-evidence-alignment
-description: "Aligns every research claim with evidence that measures exactly what it asserts and traces to a run. Use when writing conclusions, choosing metrics, reviewing results, or checking whether a number actually warrants the stated claim."
+description: "Matches research claims to supporting evidence. Use when checking whether metrics, runs, and artifacts warrant the stated conclusion."
 ---
 
 # Claim–Evidence Alignment

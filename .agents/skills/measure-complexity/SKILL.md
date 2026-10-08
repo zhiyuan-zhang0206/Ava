@@ -1,6 +1,6 @@
 ---
 name: measure-complexity
-description: Measures McCabe complexity and maintainability with radon, then ranks refactoring candidates. Use when the user mentions complexity analysis, cyclomatic complexity, maintainability index, refactoring hotspots, or `/measure-complexity` in the Ava repo.
+description: "Measures Python complexity and maintainability with radon. Use when inspecting Ava refactoring hotspots or explicitly requesting complexity metrics."
 ---
 
 # Measure complexity — McCabe + maintainability (radon)

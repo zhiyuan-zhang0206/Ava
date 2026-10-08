@@ -1,6 +1,6 @@
 ---
 name: ava-serious-engineering
-description: Guides trustworthy design, implementation, review, and evolution of complex software systems. Use when business complexity, domain modeling, conceptual integrity, or long-term changeability matters, even if the user asks only for code.
+description: "Guides architectural work on complex software. Use when domain models, system boundaries, or long-term changeability drive a design or review."
 ---
 
 # Serious Software Engineering

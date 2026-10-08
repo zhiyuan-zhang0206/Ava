@@ -1,6 +1,6 @@
 ---
 name: review-contribution
-description: Reviews your Ava contribution against current project and domain rules before opening a PR. Use when preparing a contribution or checking its design, consumer coverage and validation gaps.
+description: "Reviews Ava contributions against project rules. Use before opening a PR or checking a change's design, consumers, and validation."
 ---
 
 # Review your contribution

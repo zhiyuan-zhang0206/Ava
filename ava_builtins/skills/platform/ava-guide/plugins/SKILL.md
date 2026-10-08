@@ -1,6 +1,6 @@
 ---
 name: plugins
-description: Explains Ava plugin kinds and routes installation, development, and updates. Use when choosing an extension shape, installing a plugin, developing a native Ava plugin, or changing a built-in plugin.
+description: "Routes Ava plugin selection, development, and updates. Use when an extension needs runtime code, hooks, or persistent state."
 ---
 
 # Plugins
