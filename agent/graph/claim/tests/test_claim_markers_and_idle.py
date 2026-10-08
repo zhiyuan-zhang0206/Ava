@@ -7,13 +7,10 @@ import pytest
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _make_runtime
 from tests.fixtures.units import spawn_agent
-from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
-from tests.path_scoped.agent_tests import (
-    _fresh_unresolved_skill_warnings as _fresh_unresolved_skill_warnings,
-)
 
 
 def test_by_who_self_returns_yourself():
