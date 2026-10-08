@@ -101,7 +101,7 @@ unit and added another peer. The injected code was restored before submission.
 Next priorities:
 
 1. Run bounded live-model evaluations of both roles with adversarial late notices
-   and explicit observed token limits. Preserve prompts, artifacts and actual
+   and explicit observed USD cost limits. Preserve prompts, artifacts and actual
    usage; judge whether the agent chooses preservation and honors its own resume
    condition, rather than merely reporting compliance.
 2. Help agents select an optional observation plan at work opening: existing
