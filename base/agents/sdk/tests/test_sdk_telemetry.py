@@ -9,7 +9,11 @@ its emitted `sdk_call` event `detail`.
 from __future__ import annotations
 
 import asyncio
+import os
 import random
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -422,3 +426,102 @@ def test_sdk_calls_by_tool_call_id_respects_the_start_window() -> None:
         _exec_output("tc-2", [{"method": "shell.run", "count": 1}]),
     ]
     assert set(sdk_usage_telemetry.sdk_calls_by_tool_call_id(messages, start=1)) == {"tc-2"}
+
+
+@pytest.mark.parametrize("error_type", [ImportError, RuntimeError])
+@pytest.mark.parametrize("async_call", [False, True])
+def test_local_capture_import_failure_rejects_body_with_original_exception(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception], async_call: bool
+) -> None:
+    import builtins
+
+    failure = error_type("local capture module is invalid")
+    original_import = builtins.__import__
+    executed: list[str] = []
+    emitted = _spy_emit(monkeypatch)
+
+    def import_module(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "base.agents.impersonation.manifest":
+            raise failure
+        return original_import(name, *args, **kwargs)
+
+    def body() -> None:
+        executed.append("body")
+
+    async def async_body() -> None:
+        body()
+
+    monkeypatch.setattr(builtins, "__import__", import_module)
+    with sdk_usage_telemetry.recording() as tally, pytest.raises(error_type) as raised:
+        if async_call:
+            asyncio.run(sdk_usage_telemetry.run_metered_async("capture.call", async_body, (), {}))
+        else:
+            sdk_usage_telemetry.run_metered("capture.call", body, (), {})
+    assert raised.value is failure
+    assert executed == [] and emitted == [] and tally == {}
+
+
+def test_no_local_participant_uses_the_real_optional_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.agents.impersonation import manifest
+
+    assert manifest.admit_local_sdk_call() is None
+    emitted = _spy_emit(monkeypatch)
+
+    def body() -> str:
+        assert not manifest.local_sdk_call_was_admitted()
+        return "without-participant"
+
+    assert sdk_usage_telemetry.run_metered("capture.call", body, (), {}) == "without-participant"
+    assert emitted == [("capture.call", {})]
+
+
+@pytest.mark.parametrize("error_type", ["ImportError", "RuntimeError"])
+def test_cold_capture_import_failure_rejects_body(tmp_path: Path, error_type: str) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            """
+import importlib.abc
+import os
+import sys
+from base.agents.sdk import call_policy, telemetry
+from base.agents.sdk.call_policy import SamplingPolicy
+
+assert 'base.agents.impersonation.manifest' not in sys.modules
+error_type = {'ImportError': ImportError, 'RuntimeError': RuntimeError}[os.environ['TEST_CAPTURE_ERROR']]
+failure = error_type('invalid cold capture module')
+executed = []
+call_policy.policy = SamplingPolicy
+telemetry.emit = lambda *args, **kwargs: executed.append('emit')
+
+class BrokenCapture(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname == 'base.agents.impersonation.manifest':
+            raise failure
+
+sys.meta_path.insert(0, BrokenCapture())
+try:
+    telemetry.run_metered('capture.call', lambda: executed.append('body'), (), {})
+except (ImportError, RuntimeError) as actual:
+    assert actual is failure
+else:
+    raise AssertionError('capture import failure was hidden')
+assert executed == []
+""",
+        ],
+        cwd=tmp_path,
+        env={
+            **{key: value for key, value in os.environ.items() if key != "AVA_CONFIG_BOOT"},
+            "AVA_HOME": str(tmp_path / "absent-home"),
+            "AVA_CONFIG_FETCH": "skip",
+            "TEST_CAPTURE_ERROR": error_type,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

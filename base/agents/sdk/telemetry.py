@@ -116,17 +116,9 @@ def emit(
 
 @contextlib.contextmanager
 def _event_capture_admission() -> Generator[None, None, None]:
-    """Use the optional local capture gate without changing SDK call behavior."""
-    try:
-        from base.agents.impersonation.manifest import admitted_local_sdk_call
-    except Exception as exc:
-        # Event capture is a side channel. An unavailable settings
-        # bootstrap must never turn an SDK operation into a new hard failure.
-        from base.telemetry import report_sink_failure
+    """Use the optional gate; invalid capture code rejects the SDK call before its body."""
+    from base.agents.impersonation.manifest import admitted_local_sdk_call
 
-        report_sink_failure("SDK call local-capture admission (calls run uncaptured)", exc)
-        yield
-        return
     with admitted_local_sdk_call():
         yield
 
