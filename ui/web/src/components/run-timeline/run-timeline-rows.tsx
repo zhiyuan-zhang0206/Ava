@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
 import {
   blockClass,
@@ -23,7 +23,6 @@ import {
   inboundSources,
   levelsTopFirst,
   panView,
-  pendingSpans,
   zoomView,
   type AxisMode,
   type BlockClass,
@@ -60,14 +59,6 @@ const PINCH_ZOOM_RATE = 0.01;
 const LEVEL_ROW_PX = 32;
 const UNIT_ROW_PX = 24;
 const CONTEXT_ROW_PX = 40;
-
-// The hatching of a stretch the level above has not summarized yet.
-const PENDING_HATCH =
-  "repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, currentColor 14%, transparent) 4px 5px)";
-
-function boxStyle(box: { left: number; width: number }) {
-  return { left: `${box.left}%`, width: `max(${box.width}%, 3px)` };
-}
 
 export function RunTimelineRows({
   data,
@@ -316,17 +307,30 @@ export function RunTimelineRows({
         >
           {readout ?? t("readoutIdle")}
         </p>
-        <button
-          type="button"
+        <div
+          role="group"
+          aria-label={t("axisModeTitle")}
+          title={t("axisModeTitle")}
           data-testid="run-timeline-axis-mode"
           data-mode={mode}
-          aria-pressed={mode === "hybrid"}
-          title={t("axisModeTitle")}
-          onClick={() => setMode(mode === "hybrid" ? "time" : "hybrid")}
-          className="shrink-0 rounded border border-border px-1.5 font-mono text-[10px] text-muted-foreground hover:text-foreground"
+          className={cn(FLEX, OVERFLOW_HIDDEN, "shrink-0 rounded border border-border font-mono text-[10px]")}
         >
-          {mode === "hybrid" ? t("axisHybrid") : t("axisTime")}
-        </button>
+          {(["time", "hybrid"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              data-testid={`run-timeline-axis-${option}`}
+              aria-pressed={mode === option}
+              onClick={() => setMode(option)}
+              className={cn(
+                "px-1.5",
+                mode === option ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {option === "time" ? t("axisTime") : t("axisHybrid")}
+            </button>
+          ))}
+        </div>
       </div>
 
       {data.events.length > 0 ? (
@@ -357,24 +361,6 @@ export function RunTimelineRows({
           height="h-8"
           testId={`run-timeline-row-level-${level}`}
         >
-          {pendingSpans(data.nodes, level).map((span) => {
-            const box = axisBox(axis, span.from, span.to, viewU);
-            if (box === null) return null;
-            return (
-              <div
-                key={`pending-${span.from}`}
-                data-testid="run-timeline-pending"
-                title={t("pendingTitle")}
-                className={cn(
-                  "absolute inset-y-0 truncate rounded border border-dashed border-border px-1",
-                  "text-[10px] leading-8 text-muted-foreground",
-                )}
-                style={{ ...boxStyle(box), backgroundImage: PENDING_HATCH }}
-              >
-                {t("pending")}
-              </div>
-            );
-          })}
           {canvasFor(levelRowId(level), LEVEL_ROW_PX, (p, layout) => paintNodes(p, layout, paintState, decoFor(levelRowId(level))))}
         </RowShell>
       ))}
