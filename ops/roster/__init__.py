@@ -203,6 +203,16 @@ def build_services() -> tuple[ServiceSpec, ...]:
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; every decision is a DB read
         ),
+        # insights: the read models over agent history (the run timeline and the
+        # cluster insights), served on a Unix socket the gateway proxies to. A
+        # gateway daemon — it reads the same Postgres the gateway does, and the
+        # gateway is its only caller.
+        healthz_daemon(
+            "insights",
+            module="services.derived.insights.daemon",
+            capabilities=_GATEWAY,
+            requires_db=True,  # assert_schema_current at boot; every read is a checkpoint or audit query
+        ),
         # memory-search before memory-indexer: the indexer's cold-start
         # connects to whichever backend the switch names, so the storage
         # services must come up first.

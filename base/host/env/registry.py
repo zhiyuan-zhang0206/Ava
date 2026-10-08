@@ -197,6 +197,7 @@ _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "agent_host",
     "ttl_reaper",
     "schedule_manager",
+    "insights",
 )
 
 
