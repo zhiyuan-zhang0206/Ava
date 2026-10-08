@@ -25,7 +25,12 @@ leave selection to the agent. Existing consent is not reopened at phase boundari
 ## Guides and composition
 
 The nested guides are `capability-timescale`, `calibrate`, `align`, `define-goal`, `plan`, and `work-eval`.
-`capability-timescale` owns evidence-based calibration for AI-dependent feasibility, scheduling, and estimates.
+`capability-timescale` owns evidence-based calibration when AI-dependent
+feasibility, scheduling, or estimates depend on unverified capability. The entry
+limits investigation to facts that change the next step; initial discussion does
+not require a machine, memory, network, or SDK inventory. Deeper principles live
+in `references/working-principles.md`, read for substantial implementation or
+recurring bottlenecks. Discussion-only scope excludes prototype implementation.
 Goal supervision, Dynamic Workflow, and watcher skills provide continuation,
 executable Python orchestration, and event-driven waiting when selected. Goal
 definition does not activate supervision, and dynamic orchestration does not
