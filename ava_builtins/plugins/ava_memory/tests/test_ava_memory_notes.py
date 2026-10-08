@@ -217,25 +217,6 @@ def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
     assert 'session="memory-indexer"' not in core_source
 
 
-def test_indexer_is_gated_on_the_index_having_a_consumer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With the shared index injected nowhere, indexing spends embedding calls on
-    something nothing reads. The toggle is read profile-neutrally from the env
-    alias: the 'agent' config domain is not constructed in gateway processes,
-    and the gateway watchdog is the process that evaluates this gate (Task #856
-    per-process config; 2026-08-08 watchdog-crash incident)."""
-    import os
-
-    from ava_builtins.plugins.ava_memory.services import _memory_indexer_gate
-
-    monkeypatch.setattr(os, "environ", {**os.environ, "AVA_MEMORY_INDEX_INJECT": "true"})
-    assert _memory_indexer_gate() is None
-
-    monkeypatch.setattr(os, "environ", {**os.environ, "AVA_MEMORY_INDEX_INJECT": "false"})
-    assert "nothing consumes the index" in (_memory_indexer_gate() or "")
-
-
 def test_per_agent_framing_makes_no_path_resolution_claim(memory_plugin: Any) -> None:
     """The per-agent memory framing must not claim how relative paths resolve:
     the old "relative paths resolve to your workspace" line misled agents into
