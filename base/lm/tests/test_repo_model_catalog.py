@@ -18,6 +18,7 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
         "claude-sonnet-5",
         "claude-sonnet-5-5",
         "claude-haiku-4-5-20251001",
+        "claude-haiku-5-5",
         "claude-opus-5",
         "claude-opus-5-5",
         "claude-fable-5",
@@ -28,6 +29,7 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
         "claude-sonnet-5",
         "claude-sonnet-5-5",
         "claude-haiku-4-5-20251001",
+        "claude-haiku-5-5",
         "claude-opus-5",
         "claude-opus-5-fast",
         "claude-opus-5-5",
@@ -167,3 +169,18 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
             "incomplete": stop.StopCategory.TRUNCATED,
         },
     )
+
+
+def test_haiku_5_5_adaptive_capabilities_preserve_manual_predecessor() -> None:
+    catalog = model_catalog()
+    new = catalog.models["claude-haiku-5-5"]
+    assert new.spawnable and new.context_window == 1_000_000
+    assert new.max_output_tokens == 128_000
+    assert new.knowledge_cutoff == "2026-06"
+    assert new.effort_levels == ("low", "medium", "high", "xhigh", "max")
+    assert new.tuning.reasoning_effort == "medium"
+    assert not new.thinking_always_on and not new.extended_thinking_only
+    assert new.media_types == frozenset({"image", "pdf"})
+    old = catalog.models["claude-haiku-4-5-20251001"]
+    assert old.superseded_by == "claude-haiku-5-5" and old.spawnable
+    assert old.extended_thinking_only and old.effort_levels == ("none", "high")
