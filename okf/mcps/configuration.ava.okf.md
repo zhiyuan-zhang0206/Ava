@@ -16,7 +16,21 @@ tags: []
 Enable control: `~/.ava/mcp_enabled.json` — `ava mcp enable/disable` per-machine toggle across all four layers.
 
 ## `requires` preconditions
-`.mcp.json` entries may declare a `requires` precondition map (`display` / `unix_socket`; unknown keys fail fast): evaluated by `ava/mcp_config.py:assert_requirements` before connect — an unmet requirement raises `MCPError` and blocks the connection; the read-only `server_capability()` exposes the same check for UI gating.
+`.mcp.json` entries may declare an optional `requires` precondition map.
+Missing, `null` or an empty object means no requirements. Otherwise the only
+keys are `display` and `unix_socket`, and each value must be a JSON boolean.
+Unknown keys, non-object maps and non-boolean values raise `MCPError` through
+the shared `ava/mcp_config.py:validate_requirements` boundary before host probes.
+
+`assert_requirements()` blocks connection when a requested host capability is
+unavailable. The inventory panel's `server_capability()` returns a false verdict
+for that expected absence, but propagates invalid declarations as operation
+failures. Enabling an invalid declaration cannot write either inventory overlay.
+`ava mcp list` validates all declarations before printing inventory, and
+`ava mcp enable` validates the named declaration before writing its overlay.
+These CLI checks do not probe host capabilities, and an override for a not-yet
+defined server remains supported. Disabling a server does not validate its
+requirements, so a broken declaration can still be explicitly turned off.
 
 ## Remote servers
 An entry may declare `url` instead of `command` — a Streamable HTTP endpoint dialed directly (no child process). Two auth modes, mutually exclusive (fail-fast, `ava/mcp_config.py:server_url`):
