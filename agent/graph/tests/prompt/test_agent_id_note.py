@@ -3,8 +3,9 @@
 Policy: every window states the agent's own id — plus label / machine /
 workspace when available — as a system-styled HumanMessage outside the
 SystemMessage, so a fork does not carry a stale identity (issue #1320). The
-note reads the explicit host context because many agents share one process. Each clause is fail-soft: a missing label / machine / workspace
-never costs the identity line itself.
+note reads the explicit host context because many agents share one process.
+Missing optional values do not cost the identity line; label-read failures
+propagate to the caller.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from psycopg import OperationalError
 
 from agent.graph.prompt.context_notes import _machine_clause, _own_label, agent_id_note
 from base.agents.context import AvaContext
@@ -185,21 +187,46 @@ def test_own_label_normalizes_whitespace(monkeypatch: pytest.MonkeyPatch) -> Non
     assert _own_label(ctx, 29) == "memory steward"
 
 
-def test_own_label_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No row / empty label / read failure all degrade to "no label clause" —
-    the identity line itself outranks the label."""
-    ctx = _fake_sql(monkeypatch, _FakeDB(None))
+@pytest.mark.parametrize("row", [None, (None,), ("",)])
+def test_own_label_omits_missing_data(
+    monkeypatch: pytest.MonkeyPatch, row: tuple[object, ...] | None
+) -> None:
+    ctx = _fake_sql(monkeypatch, _FakeDB(row))
     assert _own_label(ctx, 29) is None
 
-    ctx = _fake_sql(monkeypatch, _FakeDB(("",)))
-    assert _own_label(ctx, 29) is None
+
+@pytest.mark.parametrize("error_type", [OperationalError, RuntimeError])
+def test_own_label_propagates_cursor_failure(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+) -> None:
+    failure = error_type("label connection is unavailable")
 
     class _Boom:
         def cursor(self) -> object:
-            raise RuntimeError("db down")
+            raise failure
 
     ctx = _fake_sql(monkeypatch, _Boom())
-    assert _own_label(ctx, 29) is None
+    with pytest.raises(error_type) as raised:
+        _own_label(ctx, 29)
+    assert raised.value is failure
+
+
+def test_agent_id_note_propagates_query_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = OperationalError("label query failed")
+
+    class _BrokenCursor(_FakeCursor):
+        def execute(self, *args: object, **kwargs: object) -> None:
+            raise failure
+
+    class _BrokenDB:
+        def cursor(self) -> _BrokenCursor:
+            return _BrokenCursor(None)
+
+    ctx = _fake_sql(monkeypatch, _BrokenDB())
+    monkeypatch.setattr("agent.graph.prompt.context_notes._own_label", _own_label)
+    with pytest.raises(OperationalError) as raised:
+        agent_id_note(ctx)
+    assert raised.value is failure
 
 
 def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.MonkeyPatch) -> None:
