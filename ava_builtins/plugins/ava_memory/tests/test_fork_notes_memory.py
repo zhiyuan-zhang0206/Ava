@@ -95,7 +95,7 @@ async def test_fork_end_to_end_single_copy_each_note(
 
     cmd = await claim_node(
         AgentState(messages=list(inherited)),
-        _make_runtime(ops_pool=aops_pool, extensions=_registry(memory_plugin)),
+        _make_runtime(ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid),
         _config(tid),
     )
 
@@ -156,7 +156,7 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
     ]
     cmd = await claim_node(
         AgentState(messages=list(inherited)),
-        _make_runtime(ops_pool=aops_pool, extensions=_registry(memory_plugin)),
+        _make_runtime(ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid),
         _config(tid),
     )
     msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])

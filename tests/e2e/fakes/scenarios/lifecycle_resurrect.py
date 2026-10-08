@@ -11,7 +11,6 @@ from __future__ import annotations
 import psycopg
 from langchain_core.messages import AIMessage
 
-import ava
 from base.config import settings
 from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
 
@@ -36,21 +35,21 @@ IDLE_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 
-def _is_post_resurrect_process() -> bool:
+def _is_post_resurrect_process(agent_id: int | None) -> bool:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages WHERE agent_id = %s AND kind = 'resurrect' LIMIT 1",
-            (ava.self.AGENT_ID,),
+            (agent_id,),
         )
         return cur.fetchone() is not None
 
 
-def build(model: str) -> ScriptedFakeChatModel:
-    if _is_post_resurrect_process():
+def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
+    if _is_post_resurrect_process(agent_id):
         return ScriptedFakeChatModel(script=IDLE_SCRIPT)
     return ScriptedFakeChatModel(script=TERMINATE_SCRIPT)
 
 
-def build_waiting_for_chat(model: str) -> ScriptedFakeChatModel:
+def build_waiting_for_chat(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
     """Use the same hosted resurrection scenario for the queued-wake test."""
-    return build(model)
+    return build(model, agent_id=agent_id)

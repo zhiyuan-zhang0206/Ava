@@ -171,8 +171,7 @@ class AgentHost:
     ) -> None:
         self._bus = bus
         self._db = db
-        # The connections every turn's `AvaContext` shares (the SDK calls a graph node makes
-        # reach them through `ava.sdk_surface.process_context`, bound per turn below).
+        # Shared clients are passed through each turn's explicit `AvaContext`.
         self._clients = ClientSet(database=lambda: db)
         self._extensions = extensions
         self._pool = pool

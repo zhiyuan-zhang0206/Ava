@@ -29,7 +29,6 @@ from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk
 
-import ava
 from base.config import settings
 from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
 
@@ -88,16 +87,16 @@ class _ForkContextModel(ScriptedFakeChatModel):
         yield self._make_chunk(self._verdict(messages))
 
 
-def _has_fork_inbound() -> bool:
+def _has_fork_inbound(agent_id: int | None) -> bool:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages WHERE agent_id = %s AND kind = 'fork' LIMIT 1",
-            (ava.self.AGENT_ID,),
+            (agent_id,),
         )
         return cur.fetchone() is not None
 
 
-def build(model: str) -> ScriptedFakeChatModel:
-    if _has_fork_inbound():
+def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
+    if _has_fork_inbound(agent_id):
         return _ForkContextModel(script=())
     return ScriptedFakeChatModel(script=SOURCE_SCRIPT)

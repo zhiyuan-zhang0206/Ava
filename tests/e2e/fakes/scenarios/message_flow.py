@@ -44,5 +44,5 @@ MESSAGE_FLOW_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 
-def build(model: str) -> ScriptedFakeChatModel:
+def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
     return ScriptedFakeChatModel(script=MESSAGE_FLOW_SCRIPT)

@@ -89,13 +89,13 @@ def test_member_torn_down_on_uninstall(_load_activity_plugin: None):
 
 
 def test_plugin_registers_prompt_section(_load_activity_plugin: None):
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
     assert "ava.self.set_label" in prompt
 
 
 def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     """The rendered prompt carries the reporting contract with the plugin."""
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
 
     assert prompt.count("one reporter per milestone") == 1
     assert "directly to whoever must act" in prompt
@@ -106,7 +106,7 @@ def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
 
 def test_enabled_fleet_preserves_workflow_choice(_load_activity_plugin: None):
     """Installing Fleet exposes capabilities without imposing a work strategy."""
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
     assert "Workflow selection belongs to `ava-workflow`" in prompt
     assert (
         "enabling Fleet does not require delegation, a registry task, or a management tree"
@@ -130,7 +130,7 @@ def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section(AgentSlices.resolve())
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
     assert "# Efficient long-running operation" not in section
     assert prompt.count("# Efficient long-running operation") == 1
     assert "do not plan to terminate it yourself" not in section
@@ -145,7 +145,7 @@ def test_peer_communication_survives_human_guidance_toggle(
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
-    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve(), agent_id=1)
     assert prompt.count("## Agent-to-agent communication") == 1
     assert "## Reduce context switch for the human" not in prompt
     assert "explicit reporting agreements still apply" in prompt
@@ -229,10 +229,10 @@ def test_reduce_context_switch_reaches_the_prompt(
 
     section, slices = "## Reduce context switch for the human", AgentSlices.resolve()
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
-    assert section in build_system_prompt(fleet_registry(), slices)
+    assert section in build_system_prompt(fleet_registry(), slices, agent_id=1)
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
-    assert section not in build_system_prompt(fleet_registry(), slices)
+    assert section not in build_system_prompt(fleet_registry(), slices, agent_id=1)
 
 
 def test_fleet_operating_contract_is_loaded_on_demand(_load_activity_plugin: None):
@@ -282,7 +282,7 @@ def test_fleet_contract_preserves_numeric_identifier_prefixes():
 def test_task_conversion_absent_when_plugin_disabled():
     """Prompt copy and the task SDK reference disappear together with the
     fleet plugin."""
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert "## Fleet task interaction" not in prompt
     assert "create directly with `ava.tasks.create`" not in prompt

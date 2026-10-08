@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 
-import ava
 from tests.e2e.fakes._recording import RecordingModel, exec_call, say, scratch_root
 
 
@@ -16,7 +15,7 @@ def state_file(agent_id: int) -> str:
     return str(scratch_root("budget") / f"{agent_id}.json")
 
 
-def _prepare_code(role: str) -> str:
+def _prepare_code(role: str, agent_id: int) -> str:
     root = str(scratch_root("budget"))
     code = (
         "import json\nimport ava\nfrom pathlib import Path\n"
@@ -33,7 +32,7 @@ def _prepare_code(role: str) -> str:
         dispatch = (
             "import json\nimport ava\nfrom pathlib import Path\n"
             "from base.host.atomic_io import write_text_atomic\n"
-            f"path = Path({state_file(ava.self.AGENT_ID)!r})\n"
+            f"path = Path({state_file(agent_id)!r})\n"
             "state = json.loads(path.read_text())\n"
             "if state['status'] == 'running':\n"
             "    peer = ava.agents.spawn(prompt=state['remaining'].pop(0))\n"
@@ -57,8 +56,8 @@ def _prepare_code(role: str) -> str:
     return code
 
 
-def _pause_code(owner: int) -> str:
-    path = state_file(ava.self.AGENT_ID)
+def _pause_code(owner: int, agent_id: int) -> str:
+    path = state_file(agent_id)
     return (
         "import json\nimport ava\nfrom pathlib import Path\n"
         "from base.host.atomic_io import write_text_atomic\n"
@@ -74,8 +73,8 @@ def _pause_code(owner: int) -> str:
     )
 
 
-def _recover_code(role: str) -> str:
-    path = state_file(ava.self.AGENT_ID)
+def _recover_code(role: str, agent_id: int) -> str:
+    path = state_file(agent_id)
     code = (
         "import json\nimport ava\nfrom pathlib import Path\n"
         f"path = Path({path!r})\n"
@@ -96,21 +95,27 @@ def _recover_code(role: str) -> str:
     )
 
 
-def build(model: str) -> RecordingModel:
+def build(model: str, *, agent_id: int | None) -> RecordingModel:
+    if agent_id is None:
+        raise ValueError("budget handoff scenario requires an explicit agent id")
     owner = int(scratch_root("budget").joinpath("owner").read_text())
     role = scratch_root("budget").joinpath("role").read_text()
-    path = scratch_root("budget") / f"{ava.self.AGENT_ID}.json"
+    path = scratch_root("budget") / f"{agent_id}.json"
     if path.exists() and json.loads(path.read_text())["status"] == "paused":
         # Cold reconstruction must not rerun initial dispatch. The next message
         # (including a late checkpoint) reads the saved pause before any work.
-        return RecordingModel(script=(exec_call(4, _recover_code(role)), say("Still paused.")))
-    return RecordingModel(
-        script=(
-            exec_call(1, _prepare_code(role)),
-            say("Partial result saved; waiting."),
-            exec_call(2, _pause_code(owner)),
-            say("Paused with a handoff; goal remains incomplete."),
-            exec_call(3, _recover_code(role)),
-            say("Still paused."),
+        return RecordingModel(
+            agent_id=agent_id,
+            script=(exec_call(4, _recover_code(role, agent_id)), say("Still paused.")),
         )
+    return RecordingModel(
+        agent_id=agent_id,
+        script=(
+            exec_call(1, _prepare_code(role, agent_id)),
+            say("Partial result saved; waiting."),
+            exec_call(2, _pause_code(owner, agent_id)),
+            say("Paused with a handoff; goal remains incomplete."),
+            exec_call(3, _recover_code(role, agent_id)),
+            say("Still paused."),
+        ),
     )

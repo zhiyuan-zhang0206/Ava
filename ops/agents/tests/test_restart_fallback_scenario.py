@@ -10,7 +10,6 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-import ava
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -21,7 +20,6 @@ from tests.e2e.fakes.scenarios import lifecycle_restart
 @pytest.mark.parametrize("status", ["claimed", "done"])
 def test_consumed_restart_selects_successor_script_without_claiming_completion(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     status: str,
     database: Database,
     event_bus: EventBus,
@@ -29,8 +27,7 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
     agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
         database, event_bus, spawner="test", machine=machine_name()
     )
-    monkeypatch.setitem(vars(ava.self), "AGENT_ID", agent_id)
-    initial = lifecycle_restart.build("diagnostic")
+    initial = lifecycle_restart.build("diagnostic", agent_id=agent_id)
     assert initial.script == lifecycle_restart.RESTART_SCRIPT
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,status) "
@@ -55,7 +52,7 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
     ).fetchone() == (0,)
     # Selection cannot manufacture completion: the row stays idling until
     # the durable restarter admits the successor and writes its completion row.
-    successor = lifecycle_restart.build("diagnostic")
+    successor = lifecycle_restart.build("diagnostic", agent_id=agent_id)
     assert successor.cursor == 0
     assert successor.script == lifecycle_restart.IDLE_SCRIPT
     assert not successor.script[0].tool_calls
@@ -63,18 +60,19 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
 
 def test_pending_request_does_not_select_post_request_script(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
     agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
         database, event_bus, spawner="test", machine=machine_name()
     )
-    monkeypatch.setitem(vars(ava.self), "AGENT_ID", agent_id)
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,status) "
         "VALUES(%s,'','restart','self','pending')",
         (agent_id,),
     )
     db_conn.commit()
-    assert lifecycle_restart.build("diagnostic").script == lifecycle_restart.RESTART_SCRIPT
+    assert (
+        lifecycle_restart.build("diagnostic", agent_id=agent_id).script
+        == lifecycle_restart.RESTART_SCRIPT
+    )

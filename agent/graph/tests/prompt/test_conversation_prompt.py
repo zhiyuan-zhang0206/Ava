@@ -16,7 +16,7 @@ def test_initial_human_response_is_present_without_plugins(
     monkeypatch.setattr(settings.agent, "agent_communication_style", style)
     slices = AgentSlices.resolve()
 
-    prompt = build_system_prompt(EMPTY, slices)
+    prompt = build_system_prompt(EMPTY, slices, agent_id=1)
 
     assert prompt.count(user_reply_section(slices)) == 1
     assert "before the first tool call" in prompt
@@ -37,7 +37,7 @@ def test_reply_routing_and_handoff_policy_survive_every_style(
 ) -> None:
     monkeypatch.setattr(settings.agent, "agent_communication_style", style)
     slices = AgentSlices.resolve()
-    prompt = build_system_prompt(EMPTY, slices)
+    prompt = build_system_prompt(EMPTY, slices, agent_id=1)
 
     assert prompt.count("Reply in ordinary assistant text in this conversation") == 1
     assert "Text alongside a tool call also reaches the user" in prompt

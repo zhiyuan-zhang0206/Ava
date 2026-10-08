@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 from base.agents import GatewayUnavailable
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 def _client_mock() -> MagicMock:
@@ -654,21 +655,22 @@ class TestRetryBackoffJitter:
         from ava.gateway_client import transport as gc
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+        pin_no_identity()
         assert gc._agent_jitter_seconds() == 0.0
 
     def test_agent_jitter_deterministic_and_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava.gateway_client import transport as gc
 
-        monkeypatch.setenv("AVA_AGENT_ID", "1234")
+        pin_agent(1234)
         assert gc._agent_jitter_seconds() == gc._agent_jitter_seconds()  # deterministic
         assert 0.0 <= gc._agent_jitter_seconds() < gc._JITTER_SPAN_S
 
     def test_agent_jitter_differs_across_agents(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava.gateway_client import transport as gc
 
-        monkeypatch.setenv("AVA_AGENT_ID", "1")
+        pin_agent(1)
         a = gc._agent_jitter_seconds()
-        monkeypatch.setenv("AVA_AGENT_ID", "2")
+        pin_agent(2)
         b = gc._agent_jitter_seconds()
         assert a != b
 
@@ -677,6 +679,7 @@ class TestRetryBackoffJitter:
         from ava.gateway_client import transport as gc
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+        pin_no_identity()
         assert [gc._retry_delay_seconds(i) for i in range(6)] == [1.0, 2.0, 4.0, 8.0, 8.0, 8.0]
 
     @patch("ava.gateway_client.transport._http", new_callable=_client_mock)
@@ -687,6 +690,7 @@ class TestRetryBackoffJitter:
         from ava.gateway_client.transport import post
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+        pin_no_identity()
         mock_client.post.side_effect = httpx.ConnectError("refused")
 
         with pytest.raises(GatewayUnavailable):

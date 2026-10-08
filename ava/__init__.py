@@ -1,7 +1,7 @@
 import sys as _sys
 from types import ModuleType as _ModuleType
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 # Runtime connections — `ava.DB`, `ava.REDIS` — are the bound context's clients
 # (`ava.context.sql` / `.redis`), served by the module class below. The agent's own identity
@@ -87,12 +87,13 @@ class PluginStateOutsideTurnError(AttributeError):
 # `ava.state_update = {}` — and the exec child dies with its slot.
 _STATE_KEY = "_exec_state"
 _UPDATE_KEY = "_exec_state_update"
+_CONTEXT_KEY = "_exec_context"
 
 state: Any
 state_update: dict[str, Any] | None
 
 context: AvaContext
-"""Your execution identity and supplied service connections, read-only.
+"""Your execution identity and supplied service connections.
 
 `ava.self.AGENT_ID` identifies the agent your SDK calls represent.
 `context.identity` records execution ownership and caller provenance. Compact,
@@ -111,7 +112,7 @@ def _outside_exec_turn(name: str) -> PluginStateOutsideTurnError:
 
 
 class _SdkModule(_ModuleType):
-    """The `ava` module, whose two framework slots are properties over its private keys."""
+    """The `ava` module, whose three framework slots use process-local private keys."""
 
     @property
     def state(self) -> Any:
@@ -139,21 +140,64 @@ class _SdkModule(_ModuleType):
 
     @property
     def context(self) -> AvaContext:
-        return process_context.current()
+        bound = self.__dict__.get(_CONTEXT_KEY)
+        if bound is not None:
+            return bound
+        launched = process_context.launched_context()
+        if launched is None:
+            raise process_context.ContextOutsideProcessError(
+                "ava.context requires an execution child, launched script or external attachment; "
+                "host code uses the context its caller supplied"
+            )
+        import atexit
+
+        self.context = launched
+        atexit.register(launched.clients.close)
+        return launched
+
+    @context.setter
+    def context(self, value: AvaContext) -> None:
+        if not isinstance(value, AvaContext):
+            raise TypeError("ava.context must be an AvaContext")
+        self.__dict__[_CONTEXT_KEY] = value
+
+    @context.deleter
+    def context(self) -> None:
+        self.__dict__[_CONTEXT_KEY] = None
 
     @property
     def DB(self) -> Any:  # noqa: N802 — the SDK's name for the SQL connection
-        return process_context.current().sql
+        return self.context.sql
 
     @property
     def REDIS(self) -> Any:  # noqa: N802 — the SDK's name for the Redis client
-        return process_context.current().redis
+        return self.context.redis
 
     def __dir__(self) -> list[str]:
         return sorted({*super().__dir__(), "DB", "REDIS", "context", "state", "state_update"})
 
 
 _sys.modules[__name__].__class__ = _SdkModule
+
+
+def bind_context(context: AvaContext) -> None:
+    """Initialize this process's SDK entry with an explicit context.
+
+    Framework-internal: used by disposable children and exclusive attachments,
+    never by the shared host to select its current agent.
+    """
+    cast(_SdkModule, _sys.modules[__name__]).context = context
+
+
+def unbind_context() -> AvaContext | None:
+    """Release the SDK binding without creating a launched-script context.
+
+    The caller owns restoration and closing its clients.
+    """
+    sdk = cast(_SdkModule, _sys.modules[__name__])
+    context = sdk.__dict__.get(_CONTEXT_KEY)
+    del sdk.context
+    return context
 
 
 def in_exec_turn() -> bool:
@@ -352,12 +396,14 @@ def __getattr__(name: str) -> Any:
         # Reached only when the slot property raised (an AttributeError falls through to here).
         raise _outside_exec_turn(name)
     if name == "context":
-        # Same fall-through: the property raised because no context is bound.
-        return process_context.current()
+        raise process_context.ContextOutsideProcessError(
+            "ava.context requires an execution child, launched script or external attachment; "
+            "host code uses the context its caller supplied"
+        )
     if name == "DB":
-        return process_context.current().sql
+        return _sys.modules[__name__].context.sql
     if name == "REDIS":
-        return process_context.current().redis
+        return _sys.modules[__name__].context.redis
     if name == "external":
         import importlib
 

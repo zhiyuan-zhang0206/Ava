@@ -10,11 +10,14 @@ from pathlib import Path
 
 import httpx
 import pytest
+from langchain_core.messages import AnyMessage
 
 import agent.graph.recall.memory_recall as recall
 from agent.messages import inbound_message
 from ava.gateway_client import MemorySearchResult
 from base.agents import IndexerUnavailable
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity
 from base.host.env.agent_slices import AgentSlices
 
 
@@ -41,13 +44,13 @@ def _write_note(root: Path, rel: str, text: str) -> None:
 
 
 def _set_search(monkeypatch: pytest.MonkeyPatch, results: list[MemorySearchResult]) -> None:
-    monkeypatch.setattr(recall.gateway_client, "memory_search", lambda _q, _k: results)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(recall.gateway_client, "memory_search", lambda _q, _k, **_kwargs: results)  # pyright: ignore[reportUnknownArgumentType]
 
 
 _KEY = b"test-key"
 
 
-def _conversation() -> list:
+def _conversation() -> list[AnyMessage]:
     return [inbound_message(content="how do I deploy the gateway", source="user", inbound_id=1)]
 
 
@@ -66,7 +69,8 @@ async def test_renders_path_and_description(
     )
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -91,7 +95,8 @@ async def test_empty_description_renders_path_only_no_synthesis(
     _set_search(monkeypatch, [MemorySearchResult(path="c.md", description="")])
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -115,7 +120,8 @@ async def test_description_is_not_truncated(
     _set_search(monkeypatch, [MemorySearchResult(path="a.md", description=long_desc)])
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -139,7 +145,8 @@ async def test_skips_already_injected_paths(
     )
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
         agent=AgentSlices.resolve(),
         log_key=_KEY,
@@ -165,7 +172,8 @@ async def test_skips_path_not_synced_to_this_machine(
     )
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -182,7 +190,8 @@ async def test_returns_none_when_all_matches_already_injected(
     _set_search(monkeypatch, [MemorySearchResult(path="a.md", description="desc a")])
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
         agent=AgentSlices.resolve(),
         log_key=_KEY,
@@ -200,7 +209,7 @@ async def test_returns_none_when_all_matches_already_injected(
 
 
 def _raise_on_search(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
-    def _boom(_q: str, _k: int) -> list[MemorySearchResult]:
+    def _boom(_q: str, _k: int, *, context: AvaContext) -> list[MemorySearchResult]:
         raise exc
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _boom)
@@ -227,7 +236,8 @@ async def test_http_error_degrades_to_no_recall_and_logs_error(
     _raise_on_search(monkeypatch, _status_error(500))
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -249,7 +259,8 @@ async def test_modelled_outage_degrades_without_an_error_log(
     _raise_on_search(monkeypatch, IndexerUnavailable("memory search failed"))
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -268,7 +279,8 @@ async def test_programming_error_in_search_still_propagates(
 
     with pytest.raises(TypeError):
         await recall.passive_memory_recall(
-            _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+            _conversation(),
+            context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
             agent=AgentSlices.resolve(),
             log_key=_KEY,
         )
@@ -278,7 +290,8 @@ async def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr("base.config.settings.agent.passive_memory_recall_enabled", False)
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -299,7 +312,8 @@ async def test_returns_none_when_eval_isolated(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _fake)
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -320,7 +334,9 @@ async def test_returns_none_when_no_query(
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _fake)
 
-    result = await recall.passive_memory_recall([], agent=AgentSlices.resolve(), log_key=_KEY)
+    result = await recall.passive_memory_recall(
+        [], context=AvaContext(), agent=AgentSlices.resolve(), log_key=_KEY
+    )
 
     assert result is None
     assert called is False
@@ -342,13 +358,15 @@ async def test_retrieval_default_is_top_100(
     assert settings.agent.memory_recall_retrieve_k == 100
     asked: dict[str, int] = {}
 
-    def _search(_q: str, k: int) -> list[MemorySearchResult]:
+    def _search(_q: str, k: int, *, context: AvaContext) -> list[MemorySearchResult]:
         asked["k"] = k
         return []
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
 
-    await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve(), log_key=_KEY)  # pyright: ignore[reportUnknownArgumentType]
+    await recall.passive_memory_recall(
+        _conversation(), context=AvaContext(), agent=AgentSlices.resolve(), log_key=_KEY
+    )  # pyright: ignore[reportUnknownArgumentType]
 
     assert asked["k"] == 100
 
@@ -362,13 +380,15 @@ async def test_retrieval_is_wider_than_injection(
     monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_k", 3)
     asked: dict[str, int] = {}
 
-    def _search(_q: str, k: int) -> list[MemorySearchResult]:
+    def _search(_q: str, k: int, *, context: AvaContext) -> list[MemorySearchResult]:
         asked["k"] = k
         return []
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
 
-    await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve(), log_key=_KEY)  # pyright: ignore[reportUnknownArgumentType]
+    await recall.passive_memory_recall(
+        _conversation(), context=AvaContext(), agent=AgentSlices.resolve(), log_key=_KEY
+    )  # pyright: ignore[reportUnknownArgumentType]
 
     assert asked["k"] == 10
 
@@ -396,7 +416,8 @@ async def test_only_what_the_filter_kept_is_injected(
     monkeypatch.setattr(recall, "filter_candidates", _keep_b)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -423,7 +444,8 @@ async def test_nothing_is_injected_when_the_filter_keeps_nothing(
     monkeypatch.setattr(recall, "filter_candidates", _keep_none)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
@@ -451,7 +473,9 @@ async def test_the_filter_sees_the_type_tag_search_returned(
 
     monkeypatch.setattr(recall, "filter_candidates", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
-    await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve(), log_key=_KEY)  # pyright: ignore[reportUnknownArgumentType]
+    await recall.passive_memory_recall(
+        _conversation(), context=AvaContext(), agent=AgentSlices.resolve(), log_key=_KEY
+    )  # pyright: ignore[reportUnknownArgumentType]
 
     assert seen["candidates"][0].tags == ["type/user", "tech-ops"]  # pyright: ignore[reportUnknownMemberType]
 
@@ -486,7 +510,8 @@ async def test_already_injected_notes_still_reach_the_filter_then_dedup(
     monkeypatch.setattr(recall, "filter_candidates", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
         agent=AgentSlices.resolve(),
         log_key=_KEY,
@@ -524,10 +549,39 @@ async def test_returns_none_when_everything_the_filter_kept_is_already_injected(
     monkeypatch.setattr(recall, "filter_candidates", _keep_a)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await recall.passive_memory_recall(
-        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        _conversation(),
+        context=AvaContext(),  # pyright: ignore[reportUnknownArgumentType]
         injected_paths={"a.md"},
         agent=AgentSlices.resolve(),
         log_key=_KEY,
     )
 
     assert result is None
+
+
+async def test_gateway_search_receives_each_explicit_host_context(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two host calls route their client dependencies without binding the shared SDK."""
+    contexts = [
+        AvaContext(identity=AgentIdentity(agent_id=11, owns_loop=True)),
+        AvaContext(identity=AgentIdentity(agent_id=22, owns_loop=True)),
+    ]
+    seen: list[AvaContext] = []
+
+    def search(_query: str, _k: int, *, context: AvaContext) -> list[MemorySearchResult]:
+        seen.append(context)
+        return []
+
+    monkeypatch.setattr(recall.gateway_client, "memory_search", search)
+    for context in contexts:
+        assert (
+            await recall.passive_memory_recall(
+                _conversation(),
+                agent=AgentSlices.resolve(),
+                context=context,
+                log_key=_KEY,
+            )
+            is None
+        )
+    assert seen == contexts

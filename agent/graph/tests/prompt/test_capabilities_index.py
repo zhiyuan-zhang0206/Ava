@@ -334,7 +334,7 @@ def test_building_the_prompt_records_no_skill_attribution(
     monkeypatch.setattr(audit_events, "record_audit_reported", _record)
     monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert writes == []  # prompt assembly records nothing
     # And the prompt carries the index once — the expanded SDK reference does

@@ -110,7 +110,7 @@ def test_invest_in_the_future_section_in_full_prompt_when_on(
 ):
     monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert "# Invest in the future" in prompt
     assert "Beyond the task at hand" not in prompt
@@ -122,7 +122,7 @@ def test_invest_in_the_future_section_absent_from_full_prompt_when_off(
 ):
     monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", False)
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert "# Invest in the future" not in prompt
     assert "Beyond the task at hand" not in prompt
@@ -189,7 +189,7 @@ def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.Monke
 def test_codeact_section_defaults_to_on():
     """Unconfigured clusters receive batching guidance in the assembled prompt."""
     assert settings.agent.prompt_codeact_enabled is True
-    assert "# CodeAct" in build_system_prompt(EMPTY, AgentSlices.resolve())
+    assert "# CodeAct" in build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
 
 @pytest.mark.parametrize(
@@ -237,7 +237,7 @@ def test_codeact_section_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch)
 
     from agent.graph.prompt.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert "CodeAct" in prompt
 
@@ -249,7 +249,7 @@ def test_codeact_section_absent_from_full_prompt_when_off(monkeypatch: pytest.Mo
 
     from agent.graph.prompt.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert "CodeAct" not in prompt
 
@@ -395,7 +395,7 @@ def test_off_style_is_absent_from_the_full_system_prompt(monkeypatch: pytest.Mon
     monkeypatch.setattr(settings.agent, "agent_communication_style", "off")
     from agent.graph.prompt.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert "# Keeping the user oriented" not in prompt
     assert "# Talking to the user" not in prompt
@@ -520,7 +520,7 @@ def test_user_tone_section_is_present_in_the_full_prompt_when_enabled(
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", enabled)
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert ("# Communicating with the user" in prompt) is expect_section
 
@@ -534,7 +534,7 @@ def test_knowledge_cutoff_appears_for_known_model(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
     from agent.graph.prompt.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
     assert "Knowledge cutoff: 2026-01" in prompt
 
 
@@ -544,7 +544,7 @@ def test_knowledge_cutoff_absent_for_unknown_model(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(settings.lm, "llm_model", "unknown-model-v1")
     from agent.graph.prompt.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
     assert "Knowledge cutoff:" not in prompt
 
 
@@ -639,7 +639,7 @@ def test_cross_machine_delegation_hint_in_full_prompt_when_on(monkeypatch: pytes
 
     from agent.graph.prompt.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE in prompt
     assert prompt.index(_CROSS_MACHINE_DELEGATION_SENTENCE) > prompt.index("# Before you act")
@@ -654,7 +654,7 @@ def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off(
 
     from agent.graph.prompt.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE not in prompt
 
@@ -675,12 +675,12 @@ def test_workspace_section_names_the_history_dump(
 
     from agent.graph.prompt.system_prompt import _workspace_section
 
-    rendered = _workspace_section(AgentSlices.resolve())
+    rendered = _workspace_section(AgentSlices.resolve(), agent_id=1)
     assert "message-history/" in rendered
     assert "grep -rn 'keyword' message-history/" in rendered
 
     monkeypatch.setattr(settings.agent, "history_dump_enabled", False)
-    assert "message-history" not in _workspace_section(AgentSlices.resolve())
+    assert "message-history" not in _workspace_section(AgentSlices.resolve(), agent_id=1)
 
 
 # ── activation telemetry (issue #40) ────────────────────────────────────────
@@ -713,7 +713,7 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
     registry = ExtensionRegistry(
         (("myplugin", PluginContributions(system_prompt_sections=(loud_section, silent_section))),)
     )
-    system_prompt.build_system_prompt(registry, AgentSlices.resolve())
+    system_prompt.build_system_prompt(registry, AgentSlices.resolve(), agent_id=1)
 
     assert [(p, s, i) for p, s, i, _d in recorded] == [
         ("myplugin", "systemPromptSections", "loud_section")
@@ -725,7 +725,7 @@ def test_long_running_operation_without_fleet(monkeypatch: pytest.MonkeyPatch):
     """An isolated agent gets cost/lifecycle guidance without loading a skill or fleet."""
     monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
-    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve(), agent_id=1)
     assert prompt.count("# Efficient long-running operation") == 1
     assert "## Agent-to-agent communication" not in prompt
     assert "end the turn idle" in prompt

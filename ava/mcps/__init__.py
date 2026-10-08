@@ -173,9 +173,9 @@ def _write_cache(server: str, tools: list[ToolInfo]) -> None:
 
 def _clients() -> McpClients:
     """The MCP clients of the bound context, built on first use."""
-    from ava.sdk_surface import process_context
+    import ava
 
-    return process_context.current().clients.get(McpClients)
+    return ava.context.clients.get(McpClients)
 
 
 def _get_remote_client() -> _RemoteMCPClient | None:

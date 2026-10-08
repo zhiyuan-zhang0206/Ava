@@ -27,7 +27,7 @@ files + signals:
 
 Context: the request envelope carries the description of the host's `AvaContext`
 (`AvaContext.describe`); the child builds its own instance from it
-(`AvaContext.from_description`) and binds it for the process (`ava.sdk_surface.process_context.bind_process`), so
+(`AvaContext.from_description`) and installs it in the child-local `ava.context`, so
 agent code reads it as `ava.context`. The identity carries owns_loop=True, so
 `ava.self.terminate/restart/compact` keep working exactly as they do
 in the agent process (their inbound INSERTs go to the same database over
@@ -483,9 +483,10 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
 def _bind_identity(request: RequestPayload) -> None:
     """Bind this child's `AvaContext`, built from the host's description, and the logger and
     incarnation of the agent it acts as."""
+    import ava
     from ava.sdk_surface import process_context
 
-    process_context.bind_process(process_context.context_from_description(request.context))
+    ava.bind_context(process_context.context_from_description(request.context))
     if request.agent_id is None:
         return
     if request.incarnation is not None:
@@ -596,9 +597,10 @@ def main() -> None:
         _deliver_envelope_telemetry()
     finally:
         # The connections this child opened (SQL, Redis, gateway, MCP) end with it.
-        from ava.sdk_surface import process_context
-
-        process_context.close_process()
+        sdk = sys.modules.get("ava")
+        context = None if sdk is None else sdk.unbind_context()
+        if context is not None:
+            context.clients.close()
 
 
 def _write_crashed_result(
