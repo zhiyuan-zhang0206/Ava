@@ -14,3 +14,7 @@ tags: []
 - **grafana** (`/grafana/*`, outside `/api`) — optional streaming reverse proxy to a co-located Grafana instance (`AVA_GRAFANA_PROXY_ENABLED`, `AVA_GRAFANA_HOST`/`AVA_GRAFANA_PORT`, default off → 404), auth-gated by the same cluster middleware, for dashboard iframes
 - **ui_contributions** (`gateway/extensions/ui_contributions.py`, `/api/ui/contributions`) — the merged, plugin-attributed `contributions.ui` declaration set of the cluster's ENABLED plugins (theme token packs, nav entries, and statistics-panel cards today; agent-inspect sections as that slice lands). Read straight from each plugin's `ava-plugin.json` — no plugin code is imported to answer it [[okf/plugins/package-manifest.ava.okf.md]]
 - **plugin_ui** (`gateway/extensions/plugin_ui.py`, `/api/plugin-ui/<plugin>/…`) — the sibling mount of `pages`: static files from an ENABLED plugin's own `ui/` directory, for the sandboxed iframe the console embeds. `pages`' segment validation plus a resolved-path containment check
+
+Reverse-proxy contracts live in `gateway/routers/tests/proxies/`: Grafana and
+agent page servers preserve authenticated forwarding, streaming, error responses
+and path-traversal rejection.
