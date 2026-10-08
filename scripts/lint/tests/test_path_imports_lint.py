@@ -34,8 +34,22 @@ def _baseline(root: pathlib.Path) -> None:
 @pytest.fixture
 def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
+    lcs._git("init", "--quiet").check_returncode()
+    lcs._git("add", baseline_shards.SHARD_DIR).check_returncode()
+    lcs._git(
+        "-c",
+        "user.name=Path-import gate test",
+        "-c",
+        "user.email=structure-test@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--quiet",
+        "-m",
+        "Empty baseline",
+    ).check_returncode()
     return tmp_path
 
 
