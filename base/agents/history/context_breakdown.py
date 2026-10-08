@@ -173,7 +173,7 @@ class SectionNode:
 
     name: str
     tokens: int
-    children: list[SectionNode] = field(default_factory=list)
+    children: list[SectionNode] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     estimated: bool = True  # a section is a share of the system prompt, never measured alone
 
 
@@ -185,7 +185,7 @@ class _WeightNode:
 
     name: str
     own_weight: int
-    children: list[_WeightNode] = field(default_factory=list)
+    children: list[_WeightNode] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     @property
     def total_weight(self) -> int:
