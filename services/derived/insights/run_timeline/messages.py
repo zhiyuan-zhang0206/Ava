@@ -17,13 +17,14 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
-from services.derived.insights.run_timeline.history import HistoryViewCache
+from services.derived.insights.run_timeline.history import HistoryView, HistoryViewCache
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineMessage,
     RunTimelineMessagePart,
     RunTimelineMessages,
     RunTimelinePartKind,
 )
+from services.derived.insights.run_timeline.tokens import span_tokens
 
 router = APIRouter()
 
@@ -45,7 +46,7 @@ _PART_KIND: dict[str, RunTimelinePartKind] = {
 
 
 def _message(
-    idx: int, items: list[TimelineItem], *, full: bool, text_max: int
+    view: HistoryView, idx: int, items: list[TimelineItem], *, full: bool, text_max: int
 ) -> RunTimelineMessage:
     parts: list[RunTimelineMessagePart] = []
     for item in items:
@@ -60,11 +61,14 @@ def _message(
         )
     stamp = next((item.created_at for item in items if item.created_at), None)
     ts = datetime.fromisoformat(stamp) if stamp else None
+    tokens = span_tokens(view, idx, idx)
     return RunTimelineMessage(
         idx=idx,
         ts=ts if ts is not None and ts >= _LEGACY_TS_FLOOR else None,
         source=next((item.source for item in items if item.source), None),
         parts=parts,
+        context_tokens=tokens.context_tokens,
+        estimated=tokens.estimated,
     )
 
 
@@ -81,7 +85,8 @@ def get_run_timeline_messages(
     if end < start:
         raise HTTPException(status_code=422, detail="end must not be before start")
     views: HistoryViewCache = request.app.state.run_timeline_views
-    messages = views.get(request.app.state.db, agent_id).history.messages
+    view = views.get(request.app.state.db, agent_id)
+    messages = view.history.messages
     if end >= len(messages):
         raise HTTPException(
             status_code=404, detail=f"message {end} not found: history has {len(messages)}"
@@ -94,7 +99,7 @@ def get_run_timeline_messages(
         by_message.setdefault(start + int(item.item_id.split(".")[0]), []).append(item)
     return RunTimelineMessages(
         messages=[
-            _message(idx, group, full=full, text_max=text_max)
+            _message(view, idx, group, full=full, text_max=text_max)
             for idx, group in sorted(by_message.items())
         ],
         next_start=stop + 1 if stop < end else None,

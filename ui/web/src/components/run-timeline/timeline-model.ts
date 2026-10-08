@@ -7,7 +7,6 @@ import type {
   RunTimelineNode,
   RunTimelineRequest,
   RunTimelineUnit,
-  RunTimelineUsage,
 } from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
 
@@ -76,31 +75,6 @@ export function chainIds(
     }
   }
   return chain;
-}
-
-/**
- * The stretches of a level's row that are not yet summarized: the nodes one level down that have no
- * parent (the tree is built bottom-up, so the tail of each level waits for its group to close).
- * Contiguous ones are merged into one stretch.
- */
-export function pendingSpans(
-  nodes: readonly RunTimelineNode[],
-  level: number,
-): TimelineWindow[] {
-  const open = nodes
-    .filter((node) => node.level === level - 1 && node.parent === null)
-    .sort((a, b) => a.span_start - b.span_start);
-  const spans: (TimelineWindow & { last: number })[] = [];
-  for (const node of open) {
-    const tail = spans.at(-1);
-    if (tail !== undefined && node.span_start === tail.last + 1) {
-      tail.to = node.end;
-      tail.last = node.span_end;
-    } else {
-      spans.push({ from: node.start, to: node.end, last: node.span_end });
-    }
-  }
-  return spans.map(({ from, to }) => ({ from, to }));
 }
 
 /** The distinct node levels, topmost first (level 1 = the leaves, drawn last). */
@@ -243,11 +217,6 @@ export function partsForUnit(
 ): RunTimelineMessagePart[] {
   const wanted = PART_OF_KIND[kind];
   return wanted === undefined ? [...parts] : parts.filter((part) => part.kind === wanted);
-}
-
-/** The share of input tokens served from cache; null when there was no input. */
-export function cacheHitRate(usage: Pick<RunTimelineUsage, "input" | "cache_read">): number | null {
-  return usage.input > 0 ? usage.cache_read / usage.input : null;
 }
 
 /** The legend kinds, in drawing order: a block's kind, inbound split by sender. */

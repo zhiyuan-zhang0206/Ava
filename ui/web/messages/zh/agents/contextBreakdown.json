@@ -26,7 +26,7 @@
     "tool_call": "工具调用",
     "tool_response": "工具输出"
   },
-  "pointTitle": "请求 #{request} 时的上下文 · 第 {session}/{sessions} 个 session · {time}",
+  "pointTitle": "请求时的上下文 · 第 {session}/{sessions} 个 session · {time}",
   "pointSubtitle": "跟随选中的块；未选中时显示视口内最后一次请求",
   "pointEmpty": "该 agent 还没有发起过 LLM 请求。",
   "categoryToggle": "在时间线上高亮「{category}」块"

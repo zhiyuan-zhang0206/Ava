@@ -19,7 +19,6 @@ type Translate = ReturnType<typeof useTranslations<"runTimeline">>;
 
 export function requestReadout(t: Translate, request: RunTimelineRequest): string {
   return t("readoutRequest", {
-    idx: request.idx,
     session: request.session + 1,
     time: formatShort(request.ts),
     tokens: formatTokensCompact(request.input_tokens),
@@ -32,8 +31,7 @@ function nodeReadout(t: Translate, node: RunTimelineNode): string {
     level: node.level,
     from: formatShort(node.start),
     to: formatShort(node.end),
-    start: node.span_start,
-    end: node.span_end,
+    count: node.span_end - node.span_start + 1,
     summary: firstLine(node.summary, PREVIEW_CHARS),
     calls: node.usage.calls,
     input: formatTokensCompact(node.usage.input),
@@ -70,8 +68,7 @@ export function readoutText(
   if (unit === undefined) return null;
   const line = t("readoutUnit", {
     kind: ctx.unitLabel(unit),
-    start: unit.i0,
-    end: unit.i1,
+    count: unit.i1 - unit.i0 + 1,
     time: formatShort(unit.start),
     source: unit.source === null ? t("readoutNoSource") : ctx.sourceLabel(unit.source),
     preview: firstLine(unit.preview, PREVIEW_CHARS),
