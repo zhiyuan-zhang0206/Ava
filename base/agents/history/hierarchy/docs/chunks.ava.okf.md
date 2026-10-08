@@ -32,8 +32,8 @@ zeroing it.
 **Compaction closes the segment**: `stamp_compact_boundary` enqueues the remainder from the
 last cut to the segment's end, with the boundary checkpoint id it stamped.
 
-**Manual build, session by session**: `GET /api/agents/{id}/sessions` and
-`POST /api/agents/{id}/understanding/build` (`gateway/agents/understanding.py`;
+**Manual build per session**: `GET /api/agents/{id}/sessions` and
+`POST /api/agents/{id}/understanding/build` (`gateway/agents/history/understanding.py`;
 `sessions.py`, `build.py`, `chunk_plan.py`). A *session* is one compaction segment (1 = oldest, stable; the unclosed newest has no boundary). `build.plan_jobs` replays the live
 trigger rule over the chosen sessions (`chunk_plan.plan_replay`, threshold
 `chunk_threshold`, as the hook), cuts every chunk down to the runs no level-1 node covers (one job per

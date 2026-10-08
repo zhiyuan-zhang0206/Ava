@@ -4157,7 +4157,7 @@ groups:
                     params: [C]
 
       # ── R17: Gateway latency by route — fast routes only. The exclusion
-      #        source is gateway/middleware/latency.py. p95 bucket > 3s for 5m =
+      #        source is gateway/http/middleware/latency.py. p95 bucket > 3s for 5m =
       #        warning; > 10s for 5m = error. Calibrated 2026-08-23 on 7d
       #        data: fast-route max p95 sits under ~5.5s with typical
       #        sub-second values; 3s/10s two-tier follows the PM slow-request

@@ -29,7 +29,7 @@ tags:
 - SDK side: parses the response `reason` → looks up `EXCEPTION_BY_REASON` to reconstruct the same exception type and throw to caller (preserving the original message).
 - `AvaAgentError.__init_subclass__` enforces both `reason`/`http_status` ClassVars (missing → `TypeError` at import). `EXCEPTION_BY_REASON` is a literal table at the module end. New error = enum value + exception class + one table row.
 - End-of-module check (`raise`, not `assert`, so it survives `-O`) requires the table to cover every `ErrorReason` and every `AvaAgentError` subclass, each under its own `reason` — closing the "added enum, forgot class" and "added class, forgot row" gaps.
-- `gateway/middleware/tests/test_agent_error_wire_equivalence.py` parameterizes `EXCEPTION_BY_REASON.values()` to lock down end-to-end roundtrips.
+- `gateway/http/middleware/tests/test_agent_error_wire_equivalence.py` parameterizes `EXCEPTION_BY_REASON.values()` to lock down end-to-end roundtrips.
 
 ## Key dependencies
 

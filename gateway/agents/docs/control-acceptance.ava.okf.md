@@ -8,7 +8,7 @@ tags: []
 # Cancel and compact acceptance
 
 `POST /api/cancel` and `POST /api/agents/{agent_id}/compact` accept an optional
-`Idempotency-Key`. `gateway.auth.request_principal.optional_request_key` owns
+`Idempotency-Key`. `gateway.http.auth.request_principal.optional_request_key` owns
 validation and credential scoping. One key identifies one operation in that
 scope. A principal-v1 key includes the verified credential, method and actual
 path: the same raw key on different compact agent paths or credentials is a

@@ -23,8 +23,8 @@ from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.native_process.root_control import client as root_client
 from gateway.app import app
-from gateway.auth.cors import cors_allowed_origins
 from gateway.events import telemetry_rows
+from gateway.http.auth.cors import cors_allowed_origins
 from ops import agent_pause, cluster_status
 from ops.cluster import pause as cluster_pause
 

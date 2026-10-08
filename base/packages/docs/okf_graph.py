@@ -5,7 +5,7 @@ Two consumers share this module:
   - `scripts/codegen/build_okf_data.py` — CLI, writes `graph_data.json` to disk (the
     manually-refreshed convention described in `index.ava.okf.md`, used for
     reviewing doc-bundle changes as a diff).
-  - `gateway/routers/okf_graph.py` — serves the rendered page live over
+  - `gateway/inspect/okf_graph.py` — serves the rendered page live over
     `GET /api/okf/graph`, rebuilt fresh from the current tree on every
     request. It never reads the checked-in `graph_data.json`, so the served
     graph cannot go stale between manual rebuilds.

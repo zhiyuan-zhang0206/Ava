@@ -35,7 +35,7 @@ class FrontendInteraction(TypedDict):
 
 
 class GatewayLatency(TypedDict):
-    """`gateway_latency` payload — gateway/middleware/latency.py 60s aggregator.
+    """`gateway_latency` payload — gateway/http/middleware/latency.py 60s aggregator.
 
     One event per (route, 60s bucket) carrying p50/p95/p99/max/count — never
     per request (Task #1091).
@@ -74,7 +74,7 @@ class GatewayEventLoop(TypedDict):
 
 
 class Auth401Rejected(TypedDict):
-    """`auth401_rejected` payload — gateway/auth/rejection_log.py flusher.
+    """`auth401_rejected` payload — gateway/http/auth/rejection_log.py flusher.
 
     One event per 60s window carrying the number of gateway auth-middleware
     401 rejections in that window (task #1712). The per-request log line was
@@ -229,13 +229,13 @@ EVENTS: dict[str, EventSpec] = {
         "page_restore_notified", "page restore notified", tier="noise"
     ),
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
-    # by gateway/middleware/latency.py — one event per (route, bucket), never per request
+    # by gateway/http/middleware/latency.py — one event per (route, bucket), never per request
     "gateway_latency": telemetry_event(
         "gateway_latency",
         "gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count)",
         payload=GatewayLatency,
         tier="noise",
-        site=('gateway/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)'),
+        site=('gateway/http/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)'),
         persist=True,
     ),
     "sse": telemetry_event(
@@ -243,21 +243,21 @@ EVENTS: dict[str, EventSpec] = {
         "gateway SSE lifecycle — active connections by mode plus open/close counters",
         payload=SseLifecycle,
         tier="noise",
-        site=("gateway/middleware/runtime_metrics.py:sse_opened/sse_closed positional emit"),
+        site=("gateway/http/middleware/runtime_metrics.py:sse_opened/sse_closed positional emit"),
     ),
     "gateway_process": telemetry_event(
         "gateway_process",
         "gateway process CPU, resident memory, and open file descriptors (60s sample)",
         payload=GatewayProcess,
         tier="noise",
-        site="gateway/middleware/runtime_metrics.py:_emit_snapshot positional emit",
+        site="gateway/http/middleware/runtime_metrics.py:_emit_snapshot positional emit",
     ),
     "gateway_event_loop": telemetry_event(
         "gateway_event_loop",
         "gateway event-loop maximum callback lag and slow ticks (60s window)",
         payload=GatewayEventLoop,
         tier="noise",
-        site="gateway/middleware/runtime_metrics.py:_emit_snapshot positional emit",
+        site="gateway/http/middleware/runtime_metrics.py:_emit_snapshot positional emit",
     ),
     # gateway auth middleware 401 aggregate (task #1712) — one event per 60s
     # window, never per rejection: the per-request line is DEBUG/throttled on
@@ -267,7 +267,9 @@ EVENTS: dict[str, EventSpec] = {
         "gateway auth-401 rejections in the 60s window (aggregate count)",
         payload=Auth401Rejected,
         tier="noise",
-        site=('gateway/auth/rejection_log.py:emit_auth401_count telemetry.emit("telemetry", ...)'),
+        site=(
+            'gateway/http/auth/rejection_log.py:emit_auth401_count telemetry.emit("telemetry", ...)'
+        ),
     ),
     # agent registry max id (task #2010) — one absolute gauge sample per 60s
     # window, never a counter: the registry high-water mark is state, not a sum.

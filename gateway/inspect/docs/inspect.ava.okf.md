@@ -53,3 +53,10 @@ fails to import is skipped with a loud report (loguru ERROR + the
 `plugin_load_failed` event) and the remaining widgets still serve — fail-soft
 per the plugin-load contract (user ruling 2026-09-11); a declaration is admitted
 whole or not at all, so the next request retries clean.
+
+## Repository graph
+
+`okf_graph.py` serves `GET /api/okf/graph` from the current documentation tree,
+using the shared `base.packages.docs.okf_graph` renderer. The HTML view uses
+the gateway's normal request authentication; its route and rebuild behavior
+are unchanged.
