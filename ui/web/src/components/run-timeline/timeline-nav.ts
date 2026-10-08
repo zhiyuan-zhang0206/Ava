@@ -186,8 +186,8 @@ export function navigate(
 export const SELECTION_MIN_PX = 6;
 
 /**
- * Where the selected items sit in each row: the item itself, and for a request also the blocks it
- * read and its bar in both context rows. Rows with nothing selected are absent.
+ * Where the selected items sit in each row: the item itself; for a request also the blocks it read
+ * and its bar in both context rows; for a block also the bar of the request that read it. Rows with nothing selected are absent.
  */
 export function selectionSpans(
   selection: Selection | null,
@@ -201,7 +201,8 @@ export function selectionSpans(
     const lit = navItems(row, data, axis).filter(
       (item) =>
         isSelected(selection, item.selection) ||
-        (request !== undefined && item.unit !== undefined && requestCovers(request, item.unit)),
+        (request !== undefined && item.unit !== undefined && requestCovers(request, item.unit)) ||
+        (selection.kind === "unit" && item.request !== undefined && requestCovers(item.request, { i0: selection.i0 })),
     );
     if (lit.length > 0) out.set(row, lit.map(({ u0, u1 }) => ({ u0, u1 })));
   }
