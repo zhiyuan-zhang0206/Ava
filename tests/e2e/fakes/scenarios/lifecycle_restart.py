@@ -12,7 +12,6 @@ from __future__ import annotations
 import psycopg
 from langchain_core.messages import AIMessage
 
-import ava
 from base.config import settings
 from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
 
@@ -38,19 +37,19 @@ IDLE_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 
-def _has_consumed_self_restart() -> bool:
+def _has_consumed_self_restart(agent_id: int | None) -> bool:
     """A prior self request was consumed, not a claim that restart succeeded."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages "
             "WHERE agent_id = %s AND kind = 'restart' AND source = 'self' "
             "AND status IN ('claimed','done') LIMIT 1",
-            (ava.self.AGENT_ID,),
+            (agent_id,),
         )
         return cur.fetchone() is not None
 
 
-def build(model: str) -> ScriptedFakeChatModel:
-    if _has_consumed_self_restart():
+def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
+    if _has_consumed_self_restart(agent_id):
         return ScriptedFakeChatModel(script=IDLE_SCRIPT)
     return ScriptedFakeChatModel(script=RESTART_SCRIPT)

@@ -101,9 +101,9 @@ def require_lease_free_agent_id() -> int:
 def require_actor(context: AvaContext | None = None) -> str:
     """Return this process's asserted provenance, validating a borrowed lease first.
 
-    A borrowed `agent:<id>` identity takes precedence over an explicit external
-    tool profile, a non-agent actor of the supplied or local context,
-    and its agent identity. An invalid borrowed lease
+    A borrowed `agent:<id>` identity takes precedence. A supplied host context
+    is authoritative; without one, an explicit external tool profile precedes
+    the local SDK context's actor and agent identity. An invalid borrowed lease
     raises instead of falling back. These provenance channels do not replace
     the gateway's credential checks.
 
@@ -118,12 +118,17 @@ def require_actor(context: AvaContext | None = None) -> str:
     borrowed = validate_external_identity(context)
     if borrowed is not None:
         return f"agent:{borrowed}"
+    identity = _bound(context)
+    if context is not None and identity is not None:
+        if identity.actor is not None:
+            return identity.actor
+        if identity.agent_id is not None:
+            return f"agent:{identity.agent_id}"
     from base.agents.messages.external_caller import external_caller
 
     external = external_caller()
     if external is not None:
         return external.source()
-    identity = _bound(context)
     if identity is not None and identity.actor is not None:
         return identity.actor
     if identity is None or identity.agent_id is None:
