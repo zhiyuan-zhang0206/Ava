@@ -37,7 +37,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
         with:
-          version: 0.10.2
+          version: 0.12.23
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --frozen
       - name: Vendored Postgres runtime (production's server build)
@@ -71,7 +71,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
         with:
-          version: 0.10.2
+          version: 0.12.23
       - run: uv sync --frozen
       - name: Real native domain member closure
         shell: bash

@@ -13,7 +13,7 @@
 
 # Pinned uv release — must match base/host/brew_pin.py UV_VERSION / UV_ASSET_SHA256
 # (contract test: tests/scripts/test_toolchain_uv_pin.py).
-UV_VERSION="0.10.2"
+UV_VERSION="0.12.23"
 # Overridable so a mirror user can point at a GitHub proxy they trust; the
 # sha256 check below keeps the pin regardless of where the asset came from.
 UV_RELEASE_BASE_URL="${UV_RELEASE_BASE_URL:-https://github.com/astral-sh/uv/releases/download}"
@@ -24,13 +24,13 @@ uv_asset() {
   machine="$(uname -m)"
   case "$(uname -s)-${machine}" in
     Darwin-arm64|Darwin-aarch64)
-      echo "aarch64-apple-darwin 3828b2de196687f60e9d199aea8b504299629300831eea0935ff3fe339903d0a" ;;
+      echo "aarch64-apple-darwin 50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544" ;;
     Darwin-x86_64|Darwin-amd64)
-      echo "x86_64-apple-darwin 3cdbd038333cfe861ce04f3d91678547bf2e726224acf5f42d3f0affa6740e19" ;;
+      echo "x86_64-apple-darwin 960da44cb4b73685206ddd250b19e0a117fa41095710c1038f081f5cb613efb4" ;;
     Linux-x86_64|Linux-amd64)
-      echo "x86_64-unknown-linux-gnu 6aa4576c31f791c0b9d4739e256d07358d45e7535695287fec03cf6839e25512" ;;
+      echo "x86_64-unknown-linux-gnu 9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6" ;;
     Linux-arm64|Linux-aarch64)
-      echo "aarch64-unknown-linux-gnu 4998f545234d52fc6f1280827d392f00a9278295050d59c53a776546dbf0124d" ;;
+      echo "aarch64-unknown-linux-gnu 6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f" ;;
     *)
       prov_die "no pinned uv ${UV_VERSION} asset for $(uname -s)-${machine}" ;;
   esac
