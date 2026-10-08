@@ -403,6 +403,9 @@ class RedisInboundListener:
         Bounded by `timeout` total wall-clock; internal retries across
         reconnect attempts share that budget with backoff so a
         persistently-down Redis does not spin in a tight loop.
+
+        Cancel pending open/consume children when this caller exits. Completed
+        opens transfer their handles to the listener's existing close path.
         """
         deadline = asyncio.get_running_loop().time() + timeout
         backoff = 0.5
@@ -413,10 +416,13 @@ class RedisInboundListener:
             try:
                 # Open/reconnect must honour the caller's budget.
                 open_task = asyncio.ensure_future(self._ensure_subscribed())
-                done, _ = await asyncio.wait({open_task}, timeout=remaining)
+                try:
+                    done, _ = await asyncio.wait({open_task}, timeout=remaining)
+                finally:
+                    if not open_task.done():
+                        open_task.cancel()
                 if not done:
                     self._mark_wake_degraded(WakeFailure.OPEN_ABANDON)
-                    open_task.cancel()
                     logger.warning(
                         "RedisInboundListener[agent={a}]: open/subscribe did not "
                         "complete within {r:.1f}s budget — abandoning attempt",
@@ -449,17 +455,7 @@ class RedisInboundListener:
                     if not consume_task.done():
                         consume_task.cancel()
                 if not done:
-                    self._mark_wake_degraded(WakeFailure.CONSUME_ABANDON)
-                    logger.warning(
-                        "RedisInboundListener[agent={a}]: consume never started "
-                        "its timer within {r:.1f}s budget + {g:.1f}s grace — "
-                        "abandoning attempt",
-                        a=self._agent_id,
-                        r=remaining,
-                        g=_CONSUME_ABANDON_GRACE,
-                    )
-                    async with self._lock:
-                        await self._close_inner()
+                    await self._abandon_consume(remaining)
                     return
                 consume_task.result()
                 # Reaching a clean consume (message or timeout, no error) proves
@@ -507,6 +503,20 @@ class RedisInboundListener:
                     return
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, max(0.5, remaining / 2))
+
+    async def _abandon_consume(self, remaining: float) -> None:
+        """Record the stalled consume and discard its unusable connection."""
+        self._mark_wake_degraded(WakeFailure.CONSUME_ABANDON)
+        logger.warning(
+            "RedisInboundListener[agent={a}]: consume never started "
+            "its timer within {r:.1f}s budget + {g:.1f}s grace — "
+            "abandoning attempt",
+            a=self._agent_id,
+            r=remaining,
+            g=_CONSUME_ABANDON_GRACE,
+        )
+        async with self._lock:
+            await self._close_inner()
 
     async def _close_inner(self) -> None:
         """Close the underlying Redis connection + pubsub.  Caller must hold
