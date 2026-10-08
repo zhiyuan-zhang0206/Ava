@@ -19,6 +19,7 @@ import pytest
 from base.agents.birth_config import (
     cluster_default_model,
     resolve_birth_config,
+    resolve_default_model,
     set_cluster_default_model,
 )
 from base.config import frozen_field_names, live_field_names
@@ -35,6 +36,28 @@ def cur(
 
 
 class TestClusterDefaultModel:
+    def test_resolution_reads_fresh_file_config(
+        self, cur: psycopg.Cursor, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from base.config import settings
+
+        monkeypatch.setattr(settings.lm, "llm_model", "mimo-v2.6-pro")
+        monkeypatch.setattr(
+            "base.host.env.runtime_config.read_env_aliases", lambda: {"AVA_MODEL": "deepseek-flash"}
+        )
+        assert resolve_default_model(cur) == ("deepseek-flash", "config")
+        assert resolve_birth_config(cur)["llm_model"] == "deepseek-flash"
+
+    def test_config_and_cluster_resolution_report_the_same_birth_model(
+        self, cur: psycopg.Cursor
+    ) -> None:
+        resolved = resolve_default_model(cur)
+        assert resolved.source == "config"
+        assert resolved.model == resolve_birth_config(cur)["llm_model"]
+        set_cluster_default_model(cur, "deepseek-flash", updated_by="test")
+        assert resolve_default_model(cur) == ("deepseek-flash", "cluster")
+        assert resolve_birth_config(cur)["llm_model"] == "deepseek-flash"
+
     def test_unset_reads_as_none(self, cur: psycopg.Cursor) -> None:
         assert cluster_default_model(cur) is None
 

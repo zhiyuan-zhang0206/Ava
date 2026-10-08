@@ -10,10 +10,44 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartOperation,
     NativeRestartRequest,
 )
+from base.db import Database
+from base.events.live.bus import EventBus
+from ops.lifecycle.native_restart import restart_native_work_op
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_request_identity import pool as pool
+
+
+async def test_merged_effort_refusal_has_no_restart_or_config_effects(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    pool: ConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    _inc, target = await managed_work(db_conn, aops_pool)
+    db_conn.execute(
+        "UPDATE agents_meta SET birth_config=%s::jsonb WHERE id=%s",
+        ('{"llm_model":"deepseek-flash","reasoning_effort":"max"}', target.agent_id),
+    )
+    db_conn.commit()
+    operation = NativeRestartOperation(
+        operation_key="invalid-effort",
+        request=NativeRestartRequest(target=target, config_overlay={"reasoning_effort": "low"}),
+    )
+    result = await restart_native_work_op(database, event_bus, target.agent_id, operation, pool)
+    assert result.status == "refused"
+    assert result.reason == "invalid_overlay"
+    assert "unsupported reasoning effort" in result.detail
+    assert db_conn.execute("SELECT count(*) FROM native_restart_commands").fetchone() == (0,)
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart'",
+        (target.agent_id,),
+    ).fetchone() == (0,)
+    assert db_conn.execute(
+        "SELECT config_overlay FROM agents_meta WHERE id=%s", (target.agent_id,)
+    ).fetchone() == (None,)
 
 
 async def test_domain_receipt_recovers_without_generic_claim_or_second_command(

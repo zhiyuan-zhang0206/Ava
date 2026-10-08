@@ -4,6 +4,7 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
+from base.agents import InvalidModelConfig
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAccepted,
     NativeRestartOperation,
@@ -61,7 +62,7 @@ async def restart_native_work_op(
         )
     except NativeRestartConflictError as exc:
         return NativeRestartRefused(status="refused", reason="identity_conflict", detail=str(exc))
-    except NativeRestartOverlayError as exc:
+    except (NativeRestartOverlayError, InvalidModelConfig) as exc:
         return NativeRestartRefused(status="refused", reason="invalid_overlay", detail=str(exc))
     progress = await asyncio.to_thread(
         native_restart_progress, pool, agent_id, acceptance.command_id

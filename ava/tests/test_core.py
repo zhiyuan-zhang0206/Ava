@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 import ava
+from base.agents import InvalidModelConfig
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -51,6 +52,33 @@ class TestSelfTerminate:
 
 
 class TestSelfRestart:
+    def test_rejects_incompatible_effort_without_overlay_or_inbound(
+        self, db_conn: psycopg.Connection, gateway_client
+    ) -> None:
+        aid = ava.agents.spawn(config_overlay={"llm_model": "deepseek-flash"})
+        pin_agent(aid)
+        with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
+            ava.self.restart(config_overlay={"reasoning_effort": "low"})
+        assert db_conn.execute(
+            "SELECT config_overlay FROM agents_meta WHERE id=%s", (aid,)
+        ).fetchone() == ({"llm_model": "deepseek-flash"},)
+        assert not _inbound_rows(db_conn, aid)
+
+    def test_model_and_effort_change_commit_with_the_restart(
+        self, db_conn: psycopg.Connection, gateway_client
+    ) -> None:
+        aid = ava.agents.spawn(
+            config_overlay={"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"}
+        )
+        pin_agent(aid)
+        overlay: dict[str, object] = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
+        with pytest.raises(ava.self.AgentRestart):
+            ava.self.restart(config_overlay=overlay)
+        assert db_conn.execute(
+            "SELECT config_overlay FROM agents_meta WHERE id=%s", (aid,)
+        ).fetchone() == (overlay,)
+        assert _inbound_rows(db_conn, aid) == [("", "restart", "self")]
+
     def test_restart_inserts_inbound(
         self, db_conn: psycopg.Connection, gateway_client, monkeypatch: pytest.MonkeyPatch
     ):

@@ -526,10 +526,14 @@ def _restart_blocking(
             return None
         payload: dict[str, object] | None = None
         if body.config_overlay:
+            from base.lm.model_config import validate_restart_model_config
+
             # Settle a withdrawn llm_model before the overlay is stored — the
             # provider-outage model-switch channel must not persist a stale id (#4306).
             overlay = dict(body.config_overlay)
             model_receipt = normalize_overlay_llm_model(overlay)
+            with conn.cursor() as cur:
+                validate_restart_model_config(cur, agent_id, overlay)
             if model_receipt is not None:
                 _log.warning(
                     "restart overlay llm_model %r is withdrawn; storing the "

@@ -160,6 +160,14 @@ def _resolve_birth_overlay(
                 resolved=model_receipt[1],
             )
     birth_config = resolve_birth_config(cur, config, inherited=inherited)
+    from base.agents import InvalidModelConfig
+    from base.config.agent_pins import resolve_agent_config_pins
+    from base.lm.factory import validate_model_config
+
+    try:
+        validate_model_config(config=resolve_agent_config_pins(config, birth_config))
+    except ValueError as exc:
+        raise InvalidModelConfig(str(exc)) from exc
     return config, birth_config
 
 
