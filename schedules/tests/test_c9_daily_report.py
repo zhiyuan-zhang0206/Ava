@@ -9,7 +9,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, cast
+from typing import cast
 from unittest.mock import Mock
 
 import psycopg
@@ -49,7 +49,7 @@ def _insert_schedule(conn: psycopg.Connection, *, created_at: datetime) -> int:
     return int(row[0])
 
 
-def _entry(agent_id: int | None, *, linux: int, macos: int) -> dict[str, Any]:
+def _entry(agent_id: int | None, *, linux: int, macos: int) -> dict[str, int | None]:
     return {
         "run_id": 1 if agent_id is None else agent_id,
         "agent_id": agent_id,
@@ -69,21 +69,23 @@ class _FakeAccounting(SimpleNamespace):
         self.DEFAULT_LEDGER = Path("ledger.jsonl")
         self.entries = [_entry(5811, linux=10, macos=0)]
 
-    def collect(self, repo: str, since: str, until: str) -> list[dict]:
+    def collect(self, repo: str, since: str, until: str) -> list[dict[str, int | None]]:
         del repo
         self.windows.append((since, until))
         return self.entries
 
-    def append_ledger(self, path: Path, fresh: list[dict]) -> int:
+    def append_ledger(self, path: Path, fresh: list[dict[str, int | None]]) -> int:
         del path, fresh
         return 1
 
 
-def _install_fake_accounting(monkeypatch: pytest.MonkeyPatch, accounting: Any) -> list[dict]:
+def _install_fake_accounting(
+    monkeypatch: pytest.MonkeyPatch, accounting: _FakeAccounting
+) -> list[dict[str, object]]:
     monkeypatch.setattr(accounting.module, "_load_accounting", lambda: accounting)
-    emitted: list[dict] = []
+    emitted: list[dict[str, object]] = []
 
-    def record_emit(category: str, event_name: str, **kwargs: Any) -> None:
+    def record_emit(category: str, event_name: str, **kwargs: object) -> None:
         emitted.append({"category": category, "event_name": event_name, **kwargs})
 
     monkeypatch.setattr("base.telemetry.emit", record_emit)
@@ -204,7 +206,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     event = emitted[0]
     assert event["category"] == "telemetry"
     assert event["event_name"] == "ci_usage_daily"
-    attributes = cast(dict, event["attributes"])
+    attributes = cast("dict[str, str | int | float]", event["attributes"])
     assert attributes["day"] == "2026-09-07"
     assert attributes["window_start"] == "2026-09-05T21:00:00Z"
     assert attributes["window_end"] == "2026-09-06T21:00:00Z"
@@ -244,7 +246,7 @@ def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
         ("2026-09-06T05:00:00Z", "2026-09-07T05:00:00Z"),
         ("2026-09-07T05:00:00Z", "2026-09-08T05:00:00Z"),
     ]
-    days = [cast(dict, event["attributes"])["day"] for event in emitted]
+    days = [cast("dict[str, str | int | float]", event["attributes"])["day"] for event in emitted]
     assert len(days) == 2
     assert len(set(days)) == 2
 
@@ -255,11 +257,11 @@ def test_fire_reports_failure_without_raising(
     module = _load_schedule_module()
     accounting = _FakeAccounting(module)
 
-    def broken_collect(repo: str, since: str, until: str) -> list[dict]:
+    def broken_collect(repo: str, since: str, until: str) -> list[dict[str, int | None]]:
         del repo, since, until
         raise RuntimeError("gh api down")
 
-    accounting.collect = broken_collect  # type: ignore[method-assign]
+    monkeypatch.setattr(accounting, "collect", broken_collect)
     monkeypatch.setattr(module, "_load_accounting", lambda: accounting)
     failures: list[str] = []
     monkeypatch.setattr(module, "_report_failure", failures.append)

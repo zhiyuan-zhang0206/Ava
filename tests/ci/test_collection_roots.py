@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import fnmatch
 import glob
+import os
 import subprocess
 import sys
 import tomllib
@@ -28,24 +29,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_PYPROJECT = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-_PYTEST = _PYPROJECT["tool"]["pytest"]["ini_options"]
+from scripts.ci import test_selector
+from scripts.codegen import gen_pyright_test_environments as gen
+from scripts.structure.lint_common import pytest_test_hosts
 
-# Directories a `tests/` directory may live under (mirrors `testpaths`).
-_HOSTS = (
-    "tests",
-    "agent",
-    "ava",
-    "ava_builtins",
-    "base",
-    "cli",
-    "gateway",
-    "ops",
-    "scripts",
-    "schedules",
-    "services",
-)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PYPROJECT_TEXT = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+_PYPROJECT = tomllib.loads(_PYPROJECT_TEXT)
+_CONFIGURED_TEST_HOSTS = pytest_test_hosts(_PYPROJECT_TEXT)
+_PYTEST = _PYPROJECT["tool"]["pytest"]["ini_options"]
 
 
 def _tracked(pattern: str) -> list[str]:
@@ -146,7 +138,7 @@ def test_every_tracked_test_module_is_under_a_collected_root() -> None:
     modules = [
         path
         for path in _tracked("*.py")
-        if path.split("/")[0] in _HOSTS
+        if path.split("/")[0] in _CONFIGURED_TEST_HOSTS
         and "tests" in path.split("/")[:-1]
         and Path(path).name.startswith("test_")
     ]
@@ -296,9 +288,8 @@ def test_a_collected_root_is_not_inside_another() -> None:
 def test_every_glob_only_names_a_directory_that_exists_or_may_exist() -> None:
     """A glob is `<host>/**/tests` or the literal `tests`; a typo names no host directory."""
     for pattern in _PYTEST["testpaths"]:
-        host, _, tail = pattern.partition("/")
-        assert host in _HOSTS, pattern
-        assert tail in ("", "**/tests"), pattern
+        host = pattern.partition("/")[0]
+        assert host in _CONFIGURED_TEST_HOSTS, pattern
         assert (_REPO_ROOT / host).is_dir(), pattern
 
 
@@ -373,3 +364,85 @@ def test_ci_backend_commands_collect_from_testpaths(step: str) -> None:
     assert len(commands) == 1
     assert "uv run pytest" in commands[0]
     assert "pytest tests/" not in commands[0]
+
+
+def _scratch_scope_config(testpaths: str) -> str:
+    return (
+        "[tool.pytest.ini_options]\n"
+        f"testpaths = {testpaths}\n"
+        f"python_files = {_PYTEST['python_files']!r}\n"
+        'addopts = ["--import-mode=importlib"]\n'
+        "[tool.pyright]\n"
+        + "".join(f'{rule} = "warning"\n' for rule in gen.TESTS_STANDARD)
+        + f"{gen.BEGIN}\n{gen.END}\n"
+    )
+
+
+def test_new_test_host_joins_generation_selection_and_collection(tmp_path: Path) -> None:
+    config = _scratch_scope_config('["tests", "new_component/**/tests"]')
+    (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
+    paths = [
+        "tests/test_top.py",
+        "new_component/nested/tests/test_new.py",
+        "unconfigured/tests/test_no.py",
+    ]
+    for rel in paths:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("def test_it() -> None:\n    pass\n", encoding="utf-8")
+    generated = tomllib.loads(gen.generate(config, paths))["tool"]["pyright"]
+    assert [env["root"] for env in generated["executionEnvironments"]] == [
+        "new_component/nested/tests"
+    ]
+    selected = test_selector.collectable_test_paths(tmp_path)
+    assert selected == set(paths[:2])
+    assert test_selector.select_tests([paths[1]], repo_root=tmp_path).tests == (paths[1],)
+    collected = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    )
+    assert collected.returncode == 0, collected.stdout + collected.stderr
+    assert {
+        line.split("::")[0] for line in collected.stdout.splitlines() if "::" in line
+    } == selected
+
+
+@pytest.mark.parametrize(
+    "testpaths", ["[]", '"tests"', "[1]", '["../**/tests"]', '["base/tests"]', '["tests/**/tests"]']
+)
+def test_test_scope_consumers_reject_invalid_patterns(tmp_path: Path, testpaths: str) -> None:
+    config = _scratch_scope_config(testpaths)
+    (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
+    with pytest.raises((ValueError, TypeError), match="pytest testpaths"):
+        gen.generate(config, [])
+    with pytest.raises((ValueError, TypeError), match="pytest testpaths"):
+        test_selector.collectable_test_paths(tmp_path)
+
+
+def test_test_scope_consumers_require_the_pytest_configuration(tmp_path: Path) -> None:
+    config = _scratch_scope_config('["tests"]').replace("[tool.pytest.ini_options]", "[tool.other]")
+    (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
+    with pytest.raises(ValueError, match="must configure"):
+        gen.generate(config, [])
+    with pytest.raises(ValueError, match="must configure"):
+        test_selector.collectable_test_paths(tmp_path)
+
+
+def test_schedules_tests_share_pytest_selection_and_type_checking_scope() -> None:
+    schedule_tests = {
+        path for path in _tracked("schedules/**/test_*.py") if "tests" in path.split("/")[:-1]
+    }
+    assert schedule_tests
+    assert schedule_tests <= test_selector.collectable_test_paths(_REPO_ROOT)
+    assert not _collection_problems(
+        sorted(schedule_tests), roots=_resolved_roots(), python_files=_PYTEST["python_files"]
+    )
+    for path in schedule_tests:
+        assert (
+            gen.effective_rules(_PYPROJECT["tool"]["pyright"], str(Path(path).parent))
+            == gen.TESTS_STANDARD
+        )

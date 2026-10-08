@@ -128,6 +128,11 @@ def test_fixture_scope_lint_default_scan_reaches_a_package_tests_directory(
 ) -> None:
     lint = importlib.import_module("scripts.lint.fixture_scope")
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
+    _write(
+        tmp_path,
+        "pyproject.toml",
+        '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests", "services/**/tests"]\n',
+    )
     fixture = """
         import os
 
@@ -156,6 +161,11 @@ def test_fixture_scope_lint_package_scope_needs_an_init_in_a_package_tests_direc
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _write(
         tmp_path,
+        "pyproject.toml",
+        '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests", "services/**/tests"]\n',
+    )
+    _write(
+        tmp_path,
         "services/example/tests/conftest.py",
         """
         import pytest
@@ -175,6 +185,11 @@ def test_fixture_scope_lint_ignores_a_module_that_is_not_a_test(
 ) -> None:
     lint = importlib.import_module("scripts.lint.fixture_scope")
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
+    _write(
+        tmp_path,
+        "pyproject.toml",
+        '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests", "services/**/tests"]\n',
+    )
     _write(
         tmp_path,
         "base/packages/fixtures.py",
@@ -267,6 +282,7 @@ def _hook_selects(hook_id: str, path: str) -> bool:
     ("hook_id", "path", "selected"),
     [
         ("lint-fixture-scope", "tests/e2e/conftest.py", True),
+        ("lint-fixture-scope", "pyproject.toml", True),
         ("lint-fixture-scope", "base/packages/tests/conftest.py", True),
         (
             "lint-fixture-scope",
