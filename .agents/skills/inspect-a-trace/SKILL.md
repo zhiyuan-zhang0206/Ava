@@ -1,6 +1,6 @@
 ---
 name: inspect-a-trace
-description: Reconstructs one real agent run across checkpoints, Loki, Tempo, and Grafana. Use when investigating what an agent actually did, tracing a failure, correlating run IDs, or giving the user a live trace link.
+description: "Reconstructs an Ava run from checkpoints and telemetry. Use when investigating agent behavior, execution failures, or correlated trace evidence."
 ---
 
 # Inspect a trace

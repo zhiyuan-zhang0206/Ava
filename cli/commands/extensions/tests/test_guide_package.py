@@ -102,6 +102,10 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     target = client_home / "skills" / "ava-guide"
     for relative in (
+        "references/evaluation.md",
+        "presets/SKILL.md",
+        "presets/evals/metrics.md",
+        "presets/references/role-cards.md",
         "deploy/SKILL.md",
         "operations/references/db-restore.md",
         "packages/install/SKILL.md",

@@ -78,6 +78,8 @@ Ava Guide package separately enters Ava's load directory through normal skill
 convergence and the core update channel (`ava packages refresh`); the
 `.agents/skills/ava-guide` compatibility link points to the same owner. The
 external copy includes its nested skills, scripts, and references.
+Its reading links stay within the published Guide tree, including the single
+shared skill/preset evaluation contract at `references/evaluation.md`.
 Only the existing Codex and Claude Code home integrations are supported.
 
 ## Key dependencies

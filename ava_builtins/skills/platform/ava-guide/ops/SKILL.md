@@ -1,6 +1,6 @@
 ---
 name: ops
-description: Operates Ava cluster lifecycle, updates, converge, channels, releases, resources, and sessions. Use when starting, stopping, inspecting, enrolling, updating, or releasing a cluster, or when diagnosing session and runtime layout behavior.
+description: "Operates Ava cluster lifecycle and runtime sessions. Use when starting, stopping, enrolling, updating, releasing, or inspecting a cluster."
 ---
 
 # Ava Ops — Cluster Lifecycle & Maintenance
@@ -158,91 +158,12 @@ Related local commands:
 
 ## Resource Oversight (the SRE loop)
 
-Every machine's OTel Collector sidecar scrapes the traditional SRE layer into
-Prometheus: host CPU / memory / load / disk / filesystem / network everywhere,
-plus `postgresql` and `redis` against the cluster's own data plane on a
-gateway-capable unit. They live under `job="ava-infra"` with `host` (the OS
-hostname / physical identity) and `machine_name` (the Ava roster identity)
-labels. The Grafana dashboard `ava-ops-main` (its "Host & data plane" section)
-groups by `machine_name` and is the view.
-
-**There are no resource limits in the code, deliberately.** A saturated box
-may be a runaway loop or a training job doing exactly what it was asked; which
-one it is depends on machine specs and co-tenancy, which the framework cannot
-know. So the operator's job is judgment over the data, not enforcement of a
-constant:
-
-1. Watch the axes — latency percentiles (LLM, gateway, turn), error and
-   warning volume, host utilization, data-plane saturation.
-2. When something is out of band, identify the consumer before acting.
-3. Then choose: investigate, terminate idle agents to shed load, tell the
-   user, or decide the machine is legitimately busy and leave it.
-
-Alert rules (R8-R12: sustained CPU, memory pressure, per-volume disk
-watermark, Postgres connection saturation, Redis memory) fire into the same
-alerts table and IM pipeline as the application rules. Their thresholds are
-deployment facts living in
-`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` — a box whose
-normal state trips a rule wants that file edited, never a special case in
-framework code.
-
-`ava status` still answers on a cluster with no LGTM backend: each machine row
-carries one live CPU / memory / disk reading. That is a current value, not a
-history — the history is Prometheus's, and there is exactly one of it.
-
-When disk pressure comes from dead agents' workspaces, the disposal playbook is [workspace-cleanup](../workspace-cleanup/SKILL.md).
+Read [resource diagnosis](references/resources.md) when investigating host or
+data-plane pressure. Identify the consumer and compare deployment thresholds
+before acting; readings alone do not authorize a production change.
 
 ## Sessions
 
-Ava's long-running processes (gateway, agent-runners, services, agent shells)
-run as named sessions on the platform session backend — the native process
-supervisor (`base.sessions.posixproc`) and
-the machine's `pty-sessions` service for agents' interactive shells. Key facts:
-
-### Session naming
-
-- `ava-<service>` — a service daemon session (gateway, ops, im-bridge, ...)
-- `ava-agent-<id>` — an agent main process session
-- `ava-agent-<id>-shell-<n>[-<name>]` — an agent's shell sub-sessions (and
-  `...-watcher` for background watchers)
-
-### Per-cluster session records
-
-Each session's record (pid, start time) lives at `<ava_home>/run/sessions/
-<session-name>.json` (agent shells live in the `pty-sessions` service's ledger, `<ava_home>/run/pty-sessions.json`); its combined stdout+stderr goes to
-`<ava_home>/logs/<session-name>.out.log`. `ava cluster status` enumerates the
-same sessions. Raw session
-output is queried in Loki, not tailed by a CLI: the collector's
-`filelog/sessions` receiver admits only agent shell transcripts, while
-`filelog/services` admits gateway/daemon/schedule stdout and excludes all
-agent main logs. Loki's
-`service_name` label is the filename-derived session name. Query via Grafana
-Explore (LogQL), `logcli --addr http://127.0.0.1:3100`, or the Loki HTTP API;
-local managed logs are pruned only when `ava logs retention` runs. No age flag
-keeps the configurable 14-day global fallback; deployment jobs use
-`--family-days` for 15d agent, 7d named-PTY shell and snapshots, 30d gateway/ops/watchdog,
-and 3d other service rotations. The command scans `$AVA_HOME/logs` (top level) plus the
-nested computer-use snapshot dir, admits agent/named-PTY/Loguru/snapshot shapes, rejects
-symlinks, and skips open handles. Register it daily; see `deploy/lgtm/README.md`.
-
-### Environment forwarding
-
-The session backend hands the child a built env dict (`base.sessions.env_forwarding.
-forward_env_dict`) — host-scope env only (machine identity, paths, health
-ports, the gateway URL) for daemon/service sessions; the cluster-scope values
-are NOT forwarded — the child re-sources them at its own boot (fetch on a
-pure runner, own .env on a gateway host). Nothing secret ever rides an argv (issue #974).
-
-### Shell sub-sessions outlive agent processes AND cluster restarts
-
-Agent shell sub-sessions are deliberately NOT torn down on agent exit — they
-survive agent terminate/restart and gateway and agent-host restarts, so
-background work (Claude Code, watchers, a long training run)
-outlives the process that started it. The machine's `pty-sessions` service holds
-them, so restarting those processes cannot kill them; only
-their own `kill`, their shell exiting, `ava stop` or `ava restart` (updates
-included; they close terminals, `ava stop --force` without notices), a restart
-or crash of the service, or a machine reboot ends them. After a service crash, the next start sweeps leftover shells from the
-service's ledger.
-
-Full detail: `base/sessions/env_forwarding.py`, `base/sessions/backend.py`, `cli/commands/observability/logs.py`.
+Read [sessions](references/sessions.md) when inspecting session names, logs,
+environment forwarding, or shell survival. Agent termination alone does not
+end its shell sessions; cluster stop/restart can close them.
