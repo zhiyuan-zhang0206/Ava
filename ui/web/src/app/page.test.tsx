@@ -819,6 +819,27 @@ describe("pasted image routing", () => {
     );
     expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
   });
+
+  it("submits on private HTTP when randomUUID is unavailable", async () => {
+    const browserCrypto = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) });
+    try {
+      hooksState.activeId = 5;
+      hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
+      const image = new File(["png"], "paste.png", { type: "image/png" });
+      wrap(<HomePage />);
+      fireEvent.paste(screen.getByTestId("composer-paste-target"), {
+        clipboardData: { files: [image], types: ["Files"] },
+      });
+      await waitFor(() => expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(api.submitUploadedFiles).mock.calls[0][2]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 // ── Multi-command dispatch ──

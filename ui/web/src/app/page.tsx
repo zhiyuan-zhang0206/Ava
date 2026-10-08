@@ -1,5 +1,7 @@
 "use client";
 
+import { newOperationKey } from "@/lib/transport/operation-key";
+
 // Ava home page — three-column layout: agent sidebar on the left,
 // timeline + composer in the center, inspector panel on the right.
 //
@@ -297,7 +299,7 @@ function HomeContent({
       setUploadCount(files.length);
       setUploadError(null);
       try {
-        await api.submitUploadedFiles(activeId, files, crypto.randomUUID(), setUploadProgress);
+        await api.submitUploadedFiles(activeId, files, newOperationKey(), setUploadProgress);
       } catch (e: unknown) {
         setUploadError(errMsg(e));
       } finally {
