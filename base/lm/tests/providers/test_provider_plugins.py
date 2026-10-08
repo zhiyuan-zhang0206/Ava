@@ -52,6 +52,7 @@ _REPO_MODEL_VENDORS = {
     "claude-fable-5": "anthropic",
     "claude-fable-5-1": "anthropic",
     "claude-haiku-4-5-20251001": "anthropic",
+    "claude-haiku-5-5": "anthropic",
     "claude-opus-5": "anthropic",
     "claude-opus-5-fast": "anthropic",
     "claude-opus-5-5": "anthropic",

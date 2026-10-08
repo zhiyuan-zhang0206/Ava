@@ -327,6 +327,7 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "claude-sonnet-5",
         "claude-sonnet-5-5",
         "claude-haiku-4-5-20251001",
+        "claude-haiku-5-5",
         "claude-opus-5",
         "claude-opus-5-fast",
         "claude-opus-5-5",

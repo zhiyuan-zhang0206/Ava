@@ -685,3 +685,18 @@ def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
 
     assert ordinary.status_code == 200
     assert unmarked.status_code == (422 if path_template.endswith("/last-message") else 200)
+
+
+def test_get_models_haiku_55_picker_contract() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/models")
+    assert response.status_code == 200
+    models = response.json()["models"]
+    assert models["claude-haiku-5-5"]["reasoning_effort_default"] == "medium"
+    assert models["claude-haiku-5-5"]["reasoning_effort_options"] == [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]

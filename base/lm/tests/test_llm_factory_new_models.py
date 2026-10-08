@@ -124,3 +124,39 @@ class TestClaudeAlwaysOnBuilds:
             == f"{model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored"
             for r in loguru_records
         )
+
+
+class TestHaiku55Builds:
+    def test_default_adaptive_thinking_ignores_manual_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        monkeypatch.setattr(settings.lm, "claude_thinking_budget_tokens", 4096)
+        llm = build_chat_model("claude-haiku-5-5")
+        assert isinstance(llm, ChatAnthropic)
+        assert llm.max_tokens == 128_000
+        assert llm.effort == "medium"
+        assert llm.thinking == {"type": "adaptive", "display": "summarized"}
+
+    def test_disabled_thinking_is_preserved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        llm = build_chat_model("claude-haiku-5-5", thinking={"type": "disabled"})
+        assert isinstance(llm, ChatAnthropic)
+        assert llm.thinking == {"type": "disabled"}
+        assert llm.effort is None
+
+    @pytest.mark.parametrize("effort", ("low", "medium", "high", "xhigh", "max"))
+    def test_exact_effort_vocabulary(self, monkeypatch: pytest.MonkeyPatch, effort: str) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        monkeypatch.setattr(settings.lm, "reasoning_effort", effort)
+        llm = build_chat_model("claude-haiku-5-5")
+        assert isinstance(llm, ChatAnthropic)
+        assert llm.effort == effort
+
+    def test_manual_predecessor_none_is_not_adaptive_effort(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            build_chat_model("claude-haiku-5-5")
