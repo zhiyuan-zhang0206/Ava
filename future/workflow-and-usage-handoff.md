@@ -36,7 +36,7 @@ or deployment is performed by this contribution.
 - Usage script: explicit IDs, self/spawn/fork/mixed birth ancestry, timezone-aware
   windows, lifetime ledger + event tail, per-model usage, missing-price counts,
   and optional one-shot threshold messages to named peers. Accounting logic
-  moves from the Fleet reference script into `base/telemetry/usage.py`.
+  moves from the Fleet reference script into `base/telemetry/metrics/usage.py`.
 - Deliberate pause guidance: record partial artifacts, outstanding work, peer
   and watcher IDs, and the resume condition. Goal supervisors check this before
   nudging; orchestration scripts check before a new wave or script re-entry.

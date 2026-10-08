@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from base.db import Database
-from base.telemetry.usage import usage_report
+from base.telemetry.metrics.usage import usage_report
 
 
 def parse_time(value: str) -> datetime:
