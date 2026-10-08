@@ -96,22 +96,27 @@ async def create_and_launch_agent(
     # append-only and "latest" drifts under concurrent writes, so the gateway
     # resolves an explicit id before creating the row.
     fork_checkpoint = await asyncio.to_thread(agent_router.spawn_prechecks_blocking, body, pool)
-    new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
-        agent_router.create_agent_row,
-        db,
-        bus,
-        spawner=body.spawner,
-        fork_from=body.fork_from,
-        fork_checkpoint=fork_checkpoint,
-        machine=target,
-        config=body.config,
-        label=body.label,
-        preset_name=preset_name,
-        fork_tail_skills=tail_skills,
-        prompt=body.prompt,
-        prompt_source=body.prompt_source,
-        **arguments,
-    )
+    try:
+        new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
+            agent_router.create_agent_row,
+            db,
+            bus,
+            spawner=body.spawner,
+            fork_from=body.fork_from,
+            fork_checkpoint=fork_checkpoint,
+            machine=target,
+            config=body.config,
+            label=body.label,
+            preset_name=preset_name,
+            fork_tail_skills=tail_skills,
+            prompt=body.prompt,
+            prompt_source=body.prompt_source,
+            **arguments,
+        )
+    except CreationConflictError as exc:
+        if not snapshot:
+            raise
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if creation_key is not None and request_hash is not None:
         # A concurrent caller may have won after this caller's preflight. Its
         # committed placement/config/attempt are authoritative for recovery.

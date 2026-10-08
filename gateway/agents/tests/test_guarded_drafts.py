@@ -282,3 +282,33 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     replay = client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)
     assert replay.status_code == 200 and replay.json() == first.json()
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
+
+
+def test_concurrent_changed_raw_intents_conflict_in_birth_transaction(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from threading import Barrier
+    from typing import Any
+
+    original = agent_router.create_agent_row
+    gate = Barrier(2)
+
+    def race(*args: Any, **kwargs: Any):
+        gate.wait(timeout=10)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(agent_router, "create_agent_row", race)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                client.post, "/api/keyed/v1/guide/draft", json={"nl": text}, headers=HEADERS
+            )
+            for text in ("one", "different")
+        ]
+        responses = [future.result() for future in futures]
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
+    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
+    assert db_conn.execute("SELECT count(*) FROM agent_creation_snapshots").fetchone() == (1,)
