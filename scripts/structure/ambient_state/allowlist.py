@@ -227,14 +227,6 @@ CLOCK_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "clock")
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
 DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"
-# Log-throttle flags ("already warned" sets, last-emitted stamps). The warning/alert
-# pipeline is being redesigned as a whole; a one-off `warn_once` helper is not added
-# meanwhile, and the throttle code is untouched. Same key shape as ALLOWED -> reason.
-DEFERRED: dict[str, str] = {
-    f"{site}": DEFERRED_WARNING_REDESIGN
-    for site in (
-        "agent/graph/prompt/capabilities.py::ambient-container:_warned_unresolved",
-        "ava_builtins/plugins/ava_syntax_fix/_imports.py::hidden-singleton:_warn_ruff_missing_once",
-        "base/packages/plugins/enable_config.py::ambient-container:_dangling_reported",
-    )
-}
+# Deferred sites remain measured baseline debt, never exemptions. Warning-only
+# process-wide caches have been removed; no warning redesign is needed for them.
+DEFERRED: dict[str, str] = {}
