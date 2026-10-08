@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import LiteralString, cast
 
@@ -36,6 +37,7 @@ def dispatches(monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool) -> list[di
         active_ops: daemon.ActiveOps,
         workers: WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ) -> tuple[OpStatus, dict[str, object]]:
         assert pool is dispatch_pool
         calls.append({"kind": kind, "payload": payload})
@@ -56,16 +58,23 @@ def dispatches(monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool) -> list[di
     [("status_probe", {"target": 2}), ("lifecycle", {"target": 1})],
 )
 async def test_changed_kind_or_payload_fails_without_dispatch(
+    op_executor: ThreadPoolExecutor,
     pool: ConnectionPool,
     dispatches: list[dict[str, object]],
     kind: str,
     payload: dict[str, object],
 ) -> None:
     await daemon._dispatch_idempotent_pass(
-        "status_probe", {"target": 1}, "intent", pool, active_ops={}, workers=set()
+        "status_probe",
+        {"target": 1},
+        "intent",
+        pool,
+        active_ops={},
+        workers=set(),
+        executor=op_executor,
     )
     status, result = await daemon._dispatch_idempotent_pass(
-        kind, payload, "intent", pool, active_ops={}, workers=set()
+        kind, payload, "intent", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert status is OpStatus.FAILED
     assert "identity conflict" in str(result["error"])
@@ -73,19 +82,32 @@ async def test_changed_kind_or_payload_fails_without_dispatch(
 
 
 async def test_key_order_does_not_change_request_identity(
-    pool: ConnectionPool, dispatches: list[dict[str, object]]
+    op_executor: ThreadPoolExecutor, pool: ConnectionPool, dispatches: list[dict[str, object]]
 ) -> None:
     first = await daemon._dispatch_idempotent_pass(
-        "status_probe", {"a": 1, "b": 2}, "intent", pool, active_ops={}, workers=set()
+        "status_probe",
+        {"a": 1, "b": 2},
+        "intent",
+        pool,
+        active_ops={},
+        workers=set(),
+        executor=op_executor,
     )
     second = await daemon._dispatch_idempotent_pass(
-        "status_probe", {"b": 2, "a": 1}, "intent", pool, active_ops={}, workers=set()
+        "status_probe",
+        {"b": 2, "a": 1},
+        "intent",
+        pool,
+        active_ops={},
+        workers=set(),
+        executor=op_executor,
     )
     assert second == first
     assert len(dispatches) == 1
 
 
 async def test_effect_then_exception_keeps_uncertain_claim(
+    op_executor: ThreadPoolExecutor,
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
@@ -98,6 +120,7 @@ async def test_effect_then_exception_keeps_uncertain_claim(
         active_ops: daemon.ActiveOps,
         workers: WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ) -> tuple[OpStatus, dict[str, object]]:
         with pool.connection() as conn:
             conn.execute("INSERT INTO agents (label) VALUES ('effect-before-crash')")
@@ -107,10 +130,10 @@ async def test_effect_then_exception_keeps_uncertain_claim(
     monkeypatch.setattr(daemon, "_dispatch", crash)
     with pytest.raises(RuntimeError, match="after effect"):
         await daemon._dispatch_idempotent_pass(
-            "lifecycle", {}, "intent", pool, active_ops={}, workers=set()
+            "lifecycle", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
         )
     status, result = await daemon._dispatch_idempotent_pass(
-        "lifecycle", {}, "intent", pool, active_ops={}, workers=set()
+        "lifecycle", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
@@ -123,6 +146,7 @@ async def test_effect_then_exception_keeps_uncertain_claim(
 
 
 async def test_owner_cancellation_never_frees_its_key(
+    op_executor: ThreadPoolExecutor,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     dispatches: list[dict[str, object]],
@@ -137,6 +161,7 @@ async def test_owner_cancellation_never_frees_its_key(
         active_ops: daemon.ActiveOps,
         workers: WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ) -> tuple[OpStatus, dict[str, object]]:
         nonlocal calls
         calls += 1
@@ -147,7 +172,7 @@ async def test_owner_cancellation_never_frees_its_key(
     monkeypatch.setattr(daemon, "_dispatch", interrupted)
     owner = asyncio.create_task(
         daemon._dispatch_idempotent_pass(
-            "lifecycle", {}, "intent", pool, active_ops={}, workers=set()
+            "lifecycle", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
         )
     )
     await started.wait()
@@ -155,7 +180,7 @@ async def test_owner_cancellation_never_frees_its_key(
     with pytest.raises(asyncio.CancelledError):
         await owner
     status, result = await daemon._dispatch_idempotent_pass(
-        "lifecycle", {}, "intent", pool, active_ops={}, workers=set()
+        "lifecycle", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
@@ -163,22 +188,28 @@ async def test_owner_cancellation_never_frees_its_key(
 
 
 async def test_old_ops_receipt_does_not_expire_into_fresh_execution(
-    pool: ConnectionPool, db_conn: psycopg.Connection, dispatches: list[dict[str, object]]
+    op_executor: ThreadPoolExecutor,
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    dispatches: list[dict[str, object]],
 ) -> None:
     first = await daemon._dispatch_idempotent_pass(
-        "status_probe", {}, "intent", pool, active_ops={}, workers=set()
+        "status_probe", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
     )
     db_conn.execute("UPDATE api_idempotency SET completed_at=now()-interval '8 days'")
     db_conn.commit()
     second = await daemon._dispatch_idempotent_pass(
-        "status_probe", {}, "intent", pool, active_ops={}, workers=set()
+        "status_probe", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert second == first
     assert len(dispatches) == 1
 
 
 async def test_unknown_legacy_identity_fails_closed(
-    pool: ConnectionPool, db_conn: psycopg.Connection, dispatches: list[dict[str, object]]
+    op_executor: ThreadPoolExecutor,
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    dispatches: list[dict[str, object]],
 ) -> None:
     db_conn.execute(
         "INSERT INTO api_idempotency(key,method,path,op_status,response_body) "
@@ -186,7 +217,7 @@ async def test_unknown_legacy_identity_fails_closed(
     )
     db_conn.commit()
     status, result = await daemon._dispatch_idempotent_pass(
-        "status_probe", {}, "intent", pool, active_ops={}, workers=set()
+        "status_probe", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert status is OpStatus.FAILED
     assert "legacy identity unavailable" in str(result["error"])
@@ -194,7 +225,10 @@ async def test_unknown_legacy_identity_fails_closed(
 
 
 async def test_result_write_failure_keeps_claim_without_reexecuting(
-    pool: ConnectionPool, db_conn: psycopg.Connection, dispatches: list[dict[str, object]]
+    op_executor: ThreadPoolExecutor,
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    dispatches: list[dict[str, object]],
 ) -> None:
     db_conn.execute(
         "ALTER TABLE api_idempotency ADD CONSTRAINT reject_test_result "
@@ -204,13 +238,13 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
     try:
         with pytest.raises(psycopg.errors.CheckViolation):
             await daemon._dispatch_idempotent_pass(
-                "lifecycle", {}, "intent", pool, active_ops={}, workers=set()
+                "lifecycle", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
             )
     finally:
         db_conn.execute("ALTER TABLE api_idempotency DROP CONSTRAINT reject_test_result")
         db_conn.commit()
     status, result = await daemon._dispatch_idempotent_pass(
-        "lifecycle", {}, "intent", pool, active_ops={}, workers=set()
+        "lifecycle", {}, "intent", pool, active_ops={}, workers=set(), executor=op_executor
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
