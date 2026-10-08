@@ -4,8 +4,8 @@ The memory indexer is the pool's search side: it watches the gateway's
 consolidated checkout and keeps the memory search index current, which is what makes
 `ava.memory.search` — and therefore passive recall — return anything. It is
 declared here rather than hardcoded into `ops/roster/__init__.py` because the pool is this
-plugin's, end to end: disable ava_memory and there is no pool to index, no
-`ava.memory` to search it with, and now no daemon indexing it either.
+plugin's. Its host-scoped `indexer_enabled` config controls the daemon separately
+from whether agents inject the standing memory index into their prompts.
 
 Discovery keys on this plugin's code being PRESENT on the machine (see
 `ops.spec.plugin_services`), so the cluster-level on/off is the explicit gate
@@ -20,9 +20,11 @@ are read at use-time.
 
 from __future__ import annotations
 
-import os
+from functools import partial
 
+from ava_builtins.plugins.ava_memory.default_config import MemoryConfig
 from base.cluster.machine import MachineRole
+from base.packages.plugins.config_registration import disk_image_path, read_config_image
 from ops.roster import healthz_daemon
 from ops.roster.service_spec import ServiceSpec
 
@@ -33,25 +35,10 @@ from ops.roster.service_spec import ServiceSpec
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 
 
-def _memory_indexer_gate() -> str | None:
-    """Gate reason for memory-indexer, or None when it will start.
-
-    Indexing exists to serve recall and `ava.memory.search`. With the shared pool
-    not injected anywhere, the index has no consumer in this cluster, so the
-    daemon (and its embedding spend) is dead work — the same env switch that
-    silences the shared index switches it off.
-    """
-    # The toggle lives in the 'agent' config domain (AgentMemorySettings), which
-    # a gateway-profile process — the gateway watchdog evaluating this gate —
-    # does not construct (per-process config, Task #856): `settings.agent`
-    # raises there. Read the cluster-pinned env alias directly so the gate
-    # answers the same in every process kind (start enables the daemon, the
-    # watchdog revives it). ava_builtins is outside the lint-no-os-environ scan
-    # (plugin boundary), and this is the one read that cannot go through the
-    # per-profile Settings singleton.
-    inject = os.environ.get("AVA_MEMORY_INDEX_INJECT", "true")
-    if inject.strip().lower() in ("0", "false", "off", "no"):
-        return "disabled (AVA_MEMORY_INDEX_INJECT off — nothing consumes the index)"
+def _memory_indexer_gate(config: MemoryConfig) -> str | None:
+    """Gate the indexer from the validated host config, independently of agent injection."""
+    if not config.indexer_enabled:
+        return "disabled (ava_memory.indexer_enabled off)"
     return None
 
 
@@ -62,6 +49,8 @@ def services() -> tuple[ServiceSpec, ...]:
     cold-start-connects to) is preserved by `ops.spec.plugin_services()` folding plugin
     services onto the tail of the roster, well after the gateway group.
     """
+    config_path = disk_image_path("ava_memory")
+    config = read_config_image(MemoryConfig, config_path)
     return (
         healthz_daemon(
             "memory-indexer",
@@ -75,6 +64,7 @@ def services() -> tuple[ServiceSpec, ...]:
             # delivers the gateway login.
             requires_db=False,
             db_access="gateway",
-            gate=_memory_indexer_gate,
+            gate=partial(_memory_indexer_gate, config),
+            config_inputs=(config_path,),
         ),
     )
