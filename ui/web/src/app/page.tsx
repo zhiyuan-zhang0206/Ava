@@ -297,7 +297,7 @@ function HomeContent({
       setUploadCount(files.length);
       setUploadError(null);
       try {
-        await api.uploadFiles(activeId, files, setUploadProgress);
+        await api.submitUploadedFiles(activeId, files, crypto.randomUUID(), setUploadProgress);
       } catch (e: unknown) {
         setUploadError(errMsg(e));
       } finally {

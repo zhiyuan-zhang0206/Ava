@@ -9,8 +9,9 @@ tags: [gateway, uploads]
 
 `POST /api/keyed/v1/agents/{id}/uploads` requires a verified credential, explicit
 `principal-v1` and caller `Idempotency-Key`. It always promises one user chat
-**after** confirmed copy. No Browser/SDK/MCP activation or automatic legacy retry
-is included. Old gateways have no such write route; do not downgrade this intent
+**after** confirmed copy. Browser file delivery uses this route with one key per
+submission; silent native-image attachments retain their separate upload path.
+SDK/MCP callers are not activated. Old gateways have no such write route; do not downgrade this intent
 onto synchronous legacy `POST /api/agents/{id}/uploads`. Agent IDs must be
 positive signed BIGINT values, validated before native storage or database work.
 

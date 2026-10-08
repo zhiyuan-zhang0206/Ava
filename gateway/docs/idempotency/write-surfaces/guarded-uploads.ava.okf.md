@@ -12,8 +12,10 @@ tags: [gateway, idempotency]
 | `POST /api/agents/{agent_id}/uploads` | one-shot | optional keyed silent receipt only; delivered legacy copy/chat remain synchronous and cannot safely retry ambiguity |
 | `POST /api/keyed/v1/agents/{agent_id}/uploads` | keyed / transactional | required verified principal-v1/key; immutable source acceptance, versioned create-only copy and one retained native inbound outcome |
 
-No client activation or downgrade is included. Old consumers cannot effect the
-new path/kind. 202 reports historical source acceptance, not remote readiness or
+Browser file delivery submits one batch/key to the new route and validates its
+202 source receipt. There is no client Outbox, automatic resend or legacy fallback;
+silent native-image uploads and SDK/MCP consumers keep their existing paths.
+Old consumers cannot effect the new path/kind. 202 reports historical source acceptance, not remote readiness or
 agent execution. Retained status distinguishes pending retries from inspectable
 HOLD; there is no time-based reservation expiration or operator cancel endpoint.
 

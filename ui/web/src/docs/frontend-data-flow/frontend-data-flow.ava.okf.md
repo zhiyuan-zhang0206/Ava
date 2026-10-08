@@ -11,6 +11,16 @@ tags:
 
 Server data enters UI via React Query cache, kept live by SSE while visible; hidden pages leave the transport and reconcile when visible again. SSE connects directly to FastAPI (not through Next rewrites — Turbopack dev proxy buffers SSE).
 
+## Submitted uploads
+
+Ordinary file delivery submits one batch/key to
+`POST /api/keyed/v1/agents/{id}/uploads` with `principal-v1`. The upload ends after
+the matching 202 source receipt, before remote copy or agent execution; the
+Gateway recovery owner continues delivery. Byte progress is transport progress.
+`transport/upload-delivery.ts` rejects old/malformed receipts without resending
+or falling back. No client Outbox or retry UI is added. Silent native-image
+attachments retain `api.uploadFiles(..., deliver=false)` and their existing URLs.
+
 ## Stream ownership (`lib/sse-share.ts`)
 
 **HTTPS shares SSE when Web Locks and BroadcastChannel are available.** Each
