@@ -52,13 +52,17 @@ executed. Future effective windows are copied into the PR body for review.
 
 A weekly schedule (plus manual dispatch) runs `scripts/ci/dependency_audit.py`:
 `uv audit` over `uv.lock` (severity looked up in OSV, since its JSON carries
-none), `npm audit` over `ui/web`, and the version constants Ava downloads outside
-the lockfiles (zonky Postgres, pgvector, wal-g, otelcol-contrib, uv, Grafana)
+none), `npm audit` over `ui/web` using the canonical npm advisory registry, and
+the version constants Ava downloads outside the lockfiles (zonky Postgres,
+pgvector, wal-g, otelcol-contrib, uv, Grafana)
 against each upstream's newest release. One issue, found by its marker, is
 opened or updated while any advisory is high, critical or ungradable or any
 pin is behind, and closed on a clean run. The PR-time `dependency audit` job in
 `ci.yml` stays informational and never blocks. The report changes no pin:
-moving one is a dependency upgrade that needs approval.
+moving one is a dependency upgrade that needs approval. Package acquisition still
+uses its configured transport; only the audit's advisory request selects
+`https://registry.npmjs.org`. A registry/tool error is an incomplete failed run,
+never a clean report or permission to close the tracked issue.
 
 ## `workflows/audit-branch-protection.yml`
 
