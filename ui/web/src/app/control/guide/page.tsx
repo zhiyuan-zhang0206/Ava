@@ -1,7 +1,7 @@
 "use client";
 
 // /control#guide — the Ava Guide entry. Describe an operations task in natural
-// language and it spawns an ava-guide agent (POST /api/guide/draft), then jumps
+// language and it spawns an ava-guide agent (POST /api/keyed/v1/guide/draft), then jumps
 // to that conversation to finish it. Mirrors the Schedules page's writer entry:
 // the fixed prompt lives server-side and points at ava.skills.ava_guide (the
 // map for operating the cluster via the `ava` CLI — start/update, tracks, MCP
@@ -31,6 +31,7 @@ export default function GuidePage() {
 
   const draftMutation = useMutation({
     mutationFn: (text: string) => api.draftGuide(text),
+    retry: false,
     onSuccess: (res) => {
       setNl("");
       setActiveId(res.agent_id);
@@ -41,7 +42,7 @@ export default function GuidePage() {
   });
 
   const submit = () => {
-    if (nl.trim()) draftMutation.mutate(nl.trim());
+    if (nl.trim() && !draftMutation.isPending) draftMutation.mutate(nl.trim());
   };
 
   return (
