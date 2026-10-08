@@ -173,7 +173,7 @@ async def boot_agent_scope(agent_id: int, llm_model: str, overrides: ModelOverri
     waited for the init.
 
     Returns:
-        This agent's chat model.
+        This agent's chat model and the binding selected by the same build.
     """
     workspace_dir(agent_id)
     # When converge detected an unavailable desktop permission, notify once
@@ -182,6 +182,6 @@ async def boot_agent_scope(agent_id: int, llm_model: str, overrides: ModelOverri
     from .startup import notify_desktop_permissions_at_startup
 
     await notify_desktop_permissions_at_startup()
-    from base.lm.factory import build_chat_model
+    from base.lm.factory import build_chat_model_bound
 
-    return build_chat_model(llm_model, overrides=overrides)
+    return build_chat_model_bound(llm_model, overrides=overrides)
