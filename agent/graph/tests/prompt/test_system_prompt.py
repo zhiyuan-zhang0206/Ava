@@ -267,7 +267,9 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from ava_builtins.plugins.ava_fleet import plugin as fleet
+    from base.agents.sdk import call_policy
 
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", factory())

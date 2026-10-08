@@ -18,9 +18,11 @@ Transparency contract — the recorder MUST NOT perturb the SDK surface:
     and sets ``__wrapped__``, so ``inspect.signature`` (and therefore ``ava.help``)
     resolves the original signature byte-for-byte, and function-attached members
     (``ava.understand.UnderstandError``) survive via the ``__dict__`` copy.
-  - Pure side channel: metering failures are logged and never change the call's
-    arguments, return value, or exceptions. Lifecycle exceptions
-    (``AgentTermination`` / ``AgentRestart``) propagate untouched.
+  - A valid sampling policy is captured before the outer call executes. Invalid
+    configuration prevents execution; transient fetch failures may use its last
+    valid snapshot. Once admitted, event-sink failures are logged without changing
+    the call's return or exceptions, including lifecycle exceptions
+    (``AgentTermination`` / ``AgentRestart``).
 
 Every public call is metered, including bare Python, CLI and external attachments.
 Only outermost calls count, so SDK-internal fan-out does not inflate usage.
