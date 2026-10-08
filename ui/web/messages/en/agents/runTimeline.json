@@ -39,7 +39,7 @@
   "zoomOut": "Zoom out",
   "axisHybrid": "Token axis",
   "axisTime": "Time axis",
-  "axisModeTitle": "Token axis: block width follows tokens, gaps follow log idle time. Click for a plain time axis.",
+  "axisModeTitle": "Switch the x axis between plain time and a token axis (block width follows tokens, gaps follow log idle time).",
   "zoomReset": "Reset zoom",
   "drill": "Drill in",
   "timeSpan": "Time",
