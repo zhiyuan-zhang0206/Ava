@@ -19,7 +19,7 @@ from base.db import fetch_one, insert_spawn_prompt_in_transaction
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
-from ops.agents.creation_identity import recover_birth
+from ops.agents.creation_identity import record_creation_snapshot, recover_birth
 
 
 @dataclass(frozen=True)
@@ -211,6 +211,7 @@ def insert_agent_birth(
     fork_tail_skills: list[str] | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
+    immutable_creation_snapshot: bool = False,
 ) -> AgentBirth:
     """Write/replay the existing birth, first prompt, fork and audit in this transaction.
 
@@ -218,6 +219,8 @@ def insert_agent_birth(
     no new birth event, prompt event or prompt inbound id.
     """
     validate_spawn_args(spawner, fork_from, fork_checkpoint, prompt, prompt_source)
+    if immutable_creation_snapshot and (creation_key is None or creation_request_hash is None):
+        raise ValueError("creation snapshot requires keyed identity")
     # The gateway creates the row for ANY target (the runner's ops server runs
     # as ava_runner and cannot INSERT agents); the launch op re-checks the
     # agent-runner capability on the target itself.
@@ -227,7 +230,9 @@ def insert_agent_birth(
     launch_attempt_id = uuid4()
     prompt_inbound_id: int | None = None
     prompt_event: telemetry.Event | None = None
-    existing = recover_birth(conn, creation_key, creation_request_hash)
+    existing = recover_birth(
+        conn, creation_key, creation_request_hash, immutable_snapshot=immutable_creation_snapshot
+    )
     if existing is not None:
         return AgentBirth(
             existing.agent_id, existing.birth_config, None, existing.launch_attempt_id, None, None
@@ -270,6 +275,22 @@ def insert_agent_birth(
         prompt_content = spawn_prompt_with_label(prompt, label)
         prompt_inbound_id, prompt_event = insert_spawn_prompt_in_transaction(
             cur, new_id, prompt_content, prompt_source
+        )
+    if immutable_creation_snapshot:
+        if creation_key is None or creation_request_hash is None:
+            raise ValueError("creation snapshot requires keyed identity")
+        record_creation_snapshot(
+            conn,
+            key=creation_key,
+            request_hash=creation_request_hash,
+            agent_id=new_id,
+            machine=target_machine,
+            config=config,
+            birth_config=birth_config,
+            launch_attempt_id=launch_attempt_id,
+            prompt_inbound_id=prompt_inbound_id,
+            prompt_content=spawn_prompt_with_label(prompt, label) if prompt is not None else None,
+            prompt_source=prompt_source,
         )
     birth_event = record_birth_event(
         conn, new_id, spawner, fork_from, fork_checkpoint, target_machine

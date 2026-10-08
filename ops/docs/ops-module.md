@@ -90,3 +90,5 @@ post-commit announcement contract. Its cursor-owned SQL writer is
 `ops.agents.birth_transaction.insert_agent_birth`; see
 [creation transaction primitives](../../base/agents/tasks/docs/creation-transactions.ava.okf.md).
 The writer opens no connection, commits nothing and performs no launch.
+Guarded drafts opt in to a retained original birth snapshot in this same
+transaction; see [[gateway/agents/docs/guarded-drafts.ava.okf.md]].
