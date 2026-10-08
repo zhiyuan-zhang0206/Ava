@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage
 
 from base.agents.history.hierarchy.units import DisplayBlock
 from base.agents.history.message_tokens import MessageTokens, ai_message_parts, total_of
-from gateway.run_timeline.history import HistoryView
+from services.derived.insights.run_timeline.history import HistoryView
 
 # The AIMessage part each turn block shows.
 _TURN_PART = {"thinking": "reasoning", "text": "output", "call": "tool_call"}

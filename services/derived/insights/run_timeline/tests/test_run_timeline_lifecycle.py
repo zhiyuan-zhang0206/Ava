@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 from base.db import Database
-from gateway.run_timeline import _lifecycle
+from services.derived.insights.run_timeline import _lifecycle
 
 _INSERT: LiteralString = (
     "INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, source, "

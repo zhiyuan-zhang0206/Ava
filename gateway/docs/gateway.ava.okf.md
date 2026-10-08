@@ -66,7 +66,7 @@ Feature packages (routes + helpers + wire models):
 [[ops-surfaces.ava.okf.md|cluster]],
 [[gateway/events/docs/sse.ava.okf.md|events]],
 [[gateway/alerts/docs/alerts.ava.okf.md|alerts]],
-[[gateway/run_timeline/docs/run_timeline.ava.okf.md|run_timeline]],
+[[services/derived/insights/run_timeline/docs/run_timeline.ava.okf.md|run_timeline]] (proxied),
 [[gateway/inspect/docs/inspect.ava.okf.md|inspect]],
 [[gateway/schedules/docs/schedules.ava.okf.md|schedules]],
 [[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md|mcp_server]], `auth`, `lgtm`,

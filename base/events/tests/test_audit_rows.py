@@ -1,4 +1,4 @@
-"""`gateway.events.audit_rows` — reads of the audit record in the event stream's row shape."""
+"""`base.events.reads.audit_rows` — reads of the audit record in the event stream's row shape."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from gateway.events import audit_rows
+from base.events.reads import audit_rows
 
 
 def _record(
