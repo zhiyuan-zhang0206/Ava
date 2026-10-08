@@ -30,7 +30,7 @@ from base.native_process.turn_identity import (
     bind_native_work,
     bind_turn_identity,
 )
-from services.agent_runner.agent_host.native_work import settle_native_invocation
+from services.agent_runner.agent_host.invocation.native_work import settle_native_invocation
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )

@@ -19,7 +19,7 @@ from base.agents.incarnation.native_work_models import (
 from base.agents.messages.native_cancel import accept_native_cancel, finish_native_cancel
 from base.db.transaction import async_write_transaction
 from base.native_process.turn_identity import bind_native_work, bind_turn_identity
-from services.agent_runner.agent_host.native_work import (
+from services.agent_runner.agent_host.invocation.native_work import (
     cold_cancel_checkpoint,
     recover_native_cancel,
     settle_native_invocation,
@@ -173,7 +173,7 @@ async def test_lost_or_misaligned_pointer_holds_pending_original_command(
     missing: bool,
 ) -> None:
     pool: ConnectionPool
-    from services.agent_runner.agent_host.native_work import (
+    from services.agent_runner.agent_host.invocation.native_work import (
         NativeWorkContinuation,
         prepare_native_invocation,
     )

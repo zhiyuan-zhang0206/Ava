@@ -17,7 +17,7 @@ recovery-class exemption from the system-notice ruling, task #3687),
 INSERTed in the same transaction that terminates it, so a committed reap
 can never exist without its wake. The guarded resurrect attempt that
 consumes the wake lives one layer up
-(`services.agent_runner.agent_host.crash_recovery` — the agent layer does not reach the
+(`services.agent_runner.agent_host.recovery.crash` — the agent layer does not reach the
 ops layer); every attempt a refusal, a race, or a process death drops is
 retried by the delivery watchdog's terminated-owner resurrection retry
 until the chat's stale age gate dead-letters it.

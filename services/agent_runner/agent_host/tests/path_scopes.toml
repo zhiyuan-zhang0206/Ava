@@ -4,11 +4,9 @@
     "test_circuit_breaker.py",
     "test_maintenance_prior_failure.py",
     "test_maintenance_recovery.py",
-    "test_reconcile_after_abort.py",
 ]
 "tests.path_scoped.ava_tests" = [
 ]
 "tests.path_scoped.services_tests" = [
-    "test_crash_recovery.py",
     "test_turn_dispatcher.py",
 ]
