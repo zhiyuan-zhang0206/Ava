@@ -57,13 +57,9 @@ import type { NoticesFeed,
   ResolvedConfigView,
   RestartAgentResponse,
   ResurrectAgentResponse,
-  BuildProgressResponse,
-  BuildRequest,
-  BuildResponse,
   RunTimelineContext,
   RunTimelineMessages,
   RunTimelineResponse,
-  SessionsResponse,
   ShellCapture,
   SpawnAgentRequest,
   SpawnedAgent,
@@ -293,22 +289,6 @@ export const api = {
   // what that request's context held, with its session and time.
   getRunTimelineContext: (agentId: number, at: number): Promise<RunTimelineContext> => {
     return f(`/api/agents/${agentId}/run-timeline/context?at=${at}`).then(ok<RunTimelineContext>);
-  },
-
-  // The agent's sessions (stretches between two compactions) with their
-  // understanding coverage and the estimated cost of building the rest.
-  getAgentSessions: (agentId: number): Promise<SessionsResponse> => {
-    return f(`/api/agents/${agentId}/sessions`).then(ok<SessionsResponse>);
-  },
-
-  // Build the understanding tree of chosen sessions; `dry_run` plans and prices
-  // only and writes nothing.
-  postUnderstandingBuild: (agentId: number, body: BuildRequest): Promise<BuildResponse> => {
-    return f(`/api/agents/${agentId}/understanding/build`, POST_JSON(body)).then(ok<BuildResponse>);
-  },
-
-  getUnderstandingBuild: (agentId: number, buildId: number): Promise<BuildProgressResponse> => {
-    return f(`/api/agents/${agentId}/understanding/builds/${buildId}`).then(ok<BuildProgressResponse>);
   },
 
   // Raw messages `start..end` (inclusive stitched indices, the spans nodes and
