@@ -35,7 +35,7 @@ tags:
 - **Self** only injects `set_label` (declared as an `SdkMember` in `plugin.py`) — other members of core ava.self are not affected by this plugin; **Notify**'s `ui.notify` family is entirely declared by `plugin.py`
 - **Tasks** is implemented by `task_registry.py`, with update validation and database-write helpers in `_task_update.py`; the public registry remains the sub-module registered by the plugin
 - **Neighbors** and **Spawn** are `ava.agents` SDK core; the fleet plugin uses system prompts to let agents understand their usage conventions — the plugin itself does not register these methods (the only exception: the fleet-only `label=` parameter of `spawn` is added by `_spawn_with_label` monkeypatch)
-- **Task Maintenance** is a gateway-side daemon registered by this plugin into the ops service roster (overdue task reminders + escalation) — declared via `services()` in `plugins/ava_fleet/services.py` with `ServiceSpec`, discovered by `ops/spec.py:plugin_services()` based on plugin code "existence" and folded into single-source `build_services()`. Note it is a machine-level daemon, **its life/death is not determined by agent-side plugin enable/disable** (that is the agent surface aspect); the cluster-level switch is the explicit settings field `AVA_TASK_MAINTENANCE_ENABLED`. See [[task_maintenance.ava.okf.md|Task Maintenance]] for details
+- **Task Maintenance** is a gateway-side daemon registered by this plugin into the ops service roster (overdue task reminders + escalation) — declared via `services()` in `plugins/ava_fleet/services.py` with `ServiceSpec`, discovered by `ops/spec.py:plugin_services()` based on plugin code "existence" and folded into single-source `build_services()`. Note it is a machine-level daemon, **its life/death is not determined by agent-side plugin enable/disable** (that is the agent surface aspect); the host-owned gate is `FleetConfig.task_maintenance_enabled` in the plugin config image. See [[task_maintenance.ava.okf.md|Task Maintenance]] for details
 - **Skills**: the plugin also carries two skills (converge syncs to `~/.ava/skills/ava_fleet/`) — `ava_fleet` (fleet collaboration outline, default injected into system prompt allowlist) + `reduce-context-switch-for-human` (interrupt discipline, added in #620). See [[ava_builtins/plugins/ava_fleet/docs/skills/skills.ava.okf.md|Fleet Skills]] for details
 
 ## Two-layer Relationship
@@ -83,3 +83,13 @@ Turning that toggle off does not remove peer-delivery semantics.
 The core prompt owns general lifecycle and operating cost discipline, including
 for agents without Fleet. `ava-being-a-long-running-agent` supplies waiting,
 monitoring, recovery, and persistence procedures.
+
+## Configuration ownership
+
+`default_config.py` is the sole schema for the five Fleet policy fields: the host gate `task_maintenance_enabled`, cluster-pinned maintenance interval/backoff/escalation count, and cluster-pinned `reduce_context_switch`. Defaults and restart metadata remain unchanged; none accepts per-agent pins. The agent face reads its bound typed Fleet config; a runner receives cluster policy through the existing bootstrap snapshot, while host fields remain local. Gateway config images are cluster authority.
+
+The pure config face declares the non-secret Core dependency `daemon.notice_ttl_limit_seconds`; escalation validates that declaration at its read boundary. DB/Redis are existing explicit resources, not flags. This migration does not retire other plugins' global binding or guarantee that every existing Core read has been converted.
+
+Plugin writes reject invalid candidates and mixed-owner requests with `InvalidConfigOverlay` (panel 400). Only image CAS mismatches raise `PluginConfigChangedError` (panel 409). Both reject host RPC writes. Declaration, persisted-image, default and IO failures propagate unchanged.
+
+On upgrade, `ava plugins update` imports the five declared legacy env aliases into the Fleet image once, then removes only successfully adopted aliases. An existing conflicting image fails without discarding either value. Image commit and alias removal are separate writes: a failed removal leaves values available for a same-value retry. Before import, bootstrap/admin/direct daemon reads reject pending input; service discovery reports and propagates the error, aborting roster evaluation rather than skipping Fleet or starting with defaults. Pure readers never create a home. No deployment or real-home migration occurs as part of a repository merge.

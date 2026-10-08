@@ -41,6 +41,7 @@ def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
 ) -> None:
     """A split runner receives the raw key text from the gateway's `.env` file."""
     from base import config
+    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
 
     provider_plugin()
     _write_bootstrap_env(plugin_env, "TESTP_API_KEY=sk-x\n")
@@ -48,7 +49,7 @@ def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
     payload = config.bootstrap_config_values()
     assert payload["TESTP_API_KEY"] == "sk-x"
     valid = {config.field_alias(name) for name in config.BOOTSTRAP_FIELDS}
-    assert set(payload) <= valid | {"TESTP_API_KEY"}
+    assert set(payload) <= valid | {"TESTP_API_KEY", PLUGIN_CLUSTER_CONFIG_ENV}
 
 
 def test_bootstrap_omits_an_absent_plugin_key(

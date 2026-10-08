@@ -186,7 +186,7 @@ Capabilities rather than standing as its own section.
   generated watchers and schedules. Independent of the human guidance toggle.
 - **Reduce context switch for the human** —
   `ava_builtins/plugins/ava_fleet/agent_runtime.py:_reduce_context_switch_section`,
-  on by default via `settings.agent.reduce_context_switch` (env
+  on by default via the Fleet `reduce_context_switch` config image field (legacy env
   `AVA_REDUCE_CONTEXT_SWITCH`; user ruling 2026-09-20): the human-attention default
   every fleet agent carries — essential delivery and interruption semantics.
   Detailed label, task, delegation, lifecycle, cadence and roll-up procedures

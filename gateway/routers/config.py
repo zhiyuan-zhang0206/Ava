@@ -43,8 +43,11 @@ from base.cluster.machine import MachineRole, machine_name
 from base.config import env_override_values, field_domain, get_config_metadata, settings
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
+from base.config.admin.plugin_config import patch_owner, write_plugin_patch
 from base.host.env import runtime_config
 from base.host.env.audit import check_env_integrity
+from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
+from base.packages.plugins.config_registration import InvalidConfigOverlay
 from ops import host_config
 from ops.cluster import rpc as _cluster_rpc
 from ops.host_config import SENSITIVE_MASK
@@ -323,6 +326,7 @@ async def get_config(machine: str | None = None) -> ConfigView:
             fields.append(
                 ConfigFieldView(
                     name=meta.name,
+                    owner=meta.owner,
                     field_type=meta.field_type,
                     current_value=hf.value,
                     default_value=meta.default_value,
@@ -350,6 +354,7 @@ async def get_config(machine: str | None = None) -> ConfigView:
             fields.append(
                 ConfigFieldView(
                     name=meta.name,
+                    owner=meta.owner,
                     field_type=meta.field_type,
                     current_value=value,
                     default_value=meta.default_value,
@@ -590,13 +595,39 @@ async def _write_cluster_fields(
         ) from None
 
 
+async def _put_plugin(
+    owner: PluginConfigOwner, plan: ConfigPatchPlan, metas: dict[str, Any]
+) -> ConfigWriteResult:
+    """Persist a single schema-owned image, never partly write its host/cluster fields."""
+    writes, removals = split_reducer_patch(plan.host_body, metas)
+    writes.update(plan.cluster_writes)
+    removals.update(plan.cluster_removals)
+    try:
+        await asyncio.to_thread(write_plugin_patch, owner, writes, removals, expected_digest=None)
+    except InvalidConfigOverlay as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except PluginConfigChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    restart = sorted(
+        {metas[k].restart_required for k in set(writes) | removals if metas[k].restart_required}
+    )
+    return ConfigWriteResult(
+        results={k: ConfigFieldWriteResult(ok=True, reason=None) for k in set(writes) | removals},
+        applied=True,
+        restart_required=restart,
+    )
+
+
 @router.put("/api/config")
 async def put_config(
     request: Request, body: dict[str, object], machine: str | None = None
 ) -> ConfigWriteResult:
     """Merge a config patch for `machine` (default = this gateway) into `.env`,
-    scope-routed. Persist only — no restart (restart_required says which process
+    scope-routed, with one declaration owner per request. Persist only — no restart (restart_required says which process
     to restart).
+
+    Plugin fields commit one whole config image; mixed Core/plugin or multi-plugin
+    bodies fail before any write. Core fields retain their env writer.
 
     The body is parsed by `ConfigPatchPlan.parse` (shared with the host-side
     config_write_op): the editability gate, scope routing, the merge-patch
@@ -631,6 +662,12 @@ async def put_config(
     metas = {m.name: m for m in get_config_metadata()}
     plan = ConfigPatchPlan.parse(body, metas, is_remote=machine is not None)
     _reject_invalid_plan(plan)
+    try:
+        owner = patch_owner(set(body))
+    except InvalidConfigOverlay as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if owner is not None and machine is None:
+        return await _put_plugin(owner, plan, metas)
     has_cluster_patch = bool(plan.cluster_writes or plan.cluster_removals)
     if has_cluster_patch:
         _validate_cluster_candidate(plan, metas, local=machine is None)

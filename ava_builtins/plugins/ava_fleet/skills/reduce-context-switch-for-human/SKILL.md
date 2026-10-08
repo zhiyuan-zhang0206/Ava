@@ -9,7 +9,7 @@ Every push costs the human a context switch. When their attention is elsewhere, 
 
 Since 2026-09-20 this discipline is a platform default: every agent's system
 prompt carries its interruption boundary and notice replacement semantics, gated by
-`settings.agent.reduce_context_switch` (env `AVA_REDUCE_CONTEXT_SWITCH`,
+the Fleet image field `reduce_context_switch` (legacy input `AVA_REDUCE_CONTEXT_SWITCH`,
 default on). Reporting cadence, aggregation, and delivery procedures live here
 and load on demand. Read this skill as the full playbook behind those rules.
 

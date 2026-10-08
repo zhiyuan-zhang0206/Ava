@@ -60,8 +60,8 @@ def test_discovery_ignores_agent_enable_state(monkeypatch: pytest.MonkeyPatch) -
     """Roster discovery keys on plugin PRESENCE, not the agent-facing enable-state:
     even with every plugin marked disabled in plugins_config, task-maintenance is
     still in the roster — the machine roster must not depend on the
-    agent-plugin-registration plane. Its cluster-level on/off is the explicit
-    `AVA_TASK_MAINTENANCE_ENABLED` gate, exercised in
+    agent-plugin-registration plane. Its host-owned on/off is the explicit
+    Fleet config image gate, exercised in
     `test_plugin_gate_flows_through_annotation`."""
     from base.packages.plugins.enable_config import PluginEntry, PluginsConfig
 
@@ -78,7 +78,12 @@ def test_plugin_gate_flows_through_annotation(monkeypatch: pytest.MonkeyPatch) -
     """The plugin service's own gate is honored by ops: disabling task-maintenance
     drops it from the start roster but keeps it (with a reason) in the annotated
     view — same contract as the core config-gated services."""
-    monkeypatch.setattr(spec.settings.daemon, "task_maintenance_enabled", False)
+    from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
+    from base.packages.plugins.config_registration import disk_image_path
+
+    image = disk_image_path("ava_fleet")
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_text(FleetConfig(task_maintenance_enabled=False).model_dump_json())
     start = {s.session for s in spec.services_for_capabilities(frozenset({"gateway"}))}
     assert "task-maintenance" not in start
     annotated = {

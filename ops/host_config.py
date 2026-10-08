@@ -17,9 +17,12 @@ from typing import Any
 from base.cluster.machine import machine_name
 from base.config import env_override_values, field_domain, get_config_metadata
 from base.config.admin.candidate import validate_env_patch_for_write
-from base.config.admin.editing import field_editable, split_reducer_patch
+from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
+from base.config.admin.plugin_config import patch_owner, write_plugin_patch
 from base.host import config_validators
 from base.host.env import runtime_config
+from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
+from base.packages.plugins.config_registration import InvalidConfigOverlay
 from ops.rpc_schemas import (
     ConfigAuditReadResult,
     ConfigReadResult,
@@ -45,7 +48,8 @@ def config_read_op() -> ConfigReadResult:
     """
     metas = get_config_metadata()
     metas_by_name = {m.name: m for m in metas}
-    set_fields = runtime_config.env_set_field_names()
+    set_fields = set(runtime_config.env_set_field_names())
+    set_fields.update(env_override_values())
     overrides = env_override_values()
     host_fields: dict[str, HostConfigField] = {}
     for meta in metas:
@@ -104,6 +108,13 @@ def _field_verdicts(
         if value is None:
             # Explicit unset — no value to validate.
             results[field] = FieldWriteResult(ok=True, reason=None)
+            continue
+        if meta.owner is not None:
+            try:
+                coerce_config_scalar(meta.field_type, value, meta.choices)
+                results[field] = FieldWriteResult(ok=True, reason=None)
+            except (ValueError, TypeError):
+                results[field] = FieldWriteResult(ok=False, reason="invalid declared scalar")
             continue
         vr = config_validators.validate(field, value)
         results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
@@ -173,6 +184,26 @@ def _apply_patch(
     return applied, restart_required
 
 
+def _apply_plugin_patch(
+    owner: PluginConfigOwner,
+    overrides: dict[str, Any],
+    metas: dict[str, Any],
+    results: dict[str, FieldWriteResult],
+) -> tuple[bool, list[str]]:
+    """Commit one schema owner; report candidate or concurrent-write rejection."""
+    writes, removals = split_reducer_patch(overrides, metas)
+    typed = {
+        k: coerce_config_scalar(metas[k].field_type, v, metas[k].choices) for k, v in writes.items()
+    }
+    try:
+        write_plugin_patch(owner, typed, removals, expected_digest=None)
+    except (InvalidConfigOverlay, PluginConfigChangedError) as exc:
+        for field in overrides:
+            results[field] = FieldWriteResult(ok=False, reason=str(exc))
+        return False, []
+    return True, sorted({metas[f].restart_required for f in overrides if metas[f].restart_required})
+
+
 def config_write_op(
     overrides: dict[str, Any],
     *,
@@ -201,6 +232,15 @@ def config_write_op(
     gateway's PUT /api/config gate uses, so the two write paths cannot drift.
     """
     metas = {m.name: m for m in get_config_metadata()}
+    try:
+        owner = patch_owner(set(overrides))
+    except InvalidConfigOverlay as exc:
+        return ConfigWriteOpResult(
+            machine=machine_name(),
+            results={f: FieldWriteResult(ok=False, reason=str(exc)) for f in overrides},
+            applied=False,
+            restart_required=[],
+        )
 
     results = _field_verdicts(overrides, metas, local=local)
 
@@ -208,7 +248,9 @@ def config_write_op(
     applied = all(r.ok for r in results.values())
 
     restart_required: list[str] = []
-    if applied:
+    if applied and owner is not None:
+        applied, restart_required = _apply_plugin_patch(owner, overrides, metas, results)
+    elif applied:
         applied, restart_required = _apply_patch(
             overrides, metas, results, actor=actor, trace_id=trace_id
         )
