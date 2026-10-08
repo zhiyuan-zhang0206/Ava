@@ -515,6 +515,17 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/ui/contributions"): RouteContract(),
     # ── gateway/routers/uploads.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/uploads/{filename}"): RouteContract(),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/uploads"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="immutable source acceptance and delivery intent; native receiver and one retained inbound recover together; no client activation",
+    ),
+    ("GET", "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}"): RouteContract(),
+    (
+        "GET",
+        "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}/objects/{ordinal}",
+    ): RouteContract(),
     ("POST", "/api/agents/{agent_id}/uploads"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="save files to disk + enqueue inbound; a retry duplicates files",

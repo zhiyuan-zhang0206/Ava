@@ -55,6 +55,8 @@ def dispatch_sync(
     the hold's release and unrelated ops reachable.
     """
     match kind:
+        case "upload-receive-v1":
+            return _upload_arm(payload, pool)
         case "status_probe":
             return OpStatus.COMPLETED, cluster.cluster_status_op(db, pool).model_dump(mode="json")
         case "config_read":
@@ -82,7 +84,11 @@ def dispatch_sync(
             return OpStatus.COMPLETED, _agent_arm(kind, payload, pool)
         case "upload_receive":
             ur = UploadReceivePayload.model_validate(payload)
-            return OpStatus.COMPLETED, uploads.upload_receive_op(ur).model_dump(mode="json")
+            if pool is None:
+                raise RuntimeError("legacy upload receiver requires the native DB pool")
+            return OpStatus.COMPLETED, uploads.upload_receive_op(ur, pool=pool).model_dump(
+                mode="json"
+            )
         case _:
             return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
 
@@ -108,3 +114,40 @@ def _agent_arm(
             )
         case _:
             raise ValueError(f"not an agent arm: {kind!r}")
+
+
+def _upload_arm(
+    payload: dict[str, Any], pool: ConnectionPool | None
+) -> tuple[OpStatus, dict[str, object]]:
+    """Validate the new wire and classify only known immutable-copy refusals."""
+    from httpx2 import HTTPStatusError
+
+    from base.agents.upload_delivery.models import (
+        ReceiveRequest,
+        UploadDeliveryConflictError,
+        UploadQuotaExceededError,
+    )
+    from ops.upload_delivery import receive
+
+    if pool is None:
+        raise RuntimeError("immutable upload receiver requires the native DB pool")
+    request = ReceiveRequest.model_validate(payload)
+    try:
+        return OpStatus.COMPLETED, receive(pool, request).model_dump(mode="json")
+    except HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403, 404, 409}:
+            return OpStatus.FAILED, {
+                "error": "source object unavailable",
+                "reason": "upload-source-unavailable-v1",
+            }
+        raise
+    except UploadDeliveryConflictError:
+        return OpStatus.FAILED, {
+            "error": "immutable copy conflict",
+            "reason": "upload-copy-conflict-v1",
+        }
+    except UploadQuotaExceededError:
+        return OpStatus.FAILED, {
+            "error": "native quota exceeded",
+            "reason": "upload-copy-quota-v1",
+        }

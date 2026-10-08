@@ -316,7 +316,8 @@ async def test_dispatch_upload_receive_calls_upload_receive_op(
     dispatch_pool: ConnectionPool = _stub_pool()
     seen: dict[str, object] = {}
 
-    def _fake_receive(payload):
+    def _fake_receive(payload, *, pool=None):
+        assert pool is dispatch_pool
         seen["agent_id"] = payload.agent_id  # pyright: ignore[reportUnknownMemberType]
         seen["name"] = payload.name  # pyright: ignore[reportUnknownMemberType]
         return UploadReceiveResult(

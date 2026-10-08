@@ -38,7 +38,7 @@ receipt commits. Recovery validates present objects and fills missing ones. A
 disconnected old writer can only publish identical immutable bytes; no attempt
 replaces or deletes finals or cleans another attempt's staging.
 
-Quota admission counts receiving manifests once, excluding their already-published
+Quota admission uses `base.agents.upload_delivery.storage` for shared native physical-root inventory, including delivered hidden finals/reservations. It counts receiving manifests once, excluding their already-published
 finals from the disk baseline. Legacy admission shares the xact gate. Legacy
 writers have no durable reservation: DB disconnection followed by late file writes
 remains an uncovered quota window. Orphan staging and abandoned receiving
@@ -49,4 +49,4 @@ Browser silent uploads mint one key per `uploadFiles` invocation or accept an
 explicit reusable key. Cross-call recovery requires retaining that key and files;
 there is no browser outbox, persistence or automatic ambiguous retry. Upload
 progress measures transferred bytes, not committed acceptance. Remote pull,
-`deliver=true` notifications and their crash recovery remain outside this owner.
+`deliver=true` notifications remain legacy one-shot. The separate [guarded delivered owner](../../upload_delivery/docs/delivered-uploads.ava.okf.md) closes remote-copy and one-chat recovery without activating these consumers.
