@@ -42,18 +42,17 @@ Keyed standalone creation returns the original accepted Task snapshot on replay;
 see [[task_creation_receipts.ava.okf.md|Creation receipts]]. Query `get(task.id)`
 for current state.
 
-### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", remind_interval_seconds=None, operation_key=None, require_idempotency=False) -> (Task, int)`
+### `create_and_assign(title, description, *, operation_key, preset=None, label=None, config_overlay=None, machine=None, parent, priority="P2", remind_interval_seconds=None) -> (Task, int)`
 
-Spawn an agent and create a task assigned to it in one call: spawns per `preset`/`config_overlay` (the agent must exist to be an owner), then `create(owner=that agent)`—the task-tagged system note already carries task id + title + description. Returns `(task, agent_id)`.
+Accept the agent birth, task and initial assignment in one transaction. An explicit
+`operation_key` is required; reuse the same key and inputs to recover the original
+pair after a lost reply. The SDK uses only `/api/keyed/v1/task-assignments`.
+There is no opt-in flag or separate spawn/create recipe. A missing preset uses
+the gateway's current defaults rather than assuming a named preset exists.
 
-`require_idempotency=True` with an `operation_key` accepts birth/task/assignment
-atomically and replays the original pair. It requires a lease-free agent; the
-pair does not prove readiness. A key without opt-in is rejected. See
-[[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|Guarded compound task assignment]].
-
-### `get(task_id) -> Task`
-
-Return the task by id; raises `ValueError` if it does not exist. Read `description` before working; read `results` before reporting.
+Borrowed leases are refused before HTTP. `(Task, agent_id)` proves acceptance;
+read current task and agent state to observe execution and progress. Update
+`results` before reporting task completion.
 
 ### `list(*, parent=None, owner=None, status=None, recursive=False) -> list[Task]`
 
