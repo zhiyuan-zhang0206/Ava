@@ -15,11 +15,12 @@ import asyncio
 import hashlib
 import json
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -80,13 +81,14 @@ def _bearer(token: str) -> str:
 def test_the_generation_mints_distinct_class_tokens(gateway: Path) -> None:
     tokens = _tokens(gateway).api
     assert len({tokens.gateway, tokens.runner}) == 2
-    assert api.acceptance(gateway) == {
+    cache: api.AcceptanceCache = {}
+    assert api.acceptance(gateway, cache=cache) == {
         "gateway": api.token_digest(tokens.gateway),
         "runner": api.token_digest(tokens.runner),
     }
-    # Admission rewrites the ledger: the cached acceptance follows it.
+    # Admission rewrites the ledger: the caller-owned cache follows it.
     _unadmit(gateway)
-    assert api.acceptance(gateway) == {}
+    assert api.acceptance(gateway, cache=cache) == {}
 
 
 def test_no_ledger_or_no_active_generation_accepts_no_machine_token(
@@ -342,7 +344,9 @@ def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
 
 def _webhook_request(authorization: str | None) -> Request:
     headers = [] if authorization is None else [(b"authorization", authorization.encode())]
-    return Request({"type": "http", "headers": headers, "client": ("10.0.0.9", 5000)})
+    app = FastAPI()
+    app.state.machine_token_acceptance = {}
+    return Request({"type": "http", "app": app, "headers": headers, "client": ("10.0.0.9", 5000)})
 
 
 def test_webhooks_admit_the_active_generation_off_loopback(gateway: Path) -> None:
@@ -573,8 +577,53 @@ def test_the_telemetry_token_is_one_way_and_stable_per_secret() -> None:
         api.telemetry_token("")
 
 
-@pytest.fixture(autouse=True)
-def _fresh_acceptance_cache() -> Iterator[None]:
-    api._acceptance_cache.clear()
-    yield
-    api._acceptance_cache.clear()
+def test_acceptance_cache_reuses_only_its_owner_and_ledger_revision(gateway: Path) -> None:
+    first: api.AcceptanceCache = {}
+    second: api.AcceptanceCache = {}
+    accepted = api.acceptance(gateway, cache=first)
+    assert api.acceptance(gateway, cache=first) is accepted
+    assert api.acceptance(gateway, cache=second) == accepted
+    assert api.acceptance(gateway, cache=second) is not accepted
+    assert api.acceptance(gateway) == accepted
+    assert api.acceptance(gateway) is not accepted
+    _unadmit(gateway)
+    assert api.acceptance(gateway, cache=first) == {}
+    assert api.acceptance(gateway, cache=second) == {}
+
+
+def test_acceptance_cache_keeps_homes_separate_and_fails_closed_on_missing_ledger(
+    gateway: Path, tmp_path: Path, seed_write_generation: Callable[[Path], Any]
+) -> None:
+    other = (tmp_path / "other").resolve()
+    other.mkdir(mode=0o700)
+    seed_write_generation(other)
+    cache: api.AcceptanceCache = {}
+    accepted = api.acceptance(gateway, cache=cache)
+    other_accepted = api.acceptance(other, cache=cache)
+    assert accepted != other_accepted
+    _unadmit(other)
+    assert api.acceptance(other, cache=cache) == {}
+    assert api.acceptance(gateway, cache=cache) is accepted
+    ledger.ledger_path(gateway).unlink()
+    assert api.acceptance(gateway, cache=cache) == {}
+
+
+def test_changed_ledger_refusal_is_not_hidden_by_warm_acceptance(gateway: Path) -> None:
+    cache: api.AcceptanceCache = {}
+    assert api.acceptance(gateway, cache=cache)
+    ledger.ledger_path(gateway).write_text("invalid ledger")
+    with pytest.raises(ledger.LedgerRefusedError, match="corrupt"):
+        api.acceptance(gateway, cache=cache)
+
+
+def test_gateway_lifespans_own_independent_machine_acceptance_caches(gateway: Path) -> None:
+    from gateway.app import app
+
+    with TestClient(app):
+        first: api.AcceptanceCache = app.state.machine_token_acceptance
+        assert api.acceptance(gateway, cache=first)
+    with TestClient(app):
+        second: api.AcceptanceCache = app.state.machine_token_acceptance
+        assert second is not first
+        assert second == {}
+        assert api.acceptance(gateway, cache=second) == api.acceptance(gateway, cache=first)

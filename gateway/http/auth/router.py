@@ -20,6 +20,7 @@ from base.cluster.auth import (
     is_managed_browser_user_agent,
     session_cookie_header,
 )
+from base.cluster.authority.api import AcceptanceCache
 from base.cluster.rate_limit import LoginRateLimiter
 from base.config import settings
 from gateway.http.auth.cors import session_cookie_secure
@@ -109,7 +110,13 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
             retryable=False,
         )
 
-    mint = await asyncio.to_thread(login_mint, request.app.state.session_keys, password, secret)
+    mint = await asyncio.to_thread(
+        login_mint,
+        request.app.state.session_keys,
+        password,
+        secret,
+        cache=request.app.state.machine_token_acceptance,
+    )
     if mint is None:
         login_limiter.record_failure(ip)
         return error_response(
@@ -173,15 +180,18 @@ async def check(request: Request) -> JSONResponse:
         request.app.state.session_keys,
         token,
         settings.data_plane.cluster_secret,
+        cache=request.app.state.machine_token_acceptance,
     )
     return JSONResponse(content={"authenticated": fact is not None})
 
 
-def _sessions_that_authenticate(pool: Any, keys: SessionKeys, secret: str) -> list[dict[str, Any]]:
+def _sessions_that_authenticate(
+    pool: Any, keys: SessionKeys, secret: str, *, cache: AcceptanceCache | None = None
+) -> list[dict[str, Any]]:
     """Unrevoked, unexpired sessions whose mint is still admitted: the rows
     `current_session_fact` would accept. A rotated secret's sessions and ids without
     a mint are dead and omitted."""
-    admitted = session_mints(keys, secret)
+    admitted = session_mints(keys, secret, cache=cache)
     return [row for row in list_sessions(pool) if session_mint(row["id"]) in admitted]
 
 
@@ -204,6 +214,7 @@ async def sessions(request: Request) -> list[dict[str, Any]]:
         request.app.state.db_pool,
         request.app.state.session_keys,
         settings.data_plane.cluster_secret,
+        cache=request.app.state.machine_token_acceptance,
     )
     result: list[dict[str, Any]] = []
     for row in rows:
