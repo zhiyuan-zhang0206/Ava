@@ -12,8 +12,8 @@ the anchor below the viewport it scrolled by the anchor's whole displacement
 The paging request is triggered by reaching the top (auto-load, task #4186):
 scrolling up to scrollTop=0 with older pages remaining fires the fetch for
 the previous window — no control, no pull gesture. The request is slowed with
-a route delay so the user's continued scrolling happens while the fetch is
-in flight, deterministically.
+a paused route so the user's continued scrolling happens before the fetch is
+released, deterministically.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import time
 
 import httpx
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, Route
 
 from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
@@ -129,7 +129,12 @@ def _wait_landing(
 
 
 def _run_rounds(
-    page: Page, before_requests: list[str], init_n: int, agent_id: int, gateway_url: str
+    page: Page,
+    before_requests: list[str],
+    paused_routes: list[Route],
+    init_n: int,
+    agent_id: int,
+    gateway_url: str,
 ) -> int:
     """Round 1 uses the first top arrival (with the in-flight-scroll scenario);
     rounds 2+ leave the top and re-arrive — reaching the top auto-fires the
@@ -138,7 +143,7 @@ def _run_rounds(
     the estimate-based under-compensation lived. Returns the number of rounds
     completed."""
     sample_start = page.evaluate("window.__tl.samples.length")
-    _load_older_at_top(page, before_requests)
+    _load_older_at_top(page, before_requests, paused_routes)
     _wait_landing(page, init_n, 1, agent_id, gateway_url, before_requests)
     page.wait_for_timeout(1200)
     _assert_landing_holds(page, sample_start, 1)
@@ -185,11 +190,11 @@ def _run_rounds(
     return round_no
 
 
-def _load_older_at_top(page: Page, before_requests: list[str]) -> None:
+def _load_older_at_top(page: Page, before_requests: list[str], paused_routes: list[Route]) -> None:
     """Trigger load-older by reaching the top (auto-load, task #4186): scroll
     up to scrollTop=0 — the resulting scroll event fires the fetch for the
-    previous window. Then keep scrolling while the route-delayed fetch is in
-    flight."""
+    previous window. Keep that request paused until the in-flight user scroll
+    has completed."""
     page.evaluate(_SCROLL_UP_JS)
     deadline = time.monotonic() + 15.0
     while time.monotonic() < deadline:
@@ -199,18 +204,32 @@ def _load_older_at_top(page: Page, before_requests: list[str]) -> None:
         page.wait_for_timeout(100)
     assert page.evaluate("window.__tl.vp.scrollTop") == 0, "viewport never reached the top"
 
-    # Reaching the top fires the request; the route handler records it before
-    # its 2s delay, so its presence proves the trigger.
+    # Reaching the top fires the request. The route remains paused while
+    # Playwright dispatches the user scroll; a blocking callback would release
+    # the response before the test can move the viewport.
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline and not before_requests:
         page.wait_for_timeout(50)
     assert before_requests, "reaching the top never triggered the load-older request"
 
-    # The user keeps scrolling while the delayed fetch is in flight (the
+    assert len(paused_routes) == 1, "the first paging request was not held"
+    before_n = page.evaluate(
+        "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
+    )
+
+    # The user keeps scrolling while the paused fetch is in flight (the
     # #1272 yank happened exactly when the landing compensated against a
     # stale trigger-time position).
     page.evaluate("window.__tl.vp.scrollTop = 600")
     page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
+    assert page.evaluate("window.__tl.vp.scrollTop") == 600
+    assert (
+        page.evaluate(
+            "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
+        )
+        == before_n
+    ), "older history landed before the in-flight user scroll"
+    paused_routes.pop().continue_()
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.load_older:build")
@@ -218,18 +237,20 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     page = e2e_env.page
     agent_id = e2e_env.agent_id
 
-    # The failure mode needs the fetch in flight while the user keeps
-    # scrolling — delay only the scroll-up paging requests (they carry
-    # `before=`; the initial timeline load must stay fast).
+    # Pause the first older-page response until the user has scrolled. A
+    # blocking sleep in this sync callback cannot establish that ordering:
+    # the test resumes only after the callback has released the response.
     before_requests: list[str] = []
-    page.route(
-        re.compile(r"/api/agents/\d+/timeline\?.*before="),
-        lambda route: (
-            before_requests.append(route.request.url),
-            time.sleep(2.0),
-            route.continue_(),
-        ),
-    )
+    paused_routes: list[Route] = []
+
+    def pause_first_page(route: Route) -> None:
+        before_requests.append(route.request.url)
+        if len(before_requests) == 1:
+            paused_routes.append(route)
+        else:
+            route.continue_()
+
+    page.route(re.compile(r"/api/agents/\d+/timeline\?.*before="), pause_first_page)
 
     # Pin expanded rendering so the sampler can observe the exact child card
     # the reader sees inside a work block.
@@ -283,5 +304,7 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     init = page.evaluate(_SAMPLER_JS)
     assert init.get("ok"), init
 
-    rounds = _run_rounds(page, before_requests, init["n"], agent_id, e2e_env.gateway_url)
+    rounds = _run_rounds(
+        page, before_requests, paused_routes, init["n"], agent_id, e2e_env.gateway_url
+    )
     assert rounds >= 2, f"expected multiple load-older rounds, got {rounds}"

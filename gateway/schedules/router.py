@@ -30,9 +30,9 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
-from gateway import creation_receipts
 from gateway.agents.creation import CreationLaunchArguments, guarded_draft_key
 from gateway.agents.router import create_and_launch_agent
+from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import receipts, session_control
 from ops.rpc_schemas import SpawnAgentRequest
 

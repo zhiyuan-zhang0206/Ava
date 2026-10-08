@@ -34,7 +34,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
 from base.db.transaction import write_transaction
-from gateway import creation_receipts
+from gateway.routers.receipts import creation as creation_receipts
 
 router = APIRouter()
 
