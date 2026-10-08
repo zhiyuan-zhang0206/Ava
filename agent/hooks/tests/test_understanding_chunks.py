@@ -267,7 +267,7 @@ async def test_stamp_enqueues_the_closing_chunk_against_the_stamped_checkpoint(
     queue = _Queue()
     monkeypatch.setattr(uc, "enqueue_chunk", queue)
 
-    async def stamp(_pool: object, _thread_id: str) -> str:
+    async def stamp(_pool: object, _thread_id: str, *, closing: object = None) -> str:
         return "cp-7"
 
     monkeypatch.setattr(compact, "mark_compact_boundary", stamp)
@@ -295,7 +295,7 @@ async def test_failed_stamp_enqueues_no_closing_chunk(monkeypatch: pytest.Monkey
     queue = _Queue()
     monkeypatch.setattr(uc, "enqueue_chunk", queue)
 
-    async def stamp(_pool: object, _thread_id: str) -> str:
+    async def stamp(_pool: object, _thread_id: str, *, closing: object = None) -> str:
         raise RuntimeError("db down")
 
     monkeypatch.setattr(compact, "mark_compact_boundary", stamp)

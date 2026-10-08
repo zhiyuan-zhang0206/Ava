@@ -34,6 +34,7 @@ const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: numbe
   source: null,
   preview: kind,
   parent: null,
+  context_tokens: null, generation_tokens: null, estimated: null,
 });
 
 function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null) {

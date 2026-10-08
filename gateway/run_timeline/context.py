@@ -5,9 +5,8 @@ answers for the last request of the latest one. This reads the same breakdown fo
 the stitched history: the request is the first one at or after message index ``at`` (the last one
 when none follows), and its context is what the agent really sent — the segment's own head
 (system prompt) and every message of the segment before the request's AIMessage — bucketed by
-the same `compute_breakdown` the composer's panel uses, anchored to that request's provider
-`input_tokens`. The same module lists the requests (`llm_requests`) the timeline's context-size
-row draws.
+the same breakdown the composer's panel uses, from each message's own token count. The same module
+lists the requests (`llm_requests`) the timeline's context-size row draws.
 """
 
 from __future__ import annotations
@@ -16,8 +15,9 @@ from bisect import bisect_left, bisect_right
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage
 
+from gateway.agents.context_breakdown import request_breakdown
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.state import context_breakdown_response
 from gateway.run_timeline.history import HistoryView, HistoryViewCache
@@ -42,17 +42,10 @@ def llm_requests(view: HistoryView) -> list[RunTimelineRequest]:
                 ts=sent,
                 session=max(bisect_right(starts, idx) - 1, 0),
                 input_tokens=int(msg.usage_metadata["input_tokens"]),
+                output_tokens=int(msg.usage_metadata["output_tokens"]),
             )
         )
     return out
-
-
-def request_input(view: HistoryView, request: RunTimelineRequest) -> list[BaseMessage]:
-    """What the agent sent for `request`: its segment's head, then the segment's messages before it."""
-    history = view.history
-    head = history.segment_heads[request.session]
-    body = history.messages[history.segment_starts[request.session] : request.idx]
-    return [head, *body] if head is not None else body
 
 
 def request_at(requests: list[RunTimelineRequest], at: int) -> RunTimelineRequest | None:
@@ -76,8 +69,17 @@ def get_run_timeline_context(
     found = request_at(llm_requests(view), at)
     if found is None:
         raise HTTPException(status_code=404, detail="the agent has made no LLM request")
+    history = view.history
+    start = history.segment_starts[found.session]
     breakdown = context_breakdown_response(
-        request, agent_id, request_input(view, found), found.input_tokens
+        request,
+        agent_id,
+        request_breakdown(
+            history.segment_heads[found.session],
+            history.messages[start : found.idx + 1],
+            view.segments[found.session],
+            found.idx - start,
+        ),
     )
     return RunTimelineContext(
         **breakdown.model_dump(),
