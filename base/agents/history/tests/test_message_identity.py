@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from base.agents.history.delta_read_compat import (
     _areconstruct_in_recovery,
     _fold_history,
+    _ReadSpan,
     _wrap_history_identity_reads,
     areconstruct_delta_messages,
     reconstruct_delta_messages,
@@ -263,8 +264,8 @@ async def test_recovery_cache_hit_normalizes_newly_decoded_pending_writes() -> N
     second.checkpoint["id"] = first.checkpoint["id"]
     with recovery_reconstruction_scope(saver, "identity") as scope:
         assert scope is not None
-        await _areconstruct_in_recovery(saver, first, scope.generation)
-        await _areconstruct_in_recovery(saver, second, scope.generation)
+        await _areconstruct_in_recovery(saver, first, scope.generation, _ReadSpan())
+        await _areconstruct_in_recovery(saver, second, scope.generation, _ReadSpan())
     assert len(walks) == 1
     assert (
         second.checkpoint["channel_values"]["messages"][0].additional_kwargs[
