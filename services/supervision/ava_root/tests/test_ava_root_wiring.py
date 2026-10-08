@@ -150,11 +150,33 @@ async def test_failing_start_stops_the_already_started() -> None:
     assert first.events == ["start", "stop"]
 
 
-async def test_stop_failure_is_logged_not_raised() -> None:
+async def test_stop_failure_is_raised() -> None:
     class _BadStop:
         async def start(self) -> None: ...
 
         async def stop(self) -> None:
             raise RuntimeError("sad")
 
-    await stop_participants([_BadStop()])
+    with pytest.raises(ExceptionGroup, match="participants failed to stop") as caught:
+        await stop_participants([_BadStop()])
+    assert str(caught.value.exceptions[0]) == "sad"
+
+
+async def test_stop_attempts_every_participant_and_preserves_error_leaves() -> None:
+    order: list[str] = []
+    failures = [ValueError("first unknown"), RuntimeError("second unknown")]
+
+    class Participant:
+        def __init__(self, index: int) -> None:
+            self.index = index
+
+        async def start(self) -> None: ...
+
+        async def stop(self) -> None:
+            order.append(str(self.index))
+            raise failures[self.index]
+
+    with pytest.raises(ExceptionGroup) as caught:
+        await stop_participants([Participant(0), Participant(1)])
+    assert order == ["1", "0"]
+    assert caught.value.exceptions == (failures[1], failures[0])

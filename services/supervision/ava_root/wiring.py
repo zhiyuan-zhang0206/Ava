@@ -22,6 +22,7 @@ Contract (v1, W1.2e):
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import inspect
 import logging
@@ -62,6 +63,7 @@ class WiringContext:
     registry: UnitRegistry
     run_dir: Path
     log_dir: Path
+    participant_tasks: asyncio.TaskGroup | None = field(default=None, kw_only=True)
     resource_handlers: dict[str, ResourceHandler] = field(
         default_factory=dict[str, ResourceHandler]
     )
@@ -130,18 +132,24 @@ async def start_participants(
             if inspect.isawaitable(result):
                 await result
         except Exception as exc:
-            await stop_participants(started)
+            try:
+                await stop_participants(started)
+            except Exception as cleanup:
+                raise ExceptionGroup("wiring start and cleanup failed", [exc, cleanup]) from None
             raise WiringError(f"wiring participant failed to start: {exc}") from exc
         started.append(participant)
     return started
 
 
 async def stop_participants(started: Sequence[WiringParticipant]) -> None:
-    """Stop participants in reverse start order; a failing stop never blocks the rest."""
+    """Attempt every stop in reverse order, then raise all unexpected failures."""
+    failures: list[Exception] = []
     for participant in reversed(started):
         try:
             result = participant.stop()
             if inspect.isawaitable(result):
                 await result
-        except Exception:
-            _log.exception("wiring participant failed to stop")
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        raise ExceptionGroup("wiring participants failed to stop", failures)

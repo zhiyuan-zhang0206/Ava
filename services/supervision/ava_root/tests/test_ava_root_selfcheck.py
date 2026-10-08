@@ -200,14 +200,15 @@ def test_config_validation() -> None:
 
 
 async def test_loop_start_stop() -> None:
-    check = TreeSelfCheck(_StubHost([]), config=SelfCheckConfig(interval_s=0.02))
-    await check.start()
-    with pytest.raises(RuntimeError, match="already started"):
+    async with asyncio.TaskGroup() as tasks:
+        check = TreeSelfCheck(_StubHost([]), config=SelfCheckConfig(interval_s=0.02), tasks=tasks)
         await check.start()
-    await asyncio.sleep(0.06)
-    await check.stop()
-    assert cast(int, _chain(check)["rounds"]) >= 1
-    await check.stop()  # a second stop is a no-op
+        with pytest.raises(RuntimeError, match="already started"):
+            await check.start()
+        await asyncio.sleep(0.06)
+        await check.stop()
+        assert cast(int, _chain(check)["rounds"]) >= 1
+        await check.stop()  # a second stop is a no-op
 
 
 # -- integration against a real supervisor -------------------------------------

@@ -91,89 +91,118 @@ async def run(options: DaemonOptions) -> int:
     """Bring up one tree and serve until a stop signal arrives."""
     registry = load_manifests(options.manifests_path)
     lock_fd = acquire_instance_lock(options.run_dir)
-    log_dir = options.run_dir / "logs"
-    supervisor = Supervisor(registry, run_dir=options.run_dir)
-    context = WiringContext(
-        supervisor=supervisor,
-        registry=registry,
-        run_dir=options.run_dir,
-        log_dir=log_dir,
-    )
-    # Fail-fast, before any tree state exists: a broken wiring reference must
-    # refuse startup, not leave a half-wired daemon behind.
-    participants = load_wiring(options.wiring, context)
-    socket_path = options.run_dir / _SOCKET_NAME
-    stop = asyncio.Event()
-    retiring = False
-
-    def request_stop() -> None:
-        nonlocal retiring
-        retiring = True
-        stop.set()
-
-    async def dispatch(request: RequestPayload) -> ResponsePayload:
-        if request["verb"] == Verb.SHUTDOWN:
-            return ok_response({"shutdown_requested": True})
-        if retiring and request["verb"] in {Verb.UP, Verb.RESTART, Verb.RESOURCE}:
-            return error_response(ErrorCode.INVALID_REQUEST, "root is stopping; admission closed")
-        if request["verb"] == Verb.RESOURCE:
-            if "name" not in request or "payload" not in request:
-                return error_response(ErrorCode.INVALID_REQUEST, "resource fields missing")
-            handler = context.resource_handlers.get(request["name"])
-            if handler is None:
-                return error_response(ErrorCode.INVALID_REQUEST, "resource operation unavailable")
-            try:
-                return ok_response(await handler(request["payload"]))
-            except RuntimeError as exc:
-                return error_response(ErrorCode.INVALID_REQUEST, str(exc))
-        return await supervisor.dispatch(request)
-
-    def after_response(request: RequestPayload) -> None:
-        if request["verb"] == Verb.SHUTDOWN:
-            request_stop()
-
-    server = ControlServer(socket_path, dispatch, after_response=after_response)
-    loop = asyncio.get_running_loop()
-
-    for signum in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(signum, request_stop)
-    # SIGHUP does not reload anything; ignoring it keeps a stray terminal
-    # hangup from killing the tree; release replacement is an outer-owner action.
-    loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
-    started: list[WiringParticipant] = []
-    try:
-        await supervisor.start()
-        await server.start()
-        started = await start_participants(participants)
-        _log.info(
-            "ava-root ready: %d unit(s), socket %s, %d wired participant(s)",
-            len(registry.units),
-            socket_path,
-            len(started),
+    async with asyncio.TaskGroup() as participant_tasks:
+        log_dir = options.run_dir / "logs"
+        supervisor = Supervisor(registry, run_dir=options.run_dir)
+        context = WiringContext(
+            supervisor=supervisor,
+            registry=registry,
+            run_dir=options.run_dir,
+            log_dir=log_dir,
+            participant_tasks=participant_tasks,
         )
-        await stop.wait()
-    finally:
-        # Participants first: their loops touch the tree, so they stop while it
-        # (and the control server) still exist. A failing stop never blocks the
-        # tree shutdown below.
-        await _finish(started, server, supervisor, lock_fd)
-    return 0
+        # Fail-fast, before any tree state exists: a broken wiring reference must
+        # refuse startup, not leave a half-wired daemon behind.
+        participants = load_wiring(options.wiring, context)
+        socket_path = options.run_dir / _SOCKET_NAME
+        stop = asyncio.Event()
+        retiring = False
+
+        def request_stop() -> None:
+            nonlocal retiring
+            retiring = True
+            stop.set()
+
+        async def dispatch(request: RequestPayload) -> ResponsePayload:
+            if request["verb"] == Verb.SHUTDOWN:
+                return ok_response({"shutdown_requested": True})
+            if retiring and request["verb"] in {Verb.UP, Verb.RESTART, Verb.RESOURCE}:
+                return error_response(
+                    ErrorCode.INVALID_REQUEST, "root is stopping; admission closed"
+                )
+            if request["verb"] == Verb.RESOURCE:
+                if "name" not in request or "payload" not in request:
+                    return error_response(ErrorCode.INVALID_REQUEST, "resource fields missing")
+                handler = context.resource_handlers.get(request["name"])
+                if handler is None:
+                    return error_response(
+                        ErrorCode.INVALID_REQUEST, "resource operation unavailable"
+                    )
+                try:
+                    return ok_response(await handler(request["payload"]))
+                except RuntimeError as exc:
+                    return error_response(ErrorCode.INVALID_REQUEST, str(exc))
+            return await supervisor.dispatch(request)
+
+        def after_response(request: RequestPayload) -> None:
+            if request["verb"] == Verb.SHUTDOWN:
+                request_stop()
+
+        server = ControlServer(socket_path, dispatch, after_response=after_response)
+        loop = asyncio.get_running_loop()
+
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(signum, request_stop)
+        # SIGHUP does not reload anything; ignoring it keeps a stray terminal
+        # hangup from killing the tree; release replacement is an outer-owner action.
+        loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
+        started: list[WiringParticipant] = []
+        try:
+            await supervisor.start()
+            await server.start()
+            started = await start_participants(participants)
+            _log.info(
+                "ava-root ready: %d unit(s), socket %s, %d wired participant(s)",
+                len(registry.units),
+                socket_path,
+                len(started),
+            )
+            await stop.wait()
+        except Exception as primary:
+            try:
+                await _finish(started, server, supervisor, lock_fd)
+            except Exception as cleanup:
+                raise ExceptionGroup(
+                    "root operation and teardown failed", [primary, cleanup]
+                ) from None
+            raise
+        except BaseException:
+            await _finish(started, server, supervisor, lock_fd)
+            raise
+        else:
+            # Participants first: their loops touch the tree, so they stop while it
+            # (and the control server) still exist. A failing stop never blocks the
+            # tree shutdown below.
+            await _finish(started, server, supervisor, lock_fd)
+        return 0
 
 
 async def _finish(
     started: list[WiringParticipant], server: ControlServer, supervisor: Supervisor, lock_fd: int
 ) -> None:
     """Attempt each owned teardown once, releasing the singleton even on failure."""
+    failures: list[Exception] = []
     try:
-        await stop_participants(started)
+        try:
+            await stop_participants(started)
+        except Exception as exc:
+            failures.append(exc)
     finally:
         try:
-            await server.close()
+            try:
+                await server.close()
+            except Exception as exc:
+                failures.append(exc)
         finally:
             try:
-                await supervisor.shutdown()
+                try:
+                    await supervisor.shutdown()
+                except Exception as exc:
+                    failures.append(exc)
             finally:
                 release_instance_lock(lock_fd)
+    if failures:
+        raise ExceptionGroup("root teardown failed", failures)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

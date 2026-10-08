@@ -38,6 +38,16 @@ assembly shares that path.
 `RootHealthRounds` drives one service health round and the independent
 [[services/supervision/ava_root_glue/docs/diagnostics.ava.okf.md|diagnostic roster]]. Diagnostic
 failures never acquire service or native-resource lifecycle authority.
+The daemon owns a lexical `asyncio.TaskGroup` for wired participants and supplies
+it through `WiringContext.participant_tasks`. The assembly injects that group
+into each monitor; their public `start()` / `stop()` contract stays unchanged.
+Unknown round failures propagate to the daemon and produce a nonzero exit.
+Stop attempts every participant in reverse order, then raises all stop failures;
+the daemon still closes the control socket and attempts the tree shutdown once.
+Primary failures and concrete shutdown refusals retain their exception leaves.
+Child-exit watchers retain their separate supervisor ownership so participant
+failure does not cancel native exit observation before bounded child teardown.
+
 `TreeSelfCheck` separately checks process-tree integrity. Their snapshots attach
 to root status; deployment drills can assemble the generic monitors without the
 host diagnostic roster.
