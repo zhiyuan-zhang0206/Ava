@@ -210,8 +210,8 @@ class HealthMonitor:
     """One probe round over every registered unit, acting per policy.
 
     Rounds run sequentially — one round is a bounded stream of probes — and each
-    unit is isolated: a probe failure, resolution error, or restart error in one
-    unit never aborts the round for the others. Per-unit state lives in this
+    unit reports expected probe unavailability as a verdict. Unexpected round
+    errors propagate to the root lifecycle. Per-unit state lives in this
     process; a fresh process starts without observation history.
     """
 
@@ -221,6 +221,7 @@ class HealthMonitor:
         registry: ProbeRegistry,
         *,
         config: HealthConfig | None = None,
+        tasks: asyncio.TaskGroup | None = None,
         gate: HealthGate | None = None,
         startup_graces: Mapping[str, float] | None = None,
     ) -> None:
@@ -234,17 +235,12 @@ class HealthMonitor:
         self._units: dict[str, UnitHealth] = {}
         self._runners: dict[str, ProbeRunner] = {}
         self._task: asyncio.Task[None] | None = None
+        self._tasks = tasks
 
     async def run_round(self) -> None:
         """Probe every unit once, in registration order."""
         for unit_id in self._registry.unit_ids():
-            try:
-                await self._check_unit(unit_id)
-            except Exception as exc:
-                state = self._unit_state(unit_id)
-                state.last_verdict = "unavailable"
-                state.last_detail = f"health round raised {type(exc).__name__}: {exc}"
-                _log.exception("[health] unit %s: round failed; continuing", unit_id)
+            await self._check_unit(unit_id)
         self._report_failure_states()
 
     def _report_failure_states(self) -> None:
@@ -283,7 +279,9 @@ class HealthMonitor:
         """Run rounds until `stop()` — sleep first, then one round per interval."""
         if self._task is not None:
             raise RuntimeError("health monitor already started")
-        self._task = asyncio.create_task(self._loop())
+        if self._tasks is None:
+            raise RuntimeError("monitor requires the root participant task group")
+        self._task = self._tasks.create_task(self._loop())
 
     async def stop(self) -> None:
         """Stop the round loop; safe to call when not started."""
@@ -340,13 +338,7 @@ class HealthMonitor:
         # quiesce-exempt: probes service health endpoints and process state; no database
         while True:
             await asyncio.sleep(self._config.interval_s)
-            try:
-                await self.run_round()
-            except Exception:
-                # `run_round` isolates per unit; this catches a defect in the
-                # round itself. A dead loop would stop health checks silently,
-                # so the loop survives its own bug — loudly.
-                _log.exception("[health] round raised; continuing")
+            await self.run_round()
 
     # ── one unit ─────────────────────────────────────────────────────────────
 

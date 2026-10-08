@@ -128,7 +128,12 @@ class RootHealthRounds:
     """Own one cadence for service recovery and diagnostics, plus truthful freshness."""
 
     def __init__(
-        self, health: HealthMonitor, diagnostics: DiagnosticMonitor, *, interval_s: float = 60.0
+        self,
+        health: HealthMonitor,
+        diagnostics: DiagnosticMonitor,
+        *,
+        interval_s: float = 60.0,
+        tasks: asyncio.TaskGroup | None = None,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("root health interval must be positive")
@@ -138,6 +143,7 @@ class RootHealthRounds:
         self._diagnostics = diagnostics
         self._interval_s = interval_s
         self._task: asyncio.Task[None] | None = None
+        self._tasks = tasks
         self._expected_since: float | None = None
         self._last_completed: float | None = None
 
@@ -169,6 +175,8 @@ class RootHealthRounds:
     async def start(self) -> None:
         if self._task is not None:
             raise RuntimeError("root health rounds already started")
+        if self._tasks is None:
+            raise RuntimeError("root health rounds require the participant task group")
         from base.log import init_gateway_process, logger
 
         init_gateway_process(name="ava-root")
@@ -180,16 +188,12 @@ class RootHealthRounds:
             home_id=self._home_id,
             expected_since_timestamp_seconds=self._expected_since,
         )
-        self._task = asyncio.create_task(self._loop())
+        self._task = self._tasks.create_task(self._loop())
 
     async def _loop(self) -> None:
         # quiesce-exempt: samples process diagnostics; no database
         while True:
-            try:
-                await self.run_round()
-            except Exception:
-                # A failed coordinator never records a completed round.
-                _log.exception("root health round failed")
+            await self.run_round()
             await asyncio.sleep(self._interval_s)
 
     async def stop(self) -> None:
