@@ -9,6 +9,12 @@ whole job for a role is to name that card in `skills_to_expand_at_start`.
 split into resources. Read it first. This page is only what is different about a
 role.
 
+Keep the role's evaluation cases and metrics with the card, following the shared
+[evaluation contract](../../../skill-creator/references/evaluation.md). Test
+standing instructions on concrete missions, then evaluate the complete preset
+that loads them. The evaluator owns expected results and grades; the role does
+not preload its evaluation files as instructions.
+
 ## Three pieces, three lifetimes
 
 | Piece | Carries | Where it lives |
@@ -98,8 +104,11 @@ points at it, and check the name against `ava.help(ava.skills)`.
 ```
 $AVA_HOME/skills/be-a-product-manager/
 ├── SKILL.md
-└── references/
-    └── <where-it-came-from>.md      # the external prompt, verbatim
+├── references/
+│   └── <where-it-came-from>.md      # permitted source material or provenance
+└── evals/
+    ├── evals.json                 # mission cases and expected outcomes
+    └── metrics.md                 # measures and acceptance criteria
 ```
 
 ```markdown

@@ -1,0 +1,57 @@
+{
+  "skill_name": "skill-creator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create an Ava skill named invoice-checker that validates invoice CSV totals before import and reports incorrect rows without changing the input. Use this example to prepare fixtures: invoice_id,quantity,unit_price,total\nA-17,2,50,120\nA-18,3,10,30. Work only in the supplied scratch directory; there is no live Ava runtime or MCP connection. Save the skill and its evaluation deliverables, and state what has actually been verified.",
+      "files": [],
+      "expected_output": "A focused invoice-checker skill, saved cases and metrics grounded in the CSV, a no-skill baseline plan, and an honest incomplete behavioral evaluation report.",
+      "assertions": [
+        "The skill preserves input data and limits its workflow to invoice validation.",
+        "The saved cases include the incorrect A-17 row and correct A-18 row with usable fixtures.",
+        "Metric definitions identify observable correctness checks and acceptance criteria.",
+        "The new-skill baseline uses the same task without invoice-checker available.",
+        "The report distinguishes static checks from unexecuted agent runs and does not invent results."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Improve only the discovery description of an existing Ava skill named invoice-checker. Its current description is: 'Processes CSV files. Use whenever the user mentions spreadsheets, data, invoices, or reports.' Its body is: 'Validate invoice CSV totals before import. Report incorrect rows and leave the source unchanged.' It keeps firing when users ask to sort a customer mailing list. Keep the name and workflow body, snapshot the old version, and save discovery cases and metrics. Use only the supplied scratch directory; no agent runner is available.",
+      "files": [],
+      "expected_output": "A description scoped to invoice validation, a preserved body and old-version snapshot, positive and adjacent negative discovery cases, and an unexecuted comparison plan.",
+      "assertions": [
+        "The name and workflow body are preserved.",
+        "The revised description scopes activation to checking invoice data rather than all CSV or spreadsheet work.",
+        "Discovery cases cover invoice validation and customer-list sorting without explicitly naming or preloading the tested skill.",
+        "Metrics define both missed activations and false activations with denominators.",
+        "The old version is retained as the baseline and no trigger-rate improvement is claimed without runs."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Create a reusable Ava skill named release-note-editor for rewriting product release notes in a calm, factual voice. It must preserve supplied product facts and avoid inventing features. Example source: 'Export is now available as CSV. Export supports up to 500 rows. It is currently enabled for paid accounts.' Prepare an evaluation that covers both factual fidelity and writing quality. Work only in the supplied scratch directory, with no live runner.",
+      "files": [],
+      "expected_output": "A focused editing skill with saved source-based cases, factual checks, an anchored style rubric, and a no-skill baseline plan; style is assessed without a fabricated exact answer.",
+      "assertions": [
+        "The skill preserves the CSV, 500-row, and paid-account facts and prohibits unsupported features.",
+        "The saved case contains the raw source text and identifies factual fidelity checks.",
+        "The style metric has named dimensions and concrete scoring anchors.",
+        "The evaluation does not require one exact wording to pass a subjective style check.",
+        "The handover identifies the baseline, artifact locations, and unexecuted behavioral checks."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "A YAML validator passed for my new budget-summary skill. The skill reads a household spending CSV and summarizes category totals. I cannot run an agent or access its production tools today. Help finish the evaluation deliverables in the supplied scratch directory and tell me whether the skill is validated. No behavioral runs or benchmark results exist.",
+      "files": [],
+      "expected_output": "Saved task cases, correctness measures, a no-skill baseline, and a report that treats behavioral evaluation as incomplete despite successful format validation.",
+      "assertions": [
+        "The evaluation includes a concrete spending fixture with checkable category totals.",
+        "Metrics define task correctness and acceptance criteria.",
+        "The baseline and execution gap are recorded.",
+        "The report does not mark unexecuted checks as passed or unavailable measurements as zero.",
+        "The candidate is reported as a draft pending behavioral evaluation."
+      ]
+    }
+  ]
+}
