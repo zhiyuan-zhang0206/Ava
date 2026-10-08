@@ -13,8 +13,9 @@ tags:
 An **authoring and evaluation method** for Ava skills
 (`$AVA_HOME/skills/skill-creator/`), informed by Anthropic and OpenAI and adapted
 to Ava's tools. `SKILL.md` carries the concise workflow;
-`references/evaluation.md` owns the shared evaluation contract for skills and
-presets. `evals/evals.json` and `evals/metrics.md` carry the creator's own
+`../ava-guide/references/evaluation.md` is the single shared evaluation contract
+for skills and presets, bundled in Guide for complete external publication.
+`evals/evals.json` and `evals/metrics.md` carry the creator's own
 authoring cases and grading definitions. Run artifacts stay outside the package.
 
 `references/audit.md` owns catalog-audit criteria and primary guidance.

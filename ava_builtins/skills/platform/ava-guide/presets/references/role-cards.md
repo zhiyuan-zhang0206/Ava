@@ -10,7 +10,7 @@ split into resources. Read it first. This page is only what is different about a
 role.
 
 Keep the role's evaluation cases and metrics with the card, following the shared
-[evaluation contract](../../../skill-creator/references/evaluation.md). Test
+[evaluation contract](../../references/evaluation.md). Test
 standing instructions on concrete missions, then evaluate the complete preset
 that loads them. The evaluator owns expected results and grades; the role does
 not preload its evaluation files as instructions.

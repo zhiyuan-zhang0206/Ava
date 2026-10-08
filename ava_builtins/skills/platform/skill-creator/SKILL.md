@@ -8,7 +8,7 @@ description: Creates, improves, and evaluates Ava skills. Use when authoring a s
 Create reusable guidance that improves Ava's work on a specific job. Deliver
 the skill together with evaluation cases, metrics, and evidence. Adapt the
 authoring and evaluation methods of Anthropic and OpenAI to Ava's actual tools;
-the [evaluation reference](references/evaluation.md) records the sources.
+the [evaluation reference](../ava-guide/references/evaluation.md) records the sources.
 
 ## What belongs in a skill
 
@@ -59,7 +59,7 @@ design. Read relevant examples, dependencies, and current tool documentation.
 Before drafting, define observable success and acceptance criteria. A subjective
 job still needs a case and an anchored quality rubric; it does not need a fake
 binary answer key. For every new skill or behavior change, read
-[evaluation](references/evaluation.md) and save the case set, metrics, and
+[evaluation](../ava-guide/references/evaluation.md) and save the case set, metrics, and
 baseline choice. A wording-only correction can retain the existing plan and
 verify the affected behavior.
 
@@ -99,7 +99,7 @@ instruction change. When comparing models, record that model choice is the
 changed variable.
 
 Use the available agent execution surface within the user's authorized scope.
-The [evaluation reference](references/evaluation.md) explains evidence capture,
+The [evaluation reference](../ava-guide/references/evaluation.md) explains evidence capture,
 grading, trigger tests, and Ava's existing replay tools. It does not provide a
 new automatic runner. If execution or isolation is unavailable, save the plan
 and report the missing check; do not claim a behavioral pass from a file lint.

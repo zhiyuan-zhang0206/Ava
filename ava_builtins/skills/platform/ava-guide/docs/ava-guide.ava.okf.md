@@ -53,6 +53,12 @@ Maker. `ava-self-development` and `impersonator-guide`
 remain project-local contributor/executor manuals. Guide membership changes
 neither kernel contribution requirements nor operator authorization.
 
+The shared skill/preset evaluation contract lives once at
+`references/evaluation.md`, within the complete externally published Guide
+package. Skill Creator owns the methodology and links to that canonical file.
+Its optional self-evolution replay path loads the separately available Ava
+capability by name; external Guide copies do not assume it is bundled.
+
 Sub-skills load substantial conditional procedures on demand. External-agent
 Mode A reads `references/delegated-workers.md`; takeover keeps its own mode
 boundary. Onboarding separates preference questions, intent branches, and

@@ -37,7 +37,7 @@ the reference file's location is not the command's working directory.
 ## Evidence
 
 Save cases, metrics, and the baseline choice using
-[evaluation](evaluation.md). For catalog changes, record which skills and
+[evaluation](../../ava-guide/references/evaluation.md). For catalog changes, record which skills and
 behaviors each probe covers; a few selected cases do not validate the whole
 catalog. Distinguish metadata-routing proxies, offline instruction-following
 plans, actual harness selection, and live execution.
