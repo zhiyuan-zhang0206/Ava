@@ -26,6 +26,9 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
     _write_baseline(tmp_path, {section: {} for section in _SECTIONS})
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Empty baseline")
 
 
 def _write_baseline(root: pathlib.Path, data: dict[str, dict[str, int]]) -> None:
