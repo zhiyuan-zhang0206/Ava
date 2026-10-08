@@ -66,8 +66,11 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def _load_activity_plugin() -> Iterator[None]:
-    """Install the fleet plugin's declared SDK surface; uninstall it after the test."""
+def _load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Install Fleet with a valid local sampling policy; uninstall after the test."""
+    from base.agents.sdk import call_policy
+
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     with installed_fleet_surface():
         yield
 
