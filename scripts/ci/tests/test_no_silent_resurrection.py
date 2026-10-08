@@ -2,7 +2,7 @@
 
 The behavior this file locks in (decision 2026-10-04, docs/conventions/
 no-silent-resurrection.md): the lines a PR adds are compared with the lines
-main deleted in the last N days; a run of at least two dead strong lines (or
+main deleted in the last N days; a run of at least three dead strong lines (or
 one dead distinctive line) fails unless a commit in the PR carries a
 ``Resurrects:`` declaration or reverts the deleting commit. Lines still
 present in the base tree, weak lines, single non-distinctive lines, and
@@ -541,3 +541,60 @@ def test_recent_main_incident_is_detected() -> None:
     assert completed.returncode == 1, completed.stdout + completed.stderr
     assert "6ecfe14c3" in completed.stdout
     assert "delivery_watchdog_fields" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    ("old", "current", "changed"),
+    [
+        (
+            "summary = await emergency_compact_summary(\n"
+            "    state.messages, ctx.llm, ctx.require_agent().brain.llm_model\n)\n",
+            "summary = await emergency_compact_summary(state.messages, ctx.llm, ctx.require_agent())\n",
+            "summary = await emergency_compact_summary(\n"
+            "    state.messages, ctx.llm, ctx.require_agent(), binding=ctx.llm_binding\n)\n",
+        ),
+        (
+            "def test_plugin_binding_effort_levels_reach_build_context(\n"
+            "    monkeypatch: pytest.MonkeyPatch,\n) -> None:\n    use_registry()\n",
+            "def test_plugin_binding_effort_levels_reach_build_context(add_bindings: AddBindings) -> None:\n"
+            "    use_catalog()\n",
+            "def test_plugin_binding_effort_levels_reach_build_context(\n"
+            "    add_bindings: AddBindings, monkeypatch: pytest.MonkeyPatch\n) -> None:\n"
+            "    check_actual_binding()\n",
+        ),
+    ],
+)
+def test_incomplete_historical_prefix_does_not_restore_the_deleted_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    old: str,
+    current: str,
+    changed: str,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    _write(repo, "a.py", old)
+    _commit(repo, "old caller contract", days_ago=10)
+    _write(repo, "a.py", current)
+    _commit(repo, "replace contract", days_ago=2)
+    _git(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, "a.py", changed)
+    _commit(repo, "extend current contract", days_ago=0.1)
+    code, out, _err = _check(repo, monkeypatch, capsys)
+    assert code == 0, out
+
+
+def test_incomplete_prefix_still_participates_in_a_restored_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    block = (
+        "summary = await emergency_compact_summary(\n"
+        "    original_model = resolve_old_model(state),\n"
+        "    old_policy = resolve_old_policy(config),\n)\n"
+    )
+    code, out, _err, deleting = _restore_after_delete(
+        _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=block
+    )
+    assert code == 1
+    assert "3 dead line(s)" in out
+    assert f"deleted by {deleting[:9]}" in out
