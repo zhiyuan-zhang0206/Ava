@@ -41,7 +41,7 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 from ops.roster.service_spec import _AGENT_RUNNER, _GATEWAY, ServiceSpec
 
 # The gate IS the subject here, so stand the global autouse net down for this
-# module (tests/fixtures/guards.py:_guard_health_port_gate reports every port free).
+# module (cli/commands/tests/health_port_guard.py:_guard_health_port_gate reports every port free).
 pytestmark = pytest.mark.real_health_port_gate
 
 
