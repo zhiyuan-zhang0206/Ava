@@ -343,6 +343,7 @@ def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, An
 
     Raises:
         MCPError: any source file fails to parse or has a non-dict `mcpServers`.
+        McpEnabledConfigError: the enabled-server overlay cannot be read or validated.
     """
     merged: dict[str, dict[str, Any]] = {}
     for path in builtin_mcp_paths():
@@ -354,15 +355,9 @@ def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, An
     merged.update(read_servers(machine_config_path()))
     if include_disabled:
         return merged
-    from base.packages.plugins.mcp_enabled import McpEnabledConfigError, read_enabled
+    from base.packages.plugins.mcp_enabled import read_enabled
 
-    try:
-        enabled = read_enabled()
-    except McpEnabledConfigError:
-        # Fail closed: a corrupt overlay's intent is unknown — do not
-        # silently resurrect servers the operator disabled (audit 2026-08-08
-        # P2). All-disabled is loud (missing tools), never a security hole.
-        return {}
+    enabled = read_enabled()
     return {k: v for k, v in merged.items() if enabled.get(k, True)}
 
 
