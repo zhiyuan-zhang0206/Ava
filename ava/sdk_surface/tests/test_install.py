@@ -24,6 +24,7 @@ from ava.sdk_surface.plugins import (
     PluginNamespaceConflictError,
 )
 from ava.sdk_surface.sdk_disable import _DisabledSDKModule
+from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.packages.plugins import flags, load_report
 from base.packages.plugins.extensions import (
@@ -36,9 +37,10 @@ from base.packages.plugins.extensions import (
 
 
 @pytest.fixture(autouse=True)
-def _surface() -> Iterator[None]:
+def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Start from no installation and bare callables, and leave no installation behind."""
     assert install.installed() is None
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     yield
     install.uninstall()
 
