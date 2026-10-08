@@ -41,7 +41,7 @@ jobs:
                   import pytest
 
                   raise SystemExit(pytest.main([
-                      "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-q",
+                      "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-qq",
                       "--ignore=tests/e2e", "-m", "not flaky", "--omit-static-tests",
                       "-o", "junit_family=xunit1", "-o", "faulthandler_timeout=300",
                       "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=16",
