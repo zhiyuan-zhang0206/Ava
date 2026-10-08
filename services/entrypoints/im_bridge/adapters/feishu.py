@@ -132,8 +132,9 @@ class FeishuAdapter(IMAdapter):
         """Connect the long-connection client; blocks for the process lifetime.
 
         Runs in a dedicated daemon thread (see the class docstring for why every
-        lark import lives here). A failed connect is logged and the SDK retries
-        with backoff; a failure here must never take the daemon down.
+        lark import lives here). The SDK owns its network reconnects.
+        Unexpected exits and faults reach the active service task owner;
+        after begin_shutdown, late thread outcomes are outside that owner wait.
         """
         main_loop = self._main_loop
         if main_loop is None:

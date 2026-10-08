@@ -19,7 +19,12 @@ health and the shared database pool close. Feishu websocket callbacks create han
 thread exit or faults reach its owner through an instance-local Future.
 `begin_shutdown()` rejects queued callbacks and ends the owner wait before group
 exit; this does not prove the thread stopped. Its existing disconnect budget and
-best-effort thread shutdown contract remain.
+best-effort thread shutdown contract remain. Late thread outcomes after the
+owner stops receiving are outside its completed lifecycle wait.
+
+Teardown attempts every adapter, health server, database pool and pidfile even
+after a stop fault. Unknown cleanup faults are reported with the original body
+fault in a standard exception group; they do not turn failure into success.
 
 Only explicit network failures and HTTP 429/502/503/504 retain their existing
 retry budgets. Authentication, configuration, JSON/schema and programming
