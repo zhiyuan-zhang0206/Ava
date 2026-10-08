@@ -8,7 +8,9 @@ the stop.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -35,8 +37,46 @@ from cli.commands.lifecycle.tests.stop_support import written as written
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
+from tests.path_scoped import pty_shells
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
+
+
+def test_busy_fixture_waits_for_the_job_after_a_login_helper(
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
+    pty_service: PtyServiceProcess,
+) -> None:
+    """A login-profile child is not evidence that the requested job started."""
+    name = "ava-agent-987-shell-2044-login-readiness"
+    release = home / "release-login-helper"
+    startup = home / "login-helper.py"
+    startup.write_text(
+        "import time\nfrom pathlib import Path\n"
+        "print('login-helper-ready', flush=True)\n"
+        f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n",
+        encoding="utf-8",
+    )
+    (home / ".bash_profile").write_text(
+        f"{shlex.quote(sys.executable)} -u {shlex.quote(str(startup))}\n", encoding="utf-8"
+    )
+    original = pty_shells.screen
+
+    def screen(target: str, *, scrollback: bool = True) -> str:
+        output = original(target, scrollback=scrollback)
+        if target == name and "login-helper-ready" in output.splitlines():
+            release.touch()
+        return output
+
+    # Release the native profile gate on its first real captured output. The
+    # old child-existence helper returns before this and sees no job marker.
+    monkeypatch.setattr(pty_shells, "screen", screen)
+    try:
+        busy_session(home, name, jobs.TERM_OK, pty_reaper)
+        assert "job-ready" in pty_shells.screen(name).splitlines()
+    finally:
+        release.touch()
 
 
 def test_stop_records_notice_for_verified_closed_busy_session(

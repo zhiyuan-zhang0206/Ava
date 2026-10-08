@@ -42,6 +42,7 @@ from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_service import PtyServiceProcess as PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
+from tests.path_scoped.pty_shells import output_until
 
 Launcher = Callable[[str, str], subprocess.Popen[str]]
 
@@ -171,12 +172,14 @@ def stop_env(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
 
 
 def busy_session(
-    home: Path, name: str, source: str, reaper: PtyReaper
+    home: Path, name: str, source: str, reaper: PtyReaper, *, ready_line: str = "job-ready"
 ) -> tuple[psutil.Process, list[psutil.Process]]:
-    """Start a session running `source` as a job; pin the shell and the job for teardown."""
-    shell = jobs.start(name, home, source)
+    """Wait for this new job's bare output marker; pin its native identities."""
+    shell = jobs.create(name, home, source)
     reaper.track_session(name)
+    output_until(name, ready_line)
     running = jobs.live_children(shell)
+    assert running, f"the ready job of {name} is no longer running"
     reaper.track(*running)
     return shell, running
 
