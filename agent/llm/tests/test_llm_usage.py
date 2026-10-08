@@ -7,7 +7,7 @@ usage_metadata.{input,output}_token_details.
 """
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -382,8 +382,8 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
         },
     )
     log_llm_usage(msg, model="claude-opus-4-7")
-    event: dict[str, Any] = loguru_records[0]["extra"]
-    stamped = msg.additional_kwargs["ava_usage"]
+    event = cast("dict[str, Any]", loguru_records[0]["extra"])  # pyright: ignore[reportUnknownArgumentType]
+    stamped: dict[str, Any] = msg.additional_kwargs["ava_usage"]
     assert stamped["cost_usd"] > 0
     assert (stamped["cache_write_5m"], stamped["cache_write_1h"]) == (400, 100)
     for key in _EVENT_KEYS:
