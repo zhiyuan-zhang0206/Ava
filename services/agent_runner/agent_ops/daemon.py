@@ -144,6 +144,7 @@ def _is_running() -> bool:
 
 ActiveOps = dict[str, tuple[str, float]]
 
+
 # The op arms' own thread pool, instead of asyncio's default executor.
 #
 # `asyncio.run` closes by awaiting `loop.shutdown_default_executor()`, which JOINS
@@ -167,18 +168,12 @@ ActiveOps = dict[str, tuple[str, float]]
 # `max_workers` tracks `ops_concurrency` so the semaphore stays the binding limit;
 # `thread_name_prefix` makes a stuck thread findable in a dump, which the refusal
 # runbook above tells an operator to look for.
-_op_executor: ThreadPoolExecutor | None = None
-
-
 def _op_thread_pool() -> ThreadPoolExecutor:
-    """This daemon's op executor, created on first use."""
-    global _op_executor  # noqa: PLW0603 — event-loop thread only, created once
-    if _op_executor is None:
-        _op_executor = ThreadPoolExecutor(
-            max_workers=max(1, settings.services.ops_concurrency),
-            thread_name_prefix="ava-ops-arm",
-        )
-    return _op_executor
+    """Create one invocation's executor; workers still start on first submission."""
+    return ThreadPoolExecutor(
+        max_workers=max(1, settings.services.ops_concurrency),
+        thread_name_prefix="ava-ops-arm",
+    )
 
 
 async def _run_arm(
@@ -188,6 +183,7 @@ async def _run_arm(
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
     pool: ConnectionPool,
+    executor: ThreadPoolExecutor,
 ) -> tuple[OpStatus, dict[str, object]]:
     """`_dispatch_sync` on this daemon's executor, with its explicit DB pool.
 
@@ -200,7 +196,7 @@ async def _run_arm(
     active_ops[kind] = active
     try:
         future = loop.run_in_executor(
-            _op_thread_pool(), functools.partial(_dispatch_sync, kind, payload, pool=pool)
+            executor, functools.partial(_dispatch_sync, kind, payload, pool=pool)
         )
         maintenance_activity.track_worker(future, workers=workers)
         return await asyncio.shield(future)
@@ -228,6 +224,7 @@ async def _dispatch(
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
     pool: ConnectionPool,
+    executor: ThreadPoolExecutor,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
@@ -290,7 +287,12 @@ async def _dispatch(
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
                 return await _run_arm(
-                    kind, payload, active_ops=active_ops, workers=workers, pool=pool
+                    kind,
+                    payload,
+                    active_ops=active_ops,
+                    workers=workers,
+                    pool=pool,
+                    executor=executor,
                 )
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
@@ -322,6 +324,7 @@ async def _dispatch_idempotent(
     *,
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
+    executor: ThreadPoolExecutor,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
@@ -338,7 +341,7 @@ async def _dispatch_idempotent(
     for attempt in range(_DISPATCH_RETRY_ATTEMPTS):
         try:
             return await _dispatch_idempotent_pass(
-                kind, payload, key, pool, active_ops=active_ops, workers=workers
+                kind, payload, key, pool, active_ops=active_ops, workers=workers, executor=executor
             )
         except psycopg.OperationalError:
             if attempt + 1 >= _DISPATCH_RETRY_ATTEMPTS:
@@ -360,6 +363,7 @@ async def _dispatch_idempotent_pass(
     *,
     active_ops: ActiveOps,
     workers: maintenance_activity.WorkerFutures,
+    executor: ThreadPoolExecutor,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Replay one immutable request; unresolved execution never frees its identity.
 
@@ -379,7 +383,9 @@ async def _dispatch_idempotent_pass(
             return OpStatus.FAILED, {"error": "invalid guarded restart envelope"}
         if operation.operation_key != key:
             return OpStatus.FAILED, {"error": "guarded restart envelope identity differs"}
-        return await _dispatch(kind, payload, active_ops=active_ops, workers=workers, pool=pool)
+        return await _dispatch(
+            kind, payload, active_ops=active_ops, workers=workers, pool=pool, executor=executor
+        )
     request_hash = hashlib.sha256(
         json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()
@@ -395,7 +401,7 @@ async def _dispatch_idempotent_pass(
         # Exceptions, cancellation and result-write failure retain the committed
         # claim. A retry cannot infer that execution had no side effects.
         status, result = await _dispatch(
-            kind, payload, active_ops=active_ops, workers=workers, pool=pool
+            kind, payload, active_ops=active_ops, workers=workers, pool=pool, executor=executor
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -438,6 +444,7 @@ async def _ops_route(
     dispatch_sem: asyncio.Semaphore,
     requests: maintenance_activity.RequestTokens,
     pool: ConnectionPool,
+    executor: ThreadPoolExecutor,
 ) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
@@ -481,6 +488,7 @@ async def _ops_route(
                         pool,
                         active_ops=active_ops,
                         workers=workers,
+                        executor=executor,
                     )
                 else:
                     status, result = await _dispatch(
@@ -489,6 +497,7 @@ async def _ops_route(
                         active_ops=active_ops,
                         workers=workers,
                         pool=pool,
+                        executor=executor,
                     )
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -533,6 +542,7 @@ async def _main() -> None:
         sys.exit(1)
 
     pool = _open_db_pool()
+    executor = _op_thread_pool()
     db, bus = _ops_handles()
     # Redeliver recorded delivery failures whenever the data plane allows
     # (task #3757): a resident loop that outlives every sender process, owned with
@@ -557,6 +567,7 @@ async def _main() -> None:
             extra_routes={
                 ("POST", "/ops"): functools.partial(
                     _ops_route,
+                    executor=executor,
                     active_ops=active_ops,
                     dispatch_sem=dispatch_sem,
                     requests=requests,
@@ -592,20 +603,16 @@ async def _main() -> None:
             _remove_pidfile()
     finally:
         pool.close()
-        _shutdown_op_pool()
+        _shutdown_op_pool(executor)
 
 
-def _shutdown_op_pool() -> None:
-    """Drop the op pool without joining it.
+def _shutdown_op_pool(executor: ThreadPoolExecutor) -> None:
+    """Stop accepting work without joining running arms.
 
-    `wait=False` stops THIS call from blocking; it does not stop the interpreter's
-    own atexit join (see `_op_executor`), which is why `_hard_exit` exists. Both are
-    needed: without this, shutdown waits here; without that, it waits at teardown.
+    `wait=False` avoids joining here; the interpreter still joins workers at
+    teardown, which is why the daemon also retains its existing hard exit.
     """
-    global _op_executor  # noqa: PLW0603 — event-loop thread only
-    if _op_executor is not None:
-        _op_executor.shutdown(wait=False)
-        _op_executor = None
+    executor.shutdown(wait=False)
 
 
 def main(*, argv: list[str] | None = None) -> None:
