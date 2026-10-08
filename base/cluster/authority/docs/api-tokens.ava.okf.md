@@ -14,11 +14,14 @@ on the gateway.
 
 | Surface | Admits |
 |---|---|
-| gateway middleware, `/api/bootstrap`, alert webhooks | the human secret, or the ACTIVE generation's gateway or runner token (never a pending one; `acceptance`, cached per ledger identity; `gateway.http.auth.request_principal.cluster_credential` records `cluster_bearer` or `machine_token:<class>`) |
+| gateway middleware, `/api/bootstrap`, alert webhooks | the human secret, or the ACTIVE generation's gateway or runner token (never a pending one; `acceptance`, cached per ledger identity in the gateway lifespan; `gateway.http.auth.request_principal.cluster_credential` records `cluster_bearer` or `machine_token:<class>`) |
 | `/api/auth/login` | the human secret, or the active runner token (the managed browser's cookie); the session is bound to that credential and ends when the credential stops being accepted or the human secret rotates (`gateway.http.auth.request_principal.session_mints`) |
 | a unit's `/ops` (`services/agent_runner/agent_ops/_boot._ops_acceptance`) | digests of its generation's gateway and runner tokens: a remote unit's capability carries the gateway digest, never the gateway token |
 
-The gateway re-reads its acceptance on every request; a unit's `/ops` reads it
+The gateway checks the ledger identity on every request using its lifespan-owned
+`machine_token_acceptance` cache; one-shot boot readers pass no cache and read
+the store directly. Each lifespan starts with a fresh cache, whose entries are
+keyed by home. A unit's `/ops` reads its acceptance
 once, at daemon boot, which holds because nothing changes the accepted tokens
 while a daemon runs. Delivery mirrors the login: the root launcher gives each service its class token (`api_access`,
 `cli/commands/_data_plane.api_delivery`) only while the API is authenticated

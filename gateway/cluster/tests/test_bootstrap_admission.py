@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from base import config
 from base.cluster.auth import bearer_header
+from base.cluster.authority.api import AcceptanceCache
 from base.host.env import bootstrap, runtime_config
 from gateway.cluster.bootstrap import router
 
@@ -52,7 +53,10 @@ def runner_token(
 
 @pytest.fixture
 def gateway_client() -> Iterator[TestClient]:
+    """Own the isolated router's admission cache without a full Gateway lifespan."""
     app = FastAPI()
+    machine_token_acceptance: AcceptanceCache = {}
+    app.state.machine_token_acceptance = machine_token_acceptance
     app.include_router(router)
     with TestClient(app) as client:
         yield client

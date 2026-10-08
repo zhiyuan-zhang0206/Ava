@@ -21,10 +21,12 @@ from typing import Any
 
 import psycopg
 import pytest
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
+from base.cluster.authority.api import AcceptanceCache
 from base.config import settings
 from base.events.live.tests.fakes import record_publishes
 from base.telemetry.alerts.native import load_native_group, stamp_native_sent
@@ -662,22 +664,20 @@ def test_ingest_loopback_trust_when_no_token(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(settings.alerts, "webhook_token", None)
 
-    class _FakeClient:
-        def __init__(self, host: str) -> None:
-            self.host = host
+    application = FastAPI()
+    machine_token_acceptance: AcceptanceCache = {}
+    application.state.machine_token_acceptance = machine_token_acceptance
 
-    class _FakeRequest:
-        def __init__(self, host: str) -> None:
-            self.client = _FakeClient(host)
-            self.headers: dict[str, str] = {}
+    def request(host: str) -> Request:
+        return Request({"type": "http", "app": application, "headers": [], "client": (host, 5000)})
 
-    assert alerts_router._ingest_authorized(_FakeRequest("127.0.0.1"))  # type: ignore[arg-type]
-    assert alerts_router._ingest_authorized(_FakeRequest("::1"))  # type: ignore[arg-type]
-    assert not alerts_router._ingest_authorized(_FakeRequest("10.0.0.5"))  # type: ignore[arg-type]
+    assert alerts_router._ingest_authorized(request("127.0.0.1"))
+    assert alerts_router._ingest_authorized(request("::1"))
+    assert not alerts_router._ingest_authorized(request("10.0.0.5"))
 
     # token set -> loopback alone is not enough
     monkeypatch.setattr(settings.alerts, "webhook_token", SecretStr("t"))
-    assert not alerts_router._ingest_authorized(_FakeRequest("127.0.0.1"))  # type: ignore[arg-type]
+    assert not alerts_router._ingest_authorized(request("127.0.0.1"))
 
 
 # -- list --------------------------------------------------------------------
