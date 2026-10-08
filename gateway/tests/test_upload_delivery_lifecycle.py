@@ -259,3 +259,21 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
         ).fetchone() == (1,)
     assert recovery.task.done() and not recovery.calls
     assert app.state.db_pool.closed
+
+
+def test_overlapping_gateway_lifespans_stop_their_original_upload_workers(
+    db_conn: psycopg.Connection[Any],
+) -> None:
+    # Both existing HTTP fixture consumers nest TestClient(app). Shared state
+    # exposes the newer worker, but each lifespan must drain its own TaskGroup.
+    with TestClient(app):
+        original = app.state.upload_recovery
+        assert original.task is not None and not original.stopped.is_set()
+        with TestClient(app):
+            replacement = app.state.upload_recovery
+            assert replacement is not original
+            assert replacement.task is not None and not replacement.stopped.is_set()
+        assert replacement.stopped.is_set() and replacement.task.done()
+        assert not original.stopped.is_set() and not original.task.done()
+    assert original.stopped.is_set() and original.task.done()
+    assert not original.calls and not replacement.calls

@@ -65,6 +65,10 @@ attachment/nosniff headers and is separate from old native-image upload URLs.
 
 ## Gateway round and versioned receiver
 
+Each Gateway lifespan retains its own recovery handle for start and close;
+`app.state.upload_recovery` only exposes that handle to HTTP handlers. A later
+app-state replacement cannot leave the original recovery TaskGroup unstopped.
+
 `gateway.upload_delivery.worker.UploadRecovery` belongs to Gateway lifespan,
 including pure Gateway topology without Ops. Four intents run in a scoped
 TaskGroup; due selection and final acceptance borrow short transactions, with no
