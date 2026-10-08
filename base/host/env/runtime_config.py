@@ -221,13 +221,13 @@ def write_fields(
             return path.read_bytes() if capture_bytes and path.exists() else None
         amap = _field_alias_map()
         _check_digest(path, expected_digest)
-        changes = (
-            _pending_changes(path, amap, updates, removals) if audit_site is not None else None
-        )
+        prepared = None
+        if audit_site is not None:
+            from base.host.env.audit import prepare_env_changes
+
+            prepared = prepare_env_changes(_pending_changes(path, amap, updates, removals))
         _rewrite_env(path, amap, updates, removals)
         if audit_site is not None:
-            # Lazy import avoids a module cycle: the audit helper resolves this
-            # module's env_file_path only after this writer has acquired the lock.
             from base.host.env.audit import record_env_write
 
             record_env_write(
@@ -237,7 +237,7 @@ def write_fields(
                 site=audit_site,
                 actor=actor,
                 trace_id=trace_id,
-                changes=changes,
+                changes=prepared,
             )
         if capture_bytes:
             captured = path.read_bytes()
