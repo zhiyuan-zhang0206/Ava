@@ -381,13 +381,16 @@ ignore = [
 check-typed-exception = true
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Graph-run dependencies belong to the existing Runtime[AvaContext], not a
+# second implicit ContextVar context. Outside a graph run, pass the caller's
+# context explicitly; get_runtime() is not a process-wide service locator.
 # contextvars allowlist lock (user ruling 2026-08-27, audit #3607): contextvar
 # usage is a mechanism-layer concern — LangGraph's runtime itself propagates
 # contextvars (pregel copy_context / get_runtime), and the SDK / log /
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, ava/sdk_surface/process_context.py, services/agent_runner/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+"contextvars" = { msg = "Use LangGraph Runtime[AvaContext] for graph-run dependencies and explicit parameters outside a graph run. Do not create a second implicit context. contextvars is restricted to existing mechanism owners; see docs/conventions/python-conventions.md." }
 
 [tool.ruff.lint.per-file-ignores]
 # `tests/*` is the top-level tests directory; `**/tests/*` every package's own
