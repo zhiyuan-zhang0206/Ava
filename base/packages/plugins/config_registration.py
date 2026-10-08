@@ -120,18 +120,31 @@ def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
     config_path = disk_image_path(plugin)
     if not config_path.exists():
         write_default_disk_image(plugin, cls)
+    return read_config_image(cls, config_path)
+
+
+def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
+    """Read a plugin's full config image without binding or writing it.
+
+    A missing image uses the declared defaults, including before first converge.
+    An existing image must contain exactly the declared fields and validate;
+    malformed data is never repaired or replaced with defaults.
+    """
+    try:
+        content = config_path.read_text()
+    except FileNotFoundError:
         return cls()
 
     try:
-        disk_data = json.loads(config_path.read_text())
+        disk_data = json.loads(content)
     except json.JSONDecodeError as e:
         raise InvalidConfigData(
-            f"plugin {plugin!r} disk image JSON parse failed ({config_path}): {e}"
+            f"plugin config disk image JSON parse failed ({config_path}): {e}"
         ) from e
 
     if not isinstance(disk_data, dict):
         raise InvalidConfigData(
-            f"plugin {plugin!r} disk image top-level must be a JSON object, got "
+            "plugin config disk image top-level must be a JSON object, got "
             f"{type(disk_data).__name__} ({config_path})"
         )
     disk_data = cast("dict[str, Any]", disk_data)
@@ -142,7 +155,7 @@ def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
         added = cls_keys - disk_keys
         removed = disk_keys - cls_keys
         raise SchemaDriftError(
-            f"plugin {plugin!r} disk image schema drift: "
+            f"plugin config disk image schema drift ({config_path}): "
             f"added={sorted(added)} removed={sorted(removed)}. "
             f"Run `ava plugins update` to auto-merge."
         )
@@ -151,7 +164,7 @@ def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
         return cls(**disk_data)
     except ValidationError as e:
         raise InvalidConfigData(
-            f"plugin {plugin!r} disk image Pydantic validation failed ({config_path}): {e}"
+            f"plugin config disk image Pydantic validation failed ({config_path}): {e}"
         ) from e
 
 
