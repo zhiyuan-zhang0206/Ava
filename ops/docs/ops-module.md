@@ -24,6 +24,13 @@ verifier and its manifest.
 Its operator entry point remains `python -m ops.private_files`.
 
 `build_services()` supplies the application root manifest and local status roster.
+A plugin service may bind a frozen, non-secret `plugin_config` snapshot to its
+`ServiceSpec` and gate. The root launcher serializes that instance into the unit
+environment; the existing manifest digest includes it. Daemon boot validates the
+complete packet against its declared schema instead of rereading mutable disk.
+Malformed, mismatched or incomplete packets fail; absent packets identify a
+direct development invocation. Cluster bootstrap cannot replace this service
+birth carrier. Authoritative files remain in `config_inputs` when present.
 The [checked service inventory](service-roster.md) belongs beside this owner;
 its sentinel table is validated against that registration in both directions.
 Agent-runner units execute agents inside one agent host. There is no per-agent

@@ -699,3 +699,53 @@ def is_per_agent_field(plugin: str, field: str) -> bool:
     if info is None:
         return False
     return bool(_schema_extra(info).get("per_agent", False))
+
+
+def service_config_packet(plugin: str, config: BaseModel) -> str:
+    """Canonical, non-secret config for the existing unit environment/hash path."""
+    for name, field in type(config).model_fields.items():
+        if _field_is_sensitive(field.json_schema_extra):
+            raise InvalidConfigData(f"service config {plugin}.{name} is sensitive")
+    return json.dumps(
+        {"plugin": plugin, "config": config.model_dump(mode="json")},
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
+    """Validate this service's birth snapshot; None outside a launched service.
+
+    A present packet must name this plugin and contain its complete declared
+    image. A malformed packet cannot fall back to disk or defaults.
+    """
+    from base.host.env.bootstrap import service_plugin_config_packet
+
+    packet = service_plugin_config_packet()
+    if packet is None:
+        return None
+    try:
+        data: object = json.loads(packet)
+    except json.JSONDecodeError as exc:
+        raise InvalidConfigData(f"invalid service plugin config JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise InvalidConfigData("service plugin config requires a JSON object")
+    data = cast("dict[str, object]", data)
+    if set(data) != {"plugin", "config"}:
+        raise InvalidConfigData("service plugin config requires exactly plugin and config")
+    if data["plugin"] != plugin:
+        raise InvalidConfigData(
+            f"service plugin config names {data['plugin']!r}, expected {plugin!r}"
+        )
+    values = data["config"]
+    if not isinstance(values, dict) or set(cast("dict[str, object]", values)) != set(
+        cls.model_fields
+    ):
+        raise SchemaDriftError(
+            f"service plugin config {plugin!r} field set differs from declaration"
+        )
+    try:
+        return cls.model_validate(values)
+    except ValidationError as exc:
+        raise InvalidConfigData(f"invalid service plugin config {plugin!r}: {exc}") from exc

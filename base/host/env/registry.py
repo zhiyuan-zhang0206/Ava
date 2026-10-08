@@ -141,6 +141,8 @@ def network_proxy_configured() -> bool:
 # they are process-bound carriers the exec launcher writes and child boot consumes.
 AGENT_CONFIG_OVERLAY_ENV = "AVA_AGENT_CONFIG_OVERLAY"
 AGENT_BIRTH_CONFIG_ENV = "AVA_AGENT_BIRTH_CONFIG"
+# Service birth snapshots are delivered per unit, never inherited by its parent.
+SERVICE_PLUGIN_CONFIG_ENV = "AVA_SERVICE_PLUGIN_CONFIG"
 # The Redis ACL runtime password is a file-only data-plane credential like the
 # runner database password. derive_env emits it and process isolation strips it.
 REDIS_PASSWORD_ENV = "AVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a credential
