@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
+import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import cast
 
@@ -350,39 +354,225 @@ def test_env_write_event_carries_actor_without_values(
     assert "m3" not in json.dumps(payload)
 
 
-def test_record_env_write_withholds_every_value_when_metadata_fails(
+def test_record_env_write_rejects_invalid_metadata_before_audit_artifacts(
     audit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fail closed: with the config registry unavailable, even a normally-recordable
-    field's values are withheld (names only), and no value text reaches the file.
-
-    The loader is patched (not `get_config_metadata`) because a successful load is
-    cached per process — patching the loader keeps the failure deterministic whatever
-    order the suite runs in.
-    """
+    """Direct recording cannot undo the caller's already-landed bytes."""
     env_path = audit_home / ".env"
     env_path.write_text("AVA_MODEL=new-value\n")
 
-    def _boom() -> dict[str, tuple[str, bool]]:
+    def invalid() -> dict[str, tuple[str, bool]]:
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(audit, "_load_alias_metadata", _boom)
-    record_env_write(
-        env_path,
-        {"AVA_MODEL"},
-        set(),
-        site="test",
-        changes=[{"alias": "AVA_MODEL", "old": "old-value", "new": "new-value"}],
-    )
+    monkeypatch.setattr(audit, "_load_alias_metadata", invalid)
+    with pytest.raises(RuntimeError, match="registry unavailable"):
+        record_env_write(
+            env_path,
+            {"AVA_MODEL"},
+            set(),
+            site="test",
+            changes=[{"alias": "AVA_MODEL", "old": "old-value", "new": "new-value"}],
+        )
+    assert env_path.read_text() == "AVA_MODEL=new-value\n"
+    assert not (audit_home / ".env.audit.jsonl").exists()
+    assert not (audit_home / ".env.audit.armed").exists()
 
+
+def test_alias_metadata_projects_declarations_without_runtime_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import base.config
+    from base.config.admin import metadata
+
+    def runtime_values() -> dict[str, object]:
+        pytest.fail("audit declarations must not read runtime values")
+
+    def panel() -> object:
+        pytest.fail("audit declarations must not read panel metadata")
+
+    monkeypatch.setattr(base.config, "current_field_values", runtime_values)
+    monkeypatch.setattr(metadata, "get_config_metadata", panel)
+    projected = audit._load_alias_metadata()
+    assert projected["AVA_MODEL"] == ("cluster-default", False)
+    assert projected["AVA_DB_URL"][1] is True
+
+
+def test_alias_metadata_does_not_cache_a_separate_declaration_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.host.env import config_registry
+
+    declarations = deepcopy(config_registry.fields())
+    info = declarations["llm_model"].info
+    extra = dict(config_registry.schema_extra(info))
+    info.json_schema_extra = extra
+    monkeypatch.setattr(config_registry, "fields", lambda: declarations)
+    extra["sensitive"] = False
+    assert audit._load_alias_metadata()["AVA_MODEL"][1] is False
+    extra["sensitive"] = True
+    assert audit._load_alias_metadata()["AVA_MODEL"][1] is True
+
+
+@pytest.mark.parametrize("sensitive", [None, "false", 0])
+def test_alias_metadata_rejects_invalid_sensitivity_declarations(
+    monkeypatch: pytest.MonkeyPatch, sensitive: object
+) -> None:
+    from base.host.env import config_registry
+
+    declarations = deepcopy(config_registry.fields())
+    info = declarations["llm_model"].info
+    info.json_schema_extra = {**config_registry.schema_extra(info), "sensitive": sensitive}
+    monkeypatch.setattr(config_registry, "fields", lambda: declarations)
+    with pytest.raises(TypeError, match="boolean sensitive"):
+        audit._load_alias_metadata()
+
+
+def test_alias_metadata_rejects_ambiguous_declarations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.host.env import config_registry
+
+    declarations = deepcopy(config_registry.fields())
+    declarations["gateway_url"].info.serialization_alias = "AVA_MODEL"
+    monkeypatch.setattr(config_registry, "fields", lambda: declarations)
+    with pytest.raises(ValueError, match="duplicate env alias"):
+        audit._load_alias_metadata()
+
+
+def test_declaration_projection_works_without_a_runtime_settings_image(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys; from base.host.env.audit import _load_alias_metadata; "
+            "metadata = _load_alias_metadata(); assert metadata['AVA_DB_URL'][1] is True; "
+            "assert 'base.config._full' not in sys.modules; "
+            "assert 'base.config.admin.metadata' not in sys.modules",
+        ],
+        cwd=tmp_path,
+        env={
+            **{key: value for key, value in os.environ.items() if key != "AVA_CONFIG_BOOT"},
+            "AVA_HOME": str(tmp_path / "absent-home"),
+            "AVA_CONFIG_FETCH": "skip",
+            "AVA_PROCESS_PROFILE": "runner",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("writer", ["fields-update", "fields-remove", "upsert", "remove"])
+def test_invalid_metadata_prevents_every_audited_file_write(
+    audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
+) -> None:
+    from base.host.env import dotenv_file
+
+    env_path = audit_home / ".env"
+    original = b"AVA_MODEL=before\nUNREGISTERED_SECRET=secret-before\n"
+    env_path.write_bytes(original)
+
+    def invalid() -> dict[str, tuple[str, bool]]:
+        raise RuntimeError("registry unavailable")
+
+    monkeypatch.setattr(audit, "_load_alias_metadata", invalid)
+    with pytest.raises(RuntimeError, match="registry unavailable"):
+        if writer == "fields-update":
+            runtime_config.write_fields({"llm_model": "after"}, set(), audit_site="test")
+        elif writer == "fields-remove":
+            runtime_config.write_fields({}, {"llm_model"}, audit_site="test")
+        elif writer == "upsert":
+            dotenv_file.upsert_env(env_path, {"AVA_MODEL": "after"}, audit_site="test")
+        else:
+            dotenv_file.remove_env(env_path, {"AVA_MODEL"}, audit_site="test")
+    assert env_path.read_bytes() == original
+    assert not (audit_home / "backups").exists()
+    assert not (audit_home / ".env.audit.jsonl").exists()
+    assert not (audit_home / ".env.audit.armed").exists()
+
+
+@pytest.mark.parametrize("writer", ["fields", "upsert", "remove"])
+def test_noop_writer_does_not_require_audit_metadata(
+    audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
+) -> None:
+    from base.host.env import dotenv_file
+
+    path = audit_home / ".env"
+    original = b"AVA_MODEL=before\n"
+    path.write_bytes(original)
+
+    def unexpected() -> dict[str, tuple[str, bool]]:
+        pytest.fail("a no-op must not prepare audit metadata")
+
+    monkeypatch.setattr(audit, "_load_alias_metadata", unexpected)
+    if writer == "fields":
+        runtime_config.write_fields({}, set(), audit_site="test")
+    elif writer == "upsert":
+        dotenv_file.upsert_env(path, {"AVA_MODEL": "before"}, audit_site="test")
+    else:
+        dotenv_file.remove_env(path, {"ABSENT"}, audit_site="test")
+    assert path.read_bytes() == original
+    assert not (audit_home / ".env.audit.jsonl").exists()
+    assert not (audit_home / "backups").exists()
+
+
+def test_stale_digest_fails_before_metadata_preparation(
+    audit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = audit_home / ".env"
+    original = b"AVA_MODEL=before\n"
+    path.write_bytes(original)
+
+    def unexpected() -> dict[str, tuple[str, bool]]:
+        pytest.fail("stale CAS must fail before preparing audit metadata")
+
+    monkeypatch.setattr(audit, "_load_alias_metadata", unexpected)
+    with pytest.raises(RuntimeError, match="changed before owned"):
+        runtime_config.write_fields(
+            {"llm_model": "after"}, set(), audit_site="test", expected_digest="stale"
+        )
+    assert path.read_bytes() == original
+    assert not (audit_home / ".env.audit.jsonl").exists()
+    assert not (audit_home / "backups").exists()
+
+
+@pytest.mark.parametrize("writer", ["fields", "upsert", "remove"])
+def test_redaction_is_prepared_once_while_the_old_env_is_still_present(
+    audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
+) -> None:
+    from base.host.env import dotenv_file
+
+    env_path = audit_home / ".env"
+    original = "AVA_MODEL=before\n"
+    env_path.write_text(original)
+    reads: list[str] = []
+
+    def declared() -> dict[str, tuple[str, bool]]:
+        assert env_path.read_text() == original
+        reads.append("prepare")
+        return {"AVA_MODEL": ("cluster-default", False)}
+
+    monkeypatch.setattr(audit, "_load_alias_metadata", declared)
+    if writer == "fields":
+        runtime_config.write_fields({"llm_model": "after"}, set(), audit_site="test")
+    elif writer == "upsert":
+        dotenv_file.upsert_env(env_path, {"AVA_MODEL": "after"}, audit_site="test")
+    else:
+        dotenv_file.remove_env(env_path, {"AVA_MODEL"}, audit_site="test")
+    assert reads == ["prepare"]
     record = last_env_write_record(env_path)
     assert record is not None
     assert record["changed"] == [
-        {"alias": "AVA_MODEL", "scope": None, "sensitive": None, "old": None, "new": None}
+        {
+            "alias": "AVA_MODEL",
+            "scope": "cluster-default",
+            "sensitive": False,
+            "old": "before",
+            "new": None if writer == "remove" else "after",
+        }
     ]
-    raw = (audit_home / ".env.audit.jsonl").read_text()
-    assert "old-value" not in raw
-    assert "new-value" not in raw
 
 
 def test_read_env_write_records_returns_newest_first_with_limit(audit_home: Path) -> None:
