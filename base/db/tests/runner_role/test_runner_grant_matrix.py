@@ -7,6 +7,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from base.agents.incarnation.native_restart_models import (
@@ -385,7 +386,7 @@ def test_understanding_queue_insert_grant_reaches_a_cluster_born_before_the_entr
 
 
 @pytest.mark.parametrize("refresh", [False, True])
-def test_runner_projects_original_restart_receipt_without_create_or_delete_grants(
+def test_runner_accepts_and_projects_original_restart_receipt_without_delete_grants(
     runner_db: str, refresh: bool
 ) -> None:
     """Actual source UPDATE projects APPLIED/OBSERVED using the runner login."""
@@ -413,6 +414,7 @@ def test_runner_projects_original_restart_receipt_without_create_or_delete_grant
         acceptance = NativeRestartAcceptance(
             command_id=command_id, target=target, config_overlay=None
         )
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
         conn.execute(
             "INSERT INTO native_restart_commands(operation_key,command_id,agent_id,work_id,"
             "target_generation,target_owner,request_hash,request,acceptance) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -428,7 +430,8 @@ def test_runner_projects_original_restart_receipt_without_create_or_delete_grant
                 Jsonb(acceptance.model_dump(mode="json")),
             ),
         )
-        if refresh:
+    if refresh:
+        with psycopg.connect(runner_db, autocommit=True) as conn:
             conn.execute("REVOKE UPDATE ON native_restart_commands FROM ava_runner")
     if refresh:
         with (
@@ -452,5 +455,56 @@ def test_runner_projects_original_restart_receipt_without_create_or_delete_grant
         ).fetchone() == ("observed", True)
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM native_restart_commands WHERE command_id=%s", (command_id,))
+
+
+def test_runner_writes_native_work_copy_and_cancel_ack_with_domain_limits(runner_db: str) -> None:
+    """The remote runner unit's login can perform only the audited native DML."""
+    _grant_runner(runner_db)
+    work_id, cancel_id = uuid4(), uuid4()
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO native_cancel_commands(id,work_id,agent_id,operation_key,request,acceptance) "
+            "VALUES(%s,%s,1,'runner-cancel','{}','{}')",
+            (cancel_id, work_id),
+        )
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO native_graph_work(id,agent_id,machine,generation,owner,protocol,phase) "
+            "VALUES(%s,1,'runner-test',%s,%s,1,'preparing')",
+            (work_id, uuid4(), uuid4()),
+        )
+        conn.execute("UPDATE native_graph_work SET phase='active' WHERE id=%s", (work_id,))
+        conn.execute(
+            "UPDATE native_cancel_commands SET outcome='applied',checkpoint_id='original-checkpoint',"
+            "settled_at=now() WHERE id=%s",
+            (cancel_id,),
+        )
+        conn.execute(
+            "UPDATE native_graph_work SET phase='settled',ended_at=now(),settled_checkpoint_id='original-checkpoint' "
+            "WHERE id=%s",
+            (work_id,),
+        )
+        conn.execute(
+            "INSERT INTO upload_delivery_copies(batch_id,unit_home,agent_id,request,manifest,storage_machine,storage_directory) "
+            "VALUES('fixed-batch','/unit',1,'{}','{}','runner-test','/Downloads/AvaAgent-1')"
+        )
+        conn.execute(
+            "UPDATE upload_delivery_copies SET ready_at=now() WHERE batch_id='fixed-batch'"
+        )
+        assert conn.execute(
+            "SELECT phase,ended_at IS NOT NULL FROM native_graph_work WHERE id=%s", (work_id,)
+        ).fetchone() == ("settled", True)
+        assert conn.execute(
+            "SELECT outcome,checkpoint_id FROM native_cancel_commands WHERE id=%s", (cancel_id,)
+        ).fetchone() == ("applied", "original-checkpoint")
+        assert conn.execute(
+            "SELECT ready_at IS NOT NULL FROM upload_delivery_copies WHERE batch_id='fixed-batch'"
+        ).fetchone() == (True,)
+        for table in ("native_graph_work", "native_cancel_commands", "upload_delivery_copies"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(table)))
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("INSERT INTO native_restart_commands(operation_key) VALUES('forbidden')")
+            conn.execute("INSERT INTO native_cancel_commands(id) VALUES(gen_random_uuid())")
+        for table in ("upload_delivery_batches", "agent_creation_snapshots"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(sql.SQL("INSERT INTO {} DEFAULT VALUES").format(sql.Identifier(table)))
