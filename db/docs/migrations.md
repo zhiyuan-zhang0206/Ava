@@ -32,9 +32,12 @@ the drift gate refuses unmirrored dependency changes before DB mutation.
 
 ## Adding a new migration
 
-1. Write `migrations/YYYY/MM/DD/YYYYMMDDTHHMMSS_<kebab-name>.sql` — the prefix is a
-   second-precision UTC timestamp (`date -u +%Y%m%dT%H%M%S`), pure SQL, don't INSERT
-   schema_migrations (the runner does it)
+1. Write `migrations/YYYY/MM/DD/HH/YYYYMMDDTHHMMSS_<kebab-name>.sql` — the prefix is a
+   second-precision UTC timestamp (`date -u +%Y%m%dT%H%M%S`). The `HH` directory
+   is its UTC hour. The loader discovers SQL recursively
+   and identifies migrations by basename, so additional directory levels preserve identity.
+   Use further UTC minute/second groups if an hour exceeds the directory budget. Write
+   pure SQL; don't INSERT schema_migrations (the runner does it)
 2. There is no down migration. A mistake in a merged migration is fixed forward by a new
    migration; its SQL bytes and migration name never change (lint check 4). Directory-only
    moves retain the same applied-set identity. Lossy

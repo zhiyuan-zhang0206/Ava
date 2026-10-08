@@ -332,12 +332,10 @@ def _expected_checkpoint_schema_versions() -> frozenset[int]:
 
     tracked = ava_migrations.required_migration_set()
     for version, name in CHECKPOINT_SCHEMA_AVA_MIGRATIONS.items():
-        up = ava_migrations.MIGRATIONS_DIR / f"{name}.sql"
-        if name not in tracked or not up.is_file():
+        if name not in tracked:
             raise CheckpointDependencyDriftError(
                 f"checkpoint version {version} must name a git-tracked Ava "
-                f"migration: name={name!r}, up_exists={up.is_file()}, "
-                f"tracked={name in tracked}"
+                f"migration: name={name!r}, tracked={name in tracked}"
             )
 
     approved_target = CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + len(declared_versions)
