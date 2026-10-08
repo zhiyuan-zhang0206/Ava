@@ -14,9 +14,9 @@ effort, then invoke) for the prompt-vs-material shape both entry points use.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from base.host.env.agent_slices import LlmCallPolicy
 from base.host.net.resilience import extract_retry_after, jittered
@@ -45,6 +45,17 @@ class LlmInvocation:
     messages: list[Any]
     used_explicit_cache: bool = False
     recover: Callable[[BaseException], LlmInvocation | None] | None = None
+
+
+class ProviderCallBinding(Protocol):
+    """The invocation-facing part of a binding, independent of provider registration."""
+
+    @property
+    def prepare_call(
+        self,
+    ) -> Callable[[ProviderCallContext], Awaitable[LlmInvocation | None]] | None:
+        """Optional preparation supplied by the actual model build's binding."""
+        ...
 
 
 def recover_invocation(invocation: LlmInvocation, exc: Exception) -> LlmInvocation | None:

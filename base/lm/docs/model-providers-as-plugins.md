@@ -33,7 +33,10 @@ The agent host holds that binding beside the client and supplies it through
 
 An optional `ProviderBinding.prepare_call` receives the original messages,
 tools, and caller-resolved policy snapshot. `base/lm/call.py` owns the lightweight
-invocation envelope. This transition keeps existing configuration ownership;
+invocation envelope and its read-only `ProviderCallBinding` preparation protocol.
+`AvaContext` and invocation consumers depend on that protocol, so importing the
+SDK does not load provider registration. The factory still returns the actual
+selected `ProviderBinding`. This transition keeps existing configuration ownership;
 it does not define a second provider configuration image.
 
 Google owns explicit cache eligibility, creation, and attempt-local stale
