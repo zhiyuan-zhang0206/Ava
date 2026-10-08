@@ -1,6 +1,6 @@
 ---
 name: web-ai
-description: "Drives logged-in ChatGPT, Gemini, Claude, and Perplexity web apps without API credits. Use when a hard question needs another model, current facts need web-grounded answers, or the user asks for web-only deep research, image, or video generation."
+description: "Operates logged-in AI web apps. Use when the task calls for browser-based model consultation, Deep Research, or media generation."
 ---
 
 # web-ai — drive the frontier-model web apps through the logged-in browser

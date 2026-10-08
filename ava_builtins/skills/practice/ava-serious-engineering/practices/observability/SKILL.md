@@ -1,6 +1,6 @@
 ---
 name: observability
-description: "Makes production failures visible through correlated logs, metrics, critical-path events, and watchdogs. Use when designing or reviewing queues, batch writers, background jobs, remote services, watchers, or any system that could fail silently."
+description: "Designs diagnostic signals for running systems. Use when failures are hard to detect, correlate, or explain across logs, metrics, and traces."
 ---
 
 # Observability
@@ -36,15 +36,6 @@ description: "Makes production failures visible through correlated logs, metrics
 - [ ] **SHOULD** The design doc answers "how will I know when it fails" per failure class, with an owner for each signal?
 - [ ] **SHOULD** Log volume is bounded: default verbosity fits an incident window; debug detail sits behind a knob?
 - [ ] **SHOULD** Counters are monotone with units, and no "status: ok" string substitutes for a number?
-
-## Anti-Patterns
-
-- **The suppressed batch**:wrapping a batch write in `contextlib.suppress(Exception)` / an empty catch — one bad row rolls back the whole batch with zero trace. → alternative: isolate per-row failures with counters + logs, and let unknown errors crash.
-- **The lying counter**:a drop counter that lives inside the suppressed block and never increments — "0 dropped" becomes false assurance. → alternative: increment at the point of failure, outside the suppression; prove it with a regression test.
-- **The endless silent retry**:a retry loop that swallows the error and never reports give-up — each retry amplifies load while hiding the cause. → alternative: bounded retries, attempt counters, a logged give-up, and an alert on give-up rate.
-- **The theatrical health check**:a liveness flag or PING that never exercises the real path — `is_connected=True` on a dead transport. → alternative: health checks do a real round trip through the actual resource and data path.
-- **The un-attributable warning**:a log line with no source id, no context, and no owner — hundreds of copies of a message nobody can locate. → alternative: correlation id + component + bounded inputs, and a rule that unknown-source warnings are themselves filed as debt.
-- **Monitoring the process, not the work**:checking "thread alive / process up" while the queue silently drains to zero. → alternative: watch the work product — rows written, events delivered, queue depth — and alarm on absence.
 
 ## Examples(bad → good)
 
@@ -118,19 +109,10 @@ BATCH_OK.inc(ok)
 - `practices/concurrency` — concurrency owns backpressure and connection lifecycles; observability makes backpressure visible. The dead-transport incident is a connection-lifecycle failure whose *detection* is an observability problem; the SSE queue-full incident is a backpressure failure that only numbers could expose early.
 - `ai-era/verification-discipline` — verification of AI-generated code includes observability verification: every AI-written feature ships with its metric, log line, and watchdog, and tests must verify the counters themselves (the emitter fix's regression test asserts the batch survives *and* the counter is honest). Observability is the production half of verification.
 - `practices/maintenance` — the observable surface rots like any other code: log spam, dead alerts, un-attributable warnings (the query-cancellation incident) are technical debt and need the same broken-window repair and debt tracking.
-- `references/03-pragmatic-programmer.md` §4.2 — the six iron laws of debugging: observability is what makes laws 3–6 possible (reproduce the failure from records, read the error message, don't assume — prove from the data).
+- `../../references/03-pragmatic-programmer.md` §4.2 — the six iron laws of debugging: observability is what makes laws 3–6 possible (reproduce the failure from records, read the error message, don't assume — prove from the data).
 
-## Sources
+## Examples and sources
 
-- Ava incident records (memory pool `ava/bugs/`):
-  - `emitter-silent-batch-rollback-20260804.md` — a suppressed batch rolled back silently; a counter that lied; fix + regression test
-  - `watcher-silent-failure-rootcause-2026-08-02.md` — bare except in an infinite silent loop; an expected event's absence unnoticed
-  - `sse-queue-full-rootcause-20260804.md` — a full queue dropped 318K events; rate imbalance is only visible as numbers
-  - `redis-dead-transport-write-crash-2613.md` — is_connected blind to connection_lost; a fake health check
-  - `query-cancellation-source-unknown.md` — 404 unattributable warnings; logs that cannot be owned are noise
-  - `metrics-perf-fix-2026-07-17.md` — "which step" beats "how slow overall": per-step timing wins
-- Google SRE Book, Chapter 6 "Monitoring Distributed Systems" — the four golden signals (latency, traffic, errors, saturation); monitoring must answer "is it working, and why not".
-- addyosmani/agent-skills — production-grade observability skill (ecosystem benchmark).
-- Thomas & Hunt, *The Pragmatic Programmer* — the six iron laws of debugging; Tip 62 "don't program by coincidence". See `references/03-pragmatic-programmer.md` §4.2.
-- Ousterhout, *A Philosophy of Software Design* — complexity accumulates invisibly (§1.4); the most expensive failures are the ones you cannot see. See `references/01-philosophy-of-software-design.md`.
-- **Layer-1 behavioral eval (2026-08-06)** — t3: publish_latency measured the wrong object (handler-internal time, not end-to-end latency), caught by the blind judge(`research/eval/ab/judge-verdict-t3.md`)
+Read [examples and sources](references/examples-and-sources.md) when a concrete
+counterexample, worked example, or source context would clarify these decisions.
+Use the core guidance above directly for routine work.

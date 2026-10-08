@@ -1,6 +1,6 @@
 ---
 name: pages
-description: Combines Ava page publishing, reusable display templates, and user replies for a task. Use when presenting a rich artifact or collecting a choice, confirmation, or form through an Ava page; use a general frontend skill for visual design.
+description: "Publishes Ava pages and collects page-based replies. Use when presenting a rich artifact or gathering user input through a page."
 ---
 
 # Pages and user input

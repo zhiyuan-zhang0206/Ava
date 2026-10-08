@@ -26,6 +26,11 @@ The fleet plugin owns peer communication. This skill refers to that contract for
 milestones, commitments, blockers, and handoffs rather than prescribing a second
 cadence. The human interruption section remains separate.
 
+The entrypoint retains lifecycle, scope, and recovery decisions. Waiting
+procedures load from `references/waiting.md`; state destinations and the task-file
+example load from `references/durable-state.md` when persistence or recovery
+requires them. A finite task still terminates when complete.
+
 ## Key Dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — the "use watchers" primitive

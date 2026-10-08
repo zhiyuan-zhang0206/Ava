@@ -1,6 +1,6 @@
 ---
 name: work-eval
-description: Executes multi-step work with adversarial self-review and verification woven through every step. Use when implementation, research, or operations require continuous evaluation rather than a single final check.
+description: "Guides ongoing verification during multi-step work. Use when implementation, research, or operations need checks throughout execution."
 ---
 
 # Work & Evaluate — The Evaluation Thread, Made Explicit

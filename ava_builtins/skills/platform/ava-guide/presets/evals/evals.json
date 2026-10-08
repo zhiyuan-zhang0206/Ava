@@ -1,0 +1,56 @@
+{
+  "skill_name": "ava-guide:presets",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Design a reusable Fast Worker preset with Sonnet 5.5 Fast as the default. The supplied test inventory contains only these model IDs: claude-sonnet-5-5, claude-opus-5-5-fast, and mimo-v2.6-pro-ultraspeed. Do not assume another model exists. The normal default is claude-sonnet-5-5. Use this offline inventory and the supplied scratch directory to save a proposal and evaluation plan; do not call live APIs, install packages, or spawn agents.",
+      "files": [],
+      "expected_output": "The unsupported requested model is surfaced for user choice, supported options are shown, and a saved quality-and-speed evaluation plan compares the eventual candidate with defaults without claiming readiness.",
+      "assertions": [
+        "The proposal does not invent or silently select an unregistered Sonnet Fast model.",
+        "The unresolved model choice is stated with options drawn from the supplied roster.",
+        "The evaluation cases exercise concrete worker tasks rather than only checking config syntax.",
+        "Metrics include task quality and elapsed time, with tokens or cost as measured or unavailable.",
+        "The baseline is the supplied default configuration and the report identifies unexecuted runs."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Improve this existing Fast Worker preset by changing its model to claude-opus-5-5-fast, which is registered in the supplied test inventory. Current config: {\"llm_model\":\"mimo-v2.6-pro-ultraspeed\",\"reasoning_effort\":\"high\",\"agent_communication_style\":\"oriented\",\"agent_reply_reminder_cadence\":\"every_time\",\"passive_memory_recall_enabled\":false}. Retain the other settings. Work offline in the supplied scratch directory: snapshot the current config and save a candidate and evaluation plan, without writing to a live gateway or running agents.",
+      "files": [],
+      "expected_output": "A complete replacement config that changes only the requested model, a retained old-config baseline, saved task cases and metrics, and a draft pending whole-preset evaluation.",
+      "assertions": [
+        "The candidate uses the registered requested model.",
+        "All four unrelated settings are preserved in the complete candidate config.",
+        "The previous effective config is saved for the baseline.",
+        "Cases and metrics compare actual worker task quality and efficiency across both model configurations.",
+        "No working preset is overwritten or live execution claimed before evaluation."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Design a reusable research-assistant preset that searches a team's private documents through an MCP server and produces a cited briefing. The test inventory has model claude-sonnet-5-5 and no research role card. The required document-search MCP connection is not authenticated on the intended host. Use only the supplied scratch directory to draft the role card, config, prerequisites, and evaluation plan. Do not install, authenticate, save a live preset, or contact a service.",
+      "files": [],
+      "expected_output": "An instance-role draft and compatible config proposal, a clear MCP readiness gap, cases with task-quality checks for cited briefings, and an incomplete composition evaluation.",
+      "assertions": [
+        "Standing research instructions are placed in a role-card skill rather than an invented prompt config field.",
+        "The proposed config uses only the supplied registered model and does not claim that the unregistered draft role card already resolves.",
+        "MCP definitions, credentials, and evaluation data are kept out of per-agent config.",
+        "The plan covers supported citations and a missing-authentication failure path.",
+        "The report marks the MCP prerequisite and live evaluation as blocked or unexecuted and does not claim readiness."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "I need an agent once to check these invoice totals: invoice_id,quantity,unit_price,total\nA-17,2,50,120\nA-18,3,10,30. I will not reuse this role. Advise how to launch this one-off task using the deployment defaults; there is no need to save a new agent type. Work offline in the supplied scratch directory and do not spawn an agent or modify stored presets.",
+      "files": [],
+      "expected_output": "A concrete one-off mission using defaults or a minimal explicit overlay, without creating a preset, standing role skill, or pretending execution occurred.",
+      "assertions": [
+        "The recommendation uses a one-off mission or config overlay rather than persisting a reusable preset.",
+        "No unnecessary role-card skill or dependency installation is added.",
+        "The launch guidance respects the supplied offline scope.",
+        "The response does not claim the invoice task was executed by a spawned agent."
+      ]
+    }
+  ]
+}

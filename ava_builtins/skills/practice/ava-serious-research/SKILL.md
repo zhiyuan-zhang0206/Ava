@@ -1,6 +1,6 @@
 ---
 name: ava-serious-research
-description: Guides trustworthy ML research from question through evidence, verification, and presentation. Use when starting, running, reviewing, or presenting research on LLMs, algorithms, architectures, agents, or interpretability, even if the request begins as a coding task.
+description: "Guides trustworthy ML research from question to evidence. Use when designing experiments, investigating algorithms, or reviewing and reporting research results."
 ---
 
 # Serious Research
