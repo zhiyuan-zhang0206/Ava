@@ -129,21 +129,22 @@ export function clickAt(row: string, x: number) {
   fireEvent.click(screen.getByTestId(`run-timeline-canvas-${row}`), { clientX: x });
 }
 
-/** How an item of a row looks at pixel `x`: its state ring (self, ancestor, hover) and whether a highlight faded it. */
+/** How an item of a row looks at pixel `x`: its state (self = inside the selection frame, ancestor, hover) and whether a highlight faded it. */
 export function look(row: string, x: number): { ring: "self" | "ancestor" | "hover" | "none"; faded: boolean } {
   const shapes = shapesAt(row, x);
-  const strength = (color: string) =>
-    color === "var(--foreground)"
-      ? 3
-      : color.includes("var(--foreground) 60%")
-        ? 2
-        : /var\(--foreground\) (40|70)%/.test(color)
-          ? 1
-          : 0;
-  const best = Math.max(
-    0,
-    ...shapes.map((d) => strength(d.color)),
-  );
+  const strength = (d: Drawn) => {
+    if (d.op === "stroke") {
+      if (d.color === "var(--primary)") return 3;
+      if (d.color.includes("var(--primary) 60%")) return 2;
+      if (d.color.includes("var(--primary) 35%")) return 1;
+      return 0;
+    }
+    // A hairline too narrow for an outline shows its state in its fill.
+    if (d.op === "fill" && d.w < 4 && d.color.includes("var(--primary) 60%")) return 2;
+    if (d.op === "fill" && d.color.includes("var(--foreground) 30%")) return 1;
+    return 0;
+  };
+  const best = Math.max(0, ...shapes.map(strength));
   return {
     ring: (["none", "hover", "ancestor", "self"] as const)[best],
     faded: shapes.some((d) => d.op === "fill" && d.color.includes("12%")),

@@ -100,25 +100,27 @@ describe("RunTimelineRows canvas rows", () => {
     expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 2, i1: 2, unitKind: "output" });
   });
 
-  it("outlines the selected node and gives it an outline box over the row", async () => {
+  it("frames the selected node once, in the accent, and keeps its color", async () => {
     renderRows({ nodes: [node("p", 0, 100), node("a", 100, 100, "p"), node("c", 100, 400)] }, { kind: "node", id: "a" });
     await paintFrame();
-    expect(screen.getAllByTestId("run-timeline-selection-box")).toHaveLength(1);
-    expect(screen.getByTestId("run-timeline-selection-line")).toBeTruthy();
+    expect(strokes("level-1", 2)).toHaveLength(1);
+    expect(strokes("level-1", 2)[0].color).toBe("var(--primary)");
+    expect(screen.queryByTestId("run-timeline-selection-box")).toBeNull();
     expect(screen.getByTestId("run-timeline-selection-live").textContent).toContain("node a");
   });
 
-  it("lights an ancestor of the selection, and steps the rest back", async () => {
+  it("lights an ancestor with a lighter outline, and steps the unselected back", async () => {
     renderRows({ nodes: [{ ...node("p", 0, 500), level: 2 }, node("a", 0, 100, "p"), node("b", 200, 300, "p")] }, { kind: "node", id: "a" });
     await paintFrame();
-    expect(strokes("level-2", 2)).toHaveLength(1);
-    expect(strokes("level-2", 2)[0].color).toContain("60%");
-    // The selected node has the plain foreground ring; the unrelated one has none and is dimmed.
-    expect(strokes("level-1", 2)).toHaveLength(1);
-    expect(strokes("level-1", 2)[0].color).toBe("var(--foreground)");
-    const dimmed = fills("level-1").filter((d) => d.color.includes("40%"));
-    expect(dimmed).toHaveLength(1);
+    const ancestor = strokes("level-2", 1).filter((d) => d.color.includes("var(--primary) 60%"));
+    expect(ancestor).toHaveLength(1);
+    expect(strokes("level-2", 2)).toHaveLength(0);
+    const [selected, other] = fills("level-1");
+    expect(selected.color).not.toContain("50%");
+    expect(other.color).toContain("50%");
+    expect(fills("level-2")[0].color).not.toContain("50%");
   });
+
 });
 
 describe("RunTimelineRows narrow items", () => {
@@ -138,20 +140,33 @@ describe("RunTimelineRows narrow items", () => {
     expect(onSelect.mock.calls.at(-1)?.[0]).toMatchObject({ kind: "node" });
   });
 
-  it("outlines the selected item at least 6 px wide, and draws a line through the rows", () => {
+  it("frames a selection narrower than 6 px at 6 px and marks it with a faint line in the tracks only", async () => {
     renderRows({ nodes: [node("a", 100, 100.5), node("b", 600, 900)] }, { kind: "node", id: "a" });
-    const box = screen.getByTestId("run-timeline-selection-box");
-    expect(parseFloat(box.style.width)).toBeGreaterThanOrEqual(6);
-    expect(screen.getByTestId("run-timeline-selection-line")).toBeTruthy();
+    await paintFrame();
+    const frame = strokes("level-1", 2)[0];
+    expect(frame.w).toBeGreaterThanOrEqual(6);
+    const line = fills("level-1").filter((d) => d.w <= 1 && d.color.includes("var(--foreground) 18%"));
+    expect(line).toHaveLength(1);
+    expect(line[0].h).toBe(32);
   });
 
-  it("outlines a selected request's bars and the blocks it read, and one line spans them all", () => {
+  it("draws no line when the selection is wide enough to see", async () => {
+    renderRows({ nodes: [node("a", 100, 400)] }, { kind: "node", id: "a" });
+    await paintFrame();
+    expect(fills("level-1").filter((d) => d.color.includes("var(--foreground) 18%"))).toHaveLength(0);
+  });
+
+  it("frames a selected request's bar and the whole batch it read once per row, not once per block", async () => {
     const units = [unit("text", 0, 0, 100), unit("text", 1, 100, 200)];
     const request = { idx: 2, ts: at(200), session: 0, input_tokens: 5, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: 0, added_to: 2 };
     renderRows({ units, requests: [request] }, { kind: "request", idx: 2 });
-    expect(screen.getAllByTestId("run-timeline-selection-box")).toHaveLength(4);
-    expect(screen.getAllByTestId("run-timeline-selection-line")).toHaveLength(1);
+    await paintFrame();
+    for (const row of ["units", "input", "added"]) expect(strokes(row, 2)).toHaveLength(1);
+    const [frame] = strokes("units", 2);
+    expect(frame.x).toBeLessThan(fills("units")[0].x);
+    expect(frame.x + frame.w).toBeGreaterThan(fills("units")[1].x + fills("units")[1].w);
   });
+
 });
 
 describe("RunTimelineRows hybrid axis", () => {
@@ -274,42 +289,41 @@ describe("RunTimelineRows keyboard and request bars", () => {
     expect(fills("added")[1].x).toBe(bar.x);
   });
 
-  it("selects every block a request read together with its bar, and lights them on hover", async () => {
+  it("frames the batch a request read, and lights it softly while its bar is hovered", async () => {
     renderRows(
       { units, requests: [request(1, 100), { ...request(3, 900), added_from: 1, added_to: 3 }] },
       { kind: "request", idx: 3 },
     );
     await paintFrame();
-    // Blocks 1 and 2 are ringed, block 0 is not; the selected bar is ringed in both context rows.
-    expect(strokes("units", 2)).toHaveLength(2);
+    expect(strokes("units", 2)).toHaveLength(1);
     expect(strokes("input", 2)).toHaveLength(1);
     expect(strokes("added", 2)).toHaveLength(1);
     const [first] = fills("input");
     pointAt("input", first.x + first.w / 2);
     await paintFrame();
-    expect(strokes("units", 1).length).toBeGreaterThan(0);
+    expect(strokes("input", 1).length).toBeGreaterThan(0);
   });
 
-  it("keeps the session color on the selected request bar and rings it", async () => {
+  it("keeps the session color on the selected request bar, frames it and dims the other", async () => {
     renderRows({ units, requests: [request(1, 100), request(2, 600)] }, { kind: "request", idx: 1 });
     await paintFrame();
     const [first, second] = fills("input");
-    expect(first.color).toBe("#3b82f6");
-    expect(second.color).toContain("#3b82f6");
-    expect(second.color).toContain("color-mix");
+    expect(first.color).toContain("#3b82f6");
+    expect(first.color).not.toContain("50%");
+    expect(second.color).toContain("50%");
     expect(strokes("input", 2)).toHaveLength(1);
   });
 
-  it("lights the bar that read a selected block", async () => {
+  it("frames the bar that read a selected block", async () => {
     renderRows({ units, requests: [request(1, 100), request(2, 600)] }, { kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
     await paintFrame();
     expect(strokes("input", 2)).toHaveLength(1);
     const [first, second] = fills("input");
-    expect(second.color).toBe("#3b82f6");
-    expect(first.color).toContain("color-mix");
+    expect(second.color).not.toContain("50%");
+    expect(first.color).toContain("50%");
   });
 
-  it("lights the nodes over the blocks of a selected request, like a selected block", async () => {
+  it("outlines the nodes over the blocks of a selected request as ancestors, like a selected block", async () => {
     const covered = [{ ...unit("text", 1, 0, 100), parent: "a" }];
     const requestRead = { idx: 2, ts: at(100), session: 0, input_tokens: 5, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: 0, added_to: 2 };
     renderRows(
@@ -317,8 +331,8 @@ describe("RunTimelineRows keyboard and request bars", () => {
       { kind: "request", idx: 2 },
     );
     await paintFrame();
-    expect(strokes("level-1", 2)).toHaveLength(1);
-    expect(strokes("level-2", 2)).toHaveLength(1);
+    expect(strokes("level-1", 1).filter((d) => d.color.includes("var(--primary) 60%"))).toHaveLength(1);
+    expect(strokes("level-2", 1).filter((d) => d.color.includes("var(--primary) 60%"))).toHaveLength(1);
   });
 
   it("moves the selection with the arrow keys and ignores them in an input", () => {
