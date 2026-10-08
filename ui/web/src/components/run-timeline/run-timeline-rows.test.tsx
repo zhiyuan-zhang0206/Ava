@@ -66,6 +66,7 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
 const fills = (row: string) => drawn(row).filter((d) => d.op === "fill");
 const strokes = (row: string, lineWidth?: number) =>
   drawn(row).filter((d) => d.op === "stroke" && (lineWidth === undefined || d.lineWidth === lineWidth));
+const linkedFrames = (row: string) => drawn(row).filter((d) => d.op === "stroke" && d.dash.length > 0);
 const texts = (row: string) => drawn(row).filter((d) => d.op === "text").map((d) => d.text);
 
 describe("RunTimelineRows canvas rows", () => {
@@ -156,15 +157,32 @@ describe("RunTimelineRows narrow items", () => {
     expect(fills("level-1").filter((d) => d.color.includes("var(--foreground) 18%"))).toHaveLength(0);
   });
 
-  it("frames a selected request's bar and the whole batch it read once per row, not once per block", async () => {
+  it("frames the primary bar strongly and the batch it read, and the same request in the other row, lightly", async () => {
     const units = [unit("text", 0, 0, 100), unit("text", 1, 100, 200)];
     const request = { idx: 2, ts: at(200), session: 0, input_tokens: 5, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: 0, added_to: 2 };
     renderRows({ units, requests: [request] }, { kind: "request", idx: 2 });
     await paintFrame();
-    for (const row of ["units", "input", "added"]) expect(strokes(row, 2)).toHaveLength(1);
-    const [frame] = strokes("units", 2);
+    expect(strokes("input", 2)).toHaveLength(1);
+    expect(strokes("units", 2)).toHaveLength(0);
+    expect(strokes("added", 2)).toHaveLength(0);
+    // One light frame per row around the whole batch, not one per block.
+    expect(linkedFrames("units")).toHaveLength(1);
+    expect(linkedFrames("added")).toHaveLength(1);
+    const [frame] = linkedFrames("units");
     expect(frame.x).toBeLessThan(fills("units")[0].x);
     expect(frame.x + frame.w).toBeGreaterThan(fills("units")[1].x + fills("units")[1].w);
+  });
+
+  it("hugs the bar: the frame is the bar's own width plus the gap and stroke, never the message range or a minimum", async () => {
+    const thin = [unit("text", 0, 0, 100), unit("text", 1, 100, 102)];
+    const request = { idx: 2, ts: at(102), session: 0, input_tokens: 5, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: 1, added_to: 2 };
+    renderRows({ units: thin, requests: [request] }, { kind: "request", idx: 2 });
+    await paintFrame();
+    const [bar] = fills("input");
+    const [frame] = strokes("input", 2);
+    // The stroke's centre line sits 2 px outside the bar: its outer edge is 3 px off (1 px gap plus the 2 px stroke).
+    expect(frame.x).toBeCloseTo(bar.x - 2);
+    expect(frame.w).toBeCloseTo(bar.w + 4);
   });
 
 });
@@ -204,21 +222,16 @@ describe("RunTimelineRows tokens", () => {
     estimated,
   });
 
-  it("shows a node's and a block's tokens at their right end, ~ for an estimate, and drops them when narrow", async () => {
+  it("shows no token count on a node or a block, only the node's summary", async () => {
     renderRows({
-      units: [counted(unit("text", 0, 0, 500), 1500, true), counted(unit("text", 1, 500, 505), 20, false)],
-      nodes: [
-        { ...node("wide", 0, 600), context_tokens: 2300, estimated: false },
-        { ...node("thin", 600, 610), context_tokens: 9, estimated: true },
-      ],
+      units: [counted(unit("text", 0, 0, 500), 1500, true)],
+      nodes: [{ ...node("wide", 0, 600), context_tokens: 2300, estimated: false }],
     });
     await paintFrame();
-    expect(texts("level-1")).toContain("2.3k");
-    expect(texts("level-1")).not.toContain("~9");
-    expect(texts("units")).toEqual(["~1.5k"]);
-    const token = drawn("units").find((d) => d.op === "text");
-    expect(token?.align).toBe("right");
+    expect(texts("level-1")).toEqual(["node wide"]);
+    expect(texts("units")).toEqual([]);
   });
+
 });
 
 describe("RunTimelineRows context rows", () => {
@@ -289,19 +302,19 @@ describe("RunTimelineRows keyboard and request bars", () => {
     expect(fills("added")[1].x).toBe(bar.x);
   });
 
-  it("frames the batch a request read, and lights it softly while its bar is hovered", async () => {
+  it("frames the batch a request read lightly, and lights it softly while its bar is hovered", async () => {
     renderRows(
       { units, requests: [request(1, 100), { ...request(3, 900), added_from: 1, added_to: 3 }] },
       { kind: "request", idx: 3 },
     );
     await paintFrame();
-    expect(strokes("units", 2)).toHaveLength(1);
     expect(strokes("input", 2)).toHaveLength(1);
-    expect(strokes("added", 2)).toHaveLength(1);
+    expect(linkedFrames("units")).toHaveLength(1);
+    expect(linkedFrames("added")).toHaveLength(1);
     const [first] = fills("input");
     pointAt("input", first.x + first.w / 2);
     await paintFrame();
-    expect(strokes("input", 1).length).toBeGreaterThan(0);
+    expect(strokes("input", 1).filter((d) => d.dash.length === 0).length).toBeGreaterThan(0);
   });
 
   it("keeps the session color on the selected request bar, frames it and dims the other", async () => {
@@ -314,10 +327,12 @@ describe("RunTimelineRows keyboard and request bars", () => {
     expect(strokes("input", 2)).toHaveLength(1);
   });
 
-  it("frames the bar that read a selected block", async () => {
+  it("frames the selected block strongly and the bar that read it lightly", async () => {
     renderRows({ units, requests: [request(1, 100), request(2, 600)] }, { kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
     await paintFrame();
-    expect(strokes("input", 2)).toHaveLength(1);
+    expect(strokes("units", 2)).toHaveLength(1);
+    expect(strokes("input", 2)).toHaveLength(0);
+    expect(linkedFrames("input")).toHaveLength(1);
     const [first, second] = fills("input");
     expect(second.color).not.toContain("50%");
     expect(first.color).toContain("50%");
