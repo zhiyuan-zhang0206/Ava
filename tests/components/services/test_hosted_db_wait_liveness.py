@@ -30,7 +30,7 @@ from services.agent_runner.agent_host.dispatcher import (
     TurnScheduler,
 )
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.recovery.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
 from services.wake.delivery_watchdog import turn_liveness
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
 

@@ -72,7 +72,7 @@ async def test_streak_write_failure_keeps_its_traceback(
     async def _boom(*_args: object, **_kwargs: object) -> int:
         raise RuntimeError("recovery breaker store down")
 
-    monkeypatch.setattr("base.agents.recovery_breaker.record_permanent_reject_turn", _boom)
+    monkeypatch.setattr("base.agents.recovery.breaker.record_permanent_reject_turn", _boom)
 
     await _reject(aops_pool, spawn_agent(spawner="user"))
 
@@ -97,8 +97,8 @@ async def test_halt_suppression_failure_keeps_its_traceback(
     async def _noop(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr("base.agents.recovery_breaker.record_permanent_reject_turn", _streak)
-    monkeypatch.setattr("base.agents.recovery_breaker.halt_automatic_recovery", _boom)
+    monkeypatch.setattr("base.agents.recovery.breaker.record_permanent_reject_turn", _streak)
+    monkeypatch.setattr("base.agents.recovery.breaker.halt_automatic_recovery", _boom)
     monkeypatch.setattr("agent.db.enqueue_fatal_provider_report_to_nearest_alive_ancestor", _noop)
 
     await _reject(aops_pool, spawn_agent(spawner="user"))
@@ -124,8 +124,8 @@ async def test_ancestor_report_failure_keeps_its_traceback(
     async def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("enqueue down")
 
-    monkeypatch.setattr("base.agents.recovery_breaker.record_permanent_reject_turn", _streak)
-    monkeypatch.setattr("base.agents.recovery_breaker.halt_automatic_recovery", _halt)
+    monkeypatch.setattr("base.agents.recovery.breaker.record_permanent_reject_turn", _streak)
+    monkeypatch.setattr("base.agents.recovery.breaker.halt_automatic_recovery", _halt)
     monkeypatch.setattr("agent.db.enqueue_fatal_provider_report_to_nearest_alive_ancestor", _boom)
 
     await _reject(aops_pool, spawn_agent(spawner="user"))

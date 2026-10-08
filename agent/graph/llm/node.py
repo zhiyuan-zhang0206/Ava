@@ -435,7 +435,7 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
       breaker's "first successful LLM call closes the breaker" moment).
     - permanent_reject_streak = 0 in the same statement: a completed turn is
       also the recovery signal that closes the recovery circuit breaker
-      (`base/agents/recovery_breaker.py`) — the only reset, so two consecutive
+      (`base/agents/recovery/breaker.py`) — the only reset, so two consecutive
       permanent rejections with no success between them keep it >= the halt
       threshold. `last_permanent_reject_reason` is cleared with it — the reason
       class belongs to the streak generation.

@@ -79,7 +79,7 @@ def _recover_crash_marked_blocking(
       refused, naming the guard that failed;
     - already terminated -> `already_terminated` (an idempotent repeat).
     """
-    from base.agents.recovery_breaker import (
+    from base.agents.recovery.breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
     )

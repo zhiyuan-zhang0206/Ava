@@ -1,4 +1,4 @@
-"""The reap's guarded recovery attempt — `services/agent_runner/agent_host/crash_recovery.py` (task #4039).
+"""The reap's guarded recovery attempt — `services/agent_runner/agent_host/recovery/crash.py` (task #4039).
 
 The reaper commits the death's wake inside its terminating transaction; this
 module is the attempt that consumes it right after. Every outcome a refusal,
@@ -16,7 +16,7 @@ import pytest
 from agent.ownership.corpse_reap import ReapedCorpse
 from base.db import Database
 from base.events.live.bus import EventBus
-from services.agent_runner.agent_host.crash_recovery import recover_reaped_corpses
+from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 
 
 async def test_attempts_the_guarded_resurrect_per_wake(
