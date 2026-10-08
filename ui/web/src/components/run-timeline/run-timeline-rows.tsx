@@ -17,7 +17,6 @@ import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import {
   blockClass,
-  chainIds,
   hoverLit,
   axisBox,
   buildAxisMap,
@@ -39,14 +38,12 @@ import {
   UNITS_ROW,
   levelRowId,
   navigate,
-  overlayBox,
   SELECTION_MIN_PX,
-  selectionSpans,
-  spansExtent,
+  selectionRoles,
   revealView,
   type NavKey,
 } from "./timeline-nav";
-import { barTop, layoutsFor, type RowLayout } from "./timeline-canvas-model";
+import { barTop, frameOf, layoutsFor, type RowLayout } from "./timeline-canvas-model";
 import { RunTimelineAxis } from "./run-timeline-axis";
 import { TrackCanvas } from "./run-timeline-canvas";
 import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco } from "./run-timeline-paint";
@@ -111,10 +108,6 @@ export function RunTimelineRows({
     [data.units, baseFrom, baseTo, mode],
   );
   const viewU = axis.viewU(view);
-  // A selection lights itself and every ancestor; the rest steps back.
-  const chain = chainIds(selection, data.nodes, data.units, data.requests);
-  const selectedRequest =
-    selection?.kind === "request" ? data.requests.find((request) => request.idx === selection.idx) : undefined;
   const chartRef = useRef<HTMLDivElement>(null);
   const live = useRef({ base, view, onView, axis });
   // The view a wheel event produced that React has not rendered yet.
@@ -131,14 +124,28 @@ export function RunTimelineRows({
   });
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
   // Where the selected items are, per row: drawn as an outlined box in each row and a line through all of them.
-  const selected = selectionSpans(selection, data, axis);
-  const extent = spansExtent([...selected.values()].flat());
-  // The selection is one frame per row around the whole batch; a selection too narrow to see also gets a hairline.
-  const wholeBox = extent === null ? null : overlayBox(extent, viewU, trackPx, 0);
-  const lineX = wholeBox !== null && wholeBox.width < SELECTION_MIN_PX ? wholeBox.left + wholeBox.width / 2 : null;
+  const layouts = layoutsFor(data, axis, viewU, trackPx);
+  const roles = selectionRoles(selection === null ? null : { row: navRow, selection }, data);
+  // The primary item (the cursor's) gets one strong frame; what is linked to it one light frame per row around the whole batch.
+  // A frame hugs the drawn item (bars exactly, the rest at least 6 px wide); a primary item narrower than 6 px also gets a hairline.
+  const boxesOf = (row: string, keys: Iterable<string>) => {
+    const boxes = layouts.get(row)?.boxes;
+    return [...keys].flatMap((key) => boxes?.get(key) ?? []);
+  };
+  const primaryBoxes = roles.primary === null ? [] : boxesOf(roles.primary.row, [roles.primary.key]);
+  const primaryRaw = frameOf(primaryBoxes, 0, trackPx);
+  const lineX = primaryRaw !== null && primaryRaw.width < SELECTION_MIN_PX ? primaryRaw.left + primaryRaw.width / 2 : null;
   const decoFor = (row: string): RowDeco => {
-    const rowExtent = spansExtent(selected.get(row) ?? []);
-    return { frame: rowExtent === null ? null : overlayBox(rowExtent, viewU, trackPx, SELECTION_MIN_PX), lineX };
+    const minPx = row === INPUT_ROW || row === ADDED_ROW ? 0 : SELECTION_MIN_PX;
+    const primaryHere = roles.primary?.row === row ? roles.primary.key : null;
+    const linkedKeys = roles.linked.get(row) ?? new Set<string>();
+    return {
+      primaryKey: primaryHere,
+      linkedKeys,
+      primary: primaryHere === null ? null : frameOf(boxesOf(row, [primaryHere]), minPx, trackPx),
+      linked: frameOf(boxesOf(row, linkedKeys), minPx, trackPx),
+      lineX,
+    };
   };
   useEffect(() => {
     const track = chartRef.current?.querySelector("[data-track]");
@@ -258,8 +265,7 @@ export function RunTimelineRows({
     sourceLabel,
   });
   // The layout of every row (where each item is drawn) is cached per view: hovering and selecting only repaint.
-  const layouts = layoutsFor(data, axis, viewU, trackPx);
-  const paintState: PaintState = { selection, hover, chain, lit, highlight, selectedRequest };
+  const paintState: PaintState = { selection, hover, lit, highlight };
   const canvasFor = (row: string, height: number, paint: (p: Parameters<React.ComponentProps<typeof TrackCanvas>["paint"]>[0], layout: RowLayout) => void) => {
     const layout = layouts.get(row);
     if (layout === undefined) return null;

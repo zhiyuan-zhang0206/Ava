@@ -9,10 +9,11 @@ import {
   maxInput,
   NARROW_DRAW_PX,
   type AxisMap,
-  type Selection,
   type Viewport,
 } from "./timeline-model";
-import { ADDED_ROW, INPUT_ROW, navItems, navRowIds, type NavData, type NavItem } from "./timeline-nav";
+import { ADDED_ROW, INPUT_ROW, navItems, navRowIds, selectionKey, type NavData, type NavItem } from "./timeline-nav";
+
+export { selectionKey };
 
 /** One item of a row on the track, in pixels from its left edge. */
 export interface Place {
@@ -36,15 +37,10 @@ export interface RowLayout {
   /** The narrow items, collapsed to one painted item per pixel column and run-merged. */
   cells: Cell[];
   items: ReadonlyMap<string, NavItem>;
+  /** Where each item of the row is drawn in pixels, before narrow ones collapse to columns: what a frame hugs. */
+  boxes: ReadonlyMap<string, { x0: number; x1: number }>;
   /** A bar row's value per item (what its height is), absent for other rows. */
   values?: ReadonlyMap<string, number>;
-}
-
-/** The identity of an item across redraws. */
-export function selectionKey(selection: Selection): string {
-  if (selection.kind === "node") return `n${selection.id}`;
-  if (selection.kind === "request") return `r${selection.idx}`;
-  return `u${selection.unitKind}-${selection.i0}-${selection.i1}`;
 }
 
 /**
@@ -151,7 +147,8 @@ function layoutOf(
   values?: ReadonlyMap<string, number>,
 ): RowLayout {
   const { wide, cells } = aggregateColumns(places);
-  return { wide, cells, items: new Map(items.map((item) => [selectionKey(item.selection), item])), values };
+  const boxes = new Map(places.map((place) => [place.key, { x0: place.x0, x1: place.x1 }]));
+  return { wide, cells, items: new Map(items.map((item) => [selectionKey(item.selection), item])), boxes, values };
 }
 
 /** The layout of a level or Messages row: blocks placed on the axis as the DOM rows were (a body never reaches the next block's start). */
@@ -213,4 +210,25 @@ export function layoutsFor(data: NavData, axis: Placer, view: Viewport, trackPx:
   const layouts = new Map(navRowIds(data).map((row) => [row, rowLayout(row, data, axis, view, trackPx)]));
   cache = { data, axis, from: view.from, to: view.to, trackPx, layouts };
   return layouts;
+}
+
+/**
+ * The frame around a set of items of a row: the union of the boxes they are drawn in, at least
+ * `minPx` wide (centred on them) and kept inside the track. Null when none of them is drawn.
+ */
+export function frameOf(
+  boxes: readonly { x0: number; x1: number }[],
+  minPx: number,
+  trackPx: number,
+): { left: number; width: number } | null {
+  if (boxes.length === 0) return null;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  for (const box of boxes) {
+    x0 = Math.min(x0, box.x0);
+    x1 = Math.max(x1, box.x1);
+  }
+  const width = Math.min(Math.max(x1 - x0, minPx), trackPx);
+  const left = Math.min(Math.max((x0 + x1) / 2 - width / 2, 0), trackPx - width);
+  return { left, width };
 }
