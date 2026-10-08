@@ -21,6 +21,7 @@ import psycopg
 import pytest
 
 from base.config import settings
+from base.host.atomic_io import write_text_atomic
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
@@ -134,7 +135,7 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
         peers.append(int(fork.json()["id"]))
         state = _state(root, owner)
         state["peers"] = peers
-        (root / f"{owner}.json").write_text(json.dumps(state))
+        write_text_atomic(root / f"{owner}.json", json.dumps(state))
         httpx.post(
             f"{GATEWAY_URL}/api/agents/{peers[-1]}/messages",
             json={
