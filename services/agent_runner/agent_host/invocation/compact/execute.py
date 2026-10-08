@@ -28,7 +28,7 @@ from base.agents.compaction.source_owner import require_source_receiver
 from base.agents.context import AvaContext
 from base.agents.incarnation.native_work import activate_work
 from base.db.transaction import async_write_transaction
-from base.lm.factory import build_chat_model, provider_key_of_model
+from base.lm.factory import build_chat_model_bound, provider_key_of_model
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_native_work
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph, apply_prepared
@@ -86,7 +86,7 @@ async def _generate_original(
         await _settle_without_generation(pool, command, incarnation, reason="model_changed")
         return False
     try:
-        model = build_chat_model(
+        model, binding = build_chat_model_bound(
             target_model, overrides=ctx.require_agent().overrides, single_attempt=True
         )
     except ValueError:
@@ -116,7 +116,11 @@ async def _generate_original(
             async with subscribe_interrupt(pool, incarnation.agent_id) as interrupted:
                 summary = await interruptible_model(
                     generate_summary(
-                        list(state.messages), model, ctx.require_agent(), single_attempt=True
+                        list(state.messages),
+                        model,
+                        ctx.require_agent(),
+                        single_attempt=True,
+                        binding=binding,
                     ),
                     interrupted,
                 )

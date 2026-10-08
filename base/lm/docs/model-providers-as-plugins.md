@@ -23,6 +23,26 @@ The extension surface enforces that boundary:
 - The prefix map is flat. Duplicate or nested prefixes fail at registration;
   there is no precedence order from which a fallback chain could emerge.
 
+## Invocation adapters
+
+`build_chat_model()` still returns an unbound chat model. Its internal
+`build_chat_model_bound()` companion resolves the model once and returns the
+actual client with its selected binding; override factories have no binding.
+The agent host holds that binding beside the client and supplies it through
+`AvaContext`, without serializing either into checkpoints or exec requests.
+
+An optional `ProviderBinding.prepare_call` receives the original messages,
+tools, and caller-resolved policy snapshot. `base/lm/call.py` owns the lightweight
+invocation envelope. This transition keeps existing configuration ownership;
+it does not define a second provider configuration image.
+
+Google owns explicit cache eligibility, creation, and attempt-local stale
+classification. Its recovery captures that attempt's cache reference,
+invalidates it, and returns a direct plain invocation. Core retains the total
+timeout, cancellation, one recovery, stream reset, and successful-attempt usage
+provenance. Recovery never prepares another cache; single-attempt callers
+forbid it. Other bindings remain ordinary tool calls when no adapter exists.
+
 ## Current ownership
 
 Core owns only the extension and normalization mechanisms:

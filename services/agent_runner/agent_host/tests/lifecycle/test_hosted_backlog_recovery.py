@@ -44,7 +44,7 @@ def isolated_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         host_module,
         "boot_agent_scope",
-        AsyncMock(return_value=FakeListChatModel(responses=["unused"])),
+        AsyncMock(return_value=(FakeListChatModel(responses=["unused"]), None)),
     )
 
 

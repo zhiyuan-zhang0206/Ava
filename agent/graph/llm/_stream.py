@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator
-from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
@@ -36,6 +35,8 @@ from agent.graph.llm_errors import (
 from agent.llm.cache import prepare_invocation
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.lm.call import recover_invocation
+from base.lm.provider_api import ProviderBinding
 from base.log import logger
 
 
@@ -347,6 +348,7 @@ async def _stream_with_cache_retry(
     chunks: list[AIMessageChunk],
     handler: RedisStreamHandler,
     agent: AgentSlices,
+    binding: ProviderBinding | None = None,
 ) -> None:
     """Stream the LLM response into `chunks`, retrying once on a stale cache.
 
@@ -378,10 +380,10 @@ async def _stream_with_cache_retry(
     # for it either — usage is logged only on success).
     async def _run() -> None:
         call_started = time.monotonic()
-        invocation = await prepare_invocation(llm, messages, agent.llm_policy)
+        invocation = await prepare_invocation(llm, messages, agent.llm_policy, binding)
         # Cache provenance for the usage event: only the attempt that actually
         # succeeded counts (a stale-cache retry runs on the plain path).
-        handler.used_explicit_cache = invocation.cache_ref is not None
+        handler.used_explicit_cache = invocation.used_explicit_cache
         try:
             first_ts, last_ts = await _consume_llm(
                 invocation.runnable,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
@@ -391,22 +393,9 @@ async def _stream_with_cache_retry(
                 agent=agent,
             )
         except Exception as exc:
-            if invocation.cache_ref is None:
+            plain = recover_invocation(invocation, exc)
+            if plain is None:
                 raise
-            from ava_builtins.plugins.lm_google.gemini_cache import (
-                CacheRef,
-                invalidate,
-                is_stale_cache_error,
-            )
-
-            if not is_stale_cache_error(exc):
-                raise
-            cache_ref = cast(CacheRef, invocation.cache_ref)
-            logger.warning(
-                "[gemini-cache] stale cache {name} — invalidate + retry once on plain path",
-                name=cache_ref.name,
-            )
-            invalidate(cache_ref)
             chunks.clear()
             # The handler's per-stream state (started sets, args bufs, published
             # counts, timers) belongs to the FAILED attempt — re-streaming the
@@ -414,8 +403,7 @@ async def _stream_with_cache_retry(
             # text) or stall code deltas (concatenated args JSON fails to parse).
             # Reset to a fresh-stream state; msg_idx / agent_id survive by design.
             handler.reset()
-            plain = await prepare_invocation(llm, messages, agent.llm_policy)
-            handler.used_explicit_cache = plain.cache_ref is not None  # plain path: always False
+            handler.used_explicit_cache = plain.used_explicit_cache
             first_ts, last_ts = await _consume_llm(
                 plain.runnable,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
                 plain.messages,

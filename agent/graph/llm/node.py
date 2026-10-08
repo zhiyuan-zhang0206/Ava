@@ -537,7 +537,12 @@ async def _llm_node_impl(
         ctx,
         agent_id,
         _stream_with_cache_retry(
-            llm, list(state.messages), chunks=chunks, handler=handler, agent=ctx.require_agent()
+            llm,
+            list(state.messages),
+            chunks=chunks,
+            handler=handler,
+            agent=ctx.require_agent(),
+            binding=ctx.llm_binding,
         ),
         handler,
         ledger,

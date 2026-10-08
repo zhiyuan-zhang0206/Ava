@@ -145,7 +145,9 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
 
     monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model)
     monkeypatch.setattr(
-        host_module, "boot_agent_scope", AsyncMock(return_value=FakeListChatModel(responses=[]))
+        host_module,
+        "boot_agent_scope",
+        AsyncMock(return_value=(FakeListChatModel(responses=[]), None)),
     )
 
     saver = AsyncPostgresSaver(
