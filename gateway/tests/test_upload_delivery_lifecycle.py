@@ -225,7 +225,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     from fastapi.testclient import TestClient
 
     from base.config import settings
-    from gateway.tests.test_notices_endpoint import _seed_agent
+    from gateway.tests.events.test_notices_endpoint import _seed_agent
     from gateway.tests.test_upload_delivery_recovery import SECRET
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)

@@ -91,7 +91,7 @@ def _isolate_disabled_services_marker(
     it: a `cmd_start(disabled_services=("restarter",))` left "restarter durably
     disabled" behind, and a later `unpause_local_cluster` test in the same worker
     early-returned — neither respawning the restarter nor raising (CI #1172/#1173
-    shard-5 flake, task #2177). Same redirection `tests/base/test_disabled_services.py`
+    shard-5 flake, task #2177). Same redirection `tests/components/base/test_disabled_services.py`
     uses: the marker is per-unit durable state, so each test gets a fresh one.
     """
     monkeypatch.setattr(ds, "selection_path", lambda: tmp_path / "service-selection.json")

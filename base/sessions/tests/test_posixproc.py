@@ -29,7 +29,7 @@ from base.sessions.tests.process_evidence import (
     no_new_direct_children,
     no_zombie_children,
 )
-from tests.base.poll_until import poll_until
+from tests.components.base.poll_until import poll_until
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 

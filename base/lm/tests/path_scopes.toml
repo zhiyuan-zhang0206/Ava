@@ -3,6 +3,4 @@
 "tests.path_scoped.agent_tests" = [
     "test_llm_factory.py",
     "test_llm_factory_new_models.py",
-    "test_provider_errors.py",
-    "test_provider_stop.py",
 ]

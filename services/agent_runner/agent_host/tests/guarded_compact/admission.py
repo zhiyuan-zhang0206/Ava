@@ -12,7 +12,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.test_inbound_ownership import _agent
+from agent.tests.claim.test_inbound_ownership import _agent
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
 from services.agent_runner.agent_host.host import AgentHost

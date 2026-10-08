@@ -213,7 +213,7 @@ _COMPACT_SECTIONS = (
 # claim node compact edge case tests
 # ============================================================
 # The following tests claim_node's boundary handling of compact_summary / compact_request.
-# Testing style same as agent/tests/test_claim.py — directly call claim_node to test dispatch.
+# Testing style same as agent/tests/claim/test_claim.py — directly call claim_node to test dispatch.
 
 
 # --- helpers (reusing pattern from test_claim.py) ---

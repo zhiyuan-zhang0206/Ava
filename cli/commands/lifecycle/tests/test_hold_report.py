@@ -7,8 +7,8 @@ import pytest
 from base.deploy.maintenance import hold_driver, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from cli.commands.lifecycle import hold_report
-from tests.agent.test_maintenance import WHEN
-from tests.agent.test_maintenance import isolate as isolate
+from tests.components.agent.test_maintenance import WHEN
+from tests.components.agent.test_maintenance import isolate as isolate
 
 
 def _json_hold(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:

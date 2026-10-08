@@ -25,8 +25,8 @@ from base.host.env.agent_slices import AgentSlices
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.runtime import TurnOutcome
-from tests.agent.test_maintenance import WHEN, _agent
-from tests.agent.test_maintenance import isolate as isolate
+from tests.components.agent.test_maintenance import WHEN, _agent
+from tests.components.agent.test_maintenance import isolate as isolate
 
 
 async def _failed_turn(

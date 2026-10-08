@@ -176,7 +176,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     back in its `finally`. Under `scope="session"` that `finally` fired at the end of
     the *pytest session* — not when pytest left `tests/e2e/` — so every test collected
     after this package in the same process ran with the e2e values still installed.
-    `tests/test_home_isolation.py` always sorts after `tests/e2e/`, and it is the guard
+    `tests/harness/test_home_isolation.py` always sorts after `tests/e2e/`, and it is the guard
     that exists to notice exactly this class of leak; it failed on two of its four
     assertions in every serial run, on `main`, for as long as the keyword said
     `session`.
@@ -187,7 +187,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     a `Package` node only for a directory containing `__init__.py`; without one the
     directory is a plain `Dir` and `scope="package"` is a synonym for
     `scope="session"`. So the keyword alone is a no-op here: both changes landed
-    together, and `tests/test_home_isolation.py` asserts both.
+    together, and `tests/harness/test_home_isolation.py` asserts both.
 
     Why it was invisible: CI's backend job runs `--ignore=tests/e2e`, so the two files
     never share a process there at all, and under `-n auto` they land in different
@@ -206,7 +206,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     with contextlib.suppress(Exception):
         sweep_stale_e2e_processes()
     _apply_e2e_seq_offset()
-    # Every key assigned below, no exceptions — `tests/test_home_isolation.py`'s
+    # Every key assigned below, no exceptions — `tests/harness/test_home_isolation.py`'s
     # `test_the_e2e_fixture_restores_every_env_key_it_assigns` derives the assigned set
     # from this body by AST and fails if the tuple falls behind it, so a key added to
     # the setup without a line here cannot merge.

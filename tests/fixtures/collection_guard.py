@@ -2,8 +2,8 @@
 
 pytest 9 binds a conftest's fixtures to the first `Directory` node collected
 for its directory and matches fixtures by node identity. Positional paths that
-leave a directory and come back to it (`tests/agent/a.py tests/b.py
-tests/agent/c.py`) make pytest build a second `Directory` node for the same
+leave a directory and come back to it (`tests/components/agent/a.py tests/b.py
+tests/components/agent/c.py`) make pytest build a second `Directory` node for the same
 directory, and every test under it silently loses that conftest's fixtures —
 autouse isolation fixtures included. So the positional paths are grouped by
 directory before collection, and a collection that still splits a directory

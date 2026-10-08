@@ -17,7 +17,7 @@ import pytest
 
 from base.config import settings
 from base.sessions.backend import PtySessionBackend
-from tests.base.poll_until import poll_until
+from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, wait_for_status
 from tests.e2e._ports import GATEWAY_SOCKET, GATEWAY_URL
 from tests.e2e._proc import _LIVE_SERVERS, managed_proc, wait_for_port

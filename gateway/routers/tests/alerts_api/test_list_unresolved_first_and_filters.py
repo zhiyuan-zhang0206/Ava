@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from base.config import settings
 from gateway.alerts import router as alerts_router
 from gateway.app import app
-from tests.gateway.test_alerts_api import (
+from tests.components.gateway.test_alerts_api import (
     _alert,
     _capture_im,
     _ingest,
@@ -21,10 +21,10 @@ from tests.gateway.test_alerts_api import (
     _webhook,
     native_sender,
 )
-from tests.gateway.test_alerts_api import (
+from tests.components.gateway.test_alerts_api import (
     _alerts_auth_and_im as _alerts_auth_and_im,
 )
-from tests.gateway.test_alerts_api import (
+from tests.components.gateway.test_alerts_api import (
     client as client,
 )
 

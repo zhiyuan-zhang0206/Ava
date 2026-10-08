@@ -194,7 +194,7 @@ def test_diagnose_test_failure_uses_native_evidence(diag_gh, monkeypatch, capsys
             ("/jobs", _diag_jobs_payload(_diag_job(check))),
             (
                 "/logs",
-                "FAILED tests/agent/test_consumer_guard.py::test_consumer_guard_queue_backpressure",
+                "FAILED tests/components/agent/test_consumer_guard.py::test_consumer_guard_queue_backpressure",
             ),
             ("state=all", "[]"),
         ]

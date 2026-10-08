@@ -7,7 +7,7 @@ compaction: the membership snapshot recorded at build time, the diff against it,
 and the one note that names what appeared.
 
 Skills are faked by running in a per-test unit home (`unit_home`), same shape as
-agent/graph/tests/test_capabilities_index.py.
+agent/graph/tests/prompt/test_capabilities_index.py.
 """
 
 from __future__ import annotations

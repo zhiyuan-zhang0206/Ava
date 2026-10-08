@@ -597,7 +597,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
 
 # ─────────── provider-error taxonomy: fail-fast (permanent) vs retry (transient) ───────────
 # The status→ErrorClass mapping itself is covered exhaustively in
-# base/lm/tests/test_provider_errors.py (classify_error). These drive the wiring
+# base/lm/tests/providers/test_provider_errors.py (classify_error). These drive the wiring
 # through llm_node: a PERMANENT class becomes a fail-fast FatalProviderError, a
 # TRANSIENT class re-raises for the retry loop.
 

@@ -6,7 +6,7 @@ sections, context notes), loaded only by the agent host. Each exports `contribut
 `PluginContributions` fields it owns; `declarations(faces)` merges the faces a process has loaded.
 
 Light on purpose: a child's surface-only load builds its registry here and must stay off the LM stack
-(`agent/tests/test_lazy_child_imports.py`), so the heavy checks (state validation, LangChain) are imported
+(`agent/tests/execution/test_lazy_child_imports.py`), so the heavy checks (state validation, LangChain) are imported
 only when a plugin actually declares something that needs them.
 
 `build_registry()` is the load-time gate. A plugin enters the registry only when its declaration is sound:

@@ -1,0 +1,4 @@
+"tests.path_scoped.services_tests" = [
+    "test_host_turn_progress_publish.py",
+    "test_turn_admission.py",
+]

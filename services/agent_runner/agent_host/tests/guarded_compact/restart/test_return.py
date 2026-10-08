@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.tests.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
@@ -138,7 +138,7 @@ def install_apply_loss(
             if lost in ("after_apply", "after_observe_cleanup"):
                 await original_apply(*args, **kwargs)
             if lost == "after_observe_cleanup":
-                from agent.tests.test_inbound_ownership import _admit
+                from agent.tests.claim.test_inbound_ownership import _admit
 
                 await _admit(aops_pool, args[1].agent_id)
                 db_conn.execute(

@@ -1,0 +1,8 @@
+"tests.path_scoped.agent_tests" = [
+    "test_plugin_catalog.py",
+    "test_plugin_load_containment.py",
+    "test_messages_delta_switch.py",
+]
+"tests.path_scoped.ava_tests" = [
+    "test_register_namespace.py",
+]

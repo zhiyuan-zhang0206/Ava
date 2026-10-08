@@ -8,7 +8,7 @@ the synchronous `db_conn` fixture. `agent/db/__init__.py` is the kernel async pa
 / `claim_inbound_batch`), using `aops_pool` (AsyncConnectionPool) +
 real PostgreSQL connections, matching the host's transactional queue.
 
-Note: claim_inbound_batch is end-to-end covered in agent/tests/test_claim.py via claim_node,
+Note: claim_inbound_batch is end-to-end covered in agent/tests/claim/test_claim.py via claim_node,
 so not repeated here. After Step 1G+ regression, agent/db/__init__.py only has two core async functions: wait + claim.
 
 Semantics: compact modifies messages in-place, **does not create a new agent** — hence no

@@ -44,7 +44,7 @@ from base.agents.history.inbound_sideload import (
 )
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import settlement as settlement_mod
-from services.agent_runner.agent_host.tests.test_hosted_db_recovery import _admit
+from services.agent_runner.agent_host.tests.recovery.test_hosted_db_recovery import _admit
 
 
 def _insert_claimed(

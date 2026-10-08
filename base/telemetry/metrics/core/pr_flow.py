@@ -20,7 +20,7 @@ from that:
 
 The panel SQL/JSON mirror lives in
 ``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``
-(row "PR flow") and is locked by ``tests/plugins/test_plugin_metrics_logql.py``.
+(row "PR flow") and is locked by ``tests/components/plugins/test_plugin_metrics_logql.py``.
 """
 
 from __future__ import annotations

@@ -17,7 +17,7 @@ from agent.ownership.lifecycle_intent import accept_lifecycle_intent
 from agent.ownership.tests.test_lifecycle_intent import _command
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState
-from agent.tests.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work

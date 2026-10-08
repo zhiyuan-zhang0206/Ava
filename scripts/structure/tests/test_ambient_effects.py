@@ -254,7 +254,7 @@ def test_a_thread_is_reported_by_function(tmp_path: pathlib.Path, call: str) -> 
         ("schedules/daily.py", True),
         ("ava_builtins/plugins/ava_fleet/runtime.py", True),
         ("base/tests/test_mod.py", False),
-        ("tests/base/test_mod.py", False),
+        ("tests/components/base/test_mod.py", False),
         ("base/__main__.py", False),
         ("ava_builtins/skills/web/scripts/fetch.py", False),
         ("ava_builtins/plugins/ava_code/skills/review/scripts/run.py", False),

@@ -196,7 +196,10 @@ The remaining site-exemption guard chooses its comparison base in this order:
 The guard reads the baseline at that revision. An absent baseline emits a
 note and skips comparison. Empty retired budget sections in the comparison
 revision are discarded; nonempty retired sections or malformed baselines fail.
-Retired sections are always refused in the working tree, including empty ones. This catches raises after committing them too:
+Retired sections are always refused in the working tree, including empty ones.
+Every remaining site section stays shrink-only when a lint is added or its rule
+version changes; a new measurement does not authorize new exemptions. This
+catches raises after committing them too:
 before the structural hooks run, CI sets the explicit base to the base
 revision of the triggering event — the same revision the checked-out merge
 ref was built from. Pinning both sides to one event matters: a base branch

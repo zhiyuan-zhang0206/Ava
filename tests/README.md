@@ -8,7 +8,7 @@
 .venv/bin/pytest --ignore=tests/e2e -q
 
 # Run a single module (a package's tests sit inside it)
-.venv/bin/pytest tests/agent/ -q
+.venv/bin/pytest tests/components/agent/ -q
 .venv/bin/pytest base/packages -q
 
 # Run tests + coverage report
@@ -44,7 +44,7 @@ refused.
 
 Package `tests/` directories have no `__init__.py` (`--import-mode=importlib`), and
 the repo-root `conftest.py` plugins apply to them exactly as to the top-level tree.
-The top-level `tests/{module}/` directories hold only the registered contract and integration tests.
+The `tests/components/{module}/` directories hold only the registered contract and integration tests. Cross-cutting contracts live in `tests/contracts/`, and test infrastructure checks in `tests/harness/`.
 
 ```
 tests/
@@ -78,7 +78,7 @@ all); a test moved elsewhere gets its file named in the destination directory's 
 
 If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` in
 the package's own `tests/` directory when it has one (`ava/tests/`), otherwise under
-`tests/ava/`.
+`tests/components/ava/`.
 
 ## Test Naming
 
@@ -254,11 +254,11 @@ keeps running with the layered values. Enforced by
    reason — it is load-bearing, not cruft.
 
 Both rules come from one incident: `tests/e2e/conftest.py:_e2e_process_env` layers ten
-env vars and was `scope="session"`, so `tests/test_home_isolation.py` — which sorts
+env vars and was `scope="session"`, so `tests/harness/test_home_isolation.py` — which sorts
 after `tests/e2e/` and exists to notice precisely this — failed on every serial run
 while CI stayed green (the backend job passes `--ignore=tests/e2e`, and `-n auto` puts
 the two files in different workers). The e2e job now runs `tests/e2e/
-tests/test_home_isolation.py` in one serial worker so that guard can fail where merges
+tests/harness/test_home_isolation.py` in one serial worker so that guard can fail where merges
 are gated.
 
 Getting the scope right fixes *when* the restore fires, not *what* it covers: the

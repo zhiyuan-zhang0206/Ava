@@ -9,7 +9,7 @@ from cli.commands.lifecycle._pause_resume import resume_after_start
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.parsers import build_parser
-from tests.agent.test_maintenance import isolate as isolate
+from tests.components.agent.test_maintenance import isolate as isolate
 
 
 def test_plain_start_and_parser_need_no_manual_operation(

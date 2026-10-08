@@ -1,7 +1,7 @@
 """base/packages/skills/index.py: the materialized skill scan (doorplate ⑤).
 
 The index is the single scan behind every skill read path — the runtime loader
-mounts from it (ava/tests/test_skills.py covers the tree semantics on top),
+mounts from it (ava/tests/skills/test_skills.py covers the tree semantics on top),
 the repo frontmatter lint gates on it (scripts/content_lint/tests/test_lint_skill_descriptions.py).
 These tests pin the scan itself: what becomes an entry, the tolerance contract
 (errors land on entries, never raise), the match_key fold, and the mtime cache

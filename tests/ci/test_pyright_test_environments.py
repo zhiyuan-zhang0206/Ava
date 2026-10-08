@@ -171,7 +171,7 @@ def test_tests_roots_are_the_outermost_tests_directory_of_a_package_module() -> 
             "base/packages/tests/area/test_b.py",  # same root
             "base/packages/tests/tests/test_c.py",  # a tests/ inside tests/ is not a new root
             "ava_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py",
-            "tests/base/test_top.py",  # the top-level tests/ is hand-listed
+            "tests/components/base/test_top.py",  # the top-level tests/ is hand-listed
             "docs/tests/test_x.py",  # not a package host
             "base/packages/attests/x.py",
             "base/packages/mod.py",

@@ -1,6 +1,6 @@
 """A cluster born when the runner matrix granted UPDATE on agents converges to
 none: the allocator migration, then the start-path grant refresh. The runner
-matrix itself lives in tests/base/test_runner_role.py."""
+matrix itself lives in tests/components/base/test_runner_role.py."""
 
 from __future__ import annotations
 

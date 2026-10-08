@@ -15,7 +15,7 @@ on:
       - 'cli/commands/lifecycle/_temporary_stop.py'
       - 'cli/commands/lifecycle/service_stop.py'
       - 'cli/commands/lifecycle/stop.py'
-      - 'tests/lifecycle/native_root/**'
+      - 'tests/components/lifecycle/native_root/**'
       - 'services/supervision/ava_root/tests/test_ava_root_daemon.py'
       - 'conftest.py'
       - 'tests/fixtures/*.py'

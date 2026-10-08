@@ -54,4 +54,4 @@ A new CLI argument without `required` / `type=` needs a required form, a
 parse-layer gate, or a marked retained default. An invocation that can only
 fail after the command starts — a traceback, or a bare `return 1` on a missing
 or malformed argument — is a request-changes. Usage-error tests live beside
-the verb in `tests/cli/` and assert exit code 2 plus the message.
+the verb in `tests/components/cli/` and assert exit code 2 plus the message.

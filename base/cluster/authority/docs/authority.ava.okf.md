@@ -103,7 +103,7 @@ where birth and ordinary start call this library (API tokens:
 
 ## Tests
 
-`tests/lifecycle/db_authority/` runs on real PostgreSQL 17 through
+`tests/components/lifecycle/db_authority/` runs on real PostgreSQL 17 through
 `authority_postgres`; `test_single_box.py` drives the real start steps
 against a home-owned PostgreSQL, PgBouncer and Redis (including the collector's monitoring dial), and
 `test_delivery.py` covers delivery and the boot pass without a database;

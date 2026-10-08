@@ -256,7 +256,7 @@ secret (`tests/e2e/conftest.py`): its directly started services mint no write
 generation, and with a secret set `/ops` accepts only a generation's machine
 tokens, so every spawn would be refused. The authenticated path is covered
 only piecewise: the gateway and ops acceptance matrix in
-`tests/lifecycle/db_authority/test_api_tokens.py`, run against an in-process
+`tests/components/lifecycle/db_authority/test_api_tokens.py`, run against an in-process
 app and a bare ops listener. This is a known gap and a hard gate of the production
 cutover rehearsal: the rehearsal runs on a cluster with its secret
 set and proves gateway -> `/ops` -> spawn end to end before production is

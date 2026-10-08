@@ -26,7 +26,7 @@ from base.telemetry.metrics.aggregate import (
     fetch_agent_rollups,
     fetch_aggregate,
 )
-from tests.gateway.telemetry_stream import TelemetryStream
+from tests.components.gateway.telemetry_stream import TelemetryStream
 
 
 @pytest.fixture

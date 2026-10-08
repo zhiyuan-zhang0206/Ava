@@ -233,7 +233,7 @@ of mass-editing targets.
    registries (task #3697 S3) and `ava lgtm render` previews the result —
    the panel lands under the row named after the plugin (every
    metric-shipping plugin owns a row; ids >= 1000 are renderer-allocated).
-   `tests/plugins/test_plugin_metrics_logql.py` also locks every registered
+   `tests/components/plugins/test_plugin_metrics_logql.py` also locks every registered
    grafana spec against the JSON.
 
 Shipped examples: `ava_builtins/plugins/ava_syntax_fix/metrics.py` (syntax_fix

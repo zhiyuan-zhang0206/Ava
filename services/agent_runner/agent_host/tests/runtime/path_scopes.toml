@@ -1,0 +1,13 @@
+"tests.path_scoped.agent_tests" = [
+    "test_boot_extension_materialize.py",
+]
+"tests.path_scoped.services_tests" = [
+    "test_agent_host_abort_reconcile.py",
+    "test_agent_host_boot_defer.py",
+    "test_agent_host_log_rotate.py",
+    "test_agent_host_plugins.py",
+    "test_agent_host_recrash_reap.py",
+    "test_agent_host_shutdown.py",
+    "test_agent_host_turn_reconcile.py",
+    "test_host_pool_capacity.py",
+]
