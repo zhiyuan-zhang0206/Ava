@@ -24,9 +24,10 @@ three times, reseeding its temporary duration input before every attempt, so a
 failed attempt cannot affect selection or leak partial measurements into its
 retry. Every successful measurement uses `--store-durations --clean-durations`;
 therefore its artifact contains only the tests that ran in that shard.
-`merge` requires all 20 artifacts, combines them, drops entries below 0.2s,
-rounds values to three decimals, and atomically rewrites `.test_durations` in
-the committed compact format (sorted keys, no indent, trailing newline). An
+`merge` requires all 20 artifacts, combines every measured entry (including
+fast tests), rounds values to three decimals, and atomically rewrites
+`.test_durations` in the committed compact format (sorted keys, no indent,
+trailing newline). An
 interrupted run can never leave a truncated file behind.
 
 Run it manually after a significant test-suite change, or let the scheduled
@@ -55,7 +56,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-_MIN_DURATION_SECONDS = 0.2
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)
 _E2E_WORKERS = 2  # mirrors the e2e-shard job (-n 2)
 _BACKEND_SHARDS = 16
@@ -237,12 +237,10 @@ def _merge_shard_measurements(durations_dir: Path) -> int:
 
 def _write_durations(durations: dict[str, float]) -> dict[str, float]:
     """Atomically write the canonical compact JSON format + trailing newline."""
-    trimmed = {
-        nodeid: round(value, 3)
-        for nodeid, value in durations.items()
-        if round(value, 3) >= _MIN_DURATION_SECONDS
-    }
-    content = json.dumps(trimmed, sort_keys=True, separators=(",", ":")) + "\n"
+    # pytest-split assigns unrecorded tests the known average. Dropping fast
+    # measurements would therefore price them as unknown, often slow tests.
+    rounded = {nodeid: round(value, 3) for nodeid, value in durations.items()}
+    content = json.dumps(rounded, sort_keys=True, separators=(",", ":")) + "\n"
     tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -262,7 +260,7 @@ def _write_durations(durations: dict[str, float]) -> dict[str, float]:
     finally:
         if tmp_path is not None:
             Path(tmp_path).unlink(missing_ok=True)
-    return trimmed
+    return rounded
 
 
 def _refresh_all() -> int:
