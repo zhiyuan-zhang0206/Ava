@@ -168,7 +168,7 @@ def _server_summary(spec: Any) -> str:
 def cmd_mcp_list() -> int:
     """`ava mcp list` — print the merged server set, flagging each server's
     origin (machine / installed / plugin-built-in) and which are disabled."""
-    from ava.mcp_config import MCPError, load_mcp_config
+    from ava.mcp_config import MCPError, load_mcp_config, validate_requirements
     from base.packages.extensions.install_registry import installed_mcp_names
     from base.packages.plugins.mcp_enabled import McpEnabledConfigError, read_enabled
 
@@ -177,6 +177,8 @@ def cmd_mcp_list() -> int:
         machine = _read_machine_config(_machine_config_file())
         enabled = read_enabled()
         installed = installed_mcp_names()
+        for spec in merged.values():
+            validate_requirements(spec)
     except (MCPError, McpEnabledConfigError, ValueError, json.JSONDecodeError, OSError) as e:
         print(f"[ava mcp list] {e}", file=sys.stderr)
         return 1
@@ -235,9 +237,16 @@ def cmd_mcp_disable(name: str) -> int:
 
 
 def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
-    from ava.mcp_config import load_mcp_config
+    from ava.mcp_config import MCPError, load_mcp_config, validate_requirements
     from base.packages.plugins.mcp_enabled import local_config_path, set_mcp_enabled
 
+    merged = load_mcp_config(include_disabled=True)
+    if enabled and name in merged:
+        try:
+            validate_requirements(merged[name])
+        except MCPError as exc:
+            print(f"[ava mcp enable] {exc}", file=sys.stderr)
+            return 1
     set_mcp_enabled(name, enabled=enabled)
     verb = "enabled" if enabled else "disabled"
     print(
@@ -245,7 +254,7 @@ def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
         f"in {local_config_path()}"
     )
     print("  takes effect on the next tool request; no restart needed.")
-    if name not in load_mcp_config(include_disabled=True):
+    if name not in merged:
         print(
             f"  (note: no server named '{name}' is currently defined; "
             "the override will apply if one appears)"
