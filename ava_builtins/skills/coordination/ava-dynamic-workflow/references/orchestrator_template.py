@@ -1,7 +1,9 @@
 """Full orchestrator skeleton: explore → fork → join → reduce.
 
 Fill in the placeholders (marked with ✏️) to adapt to your task.
-Run from an Ava agent's execute_code block.
+Run from an Ava agent's execute_code block in a fresh run directory only.
+This is a one-shot illustration: it deletes results and does not persist peer
+receipts. Do not use it for resume/retry; start from minimal_dispatch.py instead.
 
 Completion protocol: every worker writes its result file —
 silently.  The orchestrator is woken by the ONE checkpoint armed below, not by
