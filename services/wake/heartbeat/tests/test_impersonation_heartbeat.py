@@ -128,8 +128,10 @@ def test_sdk_attachment_can_pause_heartbeat(
     import ava
     from agent.state import BaseAgentState
     from ava import external
+    from base.agents.sdk import call_policy
     from tests.fixtures.pin_agent import pin_agent
 
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     lease = active_lease(db_conn)
     pin_agent(None)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
