@@ -1,26 +1,25 @@
 name: Refresh test durations
 
-# Nightly re-measure of pytest-split's duration data. The backend and e2e
-# shards split by per-test durations in .test_durations; that file goes stale
-# as the suite grows (new tests are costed at the average, which skewed the
-# shards ~20% as of 2026-08-30). Each measurement runs in the same isolated
-# shard shape as CI, retries only its own timing-sensitive shard, and uploads
-# a clean duration artifact. The merge job opens ONE reviewable PR with the
-# refreshed durations — the same bot-PR pattern as update-model-pricing.yml,
-# and the PR is never auto-merged. A 21:30 UTC backstop retries a missing or
-# failed 19:30 UTC run, but a successful manual or primary run in the preceding
-# five hours makes the backstop a successful no-op.
+# Refresh after 20 main changes using a successful main CI's existing timings.
+# Nightly isolated measurements remain the fallback, with a two-hour backstop.
+# Only a complete published measurement resets either guard; successful no-ops
+# do not. All shards and the publisher share one immutable source SHA. Results
+# go to one reviewable bot PR, which is never auto-merged.
 
 on:
   schedule:
     - cron: '30 19 * * *'  # UTC — GitHub Actions schedule cron is always UTC
     - cron: '30 21 * * *'  # UTC — two-hour backstop for a missed primary run
   workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
-  actions: write
-  contents: write
-  pull-requests: write
+  actions: read
+  contents: read
+  pull-requests: read
 
 env:
   UV_FROZEN: "1"
@@ -30,39 +29,62 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check-recent-success:
-    if: github.ref == 'refs/heads/main'
-    name: Check recent duration refresh
+  check-refresh:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    name: Plan duration refresh
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
-      should-refresh: ${{ steps.recent-success.outputs.should-refresh }}
+      mode: ${{ steps.plan.outputs.mode }}
+      source-sha: ${{ steps.plan.outputs.source-sha }}
+      source-run-id: ${{ steps.plan.outputs.source-run-id }}
+      measured-at: ${{ steps.plan.outputs.measured-at }}
     steps:
-      - name: Skip if a refresh recently succeeded
-        id: recent-success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.10.2'
+          enable-cache: true
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Plan from applied and published measurement provenance
+        id: plan
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ava-bot/test-durations
         run: |
-          CUTOFF="$(date --utc --date='5 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
-          if ! RECENT_SUCCESS_COUNT="$(
-            gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/refresh-test-durations.yml/runs" \
-              -f 'status=success' \
-              -f "created=>=$CUTOFF" \
-              --jq '.total_count'
-          )"; then
-            echo 'Unable to query successful duration refreshes; proceeding with measurements.'
-            echo 'should-refresh=true' >> "$GITHUB_OUTPUT"
-            exit 0
+          PUBLISHED_ARGS=()
+          OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
+          if [ "$OPEN_PR" -gt 1 ]; then
+            echo "Expected at most one open durations PR, found $OPEN_PR" >&2
+            exit 1
           fi
-          if [ "$RECENT_SUCCESS_COUNT" -gt 0 ]; then
-            echo "Skipping duration refresh: $RECENT_SUCCESS_COUNT successful run(s) created since $CUTOFF."
-            echo 'should-refresh=false' >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ "$OPEN_PR" -eq 1 ]; then
+            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            PUBLISHED_ARGS=(--published-ref "origin/$BRANCH")
           fi
-          echo 'should-refresh=true' >> "$GITHUB_OUTPUT"
+          AVA_HOME="$RUNNER_TEMP/duration-policy-home" AVA_CONFIG_FETCH=skip \
+            uv run python scripts/ci/duration_refresh_policy.py plan \
+              --event "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" \
+              --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
+              --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY" \
+              "${PUBLISHED_ARGS[@]}"
 
   measure-backend:
-    needs: check-recent-success
-    if: needs.check-recent-success.outputs.should-refresh == 'true'
+    needs: check-refresh
+    if: needs.check-refresh.outputs.mode == 'measure'
     name: Measure backend durations (${{ matrix.group }}/16)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -79,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ needs.check-refresh.outputs.source-sha }}
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -109,8 +131,8 @@ jobs:
           if-no-files-found: error
 
   measure-e2e:
-    needs: check-recent-success
-    if: needs.check-recent-success.outputs.should-refresh == 'true'
+    needs: check-refresh
+    if: needs.check-refresh.outputs.mode == 'measure'
     name: Measure e2e durations (${{ matrix.group }}/4)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -124,7 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ needs.check-refresh.outputs.source-sha }}
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -187,10 +209,16 @@ jobs:
           if-no-files-found: error
 
   refresh:
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
     if: >-
-      always() && needs.check-recent-success.outputs.should-refresh == 'true' &&
-      needs.measure-backend.result == 'success' && needs.measure-e2e.result == 'success'
-    needs: [check-recent-success, measure-backend, measure-e2e]
+      always() && !cancelled() && needs.check-refresh.result == 'success' &&
+      (needs.check-refresh.outputs.mode == 'reuse' ||
+       (needs.check-refresh.outputs.mode == 'measure' &&
+        needs.measure-backend.result == 'success' && needs.measure-e2e.result == 'success'))
+    needs: [check-refresh, measure-backend, measure-e2e]
     name: Refresh .test_durations
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -198,7 +226,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ needs.check-refresh.outputs.source-sha }}
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -214,27 +242,30 @@ jobs:
           pattern: test-durations-*
           path: ${{ runner.temp }}/durations
           merge-multiple: true
+          run-id: ${{ needs.check-refresh.outputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Merge complete shard measurements
         run: >
           uv run python scripts/ci/refresh_test_durations.py merge
           --durations-dir "$RUNNER_TEMP/durations"
 
-      - name: Detect a change
-        id: diff
+      - name: Record complete measurement provenance
+        env:
+          SOURCE_SHA: ${{ needs.check-refresh.outputs.source-sha }}
+          SOURCE_RUN_ID: ${{ needs.check-refresh.outputs.source-run-id }}
+          MEASURED_AT: ${{ needs.check-refresh.outputs.measured-at }}
         run: |
-          if git diff --quiet -- .test_durations; then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'changed=true' >> "$GITHUB_OUTPUT"
-          fi
+          AVA_HOME="$RUNNER_TEMP/duration-policy-home" AVA_CONFIG_FETCH=skip \
+            uv run python scripts/ci/duration_refresh_policy.py stamp \
+              --source-sha "$SOURCE_SHA" --run-id "$SOURCE_RUN_ID" --measured-at "$MEASURED_AT"
 
       - name: Prepare an isolated candidate branch
         id: candidate
-        if: steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ava-bot/test-durations
+          SOURCE_SHA: ${{ needs.check-refresh.outputs.source-sha }}
         run: |
           CANDIDATE="$RUNNER_TEMP/durations-candidate"
           OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
@@ -242,71 +273,53 @@ jobs:
             echo "Expected at most one open durations PR, found $OPEN_PR" >&2
             exit 1
           fi
-          REMOTE_EXISTS=0
-          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH"; then
-            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-            REMOTE_EXISTS=1
-          fi
           if [ "$OPEN_PR" -eq 1 ]; then
-            if [ "$REMOTE_EXISTS" -ne 1 ]; then
-              echo "Open durations PR has no remote head branch" >&2
-              exit 1
-            fi
-            git worktree add -B "$BRANCH" "$CANDIDATE" "origin/$BRANCH"
-          else
-            git worktree add -B "$BRANCH" "$CANDIDATE" origin/main
+            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
           fi
+          # Rebuild from the measured code, not an old bot PR's code generation.
+          git worktree add -B "$BRANCH" "$CANDIDATE" "$SOURCE_SHA"
           echo "path=$CANDIDATE" >> "$GITHUB_OUTPUT"
 
       - name: Stage the refreshed durations
-        if: steps.diff.outputs.changed == 'true'
         env:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
-        run: cp .test_durations "$CANDIDATE/.test_durations"
+        run: cp .test_durations .test_durations.source.json "$CANDIDATE/"
 
       - name: Push a review branch
-        if: steps.diff.outputs.changed == 'true'
         env:
           BRANCH: ava-bot/test-durations
           CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
           git -C "$CANDIDATE" config user.name 'ava-durations-bot'
           git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C "$CANDIDATE" add .test_durations
+          git -C "$CANDIDATE" add .test_durations .test_durations.source.json
           git -C "$CANDIDATE" commit -m 'ci: refresh .test_durations'
           git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
 
       - name: Open or update the durations PR
-        if: steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ava-bot/test-durations
+          SOURCE_SHA: ${{ needs.check-refresh.outputs.source-sha }}
+          SOURCE_RUN_ID: ${{ needs.check-refresh.outputs.source-run-id }}
+          MODE: ${{ needs.check-refresh.outputs.mode }}
         run: |
+          BODY="$RUNNER_TEMP/durations-pr.md"
+          cat > "$BODY" <<EOF
+          Refresh pytest-split timings from all 16 backend and four e2e shards
+          at source commit $SOURCE_SHA, measured by Actions run $SOURCE_RUN_ID
+          ($MODE). Complete clean artifacts retain fast and zero timings.
+
+          The provenance file records the measured generation. Main uses these
+          weights only after this PR merges. Future refreshes reuse successful
+          main CI after 20 first-parent changes; nightly measurements are the
+          fallback. This PR is never auto-merged.
+          EOF
           PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
           if [ -z "$PR_NUMBER" ]; then
-            gh pr create \
-              --base main \
-              --head "$BRANCH" \
-              --title 'ci: refresh .test_durations (restore shard balance)' \
-              --body '## Summary
-
-          A nightly re-measure of the pytest-split duration data. The backend
-          and e2e suites ran in their CI-shaped isolated shards, each artifact
-          was recorded with --store-durations --clean-durations, and the 20
-          successful measurements were merged into the refreshed timings.
-
-          ## File tree
-
-          ```text
-          .test_durations  (M) ★ per-test durations for pytest-split
-          ```
-
-          ## Data flow
-
-          CI-shaped shard measurements (backend 16 × -n 4, e2e 4 × -n 2)
-          → per-shard clean duration artifacts → complete merge retaining fast
-          measurements → commit.
-
-          This PR is never auto-merged.'
+            gh pr create --base main --head "$BRANCH" \
+              --title 'ci: refresh .test_durations (restore shard balance)' --body-file "$BODY"
+          else
+            gh pr edit "$PR_NUMBER" --body-file "$BODY"
           fi
           gh workflow run ci.yml --ref "$BRANCH"

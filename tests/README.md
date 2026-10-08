@@ -184,19 +184,26 @@ Refresh the file manually after a significant test-suite change:
 uv run python scripts/ci/refresh_test_durations.py
 ```
 
-The nightly workflow runs the CI-shaped backend 16-way and e2e four-way shard
-matrices: backend carries `-n 4`, `-m "not flaky"`, and CI's `--cov` module
-list (coverage tracing is part of the shard environment); e2e carries `-n 2`.
-Each shard records a clean duration artifact with `--store-durations
---clean-durations` and retries independently. The merge accepts only all 20
-successful artifacts, keeps entries `>= 0.2s`, and atomically rewrites
-`.test_durations` in the committed compact-JSON format (sorted keys,
-3-decimal values, one trailing newline). A failed or missing shard therefore
-leaves the committed file untouched instead of publishing partial timings.
+Successful main-push CI records clean timings during its existing backend
+16-way and e2e four-way runs. After 20 first-parent main changes since the last
+published measurement, the refresh workflow reuses those 20 artifacts without
+running the suites again. A squash or merge PR counts as one change; direct
+main commits count too. Backend retries reseed the committed input weights so
+a failed attempt cannot change its shard's selection.
 
-`.github/workflows/refresh-test-durations.yml` runs this nightly on `main` and
-opens one reviewable PR (never auto-merged) when the file changed — follow its
-bot-PR pattern for manual refreshes too.
+Daily isolated measurements remain the fallback, with a two-hour backstop.
+Backend measurements carry `--omit-static-tests`, `-n 4`, `-m "not flaky"`,
+and CI's coverage module list; e2e carries `-n 2`. The merge requires every
+artifact, rejects empty or overlapping measurements, retains fast and zero
+entries, and atomically writes compact JSON. All measurements and publication
+use one immutable source SHA.
+
+[Duration refresh policy](../scripts/ci/docs/duration-refresh.md) explains
+cadence and provenance. `.github/workflows/refresh-test-durations.yml` updates
+one reviewable bot PR and records its source in `.test_durations.source.json`.
+Only complete published measurements reset freshness; skipped runs and failed
+measurements do not. Main uses the new weights after that PR merges; it is never
+auto-merged.
 
 ## Host isolation: what a test run may touch
 
