@@ -19,4 +19,19 @@ The commit hooks run the per-file lints with `--only` followed by the changed fi
 
 `code_structure.py --only` turns the files into explicit targets (each also checks every ancestor directory's entry budget up to its scope root) and still runs the baseline guard, whose base-revision shards are read with one batched `git cat-file`.
 
+The required CI `backend-structure` job runs the following compliance checks via
+`pre-commit run --all-files` on both SELECTED and FULL backend test paths:
+
+| Hook | Repository target |
+| --- | --- |
+| `lint-fixture-scope` | Every supported `tests/` directory, including e2e fixtures |
+| `lint-ava-root-scope` | `services/supervision/ava_root/` |
+| `lint-python-lock` | `uv.lock` |
+| `lint-package-lock` | `ui/web/package-lock.json` |
+
+The classify-independent `repo-language` job also directly runs the root-scope
+and both lock checks. Their unit tests exercise positive, negative and
+temporary-repository contracts; repository compliance belongs to these CI
+gates rather than duplicate assertions over the shipped tree in pytest.
+
 Parent: [[scripts/lint/docs/lint.ava.okf.md|lint]].
