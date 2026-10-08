@@ -61,7 +61,7 @@ _TEST_HOSTS = (
     "services",
 )
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
-_NON_DOCUMENTATION_PREFIXES = ("scripts/", "schedules/", "tests/")
+_NON_DOCUMENTATION_PREFIXES = ("schedules/", "tests/")
 _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
 
 # Tree-scan tests: their subject is the checked-out repository (the lint
@@ -332,11 +332,17 @@ def _is_collectable_test_path(path: str) -> bool:
 def _forced_roots(changed: tuple[str, ...]) -> tuple[str, ...]:
     """The forced-full roots a change touches. A test-only edit beside the code
     (`base/x/tests/test_y.py`) is a test change, not a source change: it goes through
-    the reverse map like an edit under `tests/` always did."""
+    the reverse map like an edit under `tests/` always did. Component documents
+    do not turn an otherwise selectable mixed diff into a source change."""
     return tuple(
         root
         for root in _FORCED_FULL_ROOTS
-        if any(path.startswith(root) and not _is_test_dir_path(path) for path in changed)
+        if any(
+            path.startswith(root)
+            and not _is_test_dir_path(path)
+            and not _is_documentation_path(path)
+            for path in changed
+        )
     )
 
 

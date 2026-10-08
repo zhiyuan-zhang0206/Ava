@@ -10,6 +10,9 @@ instead of silently weakening CI.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -161,3 +164,80 @@ def test_the_retired_shadow_job_name_is_gone() -> None:
     """backend-selected-shadow became backend-selected when the job gained its
     enforce role; a leftover reference would dangle."""
     assert "backend-selected-shadow" not in _WORKFLOW.read_text(encoding="utf-8")
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.check_output(  # noqa: S603 -- fixed git commands over test-owned paths
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=CI test",
+            "-c",
+            "user.email=ci@test.invalid",
+            *args,
+        ],
+        text=True,
+    ).strip()
+
+
+def _changed_repo(repo: Path, paths: tuple[str, ...]) -> str:
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    for path in paths:
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("changed\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "changed")
+    return base
+
+
+def test_native_classify_step_preserves_document_and_queue_routing(tmp_path: Path) -> None:
+    step = _step(_workflow_jobs()["classify"], "Classify changed paths")
+    assert step["env"]["HEAD_REF"] == "${{ github.head_ref }}"
+    doc = "scripts/lint/docs/lint.ava.okf.md"
+    cases = [
+        ("pull_request", "codex/docs", (doc,), ("false", "false")),
+        ("pull_request", "codex/mixed", (doc, "scripts/tests/test_x.py"), ("false", "true")),
+        (
+            "pull_request",
+            "codex/frontend-docs",
+            ("ui/web/src/docs/page.ava.okf.md",),
+            ("false", "false"),
+        ),
+        (
+            "pull_request",
+            "codex/test-data",
+            ("ui/web/tests/docs/data.ava.okf.md",),
+            ("true", "false"),
+        ),
+        ("pull_request", "trunk-merge/batch-42", (doc,), ("false", "true")),
+        ("pull_request", "trunk-temp/batch-42", (doc,), ("false", "true")),
+        ("push", "", (doc,), ("true", "true")),
+    ]
+    for index, (event, head_ref, paths, expected) in enumerate(cases):
+        repo = tmp_path / f"repo-{index}"
+        base = _changed_repo(repo, paths)
+        output = tmp_path / f"outputs-{index}"
+        environment = os.environ | {
+            "EVENT": event,
+            "HEAD_REF": head_ref,
+            "BASE_SHA": base,
+            "GITHUB_OUTPUT": str(output),
+            "PYTHONPATH": str(_REPO_ROOT),
+            "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+        }
+        subprocess.run(  # noqa: S603 -- execute the checked-in workflow over test-owned inputs
+            ["bash", "-eu", "-c", step["run"]],
+            cwd=repo,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        assert (values["frontend"], values["backend"]) == expected, (event, head_ref, paths)
