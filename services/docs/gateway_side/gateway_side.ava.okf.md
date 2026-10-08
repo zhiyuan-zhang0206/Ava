@@ -22,6 +22,7 @@ Source of truth = services in `build_services()` of `ops/spec.py` whose `Service
 | delivery-watchdog | Wake dispatch + stall alerting + terminated-owner resurrect retry + stale-inbound dead-letter sweeps + stalled crash-marked recovery request + hosted-turn liveness recovery | [[delivery_watchdog.ava.okf.md]] |
 | ttl-reaper | Wall-clock deadline enforcement: expired pages / persistent shells / browser sessions / notices / impersonation leases, lifecycle-pointer scans, fire-log prune | [[ttl_reaper.ava.okf.md]] |
 | schedule-manager | Keeps one resident session alive per enabled schedule (reconcile + crash backoff/breaker, API sync requests) | [[schedule_manager.ava.okf.md]] |
+| insights | CPU-heavy read models over agent history (run timeline) on a Unix socket; the gateway authenticates and proxies | [[services/derived/insights/docs/insights.ava.okf.md]] |
 | events-maintenance | unified `events` stream maintenance (immutable-Loki class resolution + day-grain rollup) | [[events_maintenance.ava.okf.md]] |
 | memory-indexer | memory pool vector index | [[memory_indexer.ava.okf.md]] |
 | labeler | agent auto-naming | [[labeler.ava.okf.md]] |

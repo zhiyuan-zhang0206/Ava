@@ -14,13 +14,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
-from base.config import settings
-from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.run_timeline.history import HistoryViewCache
-from gateway.run_timeline.schemas import (
+from services.derived.insights.run_timeline.history import HistoryViewCache
+from services.derived.insights.run_timeline.schemas import (
     RunTimelineMessage,
     RunTimelineMessagePart,
     RunTimelineMessages,
@@ -46,8 +44,9 @@ _PART_KIND: dict[str, RunTimelinePartKind] = {
 }
 
 
-def _message(idx: int, items: list[TimelineItem], *, full: bool) -> RunTimelineMessage:
-    text_max = settings.display.run_timeline_message_text_max
+def _message(
+    idx: int, items: list[TimelineItem], *, full: bool, text_max: int
+) -> RunTimelineMessage:
     parts: list[RunTimelineMessagePart] = []
     for item in items:
         clipped = not full and len(item.payload) > text_max
@@ -69,10 +68,7 @@ def _message(idx: int, items: list[TimelineItem], *, full: bool) -> RunTimelineM
     )
 
 
-@router.get(
-    "/api/agents/{agent_id}/run-timeline/messages",
-    dependencies=[Depends(deny_isolated_result_read)],
-)
+@router.get("/api/agents/{agent_id}/run-timeline/messages")
 def get_run_timeline_messages(
     request: Request,
     agent_id: int,
@@ -90,12 +86,16 @@ def get_run_timeline_messages(
         raise HTTPException(
             status_code=404, detail=f"message {end} not found: history has {len(messages)}"
         )
+    text_max = request.app.state.config.run_timeline_message_text_max
     stop = min(end, start + limit - 1)
     items, _ = build_timeline_items(messages[start : stop + 1], [])
     by_message: dict[int, list[TimelineItem]] = {}
     for item in items:
         by_message.setdefault(start + int(item.item_id.split(".")[0]), []).append(item)
     return RunTimelineMessages(
-        messages=[_message(idx, group, full=full) for idx, group in sorted(by_message.items())],
+        messages=[
+            _message(idx, group, full=full, text_max=text_max)
+            for idx, group in sorted(by_message.items())
+        ],
         next_start=stop + 1 if stop < end else None,
     )

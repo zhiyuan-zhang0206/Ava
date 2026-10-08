@@ -18,19 +18,18 @@ from bisect import bisect_right
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.agents.history.hierarchy.serve import ServedNode, serve_nodes
 from base.agents.history.hierarchy.store import load_generation_costs, load_nodes
 from base.db import Database
 from base.log import logger
-from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.run_timeline import _lifecycle
-from gateway.run_timeline.context import llm_requests
-from gateway.run_timeline.context import router as context_router
-from gateway.run_timeline.history import HistoryView, HistoryViewCache
-from gateway.run_timeline.messages import router as messages_router
-from gateway.run_timeline.schemas import (
+from services.derived.insights.run_timeline import _lifecycle
+from services.derived.insights.run_timeline.context import llm_requests
+from services.derived.insights.run_timeline.context import router as context_router
+from services.derived.insights.run_timeline.history import HistoryView, HistoryViewCache
+from services.derived.insights.run_timeline.messages import router as messages_router
+from services.derived.insights.run_timeline.schemas import (
     RunTimelineEvent,
     RunTimelineGeneration,
     RunTimelineNode,
@@ -39,7 +38,7 @@ from gateway.run_timeline.schemas import (
     RunTimelineUsage,
     RunTimelineWindow,
 )
-from gateway.run_timeline.tokens import block_tokens, span_tokens
+from services.derived.insights.run_timeline.tokens import block_tokens, span_tokens
 
 router = APIRouter()
 router.include_router(messages_router)
@@ -137,10 +136,7 @@ def _events(db: Database, agent_id: int, start: datetime, end: datetime) -> list
         return []
 
 
-@router.get(
-    "/api/agents/{agent_id}/run-timeline",
-    dependencies=[Depends(deny_isolated_result_read)],
-)
+@router.get("/api/agents/{agent_id}/run-timeline")
 def get_run_timeline(
     request: Request,
     agent_id: int,

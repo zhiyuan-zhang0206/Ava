@@ -3,10 +3,12 @@ type: doc
 title: Run Timeline Reads
 description: The understanding tree and the layer-0 message units over a window, for the single-agent run timeline.
 tags:
-- gateway
+- services
 ---
 
 # Run Timeline Reads
+
+Served by [[services/derived/insights/docs/insights.ava.okf.md|the insights service]]; the gateway proxies these URLs unchanged.
 
 `GET /api/agents/{id}/run-timeline?from&to` serves a window over the two things an agent persists about its own run: its message history (the stitched checkpoint, `load_checkpoint_history_full`) and its understanding tree (`understanding_nodes`). Nothing is derived from telemetry events and nothing is read from Loki.
 
@@ -21,6 +23,6 @@ Each unit carries `context_tokens` / `generation_tokens` / `estimated` (`tokens.
 
 `GET /api/agents/{id}/run-timeline/messages?start&end&limit&full` returns raw messages by stitched index (at most `limit`, `next_start` continues), split into parts by the console timeline's projection; parts longer than `display.run_timeline_message_text_max` are clipped and flagged unless `full=true`.
 
-`GET /api/agents/{id}/run-timeline/context?at=` (`context.py`) returns the context breakdown of the LLM request at message index `at` (the first request at or after it, else the last; 404 when the agent has made none): the same `ContextBreakdownResponse` the composer's `context-breakdown` returns (shared `gateway.agents.state.context_breakdown_response`: window, thresholds), computed over what that request really sent (the segment's own head, then the segment's messages before the request's AIMessage) from each message's own token count (`base/agents/history/message_tokens.py`, `request_breakdown`; the categories sum to the request's `input_tokens`), each category carrying `estimated` / `exact_fraction`, plus `request`, `session` / `sessions` (zero-based session of the count) and `ts`. It works for any session of the stitched history, not only the latest.
+`GET /api/agents/{id}/run-timeline/context?at=` (`context.py`) returns the context breakdown of the LLM request at message index `at` (the first request at or after it, else the last; 404 when the agent has made none): the same `ContextBreakdownResponse` the composer's `context-breakdown` returns (shared `base.agents.history.context_response.context_breakdown_response`: window, thresholds), computed over what that request really sent (the segment's own head, then the segment's messages before the request's AIMessage) from each message's own token count (`base/agents/history/message_tokens.py`, `request_breakdown`; the categories sum to the request's `input_tokens`), each category carrying `estimated` / `exact_fraction`, plus `request`, `session` / `sessions` (zero-based session of the count) and `ts`. It works for any session of the stitched history, not only the latest.
 
 `HistoryViewCache` (`history.py`, on `app.state.run_timeline_views`) keeps each agent's derived view (history, units, usage sums, per-message token counts) keyed by agent id: served as is for 5 seconds, then kept for up to 10 minutes while the agent's newest checkpoint id is unchanged (one cheap probe), rebuilt when it moves; concurrent readers of one agent share a single build, so a page load's burst of requests costs one checkpoint read; a read that finds a node past the cached history asks for a fresh view. A node span outside the history is an explicit error.

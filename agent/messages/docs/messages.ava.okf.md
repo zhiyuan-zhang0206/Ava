@@ -41,4 +41,4 @@ Ava-style message constructors — builds standard LangChain `HumanMessage` / `T
 
 - Design chooses **not to subclass** LangChain Message — distinguishes via metadata instead of `isinstance`, serialization path is simpler
 - `NoteTag` is a closed set: adding a new kind requires updating UI mapping branches; unmapped tags render as a prominent "unrecognized" marker rather than silently falling back
-- Writer/reader division: writer (`agent/messages/__init__.py` + `agent/graph/claim/node.py` + `agent/graph/llm/node.py`) saves `<AvaMsgType member>.value`; reader (`base/agents/history/timeline.py`, `gateway/agents/history/context_breakdown.py`, `agent/graph/recall/memory_recall.py`) always gets typed view via `read_ava_kwargs()`, no longer `.get()` raw dict directly
+- Writer/reader division: writer (`agent/messages/__init__.py` + `agent/graph/claim/node.py` + `agent/graph/llm/node.py`) saves `<AvaMsgType member>.value`; reader (`base/agents/history/timeline.py`, `base/agents/history/context_breakdown.py`, `agent/graph/recall/memory_recall.py`) always gets typed view via `read_ava_kwargs()`, no longer `.get()` raw dict directly
