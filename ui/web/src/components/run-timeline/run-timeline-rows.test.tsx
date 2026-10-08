@@ -137,3 +137,31 @@ describe("RunTimelineRows hybrid axis", () => {
     expect(span(covering).right).toBeCloseTo(span(third).right);
   });
 });
+
+describe("RunTimelineRows context rows", () => {
+  it("draws the absolute and the added context as two rows, each scaled to its own largest", () => {
+    const request = (idx: number, ms: number, input: number, added: number, estimated: boolean) => ({
+      idx,
+      ts: at(ms),
+      session: 0,
+      input_tokens: input,
+      output_tokens: 1,
+      added_tokens: added,
+      added_estimated: estimated,
+    });
+    renderRows({ requests: [request(1, 100, 1000, 1000, true), request(2, 500, 2000, 100, false)] });
+    const absolute = screen.getAllByTestId("run-timeline-request");
+    const added = screen.getAllByTestId("run-timeline-added");
+    expect(absolute).toHaveLength(2);
+    expect(added).toHaveLength(2);
+    const height = (el: HTMLElement) => parseFloat(el.querySelector<HTMLElement>("span[aria-hidden]")!.style.height);
+    expect(height(absolute[0]) / height(absolute[1])).toBeCloseTo(0.5);
+    expect(height(added[0]) / height(added[1])).toBeCloseTo(10);
+    expect(height(added[0])).toBeCloseTo(height(absolute[1]));
+    expect(added[0].hasAttribute("data-estimated")).toBe(true);
+    expect(added[1].hasAttribute("data-estimated")).toBe(false);
+    expect(screen.getByTestId("run-timeline-row-added")).toBeTruthy();
+    expect(screen.getByTestId("run-timeline-row-context")).toBeTruthy();
+    expect(added[1].style.left).toBe(absolute[1].style.left);
+  });
+});

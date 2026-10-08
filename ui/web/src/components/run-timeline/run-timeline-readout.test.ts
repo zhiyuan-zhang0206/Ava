@@ -31,6 +31,33 @@ function readout(u: RunTimelineUnit): string | null {
   );
 }
 
+describe("run-timeline request readout", () => {
+  const request = (added_estimated: boolean) => ({
+    idx: 5,
+    ts: "2026-10-04T12:00:00Z",
+    session: 0,
+    input_tokens: 5000,
+    output_tokens: 10,
+    added_tokens: 1234,
+    added_estimated,
+  });
+  const read = (r: ReturnType<typeof request>) =>
+    readoutText({ kind: "request", idx: 5 }, {
+      data: { units: [], nodes: [], requests: [r], events: [] } as unknown as RunTimelineResponse,
+      t,
+      unitLabel: () => "",
+      sourceLabel: (s) => s,
+    });
+
+  it("shows the absolute input and what the request added", () => {
+    expect(read(request(false))).toMatch(/\|5\.0k\|1\.2k$/);
+  });
+
+  it("marks an estimated addition", () => {
+    expect(read(request(true))).toMatch(/\|5\.0k\|1\.2k \(estimated\)$/);
+  });
+});
+
 describe("run-timeline unit readout tokens", () => {
   it("appends the tokens of a block a request has read", () => {
     expect(readout(unit({ context_tokens: 1234, generation_tokens: null, estimated: false }))).toMatch(

@@ -478,16 +478,20 @@ export function RunTimelineRows({
         })()}
       </RowShell>
 
-      {data.requests.length > 0 ? (
-        <ContextSizeRow
-          requests={data.requests}
-          axis={axis}
-          viewU={viewU}
-          hover={hover}
-          hoverProps={hoverProps}
-          describe={(request) => requestReadout(t, request)}
-        />
-      ) : null}
+      {data.requests.length > 0
+        ? (["input", "added"] as const).map((metric) => (
+            <ContextSizeRow
+              key={metric}
+              requests={data.requests}
+              metric={metric}
+              axis={axis}
+              viewU={viewU}
+              hover={hover}
+              hoverProps={hoverProps}
+              describe={(request) => requestReadout(t, request)}
+            />
+          ))
+        : null}
 
       <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} trackPx={trackPx} />
 

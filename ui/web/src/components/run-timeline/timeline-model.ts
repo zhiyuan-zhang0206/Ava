@@ -471,6 +471,11 @@ export function contextPoint(
   return pick?.request.idx ?? null;
 }
 
+/** The largest newly added context among the requests: what the added-context row scales to. */
+export function maxAdded(requests: readonly RunTimelineRequest[]): number {
+  return requests.reduce((top, request) => Math.max(top, request.added_tokens), 0);
+}
+
 /** The largest input size among the requests: what the context-size row scales to. */
 export function maxInput(requests: readonly RunTimelineRequest[]): number {
   return requests.reduce((top, request) => Math.max(top, request.input_tokens), 0);
