@@ -72,7 +72,7 @@ STRUCTURAL_SPECS = {
     "run-timeline": {
         "ready": "[data-testid='run-timeline-chart']",
         "visible": ("#main-content", "[data-testid='run-timeline-chart']"),
-        "controls": ("[data-testid='run-timeline-crumbs'] button",),
+        "controls": ("[aria-label='Zoom in']",),
         "nonempty": ("[data-testid='run-timeline-chart']",),
     },
 }
