@@ -94,12 +94,14 @@ def test_effective_config_snapshot_is_flat_framework_keys() -> None:
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_payload_keys_are_modeled_or_enabled_plugin_aliases() -> None:
-    """Bootstrap serves Settings aliases plus declared enabled-provider keys."""
+    """Bootstrap serves Settings, enabled-provider keys and the plugin policy carrier."""
+    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
     from base.lm.plugin_providers import model_catalog
 
     served = config.bootstrap_config_values()
     valid = {config.field_alias(name) for name in config.BOOTSTRAP_FIELDS}
     valid |= {binding.key_env for binding in model_catalog().bindings.values()}
+    valid.add(PLUGIN_CLUSTER_CONFIG_ENV)
     assert set(served) <= valid
 
 

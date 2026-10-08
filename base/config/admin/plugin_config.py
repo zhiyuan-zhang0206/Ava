@@ -7,32 +7,18 @@ schema, while the image remains the sole persisted authority.
 
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import dataclass
-from pathlib import Path
-
-from pydantic import BaseModel
-
 from base.config.admin.metadata import ConfigFieldMeta
-from base.host.atomic_io import write_bytes_atomic
-from base.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S
-from base.native_process.os_platform import file_lock
+from base.packages.plugin_config_images import (
+    PluginConfigOwner,
+    image_revision,
+    write_config_image,
+)
 from base.packages.plugins.config_face import declared_config_class
 from base.packages.plugins.config_registration import (
     config_from_image,
     disk_image_path,
     read_authority_config,
 )
-
-
-@dataclass(frozen=True)
-class PluginConfigOwner:
-    """One pure declaration and its existing authority image."""
-
-    name: str
-    cls: type[BaseModel]
-    path: Path
 
 
 def config_owners() -> dict[str, PluginConfigOwner]:
@@ -45,20 +31,6 @@ def config_owners() -> dict[str, PluginConfigOwner]:
         if cls is not None:
             owners[name] = PluginConfigOwner(name, cls, disk_image_path(name))
     return owners
-
-
-def image_digest(path: Path) -> str:
-    """Digest the complete authority bytes; an absent image has empty bytes."""
-    try:
-        payload = path.read_bytes()
-    except FileNotFoundError:
-        payload = None
-    return image_revision(payload)
-
-
-def image_revision(payload: bytes | None) -> str:
-    """Distinguish a missing whole image from an existing invalid empty file."""
-    return hashlib.sha256(b"" if payload is None else b"\x01" + payload).hexdigest()
 
 
 def plugin_field_owners() -> dict[str, PluginConfigOwner]:
@@ -89,7 +61,7 @@ def patch_owner(fields: set[str]) -> PluginConfigOwner | None:
         elif name in FIELD_INFOS:
             owners[None] = None
         else:
-            raise ValueError(f"unknown config field {name!r}")
+            raise ValueError(f"unknown field {name!r}")
     if len(owners) > 1:
         raise ValueError("config patch mixes owners; send one request per config owner")
     return next(iter(owners.values()), None)
@@ -150,30 +122,6 @@ def plugin_overrides() -> dict[str, object]:
             }
         )
     return values
-
-
-def write_config_image(
-    owner: PluginConfigOwner,
-    config: BaseModel,
-    *,
-    expected_digest: str,
-) -> None:
-    """CAS one complete validated image under its existing cross-process file lock."""
-    values = config.model_dump()
-    if set(values) != set(owner.cls.model_fields):
-        raise ValueError("plugin config write requires the complete declared image")
-    validated = owner.cls.model_validate(values)
-    owner.path.parent.mkdir(parents=True, exist_ok=True)
-    with file_lock(owner.path.with_suffix(".lock"), timeout_s=ENV_LOCK_TIMEOUT_S):
-        if image_digest(owner.path) != expected_digest:
-            raise RuntimeError("plugin config changed before owned image write")
-        write_bytes_atomic(
-            owner.path,
-            (
-                json.dumps(validated.model_dump(mode="json"), indent=2, allow_nan=False) + "\n"
-            ).encode(),
-            mode=0o600,
-        )
 
 
 def write_plugin_patch(

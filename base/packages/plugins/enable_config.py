@@ -391,7 +391,8 @@ def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
         cls = declared_config_class(name, plugin_dir)
         if cls is None:
             return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
-        from base.config.admin.plugin_config import PluginConfigOwner, import_legacy_config
+        from base.config.admin.plugin_config import import_legacy_config
+        from base.packages.plugin_config_images import PluginConfigOwner
         from base.packages.plugins.config_registration import disk_image_path
 
         imported = import_legacy_config(PluginConfigOwner(name, cls, disk_image_path(name)))

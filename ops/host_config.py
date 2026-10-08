@@ -18,9 +18,10 @@ from base.cluster.machine import machine_name
 from base.config import env_override_values, field_domain, get_config_metadata
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
-from base.config.admin.plugin_config import PluginConfigOwner, patch_owner, write_plugin_patch
+from base.config.admin.plugin_config import patch_owner, write_plugin_patch
 from base.host import config_validators
 from base.host.env import runtime_config
+from base.packages.plugin_config_images import PluginConfigOwner
 from ops.rpc_schemas import (
     ConfigAuditReadResult,
     ConfigReadResult,
