@@ -104,7 +104,9 @@ def test_apply_pending_applies_post_baseline(
     """A synthetic post-baseline migration in migrations/ is applied and stamped by
     name; a second apply is idempotent."""
     _ = db_conn
-    (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_t (id int);")
+    hour = tmp_path / "2999/12/31/23"
+    hour.mkdir(parents=True)
+    (hour / f"{_SYN}.sql").write_text("CREATE TABLE syn_t (id int);")
     _init_repo(tmp_path)  # applied only if git-tracked (#998)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     try:

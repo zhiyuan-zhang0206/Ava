@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Schema Migrations (baseline + deltas)
-description: '`db/schema.sql` is the squashed baseline; `migrations/YYYY/MM/DD/YYYYMMDDTHHMMSS_<name>.sql` are post-baseline deltas tracked as an applied SET, not a high-water integer. `base/deploy/schema/migrations.py` applies them and asserts version in both directions at every daemon start.'
+description: '`db/schema.sql` is the squashed baseline; `migrations/YYYY/MM/DD/HH/YYYYMMDDTHHMMSS_<name>.sql` are post-baseline deltas tracked as an applied SET, not a high-water integer. `base/deploy/schema/migrations.py` applies them and asserts version in both directions at every daemon start.'
 tags:
 - base
 - library
@@ -21,7 +21,7 @@ tags:
   the sentinel `00000000T000000_baseline` and current reset anchor
   `20260923T031516_schema-baseline` into `schema_migrations`.
   **A schema change must be reflected here in the same commit.**
-- **`migrations/YYYY/MM/DD/YYYYMMDDTHHMMSS_<kebab-name>.sql`** — post-baseline deltas. There
+- **`migrations/YYYY/MM/DD/HH/YYYYMMDDTHHMMSS_<kebab-name>.sql`** — post-baseline deltas. There
   are no down migrations; a merged migration name and its SQL bytes are immutable; directory-only moves retain both
   (`lint_migrations.py`, checked against the merge-base with `origin/main`).
 
