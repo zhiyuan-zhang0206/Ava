@@ -65,6 +65,8 @@ from typing import Any, Literal, NamedTuple
 
 import ava
 import ava.sdk_surface.agent_identity
+from ava.gateway_client.launch_retry import get_launch_attempt as get_launch_attempt
+from ava.gateway_client.launch_retry import retry_launch as retry_launch
 from ava.gateway_client.transport import (
     _MEMORY_SEARCH_MAX_RETRIES,
     _TRANSIENT_HTTP_STATUSES,
@@ -203,13 +205,6 @@ def spawn(
             resolved=normalized.get("resolved"),
         )
     return int(data["id"])
-
-
-def retry_launch(agent_id: int) -> int:
-    """Retry launch of one committed identity without creating a new agent."""
-    resp = post(f"/api/agents/{agent_id}/retry-launch")
-    raise_from_response(resp)
-    return int(resp.json()["id"])
 
 
 def send_message(

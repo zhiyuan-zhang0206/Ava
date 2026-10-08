@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 import ava
 import ava.sdk_surface.agent_identity
@@ -57,6 +58,7 @@ __all_for_ava__ = [
     "compaction",
     "get_ancestors",
     "get_last_message",
+    "get_launch_attempt",
     "get_neighbors",
     "get_status",
     "list_agents",
@@ -421,14 +423,34 @@ def spawn(
     )
 
 
-def retry_launch(agent_id: int) -> int:
-    """Retry starting an existing agent after a launch failure.
+def get_launch_attempt(agent_id: int) -> UUID:
+    """Read the current launch attempt ID for an explicit retry.
 
-    This keeps its identity and first prompt. Use the agent id returned in the
-    failed creation response.
+    Keep this value with the retry's key; a later observation may describe
+    another attempt. Fails when no launch attempt can be observed.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return _client.retry_launch(agent_id)
+    return _client.get_launch_attempt(agent_id)
+
+
+def retry_launch(
+    agent_id: int,
+    *,
+    idempotency_key: str,
+    expected_prior_attempt_id: str | UUID,
+) -> int:
+    """Retry starting an existing agent after a launch failure.
+
+    Keep the agent id, `idempotency_key` and `expected_prior_attempt_id` together
+    when recovering a lost response. Acceptance does not prove the agent started.
+    A deliberate new retry needs a new key and the latest observed attempt.
+    """
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    return _client.retry_launch(
+        agent_id,
+        idempotency_key=idempotency_key,
+        expected_prior_attempt_id=expected_prior_attempt_id,
+    )
 
 
 def spawn_impl(
