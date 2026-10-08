@@ -412,7 +412,9 @@ def test_plugin_price_vendor_reaches_pricing_lookup(
     assert pricing.model_vendor("testp-unpriced") is None
 
 
-def test_plugin_binding_effort_levels_reach_build_context(add_bindings: AddBindings) -> None:
+def test_bound_build_preserves_fallback_identity_and_effort(
+    add_bindings: AddBindings, monkeypatch: pytest.MonkeyPatch
+) -> None:
     contexts: list[provider_api.BuildContext] = []
 
     def _build(ctx: provider_api.BuildContext) -> FakeListChatModel:
@@ -428,15 +430,26 @@ def test_plugin_binding_effort_levels_reach_build_context(add_bindings: AddBindi
     )
     add_bindings({binding.prefix: binding})
 
-    assert isinstance(
-        build_chat_model(
-            "testctx-model",
-            media_resolution="high",
-            media_thinking_level="low",
-            base_url="https://example.com/v1",
-        ),
-        FakeListChatModel,
+    from base.lm.factory import build_chat_model_bound
+
+    requested: list[str] = []
+
+    def resolve(model: str) -> str:
+        requested.append(model)
+        return "testctx-model"
+
+    monkeypatch.setattr("base.lm.factory.resolve_available_model", resolve)
+    client, selected = build_chat_model_bound(
+        "unavailable-other-provider",
+        media_resolution="high",
+        media_thinking_level="low",
+        base_url="https://example.com/v1",
     )
+    assert isinstance(client, FakeListChatModel)
+    assert selected is binding
+    assert requested == ["unavailable-other-provider"]
+    assert contexts[0].model == "testctx-model"
+    assert len(contexts) == 1
     assert contexts[0].effort_levels == ("low", "high")
     assert contexts[0].media_resolution == "high"
     assert contexts[0].media_thinking_level == "low"
