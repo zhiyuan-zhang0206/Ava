@@ -9,13 +9,17 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import settle_checkpoint
-from agent.ownership.hosted_completion import completed_hosted_lifecycle_kind
+from agent.ownership.hosted_completion import (
+    completed_hosted_lifecycle_kind,
+    pending_hosted_lifecycle_id,
+)
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
 from base.agents.incarnation.native_work_models import NativeWorkTarget
+from base.agents.messages.native_restart import original_guarded_restart_id
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.native_work import (
@@ -104,3 +108,23 @@ async def recover_completed_work(
             return "native_cancel"
         raise
     return None
+
+
+async def returned_lifecycle_request(
+    pool: AsyncConnectionPool, agent_id: int, pending: PendingWorkResult
+) -> bool:
+    """An exact guarded receipt may survive a cancel return with legacy flags clear."""
+    if not pending.checkpoint_flushed or not pending.native_settled:
+        raise RuntimeError("returned lifecycle selection requires durable work settlement")
+    if pending.lifecycle_command_id is None and pending.native_work is not None:
+        async with pool.connection() as conn:
+            pending.lifecycle_command_id = await original_guarded_restart_id(
+                conn, pending.native_work
+            )
+    requested = bool(pending.result["exit_requested"] or pending.result["restart_requested"])
+    if pending.lifecycle_command_id is None and requested:
+        incarnation = current_incarnation(agent_id)
+        if incarnation is None:
+            raise RuntimeError("hosted lifecycle return has no admitted incarnation")
+        pending.lifecycle_command_id = await pending_hosted_lifecycle_id(pool, incarnation)
+    return pending.lifecycle_command_id is not None or requested

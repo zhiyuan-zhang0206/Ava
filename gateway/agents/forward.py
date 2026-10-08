@@ -77,7 +77,9 @@ def _raise_proxied_wire_error_from_payload(payload: dict[str, object]) -> None:
     raise CrossMachineGatewayUnavailable(f"target machine reported failure via queue: {payload!r}")
 
 
-async def forward_to_home_machine(agent_id: int, path: str, json_body: dict) -> dict:
+async def forward_to_home_machine(
+    agent_id: int, path: str, json_body: dict, *, idempotency_key: str | None = None
+) -> dict:
     """Lifecycle operations (resurrect / force-terminate / etc.) must run on
     the agent's home machine (`agents_meta.machine`) — they mutate physical
     host state (session / OS process); not doing them on the home
@@ -107,10 +109,16 @@ async def forward_to_home_machine(agent_id: int, path: str, json_body: dict) -> 
     from gateway.app import app
 
     target = await asyncio.to_thread(_home_machine_blocking, app, agent_id)
+    if idempotency_key is not None:
+        return await enqueue_lifecycle(
+            app.state.db, target, path, json_body, idempotency_key=idempotency_key
+        )
     return await enqueue_lifecycle(app.state.db, target, path, json_body)
 
 
-async def enqueue_lifecycle(db: Database, target: str, path: str, json_body: dict) -> dict:
+async def enqueue_lifecycle(
+    db: Database, target: str, path: str, json_body: dict, *, idempotency_key: str | None = None
+) -> dict:
     """POST a 'lifecycle' op to the target machine's ops server, return its result.
 
     Translates a 'failed' outcome (target machine's op raised an AvaAgentError)
@@ -126,6 +134,7 @@ async def enqueue_lifecycle(db: Database, target: str, path: str, json_body: dic
                 payload={"path": path, "body": json_body},
                 timeout_s=_LIFECYCLE_DISPATCH_TIMEOUT_S,
                 retries=_LIFECYCLE_DISPATCH_RETRIES,
+                idempotency_key=idempotency_key,
             )
     except TimeoutError as exc:
         raise CrossMachineGatewayUnavailable(

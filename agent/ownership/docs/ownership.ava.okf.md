@@ -46,3 +46,8 @@ committed halt/certified-stop proof. Hosted admission appends an actual resource
 transfer in its successful metadata transaction; later startup cannot manufacture
 that certificate from mutable status. See
 [[../../../base/agents/incarnation/docs/native-work-cancel.ava.okf.md|guarded native work cancellation]].
+
+Guarded ACTIVE restart retains the exact original lifecycle command and its
+source-transaction completion facts. The completed-invocation selector runs
+after native cancellation settles and preserves later queued chat. See
+[[../../../base/agents/incarnation/docs/native-work-restart.ava.okf.md]].

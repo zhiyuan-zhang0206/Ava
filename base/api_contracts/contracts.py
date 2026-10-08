@@ -98,6 +98,12 @@ class RouteContract:
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # Native work commands have their own durable domain owner, never generic inbound.
     ("GET", "/api/keyed/v1/agents/{agent_id}/native-work"): RouteContract(),
+    ("GET", "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}"): RouteContract(),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/restart-work"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        note="original ACTIVE restart acceptance and exact lifecycle execution proof",
+    ),
     ("POST", "/api/keyed/v1/agents/{agent_id}/cancel-work"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         transactional_idempotency=True,

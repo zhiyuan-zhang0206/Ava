@@ -40,6 +40,11 @@ from base.agents import (
     ShellSessionKillTiming,
     TerminateResult,
 )
+from base.agents.incarnation.native_restart_models import (
+    NativeRestartAccepted,
+    NativeRestartOperation,
+    NativeRestartRefused,
+)
 from base.agents.messages.inbound import WakeTriggerKind
 from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message
@@ -649,7 +654,7 @@ async def recover_crash_marked_if_stalled(
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
     r"(?P<action>terminate|resurrect|resurrect-explicit-v2|"
-    r"resurrect-if-pending-work-v2|resurrect-billing-v1|recover-crash-marked-v2|restart)$"
+    r"resurrect-if-pending-work-v2|resurrect-billing-v1|recover-crash-marked-v2|restart|restart-work-v1)$"
 )
 
 
@@ -668,6 +673,8 @@ async def lifecycle_op(
     | BillingResurrectAgentResponse
     | RecoverCrashMarkedResponse
     | RestartAgentResponse
+    | NativeRestartAccepted
+    | NativeRestartRefused
 ):
     """Parse the lifecycle path from a 'lifecycle' op payload and dispatch to
     the appropriate per-action op. Returns the per-action response model (the
@@ -695,6 +702,12 @@ async def lifecycle_op(
         raise ValueError(
             f"trigger inbound is only valid for resurrect-if-pending-work-v2, not {action!r}"
         )
+    if action == "restart-work-v1":
+        from ops.lifecycle.native_restart import restart_native_work_op
+
+        return await restart_native_work_op(
+            db, bus, agent_id, NativeRestartOperation.model_validate(body), db_pool
+        )
     if action == "terminate":
         return await terminate_agent_op(
             db, bus, agent_id, TerminateAgentRequest.model_validate(body), db_pool
@@ -706,11 +719,7 @@ async def lifecycle_op(
             db, bus, agent_id, ResurrectAgentRequest.model_validate(body)
         )
     if action == "resurrect-if-pending-work-v2":
-        if trigger_inbound_id is None:
-            raise ValueError("resurrect-if-pending-work-v2 requires trigger inbound")
-        request = ResurrectAgentRequest.model_validate(body)
-        if request.resurrected_by != "system":
-            raise ValueError("resurrect-if-pending-work-v2 requires resurrected_by='system'")
+        request = _pending_work_resurrection_request(body, trigger_inbound_id)
         return await resurrect_agent_op(
             db,
             bus,
@@ -730,3 +739,15 @@ async def lifecycle_op(
             db, bus, agent_id, RestartAgentRequest.model_validate(body), db_pool
         )
     raise AssertionError(f"unreachable: action={action!r}")
+
+
+def _pending_work_resurrection_request(
+    body: dict[str, Any], trigger_inbound_id: int | None
+) -> ResurrectAgentRequest:
+    """Keep the guarded resurrection boundary independent of action routing."""
+    if trigger_inbound_id is None:
+        raise ValueError("resurrect-if-pending-work-v2 requires trigger inbound")
+    request = ResurrectAgentRequest.model_validate(body)
+    if request.resurrected_by != "system":
+        raise ValueError("resurrect-if-pending-work-v2 requires resurrected_by='system'")
+    return request

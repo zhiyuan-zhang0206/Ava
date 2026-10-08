@@ -4,6 +4,7 @@ from typing import Literal, cast
 
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.messages.native_restart import completed_guarded_restart
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -46,4 +47,6 @@ async def completed_hosted_lifecycle_kind(
                 (command_id, incarnation.agent_id, incarnation.generation, incarnation.owner),
             )
         ).fetchone()
+        if row is None and await completed_guarded_restart(conn, incarnation, command_id):
+            return "restart"
     return None if row is None else cast(Literal["restart", "terminate"], row[0])
