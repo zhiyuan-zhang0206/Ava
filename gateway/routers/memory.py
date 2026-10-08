@@ -374,7 +374,6 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
         raise IndexerUnavailable(f"memory search exceeded its {deadline:g}s deadline") from exc
 
     memory_root = gateway_memory_dir().resolve()
-    rel_paths: list[str] = []
     results: list[MemorySearchResultItem] = []
     for p in abs_paths:
         abs_p = Path(p).resolve()
@@ -382,10 +381,9 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
             rel = str(abs_p.relative_to(memory_root))
         except ValueError:
             rel = p
-        rel_paths.append(rel)
         description, tags = _extract_meta(abs_p)
         results.append(MemorySearchResultItem(path=rel, description=description, tags=tags))
-    return MemorySearchResponse(paths=rel_paths, results=results)
+    return MemorySearchResponse(results=results)
 
 
 @router.post("/api/memory/refresh", response_model=MemoryRefreshResponse)
