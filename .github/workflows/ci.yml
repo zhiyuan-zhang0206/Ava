@@ -487,7 +487,7 @@ jobs:
       - name: Apply migrations to fresh DB + trigger smoke
         run: uv run python scripts/ci/migration_smoke.py
       - name: Run pyright
-        run: uv run pyright
+        run: uv run pyright --stats
 
   backend-structure:
     # Same required check, two segments: A always runs structure lint via
@@ -549,11 +549,25 @@ jobs:
           git fetch --depth=1 origin "$base"
           echo "LINT_STRUCTURE_BASELINE_BASE=$(git rev-parse FETCH_HEAD^{commit})" >> "$GITHUB_ENV"
 
+      - name: Restore pre-commit environments
+        id: precommit-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml', '.python-version', 'uv.lock') }}
+
       - name: Run pre-commit structural gates (--all-files)
         # Segment A: keep the existing exclusions and move only codegen to B.
         env:
           SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install,types-codegen-fresh,constants-codegen-fresh,events-registry-fresh,config-lite-table-fresh
         run: env -u VIRTUAL_ENV uv run pre-commit run --all-files
+
+      - name: Save pre-commit environments
+        if: success() && steps.precommit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: ${{ steps.precommit-cache.outputs.cache-primary-key }}
 
       - name: Select codegen freshness from changed files
         id: codegen
