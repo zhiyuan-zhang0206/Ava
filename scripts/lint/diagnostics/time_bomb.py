@@ -78,7 +78,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -523,11 +523,11 @@ def _lint_tests(index: _Index, paths: list[Path], scope: frozenset[str] | None =
     return errors
 
 
-def _fixed_names_in_module(index: _Index, tree: ast.Module) -> tuple[set[str], dict[str, str]]:
+def _fixed_imports(index: _Index, nodes: Iterable[ast.AST]) -> tuple[set[str], dict[str, str]]:
     """(bare fixed-instant names imported, module-alias -> dotted module)."""
     names: set[str] = set()
     aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.ImportFrom) and node.module is not None:
             cand = node.module
             if cand in index.fixed:
@@ -641,12 +641,6 @@ def _is_calendar_literal(node: ast.AST) -> bool:
     return False
 
 
-def _window_bindings(tree: ast.Module) -> Iterator[tuple[str, int, int | None, ast.AST]]:
-    """`(name, first line, last line, value)` of every calendar literal bound to a window name."""
-    for node in ast.walk(tree):
-        yield from _node_bindings(node)
-
-
 def _node_bindings(node: ast.AST) -> Iterator[tuple[str, int, int | None, ast.AST]]:
     if isinstance(node, ast.Dict):
         yield from _dict_bindings(node)
@@ -674,7 +668,7 @@ def _dict_bindings(node: ast.Dict) -> Iterator[tuple[str, int, int | None, ast.A
             yield key.value, key.lineno, value.end_lineno, value
 
 
-def _lint_fixture_dates(path: Path, tree: ast.Module, lines: list[str]) -> list[str]:
+def _lint_fixture_dates(path: Path, nodes: Iterable[ast.AST], lines: list[str]) -> list[str]:
     """A calendar literal bound to a window-shaped name (dict value, keyword
     argument, or plain assignment) must derive from the clock or carry
     `# time-bomb-ok: <reason>` on any line of the binding's span (key..value;
@@ -695,8 +689,9 @@ def _lint_fixture_dates(path: Path, tree: ast.Module, lines: list[str]) -> list[
             )
         )
 
-    for name, start, end, value in _window_bindings(tree):
-        check(name, start, end, value)
+    for node in nodes:
+        for name, start, end, value in _node_bindings(node):
+            check(name, start, end, value)
 
     return [message for _, message in sorted(found)]
 
@@ -737,9 +732,15 @@ def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
     except (OSError, UnicodeDecodeError, SyntaxError):
         return []
     source_lines = text.splitlines()
-    errors: list[str] = _lint_fixture_dates(path, tree, source_lines)
+    # Rules 2 and 3 share one traversal; retain only their import/binding nodes.
+    nodes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.ImportFrom, ast.Import, ast.Dict, ast.keyword, ast.Assign))
+    ]
+    errors: list[str] = _lint_fixture_dates(path, nodes, source_lines)
     mod = rel[:-3].replace("/", ".")
-    fixed_names, aliases = _fixed_names_in_module(index, tree)
+    fixed_names, aliases = _fixed_imports(index, nodes)
     if not fixed_names and not aliases:
         return errors  # nothing fixed-instant in this test module — fast path
     for node in tree.body:
