@@ -48,6 +48,13 @@ source. Changing context can change those fields even when the raw Python
 arguments look the same. Within the same verified principal and key, such a
 body change conflicts; it does not silently create another agent.
 
+A current server records an immutable birth and original launch attempt. The
+same intent may recover that original unadmitted attempt; after an explicit
+retry rotates it, placement changes, admission, termination or deletion, replay
+returns the historical agent ID without launching later work. A previously
+guarded key with missing required snapshot returns 409 rather than recovering
+from mutable metadata. Reusing the key cannot reset later operator config.
+
 A receipt proves birth acceptance and recovers the original agent id, not that
 its native process is ready or work executed. Existing launch failure handling
 and explicit `retry_launch(agent_id)` remain separate recovery operations.
@@ -61,3 +68,9 @@ are not silently upgraded. `create_and_assign` has a separate explicit
 [[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md|guarded compound acceptance]]
 mode with its own receipt; standalone spawn keys do not make a script atomic. Fork strong admission
 and automatic ambiguous retry activation remain separate work.
+
+A gateway generation that already implements this fixed path may still have
+the older mutable attempt lookup. Fixed routing does not negotiate immutable
+recovery with that generation. Stop or drain older gateway writers before
+relying on the new recovery behavior; no client fallback or automatic ambiguous
+retry is added.

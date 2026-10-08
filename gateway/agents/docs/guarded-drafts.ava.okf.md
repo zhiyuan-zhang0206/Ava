@@ -22,8 +22,8 @@ creation. The existing DTO parsing rules remain intact. The handler renders a
 prompt and delegates to the existing birth/launch owner, rather than calling an
 LLM itself. Subsequent work in the created conversation may incur model costs.
 
-Only these guarded drafts opt in to `agent_creation_snapshots`. The birth owner
-commits the snapshot with the agent, first chat inbound and audit facts, under
+Guarded drafts and strict plain creation opt in to `agent_creation_snapshots`.
+The birth owner commits the snapshot with the agent, first chat inbound and audit facts, under
 the same creation advisory transaction lock. It retains original machine,
 config overlay, birth config, launch attempt UUID, first prompt IID, content and
 source. There is no target FK, TTL pruning or guessed historical backfill.
@@ -41,9 +41,10 @@ rotate attempts or insert prompts. A response is historical acceptance, not
 proof that the conversation currently exists, is available or executed.
 
 Legacy draft routes retain their original signatures, response shapes and
-one-shot behavior. Legacy HTTP, plain guarded creation, MCP and task assignment
-continue using their existing creation namespace and digest. Their shared
-`find_creation` default still projects current placement/config/attempt from
+one-shot behavior. Plain guarded creation separately retains its original birth
+through the same snapshot owner; its parsed request digest is unchanged. Legacy HTTP, MCP and
+task assignment continue using their existing creation namespace and digest.
+Their shared `find_creation` default still projects current placement/config/attempt from
 `agents_meta`; after explicit retry-launch it can return the replacement attempt.
-That separate compatibility gap remains tracked in #4473. It is not silently
-fixed or backfilled by this draft-specific snapshot contract.
+Those remaining compatibility boundaries remain tracked in #4473. They are not
+silently upgraded or backfilled by either guarded snapshot contract.
