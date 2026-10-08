@@ -14,7 +14,7 @@ import pytest
 
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.notice_bridge import NoticeBridge, _state_dir
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.types import (
     OutboundAdapterKind,
     OutboundChunk,
     PreparedOutboundSend,

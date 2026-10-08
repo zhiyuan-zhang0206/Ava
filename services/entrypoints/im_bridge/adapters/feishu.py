@@ -17,7 +17,7 @@ from base.log import logger
 from services.entrypoints.im_bridge.adapters import feishu_poll_cursor as cursors
 from services.entrypoints.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.types import (
     OutboundAdapterKind,
     OutboundChunk,
     PreparedOutboundSend,

@@ -15,7 +15,7 @@ from services.entrypoints.im_bridge.cursor_store import (
     is_after_watermark,
     watermark_of,
 )
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.types import (
     OutboundAccountMismatchError,
     OutboundIdentityConflictError,
     OutboundIntent,
