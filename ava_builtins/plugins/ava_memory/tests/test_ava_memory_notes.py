@@ -6,13 +6,16 @@ stores must not be told how to write to them, and `init_context` must lay down a
 window with no memory notes in it.
 """
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from agent.graph.prompt.context_notes import FRAMEWORK_NOTES, context_notes
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
@@ -199,9 +202,12 @@ def test_context_notes_skips_the_stores_that_are_off(
     returning None, which the registry drops."""
     monkeypatch.setattr(memory_plugin.settings.agent, "memory_index_inject_enabled", False)
     monkeypatch.setattr(memory_plugin.settings.agent, "memory_per_agent_inject_enabled", False)
+    sql = MagicMock()
+    sql.cursor.return_value.__enter__.return_value.fetchone.return_value = None
+    ctx = replace(_context(), clients=MagicMock(spec=ClientSet, sql=sql))
     tags = [
         n.additional_kwargs.get("ava_note_tag")
-        for n in context_notes(_registry(memory_plugin), _context())
+        for n in context_notes(_registry(memory_plugin), ctx)
     ]  # pyright: ignore[reportUnknownMemberType]
     assert "memory" not in tags
     assert "agent_memory" not in tags
