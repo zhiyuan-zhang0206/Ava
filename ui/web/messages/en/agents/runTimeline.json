@@ -9,8 +9,6 @@
   "loading": "Loading run timeline…",
   "loadFailed": "Could not load the run timeline.",
   "retry": "Retry",
-  "crumbsAria": "Zoom path",
-  "crumbRoot": "Whole lifetime",
   "windowSummary": "{from} – {to} · {nodes} summary nodes · {units} message units",
   "chartAria": "Run timeline: understanding tree levels above the message units",
   "empty": "Nothing in this window.",

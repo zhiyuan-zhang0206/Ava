@@ -7,7 +7,6 @@ import type {
   RunTimelineContext,
   RunTimelineMessages,
   RunTimelineResponse,
-  SessionsResponse,
   UserSettingListResponse,
 } from "@/lib/contracts/types";
 
@@ -15,7 +14,6 @@ const {
   getRunTimeline,
   getRunTimelineMessages,
   getRunTimelineContext,
-  getAgentSessions,
   getSettings,
   getContextBreakdown,
   useMediaQuery,
@@ -36,13 +34,12 @@ const {
     getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
     getRunTimelineContext: vi.fn<(agentId: number, at: number) => Promise<RunTimelineContext>>(),
-    getAgentSessions: vi.fn<(agentId: number) => Promise<SessionsResponse>>(),
   }));
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getAgentSessions, getSettings, getContextBreakdown },
+  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getSettings, getContextBreakdown },
 }));
 
 import {
@@ -402,36 +399,8 @@ function wheel(target: Element, init: WheelEventInit, count = 1) {
 
 const summaryText = () => screen.getByTestId("run-timeline-window").textContent;
 
-const sessionsResponse: SessionsResponse = {
-  agent_id: 42,
-  model: "m",
-  understanding_enabled: true,
-  cost_basis: "basis",
-  sessions: [
-    {
-      number: 1,
-      boundary_checkpoint_id: null,
-      start: "2026-10-04T12:00:00.000000Z",
-      end: "2026-10-04T13:00:00.000000Z",
-      messages: 9,
-      peak_input_tokens: 1000,
-      context_tokens: 1000,
-      generation_tokens: 1000,
-      estimated: true,
-      exact_fraction: 0.8,
-      coverage: { status: "none", ratio: 0, covered_messages: 0, total_messages: 9 },
-      estimate: { jobs: 1, input_tokens: 10, output_tokens: 1, cost_usd: null },
-    },
-  ],
-};
-
-describe("zoom path", () => {
-  async function zoomToSession() {
-    fireEvent.click(await screen.findByTestId("run-timeline-sessions-toggle"));
-    fireEvent.click(await screen.findByTestId("run-timeline-session-zoom"));
-  }
-
-  it("a double-click does not zoom or add a crumb, and there is no Drill button", async () => {
+describe("no drill-in", () => {
+  it("a double-click neither zooms nor drills, there is no Drill button, no breadcrumb and no sessions panel", async () => {
     render();
     const whole = (await screen.findByTestId("run-timeline-window")).textContent;
     const target = await nodeOf("1");
@@ -439,42 +408,9 @@ describe("zoom path", () => {
     fireEvent.doubleClick(screen.getByTestId(`run-timeline-canvas-${target.row}`));
     expect(await screen.findByTestId("run-timeline-node-detail")).toBeTruthy();
     expect(summaryText()).toBe(whole);
-    expect(screen.getByTestId("run-timeline-crumbs").querySelectorAll("button")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Drill in" })).toBeNull();
-  });
-
-  it("steps back to the whole lifetime from the root crumb, without another read", async () => {
-    getAgentSessions.mockResolvedValue(sessionsResponse);
-    render();
-    const whole = (await screen.findByTestId("run-timeline-window")).textContent;
-    await zoomToSession();
-    expect(summaryText()).not.toBe(whole);
-    fireEvent.click(within(screen.getByTestId("run-timeline-crumbs")).getByRole("button", { name: "Whole lifetime" }));
-    expect(summaryText()).toBe(whole);
-    expect(getRunTimeline).toHaveBeenCalledTimes(1);
-  });
-
-  it("clears the zoom path when the resolved agentId changes in place", async () => {
-    getAgentSessions.mockResolvedValue(sessionsResponse);
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { rerender } = rtlRender(
-      <QueryClientProvider client={queryClient}>
-        <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
-      </QueryClientProvider>,
-    );
-    await zoomToSession();
-    await waitFor(() =>
-      expect(screen.getByTestId("run-timeline-crumbs").textContent).toContain("Sessions 1"),
-    );
-
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <RunTimelinePage params={Promise.resolve({ agentId: "43" })} />
-      </QueryClientProvider>,
-    );
-    await waitFor(() =>
-      expect(screen.getByTestId("run-timeline-crumbs").textContent).not.toContain("Sessions 1"),
-    );
+    expect(screen.queryByTestId("run-timeline-crumbs")).toBeNull();
+    expect(screen.queryByTestId("run-timeline-sessions-toggle")).toBeNull();
   });
 });
 
@@ -879,19 +815,5 @@ describe("context size row", () => {
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
     expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
-  });
-});
-
-describe("sessions panel", () => {
-  it("is collapsed under the chart and zooms the timeline to a session", async () => {
-    getAgentSessions.mockResolvedValue(sessionsResponse);
-    render();
-    await screen.findByTestId("run-timeline-chart");
-    expect(getAgentSessions).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("run-timeline-sessions-toggle"));
-    const whole = summaryText();
-    fireEvent.click(await screen.findByTestId("run-timeline-session-zoom"));
-    expect(screen.getByTestId("run-timeline-crumbs").textContent).toContain("Sessions 1");
-    expect(summaryText()).not.toBe(whole);
   });
 });

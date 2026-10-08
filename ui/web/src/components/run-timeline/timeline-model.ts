@@ -16,11 +16,6 @@ export interface TimelineWindow {
   to: string;
 }
 
-/** One step of the zoom path: the window a session zoom narrowed to. */
-export interface Crumb extends TimelineWindow {
-  label: string;
-}
-
 export type Selection =
   | { kind: "node"; id: string }
   | { kind: "unit"; i0: number; i1: number; unitKind: RunTimelineUnit["kind"] }
