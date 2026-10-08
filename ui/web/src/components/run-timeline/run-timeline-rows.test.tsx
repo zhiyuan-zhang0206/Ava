@@ -26,7 +26,7 @@ const node = (id: string, from: number, to: number, parent: string | null = null
   span_start: 0,
   span_end: 0,
   summary: `node ${id}`,
-  usage: { calls: 0, input: 0, cache_read: 0, output: 0 },
+  usage: { calls: 0, input: 0, cache_read: 0, output: 0, cache_write: 0, cost_usd: 0, cost_calls: 0 },
   generation: null,
   context_tokens: null,
   estimated: null,

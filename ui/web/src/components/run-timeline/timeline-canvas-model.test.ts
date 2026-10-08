@@ -94,7 +94,7 @@ describe("row layouts", () => {
   });
   const node = (id: string, from: number, to: number): RunTimelineNode => ({
     id, level: 1, parent: null, start: iso(from), end: iso(to), span_start: 0, span_end: 1, summary: id,
-    usage: { calls: 0, input: 0, cache_read: 0, output: 0 }, generation: null, context_tokens: null, estimated: null,
+    usage: { calls: 0, input: 0, cache_read: 0, output: 0, cache_write: 0, cost_usd: 0, cost_calls: 0 }, generation: null, context_tokens: null, estimated: null,
   });
   const request = (idx: number, tokens: number, from: number): RunTimelineRequest => ({
     idx, ts: iso(idx), session: 0, input_tokens: tokens, output_tokens: 1, added_tokens: 1, added_estimated: false, added_from: from, added_to: idx,
