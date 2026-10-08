@@ -239,6 +239,8 @@ export function paintBars(p: PaintCtx, layout: RowLayout, top: number, added: bo
   };
   for (const place of layout.wide) draw(place.x0, place.x1, place.key, true);
   for (const cell of layout.cells as readonly Cell[]) draw(cell.x0, cell.x1, cell.key, false);
+  // The selected and linked bars go on top again, so a hairline of another request inside their range does not cut them.
+  for (const place of layout.wide) if (deco.primaryKey === place.key || deco.linkedKeys.has(place.key)) draw(place.x0, place.x1, place.key, true);
   // A frame reaches the top of the tallest bar it surrounds, and no higher.
   const topOf = (keys: ReadonlySet<string>) => bottom - Math.max(BAR_MIN_PX, ...[...keys].map(heightOf));
   paintDeco(p, deco, bottom - BAR_MIN_PX, bottom, topOf);
