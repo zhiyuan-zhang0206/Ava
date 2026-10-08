@@ -79,7 +79,8 @@ def test_invalid_image_fails_composition_before_a_gate_can_fail_open(
         failures.append((name, exc))
 
     monkeypatch.setattr(load_report, "report_plugin_load_failure", record_failure)
-    assert ops_spec.plugin_services() == ()
+    with pytest.raises(error):
+        ops_spec.plugin_services()
     assert len(failures) == 1
     assert failures[0][0] == "ava_memory"
     assert isinstance(failures[0][1], error)
