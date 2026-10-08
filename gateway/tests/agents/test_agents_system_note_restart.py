@@ -247,6 +247,39 @@ class TestSystemNote:
 
 
 class TestRestart:
+    @pytest.mark.parametrize(
+        ("initial", "overlay"),
+        [
+            (
+                {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+                {"reasoning_effort": "low"},
+            ),
+            (
+                {"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"},
+                {"llm_model": "deepseek-flash"},
+            ),
+        ],
+    )
+    def test_incompatible_merged_model_effort_is_rejected_without_writes(
+        self, db_conn: psycopg.Connection, initial: dict[str, str], overlay: dict[str, str]
+    ) -> None:
+        with TestClient(app) as client:
+            spawned = client.post("/api/agents", json={"config": initial})
+            assert spawned.status_code == 201, spawned.text
+            agent_id = spawned.json()["id"]
+            response = client.post(
+                f"/api/agents/{agent_id}/restart", json={"config_overlay": overlay}
+            )
+        assert response.status_code == 400, response.text
+        assert "unsupported reasoning effort" in response.json()["detail"]
+        assert db_conn.execute(
+            "SELECT config_overlay FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone() == (initial,)
+        assert db_conn.execute(
+            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart'",
+            (agent_id,),
+        ).fetchone() == (0,)
+
     def test_restart_inserts_inbound_and_returns_enqueued(
         self, db_conn: psycopg.Connection
     ) -> None:

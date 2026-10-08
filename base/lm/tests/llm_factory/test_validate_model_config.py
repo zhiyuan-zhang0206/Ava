@@ -145,6 +145,25 @@ class TestValidateModelConfig:
 
     # --- API key validation -----------------------------------------------------
 
+    def test_config_only_validation_keeps_exact_model_effort_checks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._clear_all_keys(monkeypatch)
+        assert (
+            validate_model_config(
+                config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+                check_provider_key=False,
+            )
+            == "deepseek-flash"
+        )
+        with pytest.raises(ValueError, match="unsupported reasoning effort"):
+            validate_model_config(
+                config={"llm_model": "deepseek-flash", "reasoning_effort": "low"},
+                check_provider_key=False,
+            )
+        with pytest.raises(ValueError, match="unknown model"):
+            validate_model_config(model="unknown-model", check_provider_key=False)
+
     def test_missing_claude_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ANTHROPIC_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)

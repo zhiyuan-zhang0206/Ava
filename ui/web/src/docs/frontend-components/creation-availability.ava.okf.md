@@ -35,6 +35,15 @@ reliable absolute vendor figures display a dash. Relative speed multipliers
 and cluster measurements do not fill this column. The backend also rejects
 unsupported explicit effort rather than translating it to another grade.
 
+Declared `fast_of` services appear directly after their visible Standard model.
+Families sort by the Standard input price; a service whose Standard model is
+hidden remains an independent row sorted by its own price. Names do not imply
+family membership, and grouping never restores hidden or superseded entries.
+
+The published default uses the same database/config resolution as a new
+agent's birth stamp. Saving the cluster default invalidates both default-model
+and model-catalog queries, including the otherwise indefinitely cached picker.
+
 Rates below USD 1 use up to four significant digits, with at least two decimal
 places, so nonzero cache prices such as USD 0.003 never display as USD 0.00.
 The price tooltip labels input/cache-read/output, explains that the displayed

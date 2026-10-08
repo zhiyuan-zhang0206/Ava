@@ -55,6 +55,25 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("DefaultModelPanel", () => {
+  it("refreshes the cached model picker default after saving", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    qc.setQueryData(["models"], MODELS);
+    render(
+      <QueryClientProvider client={qc}>
+        <DefaultModelPanel id="config-default-model" />
+      </QueryClientProvider>,
+    );
+    const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");
+    await waitFor(() => expect(select.value).toBe("deepseek-flash"));
+    vi.mocked(api.getModels).mockResolvedValue({ ...MODELS, default: "claude-sonnet-5" });
+    vi.mocked(api.getDefaultModel).mockResolvedValue({ model: "claude-sonnet-5", source: "cluster" });
+    fireEvent.change(select, { target: { value: "claude-sonnet-5" } });
+    fireEvent.click(screen.getByTestId("save-default-model"));
+    await waitFor(() => expect(qc.getQueryData<{ default: string }>(["models"])?.default).toBe("claude-sonnet-5"));
+  });
+
   it("shows a disabled loading placeholder before the current model resolves", () => {
     vi.mocked(api.getModels).mockReturnValue(new Promise(() => undefined));
     vi.mocked(api.getDefaultModel).mockReturnValue(new Promise(() => undefined));

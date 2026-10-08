@@ -5,6 +5,8 @@ from contextlib import nullcontext
 import psycopg
 import pytest
 
+from base.agents import InvalidModelConfig
+from base.agents.birth_config import set_cluster_default_model
 from base.agents.tasks.creation import create_task_in_transaction
 from base.agents.tasks.model import Task
 from base.cluster.machine import machine_name
@@ -31,6 +33,26 @@ def _counts(conn: psycopg.Connection) -> tuple[int, ...]:
     ).fetchone()
     assert row is not None
     return row
+
+
+def test_actual_birth_model_effort_failure_rolls_back_every_effect(
+    db_conn: psycopg.Connection, cluster_defaults_unset: None
+) -> None:
+    before = _counts(db_conn)
+    with (
+        pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"),
+        db_conn.transaction(),
+        db_conn.cursor() as cur,
+    ):
+        set_cluster_default_model(cur, "mimo-v2.6-pro", updated_by="test")
+        insert_agent_birth(
+            cur,
+            machine=machine_name(),
+            config={"reasoning_effort": "max"},
+            prompt="This birth must roll back",
+            prompt_source="user",
+        )
+    assert _counts(db_conn) == before
 
 
 @pytest.mark.parametrize("commit", [False, True])

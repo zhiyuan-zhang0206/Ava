@@ -163,8 +163,9 @@ def validate_model_config(
     *,
     model: str | None = None,
     config: dict[str, object] | None = None,
+    check_provider_key: bool = True,
 ) -> str:
-    """Validate that the given model config can be spawned.
+    """Validate the selected model, its explicit effort and launch credentials.
 
     Called at the spawn boundary (gateway POST /api/agents handler) to fail
     fast before forwarding to the runner — a 400 with a clear message is
@@ -173,13 +174,14 @@ def validate_model_config(
     Resolves the effective model from ``config.llm_model`` first, falling back
     to ``model`` (the cluster default), then checks:
     1. The model name is a spawnable model of the catalog.
-    2. The required API key for that model's provider is configured.
+    2. The required API key is configured when ``check_provider_key`` is true.
     3. An explicit effort is one of the selected model's declared options.
 
     Args:
         model: fallback model name (cluster default). Ignored when
             ``config["llm_model"]`` is set.
         config: per-agent config overlay, may contain ``llm_model``.
+        check_provider_key: check launch credentials; false for config-only edits.
 
     Returns:
         The resolved model name on success — the caller may use it directly.
@@ -218,7 +220,7 @@ def validate_model_config(
     # 2. API key must be configured — unless an LLM override is active
     # (e2e tests inject fake chat models via AVA_LLM_OVERRIDE and don't need
     # real keys; the override path in build_chat_model skips the real LLM).
-    if settings.lm.llm_override:
+    if not check_provider_key or settings.lm.llm_override:
         return effective_model
 
     _ensure_provider_key(effective_model)

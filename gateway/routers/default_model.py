@@ -22,32 +22,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from base.agents.birth_config import cluster_default_model, set_cluster_default_model
-from base.config import settings
+from base.agents.birth_config import resolve_default_model, set_cluster_default_model
 from gateway.schemas.models import DefaultModelView, DefaultModelWrite
 
 router = APIRouter()
-
-
-def _view(stored: str | None) -> DefaultModelView:
-    """The effective default: the cluster row when set, else the ordinary config
-    chain showing through — both resolved through the registry's availability
-    resolution, the call the spawn boundary makes
-    (`base/lm/factory.py:validate_model_config`). A withdrawn id registered
-    with a fallback therefore reports the model a new agent actually runs,
-    never the id that is dead on the wire."""
-    from base.lm.registry import resolve_available_model
-
-    if stored is not None:
-        return DefaultModelView(model=resolve_available_model(stored), source="cluster")
-    return DefaultModelView(model=resolve_available_model(settings.lm.llm_model), source="config")
 
 
 @router.get("/api/config/default-model")
 def get_default_model(request: Request) -> DefaultModelView:
     """The model a new agent is born on, and where that value came from."""
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        return _view(cluster_default_model(cur))
+        resolved = resolve_default_model(cur)
+        return DefaultModelView(model=resolved.model, source=resolved.source)
 
 
 @router.put("/api/config/default-model")
@@ -71,4 +57,5 @@ def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModel
         )
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         set_cluster_default_model(cur, body.model, updated_by="api")
-        return _view(cluster_default_model(cur))
+        resolved = resolve_default_model(cur)
+        return DefaultModelView(model=resolved.model, source=resolved.source)
