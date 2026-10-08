@@ -109,28 +109,75 @@ def read_worktree(repo_root: Path) -> dict[str, str]:
     }
 
 
+def _tree_listing(repo_root: Path, rev: str, *, recursive: bool) -> bytes:
+    options = ["-r", "--name-only"] if recursive else []
+    return subprocess.run(  # noqa: S603 — local git query, no shell
+        ["git", "-C", str(repo_root), "ls-tree", "-z", *options, rev, "--", SHARD_DIR],
+        capture_output=True,
+        check=True,
+    ).stdout
+
+
+def _historical_paths(repo_root: Path, rev: str) -> list[str] | None:
+    listing = _tree_listing(repo_root, rev, recursive=True)
+    if not listing:
+        entry = _tree_listing(repo_root, rev, recursive=False)
+        if not entry:
+            return None
+        metadata, _, name = entry.partition(b"\t")
+        fields = metadata.split()
+        if len(fields) != 3 or fields[1] != b"tree" or name != f"{SHARD_DIR}\0".encode():
+            raise ValueError(f"invalid baseline directory at {rev}")
+        return []
+    paths = listing.decode().split("\0")
+    prefix = f"{SHARD_DIR}/"
+    if paths[-1] != "" or any(not path.startswith(prefix) for path in paths[:-1]):
+        raise ValueError(f"invalid baseline tree listing at {rev}")
+    return [path.removeprefix(prefix) for path in paths[:-1]]
+
+
+def _batch_texts(data: bytes, filenames: list[str]) -> dict[str, str]:
+    texts: dict[str, str] = {}
+    cursor = 0
+    for filename in filenames:
+        header_end = data.find(b"\n", cursor)
+        if header_end < 0:
+            raise ValueError(f"truncated Git batch header for {filename}")
+        header = data[cursor:header_end].split()
+        if len(header) != 3 or header[1] != b"blob":
+            raise ValueError(f"unreadable Git blob for {filename}: {data[cursor:header_end]!r}")
+        if len(header[0]) not in (40, 64) or any(
+            char not in b"0123456789abcdef" for char in header[0]
+        ):
+            raise ValueError(f"invalid Git object ID for {filename}")
+        size = int(header[2])
+        body_start = header_end + 1
+        body_end = body_start + size
+        if size < 0 or data[body_end : body_end + 1] != b"\n":
+            raise ValueError(f"invalid Git batch body for {filename}")
+        texts[filename.removesuffix(".json")] = data[body_start:body_end].decode()
+        cursor = body_end + 1
+    if cursor != len(data):
+        raise ValueError("unexpected data after Git baseline batch")
+    return texts
+
+
 def read_at(repo_root: Path, rev: str) -> dict[str, str] | None:
     """Every shard (`*.json`) at a revision, by name.
 
-    None only when the revision's tree has no shard directory at all — the
+    None only when a valid revision's tree has no shard directory at all — the
     one-time migration commit that predates the sharded baseline, where the
     guard skips itself rather than comparing against nothing. Once the
     directory exists (its README.md keeps it tracked even with zero shards),
     this returns a dict, possibly empty — a real empty baseline, compared
-    against normally and not treated as guard-skip territory.
+    against normally and not treated as guard-skip territory. Git failures and
+    unreadable or incomplete blobs raise instead of disabling the guard.
     """
 
-    def git(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(  # noqa: S603 — local git query, no shell
-            ["git", "-C", str(repo_root), *args], capture_output=True, text=True, check=False
-        )
-
-    listing = git("ls-tree", "-r", "--name-only", f"{rev}:{SHARD_DIR}")
-    if listing.returncode:
+    paths = _historical_paths(repo_root, rev)
+    if paths is None:
         return None
-    filenames = [
-        name for name in listing.stdout.split() if name.endswith(".json") and name != RULES_FILE
-    ]
+    filenames = [name for name in paths if name.endswith(".json") and name != RULES_FILE]
     if not filenames:
         return {}
     # One `cat-file --batch` for every shard: a process per shard costs ~30ms each, and the
@@ -139,24 +186,9 @@ def read_at(repo_root: Path, rev: str) -> dict[str, str] | None:
         ["git", "-C", str(repo_root), "cat-file", "--batch"],
         input="".join(f"{rev}:{SHARD_DIR}/{name}\n" for name in filenames).encode(),
         capture_output=True,
-        check=False,
+        check=True,
     )
-    if batch.returncode:
-        return None
-    texts: dict[str, str] = {}
-    cursor = 0
-    for filename in filenames:
-        header_end = batch.stdout.index(b"\n", cursor)
-        header = batch.stdout[cursor:header_end].split()
-        if len(header) != 3:  # `<object> missing`
-            return None
-        size = int(header[2])
-        body_start = header_end + 1
-        texts[filename.removesuffix(".json")] = batch.stdout[
-            body_start : body_start + size
-        ].decode()
-        cursor = body_start + size + 1  # the newline that follows each object
-    return texts
+    return _batch_texts(batch.stdout, filenames)
 
 
 def parse_rules(text: str) -> dict[str, int]:
@@ -177,14 +209,20 @@ def read_rules_worktree(repo_root: Path) -> dict[str, int]:
 
 
 def read_rules_at(repo_root: Path, rev: str) -> dict[str, int]:
-    """The rule versions at a revision (none: every section was at version 1)."""
+    """Rule versions at a valid revision; a missing file means version 1.
+
+    Revision resolution and Git reads must succeed before absence is accepted.
+    """
+    paths = _historical_paths(repo_root, rev)
+    if paths is None or RULES_FILE not in paths:
+        return {}
     shown = subprocess.run(  # noqa: S603 — local git query, no shell
         ["git", "-C", str(repo_root), "show", f"{rev}:{SHARD_DIR}/{RULES_FILE}"],
         capture_output=True,
         text=True,
-        check=False,
+        check=True,
     )
-    return {} if shown.returncode else parse_rules(shown.stdout)
+    return parse_rules(shown.stdout)
 
 
 def read_rules(repo_root: Path, rev: str) -> tuple[dict[str, int], dict[str, int]]:

@@ -516,12 +516,12 @@ def _baseline_guard(
 ) -> list[str]:
     try:
         base = _baseline_base()
-    except ValueError as exc:
+        shards = baseline_shards.read_at(_REPO_ROOT, base)
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return [f"{baseline_shards.SHARD_DIR}: {exc}"]
-    shards = baseline_shards.read_at(_REPO_ROOT, base)
     if shards is None:
         print(
-            f"note: baseline guard skipped: git {base}:{baseline_shards.SHARD_DIR} unavailable",
+            f"note: baseline guard skipped: {base} predates {baseline_shards.SHARD_DIR}",
             file=sys.stderr,
         )
         return []
@@ -531,7 +531,7 @@ def _baseline_guard(
         return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
     try:
         rules_was, rules_now = baseline_shards.read_rules(_REPO_ROOT, base)
-    except ValueError as exc:
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid rule versions: {exc}"]
     errors: list[str] = []
     for kind, entries in baseline.items():
