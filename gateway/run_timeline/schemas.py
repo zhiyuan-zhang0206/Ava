@@ -52,6 +52,9 @@ class RunTimelineNode(BaseModel):
     each level up groups the one below. `span_start`..`span_end` is the inclusive
     message-index span in the stitched history, the indices the raw-message route
     reads. `generation` is None for a node with no understanding-call record.
+    `context_tokens` is the sum of the context tokens of the messages the span covers (None while
+    no request has read any of them), `estimated` whether any of that was a share rather than the
+    provider's own number (None with `context_tokens`).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -66,6 +69,8 @@ class RunTimelineNode(BaseModel):
     summary: str
     usage: RunTimelineUsage
     generation: RunTimelineGeneration | None
+    context_tokens: int | None
+    estimated: bool | None
 
 
 class RunTimelineUnit(BaseModel):

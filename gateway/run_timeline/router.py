@@ -39,7 +39,7 @@ from gateway.run_timeline.schemas import (
     RunTimelineUsage,
     RunTimelineWindow,
 )
-from gateway.run_timeline.tokens import block_tokens
+from gateway.run_timeline.tokens import block_tokens, span_tokens
 
 router = APIRouter()
 router.include_router(messages_router)
@@ -93,6 +93,24 @@ def _units(
             )
         )
     return out
+
+
+def _node(view: HistoryView, node: ServedNode) -> RunTimelineNode:
+    tokens = span_tokens(view, node.span_start, node.span_end)
+    return RunTimelineNode(
+        id=node.id,
+        level=node.level,
+        parent=node.parent,
+        start=node.start,
+        end=node.end,
+        span_start=node.span_start,
+        span_end=node.span_end,
+        summary=node.summary,
+        usage=RunTimelineUsage(**vars(node.usage)),
+        generation=RunTimelineGeneration(**vars(node.generation)) if node.generation else None,
+        context_tokens=tokens.context_tokens,
+        estimated=tokens.estimated,
+    )
 
 
 def _window(
@@ -149,23 +167,7 @@ def get_run_timeline(
         lifetime=(
             RunTimelineWindow(from_=lifetime[0], to=lifetime[1]) if lifetime is not None else None
         ),
-        nodes=[
-            RunTimelineNode(
-                id=node.id,
-                level=node.level,
-                parent=node.parent,
-                start=node.start,
-                end=node.end,
-                span_start=node.span_start,
-                span_end=node.span_end,
-                summary=node.summary,
-                usage=RunTimelineUsage(**vars(node.usage)),
-                generation=(
-                    RunTimelineGeneration(**vars(node.generation)) if node.generation else None
-                ),
-            )
-            for node in nodes
-        ],
+        nodes=[_node(view, node) for node in nodes],
         units=_units(view, served, start, end),
         events=_events(db, agent_id, start, end),
         requests=[r for r in llm_requests(view) if start <= r.ts <= end],
