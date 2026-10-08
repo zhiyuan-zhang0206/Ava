@@ -33,7 +33,6 @@ def _synthetic_ambient_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "SINK_FACADES",
         "ALLOWED",
-        "DEFERRED",
         "PURE_REPO_CALLEES",
         "SLICED_PACKAGES",
         "DB_HANDLE_PACKAGES",
