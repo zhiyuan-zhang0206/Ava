@@ -118,6 +118,7 @@ def create_agent_row(
     fork_tail_skills: list[str] | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
+    immutable_creation_snapshot: bool = False,
 ) -> tuple[int, dict[str, object] | None, int | None, UUID]:
     """Create the agent row: agents + agents_meta + fork copy, NO launch.
 
@@ -181,6 +182,8 @@ def create_agent_row(
         creation_request_hash: immutable caller request digest paired with the key;
             same-key races return the previously committed agent identity.
 
+        immutable_creation_snapshot: retain the original guarded draft birth and prompt.
+
     Returns:
         (new agent_id, birth_config dict, chat inbound id, launch attempt id).
 
@@ -205,6 +208,7 @@ def create_agent_row(
             fork_tail_skills=fork_tail_skills,
             creation_key=creation_key,
             creation_request_hash=creation_request_hash,
+            immutable_creation_snapshot=immutable_creation_snapshot,
         )
         if birth.birth_event is None:
             return birth.legacy_result()

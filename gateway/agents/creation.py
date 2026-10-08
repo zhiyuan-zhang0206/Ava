@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TypedDict
 
-from fastapi import HTTPException, Request
+from fastapi import Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from base.agents.labels import spawn_prompt_with_label
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
-from gateway.auth.request_principal import PrincipalScopeError, request_key
+from gateway.auth.request_principal import (
+    PRINCIPAL_SCOPE,
+    SCOPE_HEADER,
+    PrincipalScopeError,
+    request_key,
+)
 from ops.agents.creation_identity import (
     CreationConflictError,
     CreationReceipt,
@@ -19,6 +25,12 @@ from ops.agents.creation_identity import (
     find_creation,
 )
 from ops.rpc_schemas import ConfigNormalization, LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
+
+
+class _CreationArguments(TypedDict, total=False):
+    creation_key: str
+    creation_request_hash: str
+    immutable_creation_snapshot: bool
 
 
 def scoped_creation_key(
@@ -33,10 +45,12 @@ def scoped_creation_key(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def creation_receipt(pool: ConnectionPool, key: str, request_hash: str) -> CreationReceipt | None:
+def creation_receipt(
+    pool: ConnectionPool, key: str, request_hash: str, *, immutable_snapshot: bool = False
+) -> CreationReceipt | None:
     try:
         with pool.connection() as conn:
-            return find_creation(conn, key, request_hash)
+            return find_creation(conn, key, request_hash, immutable_snapshot=immutable_snapshot)
     except CreationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -49,6 +63,7 @@ async def create_and_launch_agent(
     bus: EventBus,
     *,
     creation_key: str | None = None,
+    creation_identity: dict[str, object] | None = None,
 ) -> SpawnedAgent:
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
     ROW in-process -> forward a launch-only op to the target runner.
@@ -65,11 +80,15 @@ async def create_and_launch_agent(
     """
     from gateway.agents import router as agent_router
 
-    request_hash = creation_request_hash(body.model_dump(mode="json")) if creation_key else None
+    snapshot = creation_identity is not None
+    arguments = _creation_arguments(body, creation_key, creation_identity)
+    request_hash = arguments.get("creation_request_hash")
     if creation_key is not None and request_hash is not None:
-        existing = await asyncio.to_thread(creation_receipt, pool, creation_key, request_hash)
+        existing = await asyncio.to_thread(
+            creation_receipt, pool, creation_key, request_hash, immutable_snapshot=snapshot
+        )
         if existing is not None:
-            return await recover_launch(pool, db, bus, existing)
+            return await recover_launch(pool, db, bus, existing, immutable_snapshot=snapshot)
     preset_name, tail_skills, model_receipt = await asyncio.to_thread(
         agent_router._spawn_preflight_blocking, db, target, body, pool
     )
@@ -91,22 +110,18 @@ async def create_and_launch_agent(
         fork_tail_skills=tail_skills,
         prompt=body.prompt,
         prompt_source=body.prompt_source,
-        **(
-            {"creation_key": creation_key, "creation_request_hash": request_hash}
-            if creation_key is not None
-            else {}
-        ),
+        **arguments,
     )
     if creation_key is not None and request_hash is not None:
         # A concurrent caller may have won after this caller's preflight. Its
         # committed placement/config/attempt are authoritative for recovery.
-        committed = await asyncio.to_thread(creation_receipt, pool, creation_key, request_hash)
+        committed = await asyncio.to_thread(
+            creation_receipt, pool, creation_key, request_hash, immutable_snapshot=snapshot
+        )
         if committed is None:
             raise RuntimeError("committed agent creation receipt is missing")
         if not committed.launch_pending:
-            return await agent_router._accepted_launch_receipt(
-                pool, SpawnedAgent(id=committed.agent_id)
-            )
+            return await recover_launch(pool, db, bus, committed, immutable_snapshot=snapshot)
         target, birth_config, launch_attempt_id = (
             committed.machine,
             committed.birth_config,
@@ -136,11 +151,18 @@ async def create_and_launch_agent(
 
 
 async def recover_launch(
-    pool: ConnectionPool, db: Database, bus: EventBus, existing: CreationReceipt
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    existing: CreationReceipt,
+    *,
+    immutable_snapshot: bool = False,
 ) -> SpawnedAgent:
     """Recover only an unadmitted birth; a completed incarnation is never revived."""
     from gateway.agents import router as agent_router
 
+    if immutable_snapshot and not existing.launch_pending:
+        return SpawnedAgent(id=existing.agent_id, accepted=True, execution_observed=False)
     if existing.launch_pending:
         spawned = await agent_router._dispatch_committed_launch(
             pool,
@@ -178,3 +200,37 @@ async def announce_creation_prompt(
         )
     except Exception as exc:
         logger.warning("created agent {} inbound hint failed: {}", agent_id, type(exc).__name__)
+
+
+def guarded_draft_key(
+    request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    idempotency_scope: str = Header(alias=SCOPE_HEADER),
+) -> str:
+    """Require a verified principal and the exact versioned operation namespace."""
+    if idempotency_scope != PRINCIPAL_SCOPE:
+        raise HTTPException(status_code=422, detail="guarded draft requires principal-v1 scope")
+    key = scoped_creation_key(request, idempotency_key, operation_path=request.url.path)
+    if key is None:
+        raise RuntimeError("required draft key is missing")
+    return key
+
+
+def _creation_arguments(
+    body: SpawnAgentRequest,
+    key: str | None,
+    identity: dict[str, object] | None,
+) -> _CreationArguments:
+    if key is None:
+        if identity is not None:
+            raise ValueError("raw creation identity requires a scoped key")
+        return {}
+    arguments: _CreationArguments = {
+        "creation_key": key,
+        "creation_request_hash": creation_request_hash(
+            identity if identity is not None else body.model_dump(mode="json")
+        ),
+    }
+    if identity is not None:
+        arguments["immutable_creation_snapshot"] = True
+    return arguments
