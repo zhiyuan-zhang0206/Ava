@@ -55,9 +55,6 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("UPDATE", ("native_cancel_commands",)),
     # Agent-side self-lifecycle inbounds (terminate / restart / compact).
     ("INSERT", ("inbound_messages",)),
-    # Native graph execution and exact cancellation closure are runner-owned.
-    ("INSERT, UPDATE", ("native_graph_work",)),
-    ("UPDATE", ("native_cancel_commands",)),
     # Compact observations are append-only host proof. HTTP command admission
     # remains gateway-only; runner updates its execution/result/closure receipt.
     ("INSERT", ("native_compact_observations",)),
