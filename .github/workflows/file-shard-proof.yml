@@ -1,13 +1,11 @@
 name: Whole-file runtime proof
 on:
   workflow_dispatch:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'scripts/ci/file_shard_shadow.py'
-      - 'scripts/ci/file_shard_runtime.py'
-      - 'scripts/ci/tests/test_file_shard_shadow.py'
-      - '.github/workflows/file-shard-proof.yml'
+    inputs:
+      plan_only:
+        description: Collect the complete population without executing either test population
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
@@ -66,6 +64,7 @@ jobs:
           if-no-files-found: error
   paired:
     needs: plan
+    if: ${{ !inputs.plan_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -140,7 +139,7 @@ jobs:
           if-no-files-found: error
   compare:
     needs: [plan, paired]
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    if: ${{ !inputs.plan_only && !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

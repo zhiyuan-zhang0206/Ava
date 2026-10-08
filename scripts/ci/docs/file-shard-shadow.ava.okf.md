@@ -68,8 +68,12 @@ collection and resolved runtime bindings with real xdist workers.
 
 ## Paired Linux runtime proof
 
-`Whole-file runtime proof` runs by manual dispatch or on changes to this proof's
-code and workflow. It pins all jobs to the same source SHA, snapshots once, then
+`Whole-file runtime proof` runs by manual dispatch. Its paired experiment executes
+two complete test populations, so ordinary pull requests and merge-queue trees
+do not start it automatically. Use `plan_only=true` to diagnose complete Linux
+collection without starting either test population; that run cannot certify
+execution equivalence. The default dispatch runs the complete comparison.
+It pins all jobs to the same source SHA, snapshots once, then
 runs the existing node split and checked whole-file split sequentially on each
 of 16 runners, with the same four workers, native environment and coverage
 sources. Neither population retries. The baseline always runs first; this
