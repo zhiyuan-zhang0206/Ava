@@ -12,7 +12,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from gateway.auth.request_principal import require_human_credential
+from gateway.http.auth.request_principal import require_human_credential
 from gateway.mcp_server import clients
 from gateway.mcp_server.clients import McpClientScope as McpClientScope
 from gateway.mcp_server.creation_receipts import (

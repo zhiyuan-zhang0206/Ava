@@ -2,12 +2,10 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.gateway_tests" = [
     "test_completion_digest_not_in_gateway.py",
-    "test_context_breakdown.py",
     "test_inbound_provenance.py",
     "test_resurrect_forward.py",
     "test_spawn_forward.py",
     "test_creation_identity.py",
-    "test_timeline.py",
 ]
 "tests.path_scoped.integration_tests" = [
     "test_agent_launch_visibility.py",

@@ -12,7 +12,7 @@ from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db import insert_inbound_message_in_transaction
 from base.db.transaction import write_transaction
 from gateway.agents.schemas import NoticeCreateIn
-from gateway.auth.request_principal import PrincipalScopeError, request_key
+from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 
 
 def notice_key(request: Request, key: str | None) -> str | None:

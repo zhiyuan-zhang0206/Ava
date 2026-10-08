@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Gateway
-description: 'Ava cluster HTTP API gateway—FastAPI service running on **port 8000**, bound to loopback without a cluster secret / to reachable addresses only with a secret and declared transport encryption. Pure JSON API, no HTML rendering — with one deliberate exception: GET /api/okf/graph serves a self-contained HTML page (D3 OKF knowledge-graph visualization).'
+description: Ava cluster HTTP API, request admission and orchestration shared by frontend, CLI and SDK.
 tags: []
 ---
 
@@ -17,6 +17,10 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 - **Client** — HTTP consumers of the gateway (more than one): Next.js browser frontend + agent SDK on agent-runner, both directly connect to `/api/*` over private network. Client **does not** talk to agents directly — everything goes through gateway HTTP.
 
 ## Core Responsibilities
+
+`http/` groups authentication and middleware. Agent history lives in
+`agents/history/`; the OKF graph viewer lives in `inspect/` and upload intake in
+`routers/upload/`. Wire endpoints and lifecycle ownership are unchanged.
 
 HTTP admission reads the home's durable maintenance journal on each business
 request. `stopping`, `stopped`, `starting` and `ready` block it; drain phases
@@ -36,7 +40,7 @@ database posture is a status projection, not this gate's authority.
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
 - **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; human-credential-only `/api/mcp/clients` manages them
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
-- **Authentication and browser-origin policy**: server-side `web_sessions` + bearer-secret auth, exact-origin CORS checks, and the Secure cookie policy — [[gateway/auth/docs/web-sessions.ava.okf.md]].
+- **Authentication and browser-origin policy**: server-side `web_sessions` + bearer-secret auth, exact-origin CORS checks, and the Secure cookie policy — [[gateway/http/auth/docs/web-sessions.ava.okf.md]].
 - **Inbound provenance**: gateway-created inbounds persist the server-verified credential kind, ingress transport, exact-content SHA-256, and a nullable agent source/token comparison. These are audit facts only and never reject delivery — [[inbound-provenance.ava.okf.md]].
 
 ## Architecture

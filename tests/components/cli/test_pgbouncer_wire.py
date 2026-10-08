@@ -309,7 +309,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
 
 def test_session_touch_overrides_a_read_only_default() -> None:
     """R3 Rule B session writes declare a raw pool borrow read-write first."""
-    from gateway.auth.session_store import touch_session
+    from gateway.http.auth.session_store import touch_session
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         with _direct_writer(pg_url) as setup:

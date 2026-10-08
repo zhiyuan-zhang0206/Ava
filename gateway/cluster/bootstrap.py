@@ -29,7 +29,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException
 
 from base import config
-from gateway.auth.request_principal import cluster_credential
+from gateway.http.auth.request_principal import cluster_credential
 
 router = APIRouter()
 

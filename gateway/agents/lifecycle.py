@@ -60,7 +60,7 @@ from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from gateway.agents.forward import forward_to_home_machine
 from gateway.agents.schemas import CancelRequest, CompactEnqueued
-from gateway.auth.request_principal import (
+from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
     SCOPE_HEADER,
     AuthPrincipal,

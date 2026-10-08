@@ -3,7 +3,7 @@
 
 CLI wrapper over `base/packages/docs/okf_graph.py`'s `build_graph_data()` — writes the
 result to disk and prints build stats + unresolved-wikilink diagnostics.
-`gateway/routers/okf_graph.py` calls `build_graph_data()` directly instead
+`gateway/inspect/okf_graph.py` calls `build_graph_data()` directly instead
 (no file write, always rebuilt fresh for the live `GET /api/okf/graph` route).
 
 Output: graph_data.json — nodes, treeEdges, crossEdges, tags.

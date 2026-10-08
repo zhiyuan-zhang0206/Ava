@@ -13,8 +13,8 @@ state, never a sum — the ``_METRIC_DISPOSITION`` override in
 Prometheus as ``ava_agent_registry_max_id_ratio`` (the unit-"1" gauge suffix,
 the same naming as ``resolution_status`` / ``checkpoint_table_sizes``).
 
-Wiring mirrors the task #1712 auth-401 aggregate (``gateway/auth/rejection_log.py``
-+ ``gateway/middleware/latency.py``): bounded row rate (1/min), never per event.
+Wiring mirrors the task #1712 auth-401 aggregate (``gateway/http/auth/rejection_log.py``
++ ``gateway/http/middleware/latency.py``): bounded row rate (1/min), never per event.
 The gauge is absolute state sampled from the database, so it needs no gateway
 process; it runs in the service that already owns the data plane's periodic reads.
 An unreachable database skips the sample; any other exception ends the loop and,

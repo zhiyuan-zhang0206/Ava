@@ -32,7 +32,7 @@ from base.cluster.auth import (
 )
 from base.config.domains.gateway import GatewaySettings
 from gateway.app import app
-from gateway.auth.cors import cors_allowed_origins
+from gateway.http.auth.cors import cors_allowed_origins
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

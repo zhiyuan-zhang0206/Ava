@@ -30,7 +30,7 @@ from base.agents import AgentStatus
 from base.api_contracts.contracts import Idempotency
 from base.events.live.bus import EventBus
 from gateway.app import app
-from gateway.middleware import idempotency
+from gateway.http.middleware import idempotency
 
 
 @pytest.fixture

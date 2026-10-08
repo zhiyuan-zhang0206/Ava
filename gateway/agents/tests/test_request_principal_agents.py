@@ -2,7 +2,7 @@
 
 from starlette.requests import Request
 
-from gateway.auth.request_principal import AuthPrincipal, principal_key
+from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 
 
 def _request(scope: str | None = "principal-v1", principal: AuthPrincipal | None = None) -> Request:

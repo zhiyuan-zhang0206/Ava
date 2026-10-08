@@ -186,7 +186,7 @@ R17's fast-route thresholds are calibrated against seven days of route data,
 R19 gives slow-by-design routes separate 5s/10s thresholds calibrated against
 24 hours of route data, and R18 catches fleet-wide slowdown (p95 vs the 24h
 baseline ×2) rather than single long turns. The emitter's single
-route-classification source is `gateway/middleware/latency.py`. All five carry
+route-classification source is `gateway/http/middleware/latency.py`. All five carry
 `notify_im: "false"` — the PM slow-request convention is warning-first and no
 IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the label once
 the IM gating PR (#3219) lands, until then they reach IM like the rest.

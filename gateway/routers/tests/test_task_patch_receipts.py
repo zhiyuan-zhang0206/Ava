@@ -161,7 +161,7 @@ def test_invalid_identity_has_no_effect(
 
 
 def test_distinct_task_paths_and_principals_are_independent(db_conn: psycopg.Connection) -> None:
-    from gateway.auth.request_principal import AuthPrincipal, principal_key
+    from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 
     owner = _make_agent(db_conn)
     first, second = (

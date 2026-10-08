@@ -49,7 +49,7 @@ from gateway.agents.creation import (
 )
 from gateway.agents.forward import forward_spawn_to_remote
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
-from gateway.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
+from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
 from gateway.inspect import neighbors
 from gateway.inspect.schemas import BornChainResponse, BornChainRow
 from gateway.schemas.models import ModelsResponse

@@ -10,8 +10,8 @@ import gateway.app as gateway_app
 from base import config
 from base.cluster.auth import bearer_header
 from gateway.app import app
-from gateway.auth.cors import cors_allowed_origins
-from gateway.middleware.error_handlers import cors_headers
+from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.middleware.error_handlers import cors_headers
 from gateway.tests.bootstrap.test_auth import (
     _SECRET,
     _auth,
