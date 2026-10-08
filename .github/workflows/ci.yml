@@ -96,6 +96,7 @@ jobs:
     # Which sides does this diff touch? Imports base/deploy/git/repo_change.py directly
     # (stdlib-only — no venv) over the PR's changed paths. push/dispatch
     # events always report both sides changed: main must always verify fully.
+    # Trunk branches always verify the full backend, even for documentation.
     name: classify change
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -115,6 +116,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
@@ -123,6 +125,7 @@ jobs:
           fi
           git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > /tmp/changed.txt
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import os
           import sys
           from pathlib import Path
 
@@ -131,6 +134,8 @@ jobs:
 
           paths = Path("/tmp/changed.txt").read_text().splitlines()
           frontend, backend = classify_change(paths)
+          if os.environ["HEAD_REF"].startswith(("trunk-merge/", "trunk-temp/")):
+              backend = True
           print(f"frontend={str(frontend).lower()}")
           print(f"backend={str(backend).lower()}")
           EOF

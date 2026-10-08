@@ -47,11 +47,20 @@ population was red on tests/contracts/test_lint_event_kinds.py). Name a new scan
 `test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
 scripts/tests/test_test_selector.py guards completeness and staleness.
 
-The documentation predicate reuses base.deploy.git.repo_change.is_doc_path. Files under
-scripts/, schedules/, and any `tests/` directory (the top-level one or a package's own
-`<pkg>/**/tests/`) are deliberately not treated as documentation by the selector even
-when their name ends in Markdown: operational schedule and test changes must remain
-conservative.
+The documentation predicate reuses base.deploy.git.repo_change.is_doc_path, the same
+owner as CI's frontend/backend classifier. It recognizes the existing project doc
+axes and top-level Markdown, plus `.ava.okf.md` files in a component's `docs/`
+layer, including under scripts/ and ui/web/. Test data in a `tests/` directory
+does not qualify as a component document. Other nested Markdown, including
+AGENTS.md and SKILL.md, retains its code-directory classification.
+
+Files under schedules/ and any `tests/` directory (the top-level one or a package's
+own `<pkg>/**/tests/`) remain conservative in the selector. The classifier's
+existing schedule policy is unchanged. For Trunk PRs, CI always enables the backend
+side before invoking the selector; its forced FULL rule therefore remains reachable
+even on a documentation diff. Non-PR runs enable both sides. The independent
+documentation, language, content-manifest and security gates run on documentation
+PRs too.
 
 Tests live in the top-level `tests/` or beside the code they prove in
 `<pkg>/**/tests/` (hosts: agent, ava, ava_builtins, base, cli, gateway, ops, scripts,
