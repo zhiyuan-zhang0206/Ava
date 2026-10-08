@@ -12,6 +12,7 @@ from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.hooks.compact import compose_summary_message
 from agent.state import AgentState, CompactState
 from agent.tests.claim.claim_status_support import (
@@ -32,10 +33,6 @@ from agent.tests.claim.claim_support import (
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
-from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
-from tests.path_scoped.agent_tests import (
-    _fresh_unresolved_skill_warnings as _fresh_unresolved_skill_warnings,
-)
 
 
 async def _set_agent_status_async(pool: "AsyncConnectionPool", agent_id: int, status: str) -> None:
