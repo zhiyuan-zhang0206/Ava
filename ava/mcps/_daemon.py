@@ -483,7 +483,10 @@ async def _get_session(
     buckets and are wrapped in a serializing session, so every connection
     shares one stdio child instead of spawning its own; non-shared servers
     keep the per-connection isolation contract."""
-    shared = _shared_kind(server)
+    cfg = _load_config()
+    if server not in cfg:
+        raise ValueError(f"Server {server!r} not configured")
+    shared = cfg[server].get("shared")
     buckets = scope.buckets_for(shared)
     if server in buckets.sessions:
         return buckets.sessions[server]
@@ -494,12 +497,11 @@ async def _get_session(
         buckets.locks[server] = lock
 
     async with lock:
-        if server in buckets.sessions:
-            return buckets.sessions[server]
-
         cfg = _load_config()
         if server not in cfg:
             raise ValueError(f"Server {server!r} not configured")
+        if server in buckets.sessions:
+            return buckets.sessions[server]
 
         session, stack = await _connect_server(server, scope.oauth_locks)
         if shared is True:
