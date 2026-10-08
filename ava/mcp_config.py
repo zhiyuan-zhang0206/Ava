@@ -30,7 +30,7 @@ from __future__ import annotations
 import errno
 import json
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from base.deploy.release.runtime_interpreter import external_plugin_read_root
 from base.host.system.probes import display_available, unix_sockets_available
@@ -64,6 +64,28 @@ class ToolInfo(TypedDict):
     input_schema: dict[str, Any]
 
 
+def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
+    """Validate optional host requirements without probing this host.
+
+    Missing or null requirements mean no preconditions. Otherwise only boolean
+    values for display and unix_socket are accepted; invalid declarations raise
+    MCPError rather than becoming a host-capability verdict.
+    """
+    requires = spec.get("requires")
+    if requires is None:
+        return {}
+    if not isinstance(requires, dict):
+        raise MCPError("server 'requires' must be an object or null")
+    validated: dict[str, bool] = {}
+    for key, want in cast(dict[object, object], requires).items():
+        if not isinstance(key, str) or key not in {"display", "unix_socket"}:
+            raise MCPError(f"unknown requires key {key!r} in MCP server config")
+        if not isinstance(want, bool):
+            raise MCPError(f"requires {key!r} must be a boolean")
+        validated[key] = want
+    return validated
+
+
 def assert_requirements(spec: dict[str, Any]) -> None:
     """Evaluate a server entry's optional `requires` preconditions before connect.
 
@@ -79,37 +101,29 @@ def assert_requirements(spec: dict[str, Any]) -> None:
     tool that cannot reach a service that cannot run (`ops.spec._gate_reason`
     gates that daemon out there over the same fact).
     """
-    requires = spec.get("requires")
-    if not requires:
-        return
+    requires = validate_requirements(spec)
     for key, want in requires.items():
-        if key == "display":
-            if want and not display_available():
-                raise MCPError(
-                    "MCP server requires a display, but this host has none "
-                    "(headless server / WSL without WSLg)"
-                )
-        elif key == "unix_socket":
-            if want and not unix_sockets_available():
-                raise MCPError(
-                    "MCP server requires AF_UNIX sockets, which this host has none of "
-                    "(Windows) — the service it fronts cannot run here either"
-                )
-        else:
-            raise MCPError(f"unknown requires key {key!r} in MCP server config")
+        if key == "display" and want and not display_available():
+            raise MCPError(
+                "MCP server requires a display, but this host has none "
+                "(headless server / WSL without WSLg)"
+            )
+        if key == "unix_socket" and want and not unix_sockets_available():
+            raise MCPError(
+                "MCP server requires AF_UNIX sockets, which this host has none of "
+                "(Windows) — the service it fronts cannot run here either"
+            )
 
 
 def server_capability(spec: dict[str, Any]) -> tuple[bool, str | None]:
-    """Non-raising read-time capability check for a server's `requires`.
+    """Validate requirements and return this host's capability verdict.
 
     Mirrors assert_requirements but returns (ok, reason) instead of raising, for
     a "can this host enable it?" UI gate. `display` and `unix_socket` are both
-    statically checkable here; unknown/other requirement keys are left to the
-    connect-time assert_requirements (so this returns ok for them).
+    statically checkable here. Invalid declarations raise MCPError, matching
+    connect-time validation; only an unavailable host capability returns false.
     """
-    requires = spec.get("requires")
-    if not requires:
-        return (True, None)
+    requires = validate_requirements(spec)
     if requires.get("display") and not display_available():
         return (False, "requires a display, but this host has none")
     if requires.get("unix_socket") and not unix_sockets_available():
