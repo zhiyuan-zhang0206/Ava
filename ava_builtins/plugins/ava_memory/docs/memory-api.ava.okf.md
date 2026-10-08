@@ -45,6 +45,10 @@ Standing guidance descendants should receive.
 - `write(slug, content, *, title=None, description=None, tags=None, store="personal") → Path` — writes an absolute personal or shared entry, assembling the note's frontmatter (a block the content carries stays the note's only one, is completed with the missing fields, and has its bare values quoted where YAML would misread them) and upserting its index pointer (a shared topic-directory entry upserts the directory's own `index.md`, created when missing — its line never lands in the root `MEMORY.md`); the canonical writer, immune to `ava.cwd` drift
 - `IndexerUnavailable` — exception when the indexer service is unavailable
 
+The gateway search response contains only `results`, each with a memory-root-relative
+`path`, frontmatter `description` and `tags`. The SDK resolves each path against
+the runner's memory root; the HTTP response has no duplicate bare-path list.
+
 Memory authoring and personal-index injection resolve the current SDK identity:
 an attached external lease takes precedence over a hosted turn, then the process
 identity. External lease validity is checked before reading or creating memory
