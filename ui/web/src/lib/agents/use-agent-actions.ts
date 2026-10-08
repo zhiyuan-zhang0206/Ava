@@ -1,5 +1,7 @@
 "use client";
 
+import { newOperationKey } from "../transport/operation-key";
+
 // Lifecycle mutations keep server state authoritative. Acceptance updates only
 // pending UI; lifecycle hints and explicit repair read the resulting roster.
 
@@ -302,7 +304,7 @@ export function useAgentActions(
         ),
       );
       try {
-        const { id } = await spawnMutation.mutateAsync({ machine, model, preset, reasoning_effort, operationKey: crypto.randomUUID() });
+        const { id } = await spawnMutation.mutateAsync({ machine, model, preset, reasoning_effort, operationKey: newOperationKey() });
         setActiveId(id);
         await markSpawnPending(id);
         return id;
@@ -326,7 +328,7 @@ export function useAgentActions(
             ...(prompt !== undefined ? { prompt, prompt_source: "user" } : {}),
           };
         })();
-        const { id } = await forkMutation.mutateAsync({ body, operationKey: crypto.randomUUID() });
+        const { id } = await forkMutation.mutateAsync({ body, operationKey: newOperationKey() });
         setActiveId(id);
         await markSpawnPending(id);
         return id;

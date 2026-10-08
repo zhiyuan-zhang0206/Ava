@@ -10,6 +10,7 @@ import { useAgentActions } from "./use-agent-actions";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   useStore.getState().setActiveId(null);
 });
 
@@ -36,6 +37,8 @@ it("selects the committed agent after launch failure instead of retrying create"
 
 
 it("holds one creation key across mutation retries and gives concurrent actions distinct keys", async () => {
+  const getRandomValues = crypto.getRandomValues.bind(crypto);
+  vi.stubGlobal("crypto", { getRandomValues });
   const client = new QueryClient({ defaultOptions: { mutations: { retry: 1, retryDelay: 0 }, queries: { retry: false } } });
   const spawn = vi.spyOn(api, "spawnAgent").mockRejectedValueOnce(new Error("before send"))
     .mockResolvedValue({ id: 42 });

@@ -858,3 +858,22 @@ it("creation callers reuse a key across calls while new actions mint distinct ke
   expect(keys.slice(0, 2)).toEqual(["creation-a", "creation-a"]);
   expect(keys[2]).not.toBe(keys[3]);
 });
+
+it("submits distinct business operations on private HTTP without randomUUID", async () => {
+  const getRandomValues = crypto.getRandomValues.bind(crypto);
+  vi.stubGlobal("crypto", { getRandomValues });
+  await api.spawnAgent();
+  await api.cancel(8);
+  await api.compact(8);
+  await api.createSchedule({ name: "daily", script: "pass", command: "python schedule.py", enabled: true });
+  await api.updateSchedule(17, { enabled: false });
+  await api.startSchedule(17);
+  await api.stopSchedule(17);
+  await api.restartSchedule(17);
+  const keys = calls.map((call) => new Headers(call.init?.headers).get("Idempotency-Key"));
+  expect(keys).toHaveLength(8);
+  expect(new Set(keys).size).toBe(8);
+  for (const key of keys) {
+    expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  }
+});

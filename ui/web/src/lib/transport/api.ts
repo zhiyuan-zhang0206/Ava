@@ -89,6 +89,7 @@ import type { NoticesFeed,
 import { projectAgentStatus } from "../contracts/types";
 import { sendMessageWithReconciliation } from "../agents/message-delivery";
 import { submitUploadedFiles } from "./upload-delivery";
+import { newOperationKey } from "./operation-key";
 
 export { MessageDeliveryUnknownError } from "../agents/message-delivery";
 export { API_BASE } from "./api-base";
@@ -441,7 +442,7 @@ export const api = {
     agentId: number,
     noticeId: number,
     body: ResolveNoticeIn,
-    idempotencyKey: string = crypto.randomUUID(),
+    idempotencyKey: string = newOperationKey(),
   ): Promise<{ status: string }> => {
     return f(
       `/api/agents/${agentId}/notices/${noticeId}/resolve`,
@@ -452,13 +453,13 @@ export const api = {
     ).then(ok<{ status: string }>);
   },
 
-  compact: (agentId: number, idempotencyKey: string = crypto.randomUUID()): Promise<CompactEnqueued> => {
+  compact: (agentId: number, idempotencyKey: string = newOperationKey()): Promise<CompactEnqueued> => {
     return f(`/api/agents/${agentId}/compact`, {
       ...POST, headers: { "Idempotency-Key": idempotencyKey },
     }).then(ok<CompactEnqueued>);
   },
 
-  cancel: (agentId: number, idempotencyKey: string = crypto.randomUUID()): Promise<CancelRequested> => {
+  cancel: (agentId: number, idempotencyKey: string = newOperationKey()): Promise<CancelRequested> => {
     // Each agent runs its own turn — the gateway watcher dispatches to
     // the corresponding cancel_event. Returns as soon as the signal is
     // sent; the actual kernel response is delivered to the UI via the
@@ -492,7 +493,7 @@ export const api = {
   getAgent: (agentId: number, signal?: AbortSignal): Promise<AgentRow> =>
     f(`/api/agents/${agentId}`, { signal }).then(ok<WireAgentRow>).then(projectAgentStatus),
 
-  spawnAgent: (req: SpawnAgentRequest = {}, operationKey: string = crypto.randomUUID()): Promise<SpawnedAgent> => {
+  spawnAgent: (req: SpawnAgentRequest = {}, operationKey: string = newOperationKey()): Promise<SpawnedAgent> => {
     if (!operationKey || operationKey.length > 128) throw new Error("idempotency key must contain 1 to 128 characters");
     const init = POST_JSON(req);
     const headers = new Headers(init.headers);
@@ -761,7 +762,7 @@ export const api = {
       throw new Error("idempotency key must contain 1 to 128 characters");
     }
     if (deliver && operationKey !== undefined) throw new Error("keyed uploads currently require deliver=false");
-    const uploadKey = deliver ? undefined : (operationKey ?? crypto.randomUUID());
+    const uploadKey = deliver ? undefined : (operationKey ?? newOperationKey());
     const formData = new FormData();
     for (const file of files) {
       formData.append("files", file, file.name);
@@ -904,14 +905,14 @@ export const api = {
     return f(`/api/schedules/${id}`).then(ok<ScheduleView>);
   },
 
-  createSchedule: (body: ScheduleCreate, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+  createSchedule: (body: ScheduleCreate, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
     const init = POST_JSON(body);
     const headers = new Headers(init.headers);
     headers.set("Idempotency-Key", operationKey);
     return f("/api/schedules", { ...init, headers }).then(ok<ScheduleView>);
   },
 
-  updateSchedule: (id: number, body: ScheduleUpdate, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+  updateSchedule: (id: number, body: ScheduleUpdate, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
     return f(`/api/schedules/${id}`, {
       method: "PUT",
       headers: { "content-type": "application/json", "Idempotency-Key": operationKey },
@@ -923,15 +924,15 @@ export const api = {
     return f(`/api/schedules/${id}`, { method: "DELETE" }).then(ok<{ status: string }>);
   },
 
-  startSchedule: (id: number, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+  startSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
     return f(`/api/schedules/${id}/start`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
   },
 
-  stopSchedule: (id: number, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+  stopSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
     return f(`/api/schedules/${id}/stop`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
   },
 
-  restartSchedule: (id: number, operationKey: string = crypto.randomUUID()): Promise<ScheduleView> => {
+  restartSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
     return f(`/api/schedules/${id}/restart`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
   },
 
