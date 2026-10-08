@@ -4,12 +4,12 @@ The run timeline rebuilds an agent's stitched history from its checkpoints on a 
 read (seconds of CPU for a long-lived agent). That work lives in this process so it
 never competes with the gateway's event loop, thread pool or GIL. The service binds
 `base.paths.insights_socket()` (mode 0600) and serves no TCP port; the gateway proxies
-authenticated requests to it. `/healthz` is the standard daemon health endpoint on the
-`insights` slot of the fixed port table.
+authenticated requests to it. Its `/healthz` answers on the same socket, so it needs no
+port slot; the supervisor probes it through `services.supervision.healthchecks.insights`.
 
 A stopped service leaves the gateway answering 502 on the insights routes and nothing
-else; the root supervisor restarts it through the roster's `/healthz` identity probe
-(`ops/roster/healthz.py`). A cold build in a worker thread is never waited on at stop
+else; the root supervisor restarts it through the roster's socket identity probe
+(`ops/roster/__init__.py`). A cold build in a worker thread is never waited on at stop
 (`_hard_exit`).
 
 Usage:
@@ -29,13 +29,11 @@ from pathlib import Path
 import uvicorn
 
 from base.config import settings
-from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
-from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.log import init_gateway_process
-from base.paths import insights_socket
+from base.paths import insights_pidfile, insights_socket
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -43,10 +41,6 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.derived.insights.daemon")
 
 _MODULE = "services.derived.insights.daemon"
-# A loop that has not run its beat for this long is wedged (a GIL-starved loop is the
-# case the health endpoint exists to expose); a request in a worker thread cannot hold it.
-_LIVENESS_TIMEOUT_S = 60.0
-_BEAT_INTERVAL_S = 5.0
 # Short row lookups only (the agent's model and config for a context breakdown); history
 # and audit reads open their own connections through `Database`.
 _POOL_MAX_SIZE = 4
@@ -57,10 +51,6 @@ def insights_config() -> InsightsConfig:
     return InsightsConfig(
         run_timeline_message_text_max=settings.display.run_timeline_message_text_max
     )
-
-
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("insights")
 
 
 def bind_socket(path: Path) -> socket.socket:
@@ -83,24 +73,12 @@ def bind_socket(path: Path) -> socket.socket:
     return sock
 
 
-async def _beat(liveness: Liveness) -> None:
-    # quiesce-exempt: stamps this process's own event-loop liveness; no database, no work to pause
-    while True:
-        liveness.beat()
-        await asyncio.sleep(_BEAT_INTERVAL_S)
-
-
 async def run() -> None:
-    """Start the daemon: pidfile -> healthz -> database -> socket -> serve until stopped."""
-    endpoint = _endpoint()
-    if pidfile_holds_daemon(endpoint.pidfile, _MODULE) or not acquire_pidfile(
-        endpoint.pidfile, _MODULE
-    ):
-        _log.info("[insights] daemon already running (pidfile=%s), exiting", endpoint.pidfile)
+    """Start the daemon: pidfile -> database -> socket -> serve until stopped."""
+    pidfile = insights_pidfile()
+    if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
+        _log.info("[insights] daemon already running (pidfile=%s), exiting", pidfile)
         sys.exit(1)
-    liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("insights", endpoint.health_port, liveness=liveness)
-    _log.info("[insights] healthz listening on :%s", endpoint.health_port)
     path = insights_socket()
     db = Database.from_settings()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
@@ -115,17 +93,11 @@ async def run() -> None:
         )
         sock = bind_socket(path)
         _log.info("[insights] serving on %s", path)
-        async with asyncio.TaskGroup() as group:
-            beat = group.create_task(_beat(liveness))
-            try:
-                await server.serve(sockets=[sock])
-            finally:
-                beat.cancel()
+        await server.serve(sockets=[sock])
     finally:
         pool.close()
         path.unlink(missing_ok=True)
-        await stop_health_server(health)
-        remove_pidfile(endpoint.pidfile)
+        remove_pidfile(pidfile)
         _log.info("[insights] daemon stopped")
 
 

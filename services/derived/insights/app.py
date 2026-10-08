@@ -7,12 +7,14 @@ reachable only through its Unix socket, and the gateway has already admitted the
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import FastAPI
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
+from base.paths import ava_home
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import history as run_timeline_history
 from services.derived.insights.run_timeline import router as run_timeline_router
@@ -29,4 +31,10 @@ def build_app(db: Database, pool: ConnectionPool[Any], config: InsightsConfig) -
     app.state.config = config
     app.state.run_timeline_views = run_timeline_history.HistoryViewCache()
     app.include_router(run_timeline_router.router)
+
+    @app.get("/healthz")
+    async def healthz() -> dict[str, object]:
+        """Identity for the supervisor's probe: which service, which home, which process."""
+        return {"name": "insights", "pid": os.getpid(), "home": str(ava_home())}
+
     return app

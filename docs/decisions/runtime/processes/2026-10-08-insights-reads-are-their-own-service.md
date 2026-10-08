@@ -15,8 +15,10 @@ coming, all CPU-bound and cache-heavy.
 
 `services/derived/insights` is a root unit of its own. It owns every insights read route
 and the checkpoint-history cache (`HistoryViewCache`); the gateway keeps no copy. It serves
-HTTP with uvicorn on a Unix socket (`$AVA_HOME/run/insights.sock`, mode 0600) and `/healthz`
-on the fixed-table slot `insights` (8123), like any `/healthz` daemon.
+HTTP with uvicorn on a Unix socket (`$AVA_HOME/run/insights.sock`, mode 0600). It has no
+port and no fixed-table slot: `/healthz` answers on the same socket and the roster entry's
+identity probe asks it there (this service, this home, the pid its pidfile records), the
+shape `browser-mcp` already has.
 
 - The browser dials only the gateway. `/api/agents/{id}/run-timeline*` and
   `/api/insights/*` keep their URLs; `gateway/routers/insights.py` forwards them over the
@@ -38,8 +40,10 @@ on the fixed-table slot `insights` (8123), like any `/healthz` daemon.
   process pool inside the gateway reinvents a service without supervision, a health
   endpoint or a restart story, and each worker would hold its own cache.
 - **A TCP port with a second fixed-table slot.** A loopback port is reachable by every
-  local user and the service has no auth; a 0600 socket confines it to the home's owner and
-  needs one slot (health) instead of two.
+  local user and the service has no auth; a 0600 socket confines it to the home's owner. Any port
+  slot, health or API, would also change the closed port table, which every existing
+  home's start intent must match: a hand edit of `start-intent.json` per home before the
+  first start of the new code. The socket needs no slot, so the upgrade needs no step.
 - **The browser dialling the service.** Two origins, two auth surfaces, CORS; the
   gateway proxy already is the precedent (Grafana, agent pages).
 - **Streaming the proxied response.** The service answers with one finite JSON document;
@@ -49,9 +53,8 @@ on the fixed-table slot `insights` (8123), like any `/healthz` daemon.
 
 ## Consequences
 
-- A new `insights` slot in the closed port table: every gateway home's start intent must
-  gain it before any command of the new code (runbook, "Release steps: adding the
-  `insights` port slot"). A home's `.env` needs nothing.
+- No port-table change and no manual upgrade step: an existing home starts the new code as is and
+  the roster launches the service.
 - Binding a Unix socket limits the home path length (about 100 bytes on macOS).
 - One more process per gateway host, holding up to six agents' histories in memory instead
   of the gateway holding them.

@@ -38,7 +38,6 @@ def remote_cluster_record() -> cluster.ClusterRecord:
             "pg_backup": 18021,
             "ttl_reaper": 18025,
             "schedule_manager": 18026,
-            "insights": 18027,
         },
         created_at="now",
     )
