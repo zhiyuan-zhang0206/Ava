@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/transport/api";
+import { useStore } from "@/lib/state/store";
 
 import { PackageDraftEntry } from "./package-draft-entry";
 
@@ -33,6 +34,30 @@ function wrap(ui: React.ReactElement) {
 }
 
 describe("PackageDraftEntry", () => {
+  it("ignores Enter while the draft is pending", async () => {
+    const draft = vi.spyOn(api, "draftPackage").mockReturnValue(new Promise(() => undefined));
+    wrap(<PackageDraftEntry kind="mcp" />);
+    const input = screen.getByPlaceholderText(/Describe a tool you want to reach/);
+    fireEvent.change(input, { target: { value: "install tools" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Find and install an MCP server" }).hasAttribute("disabled")).toBe(true));
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(draft).toHaveBeenCalledOnce();
+  });
+
+  it("does not inherit automatic mutation retries", async () => {
+    useStore.setState({ toast: null });
+    const draft = vi.spyOn(api, "draftPackage").mockRejectedValue(new Error("response lost"));
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
+    render(<QueryClientProvider client={client}><PackageDraftEntry kind="mcp" /></QueryClientProvider>);
+    const input = screen.getByPlaceholderText(/Describe a tool you want to reach/);
+    fireEvent.change(input, { target: { value: "install tools" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(useStore.getState().toast).toBe("Install failed: response lost"));
+    expect(draft).toHaveBeenCalledOnce();
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
+
   it("submit posts the section's kind + the user's words, then opens the conversation", async () => {
     const draft = vi.spyOn(api, "draftPackage").mockResolvedValue({ agent_id: 42 });
     wrap(<PackageDraftEntry kind="mcp" />);
