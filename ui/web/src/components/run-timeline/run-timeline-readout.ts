@@ -28,7 +28,7 @@ export function requestReadout(t: Translate, request: RunTimelineRequest): strin
 }
 
 function nodeReadout(t: Translate, node: RunTimelineNode): string {
-  return t("readoutNode", {
+  const line = t("readoutNode", {
     level: node.level,
     from: formatShort(node.start),
     to: formatShort(node.end),
@@ -39,6 +39,9 @@ function nodeReadout(t: Translate, node: RunTimelineNode): string {
     input: formatTokensCompact(node.usage.input),
     output: formatTokensCompact(node.usage.output),
   });
+  if (node.context_tokens === null) return line;
+  const tokens = t("readoutUnitTokens", { tokens: formatTokensCompact(node.context_tokens) });
+  return `${line} · ${tokens}${node.estimated ? ` ${t("estimatedSuffix")}` : ""}`;
 }
 
 /** The readout of what is hovered, or null when nothing is (or it is no longer in the data). */
