@@ -10,7 +10,7 @@ from base.agents import impersonation as leases
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.tests._impersonation_helpers import _active, _agent
+from base.tests.impersonation._impersonation_helpers import _active, _agent
 from services.wake.heartbeat.daemon import (
     _reconcile_checkin_outcomes,
     _select_idle_agents_needing_heartbeat,

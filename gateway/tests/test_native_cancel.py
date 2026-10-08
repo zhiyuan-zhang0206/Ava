@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.config import settings
 from base.native_process.turn_identity import bind_turn_identity

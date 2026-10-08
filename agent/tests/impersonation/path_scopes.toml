@@ -1,0 +1,3 @@
+"tests.path_scoped.agent_tests" = [
+    "test_impersonation_integration.py",
+]

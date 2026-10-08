@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.tests.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress

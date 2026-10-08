@@ -27,7 +27,7 @@ from base.sessions.backend import (
     SessionBackend,
     get_shell_backend,
 )
-from tests.base.poll_until import poll_until
+from tests.components.base.poll_until import poll_until
 
 # A long-lived child that outlives the test body; each test kills it explicitly.
 _SLEEP = "/bin/sleep 300"

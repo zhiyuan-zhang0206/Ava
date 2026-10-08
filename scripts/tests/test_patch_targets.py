@@ -259,12 +259,12 @@ def test_moving_a_file_into_its_packages_tests_directory_changes_no_verdict(
         "    monkeypatch.setattr('base.net.retry._sleep', None)\n"
         "    monkeypatch.setattr('base.db.pool._pool', None)\n"
     )
-    before = _analyze(root, "tests/base/test_x.py", text)
+    before = _analyze(root, "tests/components/base/test_x.py", text)
     after = _analyze(root, "base/tests/test_x.py", text)
     assert before == after
-    assert patch_targets.violations("tests/base/test_x.py", before).keys() == {
-        "tests/base/test_x.py::base.net.retry._sleep",
-        "tests/base/test_x.py::base.db.pool._pool",
+    assert patch_targets.violations("tests/components/base/test_x.py", before).keys() == {
+        "tests/components/base/test_x.py::base.net.retry._sleep",
+        "tests/components/base/test_x.py::base.db.pool._pool",
     }
     assert patch_targets.violations("base/tests/test_x.py", after).keys() == {
         "base/tests/test_x.py::base.net.retry._sleep",

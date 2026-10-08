@@ -1,0 +1,6 @@
+"tests.path_scoped.cli_tests" = [
+    "test_presets_cmd.py",
+    "test_skill_install.py",
+    "test_settings_failure.py",
+    "test_memory_cmd.py",
+]

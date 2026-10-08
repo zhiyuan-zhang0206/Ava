@@ -8,7 +8,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import flush_checkpoint
-from agent.tests.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
@@ -16,7 +16,9 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.invocation import PendingWorkResult
-from services.agent_runner.agent_host.tests.test_hosted_compact_failure import _prepare_graph
+from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
+    _prepare_graph,
+)
 
 
 @pytest.mark.parametrize("site", ["before_flush", "after_flush", "before_idle", "after_idle"])

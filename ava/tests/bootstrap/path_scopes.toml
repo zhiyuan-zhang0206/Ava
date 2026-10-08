@@ -1,0 +1,12 @@
+"tests.path_scoped.ava_tests" = [
+    "test_lazy_boot_import.py",
+    "test_lazy_connection.py",
+    "test_lazy_lm_import.py",
+    "test_machine_surface.py",
+    "test_mcp_config.py",
+    "test_mcp_config_enable_filter.py",
+    "test_mcps_help.py",
+    "test_sdk_disable.py",
+    "test_sdk_redis_resilience.py",
+    "test_session_venv_projection.py",
+]

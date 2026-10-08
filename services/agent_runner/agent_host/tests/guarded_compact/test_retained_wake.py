@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.test_inbound_ownership import _agent, _insert
+from agent.tests.claim.test_inbound_ownership import _agent, _insert
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 

@@ -441,9 +441,9 @@ check-typed-exception = true
 "ava/mcps/tests/test_daemon.py" = ["S110"]
 "agent/graph/claim/tests/test_core.py" = ["S110"]
 "base/deploy/schema/tests/test_migration_reset.py" = ["S110"]
-"gateway/tests/test_schedule_runner.py" = ["S110"]
+"gateway/tests/extensions/test_schedule_runner.py" = ["S110"]
 "tests/integration/test_grafana_native_runtime.py" = ["S110"]
-"tests/services/test_backup_scheduler_shutdown.py" = ["S110"]
+"tests/components/services/test_backup_scheduler_shutdown.py" = ["S110"]
 # T20 exemptions — print() is legitimate here: cli/ writes to the user's
 # terminal; ava/ and plugins/ print() is agent-facing dump (help() / context
 # injection), the SDK's documented output channel.
@@ -1340,12 +1340,12 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/ops"
+root = "tests/components/ops"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/plugins"
+root = "tests/components/plugins"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1355,32 +1355,32 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/ava"
+root = "tests/components/ava"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/agent"
+root = "tests/components/agent"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/cli"
+root = "tests/components/cli"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/gateway"
+root = "tests/components/gateway"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/base"
+root = "tests/components/base"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/services"
+root = "tests/components/services"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1427,8 +1427,8 @@ extraPaths = ["ava_builtins/skills/integrations/web-sources/scripts"]
 # in this repo so conftest imports don't ModuleNotFoundError.
 paths_to_mutate = ["agent/loop.py"]
 tests_dir = [
-    "tests/agent/test_loop.py",
-    "tests/agent/test_loop_main.py",
+    "tests/components/agent/test_loop.py",
+    "tests/components/agent/test_loop_main.py",
 ]
 also_copy = [
     "base",

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.tests.test_notices_endpoint import _insert_notice, _seed_agent
+from gateway.tests.events.test_notices_endpoint import _insert_notice, _seed_agent
 
 
 def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) -> None:

@@ -1,4 +1,4 @@
-"""Gateway status, source drift, release identity, and host readings; split from tests/cli/test_commands.py (task #4554)."""
+"""Gateway status, source drift, release identity, and host readings; split from tests/components/cli/test_commands.py (task #4554)."""
 
 from __future__ import annotations
 

@@ -257,7 +257,7 @@ def test_ops_binds_all_interfaces_only_when_authenticated() -> None:
     """An authenticated /ops (any acceptance set, even an empty fail-closed one)
     binds 0.0.0.0; the open posture binds loopback only — an unauthenticated
     control surface is never LAN-reachable. Which tokens /ops accepts is the
-    write-generation matrix in tests/lifecycle/db_authority/test_api_tokens.py."""
+    write-generation matrix in tests/components/lifecycle/db_authority/test_api_tokens.py."""
     assert daemon._ops_bind_host(frozenset({"d" * 64})) == "0.0.0.0"  # noqa: S104
     assert daemon._ops_bind_host(frozenset()) == "0.0.0.0"  # noqa: S104
     assert daemon._ops_bind_host(None) == "127.0.0.1"

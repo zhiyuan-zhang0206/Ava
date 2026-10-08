@@ -12,8 +12,8 @@ from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
-from tests.agent.test_maintenance import WHEN, _agent
-from tests.agent.test_maintenance import isolate as isolate
+from tests.components.agent.test_maintenance import WHEN, _agent
+from tests.components.agent.test_maintenance import isolate as isolate
 
 
 @pytest.mark.parametrize("observed", [False, True])

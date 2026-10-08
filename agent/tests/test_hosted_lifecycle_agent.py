@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus

@@ -8,11 +8,13 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from services.agent_runner.agent_host import native_work as owner
+from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
+    _prepare_graph,
+)
 from services.agent_runner.agent_host.tests.native_cancel.test_transfer import (
     _assert_successor_turns,
     _force_successor,
 )
-from services.agent_runner.agent_host.tests.test_hosted_compact_failure import _prepare_graph
 
 
 @pytest.mark.parametrize(

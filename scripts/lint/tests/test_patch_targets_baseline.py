@@ -22,7 +22,7 @@ _TEST = (
     "def test_x(monkeypatch):\n    retry.backoff()\n    pool.acquire()\n"
     "    monkeypatch.setattr('base.net.retry._sleep', None)\n"
 )
-_KEY = "tests/base/test_x.py::base.net.retry._sleep"
+_KEY = "tests/components/base/test_x.py::base.net.retry._sleep"
 _MOVED_KEY = "base/tests/test_x.py::base.net.retry._sleep"
 
 
@@ -86,7 +86,7 @@ def _renames(root: pathlib.Path, rev: str) -> dict[str, str]:
 def repo(tmp_path: pathlib.Path) -> pathlib.Path:
     """A committed repository whose base revision already has the lint and a frozen site."""
     locality.reset_caches()
-    root = make_repo(tmp_path, {"tests/base/test_x.py": _TEST, _LINT: "# the lint\n"})
+    root = make_repo(tmp_path, {"tests/components/base/test_x.py": _TEST, _LINT: "# the lint\n"})
     _freeze(root, {_KEY: 1})
     _git(root, "init", "--quiet")
     _git(root, "add", "-A")
@@ -100,11 +100,14 @@ def test_the_lint_reads_its_own_frozen_site_as_clean(repo: pathlib.Path) -> None
 
 
 def test_a_new_key_is_refused_once_the_lint_exists_at_the_base(repo: pathlib.Path) -> None:
-    write(repo, "tests/base/test_y.py", _TEST)
-    _freeze(repo, {_KEY: 1, "tests/base/test_y.py::base.net.retry._sleep": 1})
+    write(repo, "tests/components/base/test_y.py", _TEST)
+    _freeze(repo, {_KEY: 1, "tests/components/base/test_y.py::base.net.retry._sleep": 1})
     errors = _guard(repo, "HEAD")
     assert len(errors) == 1
-    assert "added patch_targets entry tests/base/test_y.py::base.net.retry._sleep" in errors[0]
+    assert (
+        "added patch_targets entry tests/components/base/test_y.py::base.net.retry._sleep"
+        in errors[0]
+    )
 
 
 def test_a_raised_count_is_refused_and_a_lowered_one_is_fine(repo: pathlib.Path) -> None:
@@ -117,7 +120,7 @@ def test_a_raised_count_is_refused_and_a_lowered_one_is_fine(repo: pathlib.Path)
 def test_a_new_lint_cannot_freeze_new_exemptions(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = make_repo(tmp_path, {"tests/base/test_x.py": _TEST})
+    root = make_repo(tmp_path, {"tests/components/base/test_x.py": _TEST})
     _git(root, "init", "--quiet")
     _git(root, "add", "-A")
     _git(root, "commit", "--quiet", "-m", "Before the lint")
@@ -131,9 +134,9 @@ def test_a_new_lint_cannot_freeze_new_exemptions(
 
 def test_a_moved_test_carries_its_frozen_key_no_more_and_no_fewer(repo: pathlib.Path) -> None:
     (repo / "base/tests").mkdir(parents=True)
-    _git(repo, "mv", "tests/base/test_x.py", "base/tests/test_x.py")
+    _git(repo, "mv", "tests/components/base/test_x.py", "base/tests/test_x.py")
     renames = _renames(repo, "HEAD")
-    assert renames == {"tests/base/test_x.py": "base/tests/test_x.py"}
+    assert renames == {"tests/components/base/test_x.py": "base/tests/test_x.py"}
 
     # Not migrated: the lint sees a new site at the new path and a stale entry at the old one.
     assert lint.main([], repo_root=repo) == 1
@@ -155,12 +158,12 @@ def test_a_moved_test_carries_its_frozen_key_no_more_and_no_fewer(repo: pathlib.
 # A rule version never grants additional targets or larger counts, even if the total falls.
 
 _OLD = {
-    "tests/base/test_a.py::base.net.retry._sleep": 3,
-    "tests/base/test_b.py::base.net.retry._sleep": 2,
-    "tests/base/test_c.py::base.db.pool._pool": 1,
+    "tests/components/base/test_a.py::base.net.retry._sleep": 3,
+    "tests/components/base/test_b.py::base.net.retry._sleep": 2,
+    "tests/components/base/test_c.py::base.db.pool._pool": 1,
 }
 _TOTAL = sum(_OLD.values())
-_NEW_KEY = "tests/cli/test_e.py::cli.commands._util._helper"
+_NEW_KEY = "tests/components/cli/test_e.py::cli.commands._util._helper"
 
 
 @pytest.fixture
@@ -190,7 +193,7 @@ def test_at_the_same_version_a_new_key_is_refused_as_before(
 def test_a_raised_version_with_a_lower_total_still_refuses_new_keys(
     gate: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fewer = {"tests/base/test_a.py::base.net.retry._sleep": 1, _NEW_KEY: 2}
+    fewer = {"tests/components/base/test_a.py::base.net.retry._sleep": 1, _NEW_KEY: 2}
     assert sum(fewer.values()) < _TOTAL
     _freeze(gate, fewer, rules={patch_targets.SECTION: 2})
     status, out = _gate(capsys)
@@ -239,12 +242,14 @@ def test_once_the_new_version_is_the_base_the_keys_are_guarded_again(
 
     _freeze(
         gate,
-        {**refrozen, "tests/cli/test_f.py::cli.commands._util._other": 1},
+        {**refrozen, "tests/components/cli/test_f.py::cli.commands._util._other": 1},
         rules={patch_targets.SECTION: 2},
     )
     status, out = _gate(capsys)
     assert status == 1
-    assert "added patch_targets entry tests/cli/test_f.py::cli.commands._util._other" in out
+    assert (
+        "added patch_targets entry tests/components/cli/test_f.py::cli.commands._util._other" in out
+    )
 
     _freeze(gate, {existing_key: 3}, rules={patch_targets.SECTION: 2})
     status, out = _gate(capsys)

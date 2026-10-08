@@ -52,7 +52,7 @@ class TerminationSource(StrEnum):
     The write sites embed these as SQL literals (a terminated-write stamps status
     and source in ONE statement, so the pair can never come apart); this enum is
     the value-set source of truth, locked to the column's CHECK by
-    `tests/test_db_check_enum_sync.py` and to the literals by
+    `tests/contracts/test_db_check_enum_sync.py` and to the literals by
     `scripts/lint/termination_source.py`.
 
     Resurrect policy — INVOLUNTARY deaths come back, intentional ones stay dead:

@@ -7,7 +7,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
-from agent.tests.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.db import Database, insert_inbound_message
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus

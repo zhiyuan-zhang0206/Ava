@@ -1,0 +1,11 @@
+"tests.path_scoped.cli_tests" = [
+    "test_agent_profile_launch_env.py",
+    "test_checkpoint_migration_phase.py",
+    "test_commands_start.py",
+    "test_extension_materialize_ordering.py",
+    "test_start_generation.py",
+    "test_start_health_port_gate.py",
+    "test_start_partial_stop.py",
+    "test_start_readiness_gate.py",
+    "test_start_readiness_preflight.py",
+]

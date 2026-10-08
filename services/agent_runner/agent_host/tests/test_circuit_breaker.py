@@ -34,8 +34,8 @@ from agent.hooks.compact import (
     emergency_compact_summary,
 )
 from agent.state import AgentState, CircuitState
-from agent.tests.claim_status_support import _compact_tail, _pair_compact_cycles
-from agent.tests.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
+from agent.tests.claim.claim_status_support import _compact_tail, _pair_compact_cycles
+from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
 from base.config import settings

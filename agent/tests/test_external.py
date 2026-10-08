@@ -95,7 +95,7 @@ def test_attach_requests_native_plugin_load(
     ``load_snapshot`` rebuilds the checkpoint through ``build_agent_state(build_registry())``,
     so a surface-only load silently drops the plugin state fields the lease
     carries. Locks the wiring; the loader's own surface/full split is
-    exercised in agent/tests/test_lazy_child_imports.py.
+    exercised in agent/tests/execution/test_lazy_child_imports.py.
     """
     calls: list[dict[str, Any]] = []
 

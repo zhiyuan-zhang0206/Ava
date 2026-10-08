@@ -24,11 +24,11 @@ from services.agent_runner.agent_host.native_work import (
     recover_native_cancel,
     settle_native_invocation,
 )
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
-from services.agent_runner.agent_host.tests.test_hosted_compact_failure import (
+from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _cold_reader,
     _prepare_graph,
 )
+from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
 
 async def test_checkpoint_flush_ack_and_retained_terminal_receipt(

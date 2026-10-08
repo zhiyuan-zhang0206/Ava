@@ -13,8 +13,8 @@ from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import maintenance as receipts
-from tests.agent.test_maintenance import WHEN
-from tests.agent.test_maintenance import isolate as isolate
+from tests.components.agent.test_maintenance import WHEN
+from tests.components.agent.test_maintenance import isolate as isolate
 
 
 def _held() -> None:

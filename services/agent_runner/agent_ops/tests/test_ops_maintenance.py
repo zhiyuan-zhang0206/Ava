@@ -24,8 +24,8 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from services.agent_runner.agent_ops import daemon, health
 from services.agent_runner.agent_ops import maintenance as activity
-from tests.agent.test_maintenance import WHEN
-from tests.agent.test_maintenance import isolate as isolate
+from tests.components.agent.test_maintenance import WHEN
+from tests.components.agent.test_maintenance import isolate as isolate
 
 
 async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(

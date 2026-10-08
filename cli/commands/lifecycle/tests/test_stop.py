@@ -38,8 +38,8 @@ from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop_support import written as written
 from ops import agent_pause, pty_close_notices
-from tests.agent.test_maintenance import WHEN
-from tests.agent.test_maintenance import isolate as isolate
+from tests.components.agent.test_maintenance import WHEN
+from tests.components.agent.test_maintenance import isolate as isolate
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_shells import new

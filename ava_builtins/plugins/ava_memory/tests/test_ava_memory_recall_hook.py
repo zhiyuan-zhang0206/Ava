@@ -5,7 +5,7 @@ chat, a peer agent's message (`agent:`), a scheduled turn (`schedule:`), and
 system notices all pass; `watcher:` and `shell:` completions are skipped. These
 tests drive the real hook with the recall pass stubbed, so they cover the gate
 (and the no-inbound no-op) — not the search/filter pipeline, which
-`agent/graph/tests/test_memory_recall.py` owns.
+`agent/graph/tests/prompt/test_memory_recall.py` owns.
 """
 
 from typing import Any
