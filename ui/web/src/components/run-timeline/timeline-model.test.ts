@@ -61,6 +61,7 @@ function unit(partial: Partial<RunTimelineUnit>): RunTimelineUnit {
     source: null,
     preview: "",
     parent: null,
+    context_tokens: null, generation_tokens: null, estimated: null,
     ...partial,
   };
 }
@@ -330,6 +331,9 @@ describe("highlight and hover model", () => {
     source,
     preview: "p",
     parent: null,
+    context_tokens: null,
+    generation_tokens: null,
+    estimated: null,
   });
   const treeNode = (id: string, level: number, parent: string | null, span: [number, number]): RunTimelineNode => ({
     ...node(level, id),
@@ -379,7 +383,7 @@ describe("highlight and hover model", () => {
     expect(nodeChildren(nodes[2], nodes).map((n) => n.id)).toEqual(["a", "b"]);
   });
 
-  const request = (idx: number, iso: string, tokens = 10): RunTimelineRequest => ({ idx, ts: iso, session: 0, input_tokens: tokens });
+  const request = (idx: number, iso: string, tokens = 10): RunTimelineRequest => ({ idx, ts: iso, session: 0, input_tokens: tokens, output_tokens: 0 });
   const requests = [request(2, "2026-10-04T12:10:00Z", 50), request(8, "2026-10-04T12:50:00Z", 20)];
   const view = (from: string, to: string) => ({ from: Date.parse(from), to: Date.parse(to) });
 

@@ -64,7 +64,7 @@ export function readoutText(
     (candidate) => candidate.i0 === target.i0 && candidate.i1 === target.i1 && candidate.kind === target.unitKind,
   );
   if (unit === undefined) return null;
-  return t("readoutUnit", {
+  const line = t("readoutUnit", {
     kind: ctx.unitLabel(unit),
     start: unit.i0,
     end: unit.i1,
@@ -72,4 +72,7 @@ export function readoutText(
     source: unit.source === null ? t("readoutNoSource") : ctx.sourceLabel(unit.source),
     preview: firstLine(unit.preview, PREVIEW_CHARS),
   });
+  if (unit.context_tokens === null) return line;
+  const tokens = t("readoutUnitTokens", { tokens: formatTokensCompact(unit.context_tokens) });
+  return `${line} · ${tokens}${unit.estimated ? ` ${t("estimatedSuffix")}` : ""}`;
 }

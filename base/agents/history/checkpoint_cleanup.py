@@ -51,10 +51,13 @@ any survivor is the correct rule.
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
+from base.agents.history.closing_request import METADATA_KEY as CLOSING_METADATA_KEY
+from base.agents.history.closing_request import ClosingRequest
 from base.db.transaction import async_write_transaction, write_transaction
 from base.log import logger
 
@@ -238,7 +241,7 @@ SELECT
 # names exactly the stamped boundary so the caller can enqueue the closing
 # understanding chunk for it.
 _MARK_BOUNDARY_SQL = (
-    "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
+    "UPDATE checkpoints SET metadata = metadata || %s::jsonb"
     " WHERE thread_id = %s AND checkpoint_ns = %s"
     "   AND checkpoint_id = ("
     "       SELECT checkpoint_id FROM checkpoints"
@@ -253,10 +256,13 @@ async def mark_compact_boundary(
     thread_id: str,
     *,
     checkpoint_ns: str = "",
+    closing: ClosingRequest | None = None,
 ) -> str | None:
     """Stamp the thread's newest checkpoint as a compaction boundary (idempotent).
 
     Returns the stamped checkpoint id (None when the thread has no checkpoint).
+    `closing` (the compaction LLM call that read the segment whole) is written into the
+    boundary's metadata so the history read can anchor the segment's tail.
 
     A compaction freezes the pre-compact history into a summary; the newest
     pre-compact checkpoint is the full-snapshot record of that segment. Stamping
@@ -267,7 +273,12 @@ async def mark_compact_boundary(
     recoverability (the summary survives regardless).
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(_MARK_BOUNDARY_SQL, (thread_id, checkpoint_ns, thread_id, checkpoint_ns))
+        stamp: dict[str, Any] = {"compact_boundary": True}
+        if closing is not None:
+            stamp[CLOSING_METADATA_KEY] = closing.to_metadata()
+        await cur.execute(
+            _MARK_BOUNDARY_SQL, (Jsonb(stamp), thread_id, checkpoint_ns, thread_id, checkpoint_ns)
+        )
         row = await cur.fetchone()
     boundary = row[0] if row is not None else None
     return None if boundary is None else str(boundary)

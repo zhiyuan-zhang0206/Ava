@@ -37,7 +37,7 @@ class Views:
     def __init__(self, messages: list[BaseMessage]) -> None:
         read = read_times(messages)
         units = display_blocks(divide_units(messages), messages, read)
-        self.built = HistoryView(
+        self.built = HistoryView.of(
             single_segment_history(messages), units, MessageUsage(messages), read
         )
 

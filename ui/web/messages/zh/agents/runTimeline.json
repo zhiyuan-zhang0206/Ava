@@ -78,6 +78,8 @@
   "readoutNoSource": "无来源",
   "readoutUnit": "{kind} · #{start}–#{end} · 读取于 {time} · {source} · {preview}",
   "readoutNode": "第 {level} 层 · {from} – {to} · #{start}–#{end} · {summary} · {calls} 次调用 · 输入 {input} · 输出 {output}",
+  "readoutUnitTokens": "{tokens} tokens",
+  "estimatedSuffix": "(估算)",
   "readoutRequest": "LLM 请求 #{idx} · 第 {session} 个 session · {time} · 输入 {tokens} tokens",
   "ancestorsHeading": "祖先",
   "childrenHeading": "子节点",

@@ -136,6 +136,12 @@ def _jobs(conn: psycopg.Connection, agent_id: int) -> list[tuple[Any, ...]]:
         return cur.fetchall()
 
 
+def _assert_token_totals(session: dict[str, Any]) -> None:
+    """The session's token totals come from the per-message counts anchored to the requests."""
+    assert session["context_tokens"] > 0 and session["generation_tokens"] > 0
+    assert session["estimated"] is True and 0 <= session["exact_fraction"] < 1
+
+
 def test_the_sessions_list_numbers_times_tokens_coverage_and_estimate(
     db_conn: psycopg.Connection,
 ) -> None:
@@ -151,6 +157,8 @@ def test_the_sessions_list_numbers_times_tokens_coverage_and_estimate(
     assert (first["number"], first["boundary_checkpoint_id"], first["messages"]) == (1, "cp-a", 12)
     assert (live["number"], live["boundary_checkpoint_id"], live["messages"]) == (2, None, 6)
     assert first["peak_input_tokens"] == 4000 and live["peak_input_tokens"] == 2800
+    _assert_token_totals(first)
+    _assert_token_totals(live)
     assert first["start"].startswith("2026-10-05T00:00:00")
     assert first["end"].startswith("2026-10-05T00:05:00")
     assert live["start"].startswith("2026-10-05T03:00:00")

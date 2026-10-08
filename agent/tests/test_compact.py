@@ -156,6 +156,55 @@ async def test_generate_summary_returns_summary():
     assert summary == "a synthetic summary"
 
 
+async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
+    """The summary carries the compaction call's provider input, model and instruction size --
+    what the boundary checkpoint stores so the sealed segment's tail can be priced."""
+    from agent.hooks.compact_anchor import closing_of
+    from base.agents.history.closing_request import ClosingRequest
+
+    msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
+    response = AIMessage(
+        content="a synthetic summary",
+        usage_metadata={"input_tokens": 4321, "output_tokens": 9, "total_tokens": 4330},
+        response_metadata={"model_name": "m1"},
+    )
+    summary = await generate_summary(msgs, _fake_llm(response=response), AgentSlices.resolve())
+
+    closing = closing_of(summary)
+    assert closing is not None
+    assert (closing.input_tokens, closing.model) == (4321, "m1")
+    assert closing.extra_tokens > 0  # the compaction instruction message
+    assert closing == ClosingRequest(4321, closing.extra_tokens, "m1")
+    assert summary == "a synthetic summary"  # still the plain text everywhere else
+
+    bare = await generate_summary(msgs, _fake_llm("no usage"), AgentSlices.resolve())
+    assert closing_of(bare) is None
+    assert closing_of("an agent-written summary") is None
+
+
+async def test_stamp_compact_boundary_writes_the_closing_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.hooks import compact
+    from base.agents.history.closing_request import ClosingRequest
+
+    seen: list[ClosingRequest | None] = []
+
+    async def fake_mark(_pool: Any, _thread: str, *, closing: ClosingRequest | None = None) -> str:
+        seen.append(closing)
+        return "boundary"
+
+    async def no_wait(*_args: Any) -> None:
+        return None
+
+    monkeypatch.setattr(compact, "mark_compact_boundary", fake_mark)
+    monkeypatch.setattr(compact, "await_snapshot", no_wait)
+    closing = ClosingRequest(100, 5, "m1")
+    await compact.stamp_compact_boundary(MagicMock(), 1, None, closing=closing)
+    await compact.stamp_compact_boundary(MagicMock(), 1)
+    assert seen == [closing, None]
+
+
 async def test_generate_summary_emits_agent_billing_span(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
