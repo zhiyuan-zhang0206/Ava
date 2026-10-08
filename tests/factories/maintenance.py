@@ -40,9 +40,9 @@ def start_cluster_through_ready_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
     @resume_after_start
-    def ready_start() -> int:
-        admission.require_start_allowed()
+    def ready_start(operation: pause_owner.PauseOwnerSnapshot | None) -> int:
+        admission.require_start_allowed(operation)
         return 0
 
-    assert ready_start() == 0
+    assert ready_start(None) == 0
     assert not admission.held()

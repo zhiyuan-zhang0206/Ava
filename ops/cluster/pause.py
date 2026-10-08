@@ -47,14 +47,16 @@ def is_paused(
     return resolved_state is not None and resolved_state.posture == "paused"
 
 
-def unpause_local_cluster(db: Database, bus: EventBus) -> None:
+def unpause_local_cluster(
+    db: Database, bus: EventBus, *, operation: PauseOwnerSnapshot | None = None
+) -> None:
     """Restore posture, then release this unit's existing agent pause."""
     from base.deploy.maintenance import admission
     from ops.agent_pause import resume_agents
 
     current = admission.snapshot()
     if current is None:
-        _unpause_local_cluster(db)
+        _unpause_local_cluster(db, operation)
         return
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if (refusal := _hold_refusal(current)) is not None:
@@ -65,8 +67,9 @@ def unpause_local_cluster(db: Database, bus: EventBus) -> None:
             "cold admission re-drives their continuations: %s",
             sorted(current.maintenance.undelivered),
         )
-    with admission.authorized_start(current.holder, current.acquired_at):
-        _unpause_local_cluster(db)
+    if operation is None:
+        operation = admission.authorized_start(current.holder, current.acquired_at)
+    _unpause_local_cluster(db, operation)
     resume_agents(db, bus)
 
 
@@ -96,11 +99,11 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     return None
 
 
-def _unpause_local_cluster(db: Database) -> None:
+def _unpause_local_cluster(db: Database, operation: PauseOwnerSnapshot | None) -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
     from base.deploy.maintenance import admission
     from base.deploy.state.host_deploy_state import set_posture
 
-    admission.require_start_allowed()
+    admission.require_start_allowed(operation)
     set_posture(db, "idle")
     _log.info("[cluster] unpaused: posture -> idle")

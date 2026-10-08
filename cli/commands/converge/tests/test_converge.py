@@ -311,8 +311,9 @@ def test_converge_host_runs_in_order(home, tmp_path: Path):
     assert calls == ["first", "second"]
 
 
+@pytest.mark.parametrize("maintenance_held", [False, True])
 def test_cmd_converge_unconfigured_returns_zero(
-    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, maintenance_held: bool
 ):
     import cli.commands._repo as _repo_commands
     from base.cluster.dataplane import runtime_binaries as rb
@@ -346,7 +347,18 @@ def test_cmd_converge_unconfigured_returns_zero(
     monkeypatch.setattr(
         "services.desktop.permissions_helper.converge", lambda: helper_calls.append("helper")
     )
-    rc = converge_host.cmd_converge()
+    operation = None
+    if maintenance_held:
+        from datetime import UTC, datetime
+
+        from base.deploy.maintenance import admission, pause_owner
+
+        acquired_at = datetime(2026, 10, 8, tzinfo=UTC)
+        pause_owner.begin_maintenance("converge", acquired_at)
+        with pytest.raises(RuntimeError, match="cannot release"):
+            converge_host.cmd_converge()
+        operation = admission.authorized_start("converge", acquired_at)
+    rc = converge_host.cmd_converge(operation=operation)
     assert rc == 0
     assert helper_calls == []
     assert (home / ".local" / "bin" / "ava").is_symlink()  # pyright: ignore[reportUnknownMemberType]
