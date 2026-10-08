@@ -177,7 +177,7 @@ def test_start_refuses_a_foreign_checkout_before_reading_the_home(
     monkeypatch.setattr(start_intent, "require_initialized", _never_reached)
     args = argparse.Namespace()
 
-    assert start_intent.run_start(args) == 1
+    assert start_intent.run_start(args, retained_children=[]) == 1
 
     assert "source checkout" in capsys.readouterr().err
     assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"

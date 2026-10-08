@@ -32,9 +32,6 @@ from base.native_process.evidence import EvidenceModel, ExpectedProcess
 from base.native_process.os_platform import file_lock
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 
-# Retain unreaped direct children through admission, including ambiguous failure.
-_CHILDREN: list[subprocess.Popen[bytes]] = []
-
 
 class Receipt(EvidenceModel):
     version: Literal[1] = 1
@@ -226,7 +223,14 @@ def _admission() -> Generator[Callable[[], None]]:
             signal.signal(signum, handler)
 
 
-def _spawn(data: Path, receipt: Receipt, argv: list[str], env: dict[str, str]) -> Receipt:
+def _spawn(
+    data: Path,
+    receipt: Receipt,
+    argv: list[str],
+    env: dict[str, str],
+    *,
+    retained_children: list[subprocess.Popen[bytes]],
+) -> Receipt:
     _write(data, receipt)
     with _admission(), (data / "pg.log").open("ab") as log:
         try:
@@ -244,7 +248,7 @@ def _spawn(data: Path, receipt: Receipt, argv: list[str], env: dict[str, str]) -
             # BaseException or later error has no such guarantee: keep pending.
             _write(data, receipt.model_copy(update={"state": "not-started"}))
             raise
-        _CHILDREN.append(child)
+        retained_children.append(child)
         owner = OwnedProcess.capture(psutil.Process(child.pid))
         owner.birth_key()
         captured = receipt.model_copy(
@@ -310,6 +314,7 @@ def start(
     ready: Callable[[], bool],
     timeout: float = 60,
     expected: OwnedProcess | None = None,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> OwnedProcess:
     """Complete readiness for a new child or the exact retained postmaster.
 
@@ -344,6 +349,7 @@ def start(
             ),
             argv,
             env,
+            retained_children=retained_children,
         )
         return _complete_start(data, captured, ready, timeout)
 
@@ -414,6 +420,7 @@ def stop(
     timeout: float = 60,
     immediate_wait: float | None = None,
     kill_wait: float | None = None,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> Escalation | None:
     """Fast clean shutdown, followed by exact native tree and endpoint closure.
 
@@ -455,8 +462,9 @@ def stop(
             time.sleep(0.05)
         _require_closed(data, receipt)
         require_listener(None, receipt.port, required=False)
-        for child in tuple(_CHILDREN):
-            if child.pid == owner.pid:
-                child.wait(timeout=1)
-                _CHILDREN.remove(child)
+        if retained_children is not None:
+            for child in tuple(retained_children):
+                if child.pid == owner.pid:
+                    child.wait(timeout=1)
+                    retained_children.remove(child)
         return escalation

@@ -7,9 +7,11 @@ fails fast on timeout. A loopback-only single box never waits.
 """
 
 import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -415,7 +417,9 @@ def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
 
 
 def test_start_probes_receive_the_url_hosts(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """The bring-up probes must be WIRED to the host their own URLs name —
     asserted against foreign URLs, so a re-hardcoded loopback literal fails
@@ -447,10 +451,11 @@ def test_start_probes_receive_the_url_hosts(
         calls.append(cmd)
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
+    monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", _no_native_effect)
     monkeypatch.setattr(_ci.subprocess, "run", _run)
 
-    assert _ci._start_pg(15433, "") == 0
+    assert _ci._start_pg(15433, "", retained_children=retained_children) == 0
     assert _ci.start_redis(16380, "admin", "runtime", "", "ava") == 0
     assert seen == {"redis": (16380, "10.0.0.7")}
 
@@ -520,12 +525,15 @@ def _wire_pg_start(
     ) -> None:
         calls.append(argv)
 
+    monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", start)
     return calls
 
 
 def test_start_pg_loopback_only_bind_never_waits(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """A no-secret cluster binds loopback only — the wait is never consulted and
     the start proceeds (a stray AVA_MACHINE_HOST must not hold a warm start)."""
@@ -537,24 +545,29 @@ def test_start_pg_loopback_only_bind_never_waits(
     )
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, "") == 0
+    assert _ci._start_pg(5433, "", retained_children=retained_children) == 0
     assert calls != [], "the start must proceed without waiting"
 
 
 def test_start_pg_sets_owner_only_socket_permissions(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """Postgres itself creates local trust sockets without group/world access."""
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, "") == 0
+    assert _ci._start_pg(5433, "", retained_children=retained_children) == 0
     assert "unix_socket_permissions=0700" in calls[0]
     assert Path(calls[0][0]).name == "postgres"
     assert "pg_ctl" not in calls[0]
 
 
 def test_start_pg_waits_and_fails_fast_on_timeout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: object, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+    capsys: pytest.CaptureFixture[str],
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """Secret-set cluster, reachable address never assigned: postgres must not be
     launched into a guaranteed bind failure — fail fast with an explicit error."""
@@ -563,7 +576,7 @@ def test_start_pg_waits_and_fails_fast_on_timeout(
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    rc = _ci._start_pg(5433, "s3cr3t")
+    rc = _ci._start_pg(5433, "s3cr3t", retained_children=retained_children)
 
     assert rc == 1
     assert calls == [], "postgres must not be launched when the bind address is absent"
@@ -573,7 +586,9 @@ def test_start_pg_waits_and_fails_fast_on_timeout(
 
 
 def test_start_pg_waits_for_reachable_bind_before_starting(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """Secret-set cluster, address appears late: the wait resolves and the start
     proceeds — the boot-race case the wait exists for."""
@@ -586,24 +601,28 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     )
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, "s3cr3t") == 0
+    assert _ci._start_pg(5433, "s3cr3t", retained_children=retained_children) == 0
     assert waited == [True]
     assert calls != []
 
 
 def test_start_pg_adds_no_archive_arguments_while_wal_g_is_off(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     monkeypatch.setattr(settings.walg, "walg_config_file", None)
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, "") == 0
+    assert _ci._start_pg(5433, "", retained_children=retained_children) == 0
 
     assert not [arg for arg in calls[0] if arg.startswith("archive_")]
 
 
 def test_start_pg_launches_with_the_archive_arguments_when_wal_g_is_on(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     from services.backup.walg.archive import archive_pg_args
     from services.backup.walg.tests.support import make_sandbox
@@ -613,7 +632,7 @@ def test_start_pg_launches_with_the_archive_arguments_when_wal_g_is_on(
     monkeypatch.setattr(_ci, "warn_archive_inactive", lambda: warned.append(True))
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, "") == 0
+    assert _ci._start_pg(5433, "", retained_children=retained_children) == 0
 
     args = archive_pg_args()
     assert args and args[1] == "archive_mode=on"
@@ -624,7 +643,9 @@ def test_start_pg_launches_with_the_archive_arguments_when_wal_g_is_on(
 
 
 def test_the_postmaster_inherits_no_ava_authority(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """The postmaster is the longest-lived daemon (retained across releases), and
     the `ava start` that spawns it may hold the delivered gateway login, the
@@ -651,9 +672,10 @@ def test_the_postmaster_inherits_no_ava_authority(
     ) -> None:
         envs.append(env)
 
+    monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", start)
 
-    assert _ci._start_pg(5433, "") == 0
+    assert _ci._start_pg(5433, "", retained_children=retained_children) == 0
     [env] = envs
     assert env["PATH"] == "/usr/bin:/bin" and env["TZ"] == "Asia/Shanghai"
     assert not [key for key in env if key.startswith("AVA_")]
@@ -661,7 +683,9 @@ def test_the_postmaster_inherits_no_ava_authority(
 
 
 def test_start_pg_hands_the_built_start_env_to_owned_launch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """Task #3754: direct postgres gets pg_start_env() — the postmaster env is
     built explicitly (the macOS locale fallback for launchd / non-interactive
@@ -679,7 +703,13 @@ def test_start_pg_hands_the_built_start_env_to_owned_launch(
     ) -> None:
         envs.append(env)
 
+    monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", start)
 
-    assert _ci._start_pg(5433, "") == 0
+    assert _ci._start_pg(5433, "", retained_children=retained_children) == 0
     assert envs == [sentinel]
+
+
+@pytest.fixture
+def retained_children() -> list[subprocess.Popen[bytes]]:
+    return []

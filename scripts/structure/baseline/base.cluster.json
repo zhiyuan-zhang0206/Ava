@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "base/cluster/machine.py::ambient-instance:_identity": 1,
-    "base/cluster/postgres.py::ambient-container:_CHILDREN": 1
+    "base/cluster/machine.py::ambient-instance:_identity": 1
   }
 }
