@@ -20,29 +20,31 @@ def _prepare_code(role: str) -> str:
     root = str(scratch_root("budget"))
     code = (
         "import json\nimport ava\nfrom pathlib import Path\n"
+        "from base.host.atomic_io import write_text_atomic\n"
         f"root = Path({root!r})\n"
         "aid = ava.self.AGENT_ID\n"
         "artifact = root / f'{aid}-draft.txt'\n"
         "artifact.write_text('Verified partial result; remaining work is unfinished.')\n"
         "state = {'status': 'running', 'goal_met': False, 'artifacts': [str(artifact)], "
         "'remaining': ['finish next unit'], 'peers': []}\n"
-        "(root / f'{aid}.json').write_text(json.dumps(state))\n"
+        "write_text_atomic(root / f'{aid}.json', json.dumps(state))\n"
     )
     if role == "dynamic workflow orchestrator":
         dispatch = (
             "import json\nimport ava\nfrom pathlib import Path\n"
+            "from base.host.atomic_io import write_text_atomic\n"
             f"path = Path({state_file(ava.self.AGENT_ID)!r})\n"
             "state = json.loads(path.read_text())\n"
             "if state['status'] == 'running':\n"
             "    peer = ava.agents.spawn(prompt=state['remaining'].pop(0))\n"
             "    state['peers'].append(peer)\n"
-            "    path.write_text(json.dumps(state))\n"
+            "    write_text_atomic(path, json.dumps(state))\n"
         )
         code += (
             "import runpy\n"
             "if aid == int((root / 'owner').read_text()):\n"
             "    state['remaining'] = ['unit one', 'unit two']\n"
-            "    (root / f'{aid}.json').write_text(json.dumps(state))\n"
+            "    write_text_atomic(root / f'{aid}.json', json.dumps(state))\n"
             f"    (root / 'dispatch.py').write_text({dispatch!r})\n"
             "    runpy.run_path(str(root / 'dispatch.py'))\n"
         )
@@ -50,7 +52,7 @@ def _prepare_code(role: str) -> str:
         code += (
             "if aid == int((root / 'owner').read_text()):\n"
             "    state['peers'] = [ava.agents.spawn(prompt='Preserve a partial result and wait.')]\n"
-            "    (root / f'{aid}.json').write_text(json.dumps(state))\n"
+            "    write_text_atomic(root / f'{aid}.json', json.dumps(state))\n"
         )
     return code
 
@@ -59,11 +61,12 @@ def _pause_code(owner: int) -> str:
     path = state_file(ava.self.AGENT_ID)
     return (
         "import json\nimport ava\nfrom pathlib import Path\n"
+        "from base.host.atomic_io import write_text_atomic\n"
         f"path = Path({path!r})\n"
         "state = json.loads(path.read_text())\n"
         "state.update(status='paused', reason='usage budget reminder', "
         "resume_condition='revised budget or smaller authorized scope')\n"
-        "path.write_text(json.dumps(state))\n"
+        "write_text_atomic(path, json.dumps(state))\n"
         f"if ava.self.AGENT_ID == {owner}:\n"
         "    for peer in state['peers']:\n"
         "        ava.agents.send_message(peer, 'Budget handoff: preserve results and pause. ' "
