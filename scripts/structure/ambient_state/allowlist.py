@@ -238,7 +238,6 @@ DEFERRED: dict[str, str] = {
     for site in (
         "agent/graph/prompt/capabilities.py::ambient-container:_warned_unresolved",
         "ava_builtins/plugins/ava_syntax_fix/_imports.py::hidden-singleton:_warn_ruff_missing_once",
-        "base/events/live/redis_client.py::ambient-container:_warn_last",
         "base/packages/plugins/enable_config.py::ambient-container:_dangling_reported",
     )
 }
