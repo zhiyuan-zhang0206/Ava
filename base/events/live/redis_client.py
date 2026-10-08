@@ -295,10 +295,11 @@ def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> _AuthR
 # WARNING; suppressed repeats drop to DEBUG so the signal stays visible without
 # spamming. Keyed per channel so a genuinely new mis-scoped channel still surfaces.
 _WARN_THROTTLE_S = 60.0
-_warn_last: dict[tuple[str, str], float] = {}
 
 
-def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> None:
+def _log_publish_failure(
+    exc: BaseException, *, channel: str, context: str, warn_last: dict[tuple[str, str], float]
+) -> None:
     """Classify + log a best-effort publish failure — never re-raises.
 
     The single discipline for every fire-and-forget event / live-UI publish,
@@ -309,8 +310,8 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
     A `ResponseError` (a redis NOPERM — the cluster redis ACL user is not granted
     this channel, an ACL / channel-prefix misconfig) would silently disable live
     updates fleet-wide, so it is logged at WARNING (rate-limited per channel, see
-    `_warn_last`). A transient failure (redis down, connection dropped) is
-    best-effort and logged at DEBUG; any other exception is a bug, logged at WARNING with
+    the EventBus-owned warning timestamps). A transient failure (redis down,
+    connection dropped) is best-effort and logged at DEBUG; any other exception is a bug, logged at WARNING with
     its traceback (same throttle) — the durable DB write already happened and the
     frontend recovers on its next full fetch."""
     from redis.exceptions import RedisError, ResponseError
@@ -319,9 +320,9 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
     if isinstance(exc, ResponseError):
         key = (channel, type(exc).__name__)
         now = time.monotonic()
-        last = _warn_last.get(key)
+        last = warn_last.get(key)
         if last is None or now - last >= _WARN_THROTTLE_S:
-            _warn_last[key] = now
+            warn_last[key] = now
             logger.warning(
                 "publish to {ch!r} rejected by redis ({exc!r}){tag} — the cluster "
                 "redis ACL user lacks this channel; the live event is dropped "
@@ -351,9 +352,9 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
         # Not a transport failure: a bug in the publish path. Same per-channel throttle.
         key = (channel, type(exc).__name__)
         now = time.monotonic()
-        last = _warn_last.get(key)
+        last = warn_last.get(key)
         if last is None or now - last >= _WARN_THROTTLE_S:
-            _warn_last[key] = now
+            warn_last[key] = now
             logger.opt(exception=exc).warning(
                 "publish to {ch!r} failed unexpectedly{tag}; the live event is dropped "
                 "(best-effort)",
@@ -363,7 +364,12 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
 
 
 async def publish_via(
-    client: Callable[[], _AuthRetryAsyncRedis], channel: str, payload: str, *, context: str = ""
+    client: Callable[[], _AuthRetryAsyncRedis],
+    channel: str,
+    payload: str,
+    *,
+    warn_last: dict[tuple[str, str], float],
+    context: str = "",
 ) -> int | None:
     """`publish_best_effort` on the client `client()` returns (called inside the guarded try, so
     a failure to open it is a failed publish, not an exception). The handle's publish
@@ -380,12 +386,17 @@ async def publish_via(
             _publish, attempt_timeout_s=_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S
         )
     except Exception as exc:
-        _log_publish_failure(exc, channel=channel, context=context)
+        _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
         return None
 
 
 def publish_sync_via(
-    open_client: Callable[[], _AuthRetrySyncRedis], channel: str, payload: str, *, context: str = ""
+    open_client: Callable[[], _AuthRetrySyncRedis],
+    channel: str,
+    payload: str,
+    *,
+    warn_last: dict[tuple[str, str], float],
+    context: str = "",
 ) -> int | None:
     """`publish_best_effort_sync` on a one-off client from `open_client()`; shared by the handle
     (`EventBus.publish_best_effort_sync`) and the module-level shim."""
@@ -401,7 +412,7 @@ def publish_sync_via(
         finally:
             client.close()
     except Exception as exc:
-        _log_publish_failure(exc, channel=channel, context=context)
+        _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
         return None
 
 
