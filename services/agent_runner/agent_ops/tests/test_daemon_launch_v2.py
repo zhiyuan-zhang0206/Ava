@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from psycopg_pool import ConnectionPool
 
@@ -10,7 +12,9 @@ from services.agent_runner.agent_ops import daemon
 
 
 @pytest.mark.asyncio
-async def test_versioned_launch_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_versioned_launch_dispatch(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_pool: ConnectionPool = pool
     seen: list[tuple[int, object]] = []
@@ -23,7 +27,12 @@ async def test_versioned_launch_dispatch(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _launch)
     status, result = await daemon._dispatch(
-        "spawn-launch-v2", {"agent_id": 777}, active_ops={}, workers=set(), pool=dispatch_pool
+        "spawn-launch-v2",
+        {"agent_id": 777},
+        active_ops={},
+        workers=set(),
+        pool=dispatch_pool,
+        executor=op_executor,
     )
     assert (status, result) == ("completed", {"id": 777})
     assert seen == [(777, pool)]

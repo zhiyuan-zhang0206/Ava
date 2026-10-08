@@ -1,5 +1,6 @@
 """A versioned repeatable wake never falls through to old launch effects."""
 
+from concurrent.futures import ThreadPoolExecutor
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,7 +13,9 @@ from services.agent_runner.agent_ops import daemon
 
 
 @pytest.mark.asyncio
-async def test_reconcile_dispatch_and_old_consumer_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_reconcile_dispatch_and_old_consumer_refusal(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from ops.lifecycle import launch_reconcile
 
     pool: ConnectionPool = ConnectionPool(open=False)
@@ -36,6 +39,7 @@ async def test_reconcile_dispatch_and_old_consumer_refusal(monkeypatch: pytest.M
         active_ops={},
         workers=set(),
         pool=pool,
+        executor=op_executor,
     )
     assert status == OpStatus.COMPLETED
     assert result == {"wake_published": True}
@@ -55,6 +59,7 @@ async def test_reconcile_dispatch_and_old_consumer_refusal(monkeypatch: pytest.M
         active_ops={},
         workers=set(),
         pool=pool,
+        executor=op_executor,
     )
     assert status == OpStatus.FAILED
     assert isinstance(result["error"], str)
