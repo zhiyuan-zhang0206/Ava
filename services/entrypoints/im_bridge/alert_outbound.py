@@ -6,7 +6,9 @@ from enum import StrEnum
 from typing import Any, Literal
 
 from psycopg import Connection
+from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg.types.json import Jsonb
+from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from base.db.transaction import write_transaction
@@ -21,7 +23,11 @@ from services.entrypoints.im_bridge.outbound.types import (
     OutboundSourceKind,
     PreparedOutboundSend,
 )
-from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
+from services.entrypoints.im_bridge.types import (
+    NETWORK_ERRORS,
+    IMAdapter,
+    SendNotStartedError,
+)
 
 
 class AlertOwnerDecision(StrEnum):
@@ -177,7 +183,7 @@ class AlertOutboundBridge:
     async def _prepare(channel: str, adapter: IMAdapter, text: str) -> AlertRecipientDecision:
         try:
             account = await adapter.outbound_account_id()
-        except Exception as exc:
+        except NETWORK_ERRORS as exc:
             logger.warning(
                 "native alert account held channel={} class={}", channel, type(exc).__name__
             )
@@ -192,7 +198,7 @@ class AlertOutboundBridge:
             reason = AlertOwnerDecision.UNSUPPORTED
         except SendNotStartedError:
             reason = AlertOwnerDecision.OWNER_UNAVAILABLE
-        except Exception as exc:
+        except NETWORK_ERRORS as exc:
             logger.warning(
                 "native alert preparation held channel={} class={}", channel, type(exc).__name__
             )
@@ -218,7 +224,12 @@ class AlertOutboundBridge:
                 return
             try:
                 await self.accept(group_id)
-            except Exception as exc:
+            except (
+                AlertAcceptanceHeldError,
+                ConnectionDoesNotExist,
+                ConnectionFailure,
+                PoolTimeout,
+            ) as exc:
                 logger.warning(
                     "native alert acceptance held group={} class={}", group_id, type(exc).__name__
                 )

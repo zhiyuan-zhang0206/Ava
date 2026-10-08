@@ -15,7 +15,11 @@ import pytest
 
 from services.entrypoints.im_bridge import push_watchdog
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
-from services.entrypoints.im_bridge.types import Reply, SendNotStartedError
+from services.entrypoints.im_bridge.types import (
+    Reply,
+    SendNotStartedError,
+    SendOutcomeUncertainError,
+)
 
 _LOGGER = "services.entrypoints.im_bridge.core.push_watchdog"
 
@@ -99,10 +103,34 @@ async def test_ambiguous_or_partial_send_is_not_repeated(
             markdown: bool = False,
         ) -> None:
             self.attempts += 1
-            raise RuntimeError("first chunk accepted; second response lost")
+            raise SendOutcomeUncertainError("first chunk accepted; second response lost")
 
     caplog.set_level(logging.WARNING, logger=_LOGGER)
     adapter = PartialAdapter(fail_attempts=0)
     await push_watchdog.send_with_retry(_Core(), "weixin", "chat", Reply("hello"), adapter)
     assert adapter.attempts == 1
     assert any("outcome uncertain" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.parametrize("error", [RuntimeError("unexpected send fault"), KeyError("bad config")])
+async def test_unknown_send_fault_reaches_owner_without_retry(
+    _no_sleep: None, error: Exception
+) -> None:
+    class FaultingAdapter(_Adapter):
+        async def send(
+            self,
+            _chat_id: str,
+            _text: str,
+            *,
+            buttons: list[tuple[str, str]] | None = None,
+            markdown: bool = False,
+        ) -> None:
+            self.attempts += 1
+            raise error
+
+    adapter = FaultingAdapter(fail_attempts=0)
+    with pytest.raises(type(error)) as caught:
+        await push_watchdog.send_with_retry(_Core(), "weixin", "chat", Reply("hello"), adapter)
+    assert caught.value is error
+    assert adapter.attempts == 1
+    assert adapter.push_failures == 0, "unknown faults are not reported as uncertain delivery"
