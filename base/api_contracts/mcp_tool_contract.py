@@ -20,21 +20,6 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         Includes lifecycle details, what the agent is doing right now, and any
         questions it is blocked on waiting for an answer — answer those with `send_message`.
         """,
-    "spawn_agent": """Start a new Ava agent and give it a goal. Returns its id immediately.
-
-        The agent begins working asynchronously and keeps running until it
-        finishes or is terminated, so write `prompt` as a standing objective
-        with whatever context the agent needs, not as a single question. Watch
-        its progress with `get_messages`.
-
-        `label` is a short human-readable name shown in the fleet views (one
-        is generated if omitted). `machine` picks which host runs it — omit it
-        for the default host; a name that is not an agent-runner is rejected.
-        Reuse an optional `idempotency_key` with the same arguments for the same
-        creation. Changed arguments conflict; use another key for a new agent.
-        `config_overlay` overrides per-agent settings, currently
-        `{"llm_model": "<model id>"}`.
-        """,
     "spawn_agent_guarded_v1": """Create an agent with a retained original birth receipt.
 
         Requires a 1-128 character idempotency_key scoped to your authenticated
@@ -43,8 +28,10 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         Replay retains the original agent, placement, config and launch attempt.
         It can wake only the original pending, unadmitted attempt; historical
         acceptance does not prove execution or revive later work.
-        Older servers reject this tool before effects. Never fall back to
-        spawn_agent for the same intent. No automatic retries are added.
+        Supply a standing objective in prompt. label names the agent in fleet
+        views; machine selects its host. config_overlay overrides its settings.
+        This is the sole creation tool. Older servers reject it before effects.
+        No automatic retries are added.
         """,
     "send_message": """Send a message to a running agent — a new instruction, more context,
         or the answer to a question it is blocked on.
@@ -103,8 +90,9 @@ _SERVER_INSTRUCTIONS = (
     "process with its own conversation history that keeps working after you stop\n"
     "talking to it — not a request/response endpoint.\n"
     "\n"
-    "The normal loop: `spawn_agent` with a goal (returns immediately, before the\n"
-    "agent has done anything), then `get_agent` / `get_messages` to watch it work,\n"
+    "The normal loop: `spawn_agent_guarded_v1` with a goal and a caller key,\n"
+    "then `get_agent` / `get_messages` to watch it work. Creation returns before\n"
+    "the agent has done anything. Use\n"
     "`send_message` to steer or answer it, `terminate_agent` when it is done. Because\n"
     "agents work asynchronously, a transcript read right after a spawn is usually\n"
     "still empty; poll rather than assume failure.\n"

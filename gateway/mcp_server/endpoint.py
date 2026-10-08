@@ -2,7 +2,7 @@
 
 Design task #1212 step 1: one Streamable HTTP MCP endpoint on the gateway that
 every MCP client dials (external tools like Claude Code / Codex today; Ava's
-own agents later). The eight tools are thin handlers over the SAME internal
+own agents later). The seven tools are thin handlers over the SAME internal
 functions the REST routers call — no business logic of its own and no
 self-HTTP round-trip (2026-06-07 CLI↔gateway boundary decision: in-process
 import for co-located calls, HTTP only to cross a machine).
@@ -58,7 +58,6 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 from gateway.agents import router as _agents_router
-from gateway.agents.creation import CreationLaunchArguments
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.lifecycle import terminate_agent_with_open_tasks
 from gateway.agents.schemas import AgentRow
@@ -351,37 +350,32 @@ def _register_spawn_tools(
     db: Database,
     bus: EventBus,
 ) -> None:
-    """Register legacy and guarded creation through one native birth owner."""
+    """Register keyed creation through the immutable native birth owner."""
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
 
     typed_server = cast(MCPServer, server)
 
-    async def _spawn_agent(
+    @typed_server.tool(description=tool_description("spawn_agent_guarded_v1"))
+    async def spawn_agent_guarded_v1(
         prompt: str,
+        idempotency_key: Annotated[str, Field(min_length=1, max_length=128)],
         ctx: Context,
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-        *,
-        guarded: bool = False,
     ) -> dict[str, Any]:
         client = _authenticated_client(ctx.request_context.request)
-        _require_write_scope("spawn_agent_guarded_v1" if guarded else "spawn_agent", client)
-        if guarded and idempotency_key is None:
-            raise ToolError("guarded creation requires an idempotency key")
-        creation_key = None
-        if idempotency_key is not None:
-            try:
-                creation_key = principal_key(
-                    AuthPrincipal("mcp_client", str(client["id"])),
-                    "POST",
-                    "/mcp/tools/spawn_agent_guarded_v1" if guarded else "/api/agents",
-                    idempotency_key,
-                )
-            except PrincipalScopeError as exc:
-                raise ToolError(str(exc)) from exc
+        _require_write_scope("spawn_agent_guarded_v1", client)
+        try:
+            creation_key = principal_key(
+                AuthPrincipal("mcp_client", str(client["id"])),
+                "POST",
+                "/mcp/tools/spawn_agent_guarded_v1",
+                idempotency_key,
+            )
+        except PrincipalScopeError as exc:
+            raise ToolError(str(exc)) from exc
         body = SpawnAgentRequest(
             prompt=prompt,
             prompt_source=_MESSAGE_SOURCE,
@@ -396,13 +390,8 @@ def _register_spawn_tools(
         # through the router module so tests patch the same seam as the REST
         # spawn route.
         try:
-            arguments: CreationLaunchArguments = {}
-            if creation_key is not None:
-                arguments["creation_key"] = creation_key
-            if guarded:
-                arguments["immutable_birth"] = True
             spawned = await _agents_router.create_and_launch_agent(
-                body, target, pool, db, bus, **arguments
+                body, target, pool, db, bus, creation_key=creation_key, immutable_birth=True
             )
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from exc
@@ -418,30 +407,6 @@ def _register_spawn_tools(
                 ) from exc
             raise ToolError(str(exc)) from exc
         return spawned.model_dump(mode="json")
-
-    @typed_server.tool(description=tool_description("spawn_agent"))
-    async def spawn_agent(
-        prompt: str,
-        ctx: Context,
-        label: str | None = None,
-        machine: str | None = None,
-        config_overlay: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
-        return await _spawn_agent(prompt, ctx, label, machine, config_overlay, idempotency_key)
-
-    @typed_server.tool(description=tool_description("spawn_agent_guarded_v1"))
-    async def spawn_agent_guarded_v1(
-        prompt: str,
-        idempotency_key: Annotated[str, Field(min_length=1, max_length=128)],
-        ctx: Context,
-        label: str | None = None,
-        machine: str | None = None,
-        config_overlay: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return await _spawn_agent(
-            prompt, ctx, label, machine, config_overlay, idempotency_key, guarded=True
-        )
 
 
 def _register_fleet_tools(

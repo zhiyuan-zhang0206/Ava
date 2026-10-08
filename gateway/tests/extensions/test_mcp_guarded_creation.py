@@ -127,8 +127,10 @@ def test_keys_are_scoped_to_tool_and_verified_client(db_conn: psycopg.Connection
         changed = _tool_call(client, first, TOOL, {**ARGS, "prompt": "different intent"})
         assert changed["result"].get("isError") is True
         other = _tool_result(_tool_call(client, second, TOOL, ARGS))
-        legacy = _tool_result(_tool_call(client, first, "spawn_agent", ARGS))
-    assert len({guarded["id"], other["id"], legacy["id"]}) == 3
+        retired = _tool_call(client, first, "spawn_agent", ARGS)
+        assert retired["result"].get("isError") is True
+    assert len({guarded["id"], other["id"]}) == 2
+    assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (2,)
     assert db_conn.execute("SELECT count(*) FROM agent_creation_snapshots").fetchone() == (2,)
 
 
