@@ -112,13 +112,22 @@ def test_impersonator_guide_carries_receipt_semantics_and_the_borrowed_context()
     assert "memory/MEMORY.md" in text
     assert "ava.tasks" in text
     assert "substitute new-agent assumptions" in text
-    assert "A truncated push is not received yet" in text
-    assert "ava agents timeline <agent_id>" in text
-    assert "ava.context.gateway.get" in text
-    assert "receipt, not completion" in text
-    assert "process what arrives, then acknowledge it" not in text
-    assert "Acknowledge only what you actually handled" not in text
-    assert "ACK the cancel once stopped" not in text
+    assert "Read [message receipt](reference/message-receipt.md)" in text
+    assert "before handling a delivered batch" in text
+    assert "ACK never means completion" in text
+    receipt = (guide.parent / "reference/message-receipt.md").read_text(encoding="utf-8")
+    _assert_message_receipt_contract(text, receipt)
+
+
+def _assert_message_receipt_contract(entry: str, receipt: str) -> None:
+    assert "A truncated push is not received yet" in receipt
+    assert "ava agents timeline <agent_id>" in receipt
+    assert "ava.context.gateway.get" in receipt
+    assert "receipt, not completion" in receipt
+    package_text = entry + receipt
+    assert "process what arrives, then acknowledge it" not in package_text
+    assert "Acknowledge only what you actually handled" not in package_text
+    assert "ACK the cancel once stopped" not in package_text
 
 
 def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
@@ -605,6 +614,9 @@ def test_instruction_script_prints_only_after_successful_detach(
 def test_impersonator_guide_routes_replies_by_request_origin() -> None:
     guide = Path(__file__).parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     text = guide.read_text()
+    assert "Read [message receipt](reference/message-receipt.md)" in text
+    assert "reply at the request's entry point" in text
+    text = (guide.parent / "reference/message-receipt.md").read_text()
 
     assert "Codex opened manually in tmux) gets plain text there" in text
     assert "`ava impersonate say` in Ava" in text

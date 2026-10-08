@@ -1,6 +1,6 @@
 ---
 name: workspace-cleanup
-description: Dispose of dead agents' workspaces when disk pressure or monthly inspection demands it — zero-loss first, dead-agent criteria, disposal criteria, tombstone, ledger.
+description: "Reclaims dead Ava agents' workspaces while preserving recoverable state. Use for disk pressure or planned workspace cleanup."
 ---
 
 # Ava Ops — Workspace Cold-Data Disposal

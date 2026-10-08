@@ -1,6 +1,6 @@
 ---
 name: telegram-send-file
-description: Sends one local file to the user's Telegram chat through the Bot API. Use when the user asks to receive, deliver, or send a file, report, document, or attachment over Telegram.
+description: "Sends local files over Telegram. Use when delivering a file to the user's Telegram chat."
 ---
 
 # telegram-send-file

@@ -32,16 +32,25 @@ commit — when in doubt, trigger.
 
 ## Three Deployment Topologies
 
-- **Single box** (default): sole consolidator, checkout directly tracks `main`; on first run `ava.watcher.cron("0 3 * * *", ...)` sets the schedule. In keep-local mode (`AVA_MEMORY_KEEP_LOCAL`) there is no remote, only commit + refresh local index.
+- **Single box** (default): sole consolidator, checkout directly tracks `main`.
+  Remote-backed pools use `scripts/consolidate.py`. A local-only pool has no
+  remote and uses a local git commit followed by `ava memory refresh`; the
+  wrapper unconditionally pushes and has no `AVA_MEMORY_KEEP_LOCAL` switch.
+  A daily schedule is created only for authorized ongoing maintenance.
 - **Arbiter / arbiter** (multi-host, one resident machine — the Memory Arbiter agent): holds the schedule; each round spawns a per-machine Steward for each machine (or the machines run resident stewards), waits for PR readiness, `skills/scripts/arbiter_merge.py` squash-merges each one, `ava memory refresh` rebuilds the index, notifies stewards to rebase, re-curates `MEMORY.md` (16000 character cap ≈ 200 lines index (Claude Code auto-memory scale), enforced by pre-commit hook).
 - **per-machine Steward** (multi-host, one per machine): `skills/scripts/steward.py` one-step commit + push + create PR, reports to the Arbiter then idles (or stays resident as a scheduler with the 1–5 min trigger watch), upon receiving "rebase now" rebases and terminates.
 
 ## Content Discipline
 
+The entrypoint keeps common content and index constraints, then selects
+`references/single-box.md`, `references/arbiter.md`, or `references/steward.md`
+using the deployment and assigned role. Loading the skill does not assign a
+multi-host role; keep-local consolidation stays local.
+
 Topic directories are shared, `machines/<name>/` holds per-machine notes; `MEMORY.md` is a curated index injected into all agents each session. Large content (handoff / logs / binaries) does not go into the pool; move to Vault and leave pointer notes.
 
 ## Key Dependencies
 
-- [[ava_builtins/plugins/ava_memory/skills/docs/skills.ava.okf.md|Ava Memory Skills]] — the root skill (Memory Arbiter manual) itself
+- [[ava_builtins/plugins/ava_memory/skills/docs/skills.ava.okf.md|Ava Memory Skills]] — shared-memory entrypoint and assigned-role references
 - [[ava_builtins/plugins/ava_memory/docs/memory-api.ava.okf.md]] — the `ava.memory` pool itself being operated on
 - [[memory_indexer.ava.okf.md]] — the re-embedding service triggered by `ava memory refresh`

@@ -1,6 +1,6 @@
 ---
 name: youtube
-description: Enumerates YouTube channel or playlist videos and fetches metadata and transcripts without login. Use when following YouTube updates, ingesting a channel, playlist, conference series, or single video, or checking what is new.
+description: "Retrieves YouTube videos, channel/playlist entries, metadata, and transcripts. Use when ingesting YouTube content or checking channel updates."
 ---
 
 # youtube

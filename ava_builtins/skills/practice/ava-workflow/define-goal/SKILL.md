@@ -1,6 +1,6 @@
 ---
 name: define-goal
-description: "Clarifies an unclear outcome, acceptance evidence, scope, and stopping conditions. Use when goal definition needs work; skip when the user's existing requirement is already verifiable. Defining an outcome does not activate sustained supervision."
+description: "Defines a verifiable outcome and stopping conditions. Use when the requested result or acceptance evidence is unclear."
 ---
 
 # Define Goal

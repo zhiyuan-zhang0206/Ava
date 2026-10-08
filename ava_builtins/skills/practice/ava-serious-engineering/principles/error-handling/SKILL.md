@@ -1,6 +1,6 @@
 ---
 name: error-handling
-description: "Designs errors out of APIs and centralizes unavoidable failure handling at the right layer. Use when try-catch blocks scatter, recovery is inconsistent, null checks spread, exceptions cross boundaries, or the wrong layer crashes."
+description: "Designs explicit failure and recovery boundaries. Use when exceptions, null handling, or scattered retries obscure which layer owns a failure."
 ---
 
 # Error Handling
@@ -33,108 +33,6 @@ description: "Designs errors out of APIs and centralizes unavoidable failure han
 - [ ] **MUST** Is there a single top-level error handler for each system boundary (HTTP, message queue, CLI) that converts all unhandled exceptions into controlled error responses?
 - [ ] **MUST** For distributed operations: are partial failures handled explicitly, or does the system silently continue with incomplete state?
 
-## Anti-Patterns
-
-- **Defensive null-check sprawl**:Every method starts with `if (x == null) return null;` — null propagates through the call stack, and the eventual error message is "NullPointerException at line 1 of Main" with no hint of the source. → alternative: Crash at the point null first appears where it shouldn't; use `Optional` or `Result` types to make absence explicit and force handling at the call site.
-- **Empty catch / log-and-swallow**:`catch (Exception e) { log.error(e); }` — the error is logged and execution continues as if nothing happened, with the system in an unknown state. → alternative: If you can't recover, don't catch. Let it propagate to the layer that can. If you must catch, re-throw or translate into a domain exception.
-- **Using exceptions for control flow**:Throwing and catching exceptions for non-exceptional conditions (e.g., using `throw new NotFoundException()` as a "return not found" instead of returning `Optional`). → alternative: Exceptions are for exceptional conditions. Use return types (`Optional`, `Result`, `Either`) for expected alternative outcomes.
-- **Catching too broadly**:`catch (Exception e)` at every method boundary — the "I don't know what might go wrong so I'll catch everything" pattern. → alternative: Catch only the specific exception types you can handle. Let unknown exceptions propagate to the top-level handler.
-- **Swallowing errors in distributed systems**:A microservice calls another, gets an error, logs it, and returns a partial result. The caller never knows the operation was incomplete. → alternative: Distributed operations must make partial failure explicit — return `PartialSuccess` with a list of what succeeded and what failed, or fail the whole operation with a clear scope.
-
-## Examples
-
-**Example 1: Define Errors Out of Existence**
-
-❌ Bad (exception that could be a normal state):
-```python
-def get_user(user_id: int) -> User:
-    user = db.query("SELECT * FROM users WHERE id = ?", user_id)
-    if user is None:
-        raise UserNotFoundError(f"User {user_id} not found")
-    return user
-
-# Every caller must try-catch or propagate
-# Control flow is interrupted for a common, expected case
-```
-
-✅ Good (absence as normal state):
-```python
-def get_user(user_id: int) -> Optional[User]:
-    return db.query("SELECT * FROM users WHERE id = ?", user_id)
-
-# Caller handles absence on the normal path:
-user = get_user(123)
-if user is None:
-    return Response.not_found()
-# No exception, no control-flow interruption
-```
-
-**Example 2: Crash Early vs Silent Corruption**
-
-❌ Bad (silent default substitution):
-```python
-def process_order(order_data: dict) -> Order:
-    quantity = order_data.get("quantity", 1)  # silently defaults
-    price = order_data.get("price", 0.0)      # silently defaults
-    # If the upstream system changed "quantity" to "qty", we ship wrong orders
-    # with no error — the bug is discovered by angry customers
-    return Order(quantity=quantity, price=price)
-```
-
-✅ Good (crash early on contract violation):
-```python
-def process_order(order_data: dict) -> Order:
-    if "quantity" not in order_data:
-        raise ValueError("Missing required field: quantity")
-    if "price" not in order_data:
-        raise ValueError("Missing required field: price")
-    quantity = order_data["quantity"]
-    price = order_data["price"]
-    # Contract violation is caught immediately — the upstream bug is found in CI
-    return Order(quantity=quantity, price=price)
-```
-
-**Example 3: Error Handling at the Right Layer**
-
-❌ Bad (catching everywhere):
-```python
-def calculate_total(items: list[Item]) -> float:
-    try:
-        return sum(item.price for item in items)
-    except Exception:
-        return 0.0  # what went wrong? unknown. total is silently 0.
-
-def apply_discount(total: float, code: str) -> float:
-    try:
-        discount = discount_service.lookup(code)
-        return total * (1 - discount)
-    except Exception:
-        return total  # discount silently skipped — the user is overcharged
-```
-
-✅ Good (catch at the right layer):
-```python
-def calculate_total(items: list[Item]) -> float:
-    return sum(item.price for item in items)  # no catch — let errors propagate
-
-def apply_discount(total: float, code: str) -> float:
-    discount = discount_service.lookup(code)  # no catch — let errors propagate
-    return total * (1 - discount)
-
-# Single top-level handler:
-@app.route("/checkout")
-def checkout():
-    try:
-        total = calculate_total(cart.items)
-        total = apply_discount(total, request.discount_code)
-        return Response.ok({"total": total})
-    except DiscountServiceError as e:
-        return Response.error("DISCOUNT_UNAVAILABLE", str(e))
-    except Exception as e:
-        logger.exception("Checkout failed")
-        return Response.error("INTERNAL_ERROR", "Please try again")
-```
-
 ## Relationships
 
 - `principles/complexity-management` — Define Errors Out of Existence is a direct application of "pull complexity down": eliminate exception classes by redesigning semantics. Error handling is one of the worst sources of complexity (§4.3 of Ousterhout).
@@ -142,11 +40,11 @@ def checkout():
 - `principles/bounded-context` — Error semantics may differ across Bounded Contexts: a "not found" in the Catalog context may be a 404, while in the Inventory context it may be a 200 with `stock: 0`. The context boundary defines which error semantics apply.
 - `practices/testing` — Property-based testing (03 Tip 71) is especially effective for error handling: define the property "for any invalid input, the system returns a controlled error, not a crash or silent corruption."
 - `practices/implementation` — Design by Contract translates directly into implementation: preconditions become assertions or type constraints at function entry; postconditions become assertions or tests at function exit.
-- `references/01-philosophy-of-software-design.md` §4.3 — Define Errors Out of Existence and the three companion techniques (exception masking, aggregation, state-machine self-healing).
-- `references/03-pragmatic-programmer.md` Tips 37–39 — Design by Contract, Crash Early, and Assertions.
+- `../../references/01-philosophy-of-software-design.md` §4.3 — Define Errors Out of Existence and the three companion techniques (exception masking, aggregation, state-machine self-healing).
+- `../../references/03-pragmatic-programmer.md` Tips 37–39 — Design by Contract, Crash Early, and Assertions.
 
-## Sources
+## Examples and sources
 
-- Ousterhout, *A Philosophy of Software Design* — Define Errors Out of Existence (§4.3), exception masking, exception aggregation, state-machine self-healing. See `references/01-philosophy-of-software-design.md`.
-- Thomas & Hunt, *The Pragmatic Programmer* — Design by Contract (Tip 37), Crash Early (Tip 38), Assertions (Tip 39). See `references/03-pragmatic-programmer.md`.
-- Meyer, *Object-Oriented Software Construction* — the original formulation of Design by Contract (preconditions, postconditions, invariants).
+Read [examples and sources](references/examples-and-sources.md) when a concrete
+counterexample, worked example, or source context would clarify these decisions.
+Use the core guidance above directly for routine work.
