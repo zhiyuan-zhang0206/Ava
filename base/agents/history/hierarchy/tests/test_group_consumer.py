@@ -21,6 +21,7 @@ from base.agents.history.hierarchy import group_consumer as gc
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.group import Group, GroupCall, OpenNode, parse_groups
 from base.agents.history.hierarchy.group_store import (
+    GroupOrderError,
     claim_check,
     load_last_checked,
     load_open_nodes,
@@ -406,3 +407,22 @@ async def test_an_old_workers_node_is_never_an_open_node_of_the_tree(
             "UPDATE understanding_nodes SET engine_version = '0.3' WHERE id = %s", (ids[0],)
         )
     assert [n.id for n in await load_open_nodes(aops_pool, AGENT, 1)] == ids[1:]
+
+
+async def test_a_group_may_not_close_across_an_earlier_open_node(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """A leaf of an earlier span landed after the snapshot: closing the later group would seal it
+    inside the gap, so the write is refused and nothing changes."""
+    ids = await _fill(aops_pool, 5, start=5)
+    nodes = await load_open_nodes(aops_pool, AGENT, 1)
+    late = await _add_leaf(aops_pool, 0)
+    assert await claim_check(aops_pool, AGENT, 1)
+    with pytest.raises(GroupOrderError, match=f"open node {late}"):
+        await write_groups(
+            aops_pool, AGENT, 1, nodes, [Group(ids[0], ids[2], "g")], model="m", check_key="ck"
+        )
+    assert await _parents(aops_pool) == []
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT count(*) FROM understanding_nodes WHERE parent_id IS NOT NULL")
+        assert _first(await cur.fetchone()) == 0
