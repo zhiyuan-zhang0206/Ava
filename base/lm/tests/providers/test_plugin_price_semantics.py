@@ -101,3 +101,28 @@ def test_flat_plugin_price_remains_an_unbounded_compatibility_shortcut() -> None
     assert book.rates_at(model, datetime(2100, 1, 1, 2, tzinfo=UTC), 300_000) == Rates(
         1.0, 0.1, 3.0
     )
+
+
+def test_haiku_5_5_whole_request_price_boundary_includes_cached_input() -> None:
+    low = Rates(0.10, 0.01, 0.50, cache_write_5m=0.125, cache_write_1h=0.20)
+    high = Rates(0.50, 0.05, 2.50, cache_write_5m=0.625, cache_write_1h=1.0)
+    assert rates_at("claude-haiku-5-5", _FUTURE, 100_000) == low
+    assert rates_at("claude-haiku-5-5", _FUTURE, 100_001) == high
+    # Cache reads and both cache-write TTLs count toward the input threshold.
+    for total, rates in ((100_000, low), (100_001, high)):
+        expected = (
+            (total - 90_000) * rates.cache_miss
+            + 80_000 * rates.cache_hit
+            + 5_000 * (rates.cache_write_5m or 0)
+            + 5_000 * (rates.cache_write_1h or 0)
+            + 1_000 * rates.output
+        ) / 1_000_000
+        assert quote(
+            "claude-haiku-5-5",
+            total,
+            1_000,
+            80_000,
+            at=_FUTURE,
+            cache_write_5m=5_000,
+            cache_write_1h=5_000,
+        ) == CostQuote(cost_usd=expected, rates=rates)
