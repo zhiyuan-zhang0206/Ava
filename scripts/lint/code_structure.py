@@ -371,13 +371,21 @@ def _parse_baseline(
 
     The comparison revision may still contain empty budget or locality sections from
     before retirement. They convey no allowance and are discarded after validation.
+    Historical patch-target counts are parsed and discarded; current fields are forbidden.
     """
     retired = (
         ("directories", "files", *quality_budget.QUALITY_SECTIONS, *locality.STRICT_SECTIONS)
         if historical
         else ()
     )
-    baseline = baseline_shards.merge(shards, (*_SITE_SECTIONS, *retired))
+    historical_patch = ("patch_targets",) if historical else ()
+    baseline = baseline_shards.merge(shards, (*_SITE_SECTIONS, *retired, *historical_patch))
+    # Immutable comparison revisions may retain old patch debt; it grants no allowance.
+    historical_entries = baseline.pop("patch_targets", {})
+    if historical_entries:
+        locality.validate_entries(
+            "patch_targets", historical_entries, (*_SCAN_DIRS, "tests", "scripts")
+        )
     for kind in retired:
         if baseline.pop(kind):
             raise ValueError(f"retired {kind} baseline must be empty")
