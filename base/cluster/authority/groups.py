@@ -49,6 +49,8 @@ _GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
 _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     # Claim polling and agent status/liveness; INSERT on agents_meta stays with spawn.
     ("SELECT, UPDATE", ("inbound_messages", "agents_meta")),
+    # Original lifecycle source projection locks and updates its retained restart receipt.
+    ("UPDATE", ("native_restart_commands",)),
     # Agent-side self-lifecycle inbounds (terminate / restart / compact).
     ("INSERT", ("inbound_messages",)),
     # register_self / mark_stopping and the deploy posture on every start.

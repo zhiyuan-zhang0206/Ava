@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import psycopg
 import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg.types.json import Jsonb
 
+from base.agents.incarnation.native_restart_models import (
+    NativeRestartAcceptance,
+    NativeRestartRequest,
+)
+from base.agents.incarnation.native_work_models import NativeWorkTarget
 from tests.base.test_runner_role import (
     _assert_alert_writes_denied,
     _exercise_impersonation_entry_grants,
@@ -374,3 +382,75 @@ def test_understanding_queue_insert_grant_reaches_a_cluster_born_before_the_entr
     _grant_runner(runner_db)
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
         _exercise_understanding_queue_grants(conn, 880_040)
+
+
+@pytest.mark.parametrize("refresh", [False, True])
+def test_runner_projects_original_restart_receipt_without_create_or_delete_grants(
+    runner_db: str, refresh: bool
+) -> None:
+    """Actual source UPDATE projects APPLIED/OBSERVED using the runner login."""
+    _grant_runner(runner_db)
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        row = conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
+        assert row is not None
+        agent_id = row[0]
+        conn.execute("INSERT INTO agents_meta(id,status) VALUES(%s,'idling')", (agent_id,))
+        target = NativeWorkTarget(
+            protocol=1,
+            work_id=uuid4(),
+            agent_id=agent_id,
+            machine="runner-test",
+            generation=uuid4(),
+            owner=uuid4(),
+        )
+        row = conn.execute(
+            "INSERT INTO inbound_messages(agent_id,content,kind,source,status,claimed_at,target_generation,target_owner) "
+            "VALUES(%s,'','restart','user','claimed',now(),%s,%s) RETURNING id",
+            (agent_id, target.generation, target.owner),
+        ).fetchone()
+        assert row is not None
+        command_id = row[0]
+        acceptance = NativeRestartAcceptance(
+            command_id=command_id, target=target, config_overlay=None
+        )
+        conn.execute(
+            "INSERT INTO native_restart_commands(operation_key,command_id,agent_id,work_id,"
+            "target_generation,target_owner,request_hash,request,acceptance) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                "runner-restart",
+                command_id,
+                agent_id,
+                target.work_id,
+                target.generation,
+                target.owner,
+                "0" * 64,
+                Jsonb(NativeRestartRequest(target=target).model_dump(mode="json")),
+                Jsonb(acceptance.model_dump(mode="json")),
+            ),
+        )
+        if refresh:
+            conn.execute("REVOKE UPDATE ON native_restart_commands FROM ava_runner")
+    if refresh:
+        with (
+            psycopg.connect(_runner_url(runner_db), autocommit=True) as conn,
+            pytest.raises(psycopg.errors.InsufficientPrivilege),
+        ):
+            conn.execute("UPDATE inbound_messages SET applied_at=now() WHERE id=%s", (command_id,))
+        _grant_runner(runner_db)
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+        conn.execute("UPDATE inbound_messages SET applied_at=now() WHERE id=%s", (command_id,))
+        assert conn.execute(
+            "SELECT outcome,applied_at IS NOT NULL,observed_at IS NULL FROM native_restart_commands WHERE command_id=%s",
+            (command_id,),
+        ).fetchone() == ("applied", True, True)
+        conn.execute(
+            "UPDATE inbound_messages SET observed_at=now(),status='done' WHERE id=%s", (command_id,)
+        )
+        assert conn.execute(
+            "SELECT outcome,observed_at IS NOT NULL FROM native_restart_commands WHERE command_id=%s",
+            (command_id,),
+        ).fetchone() == ("observed", True)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("DELETE FROM native_restart_commands WHERE command_id=%s", (command_id,))
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("INSERT INTO native_restart_commands(operation_key) VALUES('forbidden')")
