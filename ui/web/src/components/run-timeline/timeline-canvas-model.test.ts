@@ -137,4 +137,12 @@ describe("frameOf", () => {
     expect(frameOf([{ x0: 999, x1: 1000 }], 6, 1000)).toEqual({ left: 994, width: 6 });
     expect(frameOf([], 6, 1000)).toBeNull();
   });
+
+  it("frames only the visible part of an item running past an edge, and nothing for one off the track", () => {
+    // A bar from -26 to 141 is framed from 0 to 141, not shifted right to keep its full width.
+    expect(frameOf([{ x0: -26, x1: 141 }], 0, 860)).toEqual({ left: 0, width: 141 });
+    expect(frameOf([{ x0: 800, x1: 900 }], 0, 860)).toEqual({ left: 800, width: 60 });
+    expect(frameOf([{ x0: -40, x1: -10 }], 0, 860)).toBeNull();
+    expect(frameOf([{ x0: 900, x1: 950 }], 0, 860)).toBeNull();
+  });
 });
