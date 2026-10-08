@@ -1,11 +1,5 @@
 {
   "ambient_state": {
-    "services/entrypoints/im_bridge/adapters/feishu.py::asyncio-task:FeishuAdapter._start_poller": 1,
-    "services/entrypoints/im_bridge/adapters/feishu.py::thread:FeishuAdapter.start": 1,
-    "services/entrypoints/im_bridge/adapters/telegram.py::asyncio-task:TelegramAdapter.start": 1,
-    "services/entrypoints/im_bridge/adapters/weixin.py::asyncio-task:WeixinAdapter.start": 1,
-    "services/entrypoints/im_bridge/core.py::asyncio-task:IMBridgeCore._ensure_subscription": 1,
-    "services/entrypoints/im_bridge/core.py::asyncio-task:IMBridgeCore._start_typing": 1,
-    "services/entrypoints/im_bridge/core.py::asyncio-task:IMBridgeCore.ensure_outbox_replay": 1
+    "services/entrypoints/im_bridge/adapters/feishu.py::thread:FeishuAdapter.start": 1
   }
 }

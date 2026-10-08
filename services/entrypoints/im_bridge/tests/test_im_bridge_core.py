@@ -10,15 +10,24 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
+from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
-from services.entrypoints.im_bridge.types import ChatState, IMAdapter, Reply, SendNotStartedError
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.types import (
+    ChatState,
+    IMAdapter,
+    Reply,
+    RetryableTransportError,
+    SendNotStartedError,
+    SendOutcomeUncertainError,
+)
 
 
 def _row(
@@ -150,21 +159,28 @@ class FakeGateway:
     ) -> None:
         if self.send_failures > 0:
             self.send_failures -= 1
-            raise RuntimeError("gateway down")
+            raise RetryableTransportError("gateway down")
         self.sent.append((agent_id, text, source))
         self.sent_keys.append(idempotency_key)
 
     async def stream_events(self, agent_id: int) -> Any:
         if self.stream_failures > 0:
             self.stream_failures -= 1
-            raise RuntimeError("stream down")
+            raise RetryableTransportError("stream down")
         # Park forever — the subscription task is cancelled at test teardown.
         await asyncio.Event().wait()
         yield None  # pragma: no cover - unreachable
 
 
-def create_test_core(gateway: FakeGateway, **config: Any) -> IMBridgeCore:
-    core = IMBridgeCore(im_bridge_config(**config), gateway, db_pool=TEST_POOL)  # type: ignore[arg-type]
+def create_test_core(
+    gateway: FakeGateway, *, tasks: asyncio.TaskGroup | None = None, **config: Any
+) -> IMBridgeCore:
+    core = IMBridgeCore(
+        im_bridge_config(**config),
+        cast(GatewayClient, gateway),
+        db_pool=TEST_POOL,
+        tasks=tasks if tasks is not None else asyncio.TaskGroup(),
+    )
     telegram = FakePlainAdapter()
     telegram.channel = "telegram"
     core.register(telegram)
@@ -190,305 +206,331 @@ def _text(reply: object) -> str:
     return "\n".join(r.text for r in replies if r is not None)  # type: ignore[union-attr]
 
 
-def test_cmd_list_renders_agent_id() -> None:
+async def test_cmd_list_renders_agent_id() -> None:
     """/list renders rows from the real shape — regression for KeyError('id')."""
-    gateway = FakeGateway(
-        agents=[
-            _row(405, label="Ava \u8d1f\u8d23\u4eba"),
-            _row(228, label=None, status="running"),
-            _row(999, label="gone", status="terminated"),  # filtered out
-        ]
-    )
-    # no adapter registered -> plain text-list path (the button path is
-    # covered in the v3 section with a button-capable adapter)
-    out = asyncio.run(_core(gateway)._cmd_list("telegram"))
-    assert isinstance(out, Reply)
-    text = _text(out)
-    assert "405  Ava \u8d1f\u8d23\u4eba  [idling]" in text
-    assert f"228  {copy.UNNAMED_LABEL}  [running]" in text
-    assert "999" not in text
-    assert copy.LIVE_AGENTS_TITLE in text
-    assert out.buttons is None
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[
+                _row(405, label="Ava \u8d1f\u8d23\u4eba"),
+                _row(228, label=None, status="running"),
+                _row(999, label="gone", status="terminated"),  # filtered out
+            ]
+        )
+        # no adapter registered -> plain text-list path (the button path is
+        # covered in the v3 section with a button-capable adapter)
+        out = await _core(gateway, tasks=_owned_tasks)._cmd_list("telegram")
+        assert isinstance(out, Reply)
+        text = _text(out)
+        assert "405  Ava \u8d1f\u8d23\u4eba  [idling]" in text
+        assert f"228  {copy.UNNAMED_LABEL}  [running]" in text
+        assert "999" not in text
+        assert copy.LIVE_AGENTS_TITLE in text
+        assert out.buttons is None
 
 
-def test_cmd_list_no_alive_agents() -> None:
-    gateway = FakeGateway(agents=[_row(1, status="terminated")])
-    out = asyncio.run(_core(gateway)._cmd_list("telegram"))
-    assert _text(out) == copy.NO_LIVE_AGENTS
+async def test_cmd_list_no_alive_agents() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(agents=[_row(1, status="terminated")])
+        out = await _core(gateway, tasks=_owned_tasks)._cmd_list("telegram")
+        assert _text(out) == copy.NO_LIVE_AGENTS
 
 
-def test_cmd_list_pages_live_agents_only() -> None:
-    gateway = FakeGateway(
-        agents=[_row(agent_id) for agent_id in range(1, 102)]
-        + [_row(agent_id, status="terminated") for agent_id in range(102, 120)]
-    )
-    text = _text(asyncio.run(_core(gateway)._cmd_list("telegram")))
-    assert len(text.splitlines()) == 102
-    assert gateway.directory_calls == [("live", "", None), ("live", "", 2)]
-    assert gateway.detail_calls == []
+async def test_cmd_list_pages_live_agents_only() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[_row(agent_id) for agent_id in range(1, 102)]
+            + [_row(agent_id, status="terminated") for agent_id in range(102, 120)]
+        )
+        text = _text(await _core(gateway, tasks=_owned_tasks)._cmd_list("telegram"))
+        assert len(text.splitlines()) == 102
+        assert gateway.directory_calls == [("live", "", None), ("live", "", 2)]
+        assert gateway.detail_calls == []
 
 
-def test_cmd_switch_matches_agent_id() -> None:
+async def test_cmd_switch_matches_agent_id() -> None:
     """/switch 405 selects the row by agent_id and starts the subscription."""
-    gateway = FakeGateway(
-        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
-        timeline=[
-            {"kind": "agent_chat", "item_id": "3.1", "payload": "hello"},
-        ],
-    )
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "405"))
-    assert "hello" not in _text(out), (
-        "dialog is queued instead of returned through the command send owner"
-    )
-    text = _text(out) + "\n" + _queued_text(core)
-    assert state.current_agent_id == 405
-    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
-    assert "hello" in text
-    assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "3.1")
-    assert gateway.directory_calls == []
-    assert gateway.detail_calls == [405]
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
+            timeline=[
+                {"kind": "agent_chat", "item_id": "3.1", "payload": "hello"},
+            ],
+        )
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        out = await core._cmd_switch(state, "405")
+        assert "hello" not in _text(out), (
+            "dialog is queued instead of returned through the command send owner"
+        )
+        text = _text(out) + "\n" + _queued_text(core)
+        assert state.current_agent_id == 405
+        assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
+        assert "hello" in text
+        assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "3.1")
+        assert gateway.directory_calls == []
+        assert gateway.detail_calls == [405]
 
 
-def test_cmd_switch_matches_label() -> None:
-    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "ava \u8d1f\u8d23\u4eba"))
-    assert state.current_agent_id == 405
-    assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in _text(out)
-    assert gateway.directory_calls == [("live", "ava \u8d1f\u8d23\u4eba", None)]
+async def test_cmd_switch_matches_label() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        out = await core._cmd_switch(state, "ava \u8d1f\u8d23\u4eba")
+        assert state.current_agent_id == 405
+        assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in _text(out)
+        assert gateway.directory_calls == [("live", "ava \u8d1f\u8d23\u4eba", None)]
 
 
-def test_cmd_switch_label_pages_exact_matches_and_prefers_live() -> None:
-    gateway = FakeGateway(
-        agents=[_row(1, label="Target")]
-        + [_row(agent_id, label="target-extra") for agent_id in range(2, 102)]
-        + [_row(102, label="target", status="terminated")]
-    )
-    state = ChatState("telegram", "12345")
-    asyncio.run(_core(gateway)._cmd_switch(state, "TARGET"))
-    assert state.current_agent_id == 1
-    assert gateway.directory_calls == [("live", "TARGET", None), ("live", "TARGET", 2)]
-    assert gateway.detail_calls == []
+async def test_cmd_switch_label_pages_exact_matches_and_prefers_live() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[_row(1, label="Target")]
+            + [_row(agent_id, label="target-extra") for agent_id in range(2, 102)]
+            + [_row(102, label="target", status="terminated")]
+        )
+        state = ChatState("telegram", "12345")
+        await _core(gateway, tasks=_owned_tasks)._cmd_switch(state, "TARGET")
+        assert state.current_agent_id == 1
+        assert gateway.directory_calls == [("live", "TARGET", None), ("live", "TARGET", 2)]
+        assert gateway.detail_calls == []
 
 
-def test_cmd_switch_label_rejects_partial_and_terminated_matches() -> None:
-    gateway = FakeGateway(
-        agents=[_row(1, label="target-extra"), _row(2, label="target", status="terminated")]
-    )
-    state = ChatState("telegram", "12345")
-    reply = asyncio.run(_core(gateway)._cmd_switch(state, "target"))
-    assert state.current_agent_id is None
-    assert _text(reply) == copy.AGENT_CANNOT_SWITCH.format(agent_id=2, status="terminated")
-    assert gateway.directory_calls == [("live", "target", None), ("terminated", "target", None)]
+async def test_cmd_switch_label_rejects_partial_and_terminated_matches() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[_row(1, label="target-extra"), _row(2, label="target", status="terminated")]
+        )
+        state = ChatState("telegram", "12345")
+        reply = await _core(gateway, tasks=_owned_tasks)._cmd_switch(state, "target")
+        assert state.current_agent_id is None
+        assert _text(reply) == copy.AGENT_CANNOT_SWITCH.format(agent_id=2, status="terminated")
+        assert gateway.directory_calls == [("live", "target", None), ("terminated", "target", None)]
 
 
-def test_cmd_switch_replays_five_dialog_items_amid_non_dialog() -> None:
+async def test_cmd_switch_replays_five_dialog_items_amid_non_dialog() -> None:
     """/switch replays the most recent 5 dialog messages even when the raw
     timeline mixes in non-dialog items (agent_updated etc.) — the old
     limit=5 on raw items could yield as few as 2 messages (user feedback
     2026-08-05: "\u53ea\u63a8\u9001\u6700\u8fd1 2 \u6761\u592a\u5c11\u4e86")."""
-    gateway = FakeGateway(
-        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
-        timeline=[
-            {"kind": "agent_updated", "item_id": "1.0"},
-            {"kind": "agent_chat", "item_id": "1.1", "payload": "m1"},
-            {"kind": "agent_chat", "item_id": "2.1", "payload": "m2"},
-            {"kind": "agent_updated", "item_id": "3.0"},
-            {"kind": "agent_chat", "item_id": "3.1", "payload": "m3"},
-            {"kind": "agent_chat", "item_id": "4.1", "payload": "m4"},
-            {"kind": "agent_chat", "item_id": "5.1", "payload": "m5"},
-        ],
-    )
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out) + "\n" + _queued_text(core)
-    for m in ("m1", "m2", "m3", "m4", "m5"):
-        assert m in text
-    assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "5.1")
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
+            timeline=[
+                {"kind": "agent_updated", "item_id": "1.0"},
+                {"kind": "agent_chat", "item_id": "1.1", "payload": "m1"},
+                {"kind": "agent_chat", "item_id": "2.1", "payload": "m2"},
+                {"kind": "agent_updated", "item_id": "3.0"},
+                {"kind": "agent_chat", "item_id": "3.1", "payload": "m3"},
+                {"kind": "agent_chat", "item_id": "4.1", "payload": "m4"},
+                {"kind": "agent_chat", "item_id": "5.1", "payload": "m5"},
+            ],
+        )
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        out = await core._cmd_switch(state, "405")
+        text = _text(out) + "\n" + _queued_text(core)
+        for m in ("m1", "m2", "m3", "m4", "m5"):
+            assert m in text
+        assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "5.1")
 
 
-def test_cmd_switch_replay_caps_at_five() -> None:
+async def test_cmd_switch_replay_caps_at_five() -> None:
     """More than 5 dialog messages -> only the most recent 5 are replayed."""
-    gateway = FakeGateway(
-        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
-        timeline=[
-            {"kind": "agent_chat", "item_id": f"{i}.1", "payload": f"m{i}"} for i in range(1, 9)
-        ],
-    )
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out) + "\n" + _queued_text(core)
-    for m in ("m1", "m2", "m3"):
-        assert m not in text
-    for m in ("m4", "m5", "m6", "m7", "m8"):
-        assert m in text
-    assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "8.1")
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
+            timeline=[
+                {"kind": "agent_chat", "item_id": f"{i}.1", "payload": f"m{i}"} for i in range(1, 9)
+            ],
+        )
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        out = await core._cmd_switch(state, "405")
+        text = _text(out) + "\n" + _queued_text(core)
+        for m in ("m1", "m2", "m3"):
+            assert m not in text
+        for m in ("m4", "m5", "m6", "m7", "m8"):
+            assert m in text
+        assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "8.1")
 
 
-def test_cmd_switch_window_and_replay_follow_config() -> None:
+async def test_cmd_switch_window_and_replay_follow_config() -> None:
     """The raw fetch window and the replay count are cluster config (task #3696)."""
-    gateway = FakeGateway(
-        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
-        timeline=[
-            {"kind": "agent_chat", "item_id": f"{i}.1", "payload": f"m{i}"} for i in range(1, 9)
-        ],
-    )
-    core = _core(gateway, im_bridge_timeline_window=7, im_bridge_replay_messages=2)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out) + "\n" + _queued_text(core)
-    assert gateway.timeline_limits[-1] == 7
-    for m in ("m1", "m2", "m3", "m4", "m5", "m6"):
-        assert m not in text
-    for m in ("m7", "m8"):
-        assert m in text
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
+            timeline=[
+                {"kind": "agent_chat", "item_id": f"{i}.1", "payload": f"m{i}"} for i in range(1, 9)
+            ],
+        )
+        core = _core(
+            gateway, im_bridge_timeline_window=7, im_bridge_replay_messages=2, tasks=_owned_tasks
+        )
+        state = ChatState("telegram", "12345")
+        out = await core._cmd_switch(state, "405")
+        text = _text(out) + "\n" + _queued_text(core)
+        assert gateway.timeline_limits[-1] == 7
+        for m in ("m1", "m2", "m3", "m4", "m5", "m6"):
+            assert m not in text
+        for m in ("m7", "m8"):
+            assert m in text
 
 
-def test_cmd_switch_unknown_agent() -> None:
-    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "999"))
-    assert state.current_agent_id is None
-    assert copy.AGENT_NOT_FOUND.format(arg="999") in _text(out)
+async def test_cmd_switch_unknown_agent() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        out = await core._cmd_switch(state, "999")
+        assert state.current_agent_id is None
+        assert copy.AGENT_NOT_FOUND.format(arg="999") in _text(out)
 
 
-def test_cmd_status_reads_agent_id() -> None:
-    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba", status="running")])
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    state.current_agent_id = 405
-    out = asyncio.run(core._cmd_status(state))
-    text = _text(out) + "\n" + _queued_text(core)
-    assert copy.STATUS_DETAIL_LINE.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
-    assert copy.STATUS_STATE_LINE.format(status="running") in text
-    assert gateway.directory_calls == []
-    assert gateway.detail_calls == [405]
+async def test_cmd_status_reads_agent_id() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba", status="running")])
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        state.current_agent_id = 405
+        out = await core._cmd_status(state)
+        text = _text(out) + "\n" + _queued_text(core)
+        assert copy.STATUS_DETAIL_LINE.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
+        assert copy.STATUS_STATE_LINE.format(status="running") in text
+        assert gateway.directory_calls == []
+        assert gateway.detail_calls == [405]
 
 
-def test_cmd_status_clears_vanished_agent() -> None:
-    gateway = FakeGateway(agents=[])
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    state.current_agent_id = 405
-    out = asyncio.run(core._cmd_status(state))
-    assert state.current_agent_id is None
-    assert copy.CURRENT_AGENT_GONE in _text(out)
+async def test_cmd_status_clears_vanished_agent() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(agents=[])
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        state.current_agent_id = 405
+        out = await core._cmd_status(state)
+        assert state.current_agent_id is None
+        assert copy.CURRENT_AGENT_GONE in _text(out)
 
 
-def test_chat_without_switch_errors() -> None:
-    gateway = FakeGateway()
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._handle_chat(state, "hi"))
-    assert out is not None
-    assert copy.NO_AGENT_SWITCHED in _text(out)
-    assert gateway.sent == []
+async def test_chat_without_switch_errors() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway()
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        out = await core._handle_chat(state, "hi")
+        assert out is not None
+        assert copy.NO_AGENT_SWITCHED in _text(out)
+        assert gateway.sent == []
 
 
-def test_chat_forwards_to_current_agent() -> None:
-    gateway = FakeGateway()
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    state.current_agent_id = 405
-    out = asyncio.run(core._handle_chat(state, "hi"))
-    assert out is None
-    # IM is a frontend — the human through any channel is plain "user"
-    # (source whitelist: system / agent:N / user / ui:page:<name> / ...).
-    assert gateway.sent == [(405, "hi", "user")]
+async def test_chat_forwards_to_current_agent() -> None:
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway()
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        state.current_agent_id = 405
+        out = await core._handle_chat(state, "hi")
+        assert out is None
+        # IM is a frontend — the human through any channel is plain "user"
+        # (source whitelist: system / agent:N / user / ui:page:<name> / ...).
+        assert gateway.sent == [(405, "hi", "user")]
 
 
 # --- v2: switch semantics / persistence / filtering / rendering ---
 
 
-def test_switch_without_arg_is_usage_error() -> None:
+async def test_switch_without_arg_is_usage_error() -> None:
     """/switch with no argument is an error — the picker lives on /list's
     tap-to-switch card, not here (user ruling 2026-08-03)."""
-    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, ""))
-    assert isinstance(out, Reply)
-    assert copy.SWITCH_USAGE in out.text
-    assert out.buttons is None
-    assert state.current_agent_id is None  # an error never switches
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        out = await core._cmd_switch(state, "")
+        assert isinstance(out, Reply)
+        assert copy.SWITCH_USAGE in out.text
+        assert out.buttons is None
+        assert state.current_agent_id is None  # an error never switches
 
 
-def test_restore_subscriptions_rebuilds_after_restart(
+async def test_restore_subscriptions_rebuilds_after_restart(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
     """A fresh core (daemon restart) rebuilds SSE subscriptions from the
     persisted switch_state — agent replies must flow again without the user
     re-running /switch (Task #804)."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    asyncio.run(core._cmd_switch(state, "405"))
-    assert core._subscriptions  # subscription created by the switch
+    async with owned_tasks() as _owned_tasks:
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        await core._cmd_switch(state, "405")
+        assert core._subscriptions  # subscription created by the switch
 
-    # a fresh core simulating daemon restart: switch_state restored, but the
-    # in-memory subscription is gone — restore_subscriptions() rebuilds it
-    core2 = _core(FakeGateway(agents=[]))
-    assert core2._subscriptions == {}
-    asyncio.run(core2.restore_subscriptions())
-    assert ("telegram", "12345") in core2._subscriptions
-    assert core2._subscriptions[("telegram", "12345")] is not None
-
-
-def test_handle_chat_ensures_subscription(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Sending a chat message must (re)create the push subscription even if
-    it was lost (e.g. daemon restarted since the last /switch)."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    gateway = FakeGateway()
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    state.current_agent_id = 405
-    asyncio.run(core._handle_chat(state, "hi"))
-    assert ("telegram", "12345") in core._subscriptions
-    # and it stays a single subscription on the next message
-    asyncio.run(core._handle_chat(state, "again"))
-    assert len(core._subscriptions) == 1
+        # a fresh core simulating daemon restart: switch_state restored, but the
+        # in-memory subscription is gone — restore_subscriptions() rebuilds it
+        core2 = _core(FakeGateway(agents=[]), tasks=_owned_tasks)
+        assert core2._subscriptions == {}
+        await core2.restore_subscriptions()
+        assert ("telegram", "12345") in core2._subscriptions
+        assert core2._subscriptions[("telegram", "12345")] is not None
 
 
-def test_switch_persists_across_restart(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """The switched agent survives a core restart: state is read back from
-    the switch_state file when the chat is next seen."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    asyncio.run(core._cmd_switch(state, "405"))
-    assert state.current_agent_id == 405
-    assert (tmp_path / "state" / "im_bridge" / "switch_state.json").exists()
-
-    # a fresh core (simulating daemon restart) restores the binding
-    core2 = _core(FakeGateway(agents=[]))
-    state2 = core2._get_or_create_state("telegram", "12345")
-    assert state2.current_agent_id == 405
-
-
-def test_switch_state_cleared_when_agent_vanishes(
+async def test_handle_chat_ensures_subscription(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    asyncio.run(core._cmd_switch(state, "405"))
-    # agent disappears; /status clears and persists the clearing
-    core2 = _core(FakeGateway(agents=[]))
-    state2 = core2._get_or_create_state("telegram", "12345")
-    out = asyncio.run(core2._cmd_status(state2))
-    assert state2.current_agent_id is None
-    assert copy.CURRENT_AGENT_GONE in _text(out)
-    core3 = _core(FakeGateway(agents=[]))
-    assert core3._get_or_create_state("telegram", "12345").current_agent_id is None
+    """Sending a chat message must (re)create the push subscription even if
+    it was lost (e.g. daemon restarted since the last /switch)."""
+    async with owned_tasks() as _owned_tasks:
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        gateway = FakeGateway()
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        state.current_agent_id = 405
+        await core._handle_chat(state, "hi")
+        assert ("telegram", "12345") in core._subscriptions
+        # and it stays a single subscription on the next message
+        await core._handle_chat(state, "again")
+        assert len(core._subscriptions) == 1
+
+
+async def test_switch_persists_across_restart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """The switched agent survives a core restart: state is read back from
+    the switch_state file when the chat is next seen."""
+    async with owned_tasks() as _owned_tasks:
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        await core._cmd_switch(state, "405")
+        assert state.current_agent_id == 405
+        assert (tmp_path / "state" / "im_bridge" / "switch_state.json").exists()
+
+        # a fresh core (simulating daemon restart) restores the binding
+        core2 = _core(FakeGateway(agents=[]), tasks=_owned_tasks)
+        state2 = core2._get_or_create_state("telegram", "12345")
+        assert state2.current_agent_id == 405
+
+
+async def test_switch_state_cleared_when_agent_vanishes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    async with owned_tasks() as _owned_tasks:
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        await core._cmd_switch(state, "405")
+        # agent disappears; /status clears and persists the clearing
+        core2 = _core(FakeGateway(agents=[]), tasks=_owned_tasks)
+        state2 = core2._get_or_create_state("telegram", "12345")
+        out = await core2._cmd_status(state2)
+        assert state2.current_agent_id is None
+        assert copy.CURRENT_AGENT_GONE in _text(out)
+        core3 = _core(FakeGateway(agents=[]), tasks=_owned_tasks)
+        assert core3._get_or_create_state("telegram", "12345").current_agent_id is None
 
 
 def test_dialog_filter_keeps_only_user_and_agent_text() -> None:
@@ -510,28 +552,34 @@ def test_dialog_filter_keeps_only_user_and_agent_text() -> None:
     assert kept == ["inbound_chat:user", "agent_chat:None"]
 
 
-def test_switch_summary_uses_strict_filter() -> None:
+async def test_switch_summary_uses_strict_filter() -> None:
     """Recent-messages summary shows only user+agent text — code/output rows
     from the same window are not echoed."""
-    gateway = FakeGateway(
-        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
-        timeline=[
-            {"kind": "inbound_chat", "source": "agent:1818", "item_id": "1.0", "payload": "peer"},
-            {"kind": "agent_chat", "item_id": "2.0", "payload": "real answer"},
-            {"kind": "agent_code", "item_id": "3.0", "payload": "print(1)"},
-            {"kind": "code_output", "item_id": "4.0", "payload": "1"},
-        ],
-    )
-    core = _core(gateway)
-    state = ChatState("telegram", "12345")
-    out = asyncio.run(core._cmd_switch(state, "405"))
-    text = _text(out) + "\n" + _queued_text(core)
-    assert "real answer" in text
-    assert "peer" not in text
-    assert "print(1)" not in text
-    # Only the command header returns inline; the qualified dialog is durably queued.
-    assert isinstance(out, list) and len(out) == 1
-    assert _queued_text(core) == "[Ava #405] real answer"
+    async with owned_tasks() as _owned_tasks:
+        gateway = FakeGateway(
+            agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
+            timeline=[
+                {
+                    "kind": "inbound_chat",
+                    "source": "agent:1818",
+                    "item_id": "1.0",
+                    "payload": "peer",
+                },
+                {"kind": "agent_chat", "item_id": "2.0", "payload": "real answer"},
+                {"kind": "agent_code", "item_id": "3.0", "payload": "print(1)"},
+                {"kind": "code_output", "item_id": "4.0", "payload": "1"},
+            ],
+        )
+        core = _core(gateway, tasks=_owned_tasks)
+        state = ChatState("telegram", "12345")
+        out = await core._cmd_switch(state, "405")
+        text = _text(out) + "\n" + _queued_text(core)
+        assert "real answer" in text
+        assert "peer" not in text
+        assert "print(1)" not in text
+        # Only the command header returns inline; the qualified dialog is durably queued.
+        assert isinstance(out, list) and len(out) == 1
+        assert _queued_text(core) == "[Ava #405] real answer"
 
 
 def test_render_item_tags_speaker() -> None:
@@ -559,7 +607,7 @@ class FakeTypingAdapter(IMAdapter):
         self.typing_calls: list[str] = []
         self.owner_sent: list[str] = []
 
-    async def start(self) -> None:
+    async def start(self, tasks: asyncio.TaskGroup) -> None:
         pass
 
     async def stop(self) -> None:
@@ -685,7 +733,7 @@ class FakeFailingWeixinAdapter(FakePlainAdapter):
     ) -> None:
         del buttons, markdown
         self.send_attempts += 1
-        raise RuntimeError("iLink sendmessage error: ret=-2 errmsg=prepare failed")
+        raise SendOutcomeUncertainError("response lost after provider submission")
 
 
 class FakeFlakyWeixinAdapter(FakePlainAdapter):
@@ -730,16 +778,17 @@ class FakeFlakyWeixinAdapter(FakePlainAdapter):
 
 
 async def test_spawn_submission_forwards_adapter_event_key() -> None:
-    from services.entrypoints.im_bridge.types import InboundMessage
+    async with owned_tasks() as _owned_tasks:
+        from services.entrypoints.im_bridge.types import InboundMessage
 
-    gateway = FakeGateway()
-    core = _core(gateway)
-    await core.handle_inbound(
-        InboundMessage(
-            channel="telegram",
-            chat_id="42",
-            text="spawn:go",
-            idempotency_key="telegram-callback:one",
+        gateway = FakeGateway()
+        core = _core(gateway, tasks=_owned_tasks)
+        await core.handle_inbound(
+            InboundMessage(
+                channel="telegram",
+                chat_id="42",
+                text="spawn:go",
+                idempotency_key="telegram-callback:one",
+            )
         )
-    )
-    assert gateway.creation_keys == ["telegram-callback:one"]
+        assert gateway.creation_keys == ["telegram-callback:one"]

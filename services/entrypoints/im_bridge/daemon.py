@@ -2,9 +2,8 @@
 
 Each IM channel is one adapter (service) sharing the bridge core: message
 envelope, command routing, per-channel session state, and SSE subscription
-push. Adapters are optional at import time — a channel whose adapter module
-is missing or whose credentials are unset logs "skipped" and the daemon keeps
-serving the others.
+push. Channels disabled by configuration or without configured credentials remain
+inactive. Import, configuration and programming errors fail the daemon.
 
 Usage:
     .venv/bin/python -m services.entrypoints.im_bridge.daemon
@@ -17,9 +16,12 @@ import json
 import logging
 import signal
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
+from psycopg_pool import PoolTimeout
 
 from base.cluster.machine import daemon_acceptance, gateway_auth_headers
 from base.config import settings
@@ -37,6 +39,7 @@ from services.entrypoints.im_bridge.config import (
     TelegramCredentialsConfig,
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
+from services.entrypoints.im_bridge.types import NETWORK_ERRORS
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.entrypoints.im_bridge.daemon")
@@ -144,34 +147,20 @@ def _import_adapter(name: str) -> Any:
 
 
 def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
-    """Import each channel adapter; a missing module or failed import logs and
-    skips — one broken channel must not take down the bridge."""
+    """Compose configured adapters; invalid configuration or imports fail startup."""
 
     loaded: list[Any] = []
     for name, build_config in _ADAPTERS:
         if name in disabled:
             _log.info("im_bridge: adapter %s disabled by config (AVA_IM_DISABLED_ADAPTERS)", name)
             continue
-        try:
-            mod = _import_adapter(name)
-            adapter_cls = mod.ADAPTER_CLASS
-            adapter = adapter_cls(core, *(() if build_config is None else (build_config(),)))
-            core.register(adapter)
-            loaded.append(adapter)
-            _log.info("im_bridge: adapter %s loaded", name)
-        except ImportError as exc:
-            _log.warning("im_bridge: adapter %s unavailable (skipped): %r", name, exc)
-        except Exception:
-            _log.exception("im_bridge: adapter %s failed to load (skipped)", name)
+        mod = _import_adapter(name)
+        adapter_cls = mod.ADAPTER_CLASS
+        adapter = adapter_cls(core, *(() if build_config is None else (build_config(),)))
+        core.register(adapter)
+        loaded.append(adapter)
+        _log.info("im_bridge: adapter %s loaded", name)
     return loaded
-
-
-async def _contained(work: Awaitable[None], what: str) -> None:
-    """Run one daemon-long loop so a failure ends that loop alone, logged, never the daemon."""
-    try:
-        await work
-    except Exception:
-        _log.exception("im_bridge: %s failed", what)
 
 
 async def _liveness_loop(liveness: Liveness) -> None:
@@ -206,7 +195,12 @@ async def _timeline_outbound_loop(core: Any, alerts: AlertOutboundBridge) -> Non
             try:
                 await alerts.poll_once()
                 await core.poll_timeline_outbound()
-            except Exception as exc:
+            except (
+                *NETWORK_ERRORS,
+                ConnectionDoesNotExist,
+                ConnectionFailure,
+                PoolTimeout,
+            ) as exc:
                 _log.warning("im_bridge: outbound round failed class=%s", type(exc).__name__)
         await asyncio.sleep(3.0)
 
@@ -243,6 +237,44 @@ async def _handle_send(core: Any) -> Any:
     return handle
 
 
+def _begin_shutdown(adapters: list[Any]) -> list[BaseException]:
+    errors: list[BaseException] = []
+    for adapter in adapters:
+        try:
+            adapter.begin_shutdown()
+        except BaseException as error:
+            errors.append(error)
+    return errors
+
+
+async def _stop_resources(
+    core: Any, adapters: list[Any], health: Any, pool: Any
+) -> list[BaseException]:
+    """Attempt every owned resource once, returning faults for the daemon to expose."""
+    errors: list[BaseException] = []
+    if core is not None:
+        try:
+            await core.stop()
+        except BaseException as error:
+            errors.append(error)
+    for adapter in adapters:
+        try:
+            await adapter.stop()
+        except BaseException as error:
+            errors.append(error)
+    if health is not None:
+        try:
+            await stop_health_server(health)
+        except BaseException as error:
+            errors.append(error)
+    for close in (pool.close, _remove_pidfile):
+        try:
+            close()
+        except BaseException as error:
+            errors.append(error)
+    return errors
+
+
 async def run() -> None:
     """Start the daemon: healthz -> pidfile -> load adapters -> serve."""
     if _is_running():
@@ -258,70 +290,58 @@ async def run() -> None:
     from services.entrypoints.im_bridge.core import IMBridgeCore
 
     db_pool = Database.from_settings().pool()
-    config = im_bridge_config()
-    core = IMBridgeCore(config, gateway_client(config), db_pool=db_pool)
-    alerts = AlertOutboundBridge(
-        core.outbound_store, core.adapters, enabled=settings.alerts.im_notify_enabled
-    )
-    liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint()
+    core = None
+    health = None
+    adapters: list[Any] = []
+    cleanup_errors: list[BaseException] = []
+    primary: BaseException | None = None
     try:
-        await asyncio.to_thread(core.notice_bridge.initialize_poll)
-        health = await start_health_server(
-            "im_bridge",
-            endpoint.health_port,
-            liveness=liveness,
-            extra_routes={
-                ("POST", "/send"): await _handle_send(core),
-                ("POST", "/send/alert-outbound-v1"): alerts.handle,
-            },
-            # Bearer = a machine API token of the write generation (the gateway's, or this
-            # unit's); an open cluster (no secret) gets no auth — consistent with the gateway.
-            auth_digests=daemon_acceptance(),
-        )
-    except Exception:
-        db_pool.close()
-        _remove_pidfile()
-        raise
-    _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)
-
-    adapters = _load_adapters(core, frozenset(config.im_disabled_adapters))
-    if not adapters:
-        _log.warning("im_bridge: no adapters loaded — nothing to serve")
-
-    try:
-        # Drain anything the previous process outboxed when the gateway was
-        # down (Task #1032: user messages must not drop across restarts).
-        core.ensure_outbox_replay()
-        # Rebuild SSE push subscriptions from persisted switch state — they
-        # are memory-only and a restart drops them (Task #804: agent replies
-        # silently stopped reaching Telegram after the 04:32 restart).
-        await core.restore_subscriptions()
-        # One TaskGroup owns the heartbeat and the notice poll; leaving the
-        # block (SIGTERM/SIGINT cancels it) cancels both before the finally.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_contained(_liveness_loop(liveness), "liveness loop"))
-            loops.create_task(_contained(_notice_loop(core), "notice loop"))
-            await asyncio.gather(*(a.start() for a in adapters))
-            if adapters:
-                core.outbound_worker.validate_pool()
-                loops.create_task(_timeline_outbound_loop(core, alerts))
-            # Every adapter's start() returns once its connection loop is launched
-            # (long polls / ws threads run in the background). The daemon now stays
-            # alive forever; SIGTERM/SIGINT unwinds through the finally below.
-            await asyncio.Event().wait()
-    finally:
-        for a in adapters:
             try:
-                await a.stop()
-            except Exception:
-                _log.warning(
-                    "[im_bridge] adapter %s failed to stop cleanly", type(a).__name__, exc_info=True
+                config = im_bridge_config()
+                core = IMBridgeCore(config, gateway_client(config), db_pool=db_pool, tasks=loops)
+                alerts = AlertOutboundBridge(
+                    core.outbound_store, core.adapters, enabled=settings.alerts.im_notify_enabled
                 )
-        await stop_health_server(health)
-        db_pool.close()
-        _remove_pidfile()
+                liveness = Liveness(_LIVENESS_TIMEOUT_S)
+                endpoint = _endpoint()
+                await asyncio.to_thread(core.notice_bridge.initialize_poll)
+                health = await start_health_server(
+                    "im_bridge",
+                    endpoint.health_port,
+                    liveness=liveness,
+                    extra_routes={
+                        ("POST", "/send"): await _handle_send(core),
+                        ("POST", "/send/alert-outbound-v1"): alerts.handle,
+                    },
+                    auth_digests=daemon_acceptance(),
+                )
+                _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)
+                adapters = _load_adapters(core, frozenset(config.im_disabled_adapters))
+                if not adapters:
+                    _log.warning("im_bridge: no adapters loaded — nothing to serve")
+                core.ensure_outbox_replay()
+                await core.restore_subscriptions()
+                loops.create_task(_liveness_loop(liveness))
+                loops.create_task(_notice_loop(core))
+                await asyncio.gather(*(a.start(loops) for a in adapters))
+                if adapters:
+                    core.outbound_worker.validate_pool()
+                    loops.create_task(_timeline_outbound_loop(core, alerts))
+                await asyncio.Event().wait()
+            finally:
+                cleanup_errors.extend(_begin_shutdown(adapters))
+    except BaseException as error:
+        primary = error
+    finally:
+        # Children have drained; every shared resource is attempted even after a stop fault.
+        cleanup_errors.extend(await _stop_resources(core, adapters, health, db_pool))
         _log.info("[im_bridge] daemon stopped")
+    if cleanup_errors:
+        errors = ([primary] if primary is not None else []) + cleanup_errors
+        raise BaseExceptionGroup("IM daemon failure and cleanup faults", errors)
+    if primary is not None:
+        raise primary
 
 
 def _gate_httpx_info_logs() -> None:
@@ -363,7 +383,7 @@ def main() -> None:
         if failures:
             _log.error("[im_bridge] async shutdown failed: %r", failures)
             code = 1
-    except Exception:
+    except (Exception, BaseExceptionGroup):
         _log.exception("[im_bridge] daemon crashed — uncaught exception escaped run()")
         code = 1
     _hard_exit(code)
