@@ -9,6 +9,7 @@ the service that holds them.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,7 +30,12 @@ from cli.start_runtime import StartRuntime
 _BROWSER_SESSION = "browser"
 
 
-def _stop_data_plane(*, skip_infra: bool, runner_only: bool) -> None:
+def _stop_data_plane(
+    *,
+    skip_infra: bool,
+    runner_only: bool,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> None:
     """Stop this cluster's own Postgres+Redis (data preserved on disk).
 
     A runner-only host has no local data plane. `skip_infra` (keep_infra — the
@@ -44,7 +50,7 @@ def _stop_data_plane(*, skip_infra: bool, runner_only: bool) -> None:
     else:
         from cli.commands.data_plane.cluster_instance import stop_cluster_instance
 
-        stop_cluster_instance()
+        stop_cluster_instance(retained_children=retained_children)
 
 
 def _reap_cluster_chrome() -> None:
@@ -150,6 +156,7 @@ def _force_stop(
     preserve_sessions: frozenset[str] = frozenset(),
     keep_browser: bool = True,
     announce: bool = False,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Explicit force-only resource stop; normal commands use _temporary_stop.
 
@@ -212,7 +219,9 @@ def _force_stop(
         _root_driver_commands.stop_root_service_tree(preserve=root_preserve, force=True)
 
     # 2) stop the data plane (data persists on disk).
-    _stop_data_plane(skip_infra=skip_infra, runner_only=runner_only)
+    _stop_data_plane(
+        skip_infra=skip_infra, runner_only=runner_only, retained_children=retained_children
+    )
 
     return 0
 
@@ -229,6 +238,7 @@ def _do_stop(
     teardown_extras: bool = False,
     force: bool = False,
     timeout: float = 300,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Shared stop kernel; only explicit force escalates a service stop."""
     if force:
@@ -239,6 +249,7 @@ def _do_stop(
             preserve_sessions=preserve_sessions,
             keep_browser=keep_browser,
             announce=announce,
+            retained_children=retained_children,
         )
     from cli.commands.lifecycle._temporary_stop import stop
 
@@ -250,6 +261,7 @@ def _do_stop(
         announce=announce,
         teardown_extras=teardown_extras,
         timeout=timeout,
+        retained_children=retained_children,
     )
 
 
@@ -261,6 +273,7 @@ def cmd_stop(
     preserve_sessions: frozenset[str] = frozenset(),
     force: bool = False,
     timeout: float = 300,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Stop this unit, including terminals and infrastructure; retain its data."""
     return _do_stop(
@@ -273,6 +286,7 @@ def cmd_stop(
         teardown_extras=True,
         force=force,
         timeout=timeout,
+        retained_children=retained_children,
     )
 
 
@@ -362,12 +376,18 @@ def _restart_runtime() -> StartRuntime:
     return runtime
 
 
-def _cmd_restart_body(*, mode: str = "smooth") -> int:
+def _cmd_restart_body(
+    *,
+    mode: str = "smooth",
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
     """Stop then start without a stdin confirmation prompt.
 
     Hosted agents drain through the shared stop boundary before service stop.
     Explicit force authorizes interrupting resource shutdown.
     """
+    if retained_children is None:
+        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
     from base.host.proc import hosting_exec_domain, hosting_supervised_session
     from cli.commands import _repo
@@ -487,6 +507,7 @@ def _cmd_restart_body(*, mode: str = "smooth") -> int:
             keep_browser=True,
             teardown_extras=False,
             force=mode == "force",
+            retained_children=retained_children,
         )
     if rc != 0:
         # The quiesce paused this host; a failed stop means no `ava start` is
@@ -500,12 +521,18 @@ def _cmd_restart_body(*, mode: str = "smooth") -> int:
     # Keep the captured runtime and the operator's durable selection through
     # startup; neither is recaptured from a later caller or moving selector.
     with status_journal.phase("start"):
-        rc = start._cmd_start_body(None, persist_services=False, runtime=runtime)
+        rc = start._cmd_start_body(
+            None, persist_services=False, runtime=runtime, retained_children=retained_children
+        )
     if owns_journal:
         status_journal.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
     return rc
 
 
-def cmd_restart(*, mode: str = "smooth") -> int:
+def cmd_restart(
+    *,
+    mode: str = "smooth",
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
     """Stop then start without a confirmation prompt."""
-    return _cmd_restart_body(mode=mode)
+    return _cmd_restart_body(mode=mode, retained_children=retained_children)

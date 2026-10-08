@@ -20,7 +20,7 @@ import shutil
 import socket
 import subprocess
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -53,6 +53,7 @@ class Born:
     home: Path
     record: cluster.ClusterRecord
     values: dict[str, str]
+    retained_children: list[subprocess.Popen[bytes]] = field(default_factory=list)
 
     @property
     def pg_port(self) -> int:
@@ -96,7 +97,12 @@ def _intent(home: Path, record: cluster.ClusterRecord, values: dict[str, str]) -
     path.chmod(0o600)
 
 
-def _teardown(home: Path, redis_port: int, admin_password: str) -> None:
+def _teardown(
+    home: Path,
+    redis_port: int,
+    admin_password: str,
+    retained_children: list[subprocess.Popen[bytes]],
+) -> None:
     try:
         pooler.stop_pgbouncer(force=True)
     finally:
@@ -105,6 +111,8 @@ def _teardown(home: Path, redis_port: int, admin_password: str) -> None:
             check=False,
             capture_output=True,
         )
+        for child in retained_children:
+            child.wait(timeout=1)
         subprocess.run(
             [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
             env=ci._redis_cli_env(admin_password),
@@ -201,7 +209,7 @@ def test_configured_roster_survives_kernel_reuse_of_closed_ports(
 
 
 def _birth(born: Born) -> None:
-    assert bringup.ensure_gateway_data_plane() == 0
+    assert bringup.ensure_gateway_data_plane(retained_children=born.retained_children) == 0
     bringup.prepare_gateway_schema()
     cmd_migrations_apply()
     bringup.complete_gateway_data_plane()
@@ -213,7 +221,12 @@ def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Born
     try:
         yield born
     finally:
-        _teardown(born.home, born.record.ports["redis"], born.values["AVA_REDIS_ADMIN_PASSWORD"])
+        _teardown(
+            born.home,
+            born.record.ports["redis"],
+            born.values["AVA_REDIS_ADMIN_PASSWORD"],
+            born.retained_children,
+        )
 
 
 @pytest.fixture
@@ -377,7 +390,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     intent = json.loads((configured.home / "start-intent.json").read_text())
     intent["phase"] = "provisioned"
     (configured.home / "start-intent.json").write_text(json.dumps(intent))
-    assert bringup.ensure_gateway_data_plane() == 1
+    assert bringup.ensure_gateway_data_plane(retained_children=configured.retained_children) == 1
     assert "no conversion exists" in capsys.readouterr().err
     assert not (configured.home / "pg").exists()
     with pytest.raises(RuntimeError, match="no database authority ledger"):
