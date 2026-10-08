@@ -314,6 +314,36 @@ async def test_connect_server_enforces_requires_before_connecting(
     assert called is False
 
 
+@pytest.mark.parametrize(
+    ("overlay", "error"),
+    [
+        ("{not json", "mcp_enabled.json"),
+        ('{"mcp_servers":{"fs":{"enabled":false}}}', "not configured"),
+    ],
+)
+async def test_overlay_error_or_disabled_server_never_starts_a_process(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scope: daemon_mod._Scope,
+    overlay: str,
+    error: str,
+) -> None:
+    import mcp.client.stdio
+
+    _write_config(fake_home, {"fs": {"command": "must-not-run"}})
+    (fake_home / "mcp_enabled.json").write_text(overlay)
+    launch = MagicMock(side_effect=AssertionError("server startup must not be reached"))
+    monkeypatch.setattr(mcp.client.stdio, "stdio_client", launch)
+    response = await daemon_mod._dispatch_with_retry(
+        {"id": 1, "method": "list_tools", "params": {"server": "fs"}}, scope
+    )
+    assert response["ok"] is False
+    assert error in response["error"]
+    launch.assert_not_called()
+    assert scope.local.sessions == {} and scope.shared.sessions == {}
+    assert await daemon_mod._handle_ping(2) == {"id": 2, "ok": True, "result": "pong"}
+
+
 def test_is_transport_error_broken_pipe() -> None:
     assert daemon_mod._is_transport_error(BrokenPipeError()) is True
 
