@@ -57,3 +57,12 @@ resource settlement removes them. The database settlement re-locks the exact
 target generation, owner, and command before clearing its active pointer.
 Persistent shell sessions deliberately retain their separate ownership and are
 not disposable exec descendants to kill wholesale.
+
+## Contract verification
+
+The host force tests exercise real thread work, exec children and late readers.
+Reader delay and bounded join are simulated at the standard-library thread
+boundary for the exact reader, while preserving force observation and successor
+isolation assertions. History owner tests verify that an incomplete settled-write
+scan propagates its failure; host reconciliation preserves the claimed row when
+the public committed-id resolver fails.
