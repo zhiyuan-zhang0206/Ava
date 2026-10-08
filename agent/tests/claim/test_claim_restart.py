@@ -11,6 +11,7 @@ from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import (
     _await_status,
@@ -27,10 +28,6 @@ from agent.tests.claim.claim_support import (
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
-from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
-from tests.path_scoped.agent_tests import (
-    _fresh_unresolved_skill_warnings as _fresh_unresolved_skill_warnings,
-)
 
 
 async def test_claim_restart_completed_kind_appends_marker_and_continues(

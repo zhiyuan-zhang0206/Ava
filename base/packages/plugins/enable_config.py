@@ -263,15 +263,6 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
     return cfg
 
 
-# Dangling names already reported through the canonical reporter in THIS
-# process. `load_for_runtime` also sits on gateway request paths
-# (ui_contributions / plugin_ui / plugin inspector), where the same dangling
-# set would otherwise re-report on every request; the first report is the
-# signal and repeats are noise. Process lifetime bounds the suppression — a
-# fresh process (next boot / request worker / CLI run) reports again.
-_dangling_reported: set[str] = set()
-
-
 def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = None) -> None:
     """Report dangling config entries through the one canonical fail-soft reporter.
 
@@ -283,12 +274,10 @@ def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = N
     `plugin_load_failed` telemetry event. The 2026-09-11 macmini incident
     (`codex_usage` / `deepseek_balance` enabled with their directories gone)
     ran for days on a plain WARNING that only a log grep ever found. Each name
-    reports once per process (see `_dangling_reported`); the caller keeps the
+    reports on each failed load; the caller keeps the
     fail-soft contract — dropping the entry must never block a start.
     """
-    fresh = sorted(set(exc.names) - _dangling_reported)
-    _dangling_reported.update(fresh)
-    for name in fresh:
+    for name in sorted(set(exc.names)):
         load_report.reporter(report)(name, exc)
 
 
@@ -303,8 +292,7 @@ def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
     must not block a service from starting or answering. This is the same
     fail-soft contract `load_extensions` follows (2026-08-28 ava_ledger
     incident); interactive CLI paths (`set_local_enabled`) keep the strict
-    `load()` and its DanglingPlugin error. Each dangling name is reported once
-    per process through `report_dangling`.
+    `load()` and its DanglingPlugin error. Each dangling name is reported on each failed load through `report_dangling`.
     """
     try:
         return load(known_plugins)

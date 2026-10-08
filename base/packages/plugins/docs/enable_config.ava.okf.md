@@ -50,6 +50,9 @@ decentralized-install **step 3**, so enable state is now fully per-machine.
 | a discovered plugin missing from the config | merged in memory as `enabled=true` (not written back) |
 | malformed JSON / schema-invalid file | fail-fast — never a silent all-enabled fallback |
 
+Each failed runtime load reports dangling names through the canonical ERROR
+and `plugin_load_failed` reporter; no process-wide cache suppresses later failures.
+
 A plugin disabled here is imported by **no** production path: host boot and
 graph build both read the enable set through `load_for_runtime`
 (issue #2161 — the boot loader used to ignore it).
