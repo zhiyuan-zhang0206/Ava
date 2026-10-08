@@ -16,25 +16,25 @@ script is outside this contract.
 
 ## Intent and SDK admission
 
-`ava.tasks.create_and_assign(..., operation_key="intent", require_idempotency=True)`
-opts in; default keyless behavior retains the existing multi-transaction recipe.
-The flag is a strict bool. Strong mode requires an explicit valid key; a supplied
-key with the flag false is rejected. Return type remains `(Task, agent_id)`.
+`ava.tasks.create_and_assign(..., operation_key="intent")` requires a valid
+explicit key. The SDK always uses atomic acceptance; no `require_idempotency`
+flag or keyless multi-transaction recipe remains. Return type is `(Task, agent_id)`.
 Both objects describe the original business acceptance, not runner readiness or
 current task state. Use task/agent reads for current state.
 
 The request contains a positive non-bool `actor_agent_id`, task title,
 description, positive parent id, canonical priority and requested reminder
 interval, plus agent label, machine and config. Unknown fields and enum values
-are rejected. The SDK preserves `None` interval intent and puts the preset in
-config; it defaults machine to its own machine before HTTP. Actor/machine/config
+are rejected. The SDK preserves `None` interval intent and puts an explicitly
+supplied preset in config; omitting a preset uses current gateway defaults.
+It defaults machine to its own machine before HTTP. Actor/machine/config
 changes under the same verified principal and key conflict; identical raw Python
 arguments from another context do not necessarily produce the same request.
 
 The SDK's identity owner requires a lease-free established agent id. Strong
 admission refuses any borrowed ExternalLease before HTTP or application database
 writes. ExternalLease callbacks cannot be serialized or revalidated by the remote
-transaction after lock waits. Legacy borrowed-lease behavior is unchanged.
+transaction after lock waits.
 Server actor/spawner fields are execution provenance, not proof of lease authority
 or a new security ACL. Scope comes from verified HTTP authentication, method,
 actual versioned path and raw key. Cookie and bearer credentials for the same
