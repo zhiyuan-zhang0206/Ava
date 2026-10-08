@@ -45,7 +45,7 @@ def test_read_enabled_fails_closed_when_malformed(unit_home: Path):
     """A present-but-malformed file RAISES (fail-closed, audit 2026-08-08 P2):
     the operator's explicit enable/disable intent is unknown, and defaulting
     to "all enabled" would silently resurrect servers the operator disabled.
-    Consumers catch the error and disable every server."""
+    Consumers report the error instead of selecting a server set."""
     from base.packages.plugins.mcp_enabled import McpEnabledConfigError
 
     local_config_path().write_text("{not json")
@@ -55,7 +55,7 @@ def test_read_enabled_fails_closed_when_malformed(unit_home: Path):
 
 def test_write_local_is_atomic_and_leaves_no_tmp(unit_home: Path):
     """write_local is temp+replace: a crash mid-write cannot leave the
-    malformed file that fail-closed reads treat as all-disabled (audit
+    malformed file that fail-closed reads reject (audit
     2026-08-08 P2 — the old bare write_text produced exactly that file on a
     partial write)."""
     cfg = McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=False)})
@@ -120,3 +120,23 @@ def test_read_enabled_raises_schema_invalid_on_bad_shape(unit_home: Path):
     local_config_path().write_text(json.dumps({"mcp_servers": {"fs": {"enabled": [1, 2]}}}))
     with pytest.raises(SchemaInvalid):
         read_enabled()
+
+
+@pytest.mark.parametrize(
+    "content", ["", "[]", "null", '{"mcp_servers":null}', '{"mcp_servers":[]}']
+)
+def test_present_invalid_overlay_cannot_default_on_or_be_overwritten(
+    unit_home: Path, content: str
+) -> None:
+    overlay = local_config_path()
+    overlay.write_text(content)
+    with pytest.raises(McpEnabledConfigError):
+        read_enabled()
+    with pytest.raises(McpEnabledConfigError):
+        set_mcp_enabled("fs", enabled=True)
+    assert overlay.read_text() == content
+
+
+def test_present_empty_object_preserves_default_on_policy(unit_home: Path) -> None:
+    local_config_path().write_text("{}")
+    assert read_enabled() == {}
