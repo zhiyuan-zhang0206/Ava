@@ -53,6 +53,9 @@ tags:
 `ava.agents.compaction` provides observed-source manual compaction and separate
 execution status; see [[ava/agents/docs/compaction.ava.okf.md]].
 
+`ava.agents.work.observe(agent_id)` and `work.cancel(target, idempotency_key=...)`
+target one observed active turn; see [[work-control.ava.okf.md]].
+
 For guaranteed plain-creation admission, set `require_idempotency=True` with an explicit 1–128 character `idempotency_key`; retain the same key, effective body and verified principal on retry. This mode rejects forks and never falls back to legacy routing. See [[strong-creation.ava.okf.md|Explicit strong creation]]. Default mode retains existing behavior but cannot promise recovery on older servers that ignore keys. Ambiguous transport outcomes are not automatically retried.
 
 `get_launch_attempt(agent_id)` observes the current attempt UUID. Explicit guarded
