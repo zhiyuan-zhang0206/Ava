@@ -84,8 +84,9 @@ _FIXES: dict[str, str] = {
     scan.INSTANCE: f"module-level instance — {_STATE_FIX}",
     scan.CONTAINER: f"module-level mutable container — {_STATE_FIX}",
     scan.CONTEXTVAR: (
-        "a ContextVar is ambient state — carry the value in the LangGraph runtime context "
-        "(`AvaContext`) instead"
+        "LangGraph Runtime[AvaContext] already carries graph-run dependencies — "
+        "do not duplicate them with a ContextVar; outside the graph, pass "
+        "the caller's context explicitly instead of adding an ambient carrier"
     ),
     scan.GLOBAL_REBIND: f"a function rebinds a module global — {_STATE_FIX}",
     scan.FOREIGN: "rebinds an attribute of another module — give the owner a setter or inject the value",
