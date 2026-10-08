@@ -179,8 +179,10 @@ os.environ["AVA_OS_JOBS_ENABLED"] = "false"
 # instead of hitting a real database. load_dotenv(override=False) won't clobber
 # these. The real per-session URLs are injected by the `_provisioned_db` /
 # `_provisioned_redis` fixtures, which start throwaway native pg/redis (tests/_containers.py).
-os.environ["AVA_DB_URL"] = "postgresql://unprovisioned@127.0.0.1:1/unprovisioned"
-os.environ["AVA_REDIS_URL"] = "redis://127.0.0.1:1/0"
+UNPROVISIONED_DB_URL = "postgresql://unprovisioned@127.0.0.1:1/unprovisioned"
+UNPROVISIONED_REDIS_URL = "redis://127.0.0.1:1/0"
+os.environ["AVA_DB_URL"] = UNPROVISIONED_DB_URL
+os.environ["AVA_REDIS_URL"] = UNPROVISIONED_REDIS_URL
 
 # The cluster secret authenticates bootstrap / /ops. Data-plane credentials
 # are independent, including in the private test bootstrap. Use a URL-safe token that

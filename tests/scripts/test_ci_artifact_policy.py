@@ -48,7 +48,7 @@ def test_every_artifact_upload_is_non_blocking() -> None:
 
 def test_coverage_uploads_retry_once_and_expose_the_outcome() -> None:
     """Coverage uploads retry a transient fault before the gate records a gap."""
-    for job_name in ("backend-shard", "backend-serial"):
+    for job_name in ("backend-shard", "backend-serial", "backend-structure"):
         job = _workflow_jobs()[job_name]
         upload = _step(job, "Upload coverage data")
         assert upload["id"] == "coverage-upload"
@@ -70,7 +70,7 @@ def test_coverage_gate_records_the_groups_that_arrived() -> None:
     """The gate scores received coverage while making dropped shard data visible."""
     jobs = _workflow_jobs()
     shard_groups = cast("list[int]", jobs["backend-shard"]["strategy"]["matrix"]["group"])
-    expected_groups = " ".join([*(str(group) for group in shard_groups), "serial"])
+    expected_groups = " ".join([*(str(group) for group in shard_groups), "serial", "static"])
 
     backend_env = jobs["backend"]["env"]
     assert isinstance(backend_env, dict)
