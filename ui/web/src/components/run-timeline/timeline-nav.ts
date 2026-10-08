@@ -46,11 +46,27 @@ export const INPUT_ROW = "input";
 export const ADDED_ROW = "added";
 export const levelRowId = (level: number) => `level-${level}`;
 
+/** Which context bars the page draws: none, the absolute size, the added size or both. */
+export type ContextBars = "off" | "absolute" | "added" | "both";
+
+/** What the page's settings keep of an agent's rows. */
+export interface RowOptions {
+  /** How many understanding-tree levels are drawn, counted from the topmost; null draws them all. */
+  levels: number | null;
+  context: ContextBars;
+}
+
+export const ALL_ROWS: RowOptions = { levels: null, context: "both" };
+
 /** The rows top to bottom, as the page draws them. */
-export function navRowIds(data: NavData): string[] {
-  const rows = levelsTopFirst(data.nodes).map(levelRowId);
+export function navRowIds(data: NavData, options: RowOptions = ALL_ROWS): string[] {
+  const levels = levelsTopFirst(data.nodes);
+  const rows = (options.levels === null ? levels : levels.slice(0, options.levels)).map(levelRowId);
   rows.push(UNITS_ROW);
-  if (data.requests.length > 0) rows.push(INPUT_ROW, ADDED_ROW);
+  if (data.requests.length > 0) {
+    if (options.context === "absolute" || options.context === "both") rows.push(INPUT_ROW);
+    if (options.context === "added" || options.context === "both") rows.push(ADDED_ROW);
+  }
   return rows;
 }
 
@@ -140,10 +156,10 @@ function overlapScore(here: NavItem, target: NavItem): number {
   return Math.min(here.u1, target.u1) - Math.max(here.u0, target.u0);
 }
 
-/** The target item to move vertically to: a related one (parent or child) when the row has any, else the one overlapping most on the x axis, else the nearest. */
-function verticalTarget(here: NavItem, targets: readonly NavItem[]): NavItem | undefined {
-  const related = targets.find((item) => isParentOf(here, item) || isParentOf(item, here));
-  if (related !== undefined) return related;
+/** The target item to move vertically to: a related one (parent or child, unless `related` is off: another agent's rows share no ids) when the row has any, else the one overlapping most on the x axis, else the nearest. */
+export function verticalTarget(here: NavItem, targets: readonly NavItem[], related = true): NavItem | undefined {
+  const kin = related ? targets.find((item) => isParentOf(here, item) || isParentOf(item, here)) : undefined;
+  if (kin !== undefined) return kin;
   return targets.reduce<NavItem | undefined>((best, item) => {
     if (best === undefined) return item;
     const gain = overlapScore(here, item) - overlapScore(here, best);
@@ -181,25 +197,12 @@ export function navigate(
   data: NavData,
   axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">,
   view: Viewport,
+  rows: readonly string[] = navRowIds(data),
 ): { row: string; item: NavItem } | null {
-  const rows = navRowIds(data);
-  if (current === null) {
-    const order = [UNITS_ROW, ...rows.filter((row) => row !== UNITS_ROW).reverse()];
-    for (const row of order) {
-      const inView = navItems(row, data, axis).find((item) => item.end >= view.from && item.start <= view.to);
-      if (inView !== undefined) return { row, item: inView };
-    }
-    return null;
-  }
-  let row = current.row !== null && rows.includes(current.row) ? current.row : null;
-  let items = row === null ? [] : navItems(row, data, axis);
-  let at = row === null ? -1 : indexOfSelection(items, current.selection);
-  if (at < 0) {
-    row = rowOfSelection(current.selection, data);
-    items = row === null ? [] : navItems(row, data, axis);
-    at = indexOfSelection(items, current.selection);
-  }
-  if (row === null || at < 0) return navigate(key, null, data, axis, view);
+  if (current === null) return firstInView(data, axis, view, rows);
+  const here = locate(current, data, axis, rows);
+  if (here === null) return firstInView(data, axis, view, rows);
+  const { row, items, at } = here;
   if (key === "left" || key === "right") {
     const to = at + (key === "left" ? -1 : 1);
     const next = to < 0 ? undefined : items.at(to);
@@ -210,6 +213,39 @@ export function navigate(
   if (targetRow === undefined) return null;
   const found = verticalTarget(items[at], navItems(targetRow, data, axis));
   return found === undefined ? null : { row: targetRow, item: found };
+}
+
+/** The leftmost item in the viewport (Messages first, then the rows from the bottom up), else the first of a row. */
+export function firstInView(
+  data: NavData,
+  axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">,
+  view: Viewport,
+  rows: readonly string[],
+): { row: string; item: NavItem } | null {
+  const order = [UNITS_ROW, ...rows.filter((row) => row !== UNITS_ROW).reverse()].filter((row) => rows.includes(row));
+  for (const row of order) {
+    const inView = navItems(row, data, axis).find((item) => item.end >= view.from && item.start <= view.to);
+    if (inView !== undefined) return { row, item: inView };
+  }
+  return null;
+}
+
+/** The row, items and position of the current selection among `rows`; null when it is not in any of them. */
+export function locate(
+  current: { row: string | null; selection: Selection },
+  data: NavData,
+  axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">,
+  rows: readonly string[],
+): { row: string; items: NavItem[]; at: number } | null {
+  let row = current.row !== null && rows.includes(current.row) ? current.row : null;
+  let items = row === null ? [] : navItems(row, data, axis);
+  let at = row === null ? -1 : indexOfSelection(items, current.selection);
+  if (at < 0) {
+    row = rowOfSelection(current.selection, data);
+    items = row === null || !rows.includes(row) ? [] : navItems(row, data, axis);
+    at = indexOfSelection(items, current.selection);
+  }
+  return row === null || at < 0 ? null : { row, items, at };
 }
 
 /** The narrowest a selection's frame is drawn, in pixels, so it stays visible at any zoom. */
@@ -238,11 +274,11 @@ export interface SelectionRoles {
 export function selectionRoles(
   current: { row: string | null; selection: Selection } | null,
   data: NavData,
+  rows: readonly string[] = navRowIds(data),
 ): SelectionRoles {
   const linked = new Map<string, Set<string>>();
   if (current === null) return { primary: null, linked };
   const { selection } = current;
-  const rows = navRowIds(data);
   // Only a request can sit in either of two rows; a node or a block is in the row of its level or the Messages row.
   const row =
     selection.kind === "request" && (current.row === INPUT_ROW || current.row === ADDED_ROW) && rows.includes(current.row)

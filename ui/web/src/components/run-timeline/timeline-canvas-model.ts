@@ -196,19 +196,41 @@ export function rowLayout(row: string, data: NavData, axis: Placer, viewU: Viewp
     : blockLayout(row, data, axis, viewU, trackPx);
 }
 
-let cache: { data: NavData; axis: Placer; from: number; to: number; trackPx: number; layouts: Map<string, RowLayout> } | null = null;
+interface CachedLayouts {
+  axis: Placer;
+  from: number;
+  to: number;
+  trackPx: number;
+  rows: string;
+  layouts: Map<string, RowLayout>;
+}
+
+const cache = new WeakMap<NavData, CachedLayouts>();
 
 /**
- * The layout of every row for one view, remembered until the data, axis, view or track width changes:
- * hovering, selecting and highlighting repaint over it without laying anything out again.
+ * The layout of the given rows for one view, remembered per agent's data until the axis, view, rows or
+ * track width changes: hovering, selecting and highlighting repaint over it without laying anything out again.
  */
-export function layoutsFor(data: NavData, axis: Placer, view: Viewport, trackPx: number): Map<string, RowLayout> {
-  const hit = cache;
-  if (hit !== null && hit.data === data && hit.axis === axis && hit.from === view.from && hit.to === view.to && hit.trackPx === trackPx) {
+export function layoutsFor(
+  data: NavData,
+  axis: Placer,
+  view: Viewport,
+  trackPx: number,
+  rows: readonly string[] = navRowIds(data),
+): Map<string, RowLayout> {
+  const hit = cache.get(data);
+  const rowsKey = rows.join("|");
+  if (
+    hit?.axis === axis &&
+    hit.from === view.from &&
+    hit.to === view.to &&
+    hit.trackPx === trackPx &&
+    hit.rows === rowsKey
+  ) {
     return hit.layouts;
   }
-  const layouts = new Map(navRowIds(data).map((row) => [row, rowLayout(row, data, axis, view, trackPx)]));
-  cache = { data, axis, from: view.from, to: view.to, trackPx, layouts };
+  const layouts = new Map(rows.map((row) => [row, rowLayout(row, data, axis, view, trackPx)]));
+  cache.set(data, { axis, from: view.from, to: view.to, trackPx, rows: rowsKey, layouts });
   return layouts;
 }
 

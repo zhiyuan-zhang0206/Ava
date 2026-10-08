@@ -476,9 +476,10 @@ export interface AxisMap {
   viewU: (view: Viewport) => Viewport;
   /** A viewport in axis coordinates back to time (at least 1 ms wide). */
   viewFromU: (view: Viewport) => Viewport;
-  unitSpan: (unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1" | "start" | "end">) => AxisSpan;
+  /** `owner` names the agent whose blocks these are (blocks of different agents share indices); 0 when the axis holds one agent. */
+  unitSpan: (unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1" | "start" | "end">, owner?: number) => AxisSpan;
   /** A node follows the blocks its message span covers; with none loaded, its own times. */
-  nodeSpan: (node: Pick<RunTimelineNode, "start" | "end" | "span_start" | "span_end">) => AxisSpan;
+  nodeSpan: (node: Pick<RunTimelineNode, "start" | "end" | "span_start" | "span_end">, owner?: number) => AxisSpan;
   /** Hybrid only: the left edge of every block with the time it starts at, for tick labels. */
   boundaries: readonly { ms: number; u: number }[];
 }
@@ -532,12 +533,20 @@ function knotFromU(knots: readonly Knot[], u: number): number {
   return b.u === a.u ? b.ms : a.ms + ((u - a.u) / (b.u - a.u)) * (b.ms - a.ms);
 }
 
+/** One agent's blocks on a shared axis. */
+export interface AxisSource {
+  owner: number;
+  units: readonly RunTimelineUnit[];
+}
+
+const ownedKey = (owner: number, unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1">) => `${owner}:${unitKey(unit)}`;
+
 function finishAxis(
   mode: AxisMode,
   knots: Knot[],
   minSpan: number,
   spans: Map<string, AxisSpan>,
-  units: readonly RunTimelineUnit[],
+  sources: readonly AxisSource[],
   boundaries: { ms: number; u: number }[],
 ): AxisMap {
   const toU = (ms: number, side: "lo" | "hi" = "lo") => knotToU(knots, ms, side);
@@ -546,7 +555,7 @@ function finishAxis(
     u0: toU(Date.parse(start), "lo"),
     u1: toU(Date.parse(end), "hi"),
   });
-  const unitSpan: AxisMap["unitSpan"] = (unit) => spans.get(unitKey(unit)) ?? timeSpan(unit.start, unit.end);
+  const unitSpan: AxisMap["unitSpan"] = (unit, owner = 0) => spans.get(ownedKey(owner, unit)) ?? timeSpan(unit.start, unit.end);
   return {
     mode,
     total: knots[knots.length - 1].u,
@@ -559,13 +568,13 @@ function finishAxis(
       return { from, to: Math.max(fromU(view.to), from + 1) };
     },
     unitSpan,
-    nodeSpan: (node) => {
+    nodeSpan: (node, owner = 0) => {
       if (mode === "time") return timeSpan(node.start, node.end);
       let u0 = Infinity;
       let u1 = -Infinity;
-      for (const unit of units) {
+      for (const unit of sources.find((source) => source.owner === owner)?.units ?? []) {
         if (unit.i0 < node.span_start || unit.i0 > node.span_end) continue;
-        const span = spans.get(unitKey(unit));
+        const span = spans.get(ownedKey(owner, unit));
         if (span === undefined) continue;
         u0 = Math.min(u0, span.u0);
         u1 = Math.max(u1, span.u1);
@@ -587,15 +596,21 @@ function finishAxis(
  * the block weight. Inside a block, and inside a gap, time is linear.
  */
 export function buildAxisMap(units: readonly RunTimelineUnit[], base: Viewport, mode: AxisMode): AxisMap {
+  return buildSharedAxisMap([{ owner: 0, units }], base, mode);
+}
+
+/** The same map over several agents' blocks: they are laid in one time order, so every agent shares the axis. */
+export function buildSharedAxisMap(sources: readonly AxisSource[], base: Viewport, mode: AxisMode): AxisMap {
   const extent = Math.max(base.to - base.from, 1);
   if (mode === "time") {
     const spans = new Map<string, AxisSpan>();
-    return finishAxis("time", [{ ms: base.from, u: 0 }, { ms: base.from + extent, u: extent }], MIN_VIEW_MS, spans, units, []);
+    return finishAxis("time", [{ ms: base.from, u: 0 }, { ms: base.from + extent, u: extent }], MIN_VIEW_MS, spans, sources, []);
   }
-  const sorted = units
-    .map((unit) => ({ unit, start: Date.parse(unit.start), end: Date.parse(unit.end) }))
+  const sorted = sources
+    .flatMap(({ owner, units }) => units.map((unit) => ({ owner, unit })))
+    .map(({ owner, unit }) => ({ owner, unit, start: Date.parse(unit.start), end: Date.parse(unit.end) }))
     .filter(({ start, end }) => !Number.isNaN(start) && !Number.isNaN(end))
-    .sort((a, b) => a.start - b.start || a.end - b.end || a.unit.i0 - b.unit.i0);
+    .sort((a, b) => a.start - b.start || a.end - b.end || a.owner - b.owner || a.unit.i0 - b.unit.i0);
   const tokens = sorted.map(({ unit }) => Math.max(unit.context_tokens ?? 0, 0));
   const tokenTotal = tokens.reduce((sum, value) => sum + value, 0);
   const floor = MIN_BLOCK_SHARE * (tokenTotal > 0 ? tokenTotal : sorted.length);
@@ -622,19 +637,19 @@ export function buildAxisMap(units: readonly RunTimelineUnit[], base: Viewport, 
   const spans = new Map<string, AxisSpan>();
   const boundaries: { ms: number; u: number }[] = [];
   let u = 0;
-  sorted.forEach(({ unit, start }, i) => {
+  sorted.forEach(({ owner, unit, start }, i) => {
     u += k * idles[i];
     knots.push({ ms: starts[i], u });
     const u0 = u;
     u += weights[i];
     knots.push({ ms: ends[i], u });
-    spans.set(unitKey(unit), { u0, u1: u });
+    spans.set(ownedKey(owner, unit), { u0, u1: u });
     boundaries.push({ ms: start, u: u0 });
   });
   u += k * trailing;
   knots.push({ ms: Math.max(base.to, cursor), u });
-  if (!(u > 0)) return buildAxisMap([], base, "time");
-  return finishAxis("hybrid", knots, u * MIN_VIEW_SHARE, spans, units, boundaries);
+  if (!(u > 0)) return buildSharedAxisMap([], base, "time");
+  return finishAxis("hybrid", knots, u * MIN_VIEW_SHARE, spans, sources, boundaries);
 }
 
 /** Zooms a time viewport by `factor` around the point `frac` across the view, in the axis's own coordinates. */

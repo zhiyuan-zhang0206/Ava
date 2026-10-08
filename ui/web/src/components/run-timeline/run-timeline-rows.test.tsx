@@ -1,11 +1,22 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import { RunTimelineRows } from "./run-timeline-rows";
+import { ALL_ROWS } from "./timeline-nav";
 import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./run-timeline-test-canvas";
 import type { Selection } from "./timeline-model";
+
+vi.mock("@/lib/transport/api", () => ({
+  api: { getAgentRoster: vi.fn(() => Promise.resolve({ agents: [], ancestors: [] })), getAgent: vi.fn() },
+}));
+
+function render(ui: React.ReactElement) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 beforeEach(mockCanvas);
 afterEach(() => {
@@ -44,18 +55,25 @@ const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: numbe
   context_tokens: null, generation_tokens: null, estimated: null,
 });
 
+const ENTRIES = (data: Partial<RunTimelineResponse>) => [
+  { id: 42, status: "loaded" as const, data: { nodes: [], units: [], events: [], requests: [], ...data } as RunTimelineResponse },
+];
+
 function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null, hybrid = false) {
   const onSelect = vi.fn();
   render(
     <RunTimelineRows
-      data={{ nodes: [], units: [], events: [], requests: [], ...data } as RunTimelineResponse}
+      entries={ENTRIES(data)}
       base={BASE}
       view={BASE}
       onView={vi.fn()}
-      selection={selection}
-      onSelect={onSelect}
+      selection={selection === null ? null : { agent: 42, selection }}
+      onSelect={(picked) => void onSelect(picked.selection)}
       highlight={null}
       onHighlight={vi.fn()}
+      options={ALL_ROWS}
+      onRemove={null}
+      onRetry={vi.fn()}
     />,
   );
   // These cases are about positions on the plain time axis.

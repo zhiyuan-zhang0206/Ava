@@ -72,11 +72,11 @@ describe("InsightsPage shell", () => {
   it("requires an agent id before exposing the run timeline link", () => {
     wrap(<InsightsPage />);
 
-    expect(screen.getByRole("button", { name: "Open run timeline" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Open agent view" }).hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Agent ID" }), {
       target: { value: "405" },
     });
-    expect(screen.getByRole("link", { name: "Open run timeline" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Open agent view" }).getAttribute("href")).toBe(
       "/insights/run/405",
     );
   });
