@@ -27,8 +27,11 @@ def _render_help(target: object) -> str:
 
 
 @pytest.fixture
-def _load_ava_code_plugin() -> Iterator[None]:
+def _load_ava_code_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     from ava_builtins.plugins.ava_code import plugin
+    from base.agents.sdk import call_policy
+
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
 
     install.install(ExtensionRegistry((("ava_code", plugin.contribute()),)))
 
@@ -38,8 +41,11 @@ def _load_ava_code_plugin() -> Iterator[None]:
 
 
 @pytest.fixture
-def _load_ava_fleet_plugin() -> Iterator[None]:
+def _load_ava_fleet_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     from ava_builtins.plugins.ava_fleet import plugin
+    from base.agents.sdk import call_policy
+
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
 
     install.install(ExtensionRegistry((("ava_fleet", plugin.contribute()),)))
 
