@@ -20,9 +20,9 @@ from base.agents.history.hierarchy.units import (
 )
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.db import Database
-from gateway.run_timeline import router
-from gateway.run_timeline.history import HistoryView
-from gateway.run_timeline.schemas import RunTimelineEvent
+from services.derived.insights.run_timeline import router
+from services.derived.insights.run_timeline.history import HistoryView
+from services.derived.insights.run_timeline.schemas import RunTimelineEvent
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -341,7 +341,7 @@ def test_a_recorded_pickup_time_is_the_read_time_and_older_messages_fall_back_to
 def test_a_view_behind_the_tree_is_rebuilt_but_not_more_than_every_two_seconds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from gateway.run_timeline import history as history_module
+    from services.derived.insights.run_timeline import history as history_module
 
     loads: list[int] = []
     clock = {"now": 100.0}

@@ -531,7 +531,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/agents/history/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
-    # ── gateway/run_timeline/router.py, messages.py, context.py ──────────────────
+    # ── gateway/routers/insights.py (proxy of services/derived/insights/run_timeline) ──
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
         note="read-only: the understanding tree and the layer-0 message units in a window",
     ),
@@ -540,6 +540,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/agents/{agent_id}/run-timeline/messages"): RouteContract(
         note="read-only raw messages of a stitched-index range — long parts clip with text_truncated; full=true returns the whole body",
+    ),
+    ("GET", "/api/insights/{rest:path}"): RouteContract(
+        note="read-only: proxied untouched to the insights service, which builds every insights read from the record",
     ),
     # ── gateway/extensions/ui_contributions.py ───────────────────────────────────
     ("GET", "/api/ui/contributions"): RouteContract(),
