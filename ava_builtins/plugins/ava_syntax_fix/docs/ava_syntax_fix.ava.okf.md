@@ -41,6 +41,9 @@ Multi-stage pipeline: the main pipeline in `plugin.py`, followed by a batch of d
 
 ### 2. Missing imports → auto-add (ruff F821 + mapping table)
 
+A missing optional Ruff executable warns on each skipped stage and leaves
+the source unchanged; there is no process-wide warning cache.
+
 - ruff `F821` (undefined name, scope-aware) detects undefined names
 - Manual mapping tables like `_BARE_NAME_IMPORTS`: `Path`, `datetime`, `json`, `np`→`numpy`,
   `pd`→`pandas`, **`ava`** (added to auto-import list), etc.

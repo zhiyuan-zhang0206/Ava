@@ -4,7 +4,7 @@ QA nit 2 from PR #878: `load()` stayed fail-fast at every consumer other than
 `load_extensions`. `load_for_runtime` is the shared runtime wrapper those
 consumers use; strict `load()` (interactive CLI paths) keeps raising. Dangling
 names route through the one canonical reporter (`base.packages.plugins.load_report`,
-once per process) — the 2026-09-11 macmini incident ran for days on a plain
+on each failed load) — the 2026-09-11 macmini incident ran for days on a plain
 warning no alert surface carried.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.packages.plugins import enable_config, load_report
+from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import (
     DanglingPlugin,
     load,
@@ -30,9 +30,6 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
     monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
-    # The once-per-process report memo is interpreter-global module state;
-    # reset it so one test's report cannot suppress another test's assertion.
-    monkeypatch.setattr(enable_config, "_dangling_reported", set[str]())
 
 
 def test_load_for_runtime_drops_dangling_and_reports_each_name(
@@ -62,11 +59,10 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
     assert isinstance(reported[0][1], DanglingPlugin)
 
 
-def test_load_for_runtime_reports_each_name_once_per_process(
+def test_load_for_runtime_reports_each_failed_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The wrapper sits on gateway request paths; a repeat load in the same
-    process must not re-report — the first report is the signal."""
+    """Repeated failures stay visible without process-wide warning state."""
     write_local({"plugins": {"real": {"enabled": True}, "vanished": {"enabled": False}}})
     reported: list[str] = []
 
@@ -78,7 +74,7 @@ def test_load_for_runtime_reports_each_name_once_per_process(
     load_for_runtime({"real"})
     load_for_runtime({"real"})  # a later request re-reads the same config
 
-    assert reported == ["vanished"]
+    assert reported == ["vanished", "vanished"]
 
 
 def test_load_for_runtime_keeps_enabled_flags() -> None:
