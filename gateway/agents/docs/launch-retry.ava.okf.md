@@ -57,5 +57,8 @@ reconciliation or the existing pending scan. No new durable worker is added.
 
 The original `/api/agents/{agent_id}/retry-launch` remains legacy one-shot and
 rotates per invocation. The new route is transactionally keyed but
-`legacy_keyed_retry=False`; this PR activates no SDK or browser strong retry
-mode, capability cache, client outbox or runtime command checkpoint recovery.
+`legacy_keyed_retry=False`. The SDK explicitly opts in with a caller key and
+observed UUID; see [[ava/agents/docs/launch-retry.ava.okf.md]]. Browser, CLI and
+MCP retry consumers remain legacy. There is no capability cache, client outbox
+or automatic ambiguous-failure retry, and no runtime command checkpoint recovery
+is added by the SDK consumer.
