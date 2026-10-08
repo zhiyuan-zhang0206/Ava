@@ -522,39 +522,50 @@ class TestResolveOverride:
         from returning a string / dict that later graph code chokes on with AttributeError,
         which is hard to locate."""
         mod = _install_fake_module(monkeypatch, "tests._llm_override_bad_return")
-        mod.build = lambda _model: "not a chat model"  # type: ignore[attr-defined]
+
+        def build(_model: str, *, agent_id: int | None) -> str:
+            return "not a chat model"
+
+        mod.__dict__["build"] = build
         with pytest.raises(TypeError, match="factory returned 'str', not a BaseChatModel"):
             _resolve_override("tests._llm_override_bad_return:build", "claude-opus-4-7")
 
     def test_success_returns_factory_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """factory returns a BaseChatModel subclass instance → _resolve_override passes through.
         The model parameter should be fed to the factory as-is (factory decides whether to use it)."""
-        captured_model: list[str] = []
+        captured_model: list[tuple[str, int | None]] = []
         mod = _install_fake_module(monkeypatch, "tests._llm_override_ok")
 
-        def build(model: str) -> _FakeLLM:
-            captured_model.append(model)
+        def build(model: str, *, agent_id: int | None) -> _FakeLLM:
+            captured_model.append((model, agent_id))
             return _FakeLLM()
 
-        mod.build = build  # type: ignore[attr-defined]
-        result = _resolve_override("tests._llm_override_ok:build", "claude-opus-4-7")
+        mod.__dict__["build"] = build
+        result = _resolve_override("tests._llm_override_ok:build", "claude-opus-4-7", agent_id=7)
         assert isinstance(result, _FakeLLM)
-        assert captured_model == ["claude-opus-4-7"]
+        assert captured_model == [("claude-opus-4-7", 7)]
 
     def test_build_chat_model_respects_override_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When `AVA_LLM_OVERRIDE` env is set, `build_chat_model` short-circuits through
         `_resolve_override` — bypassing claude-* / deepseek-* prefix dispatch,
         allowing e2e tests / debugging to inject a fake LLM (without hitting the real API)."""
         mod = _install_fake_module(monkeypatch, "tests._llm_override_e2e")
-        mod.build = lambda _model: _FakeLLM()  # type: ignore[attr-defined]
+        owners: list[int | None] = []
+
+        def build(_model: str, *, agent_id: int | None) -> _FakeLLM:
+            owners.append(agent_id)
+            return _FakeLLM()
+
+        mod.__dict__["build"] = build
         monkeypatch.setattr(settings.lm, "llm_override", "tests._llm_override_e2e:build")
         from base.lm.factory import build_chat_model_bound
 
-        llm = build_chat_model("claude-opus-4-7")
+        llm = build_chat_model("claude-opus-4-7", agent_id=8)
         assert isinstance(llm, _FakeLLM)
         bound, binding = build_chat_model_bound("claude-opus-4-7")
         assert isinstance(bound, _FakeLLM)
         assert binding is None
+        assert owners == [8, None]
         with pytest.raises(ValueError, match="single-attempt"):
             build_chat_model_bound("claude-opus-4-7", single_attempt=True)
 

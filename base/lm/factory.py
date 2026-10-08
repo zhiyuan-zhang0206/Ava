@@ -110,12 +110,13 @@ class _LLMFactory(Protocol):
     """Contract for the callable that `AVA_LLM_OVERRIDE=mod:factory` points to.
 
     Newly written fake factories should conform to this signature: take
-    model name, return a BaseChatModel subclass. `_resolve_override` runs
+    model name and explicit agent id (None outside an agent), return a
+    BaseChatModel subclass. `_resolve_override` runs
     isinstance(BaseChatModel) validation at the end; bad factories blow up
     at build time rather than crashing deep in the graph.
     """
 
-    def __call__(self, model: str) -> BaseChatModel: ...
+    def __call__(self, model: str, *, agent_id: int | None) -> BaseChatModel: ...
 
 
 def model_supports_vision(model: str) -> bool:
@@ -271,7 +272,7 @@ def _ensure_provider_key(effective_model: str) -> None:
     )
 
 
-def _resolve_override(override: str, model: str) -> BaseChatModel:
+def _resolve_override(override: str, model: str, *, agent_id: int | None = None) -> BaseChatModel:
     """Parse `AVA_LLM_OVERRIDE=mod:factory` env; report failure errors in four
     classes hierarchically ("format / module not found / factory not found /
     return type wrong"), so the user can pinpoint."""
@@ -294,7 +295,7 @@ def _resolve_override(override: str, model: str) -> BaseChatModel:
         )
     from langchain_core.language_models.chat_models import BaseChatModel
 
-    result = factory(model)
+    result = factory(model, agent_id=agent_id)
     if not isinstance(result, BaseChatModel):
         raise TypeError(
             f"AVA_LLM_OVERRIDE={override!r}: factory returned {type(result).__name__!r}, "
@@ -306,6 +307,7 @@ def _resolve_override(override: str, model: str) -> BaseChatModel:
 def build_chat_model(
     model: str,
     *,
+    agent_id: int | None = None,
     thinking: ThinkingConfig | None = None,
     reasoning_effort: str | None = None,
     streaming: bool | None = None,
@@ -331,6 +333,8 @@ def build_chat_model(
 
     Args:
         model: e.g. `claude-sonnet-5` / `deepseek-flash`.
+        agent_id: explicit owner for an override factory. None for non-agent
+            callers; real provider construction does not use this metadata.
         thinking: cross-provider thinking switch (Anthropic Messages API
             shape). `{"type": "disabled"}` turns reasoning off where the
             provider supports it (short-text paths like label generation —
@@ -386,6 +390,7 @@ def build_chat_model(
     """
     return build_chat_model_bound(
         model,
+        agent_id=agent_id,
         thinking=thinking,
         reasoning_effort=reasoning_effort,
         streaming=streaming,
@@ -401,6 +406,7 @@ def build_chat_model(
 def build_chat_model_bound(
     model: str,
     *,
+    agent_id: int | None = None,
     thinking: ThinkingConfig | None = None,
     reasoning_effort: str | None = None,
     streaming: bool | None = None,
@@ -424,7 +430,7 @@ def build_chat_model_bound(
         logger.warning(
             f"AVA_LLM_OVERRIDE active: model={model!r} does not go through real LLM, routed via {override!r}"
         )
-        return _resolve_override(override, model), None
+        return _resolve_override(override, model, agent_id=agent_id), None
 
     # Every process that builds a model loads the provider plugins (once per
     # process) through the catalog, including the labeler daemon and the eval

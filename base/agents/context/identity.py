@@ -2,8 +2,8 @@
 
 `AgentIdentity` is a frozen value. The agent host builds one for a turn it serves, the exec child
 and a script an agent launched build theirs from a description, and an external controller derives
-one carrying its lease. Nothing here is process state: the identity of a process is whatever
-`AvaContext` it is bound to (`ava.sdk_surface.process_context`).
+one carrying its lease. Each identity belongs to its `AvaContext`: host turns pass it explicitly,
+and an execution child exposes one context through `ava.context`.
 """
 
 from __future__ import annotations

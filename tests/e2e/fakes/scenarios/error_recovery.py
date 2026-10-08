@@ -53,5 +53,5 @@ class ErrorThenRecoverFake(ScriptedFakeChatModel):
 RECOVERY_SCRIPT: tuple[AIMessage, ...] = (AIMessage(content=RECOVERY_REPLY, usage_metadata=_USAGE),)
 
 
-def build(model: str) -> ScriptedFakeChatModel:
+def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
     return ErrorThenRecoverFake(script=RECOVERY_SCRIPT)
