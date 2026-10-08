@@ -97,25 +97,20 @@ def _intent(home: Path, record: cluster.ClusterRecord, values: dict[str, str]) -
     path.chmod(0o600)
 
 
-def _teardown(
-    home: Path,
-    redis_port: int,
-    admin_password: str,
-    retained_children: list[subprocess.Popen[bytes]],
-) -> None:
+def _teardown(born: Born) -> None:
     try:
         pooler.stop_pgbouncer(force=True)
     finally:
         subprocess.run(
-            [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
+            [ci._pg_bin("pg_ctl"), "-D", str(born.home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
-        for child in retained_children:
+        for child in born.retained_children:
             child.wait(timeout=1)
         subprocess.run(
-            [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
-            env=ci._redis_cli_env(admin_password),
+            [ci._redis_cli_bin(), "-p", str(born.record.ports["redis"]), "shutdown", "nosave"],
+            env=ci._redis_cli_env(born.values["AVA_REDIS_ADMIN_PASSWORD"]),
             check=False,
             capture_output=True,
         )
@@ -221,12 +216,7 @@ def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Born
     try:
         yield born
     finally:
-        _teardown(
-            born.home,
-            born.record.ports["redis"],
-            born.values["AVA_REDIS_ADMIN_PASSWORD"],
-            born.retained_children,
-        )
+        _teardown(born)
 
 
 @pytest.fixture
