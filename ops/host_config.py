@@ -21,7 +21,8 @@ from base.config.admin.editing import coerce_config_scalar, field_editable, spli
 from base.config.admin.plugin_config import patch_owner, write_plugin_patch
 from base.host import config_validators
 from base.host.env import runtime_config
-from base.packages.plugin_config_images import PluginConfigOwner
+from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
+from base.packages.plugins.config_registration import InvalidConfigOverlay
 from ops.rpc_schemas import (
     ConfigAuditReadResult,
     ConfigReadResult,
@@ -191,13 +192,12 @@ def _apply_plugin_patch(
 ) -> tuple[bool, list[str]]:
     """Commit one schema owner; report candidate or concurrent-write rejection."""
     writes, removals = split_reducer_patch(overrides, metas)
+    typed = {
+        k: coerce_config_scalar(metas[k].field_type, v, metas[k].choices) for k, v in writes.items()
+    }
     try:
-        typed = {
-            k: coerce_config_scalar(metas[k].field_type, v, metas[k].choices)
-            for k, v in writes.items()
-        }
         write_plugin_patch(owner, typed, removals, expected_digest=None)
-    except (ValueError, RuntimeError) as exc:
+    except (InvalidConfigOverlay, PluginConfigChangedError) as exc:
         for field in overrides:
             results[field] = FieldWriteResult(ok=False, reason=str(exc))
         return False, []
@@ -234,7 +234,7 @@ def config_write_op(
     metas = {m.name: m for m in get_config_metadata()}
     try:
         owner = patch_owner(set(overrides))
-    except ValueError as exc:
+    except InvalidConfigOverlay as exc:
         return ConfigWriteOpResult(
             machine=machine_name(),
             results={f: FieldWriteResult(ok=False, reason=str(exc)) for f in overrides},

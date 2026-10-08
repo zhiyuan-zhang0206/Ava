@@ -90,4 +90,6 @@ monitoring, recovery, and persistence procedures.
 
 The pure config face declares the non-secret Core dependency `daemon.notice_ttl_limit_seconds`; escalation validates that declaration at its read boundary. DB/Redis are existing explicit resources, not flags. This migration does not retire other plugins' global binding or guarantee that every existing Core read has been converted.
 
+Plugin writes reject invalid candidates and mixed-owner requests with `InvalidConfigOverlay` (panel 400). Only image CAS mismatches raise `PluginConfigChangedError` (panel 409). Both reject host RPC writes. Declaration, persisted-image, default and IO failures propagate unchanged.
+
 On upgrade, `ava plugins update` imports the five declared legacy env aliases into the Fleet image once, then removes only successfully adopted aliases. An existing conflicting image fails without discarding either value. Image commit and alias removal are separate writes: a failed removal leaves values available for a same-value retry. Before import, bootstrap/admin/direct daemon reads reject pending input; service discovery reports and propagates the error, aborting roster evaluation rather than skipping Fleet or starting with defaults. Pure readers never create a home. No deployment or real-home migration occurs as part of a repository merge.

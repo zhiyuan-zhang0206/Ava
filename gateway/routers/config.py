@@ -46,7 +46,8 @@ from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
 from base.config.admin.plugin_config import patch_owner, write_plugin_patch
 from base.host.env import runtime_config
 from base.host.env.audit import check_env_integrity
-from base.packages.plugin_config_images import PluginConfigOwner
+from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
+from base.packages.plugins.config_registration import InvalidConfigOverlay
 from ops import host_config
 from ops.cluster import rpc as _cluster_rpc
 from ops.host_config import SENSITIVE_MASK
@@ -603,9 +604,9 @@ async def _put_plugin(
     removals.update(plan.cluster_removals)
     try:
         await asyncio.to_thread(write_plugin_patch, owner, writes, removals, expected_digest=None)
-    except ValueError as exc:
+    except InvalidConfigOverlay as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
-    except RuntimeError as exc:
+    except PluginConfigChangedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     restart = sorted(
         {metas[k].restart_required for k in set(writes) | removals if metas[k].restart_required}
@@ -663,7 +664,7 @@ async def put_config(
     _reject_invalid_plan(plan)
     try:
         owner = patch_owner(set(body))
-    except ValueError as exc:
+    except InvalidConfigOverlay as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if owner is not None and machine is None:
         return await _put_plugin(owner, plan, metas)
