@@ -11,12 +11,13 @@ import type { RunTimelineRequest } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
 import { RowShell } from "./run-timeline-row-shell";
-import { axisBox, maxInput, type AxisMap, type Hover, type Viewport } from "./timeline-model";
+import { axisBox, maxAdded, maxInput, type AxisMap, type Hover, type Viewport } from "./timeline-model";
 
 const BAR_AREA_PX = 38;
 
 export function ContextSizeRow({
   requests,
+  metric = "input",
   axis,
   viewU,
   hover,
@@ -24,6 +25,8 @@ export function ContextSizeRow({
   describe,
 }: {
   requests: readonly RunTimelineRequest[];
+  /** What a bar's height is: the request's whole input (absolute) or what it newly added (relative). Each scales to its own largest. */
+  metric?: "input" | "added";
   axis: AxisMap;
   /** The viewport in the axis's coordinates. */
   viewU: Viewport;
@@ -38,9 +41,15 @@ export function ContextSizeRow({
   describe: (request: RunTimelineRequest) => string;
 }) {
   const t = useTranslations("runTimeline");
-  const top = maxInput(requests);
+  const added = metric === "added";
+  const value = (request: RunTimelineRequest) => (added ? request.added_tokens : request.input_tokens);
+  const top = added ? maxAdded(requests) : maxInput(requests);
   return (
-    <RowShell label={t("contextRow")} height="h-10" testId="run-timeline-row-context">
+    <RowShell
+      label={t(added ? "addedContextRow" : "contextRow")}
+      height="h-10"
+      testId={added ? "run-timeline-row-added" : "run-timeline-row-context"}
+    >
       {requests.map((request) => {
         const box = axisBox(axis, request.ts, request.ts, viewU);
         if (box === null || top <= 0) return null;
@@ -50,10 +59,12 @@ export function ContextSizeRow({
             key={request.idx}
             role="img"
             aria-label={describe(request)}
-            data-testid="run-timeline-request"
+            data-testid={added ? "run-timeline-added" : "run-timeline-request"}
             data-request-idx={request.idx}
             data-session={request.session}
             data-input-tokens={request.input_tokens}
+            data-added-tokens={request.added_tokens}
+            data-estimated={added && request.added_estimated ? "" : undefined}
             {...hoverProps({ kind: "request", idx: request.idx })}
             className="absolute bottom-0 h-full -translate-x-1/2 px-px"
             style={{ left: `${box.left}%` }}
@@ -64,8 +75,9 @@ export function ContextSizeRow({
                 "absolute bottom-0 left-1/2 block w-[2px] -translate-x-1/2 rounded-t-[1px]",
                 request.session % 2 === 0 ? "bg-blue-500/70" : "bg-amber-500/80",
                 hovered && "bg-foreground",
+                added && request.added_estimated && "opacity-60",
               )}
-              style={{ height: `${(request.input_tokens / top) * BAR_AREA_PX}px` }}
+              style={{ height: `${(value(request) / top) * BAR_AREA_PX}px` }}
             />
           </span>
         );

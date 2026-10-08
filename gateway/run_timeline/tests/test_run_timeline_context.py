@@ -71,6 +71,63 @@ def test_requests_carry_their_session_input_size_and_send_time() -> None:
     assert requests[1].ts == T0 + timedelta(minutes=10)
 
 
+def with_output(msg: AIMessage, output: int) -> AIMessage:
+    msg.usage_metadata = {
+        "input_tokens": msg.usage_metadata["input_tokens"],  # type: ignore[index]
+        "output_tokens": output,
+        "total_tokens": msg.usage_metadata["input_tokens"] + output,  # type: ignore[index]
+    }
+    return msg
+
+
+def three_requests_then_a_session() -> HistoryView:
+    """Session 0: prompt, ask@0, reply1@1 (input 100, output 5), two asks @2 and @3, reply2@4
+    (input 160, output 7), ask@5, reply3@6 (input 190). Session 1: ask@10, reply4@11 (input 40)."""
+    messages: list[BaseMessage] = [
+        SystemMessage(content="first prompt"),
+        human("ask one", 0),
+        with_output(ai("reply one", 100, 1), 5),
+        human("ask two", 2),
+        human("ask three", 3),
+        with_output(ai("reply two", 160, 4), 7),
+        human("ask four", 5),
+        ai("reply three", 190, 6),
+        human("ask five", 10),
+        ai("reply four", 40, 11),
+    ]
+    read = read_times(messages)
+    units = display_blocks(divide_units(messages), messages, read)
+    history = FullHistory(
+        messages,
+        (messages[0], SystemMessage(content="second prompt")),  # type: ignore[arg-type]
+        (1, 8),
+    )
+    return HistoryView.of(history, units, MessageUsage(messages), read)
+
+
+def test_a_request_adds_what_entered_the_context_since_the_previous_one() -> None:
+    view = three_requests_then_a_session()
+    requests = context.llm_requests(view)
+    assert [r.idx for r in requests] == [2, 5, 7, 9]
+    # The previous reply is re-sent, so its output counts: 5 + the two asks make up the whole growth.
+    assert requests[1].added_tokens == 160 - 100
+    assert requests[1].added_estimated is True  # the asks share a provider total
+    assert requests[2].added_tokens == 190 - 160
+    assert requests[2].added_estimated is False  # reply two and one ask: both anchored exactly
+    assert requests[2].added_tokens == sum(t.context_tokens or 0 for t in view.tokens[5:7])
+
+
+def test_a_sessions_first_request_adds_its_first_messages_without_the_system_prompt() -> None:
+    view = three_requests_then_a_session()
+    requests = context.llm_requests(view)
+    # Session 0 starts at the first ask (the prompt, message 0, is the head); session 1 at its own first message.
+    assert requests[0].added_tokens == view.tokens[1].context_tokens
+    assert requests[0].added_tokens < requests[0].input_tokens
+    assert requests[3].added_tokens == view.tokens[8].context_tokens
+    # The previous session's last reply is not re-sent after a compaction.
+    assert requests[3].added_tokens != sum(t.context_tokens or 0 for t in view.tokens[7:9])
+
+
 def test_a_point_resolves_to_the_next_request_else_the_last() -> None:
     requests = context.llm_requests(two_sessions())
     assert [context.request_at(requests, at).idx for at in (0, 2, 3, 4, 99)] == [2, 2, 4, 4, 4]  # type: ignore[union-attr]
