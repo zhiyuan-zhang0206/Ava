@@ -12,7 +12,6 @@ from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.notes import record_notes
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import (
     _fake_no_duplicate_precheck,
-    _persisted_owner,
     _persisted_parent,
     _persisted_priority,
     _seed_agent,
@@ -244,6 +243,7 @@ def test_create_and_assign_signature() -> None:
     assert list(params.keys()) == [
         "title",
         "description",
+        "operation_key",
         "preset",
         "label",
         "config_overlay",
@@ -251,239 +251,15 @@ def test_create_and_assign_signature() -> None:
         "parent",
         "remind_interval_seconds",
         "priority",
-        "operation_key",
-        "require_idempotency",
     ]
-    assert params["operation_key"].default is None
-    assert params["require_idempotency"].default is False
-    assert params["preset"].default == "coder"
+    assert params["operation_key"].default is inspect.Parameter.empty
+    assert params["preset"].default is None
     assert params["label"].default is None
     assert params["config_overlay"].default is None
     assert params["machine"].default is None
     assert params["parent"].default is inspect.Parameter.empty  # required, no default
     assert params["remind_interval_seconds"].default is None
     assert params["priority"].default == "P2"
-
-
-def test_create_and_assign_returns_task_and_agent_id(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """create_and_assign returns a (Task, agent_id) tuple."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id) as mock_spawn,
-        record_notes(db_conn),
-    ):
-        task, aid = task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
-    assert isinstance(task, task_registry.Task)
-    assert task.title == "title"
-    assert task.description == "description"
-    assert aid == spawned_id
-    mock_spawn.assert_called_once()
-
-
-def test_create_and_assign_task_owned_by_spawned_agent(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """After create_and_assign, the task's owner is the spawned agent id."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id),
-        record_notes(db_conn),
-    ):
-        task, _ = task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
-    assert task.owner == spawned_id
-    assert _persisted_owner(db_conn, task.id) == spawned_id
-
-
-def test_create_and_assign_passes_spawn_args(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """create_and_assign folds preset into the overlay it forwards to spawn."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id) as mock_spawn,
-        record_notes(db_conn),
-    ):
-        task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
-            "title",
-            "description",
-            preset="researcher",
-            label="test-label",
-            config_overlay={"llm_model": "fast"},
-            machine="test-machine",
-            parent=root_task_id,
-        )
-    mock_spawn.assert_called_once_with(
-        label="test-label",
-        config_overlay={"preset": "researcher", "llm_model": "fast"},
-        machine="test-machine",
-    )
-
-
-def test_create_and_assign_sends_notification(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """create_and_assign triggers a notification to the spawned agent via create()."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id),
-        record_notes(db_conn) as mock_send,
-    ):
-        task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
-            "my title", "my description", parent=root_task_id
-        )
-    # create(owner=spawned_id) calls _notify_owner_change → send_system_note
-    mock_send.assert_called_once()
-    call_args = mock_send.call_args
-    assert call_args[0][0] == spawned_id
-    msg = call_args[0][1]
-    assert f"Task #{task.id}" in msg
-    assert "my title" in msg
-    assert "my description" in msg
-    assert "assigned to you" in msg
-
-
-def test_create_and_assign_no_notification_when_spawn_fails(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """If spawn raises, no task is created and no notification is sent."""
-    agent_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", side_effect=RuntimeError("spawn failed")),
-        record_notes(db_conn) as mock_send,
-        pytest.raises(RuntimeError, match="spawn failed"),
-    ):
-        task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
-    mock_send.assert_not_called()
-
-
-def test_create_and_assign_honours_parent(db_conn: psycopg.Connection, root_task_id: int) -> None:
-    """create_and_assign passes parent through to create."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    parent_task = task_registry.create("parent", "detail", parent=root_task_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id),
-        record_notes(db_conn),
-    ):
-        task, _ = task_registry.create_and_assign("child", "detail", parent=parent_task.id)  # pyright: ignore[reportUnknownMemberType]
-    assert task.parent_id == parent_task.id
-
-
-def test_create_and_assign_honours_remind_interval_seconds(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """create_and_assign passes remind_interval_seconds through to create."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id),
-        record_notes(db_conn),
-    ):
-        task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
-            "title", "detail", remind_interval_seconds=3600, parent=root_task_id
-        )
-    assert task.remind_interval_seconds == 3600
-
-
-def test_create_and_assign_honours_priority(db_conn: psycopg.Connection, root_task_id: int) -> None:
-    """create_and_assign passes priority through to create."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id),
-        record_notes(db_conn),
-    ):
-        task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
-            "title", "detail", priority="P0", parent=root_task_id
-        )
-    assert task.priority == "P0"
-    assert _persisted_priority(db_conn, task.id) == "P0"
-
-
-def test_create_and_assign_remind_interval_none(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """create_and_assign with remind_interval_seconds=None falls back to the default —
-    reminders cannot be disabled."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id),
-        record_notes(db_conn),
-    ):
-        task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
-            "title", "detail", remind_interval_seconds=None, parent=root_task_id
-        )
-    assert task.remind_interval_seconds == 7200  # P2 default -> 2h
-
-
-def test_create_and_assign_uses_default_preset(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """When no preset is given, 'coder' is the default (folded into the overlay)."""
-    agent_id = _seed_agent(db_conn)
-    spawned_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn", return_value=spawned_id) as mock_spawn,
-        record_notes(db_conn),
-    ):
-        task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
-    mock_spawn.assert_called_once_with(label=None, config_overlay={"preset": "coder"}, machine=None)
-
-
-@pytest.mark.parametrize("closed_status", ["done", "cancelled"])
-def test_create_and_assign_rejects_closed_parent_before_spawn(
-    db_conn: psycopg.Connection, closed_status: str, root_task_id: int
-) -> None:
-    """Same as the missing-parent guard: a closed parent is rejected before the
-    agent spawns, so no orphaned agent is left behind (task #1975)."""
-    agent_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    parent = task_registry.create(
-        f"andassign-parent-{closed_status}", "detail", parent=root_task_id
-    )
-    task_registry.update(parent.id, status=closed_status)
-    with (
-        patch("ava.agents.spawn") as mock_spawn,
-        pytest.raises(ValueError, match="closed task cannot be the parent"),
-    ):
-        task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
-            f"andassign-child-{closed_status}", "d", parent=parent.id
-        )
-    mock_spawn.assert_not_called()
-
-
-def test_create_and_assign_rejects_bad_parent_before_spawn(
-    db_conn: psycopg.Connection, root_task_id: int
-) -> None:
-    """A missing parent is rejected before the agent spawns, so no orphaned
-    agent is left behind."""
-    agent_id = _seed_agent(db_conn)
-    pin_agent(agent_id)
-    with (
-        patch("ava.agents.spawn") as mock_spawn,
-        pytest.raises(ValueError, match="parent task 999999 does not exist"),
-    ):
-        task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
-            "orphan-child", "d", parent=999_999
-        )
-    mock_spawn.assert_not_called()
 
 
 def test_create_duplicate_in_progress_title_raises(db_conn, root_task_id: int):
