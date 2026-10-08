@@ -236,17 +236,35 @@ has no such parameter (the traceback rides `extra` and is lost), so it is
 
 ## No silent failures
 
+Unexpected failures must reach the operation or service owner. Configuration,
+schema, invariant and programming errors must not become defaults, stale values,
+skipped components or successful results. Logging an error does not authorize
+recovery.
+
+Retry or fallback requires an explicit contract for the expected failure: name
+the exception types or protocol statuses, the recovery behavior, its budget and
+the result when that budget is exhausted. Network timeouts, connection loss,
+HTTP 429 and selected temporary server failures can qualify when the owning
+operation designs for them. Invalid configuration or malformed data cannot be
+classified as transient merely because it arrived through a network call.
+Tests must exercise both the expected recovery and propagation of an unexpected
+failure. Declare an optional capability's absence directly; a missing required
+dependency is an error.
+
 A broad handler (`except Exception`, `except BaseException`, bare `except`,
-`contextlib.suppress(Exception)`) must re-raise or report; a swallowed failure is
-indistinguishable from a feature that works. In order of preference: narrow the
-handler to the exceptions the `try` body can legitimately raise (an expected
-condition may then be handled quietly); delete it and let the failure surface;
-keep the broad handler at a real boundary (a loop that must go on, best-effort
-cleanup or telemetry) and log at WARNING with the traceback
-(`logger.opt(exception=True).warning(...)`) or emit a structured event. A debug or
-info line is not a report. Enforced by `scripts/lint/diagnostics/no_silent_failures.py` (hook
-`lint-no-silent-failures`); the one exemption is `# silent-ok: <reason>` on the
-handler line, for a reporting channel's own failure path.
+`contextlib.suppress(Exception)`) is not a recovery policy. Use it to clean up
+and re-raise, or at a terminal boundary to report an explicit failed operation.
+Do not keep a loop alive or replace a failed read just because the exception was
+reported. Preserve cancellation and the original failure during cleanup. A
+failure report needs a traceback at WARNING or above
+(`logger.opt(exception=True).warning(...)`) or an explicit structured failure;
+a debug or info line is not a report.
+
+`scripts/lint/diagnostics/no_silent_failures.py` (hook `lint-no-silent-failures`)
+checks the minimum reporting requirement, not whether recovery is legitimate.
+Passing it does not approve a fallback. Its existing `# silent-ok: <reason>`
+marker is restricted to a reporting channel's own failure path and does not
+permit recovery in the operation that channel reports on.
 
 ## No decorative emoji in core Python
 
