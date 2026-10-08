@@ -90,6 +90,20 @@ def test_list_shows_machine_entry(unit_home: Path, capsys: pytest.CaptureFixture
     assert "npx -y server-foo" in out
 
 
+@pytest.mark.parametrize("content", ["{not json", '{"mcp_servers":{"foo":{"enabled":[]}}}'])
+def test_list_reports_invalid_overlay_without_successful_disabled_listing(
+    unit_home: Path, capsys: pytest.CaptureFixture[str], content: str
+) -> None:
+    assert cmd_mcp_add("foo", None, "npx", ["server-foo"], []) == 0
+    capsys.readouterr()
+    (unit_home / "mcp_enabled.json").write_text(content)
+    assert cmd_mcp_list() == 1
+    output = capsys.readouterr()
+    assert "mcp_enabled.json" in output.err
+    assert "[disabled]" not in output.out
+    assert output.out == ""
+
+
 def test_remove_machine_entry(unit_home: Path) -> None:
     cmd_mcp_add("foo", None, "npx", [], [])
     assert cmd_mcp_remove("foo") == 0
