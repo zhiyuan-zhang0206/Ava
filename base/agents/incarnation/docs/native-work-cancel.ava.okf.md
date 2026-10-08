@@ -114,7 +114,11 @@ not covered by that hold guarantee.
 Operator activation requires retiring or draining every old native runtime,
 claim and admission consumer for the target before strong callers are enabled.
 The protocol does not promise safe old/new concurrent execution during rolling
-replacement. This PR introduces no SDK/UI activation, fallback or deployment.
+replacement. The SDK offers explicit observed-work control through
+[[ava/agents/docs/work-control.ava.okf.md]]; it does not replace legacy controls
+or automatically submit commands. The same operator activation prerequisite
+applies. UI, CLI and MCP controls remain separate; there is no fallback or
+deployment in the SDK consumer change.
 
 Owners: `services/agent_runner/agent_host/invocation/native_work.py`,
 `agent/ownership/native_cancel.py`, `agent/ownership/hosted.py`, and
