@@ -1,0 +1,162 @@
+name: Whole-file runtime proof
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'scripts/ci/file_shard_shadow.py'
+      - 'scripts/ci/file_shard_runtime.py'
+      - 'scripts/ci/tests/test_file_shard_shadow.py'
+      - '.github/workflows/file-shard-proof.yml'
+permissions:
+  contents: read
+env:
+  UV_FROZEN: '1'
+  AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+  AVA_REDIS_URL: redis://127.0.0.1:1/0
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.10.2
+          enable-cache: true
+      - uses: ./.github/actions/uv-sync
+      - name: Snapshot the complete eligible population
+        run: |
+          mkdir -p tmp
+          uv run pytest -c pyproject.toml --rootdir=. --collect-only -q \
+            --ignore=tests/e2e -m 'not flaky' --omit-static-tests \
+            -o junit_family=xunit1 -o faulthandler_timeout=300 \
+            -p scripts.ci.file_shard_shadow --file-shard-count=16 \
+            --file-shard-plan=tmp/file-plan.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: file-shard-plan
+          path: tmp/file-plan.json
+          if-no-files-found: error
+  paired:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.10.2
+          enable-cache: true
+      - uses: ./.github/actions/install-pg-redis
+      - uses: ./.github/actions/uv-sync
+      - uses: ./.github/actions/vendor-pg-runtime
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: file-shard-plan
+          path: tmp
+      - name: Execute current node shards without retries
+        id: baseline
+        continue-on-error: true
+        env:
+          COVERAGE_FILE: tmp/proof/baseline/${{ matrix.group }}/coverage-data
+        run: |
+          mkdir -p tmp/proof/baseline/${{ matrix.group }}
+          uv run pytest -c pyproject.toml --rootdir=. -q --ignore=tests/e2e \
+            --omit-static-tests -m 'not flaky' -n 4 \
+            --splits 16 --group ${{ matrix.group }} --splitting-algorithm least_duration \
+            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
+            --cov=ops --cov=services --cov=ava_builtins \
+            --junit-xml=tmp/proof/baseline/${{ matrix.group }}/junit.xml \
+            -o junit_family=xunit1 -o faulthandler_timeout=300 \
+            -p scripts.ci.file_shard_shadow \
+            --file-shard-runtime-report=tmp/proof/baseline/${{ matrix.group }}/runtime.json
+      - name: Execute checked whole-file shards without retries
+        id: candidate
+        continue-on-error: true
+        env:
+          COVERAGE_FILE: tmp/proof/candidate/${{ matrix.group }}/coverage-data
+        run: |
+          mkdir -p tmp/proof/candidate/${{ matrix.group }}
+          uv run pytest -c pyproject.toml --rootdir=. -q --ignore=tests/e2e \
+            --omit-static-tests -m 'not flaky' -n 4 \
+            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
+            --cov=ops --cov=services --cov=ava_builtins \
+            --junit-xml=tmp/proof/candidate/${{ matrix.group }}/junit.xml \
+            -o junit_family=xunit1 -o faulthandler_timeout=300 \
+            -p scripts.ci.file_shard_shadow --file-shard-execute \
+            --file-shard-check=tmp/file-plan.json --file-shard-group=${{ matrix.group }} \
+            --file-shard-report=tmp/proof/candidate/${{ matrix.group }}/collection.json \
+            --file-shard-runtime-report=tmp/proof/candidate/${{ matrix.group }}/runtime.json
+      - name: Validate baseline native results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          test-outcome: ${{ steps.baseline.outcome }}
+          junit-patterns: '["tmp/proof/baseline/${{ matrix.group }}/junit.xml"]'
+      - name: Validate candidate native results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          test-outcome: ${{ steps.candidate.outcome }}
+          junit-patterns: '["tmp/proof/candidate/${{ matrix.group }}/junit.xml"]'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: file-shard-proof-group-${{ matrix.group }}
+          path: tmp/proof/
+          if-no-files-found: error
+  compare:
+    needs: [plan, paired]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.10.2
+      - uses: ./.github/actions/uv-sync
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: file-shard-plan
+          path: tmp
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: file-shard-proof-group-*
+          path: tmp/proof
+          merge-multiple: true
+      - name: Combine each population's coverage separately
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in baseline candidate; do
+            for group in {1..16}; do
+              test -s "tmp/proof/$mode/$group/coverage-data"
+            done
+            export COVERAGE_FILE="tmp/proof/$mode/combined-coverage"
+            uv run coverage combine --keep tmp/proof/$mode/*/coverage-data
+            uv run coverage json -o "tmp/proof/$mode/coverage.json"
+          done
+      - name: Require equal execution, dynamic bindings and no lost coverage
+        run: >
+          uv run python -m scripts.ci.file_shard_runtime --plan tmp/file-plan.json
+          --reports tmp/proof --workers 4 --out tmp/file-runtime-comparison.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: file-shard-runtime-comparison
+          path: |
+            tmp/file-runtime-comparison.json
+            tmp/proof/*/coverage.json
+          if-no-files-found: warn
