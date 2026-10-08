@@ -30,8 +30,8 @@ from base.agents.impersonation.manifest import (
     unbind_local_participant,
 )
 from base.agents.impersonation.tests import test_history as history_cases
-from base.agents.impersonation_event_grants import grant_event_log_runner_access
 from base.agents.messages.caller_identity import CallerIdentity
+from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, create_agent

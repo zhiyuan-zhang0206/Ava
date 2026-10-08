@@ -27,7 +27,6 @@ from typing import LiteralString
 from psycopg import sql
 from psycopg.errors import Diagnostic
 
-from base.agents.impersonation_event_grants import grant_event_log_runner_access
 from base.cluster.authority.catalog import (
     BOOTSTRAP_SUPERUSER_OID,
     Conn,
@@ -35,6 +34,7 @@ from base.cluster.authority.catalog import (
     require_admin,
     role_facts,
 )
+from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.authority.model import AuthorityRefusedError, CatalogRefusedError, Groups
 
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
