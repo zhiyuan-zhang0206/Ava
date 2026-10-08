@@ -179,6 +179,12 @@ export interface CategoryHighlight {
   onToggle: (category: string) => void;
 }
 
+/** The HTTP status of a gateway answer (an `ApiError`), null for any other error. */
+function httpStatus(error: unknown): number | null {
+  const status = error instanceof Error ? (error as { status?: unknown }).status : undefined;
+  return typeof status === "number" ? status : null;
+}
+
 /** The breakdown as a standalone card — the composer panel's body rendered
  * inline (run page, task #4023 P4-3), chart-side above the timeline. Demo
  * parity: the pilot-w1 card caps at 520px (`#cbd` in its stylesheet).
@@ -205,6 +211,8 @@ export function ContextBreakdownCard({
     // Panning moves the point often: the card keeps the last one's numbers until the next arrives.
     placeholderData: keepPreviousData,
   });
+  // The gateway answers 404 when the agent has made no LLM request: that is an empty point, not a failure.
+  const noRequest = httpStatus(point.error) === 404;
   const title = point.data
     ? t("pointTitle", {
         request: point.data.request,
@@ -227,7 +235,7 @@ export function ContextBreakdownCard({
       </p>
       {!pointed ? (
         <ContextBreakdownBody agentId={agentId} categoryHighlight={categoryHighlight} />
-      ) : at === null ? (
+      ) : at === null || noRequest ? (
         <p data-testid="context-breakdown-empty" className="text-muted-foreground text-xs">
           {t("pointEmpty")}
         </p>
@@ -285,7 +293,8 @@ function BreakdownQuery({
     // prefixes every non-OK response with "HTTP <status>: …", which separates
     // a server-side failure from never reaching the gateway at all.
     const message = errMsg(error);
-    const isHttp = message.startsWith("HTTP ");
+    // An ApiError is a gateway answer whatever its message (a JSON `detail` replaces the "HTTP <status>" prefix).
+    const isHttp = httpStatus(error) !== null || message.startsWith("HTTP ");
     return (
       <div className={cn("items-start gap-2", FLEX, FLEX_COL)}>
         <p data-testid="context-breakdown-error" className="text-destructive text-xs">
