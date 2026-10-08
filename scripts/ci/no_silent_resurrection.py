@@ -209,7 +209,9 @@ def _classify(text: str) -> tuple[bool, bool]:
         return False, False
     identifiers = [t for t in _IDENTIFIER.findall(text) if len(t) >= MIN_IDENTIFIER_LENGTH]
     strong = len(identifiers) >= MIN_IDENTIFIERS
-    return strong, strong and _has_distinctive_identifier(text)
+    # An opening prefix omits the arguments/body that establish its contract.
+    # Keep it strong for restored blocks, but never decisive on its own.
+    return strong, strong and not text.endswith("(") and _has_distinctive_identifier(text)
 
 
 def _added_runs(merge_base: str, head: str, cwd: Path) -> list[Run]:
