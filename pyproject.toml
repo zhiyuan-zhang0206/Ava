@@ -471,7 +471,6 @@ check-typed-exception = true
 # SDK async tasks must not share active call frames or borrowed identity.
 "base/agents/sdk/telemetry.py" = ["TID251"]
 "base/packages/plugins/context.py" = ["TID251"]
-"base/events/live/redis_client.py" = ["TID251"]
 "gateway/mcp_server/endpoint.py" = ["TID251"]
 "ava/sdk_surface/help.py" = ["TID251"]
 "ava/sdk_surface/discovery.py" = ["TID251"]
