@@ -35,6 +35,7 @@ from base.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 from base.clock import Clock
 from base.config import settings
 
+from . import compaction as compaction
 from . import presets as presets
 
 __all_for_ava__ = [
@@ -53,6 +54,7 @@ __all_for_ava__ = [
     "TerminateOutcome",
     "TerminateResult",
     "commands",
+    "compaction",
     "get_ancestors",
     "get_last_message",
     "get_neighbors",
