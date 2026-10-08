@@ -13930,13 +13930,6 @@
       },
       "MemorySearchResponse": {
         "properties": {
-          "paths": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Paths"
-          },
           "results": {
             "items": {
               "$ref": "#/components/schemas/MemorySearchResultItem"
@@ -13946,8 +13939,11 @@
           }
         },
         "type": "object",
+        "required": [
+          "results"
+        ],
         "title": "MemorySearchResponse",
-        "description": "POST /api/memory/search response — RELATIVE paths from memory pool root.\n\nCaller (SDK `ava.memory.search`) uses `ava.memory.PATH / p` to\nreconstruct absolute paths. fs-neutral makes mismatched gateway\n(e.g. /Users/x) and agent-runner (/home/y) filesystems work.\n\n`results` carries path + description for each match; `paths` is the\nbare list of relative paths (backward-compat for existing consumers)."
+        "description": "POST /api/memory/search response — RELATIVE paths from memory pool root.\n\nCaller (SDK `ava.memory.search`) uses `ava.memory.PATH / p` to\nreconstruct absolute paths. fs-neutral makes mismatched gateway\n(e.g. /Users/x) and agent-runner (/home/y) filesystems work.\n\n`results` carries path, description and tags for each match."
       },
       "MemorySearchResultItem": {
         "properties": {
