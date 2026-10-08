@@ -11,12 +11,12 @@ remains unarmed until an audited runtime write.
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 import os
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -80,34 +80,36 @@ def env_values_from_text(text: str) -> dict[str, str]:
     return values
 
 
-@functools.cache
 def _load_alias_metadata() -> dict[str, tuple[str, bool]]:
-    from base.config.admin.metadata import get_config_metadata
+    from base.host.env.config_registry import field_alias, fields, schema_extra
 
-    return {meta.env_var: (meta.scope, meta.sensitive) for meta in get_config_metadata()}
+    metadata: dict[str, tuple[str, bool]] = {}
+    for name, ref in fields().items():
+        extra = schema_extra(ref.info)
+        alias = field_alias(name)
+        sensitive = extra.get("sensitive", False)
+        if not isinstance(sensitive, bool):
+            raise TypeError(f"config field {name!r} must declare a boolean sensitive flag")
+        if alias in metadata:
+            raise ValueError(f"config fields declare duplicate env alias {alias!r}")
+        metadata[alias] = (extra["scope"], sensitive)
+    return metadata
 
 
 def _alias_metadata() -> dict[str, tuple[str, bool]]:
-    """`alias -> (scope, sensitive)` from the config registry, possibly empty.
-
-    A value is recorded only for a registered field explicitly marked
-    `sensitive: false`. Every failure path yields an empty mapping, which
-    withholds every value (fail closed); a successful build is cached because
-    the registry derives from class declarations (a failed one is not, so a
-    later call retries rather than withholding for the process lifetime).
-    """
+    """Project declaration facts; invalid metadata prevents audit preparation."""
     try:
         return _load_alias_metadata()
     except Exception:
-        logger.opt(exception=True).warning(
-            "could not load config metadata for the .env audit — recording names only"
+        logger.bind(_no_emitter=True).opt(exception=True).error(
+            "could not load declared config metadata for the .env audit"
         )
-        return {}
+        raise
 
 
 def _audit_changes(
-    changes: Sequence[Mapping[str, object]] | None,
-) -> list[dict[str, object]] | None:
+    changes: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
     """Redact a raw `{alias, old, new}` diff into its auditable form.
 
     Values survive only for aliases registered with `sensitive: false`; every
@@ -115,8 +117,6 @@ def _audit_changes(
     with `old`/`new` withheld, so the record can still answer "this key
     changed" without becoming a second place secrets live.
     """
-    if changes is None:
-        return None
     metadata = _alias_metadata()
     redacted: list[dict[str, object]] = []
     for change in changes:
@@ -133,6 +133,18 @@ def _audit_changes(
             }
         )
     return redacted
+
+
+@dataclass(frozen=True)
+class _PreparedEnvChanges:
+    """Audit-owned redacted values prepared before the caller changes its file."""
+
+    changes: list[dict[str, object]]
+
+
+def prepare_env_changes(changes: Sequence[Mapping[str, object]]) -> _PreparedEnvChanges:
+    """Resolve declarations and redact a diff while the writer still holds old bytes."""
+    return _PreparedEnvChanges(_audit_changes(changes))
 
 
 def _process_metadata() -> tuple[str, str]:
@@ -231,7 +243,7 @@ def record_env_write(
     site: str,
     actor: str | None = None,
     trace_id: str | None = None,
-    changes: Sequence[Mapping[str, object]] | None = None,
+    changes: Sequence[Mapping[str, object]] | _PreparedEnvChanges | None = None,
 ) -> None:
     """Append metadata for an official `.env` write that has already landed.
 
@@ -239,8 +251,10 @@ def record_env_write(
     invoke this while holding `base.host.env.dotenv_file.env_lock_path`'s lock, so the
     recorded digest describes exactly the bytes that their write completed.
     `changes` is the raw `{alias, old, new}` diff the caller captured before its
-    rewrite; values are redacted here (only `sensitive: false` fields keep
-    theirs). `actor` names the initiating credential fact
+    rewrite, or the result of `prepare_env_changes` before its rewrite. Direct
+    raw diffs are still redacted here; prepared diffs never reload metadata
+    after the write. Only non-sensitive registered fields retain values.
+    `actor` names the initiating credential fact
     (`user_session:administrator`, `cluster_bearer:administrator`, `cli:zzy`)
     and `trace_id` the gateway request, when the write had one.
     """
@@ -259,7 +273,10 @@ def record_env_write(
         "keys_after": _env_key_names(env_path),
         "digest_after": digest_after,
     }
-    audited_changes = _audit_changes(changes)
+    if isinstance(changes, _PreparedEnvChanges):
+        audited_changes = changes.changes
+    else:
+        audited_changes = _audit_changes(changes) if changes is not None else None
     if audited_changes is not None:
         record["changed"] = audited_changes
     # The marker comes first: a crash can produce an armed repair event, but it
