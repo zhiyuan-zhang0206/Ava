@@ -171,13 +171,13 @@ def _from_import_bindings(node: ast.ImportFrom, loggers: set[str], other: set[st
         bound.add(alias.asname or alias.name)
 
 
-def _import_bindings(tree: ast.Module) -> tuple[set[str], set[str], bool]:
+def _import_bindings(nodes: tuple[ast.AST, ...]) -> tuple[set[str], set[str], bool]:
     """(names imported as the loguru logger, names imported as anything else,
     whether the bare `loguru` module is imported)."""
     loggers: set[str] = set()
     other: set[str] = set()
     loguru_module = False
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.ImportFrom):
             _from_import_bindings(node, loggers, other)
         elif isinstance(node, ast.Import):
@@ -192,18 +192,18 @@ def _import_bindings(tree: ast.Module) -> tuple[set[str], set[str], bool]:
 class _Bindings:
     """Which names in one module are loguru loggers."""
 
-    def __init__(self, tree: ast.Module) -> None:
-        self.names, other, self.loguru_module = _import_bindings(tree)
-        derivations = self._add_derived_loggers(tree)
-        for node in ast.walk(tree):
+    def __init__(self, nodes: tuple[ast.AST, ...]) -> None:
+        self.names, other, self.loguru_module = _import_bindings(nodes)
+        derivations = self._add_derived_loggers(nodes)
+        for node in nodes:
             if id(node) not in derivations:
                 other.update(_names_bound_by(node))
         self.names -= other
 
-    def _add_derived_loggers(self, tree: ast.Module) -> set[int]:
+    def _add_derived_loggers(self, nodes: tuple[ast.AST, ...]) -> set[int]:
         """Add names assigned from a loguru logger (`log = logger.bind(...)`), to a
         fixed point; return the ids of those deriving assignments."""
-        assigns = [n for n in ast.walk(tree) if isinstance(n, (ast.Assign, ast.AnnAssign))]
+        assigns = [n for n in nodes if isinstance(n, (ast.Assign, ast.AnnAssign))]
         derivations: set[int] = set()
         grew = True
         while grew:
@@ -233,22 +233,22 @@ class _Bindings:
 class _StdlibBindings:
     """Which names in one module are stdlib loggers, and which names are the `logging` module."""
 
-    def __init__(self, tree: ast.Module) -> None:
+    def __init__(self, nodes: tuple[ast.AST, ...]) -> None:
         self.modules: set[str] = set()  # `import logging [as lg]`
         self.factories: set[str] = set()  # `from logging import getLogger [as g]`
-        imported = self._scan_imports(tree)
+        imported = self._scan_imports(nodes)
         self.names: set[str] = set()
-        derivations = self._add_derived_loggers(tree)
+        derivations = self._add_derived_loggers(nodes)
         other = set(imported)
-        for node in ast.walk(tree):
+        for node in nodes:
             if id(node) not in derivations:
                 other.update(_names_bound_by(node))
         self.names -= other
 
-    def _scan_imports(self, tree: ast.Module) -> set[str]:
+    def _scan_imports(self, nodes: tuple[ast.AST, ...]) -> set[str]:
         """Record the `logging` aliases and return every name any import binds."""
         imported: set[str] = set()
-        for node in ast.walk(tree):
+        for node in nodes:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imported.add(alias.asname or alias.name.partition(".")[0])
@@ -267,10 +267,10 @@ class _StdlibBindings:
         elif alias.asname is None and alias.name.startswith("logging."):
             self.modules.add("logging")
 
-    def _add_derived_loggers(self, tree: ast.Module) -> set[int]:
+    def _add_derived_loggers(self, nodes: tuple[ast.AST, ...]) -> set[int]:
         """Add names assigned from a stdlib logger (`_log = logging.getLogger(...)`), to a
         fixed point; return the ids of those deriving assignments."""
-        assigns = [n for n in ast.walk(tree) if isinstance(n, (ast.Assign, ast.AnnAssign))]
+        assigns = [n for n in nodes if isinstance(n, (ast.Assign, ast.AnnAssign))]
         derivations: set[int] = set()
         grew = True
         while grew:
@@ -403,11 +403,13 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
         tree = ast.parse(src, filename=filename)
     except SyntaxError as exc:
         return [(exc.lineno or 1, f"could not parse: {exc}")]
-    loguru = _Bindings(tree)
-    stdlib = _StdlibBindings(tree)
+    # Binding and call analysis share one breadth-first traversal of this source.
+    nodes = tuple(ast.walk(tree))
+    loguru = _Bindings(nodes)
+    stdlib = _StdlibBindings(nodes)
     lines = src.splitlines()
     out: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Call):
             problem = (
                 _call_problem(node, loguru)

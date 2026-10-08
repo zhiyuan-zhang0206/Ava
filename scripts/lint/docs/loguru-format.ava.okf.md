@@ -25,6 +25,10 @@ traceback belongs on the call as `logger.opt(exception=True)` (or
 Opt-out `# log-format-ok: <reason>`; scope `lint_common.FRAMEWORK_DIRS` +
 `scripts/`. The authoritative rule text is the script's module docstring.
 
+Each source has one breadth-first AST node sequence, shared by the import,
+derived-binding, ambiguous-name and call analyses. Derived bindings still resolve
+to a fixed point, and every analysis sees the original traversal order.
+
 The required CI `backend-structure` job runs `lint-loguru-format` and
 `lint-logger-add-diagnose` with `pre-commit run --all-files` on both SELECTED and
 FULL backend test paths. These hooks own repository-wide logging compliance.
