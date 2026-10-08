@@ -35,7 +35,9 @@ do not temporarily enable drivers inside a static process.
 Required CI runs this lane once inside `backend-static` with four xdist
 workers, each retaining the process-lifetime native refusal and isolation
 guards. JUnit validation, executed counts and combined coverage include all
-workers. It runs alongside the existing structure job so tool lint and pure
+workers. Unhandled test-thread exceptions are errors in the actual CI command;
+a refused background driver call cannot leave only a warning and green JUnit.
+It runs alongside the existing structure job so tool lint and pure
 unit execution do not accumulate on one runner. Native full, selected and flaky commands use
 `--omit-static-tests` from the same owner; combined counts and coverage include
 the static artifacts. Local pytest remains native unless explicitly selected.
