@@ -162,7 +162,7 @@ def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
 # ── handshake + tool surface ─────────────────────────────────────────────
 
 
-def test_initialize_negotiates_and_lists_seven_tools() -> None:
+def test_initialize_negotiates_and_lists_guarded_creation_tool() -> None:
     with TestClient(app) as client:
         token = _create_token(client)
         init = _initialize(client, token)
@@ -173,11 +173,16 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
         "list_agents",
         "get_agent",
         "spawn_agent",
+        "spawn_agent_guarded_v1",
         "send_message",
         "get_messages",
         "terminate_agent",
         "cluster_status",
     }
+    creation_schema = tools["spawn_agent_guarded_v1"]["inputSchema"]
+    assert set(creation_schema["required"]) == {"prompt", "idempotency_key"}
+    assert creation_schema["properties"]["idempotency_key"]["minLength"] == 1
+    assert creation_schema["properties"]["idempotency_key"]["maxLength"] == 128
     terminate_description = " ".join(tools["terminate_agent"]["description"].split())
     assert "requests interruption" in terminate_description
     assert (
@@ -187,7 +192,7 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
     assert "Use force only when a clean stop cannot progress" in terminate_description
 
 
-async def test_gateway_contract_matches_pre_extraction_golden() -> None:
+async def test_legacy_gateway_contract_matches_pre_extraction_golden() -> None:
     from gateway.mcp_server import endpoint
 
     server = endpoint._build_server(None, cast(Database, None), cast(EventBus, None))
@@ -197,6 +202,7 @@ async def test_gateway_contract_matches_pre_extraction_golden() -> None:
         "tools": [
             {"name": t.name, "description": t.description, "inputSchema": t.input_schema}
             for t in sorted(tools, key=lambda t: t.name)
+            if t.name != "spawn_agent_guarded_v1"
         ],
     }
     encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

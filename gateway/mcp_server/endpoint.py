@@ -2,7 +2,7 @@
 
 Design task #1212 step 1: one Streamable HTTP MCP endpoint on the gateway that
 every MCP client dials (external tools like Claude Code / Codex today; Ava's
-own agents later). The seven tools are thin handlers over the SAME internal
+own agents later). The eight tools are thin handlers over the SAME internal
 functions the REST routers call — no business logic of its own and no
 self-HTTP round-trip (2026-06-07 CLI↔gateway boundary decision: in-process
 import for co-located calls, HTTP only to cross a machine).
@@ -58,6 +58,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 from gateway.agents import router as _agents_router
+from gateway.agents.creation import CreationLaunchArguments
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.lifecycle import terminate_agent_with_open_tasks
 from gateway.agents.schemas import AgentRow
@@ -132,7 +133,9 @@ def _tool_result_is_error(
 def _validate_mcp_identity_arguments(tool: str, args: dict[str, Any]) -> None:
     from mcp.server.mcpserver.exceptions import ToolError
 
-    if tool == "send_message" and args.get("caller_protocol") == "v1":
+    if tool == "spawn_agent_guarded_v1" or (
+        tool == "send_message" and args.get("caller_protocol") == "v1"
+    ):
         reserved = {"source", "instance", "caller_identity", "auth_principal", "client_id"}
         if reserved.intersection(args):
             raise ToolError("caller identity is server-derived; remove identity arguments")
@@ -342,41 +345,39 @@ async def _mcp_deliver_send_message(
     return {"status": delivery.status, "inbound_id": delivery.inbound_id}
 
 
-def _register_fleet_tools(
-    server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def _register_spawn_tools(
+    server: object,
     pool: Any,
     db: Database,
     bus: EventBus,
 ) -> None:
-    """Fleet-mutating tools: spawn / message / terminate.
-
-    Each tool's description is the contract an external model reads before
-    calling it, so it states what the call *does to the fleet* — including
-    that `terminate_agent` ends a running process.
-    """
+    """Register legacy and guarded creation through one native birth owner."""
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
 
     typed_server = cast(MCPServer, server)
 
-    @typed_server.tool(description=tool_description("spawn_agent"))
-    async def spawn_agent(
+    async def _spawn_agent(
         prompt: str,
         ctx: Context,
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
+        *,
+        guarded: bool = False,
     ) -> dict[str, Any]:
         client = _authenticated_client(ctx.request_context.request)
-        _require_write_scope("spawn_agent", client)
+        _require_write_scope("spawn_agent_guarded_v1" if guarded else "spawn_agent", client)
+        if guarded and idempotency_key is None:
+            raise ToolError("guarded creation requires an idempotency key")
         creation_key = None
         if idempotency_key is not None:
             try:
                 creation_key = principal_key(
                     AuthPrincipal("mcp_client", str(client["id"])),
                     "POST",
-                    "/api/agents",
+                    "/mcp/tools/spawn_agent_guarded_v1" if guarded else "/api/agents",
                     idempotency_key,
                 )
             except PrincipalScopeError as exc:
@@ -395,8 +396,13 @@ def _register_fleet_tools(
         # through the router module so tests patch the same seam as the REST
         # spawn route.
         try:
+            arguments: CreationLaunchArguments = {}
+            if creation_key is not None:
+                arguments["creation_key"] = creation_key
+            if guarded:
+                arguments["immutable_birth"] = True
             spawned = await _agents_router.create_and_launch_agent(
-                body, target, pool, db, bus, creation_key=creation_key
+                body, target, pool, db, bus, **arguments
             )
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from exc
@@ -412,6 +418,44 @@ def _register_fleet_tools(
                 ) from exc
             raise ToolError(str(exc)) from exc
         return spawned.model_dump(mode="json")
+
+    @typed_server.tool(description=tool_description("spawn_agent"))
+    async def spawn_agent(
+        prompt: str,
+        ctx: Context,
+        label: str | None = None,
+        machine: str | None = None,
+        config_overlay: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await _spawn_agent(prompt, ctx, label, machine, config_overlay, idempotency_key)
+
+    @typed_server.tool(description=tool_description("spawn_agent_guarded_v1"))
+    async def spawn_agent_guarded_v1(
+        prompt: str,
+        idempotency_key: Annotated[str, Field(min_length=1, max_length=128)],
+        ctx: Context,
+        label: str | None = None,
+        machine: str | None = None,
+        config_overlay: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await _spawn_agent(
+            prompt, ctx, label, machine, config_overlay, idempotency_key, guarded=True
+        )
+
+
+def _register_fleet_tools(
+    server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    pool: Any,
+    db: Database,
+    bus: EventBus,
+) -> None:
+    """Register fleet mutation and transcript tools with their native owners."""
+    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    typed_server = cast(MCPServer, server)
+    _register_spawn_tools(typed_server, pool, db, bus)
 
     @typed_server.tool(description=tool_description("send_message"))
     async def send_message(
