@@ -447,11 +447,10 @@ def terminate(
 
     `status` is "enqueued" / "already_terminated"; `open_tasks` carries what
     the agent still owned as it went down, if anything; `shell_sessions`
-    carries what a requested shell-session kill did (absent on older versions).
+    carries what a requested shell-session kill did.
 
-    source defaults to f"agent:{ava.self.AGENT_ID}" so the lifecycle marker
-    tells the peer who terminated it. Pass source=None to use the gateway
-    default ("user").
+    An omitted source requires the established actor identity. Callers without
+    an agent or system identity must supply an explicit source.
 
     force=True requests interruption. Hosted force returns "enqueued" while
     the original host drains actual work; acceptance is not observed exit.
@@ -460,14 +459,13 @@ def terminate(
     termination proceeds without waiting for another response.
 
     kill_all_shell_sessions=True also kills every shell session the agent owns
-    on its home machine. Sent only when set; an older gateway ignores it and
-    answers without `shell_sessions`, so an unhonored request stays visible.
+    on its home machine. Sent only when set.
     """
     body: dict = {}
     if source is not None:
         body["source"] = source
     else:
-        body["source"] = ava.sdk_surface.agent_identity.default_actor()
+        body["source"] = ava.sdk_surface.agent_identity.require_actor()
     if message is not None:
         body["message"] = message
     if force:
@@ -482,15 +480,14 @@ def terminate(
 def restart(agent_id: int, *, source: str | None = None) -> str:
     """POST /api/agents/{id}/restart → status string.
 
-    source defaults to f"agent:{ava.self.AGENT_ID}" so the lifecycle marker
-    tells the peer who restarted it. Pass source=None to use the gateway
-    default ("user").
+    An omitted source requires the established actor identity. Callers without
+    an agent or system identity must supply an explicit source.
     """
     body: dict = {}
     if source is not None:
         body["source"] = source
     else:
-        body["source"] = ava.sdk_surface.agent_identity.default_actor()
+        body["source"] = ava.sdk_surface.agent_identity.require_actor()
     resp = post(f"/api/agents/{agent_id}/restart", body)
     raise_from_response(resp)
     return resp.json()["status"]
@@ -499,9 +496,8 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
 def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) -> str:
     """POST /api/agents/{id}/resurrect -> status string.
 
-    resurrected_by defaults to f"agent:{ava.self.AGENT_ID}" so the
-    lifecycle marker tells the peer who resurrected it. Pass
-    resurrected_by=None to use the gateway default ("user").
+    An omitted resurrected_by requires the established actor identity. Callers
+    without an agent or system identity must supply explicit provenance.
 
     prompt is required -- a resurrected agent needs to know why it
     was woken up and what to do.
@@ -510,7 +506,7 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
     if resurrected_by is not None:
         body["resurrected_by"] = resurrected_by
     else:
-        body["resurrected_by"] = ava.sdk_surface.agent_identity.default_actor()
+        body["resurrected_by"] = ava.sdk_surface.agent_identity.require_actor()
     resp = post(f"/api/agents/{agent_id}/resurrect", body)
     raise_from_response(resp)
     return resp.json()["status"]

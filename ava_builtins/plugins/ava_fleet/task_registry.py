@@ -12,11 +12,8 @@ import ava
 import ava.sdk_surface.agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents.context import AvaContext
-
-# Kept as compatibility aliases for existing SDK readers and tooling.
-from base.agents.tasks.model import TASK_COLUMNS as _COLS
+from base.agents.tasks.model import TASK_COLUMNS, task_from_row
 from base.agents.tasks.model import Task as Task
-from base.agents.tasks.model import task_from_row as _row_to_task
 from base.agents.tasks.owner_notifications import TaskOwnerNotification, owner_change_notifications
 from base.agents.tasks.reparent import resolve_reparent
 
@@ -36,27 +33,6 @@ from ._task_update import (
     _owner_actually_changed,
     _validate_status,
     _write_task_update,
-)
-from ._task_update import (
-    _MAX_REMIND_INTERVAL_SECONDS as _MAX_REMIND_INTERVAL_SECONDS,
-)
-from ._task_update import (
-    _append_note_to_results as _append_note_to_results,
-)
-from ._task_update import (
-    _log_task_update as _log_task_update,
-)
-from ._task_update import (
-    _owner_change_payload as _owner_change_payload,
-)
-from ._task_update import (
-    _owner_is_changing as _owner_is_changing,
-)
-from ._task_update import (
-    _Unset as _Unset,
-)
-from ._task_update import (
-    _validate_remind_interval_seconds as _validate_remind_interval_seconds,
 )
 
 # `list` / `get` shadow builtins intentionally: these are the agent-facing names
@@ -503,11 +479,11 @@ def get(task_id: int) -> Task:
     """Return the task with this id."""
     task_id = coerce_typed(task_id, "task_id", int)
     with ava.DB.cursor() as cur:
-        cur.execute(f"SELECT {_COLS} FROM agent_tasks WHERE id = %s", (task_id,))  # noqa: S608
+        cur.execute(f"SELECT {TASK_COLUMNS} FROM agent_tasks WHERE id = %s", (task_id,))  # noqa: S608
         row = cur.fetchone()
     if row is None:
         raise ValueError(f"task {task_id} does not exist")
-    return _row_to_task(row)
+    return task_from_row(row)
 
 
 def _where_clause(filters: builtins.list[str]) -> str:
@@ -540,14 +516,14 @@ def _build_list_query(
             " SELECT * FROM agent_tasks WHERE parent_id = %s"
             " UNION ALL"
             " SELECT c.* FROM agent_tasks c JOIN subtree s ON c.parent_id = s.id"
-            f") SELECT {_COLS} FROM subtree{_where_clause(filters)} ORDER BY created_at, id"
+            f") SELECT {TASK_COLUMNS} FROM subtree{_where_clause(filters)} ORDER BY created_at, id"
         )
         return sql, [parent, *params]
 
     if parent is not None:
         filters.append("parent_id = %s")
         params.append(parent)
-    sql = f"SELECT {_COLS} FROM agent_tasks{_where_clause(filters)} ORDER BY created_at, id"  # noqa: S608
+    sql = f"SELECT {TASK_COLUMNS} FROM agent_tasks{_where_clause(filters)} ORDER BY created_at, id"  # noqa: S608
     return sql, params
 
 
@@ -574,4 +550,4 @@ def list(
     sql, params = _build_list_query(parent, owner, status, recursive)
     with ava.DB.cursor() as cur:
         cur.execute(sql, params)
-        return [_row_to_task(r) for r in cur.fetchall()]
+        return [task_from_row(r) for r in cur.fetchall()]
