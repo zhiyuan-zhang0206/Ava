@@ -9,6 +9,10 @@ tags: []
 
 An agent has only one tool—`execute_code(code: str)`—but obtains all capabilities through the `ava.*` Python namespace. Each submodule corresponds to a separate concept file.
 
+`ava.help()` reads current module source for constant annotations and attribute
+documentation. Reloading a plugin in place updates this view; unavailable source
+is retried on the next discovery instead of being retained as an empty result.
+
 ## Module Index
 
 ### Files & Shell
