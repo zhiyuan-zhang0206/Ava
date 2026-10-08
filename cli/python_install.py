@@ -22,8 +22,9 @@ from typing import Protocol
 
 # Fresh installs have no editable package; PYTHONSAFEPATH also excludes cwd.
 # Resolve imports from this trusted checkout, including in updater staging trees.
-if not __package__:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if __name__ == "__main__":
+    if not __package__:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from base.deploy.release.python_lock import violations
 from cli._python_index import PYPI_INDEX, python_index
