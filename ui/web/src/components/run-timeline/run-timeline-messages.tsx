@@ -87,10 +87,7 @@ function MessageCard({
   return (
     <article className="space-y-1.5 rounded border border-border p-2.5" data-testid="run-timeline-message">
       <header className={cn("items-baseline gap-2 font-mono text-[10px] text-muted-foreground", FLEX)}>
-        <span>
-          #{message.idx}
-          {message.source ? ` · ${message.source}` : ""}
-        </span>
+        <span>{message.source ?? ""}</span>
         {tokens !== null ? (
           <span className="ml-auto shrink-0 tabular-nums" data-testid="run-timeline-message-tokens">
             {t("tokensValue", { tokens: formatTokensCompact(tokens.tokens) })}

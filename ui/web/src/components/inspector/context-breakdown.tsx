@@ -215,7 +215,6 @@ export function ContextBreakdownCard({
   const noRequest = httpStatus(point.error) === 404;
   const title = point.data
     ? t("pointTitle", {
-        request: point.data.request,
         session: point.data.session + 1,
         sessions: point.data.sessions,
         time: formatShort(point.data.ts),

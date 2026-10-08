@@ -75,7 +75,7 @@ function Details({
           label={t("timeSpan")}
           value={`${formatAbsolute(start)} – ${formatAbsolute(end)}`}
         />
-        <Metric label={t("messageSpan")} value={t("messageSpanValue", { start: i0, end: i1, count: i1 - i0 + 1 })} />
+        <Metric label={t("messageSpan")} value={t("messageSpanValue", { count: i1 - i0 + 1 })} />
         {tokens !== null ? (
           <Metric
             label={t("contextTokens")}
