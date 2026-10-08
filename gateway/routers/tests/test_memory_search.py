@@ -86,9 +86,9 @@ class TestPrimaryPath:
         assert resp.status_code == 200
         # must be relative paths relative to memory_root — must not contain tmp_path prefix
         body = resp.json()
-        paths = body["paths"]
         results = body["results"]
-        assert paths == ["notes/foo.md", "bar.md"]
+        assert set(body) == {"results"}
+        assert [item["path"] for item in results] == ["notes/foo.md", "bar.md"]
         assert len(results) == 2
         assert results[0]["path"] == "notes/foo.md"
         assert results[1]["path"] == "bar.md"
@@ -159,8 +159,7 @@ title: No Description
         assert results[1]["description"] == ""
         assert results[2]["path"] == "no_frontmatter.md"
         assert results[2]["description"] == ""
-        # paths still only return paths (backward compat)
-        assert body["paths"] == ["with_desc.md", "no_desc.md", "no_frontmatter.md"]
+        assert set(body) == {"results"}
 
     def test_primary_embedder_failure_raises_indexer_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
