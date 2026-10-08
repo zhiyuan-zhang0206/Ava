@@ -72,7 +72,7 @@ def _git(root: pathlib.Path, *args: str) -> None:
 @pytest.fixture
 def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", baseline_shards.SHARD_DIR)
