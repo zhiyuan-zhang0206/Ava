@@ -8,7 +8,6 @@ of plugin.py (2026-08-07, Task #1011).
 
 from __future__ import annotations
 
-import functools
 import importlib.util
 import json
 import pathlib
@@ -206,12 +205,11 @@ def _ruff_executable() -> str:
 _RUFF_TIMEOUT_SECONDS = 5
 
 
-@functools.lru_cache(maxsize=1)
-def _warn_ruff_missing_once() -> None:
-    """Log a missing ruff executable once per process.
+def _warn_ruff_missing() -> None:
+    """Log a missing ruff executable for each skipped stage.
 
     ruff is an optional stage — a host without it skips the fix — but the skip
-    must be visible. One line per process, not one per agent turn (issue #159).
+    must be visible. Each skipped stage remains observable (issue #159).
     """
     logger.warning(
         f"ruff executable {_ruff_executable()!r} not found — syntax-fix "
@@ -223,7 +221,7 @@ def _log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
     """Log why a ruff subprocess pass gave up, then let the caller pass through.
 
     FileNotFoundError = the optional stage is skipped on a host without ruff —
-    one line per process via _warn_ruff_missing_once. TimeoutExpired and
+    a warning for each skipped stage via _warn_ruff_missing. TimeoutExpired and
     OSError and UnicodeError are silent-failure smells (issue #159): the first
     logs the elapsed budget and the input size (a timeout correlated with large
     inputs points at the budget, not the host), the second logs the errno
@@ -237,7 +235,7 @@ def _log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
         )
         return
     if isinstance(exc, FileNotFoundError):  # OSError subclass — check first
-        _warn_ruff_missing_once()
+        _warn_ruff_missing()
         return
     if isinstance(exc, UnicodeError):
         logger.warning(
@@ -293,7 +291,7 @@ def _ruff_undefined_names(code: str) -> set[str]:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
         # Same contract as _ruff_fix / _ruff_format (issue #159): a missing
-        # ruff is logged once per process, a timeout / OS error at warning —
+        # ruff is logged per skipped stage, a timeout / OS error at warning —
         # a detection stage that silently returns "no undefined names" would
         # leave missing imports un-repaired with zero signal.
         _log_ruff_give_up("check --select F821", code, exc)
