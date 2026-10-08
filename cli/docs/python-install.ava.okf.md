@@ -14,6 +14,8 @@ exist. Invoke it with Python 3.12 and an explicit checkout; worktree setup uses
 its already-created venv. It neither creates cluster identity nor starts or
 provisions services. The script explicitly locates
 its checkout, including when `PYTHONSAFEPATH` disables implicit cwd imports.
+That import-path bootstrap runs only at the standalone `__main__` entry;
+loading the installer as a library leaves the caller's import path intact.
 
 `cli/_python_index.py` reads one host index from uv settings or the pip settings
 uv does not consume. The installer can pass the existing unit `mirror.env`; real
