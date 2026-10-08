@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 from psycopg import sql
 
 import base.db
-from gateway import creation_receipts
 from gateway.app import app
 from gateway.routers import presets
+from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import router as schedules
 
 
