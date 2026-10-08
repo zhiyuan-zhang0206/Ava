@@ -62,12 +62,14 @@ import hashlib
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AnyMessage, SystemMessage
 from loguru import logger
 
 from base.host.env.agent_slices import LlmCallPolicy
+from base.lm.call import LlmInvocation, ProviderCallContext
 
 # Cache lifetime. 3600s is also the API default; stated explicitly so the
 # refresh arithmetic has one source. Storage bills per token-hour, so a
@@ -334,3 +336,42 @@ async def get_or_create_cache(
         expire=ref.expire_time,
     )
     return ref
+
+
+async def prepare_call(ctx: ProviderCallContext) -> LlmInvocation | None:
+    """Prepare Google wire shape and capture this attempt's opaque cache handle."""
+    if not isinstance(ctx.provider_config, LlmCallPolicy):
+        raise TypeError("Google call requires a resolved LlmCallPolicy snapshot")
+    messages = cast(list[AnyMessage], ctx.messages)
+    if not (
+        messages
+        and isinstance(messages[0], SystemMessage)
+        and isinstance(messages[0].content, str)
+        and not any(isinstance(message, SystemMessage) for message in messages[1:])
+    ):
+        return None
+    llm = cast(BaseChatModel, ctx.llm)
+    ref = await get_or_create_cache(llm, messages[0].content, ctx.tools, ctx.provider_config)
+    if ref is None:
+        return None
+
+    def recover(exc: BaseException) -> LlmInvocation | None:
+        if not isinstance(exc, Exception):
+            raise exc
+        if not is_stale_cache_error(exc):
+            return None
+        logger.warning(
+            "[gemini-cache] stale cache {name} — invalidate + retry once on plain path",
+            name=ref.name,
+        )
+        invalidate(ref)
+        return LlmInvocation(
+            runnable=llm.bind_tools(cast(list[Any], ctx.tools)), messages=list(messages)
+        )
+
+    return LlmInvocation(
+        runnable=llm.bind(cached_content=ref.name),
+        messages=list(messages[1:]),
+        used_explicit_cache=True,
+        recover=recover,
+    )

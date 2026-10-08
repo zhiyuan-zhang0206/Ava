@@ -380,7 +380,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )
     summary_text = "compacted summary " * 100
 
-    async def _fake_generate_summary(messages: list[AnyMessage], llm: object, _model: str) -> str:
+    async def _fake_generate_summary(
+        messages: list[AnyMessage], llm: object, _model: str, *, binding: object = None
+    ) -> str:
         return summary_text
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)

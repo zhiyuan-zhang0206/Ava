@@ -9,8 +9,10 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent.llm.cache import ainvoke_with_cache_retry
+from agent.llm.cache import ainvoke_with_cache_retry, prepare_invocation
 from base.host.env.agent_slices import AgentSlices
+from base.lm.call import LlmInvocation, ProviderCallContext
+from base.lm.provider_api import ProviderBinding
 
 _SYSTEM = SystemMessage(content="You are a test agent. " * 100)
 
@@ -22,7 +24,7 @@ class _StubRunnable:
     """Records ainvoke calls; scripts errors."""
 
     def __init__(self, *, errors: list[Exception] | None = None) -> None:
-        self.calls: list[list] = []
+        self.calls: list[list[Any]] = []
         self._errors = list(errors or [])
 
     async def ainvoke(self, messages: Any) -> AIMessage:
@@ -87,3 +89,108 @@ class TestInvokeTimeout:
         )
         assert out.content == "done"  # pyright: ignore[reportUnknownMemberType]
         assert used_cache is False  # plain path (no cache memo)
+
+
+@pytest.mark.parametrize("nested", [True, False])
+async def test_recovery_rejects_a_cached_or_nested_retry(nested: bool) -> None:
+    llm = _StubLLM(invoke_errors=[ValueError("first failed")])
+
+    def recover(_exc: BaseException) -> LlmInvocation:
+        return LlmInvocation(
+            llm.runnable, [], used_explicit_cache=not nested, recover=recover if nested else None
+        )
+
+    async def prepare(ctx: ProviderCallContext) -> LlmInvocation:
+        return LlmInvocation(llm.runnable, ctx.messages, recover=recover)
+
+    def build(_ctx: object) -> BaseChatModel:
+        return cast(BaseChatModel, llm)
+
+    binding = ProviderBinding("test-", "Test", "TEST_KEY", build, prepare_call=prepare)
+    with pytest.raises(ValueError, match="plain invocation"):
+        await ainvoke_with_cache_retry(
+            cast(BaseChatModel, llm),
+            list(_CONVO),
+            AgentSlices.resolve().llm_policy,
+            binding=binding,
+        )
+    assert len(llm.runnable.calls) == 1
+
+
+async def test_prepare_is_inside_total_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from base.config import settings
+
+    preparing = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def prepare(_ctx: ProviderCallContext) -> LlmInvocation | None:
+        preparing.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    llm = _StubLLM()
+
+    def build(_ctx: object) -> BaseChatModel:
+        return cast(BaseChatModel, llm)
+
+    binding = ProviderBinding("test-", "Test", "TEST_KEY", build, prepare_call=prepare)
+    monkeypatch.setattr(settings.lm, "llm_compact_timeout_seconds", 0.05)
+    with pytest.raises(TimeoutError):
+        await ainvoke_with_cache_retry(
+            cast(BaseChatModel, llm),
+            list(_CONVO),
+            AgentSlices.resolve().llm_policy,
+            binding=binding,
+        )
+    assert preparing.is_set() and cancelled.is_set()
+    assert llm.runnable.calls == []
+
+
+async def test_malformed_provider_runnable_fails_at_preparation() -> None:
+    llm = _StubLLM()
+
+    async def prepare(ctx: ProviderCallContext) -> LlmInvocation:
+        return LlmInvocation(object(), ctx.messages)
+
+    def build(_ctx: object) -> BaseChatModel:
+        return cast(BaseChatModel, llm)
+
+    binding = ProviderBinding("test-", "Test", "TEST_KEY", build, prepare_call=prepare)
+    with pytest.raises(TypeError, match="support ainvoke"):
+        await prepare_invocation(
+            cast(BaseChatModel, llm), list(_CONVO), AgentSlices.resolve().llm_policy, binding
+        )
+    assert llm.runnable.calls == []
+
+
+async def test_wire_cancellation_never_calls_recovery() -> None:
+    interruption = asyncio.CancelledError()
+    recovered: list[BaseException] = []
+
+    class CancelledRunnable:
+        async def ainvoke(self, _messages: object) -> AIMessage:
+            raise interruption
+
+    def recover(exc: BaseException) -> LlmInvocation | None:
+        recovered.append(exc)
+        return None
+
+    async def prepare(ctx: ProviderCallContext) -> LlmInvocation:
+        return LlmInvocation(CancelledRunnable(), ctx.messages, recover=recover)
+
+    llm = _StubLLM()
+
+    def build(_ctx: object) -> BaseChatModel:
+        return cast(BaseChatModel, llm)
+
+    binding = ProviderBinding("test-", "Test", "TEST_KEY", build, prepare_call=prepare)
+    with pytest.raises(asyncio.CancelledError):
+        await ainvoke_with_cache_retry(
+            cast(BaseChatModel, llm),
+            list(_CONVO),
+            AgentSlices.resolve().llm_policy,
+            binding=binding,
+        )
+    assert recovered == []

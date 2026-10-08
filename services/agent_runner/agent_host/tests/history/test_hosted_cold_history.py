@@ -87,7 +87,7 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
     monkeypatch.setattr(saver, "aget_delta_channel_history", counted)
     monkeypatch.setattr(host_module, "admit_stored_model", Mock(return_value=True))
     monkeypatch.setattr(host_module, "publish_agent_updated", AsyncMock())
-    monkeypatch.setattr(host_module, "boot_agent_scope", AsyncMock(return_value=object()))
+    monkeypatch.setattr(host_module, "boot_agent_scope", AsyncMock(return_value=(object(), None)))
     monkeypatch.setattr(host_module, "close_hosted_turn", AsyncMock())
     host = AgentHost(
         pool=aops_pool,
