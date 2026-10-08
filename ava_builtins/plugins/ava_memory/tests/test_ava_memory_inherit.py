@@ -9,8 +9,10 @@ does with the note (strip on fork + regraft) is pinned in
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -19,6 +21,7 @@ from ava import gateway_client
 from ava_builtins.plugins.ava_memory import inherit
 from base.agents import GatewayUnavailable
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.cluster.machine import machine_name
 from base.config import settings
@@ -337,7 +340,10 @@ def test_fork_notes_graft_the_new_agent_s_own_chain(chain: _FakeChain, memory_pl
     from agent.graph.prompt.context_notes import fork_notes
 
     registry = ExtensionRegistry((("ava_memory", memory_plugin.contribute()),))
-    notes = fork_notes(registry, _context())
+    sql = MagicMock()
+    sql.cursor.return_value.__enter__.return_value.fetchone.return_value = None
+    ctx = replace(_context(), clients=MagicMock(spec=ClientSet, sql=sql))
+    notes = fork_notes(registry, ctx)
     inherited = [n for n in notes if _note_tag(n) == "inherited_memory"]
     assert len(inherited) == 1
     assert "fork chain block" in _note_text(inherited[0])

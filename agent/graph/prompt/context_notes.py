@@ -202,21 +202,14 @@ def timezone_note(ctx: AvaContext) -> HumanMessage | None:
 def _own_label(ctx: AvaContext, agent_id: int) -> str | None:
     """The agent's current label, whitespace-normalized, or None.
 
-    Fail-soft on purpose: the identity line must render even when the label
-    read cannot (DB blip, row not yet auto-named), so every failure degrades to
-    "no label clause" — never to a missing identity line. A label is free text
-    (set by the agent via `ava.self.set_label` or by the gateway), so its
-    whitespace is collapsed before it enters the one-line note.
+    A missing row or empty label omits the optional clause. SQL and programming
+    errors propagate to the context-building caller. A label is free text (set
+    by the agent via `ava.self.set_label` or by the gateway), so its whitespace
+    is collapsed before it enters the one-line note.
     """
-    try:
-        with ctx.sql.cursor() as cur:
-            cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
-            row = cur.fetchone()
-    except Exception:  # fail-soft by design: the identity line outranks the label clause
-        logger.opt(exception=True).warning(
-            "[context-notes] agent-id label read failed; the identity line renders without a label"
-        )
-        return None
+    with ctx.sql.cursor() as cur:
+        cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
+        row = cur.fetchone()
     if row is None or not row[0]:
         return None
     return " ".join(str(row[0]).split())
@@ -225,8 +218,7 @@ def _own_label(ctx: AvaContext, agent_id: int) -> str | None:
 def _machine_clause() -> str | None:
     """The host's machine name, whitespace-normalized, or None when unset.
 
-    Fail-soft like the label: a host whose machine name cannot be resolved
-    still states the agent's identity line."""
+    An unset machine name omits this optional clause; other failures propagate."""
     from base.cluster.machine import MachineNameMissing, machine_name
 
     try:
@@ -256,7 +248,8 @@ def _workspace_path(agent_id: int) -> str | None:
 
 def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
     """A context note stating the agent's own identity: id, label, machine,
-    workspace path — each clause fail-soft.
+    workspace path. Missing optional values omit their clauses; failed label
+    reads propagate.
 
     It lives outside the SystemMessage (as a system-styled HumanMessage) so a
     fork — which copies the source agent's full conversation including the
