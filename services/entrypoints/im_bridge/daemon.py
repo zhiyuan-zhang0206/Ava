@@ -237,16 +237,42 @@ async def _handle_send(core: Any) -> Any:
     return handle
 
 
-async def _stop_adapters(adapters: list[Any]) -> None:
+def _begin_shutdown(adapters: list[Any]) -> list[BaseException]:
+    errors: list[BaseException] = []
+    for adapter in adapters:
+        try:
+            adapter.begin_shutdown()
+        except BaseException as error:
+            errors.append(error)
+    return errors
+
+
+async def _stop_resources(
+    core: Any, adapters: list[Any], health: Any, pool: Any
+) -> list[BaseException]:
+    """Attempt every owned resource once, returning faults for the daemon to expose."""
+    errors: list[BaseException] = []
+    if core is not None:
+        try:
+            await core.stop()
+        except BaseException as error:
+            errors.append(error)
     for adapter in adapters:
         try:
             await adapter.stop()
-        except Exception:
-            _log.warning(
-                "[im_bridge] adapter %s failed to stop cleanly",
-                type(adapter).__name__,
-                exc_info=True,
-            )
+        except BaseException as error:
+            errors.append(error)
+    if health is not None:
+        try:
+            await stop_health_server(health)
+        except BaseException as error:
+            errors.append(error)
+    for close in (pool.close, _remove_pidfile):
+        try:
+            close()
+        except BaseException as error:
+            errors.append(error)
+    return errors
 
 
 async def run() -> None:
@@ -267,6 +293,8 @@ async def run() -> None:
     core = None
     health = None
     adapters: list[Any] = []
+    cleanup_errors: list[BaseException] = []
+    primary: BaseException | None = None
     try:
         async with asyncio.TaskGroup() as loops:
             try:
@@ -302,20 +330,18 @@ async def run() -> None:
                     loops.create_task(_timeline_outbound_loop(core, alerts))
                 await asyncio.Event().wait()
             finally:
-                for adapter in adapters:
-                    adapter.begin_shutdown()
+                cleanup_errors.extend(_begin_shutdown(adapters))
+    except BaseException as error:
+        primary = error
     finally:
-        # The TaskGroup has drained its children before their shared resources close.
-        try:
-            if core is not None:
-                await core.stop()
-            await _stop_adapters(adapters)
-            if health is not None:
-                await stop_health_server(health)
-        finally:
-            db_pool.close()
-            _remove_pidfile()
-            _log.info("[im_bridge] daemon stopped")
+        # Children have drained; every shared resource is attempted even after a stop fault.
+        cleanup_errors.extend(await _stop_resources(core, adapters, health, db_pool))
+        _log.info("[im_bridge] daemon stopped")
+    if cleanup_errors:
+        errors = ([primary] if primary is not None else []) + cleanup_errors
+        raise BaseExceptionGroup("IM daemon failure and cleanup faults", errors)
+    if primary is not None:
+        raise primary
 
 
 def _gate_httpx_info_logs() -> None:
