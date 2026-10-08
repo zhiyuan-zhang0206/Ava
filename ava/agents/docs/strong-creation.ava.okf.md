@@ -57,7 +57,8 @@ from mutable metadata. Reusing the key cannot reset later operator config.
 
 A receipt proves birth acceptance and recovers the original agent id, not that
 its native process is ready or work executed. Existing launch failure handling
-and explicit `retry_launch(agent_id)` remain separate recovery operations.
+and observed-attempt `retry_launch` remain separate recovery operations; see
+[[launch-retry.ava.okf.md]].
 
 ## Compatibility and remaining scope
 
