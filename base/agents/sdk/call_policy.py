@@ -6,7 +6,6 @@ import threading
 import time
 from types import TracebackType
 
-import httpx
 from pydantic import BaseModel, Field
 
 from base.log import logger
@@ -71,15 +70,27 @@ class _PolicyCache:
             return self.value
 
     def refresh(self) -> None:
+        transient_errors: tuple[type[Exception], ...] = ()
+        status_error = None
         try:
+            import httpx
+
+            transient_errors = (
+                httpx.TimeoutException,
+                httpx.NetworkError,
+                httpx.RemoteProtocolError,
+            )
+            status_error = httpx.HTTPStatusError
             value = _read_policy()
             with self.lock:
                 self.value = value
                 self.error = None
         except Exception as exc:
-            expected = isinstance(
-                exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)
-            ) or (isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429)
+            expected = isinstance(exc, transient_errors) or (
+                status_error is not None
+                and isinstance(exc, status_error)
+                and exc.response.status_code == 429
+            )
             if expected:
                 logger.bind(_no_emitter=True).opt(exception=True).warning(
                     "SDK sampling config fetch unavailable; retaining the last valid policy",
