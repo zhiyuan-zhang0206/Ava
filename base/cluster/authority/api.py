@@ -39,9 +39,8 @@ from base.host.private_storage import write_private_bytes
 _SCHEME = "Bearer "
 _TELEMETRY_LABEL = b"ava-telemetry-ingress/1"
 
-# home -> (ledger file identity, accepted digests); activation rewrites the
-# ledger atomically, so its identity changes and the next request reloads.
-_acceptance_cache: dict[Path, tuple[tuple[int, int, int], dict[GenerationClass, str]]] = {}
+# A caller-owned cache follows atomic ledger replacement on the next read.
+type AcceptanceCache = dict[Path, tuple[tuple[int, int, int], dict[GenerationClass, str]]]
 
 
 def token_digest(token: str) -> str:
@@ -116,12 +115,13 @@ def api_token(home: Path, cls: GenerationClass) -> str:
     return read_secret(home, active_generation(home)).api.of(cls)
 
 
-def acceptance(home: Path) -> dict[GenerationClass, str]:
+def acceptance(home: Path, *, cache: AcceptanceCache | None = None) -> dict[GenerationClass, str]:
     """Digests of the tokens the gateway at `home` accepts, by class.
 
     The ACTIVE generation's two tokens; none without a ledger (a remote-managed
     plane has no generations) or while no generation is active (a birth not yet
-    admitted). A ledger or secret the store refuses raises.
+    admitted). A ledger or secret the store refuses raises. Gateway requests
+    share their lifespan-owned cache; one-shot boot readers read without one.
     """
     path = ledger_path(home)
     try:
@@ -129,7 +129,7 @@ def acceptance(home: Path) -> dict[GenerationClass, str]:
     except FileNotFoundError:
         return {}
     identity = (info.st_ino, info.st_mtime_ns, info.st_size)
-    cached = _acceptance_cache.get(home)
+    cached = None if cache is None else cache.get(home)
     if cached is not None and cached[0] == identity:
         return cached[1]
     ledger = load_ledger(home)
@@ -137,5 +137,6 @@ def acceptance(home: Path) -> dict[GenerationClass, str]:
     if ledger is not None and ledger.active is not None:
         tokens = read_secret(home, ledger.active).api
         accepted = {cls: token_digest(tokens.of(cls)) for cls in CLASSES}
-    _acceptance_cache[home] = (identity, accepted)
+    if cache is not None:
+        cache[home] = (identity, accepted)
     return accepted
