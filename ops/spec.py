@@ -38,6 +38,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from base.cluster.machine import MachineRoles
 from base.config import settings
@@ -79,13 +80,10 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     own `plugin.py`, so this load does not drag the agent kernel into the ops
     process.
 
-    Fail-soft per plugin (user ruling 2026-09-11): a ``services.py`` that fails
-    to load, a file without a ``services()`` function, or a ``services()`` call
-    that raises is skipped with a loud report
-    (``base.packages.plugins.load_report``) — one broken plugin must not block
-    `ava start` / the root roster for every other plugin. The session-name
-    collision guard stays fail-closed: no rule can pick a winner between two
-    owners of one session name.
+    A missing services.py is an optional absent face. Once present, import,
+    declaration and config errors are reported and propagated to the operation
+    owner; an invalid roster is never presented as a successful partial one.
+    Session-name collisions also fail: no rule can pick between two owners.
     """
     from base.packages.plugins import load_report
     from base.packages.plugins.enable_config import installed_plugin_dirs
@@ -97,27 +95,27 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
             continue
         try:
             module = _load_plugin_module(name, services_py)
+            specs.extend(_declared_plugin_services(name, module))
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
             load_report.report_plugin_load_failure(name, exc)
-            continue
-        declare = getattr(module, "services", None)
-        if declare is None:
-            load_report.report_plugin_load_failure(
-                name,
-                PluginServiceError(
-                    f"plugin {name!r} ships a services.py but it defines no `services()` function"
-                ),
-            )
-            continue
-        try:
-            specs.extend(declare())
-        except (KeyboardInterrupt, SystemExit):
             raise
-        except BaseException as exc:
-            load_report.report_plugin_load_failure(name, exc)
     return tuple(specs)
+
+
+def _declared_plugin_services(name: str, module: object) -> tuple[ServiceSpec, ...]:
+    """Validate the present services face before accepting any roster entries."""
+    declare = getattr(module, "services", None)
+    if not callable(declare):
+        raise PluginServiceError(f"plugin {name!r} services.py must define callable services()")
+    declared = declare()
+    if not isinstance(declared, tuple):
+        raise PluginServiceError(f"plugin {name!r} services() must return tuple[ServiceSpec, ...]")
+    members = cast(tuple[object, ...], declared)
+    if not all(isinstance(item, ServiceSpec) for item in members):
+        raise PluginServiceError(f"plugin {name!r} services() must return tuple[ServiceSpec, ...]")
+    return cast(tuple[ServiceSpec, ...], members)
 
 
 def _load_plugin_module(name: str, services_py: Path) -> object:
@@ -279,6 +277,16 @@ def _core_gate_reason(session: str) -> str | None:
     return _flag_gate_reason(session)
 
 
+def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
+    """A plugin gate must supply its declared reason contract."""
+    if spec.gate is None:
+        raise PluginServiceError(f"service {spec.session!r} has no plugin gate")
+    reason = spec.gate()
+    if reason is not None and not isinstance(reason, str):
+        raise PluginServiceError(f"gate for {spec.session!r} must return str or None")
+    return reason
+
+
 def _gate_reason(spec: ServiceSpec) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
@@ -291,17 +299,12 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
     """
     if spec.gate is not None:
         try:
-            return spec.gate()
-        except Exception as exc:  # a broken gate must not kill the watchdog
-            # 2026-08-08 incident: the memory-indexer gate read the 'agent'
-            # config domain from the gateway watchdog's process profile and
-            # raised AttributeError, killing the whole watchdog on its first
-            # tick (no healthchecks ran until a respawn without the profile).
-            # Fail OPEN — run the service — and log, so one plugin's gate bug
-            # can never take the supervisor down; the capability filter above
-            # already scoped the service to this host's role.
-            logger.warning("gate for {} raised (failing open): {}", spec.session, exc)
-            return None
+            return _plugin_gate_reason(spec)
+        except Exception:
+            logger.opt(exception=True).error(
+                "gate for {} failed; roster evaluation aborted", spec.session
+            )
+            raise
     return _core_gate_reason(spec.session)
 
 
