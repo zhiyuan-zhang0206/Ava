@@ -4,7 +4,7 @@
 // new session, so the bars rise and fall in a sawtooth whose drops are the compact boundaries;
 // sessions alternate in color.
 
-import type { MouseEventHandler } from "react";
+import type { MouseEventHandler, ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import type { RunTimelineRequest, RunTimelineUnit } from "@/lib/contracts/types";
@@ -36,6 +36,7 @@ export function ContextSizeRow({
   units,
   selection,
   onSelect,
+  overlay,
   hover,
   hoverProps,
   describe,
@@ -51,6 +52,8 @@ export function ContextSizeRow({
   units: readonly RunTimelineUnit[];
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
+  /** The selection's outline in this row, drawn over the bars. */
+  overlay?: ReactNode;
   hover: Hover | null;
   hoverProps: (target: Hover) => {
     onMouseEnter: MouseEventHandler;
@@ -113,6 +116,7 @@ export function ContextSizeRow({
           </button>
         );
       })}
+      {overlay}
     </RowShell>
   );
 }
