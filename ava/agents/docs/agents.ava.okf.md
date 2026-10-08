@@ -49,6 +49,10 @@ tags:
 - [[gateway-cli.ava.okf.md]] — gateway is the actual entry point for agent spawn
 
 ## Notes
+
+`ava.agents.compaction` provides observed-source manual compaction and separate
+execution status; see [[ava/agents/docs/compaction.ava.okf.md]].
+
 For guaranteed plain-creation admission, set `require_idempotency=True` with an explicit 1–128 character `idempotency_key`; retain the same key, effective body and verified principal on retry. This mode rejects forks and never falls back to legacy routing. See [[strong-creation.ava.okf.md|Explicit strong creation]]. Default mode retains existing behavior but cannot promise recovery on older servers that ignore keys. Ambiguous transport outcomes are not automatically retried.
 
 `send_message` is asynchronous insert — returns immediately, does not wait for target agent to receive or process. Target agent is woken if idle.
