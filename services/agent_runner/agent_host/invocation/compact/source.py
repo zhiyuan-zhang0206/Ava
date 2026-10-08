@@ -1,6 +1,7 @@
 """Actual host quiescence produces compact observations; a status row cannot."""
 
-from collections.abc import Awaitable
+import asyncio
+from collections.abc import Awaitable, Callable
 from uuid import UUID, uuid4
 
 import psycopg
@@ -14,16 +15,20 @@ from base.agents.compaction.models import CompactTarget
 from base.agents.incarnation.native_work import NativeWorkRecord, load_work, managed_resources
 from base.agents.incarnation.native_work_models import NativeWorkPhase
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
+from base.agents.observation.db_wait import DatabaseWaits
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db.transaction import async_write_transaction
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import model_catalog
 from base.log import logger
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
+from services.agent_runner.agent_host.db_recovery import recover_database
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
+from services.agent_runner.agent_host.invocation.compact.lifecycle import settle_original_restart
 from services.agent_runner.agent_host.wake_screening import read_stored_config
 
 
@@ -187,7 +192,29 @@ async def finish_force_and_compact(
     agent_id: int,
     owner: UUID,
     resources: HostedTurnResources,
+    bus: EventBus,
+    drop_agent: Callable[[int], None],
+    database_waits: DatabaseWaits,
+    peek_lock: asyncio.Lock,
 ) -> None:
     """Both proof tails share the original shielded owned settlement task."""
     await force
     await finish_compact_pump(pool, saver, graph, agent_id, owner, resources)
+    from base.native_process.turn_identity import bind_hosted_resources
+
+    with bind_hosted_resources(resources):
+        await settle_original_restart(
+            pool,
+            bus,
+            agent_id,
+            owner,
+            drop_agent,
+            lambda token: recover_database(
+                pool=pool,
+                checkpointer=saver,
+                graph=graph,
+                incarnation=token,
+                database_waits=database_waits,
+                peek_lock=peek_lock,
+            ),
+        )

@@ -212,3 +212,32 @@ async def completed_guarded_restart(
         acceptance.target.generation,
         acceptance.target.owner,
     ) == (incarnation.agent_id, incarnation.generation, incarnation.owner)
+
+
+async def superseded_guarded_restart(
+    conn: psycopg.AsyncConnection, target: NativeWorkTarget, command_id: int
+) -> bool:
+    """Read canonical original no-effect proof, never applied execution."""
+    row = await (
+        await conn.execute(
+            "SELECT acceptance,outcome,applied_at,observed_at,outcome_reason "
+            "FROM native_restart_commands WHERE command_id=%s AND agent_id=%s",
+            (command_id, target.agent_id),
+        )
+    ).fetchone()
+    if row is None:
+        return False
+    proof = NativeRestartProgress(
+        acceptance=NativeRestartAcceptance.model_validate(row[0]),
+        outcome=row[1],
+        applied_at=row[2],
+        observed_at=row[3],
+        reason=row[4],
+    )
+    if proof.acceptance.target != target or proof.acceptance.command_id != command_id:
+        raise NativeRestartConflictError("guarded restart original work identity differs")
+    return proof.outcome == NativeRestartOutcome.SUPERSEDED and proof.reason in (
+        NativeRestartReason.TARGET_REPLACED,
+        NativeRestartReason.RESURRECT,
+        NativeRestartReason.FORCE_TERMINATE,
+    )

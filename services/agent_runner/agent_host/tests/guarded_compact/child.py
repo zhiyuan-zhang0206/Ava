@@ -15,6 +15,7 @@ from base.agents.compaction.commands import observe
 from base.lm.plugin_providers import model_catalog, use_catalog
 from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
 from services.agent_runner.agent_host.invocation.compact import execute as compact_execute
+from services.agent_runner.agent_host.invocation.compact import lifecycle as compact_lifecycle
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
 
 
@@ -27,7 +28,31 @@ async def park(stage: str, model: SummaryModel) -> None:
 def install(
     stage: str, model: SummaryModel, patch: pytest.MonkeyPatch, host: Any, agent: int
 ) -> None:
-    if stage == "prepared":
+    if stage == "released":
+        save_result = compact_execute.save_result
+
+        async def before_close(*args: Any, **kwargs: Any) -> Any:
+            result = await save_result(*args, **kwargs)
+            sys.stdout.write(
+                json.dumps({"stage": "prepared", "provider_calls": model.calls}) + "\n"
+            )
+            sys.stdout.flush()
+            await asyncio.to_thread(sys.stdin.readline)
+            return result
+
+        async def after_close(*args: Any, **kwargs: Any) -> bool:
+            await park(stage, model)
+            return False
+
+        patch.setattr(compact_execute, "save_result", before_close)
+        patch.setattr(compact_lifecycle, "settle_original_restart", after_close)
+        # Driver and resource tail share this owner; replace their imported seam too.
+        from services.agent_runner.agent_host.invocation import driver
+        from services.agent_runner.agent_host.invocation.compact import source
+
+        patch.setattr(driver, "settle_original_restart", after_close)
+        patch.setattr(source, "settle_original_restart", after_close)
+    elif stage == "prepared":
         original = compact_execute.save_result
 
         async def save(*args: Any, **kwargs: Any) -> Any:
