@@ -5,8 +5,8 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from base.db.transaction import write_transaction
-from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
+from services.entrypoints.im_bridge.outbound.types import (
     NoticePollDecision,
     NoticePollImportReason,
     NoticePollReceipt,

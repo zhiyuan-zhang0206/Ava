@@ -31,7 +31,7 @@ from base.paths import ava_home
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.notice_poll_store import NoticePollStore
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.types import (
     NoticePollImportReason,
     OutboundIntent,
     OutboundSource,

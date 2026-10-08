@@ -14,8 +14,8 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
-from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
+from services.entrypoints.im_bridge.outbound.types import (
     OutboundAccountMismatchError,
     OutboundAdapterKind,
     OutboundChunk,
@@ -27,7 +27,7 @@ from services.entrypoints.im_bridge.outbound_types import (
     PreparedOutboundSend,
     TimelineCandidate,
 )
-from services.entrypoints.im_bridge.outbound_worker import IMOutboxWorker
+from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
 from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 
 

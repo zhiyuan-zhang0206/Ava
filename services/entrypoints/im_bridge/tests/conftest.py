@@ -7,7 +7,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
-from services.entrypoints.im_bridge.outbound_types import (
+from services.entrypoints.im_bridge.outbound.types import (
     OutboundAdapterKind,
     OutboundChunk,
     PreparedOutboundSend,

@@ -6,7 +6,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
-from services.entrypoints.im_bridge.outbound_store import IMOutboxStore
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import candidate
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
 
