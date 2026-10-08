@@ -98,7 +98,7 @@ symlinks, __pycache__, migrations subtrees, and a subdirectory holding nothing
 else (a local leftover CI never checks out) are excluded. Each directory is
 independent. A `docs/` or `tests/` layer without `__init__.py` takes no slot in its
 parent's budget, and a `tests/` layer has no entry cap of its own (see
-`scripts/structure/directory_budget.py`); its files keep the 800-line ceiling.
+`scripts/structure/budgets/directory_budget.py`); its files keep the 800-line ceiling.
 AST rules retain their governed-package scope.
 
 File, directory, complexity and nesting budgets have no exemptions. Every
@@ -127,12 +127,14 @@ sys.path.insert(0, str(_REPO_ROOT))
 from scripts.structure import (  # noqa: E402 — standalone script
     ambient_state,
     baseline_shards,
-    directory_budget,
     lint_common,
     locality,
     path_imports,
 )
-from scripts.structure import quality_budget as quality  # noqa: E402 — standalone script
+from scripts.structure.budgets import (  # noqa: E402 — standalone script
+    directory_budget,
+    quality_budget,
+)
 
 _HARD_CEILING = 800
 # Baseline sections whose frozen `path::target` site counts must match reality exactly.
@@ -370,7 +372,7 @@ def _parse_baseline(
     before retirement. They convey no allowance and are discarded after validation.
     """
     retired = (
-        ("directories", "files", *quality.QUALITY_SECTIONS, *locality.STRICT_SECTIONS)
+        ("directories", "files", *quality_budget.QUALITY_SECTIONS, *locality.STRICT_SECTIONS)
         if historical
         else ()
     )
@@ -608,7 +610,7 @@ def _check_ast_and_quality(
     files, _ = _budget_targets(targets)
     ast_files = _ast_rule_files(argv)
     locality.reset_caches()
-    measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality.QUALITY_SECTIONS}
+    measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
     sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
     scanned: set[str] = set()
     errors: list[str] = []
@@ -633,9 +635,9 @@ def _check_ast_and_quality(
         if ambient:
             errors.extend(ambient_state.collect(tree, rel, _REPO_ROOT, sites, scanned))
         if path in files:
-            for kind, values in quality.measure_quality(tree, rel).items():
+            for kind, values in quality_budget.measure_quality(tree, rel).items():
                 measurements[kind].update(values)
-    errors.extend(quality.quality_errors(measurements))
+    errors.extend(quality_budget.quality_errors(measurements))
     errors.extend(
         locality.site_errors(
             sites, baseline, scanned=scanned, repo_root=_REPO_ROOT, renames=renames
@@ -643,7 +645,7 @@ def _check_ast_and_quality(
     )
     errors.extend(locality.missing_allowlist_errors(_REPO_ROOT))
     errors.extend(ambient_state.missing_allowlist_errors(_REPO_ROOT))
-    quality.render_warnings(measurements["complexity"], full=full)
+    quality_budget.render_warnings(measurements["complexity"], full=full)
     return errors
 
 
