@@ -16,6 +16,9 @@ import io
 import sys
 import textwrap
 import types
+from pathlib import Path
+
+import pytest
 
 import ava
 from ava.sdk_surface.discovery import (
@@ -30,6 +33,7 @@ from ava.sdk_surface.help import (
     _format_documented_const_stub,
     _format_signature,
 )
+from ava.sdk_surface.plugin_loader import load_plugin_module
 
 
 def _fake_module(source: str, name: str = "fakemod") -> types.ModuleType:
@@ -56,6 +60,47 @@ def _render(target: object | list[object], *, compact_classes: bool = False) -> 
     with contextlib.redirect_stdout(buf):
         ava.help(*targets, compact_classes=compact_classes)
     return buf.getvalue()
+
+
+def test_help_reads_updated_source_after_reload_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plugin_py = tmp_path / "plugin.py"
+    module_name = "help_reload_fixture.sample.plugin"
+    monkeypatch.setitem(sys.modules, module_name, types.ModuleType(module_name))
+    plugin_py.write_text('VALUE: str = "old"\n"""Original value documentation."""\n')
+    mod = load_plugin_module(plugin_py, name="sample", pkg="help_reload_fixture")
+    first = _render(mod)
+    assert "VALUE: str" in first
+    assert "Original value documentation." in first
+
+    plugin_py.write_text('VALUE: int = 42\n"""Updated integer documentation after reload."""\n')
+    reloaded = load_plugin_module(plugin_py, name="sample", pkg="help_reload_fixture")
+    assert reloaded is mod
+    assert reloaded.VALUE == 42
+    second = _render(reloaded)
+    assert "VALUE: int" in second
+    assert "Updated integer documentation after reload." in second
+    assert "Original value documentation." not in second
+
+
+def test_help_recovers_after_source_becomes_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plugin_py = tmp_path / "plugin.py"
+    module_name = "help_source_fixture.sample.plugin"
+    monkeypatch.setitem(sys.modules, module_name, types.ModuleType(module_name))
+    source = 'VALUE: str | None = "ready"\n"""Recovered source documentation."""\n'
+    plugin_py.write_text(source)
+    mod = load_plugin_module(plugin_py, name="sample", pkg="help_source_fixture")
+    plugin_py.unlink()
+    first = _render(mod)
+    assert "Recovered source documentation." not in first
+
+    plugin_py.write_text(source)
+    second = _render(mod)
+    assert "VALUE: str | None" in second
+    assert "Recovered source documentation." in second
 
 
 # ── _format_docstring ───────────────────────────────────────────────────────

@@ -73,6 +73,12 @@ restart it (a reload never revokes a user). A live pooler with closed listeners
 retains custody: normal start cannot repeat its shutdown signal or escalate to
 force. A graceful stop timeout fails without killing the survivor.
 
+Native maintenance-stop tests wait for both listener readiness and the daemon's
+PID publication: an open port does not prove the PID file is complete. Their
+bounded fixture wait accepts missing or empty publication while startup proceeds;
+nonempty corrupt content fails immediately. The real exit and idle-client stop
+contracts exercise a pending PID read and retain verified native cleanup custody.
+
 PgBouncer and Redis are spawned with `base.native_process.child_env.daemon_process_env`,
 and the Postgres postmaster with `base.cluster.dataplane.pg_tools.pg_start_env` (the same set
 plus the macOS locale fallback): the operator's PATH, home, user, temp dir,

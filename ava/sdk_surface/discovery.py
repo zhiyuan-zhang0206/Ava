@@ -11,7 +11,6 @@ entry re-exports the names tests and framework code reach as `ava.<name>`.
 import ast as _ast
 import inspect
 from dataclasses import dataclass
-from functools import cache
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -274,9 +273,8 @@ def _resolve_child(
     )
 
 
-@cache
 def _module_ast(mod: ModuleType) -> _ast.Module | None:
-    """Parse `mod`'s source once and cache the AST for downstream extractors."""
+    """Parse current source: a plugin reload can preserve the module identity."""
     try:
         src = inspect.getsource(mod)
     except (OSError, TypeError):
