@@ -31,7 +31,7 @@ from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from gateway import creation_receipts
-from gateway.agents.creation import DraftCreationArguments, guarded_draft_key
+from gateway.agents.creation import CreationLaunchArguments, guarded_draft_key
 from gateway.agents.router import create_and_launch_agent
 from gateway.schedules import receipts, session_control
 from ops.rpc_schemas import SpawnAgentRequest
@@ -475,7 +475,7 @@ async def _draft_schedule(
         prompt_source="user",
         label="ava-schedule-writer",
     )
-    identity: DraftCreationArguments = {}
+    identity: CreationLaunchArguments = {}
     if key is not None:
         identity = {"creation_key": key, "creation_identity": body.model_dump(mode="json")}
     spawned = await create_and_launch_agent(
