@@ -31,3 +31,19 @@ binaries may still execute legacy commands or raw checkpoint mutations and do
 not gain guarded support merely from installed schema/routes. Deployment,
 retirement of older generations and operational reconciliation are separate
 operator actions; this contribution performs none of them.
+
+A construction refusal before attempt admission releases a REJECTED receipt
+with `single_attempt_unavailable` (or `provider_unavailable`), without execution
+or provider evidence. This differs from a claimed attempt's unknown result.
+
+The serialized driver and actual resource tail hand an accepted guarded restart
+to the original immutable compact execution before ordinary work may mint a
+new UUID. SQL response loss reads original APPLIED/OBSERVED proof before database
+repair. Actual generation failure and native cancellation use the same handoff
+after diagnostic/native closure. A dead executor's settled work is not transferred
+as ACTIVE execution: its admitted successor uses the existing lifecycle
+`target_replaced` settlement, retaining SUPERSEDED with no application timestamp.
+The original restart owner also certifies `resurrect` and `force_terminate`
+no-effect receipts. These retain their original reason across source cleanup.
+That no-effect receipt permits new input; it never restarts the successor or
+reapplies the original overlay. Unknown restart proof retains the gate.

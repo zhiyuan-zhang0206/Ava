@@ -263,6 +263,9 @@ ignore_imports = [
     "services.agent_runner.agent_host.invocation.compact.execute -> agent.state",
     "services.agent_runner.agent_host.invocation.compact.recovery -> agent.impersonation",
     "services.agent_runner.agent_host.invocation.compact.source -> agent.state",
+    "services.agent_runner.agent_host.invocation.compact.lifecycle -> agent.ownership.hosted",
+    "services.agent_runner.agent_host.invocation.compact.lifecycle -> agent.ownership.hosted_completion",
+    "services.agent_runner.agent_host.invocation.compact.lifecycle -> agent.ownership.lifecycle_intent",
 ]
 
 # The one reverse edge base must never grow: `base` is the bottom layer,

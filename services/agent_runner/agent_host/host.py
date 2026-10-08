@@ -248,8 +248,7 @@ class AgentHost:
                     except asyncio.CancelledError:
                         cancelled = True
                 self._in_flight.discard(agent_id)
-            # Still inside the existing scheduler's exclusive per-agent pump.
-            # No-task wakes also take this path without admitting a runtime.
+            # The exclusive pump also covers no-task wakes.
             if cancelled:
                 self.drop_agent(agent_id)
             from services.agent_runner.agent_host.invocation.compact.source import (
@@ -272,6 +271,10 @@ class AgentHost:
                     agent_id,
                     self._owner,
                     resources,
+                    self._bus,
+                    self.drop_agent,
+                    self.database_waits,
+                    self._peek_lock,
                 )
             )
             while not settlement.done():
@@ -558,6 +561,7 @@ class AgentHost:
             self.database_waits,
             self._peek_lock,
             self._invoke_until_done,
+            self.drop_agent,
         )
 
     async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:

@@ -85,12 +85,21 @@ async def _generate_original(
     if ctx.require_agent().brain.llm_model != target_model:
         await _settle_without_generation(pool, command, incarnation, reason="model_changed")
         return False
-    model = build_chat_model(
-        target_model, overrides=ctx.require_agent().overrides, single_attempt=True
-    )
+    try:
+        model = build_chat_model(
+            target_model, overrides=ctx.require_agent().overrides, single_attempt=True
+        )
+    except ValueError:
+        # Construction has not claimed an attempt or entered the provider.
+        # Reject the now-unavailable contract instead of stranding its gate.
+        await _settle_without_generation(
+            pool, command, incarnation, reason="single_attempt_unavailable"
+        )
+        return False
     provider = provider_key_of_model(target_model)
     if provider is None:
-        raise CompactHeldError("compact original model has no registered provider")
+        await _settle_without_generation(pool, command, incarnation, reason="provider_unavailable")
+        return False
     command, claimed_here = await claim_attempt(pool, command, incarnation, provider_key=provider)
     continuation.command = command
     if command.outcome is CompactOutcome.REJECTED:
