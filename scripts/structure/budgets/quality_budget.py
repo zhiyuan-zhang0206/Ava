@@ -29,7 +29,9 @@ def function_nodes(tree: ast.AST, path: str) -> dict[str, ast.FunctionDef | ast.
         elif isinstance(node, ast.ClassDef):
             prefix += node.name + "."
         for child in ast.iter_child_nodes(node):
-            visit(child, prefix)
+            # Definitions can occur only in statement bodies, never expressions.
+            if isinstance(child, (ast.stmt, ast.ExceptHandler, ast.match_case)):
+                visit(child, prefix)
 
     visit(tree, "")
     counts: Counter[str] = Counter()
@@ -93,7 +95,11 @@ def _node_depth(node: ast.AST, depth: int) -> int:
         children = [child for case in node.cases for child in case.body]
     else:
         # Includes Try handlers/else/finally at the control node's incremented depth.
-        children = ast.iter_child_nodes(node)
+        children = (
+            child
+            for child in ast.iter_child_nodes(node)
+            if isinstance(child, (ast.stmt, ast.ExceptHandler))
+        )
     return max((_node_depth(child, depth) for child in children), default=depth)
 
 
