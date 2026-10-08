@@ -50,9 +50,10 @@ def _freeze(
     root: pathlib.Path, counts: dict[str, int], *, rules: dict[str, int] | None = None
 ) -> None:
     directory = root / baseline_shards.SHARD_DIR
-    for stale in directory.glob("*.json"):
+    for stale in directory.rglob("*.json"):
         stale.unlink()
     for name, shard in baseline_shards.split({patch_targets.SECTION: counts}).items():
+        pathlib.Path(f"{directory}/{name}.json").parent.mkdir(parents=True, exist_ok=True)
         write(root, f"{baseline_shards.SHARD_DIR}/{name}.json", baseline_shards.render(shard))
     if rules is not None:
         write(root, f"{baseline_shards.SHARD_DIR}/{baseline_shards.RULES_FILE}", json.dumps(rules))

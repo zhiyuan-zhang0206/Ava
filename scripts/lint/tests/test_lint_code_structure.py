@@ -29,7 +29,7 @@ def _clear_baseline_dir(root: pathlib.Path) -> pathlib.Path:
     to exist, and the README is what keeps git tracking it even with zero shards."""
     directory = root / baseline_shards.SHARD_DIR
     if directory.is_dir():
-        for path in directory.glob("*.json"):
+        for path in directory.rglob("*.json"):
             path.unlink()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
@@ -58,6 +58,7 @@ def _baseline(
     for name, shard in baseline_shards.split(data).items():
         # String concat, not `/`: a test-only key can produce a shard name
         # starting with "/", which `directory / name` would treat as absolute.
+        pathlib.Path(f"{directory}/{name}.json").parent.mkdir(parents=True, exist_ok=True)
         (pathlib.Path(f"{directory}/{name}.json")).write_text(
             baseline_shards.render(shard), encoding="utf-8"
         )
@@ -98,6 +99,9 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
     _baseline(tmp_path)
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Empty baseline")
 
 
 @pytest.mark.parametrize("lines", [600, 601, 700, 800, 801])
@@ -194,7 +198,7 @@ def test_docs_and_frontend_are_out_of_scope(
 def test_baseline_introduction_skips_guard_when_absent_from_head(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "rm", "-r", baseline_shards.SHARD_DIR)
     _write(tmp_path, "README.md", 1)
     _git(tmp_path, "add", "README.md")
     _git(tmp_path, "commit", "--quiet", "-m", "Before baseline introduction")
@@ -207,11 +211,14 @@ def test_baseline_introduction_skips_guard_when_absent_from_head(
     assert "baseline guard skipped" in captured.err
 
 
-def test_non_git_checkout_skips_guard(
+def test_non_git_checkout_fails_the_guard(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert lcs.main([]) == 0
-    assert "baseline guard skipped" in capsys.readouterr().err
+    (tmp_path / ".git").rename(tmp_path / "saved-git")
+    assert lcs.main([]) == 1
+    captured = capsys.readouterr()
+    assert "baseline guard skipped" not in captured.err
+    assert "ls-tree" in captured.out
 
 
 # Malformed/misfiled/missing baseline shards: test_baseline_shard_validity_gate.py.
@@ -248,7 +255,7 @@ def test_explicit_out_of_scope_target_is_silent_but_guard_still_runs(
     _baseline(tmp_path)
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", baseline_shards.SHARD_DIR)
-    _git(tmp_path, "commit", "--quiet", "-m", "Freeze baseline")
+    _git(tmp_path, "commit", "--quiet", "--allow-empty", "-m", "Freeze baseline")
     directory = _entries(tmp_path, "docs", 21)
     path = _write(directory, "oversized.py", 801)
     args = [str(directory if target_is_directory else path)]
@@ -390,7 +397,7 @@ def _nested(depth: int) -> str:
 
 def _commit_baseline(root: pathlib.Path) -> None:
     _git(root, "add", baseline_shards.SHARD_DIR)
-    _git(root, "commit", "--quiet", "-m", "Baseline snapshot")
+    _git(root, "commit", "--quiet", "--allow-empty", "-m", "Baseline snapshot")
 
 
 @pytest.mark.parametrize(

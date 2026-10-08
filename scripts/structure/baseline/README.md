@@ -1,8 +1,11 @@
 # Structure baseline shards
 
-This directory holds the structure lint's frozen baseline, split into one
-shard file per directory area — `<shard>.json`, named after the first two
-components of an entry's directory (`agent/graph/x.py` sites under `agent.graph.json`). See `scripts/structure/baseline_shards.py`
+This directory holds the structure lint's frozen baseline, grouped into ordinary
+component folders: `base/db.json`, `agent/graph.json` and `cli/commands.json`.
+A single-component area remains a top-level shard, such as `agent.json`.
+The shard name derives from the first two components of the entry's directory;
+readers also accept historical flat names such as `base.db.json`. See
+`scripts/structure/baseline_shards.py`
 for the exact rule (`shard_of`) and `scripts/lint/code_structure.py` for how
 the shards are merged, validated and compared against the base revision. An
 existing entry may remain in its original shard when its file moves. Duplicate
@@ -12,6 +15,11 @@ the combined entries and permits no additional targets or counts.
 `rules.json` is not a shard: it records the rule version a section was frozen under.
 The guard still checks each key and count when that version changes; a rule upgrade
 or a newly introduced lint cannot add exemptions.
+
+Historical absence is accepted only after Git resolves a valid revision: no
+baseline directory means it predates the shard migration, and no `rules.json`
+means rule version 1. Unknown revisions, failed Git reads, and incomplete blobs
+fail the gate instead of disabling the comparison.
 
 This directory is temporary while the existing exemptions are removed. Keep its
 README while the shrink-only gate still reads it. After the final exemption is
