@@ -31,8 +31,8 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity, hosted_resources_settled
-from services.agent_runner.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_runner.agent_host.db_recovery import database_phase
+from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 from services.agent_runner.agent_host.runtime import TurnOutcome
 
 __all__ = [

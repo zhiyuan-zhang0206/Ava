@@ -1,4 +1,0 @@
-"tests.path_scoped.agent_tests" = [
-    "test_hosted_db_recovery.py",
-    "test_recovery_interrupt.py",
-]
