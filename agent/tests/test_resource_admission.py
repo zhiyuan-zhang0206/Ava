@@ -6,45 +6,33 @@ from pathlib import Path
 from uuid import uuid4
 
 import psycopg
-import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.incarnation.exec_owner_protocol import OwnerReady
 from base.agents.incarnation.resources import (
     IncarnationResources,
-    ResourceProcess,
     decode_resources,
 )
-from base.agents.incarnation.tests.test_resources import _admitted, _force
+from base.agents.incarnation.tests.test_resources import _force
 from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.pin_agent import exec_context
 
 
-async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR0915 -- one synchronized race proof.
+async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    admitted_owner_ready: tuple[RuntimeIncarnation, threading.Event, threading.Event],
     database: Database,
 ) -> None:
     """Force before native attachment cannot freeze an unattached reservation."""
-    from agent.graph.exec import _owned_run
     from agent.graph.exec._result import _ExecCrashed
     from agent.graph.exec._subprocess import _run_in_subprocess
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents.incarnation.hosted_force import original_host_force
 
-    target = _admitted(db_conn)
+    target, ready, force_done = admitted_owner_ready
     marker = tmp_path / "must-not-run"
-
-    def admitted(_agent_id: int) -> RuntimeIncarnation:
-        return target
-
-    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
-    original_validate = _owned_run.validate_native_ready
-    ready = threading.Event()
-    force_done = threading.Event()
     failures: list[BaseException] = []
     commands: list[int] = []
     path = db_conn.execute("SHOW search_path").fetchone()
@@ -64,16 +52,6 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
         finally:
             force_done.set()
 
-    def validate_then_wait(
-        receipt: OwnerReady,
-        launcher: ResourceProcess,
-        context_path: Path,
-    ) -> None:
-        original_validate(receipt, launcher, context_path)
-        ready.set()
-        assert force_done.wait(10)
-
-    monkeypatch.setattr(_owned_run, "validate_native_ready", validate_then_wait)
     thread = threading.Thread(target=force_after_ready)
     thread.start()
     result, _ = await _run_in_subprocess(
