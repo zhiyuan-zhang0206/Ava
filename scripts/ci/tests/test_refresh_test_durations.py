@@ -47,7 +47,7 @@ def test_load_durations_rejects_non_numeric_values(tmp_path: Path, contents: str
         refresh._load_durations(bad)
 
 
-def test_write_durations_committed_format_with_trim_and_rounding(
+def test_write_durations_committed_format_preserves_fast_measurements(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / ".test_durations"
@@ -56,9 +56,10 @@ def test_write_durations_committed_format_with_trim_and_rounding(
     kept = refresh._write_durations(
         {
             "tests/a/test_x.py::test_slow": 37.517338,
-            "tests/a/test_x.py::test_subsecond": 0.1994,  # rounds below 0.2 -> dropped
-            "tests/a/test_x.py::test_boundary": 0.2004,  # rounds to 0.2 -> kept
+            "tests/a/test_x.py::test_subsecond": 0.1994,
+            "tests/a/test_x.py::test_boundary": 0.2004,
             "tests/a/test_x.py::test_decimal": 1.23456,
+            "tests/a/test_x.py::test_zero": 0.0004,
         }
     )
 
@@ -66,12 +67,16 @@ def test_write_durations_committed_format_with_trim_and_rounding(
     assert content == (
         '{"tests/a/test_x.py::test_boundary":0.2,'
         '"tests/a/test_x.py::test_decimal":1.235,'
-        '"tests/a/test_x.py::test_slow":37.517}\n'
+        '"tests/a/test_x.py::test_slow":37.517,'
+        '"tests/a/test_x.py::test_subsecond":0.199,'
+        '"tests/a/test_x.py::test_zero":0.0}\n'
     )
     assert sorted(kept) == [
         "tests/a/test_x.py::test_boundary",
         "tests/a/test_x.py::test_decimal",
         "tests/a/test_x.py::test_slow",
+        "tests/a/test_x.py::test_subsecond",
+        "tests/a/test_x.py::test_zero",
     ]
     data = json.loads(content)
     assert list(data) == sorted(data)
@@ -331,9 +336,13 @@ def test_merge_all_ci_shards_writes_the_compact_combined_durations(
     monkeypatch.setattr(refresh, "_DURATIONS_PATH", target)
 
     _write_complete_measurements(durations_dir)
+    (durations_dir / "backend-1.json").write_text(
+        json.dumps({"tests/components/agent/test_1.py::test_one": 0.019})
+    )
 
     assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 0
     combined = json.loads(target.read_text())
     assert len(combined) == 20
+    assert combined["tests/components/agent/test_1.py::test_one"] == 0.019
     assert combined["tests/components/agent/test_12.py::test_one"] == 1.0
     assert combined["tests/e2e/test_4.py::test_one"] == 1.0
