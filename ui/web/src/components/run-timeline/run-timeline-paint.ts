@@ -34,8 +34,16 @@ export interface PaintCtx {
 }
 
 const FOREGROUND = "var(--foreground)";
-const BAR_AREA_PX = 36;
-const BAR_FLOOR_PX = 2;
+const ACCENT = "var(--primary)";
+// The selection frame: a stroke this wide, kept this far off the item.
+const FRAME_PX = 2;
+const FRAME_GAP_PX = 1;
+const FRAME_ROOM_PX = FRAME_PX + FRAME_GAP_PX;
+// What the items outside the selection keep of their color.
+const DIM_SHARE = 0.5;
+const FADE_SHARE = 0.12;
+const BAR_ROOM_PX = 4;
+const BAR_MIN_PX = 3;
 const BLOCK_RADIUS = 4;
 const UNIT_RADIUS = 2;
 const UNIT_INSET = 4;
@@ -71,13 +79,6 @@ function outline(p: PaintCtx, x0: number, x1: number, y0: number, y1: number, cs
   if (right - left > 2 * radius) ctx.roundRect(left, y0 + lineWidth / 2, right - left, y1 - y0 - lineWidth, radius);
   else ctx.rect(left, y0 + lineWidth / 2, Math.max(right - left, 0), y1 - y0 - lineWidth);
   ctx.stroke();
-}
-
-/** The color of the ring that marks an item's state, also the fill of a column too narrow for a ring. */
-function ringColor(picked: boolean, ancestor: boolean, hovered: boolean): string {
-  if (picked) return FOREGROUND;
-  if (ancestor) return mix(FOREGROUND, 0.6, "var(--card)");
-  return mix(FOREGROUND, hovered ? 0.7 : 0.4, "var(--card)");
 }
 
 function fitText(ctx: CanvasRenderingContext2D, text: string, maxPx: number): string {
@@ -118,6 +119,25 @@ function drawTexts(p: PaintCtx, place: Place, y: number, label: string | null, t
   ctx.restore();
 }
 
+/** What a row is decorated with besides its items: the selection's frame, and the line that marks a selection too narrow to see. */
+export interface RowDeco {
+  /** The box (px) the selection frame goes around in this row: the whole selected batch, one frame. */
+  frame: { left: number; width: number } | null;
+  /** x (px) of the thin line that marks a selection narrower than the frame's minimum; null when the selection is wide enough to see. */
+  lineX: number | null;
+}
+
+/** The frame around a row's selection, and the hairline: one stroke in the accent, never a fill. */
+function paintDeco(p: PaintCtx, deco: RowDeco, top: number, bottom: number) {
+  if (deco.lineX !== null) {
+    fillBox(p, deco.lineX - 0.5, deco.lineX + 0.5, 0, p.height, mix(FOREGROUND, 0.18, p.trackBg));
+  }
+  if (deco.frame !== null) {
+    const { left, width } = deco.frame;
+    outline(p, left - FRAME_ROOM_PX, left + width + FRAME_ROOM_PX, top - FRAME_ROOM_PX, bottom + FRAME_ROOM_PX, ACCENT, FRAME_PX, BLOCK_RADIUS);
+  }
+}
+
 interface BlockState {
   picked: boolean;
   ancestor: boolean;
@@ -127,9 +147,15 @@ interface BlockState {
   dim: boolean;
 }
 
+function tone(p: PaintCtx, s: { faded: boolean; dim: boolean }, color: string): string {
+  if (s.faded) return mix(color, FADE_SHARE, p.trackBg);
+  return s.dim ? mix(color, DIM_SHARE, p.trackBg) : color;
+}
+
 /** Level rows: one block per node, summary text and token count when wide enough; the hairlines of narrow nodes on top. */
-export function paintNodes(p: PaintCtx, layout: RowLayout, state: PaintState) {
-  const { height } = p;
+export function paintNodes(p: PaintCtx, layout: RowLayout, state: PaintState, deco: RowDeco) {
+  const top = FRAME_ROOM_PX;
+  const bottom = p.height - FRAME_ROOM_PX;
   const stateOf = (key: string): BlockState => {
     const node = layout.items.get(key)?.node;
     const id = node?.id ?? "";
@@ -140,30 +166,27 @@ export function paintNodes(p: PaintCtx, layout: RowLayout, state: PaintState) {
     const faded = state.highlight !== null && !picked;
     return { picked, ancestor, hoverLight, hovered, faded, dim: state.selection !== null && !picked && !ancestor && !hoverLight };
   };
-  const tone = (s: BlockState, color: string) =>
-    s.faded ? mix(color, 0.12, p.trackBg) : s.dim && state.highlight === null ? mix(color, 0.4, p.trackBg) : color;
-  const base = (s: BlockState) =>
-    mix("var(--primary)", s.picked ? 0.45 : s.ancestor ? 0.4 : s.hoverLight ? 0.3 : 0.2, "var(--card)");
+  const base = (s: BlockState) => mix(ACCENT, s.ancestor ? 0.3 : 0.2, "var(--card)");
   for (const place of layout.wide) {
     const s = stateOf(place.key);
     const node = layout.items.get(place.key)?.node;
-    fillBox(p, place.x0, place.x1, 0, height, tone(s, base(s)), BLOCK_RADIUS);
-    outline(p, place.x0, place.x1, 0, height, tone(s, "var(--border)"), 1, BLOCK_RADIUS);
-    if (s.picked || s.ancestor) outline(p, place.x0, place.x1, 0, height, ringColor(s.picked, s.ancestor, false), 2, BLOCK_RADIUS);
-    else if (s.hoverLight) outline(p, place.x0, place.x1, 0, height, ringColor(false, false, s.hovered), 1, BLOCK_RADIUS);
+    fillBox(p, place.x0, place.x1, top, bottom, tone(p, s, base(s)), BLOCK_RADIUS);
+    outline(p, place.x0, place.x1, top, bottom, tone(p, s, "var(--border)"), 1, BLOCK_RADIUS);
+    if (s.ancestor) outline(p, place.x0, place.x1, top, bottom, mix(ACCENT, 0.6, "var(--card)"), 1, BLOCK_RADIUS);
+    else if (s.hoverLight) outline(p, place.x0, place.x1, top, bottom, mix(ACCENT, 0.35, "var(--card)"), 1, BLOCK_RADIUS);
     if (node !== undefined) {
-      drawTexts(p, place, height / 2, firstLine(node.summary, NODE_LABEL_CHARS), tokenLabel(node.context_tokens, node.estimated), tone(s, FOREGROUND));
+      drawTexts(p, place, p.height / 2, firstLine(node.summary, NODE_LABEL_CHARS), tokenLabel(node.context_tokens, node.estimated), tone(p, s, FOREGROUND));
     }
   }
   for (const cell of layout.cells) {
     const s = stateOf(cell.key);
-    const strong = s.picked || s.ancestor || s.hoverLight;
-    fillBox(p, cell.x0, cell.x1, 0, height, tone(s, strong ? ringColor(s.picked, s.ancestor, s.hovered) : mix("var(--primary)", 0.4, "var(--card)")));
+    fillBox(p, cell.x0, cell.x1, top, bottom, tone(p, s, mix(ACCENT, s.ancestor || s.hoverLight ? 0.6 : 0.4, "var(--card)")));
   }
+  paintDeco(p, deco, top, bottom);
 }
 
 /** The Messages row: one colored block per message unit. */
-export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState) {
+export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, deco: RowDeco) {
   const y1 = p.height - UNIT_INSET;
   const stateOf = (key: string) => {
     const unit = layout.items.get(key)?.unit;
@@ -178,20 +201,21 @@ export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState) {
     const faded = state.highlight !== null && !matched && !picked;
     return { unit, picked, hovered, hoverLight, faded, dim: state.highlight === null && state.selection !== null && !picked && !hoverLight };
   };
-  const tone = (s: { faded: boolean; dim: boolean }, color: string) =>
-    s.faded ? mix(color, 0.12, p.trackBg) : s.dim ? mix(color, 0.4, p.trackBg) : color;
   for (const place of layout.wide) {
     const s = stateOf(place.key);
     if (s === null) continue;
-    fillBox(p, place.x0, place.x1, UNIT_INSET, y1, tone(s, unitColor(s.unit)), UNIT_RADIUS);
-    if (s.picked) outline(p, place.x0, place.x1, UNIT_INSET, y1, ringColor(true, false, false), 2, UNIT_RADIUS);
-    else if (s.hoverLight) outline(p, place.x0, place.x1, UNIT_INSET, y1, ringColor(false, false, s.hovered), 1, UNIT_RADIUS);
+    fillBox(p, place.x0, place.x1, UNIT_INSET, y1, tone(p, s, unitColor(s.unit)), UNIT_RADIUS);
+    if (s.hoverLight && !s.picked) outline(p, place.x0, place.x1, UNIT_INSET, y1, mix(ACCENT, 0.35, "var(--card)"), 1, UNIT_RADIUS);
     drawTexts(p, place, UNIT_INSET + 5, null, tokenLabel(s.unit.context_tokens, s.unit.estimated), "#3f3f46");
   }
   for (const cell of layout.cells) {
     const s = stateOf(cell.key);
-    if (s !== null) fillBox(p, cell.x0, cell.x1, UNIT_INSET, y1, tone(s, s.picked || s.hoverLight ? ringColor(s.picked, false, s.hovered) : unitColor(s.unit)));
+    if (s === null) continue;
+    // A hairline lit by a hover is lifted toward the foreground a little; a selected one keeps its color.
+    const color = s.hoverLight && !s.picked ? mix(FOREGROUND, 0.3, unitColor(s.unit)) : unitColor(s.unit);
+    fillBox(p, cell.x0, cell.x1, UNIT_INSET, y1, tone(p, s, color));
   }
+  paintDeco(p, deco, UNIT_INSET, y1);
 }
 
 function coveredBy(request: Pick<RunTimelineRequest, "added_from" | "added_to">, i0: number): boolean {
@@ -202,30 +226,35 @@ const BLUE = "#3b82f6";
 const AMBER = "#f59e0b";
 
 /** A context row: one bar per request as tall as its value, sessions alternating in color. */
-export function paintBars(p: PaintCtx, layout: RowLayout, top: number, added: boolean, state: PaintState) {
+export function paintBars(p: PaintCtx, layout: RowLayout, top: number, added: boolean, state: PaintState, deco: RowDeco) {
   if (!(top > 0)) return;
+  const area = p.height - 2 * BAR_ROOM_PX;
+  const bottom = p.height - BAR_ROOM_PX;
   const stateOf = (key: string) => {
     const request = layout.items.get(key)?.request;
     if (request === undefined) return null;
     const lit = requestLit(request, state.selection, state.hover);
-    return { request, selected: lit.selected, hovered: lit.hovered, height: ((layout.values?.get(key) ?? 0) / top) * BAR_AREA_PX };
+    const height = Math.max(((layout.values?.get(key) ?? 0) / top) * area, BAR_MIN_PX);
+    return { request, selected: lit.selected, hovered: lit.hovered, height };
   };
   const colorOf = (s: NonNullable<ReturnType<typeof stateOf>>) => {
     const hue = s.request.session % 2 === 0 ? BLUE : AMBER;
-    if (s.selected || s.hovered) return hue;
     const solid = mix(hue, s.request.session % 2 === 0 ? 0.7 : 0.8, "var(--card)");
-    return added && s.request.added_estimated ? mix(solid, 0.6, p.trackBg) : solid;
+    const own = added && s.request.added_estimated ? mix(solid, 0.6, p.trackBg) : solid;
+    return state.selection !== null && !s.selected && !s.hovered ? mix(own, DIM_SHARE, p.trackBg) : own;
   };
-  const bottom = p.height - BAR_FLOOR_PX;
+  let tallest = 0;
+  for (const key of layout.values?.keys() ?? []) {
+    const s = stateOf(key);
+    if (s?.selected === true) tallest = Math.max(tallest, s.height);
+  }
   const draw = (x0: number, x1: number, key: string, ring: boolean) => {
     const s = stateOf(key);
     if (s === null) return;
-    const y0 = bottom - s.height;
-    fillBox(p, x0, x1, y0, bottom, colorOf(s));
-    if (!ring) return;
-    if (s.selected) outline(p, x0 - 1, x1 + 1, y0 - 1, bottom + 1, FOREGROUND, 2, 0);
-    else if (s.hovered) outline(p, x0, x1, y0, bottom, mix(FOREGROUND, 0.4, "var(--card)"), 1, 0);
+    fillBox(p, x0, x1, bottom - s.height, bottom, colorOf(s));
+    if (ring && s.hovered && !s.selected) outline(p, x0, x1, bottom - s.height, bottom, mix(ACCENT, 0.35, "var(--card)"), 1, 0);
   };
   for (const place of layout.wide) draw(place.x0, place.x1, place.key, true);
   for (const cell of layout.cells as readonly Cell[]) draw(cell.x0, cell.x1, cell.key, false);
+  paintDeco(p, deco, bottom - Math.max(tallest, BAR_MIN_PX), bottom);
 }

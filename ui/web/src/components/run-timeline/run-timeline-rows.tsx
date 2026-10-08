@@ -40,6 +40,7 @@ import {
   levelRowId,
   navigate,
   overlayBox,
+  SELECTION_MIN_PX,
   selectionSpans,
   spansExtent,
   revealView,
@@ -48,8 +49,7 @@ import {
 import { barTop, layoutsFor, type RowLayout } from "./timeline-canvas-model";
 import { RunTimelineAxis } from "./run-timeline-axis";
 import { TrackCanvas } from "./run-timeline-canvas";
-import { SelectionBox, SelectionLine } from "./run-timeline-cells";
-import { paintBars, paintNodes, paintUnits, type PaintState } from "./run-timeline-paint";
+import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco } from "./run-timeline-paint";
 import { RunTimelineLegend } from "./run-timeline-legend";
 import { RowShell } from "./run-timeline-row-shell";
 import { readoutText } from "./run-timeline-readout";
@@ -133,12 +133,13 @@ export function RunTimelineRows({
   // Where the selected items are, per row: drawn as an outlined box in each row and a line through all of them.
   const selected = selectionSpans(selection, data, axis);
   const extent = spansExtent([...selected.values()].flat());
-  const lineBox = extent === null ? null : overlayBox(extent, viewU, trackPx, 1);
-  const selectionBoxes = (row: string) =>
-    (selected.get(row) ?? []).map((span, i) => {
-      const box = overlayBox(span, viewU, trackPx);
-      return box === null ? null : <SelectionBox key={`${row}-${i}`} box={box} />;
-    });
+  // The selection is one frame per row around the whole batch; a selection too narrow to see also gets a hairline.
+  const wholeBox = extent === null ? null : overlayBox(extent, viewU, trackPx, 0);
+  const lineX = wholeBox !== null && wholeBox.width < SELECTION_MIN_PX ? wholeBox.left + wholeBox.width / 2 : null;
+  const decoFor = (row: string): RowDeco => {
+    const rowExtent = spansExtent(selected.get(row) ?? []);
+    return { frame: rowExtent === null ? null : overlayBox(rowExtent, viewU, trackPx, SELECTION_MIN_PX), lineX };
+  };
   useEffect(() => {
     const track = chartRef.current?.querySelector("[data-track]");
     if (!track) return;
@@ -301,15 +302,6 @@ export function RunTimelineRows({
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
         {spoken ?? ""}
       </p>
-      {lineBox === null ? null : (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-3 left-[100px] z-10"
-          style={{ width: trackPx }}
-        >
-          <SelectionLine box={lineBox} />
-        </div>
-      )}
       <div className={cn(FLEX, "h-4 items-center gap-2 pl-[88px]")}>
         <p
           data-testid="run-timeline-readout"
@@ -377,14 +369,12 @@ export function RunTimelineRows({
               </div>
             );
           })}
-          {canvasFor(levelRowId(level), LEVEL_ROW_PX, (p, layout) => paintNodes(p, layout, paintState))}
-          {selectionBoxes(levelRowId(level))}
+          {canvasFor(levelRowId(level), LEVEL_ROW_PX, (p, layout) => paintNodes(p, layout, paintState, decoFor(levelRowId(level))))}
         </RowShell>
       ))}
 
       <RowShell label={t("messagesRow")} height="h-6" testId="run-timeline-row-units">
-        {canvasFor(UNITS_ROW, UNIT_ROW_PX, (p, layout) => paintUnits(p, layout, paintState))}
-        {selectionBoxes(UNITS_ROW)}
+        {canvasFor(UNITS_ROW, UNIT_ROW_PX, (p, layout) => paintUnits(p, layout, paintState, decoFor(UNITS_ROW)))}
       </RowShell>
 
       {data.requests.length > 0
@@ -396,9 +386,8 @@ export function RunTimelineRows({
               testId={row === ADDED_ROW ? "run-timeline-row-added" : "run-timeline-row-context"}
             >
               {canvasFor(row, CONTEXT_ROW_PX, (p, layout) =>
-                paintBars(p, layout, barTop(row, data), row === ADDED_ROW, paintState),
+                paintBars(p, layout, barTop(row, data), row === ADDED_ROW, paintState, decoFor(row)),
               )}
-              {selectionBoxes(row)}
             </RowShell>
           ))
         : null}

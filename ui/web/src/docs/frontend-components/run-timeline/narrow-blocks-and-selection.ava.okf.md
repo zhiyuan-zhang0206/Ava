@@ -14,4 +14,4 @@ tags:
 
 **Pointer and keys.** A pointer position becomes the item under it by binary search (`hitTest`, hairlines answer first, within a pixel); hover, click, selection and the arrow keys reuse the same model as before (`timeline-nav.ts`). The canvas is decorative: the selected item is read out through a live region.
 
-**Selection layer.** The selection is also its own layer: an outlined box at least 6 px wide in each row that holds a selected item (a selected request outlines its bars and the blocks it read), plus a thin vertical line through all rows over the whole selected extent (`selectionSpans`, `overlayBox`), kept as a few DOM elements above the canvases.
+**Selection.** The selected items keep their own color and get one thin accent frame per row around the whole selected batch (a request's bar and the blocks it read: one frame in each of those rows), a pixel off the item, at least 6 px wide (`selectionSpans`, `overlayBox`, drawn in `paintDeco`). Everything outside the selection loses some contrast; ancestors keep theirs and get a lighter 1 px outline; hover is lighter still. A selection narrower than 6 px also gets a faint hairline, in the tracks only.
