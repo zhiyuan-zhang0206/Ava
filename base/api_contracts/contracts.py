@@ -370,6 +370,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         transactional_idempotency=True,
         note="notice resolution and reply share a durable keyed receipt; keyless legacy reads with reply remain distinct",
     ),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        legacy_keyed_retry=False,
+        note="required verified principal key resolves only the explicit global notice and replays its original inbound",
+    ),
     ("POST", "/api/agents/{agent_id}/notices"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         transactional_idempotency=True,

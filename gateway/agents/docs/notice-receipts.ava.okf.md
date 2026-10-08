@@ -33,8 +33,14 @@ relative expiration inputs require their normalized absolute deadline to be
 reused. The mixed-version rollout gate sends new keys while withholding
 ambiguous automatic retries when gateway support is unproven.
 
-Browser resolution allocates an operation id per invocation and optionally
-accepts one from its caller. It does not persist or automatically retry requests.
+Browser resolution uses the fixed required-key/principal route
+`POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve`. It reuses this same
+transaction owner, scoped to its own concrete path; legacy and guarded paths
+must not be interchanged during recovery. The API accepts a caller operation
+id or allocates one per invocation. The mounted reply component retains the
+same key for a manual retry of an unchanged action/reply/target after failure;
+changed input starts a new intent. It does not persist or automatically retry
+requests, and an unsupported server is refused without fallback.
 CLI and IM bridge resolution remain keyless single attempts; this PR does not
 add ambiguous-failure retries to those callers.
 

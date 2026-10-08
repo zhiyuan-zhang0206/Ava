@@ -416,8 +416,9 @@ export const api = {
   // 'dismiss' on a require_response notice ('answer' needs a reply), 'read' on an
   // FYI notice. A non-empty reply (and a dismissed require_response notice) wakes
   // the agent with a chat inbound. A 'read' on an already-resolved notice is an
-  // idempotent success (user ruling 2026-08-28 — no "already read" error); 409
-  // only when the notice does not exist or the action does not match its kind.
+  // idempotent success (user ruling 2026-08-28 — no "already read" error).
+  // Answer/dismiss on an already-resolved row conflict. The fixed keyed path
+  // requires verified principal scope; an unsupported server cannot execute it.
   resolveNotice: (
     agentId: number,
     noticeId: number,
@@ -425,10 +426,14 @@ export const api = {
     idempotencyKey: string = newOperationKey(),
   ): Promise<{ status: string }> => {
     return f(
-      `/api/agents/${agentId}/notices/${noticeId}/resolve`,
+      `/api/keyed/v1/agents/${agentId}/notices/${noticeId}/resolve`,
       {
         ...POST_JSON(body),
-        headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
+        headers: {
+          "content-type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+          "Idempotency-Scope": "principal-v1",
+        },
       },
     ).then(ok<{ status: string }>);
   },
