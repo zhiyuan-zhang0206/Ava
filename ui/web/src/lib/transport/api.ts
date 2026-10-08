@@ -217,6 +217,28 @@ const POST_JSON = (body: unknown): RequestInit => ({
   headers: { "content-type": "application/json" },
   body: JSON.stringify(body),
 });
+
+async function draftAgent(
+  path: string,
+  body: unknown,
+  operationKey: string,
+): Promise<GuideDraftResponse> {
+  if (typeof operationKey !== "string" || !operationKey || operationKey.length > 128) {
+    throw new Error("idempotency key must contain 1 to 128 characters");
+  }
+  const init = POST_JSON(body);
+  const headers = new Headers(init.headers);
+  headers.set("Idempotency-Key", operationKey);
+  headers.set("Idempotency-Scope", "principal-v1");
+  const response = await f(path, { ...init, headers });
+  const accepted = await ok<unknown>(response);
+  if (response.status !== 200 || !accepted || typeof accepted !== "object" ||
+    !("agent_id" in accepted) || typeof accepted.agent_id !== "number" ||
+    !Number.isSafeInteger(accepted.agent_id) || accepted.agent_id <= 0) {
+    throw new Error("Draft agent acceptance is unconfirmed");
+  }
+  return accepted as GuideDraftResponse;
+}
 const PATCH_JSON = (body: unknown): RequestInit => ({
   method: "PATCH",
   headers: { "content-type": "application/json" },
@@ -924,22 +946,22 @@ export const api = {
     return f(`/api/schedules/${id}/runs?limit=${limit}`).then(ok<ScheduleRunView[]>);
   },
 
-  draftSchedule: (nl: string): Promise<ScheduleDraftResponse> => {
-    return f("/api/schedules/draft", POST_JSON({ nl })).then(ok<ScheduleDraftResponse>);
+  draftSchedule: (nl: string, operationKey: string = newOperationKey()): Promise<ScheduleDraftResponse> => {
+    return draftAgent("/api/keyed/v1/schedules/draft", { nl }, operationKey);
   },
 
   // Spawn an ava-guide agent for a natural-language ops request; returns its id
   // so the Control page's Guide entry can open the conversation.
-  draftGuide: (nl: string): Promise<GuideDraftResponse> => {
-    return f("/api/guide/draft", POST_JSON({ nl })).then(ok<GuideDraftResponse>);
+  draftGuide: (nl: string, operationKey: string = newOperationKey()): Promise<GuideDraftResponse> => {
+    return draftAgent("/api/keyed/v1/guide/draft", { nl }, operationKey);
   },
 
   // Spawn an ava-package-installer agent to find, install, and verify a skill /
   // plugin / MCP server; returns its id so the Control page can open the
   // conversation. The whole lifecycle happens in that session — there is no
   // install-by-URL endpoint on purpose.
-  draftPackage: (kind: PackageKind, nl: string): Promise<PackageDraftResponse> => {
-    return f("/api/packages/draft", POST_JSON({ kind, nl })).then(ok<PackageDraftResponse>);
+  draftPackage: (kind: PackageKind, nl: string, operationKey: string = newOperationKey()): Promise<PackageDraftResponse> => {
+    return draftAgent("/api/keyed/v1/packages/draft", { kind, nl }, operationKey);
   },
 
   // --- Presets (config templates; GET /api/presets) ---

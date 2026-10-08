@@ -24,6 +24,28 @@ describe("GuidePage", () => {
     setActiveId.mockReset();
   });
 
+  it("ignores Enter while the draft is pending", async () => {
+    const draft = vi.spyOn(api, "draftGuide").mockReturnValue(new Promise(() => undefined));
+    render(<QueryClientProvider client={new QueryClient()}><GuidePage /></QueryClientProvider>);
+    const input = screen.getByPlaceholderText(/Describe an operations task/);
+    fireEvent.change(input, { target: { value: "install tools" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Ask Ava" }).hasAttribute("disabled")).toBe(true));
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(draft).toHaveBeenCalledOnce();
+  });
+
+  it("does not inherit automatic mutation retries", async () => {
+    const draft = vi.spyOn(api, "draftGuide").mockRejectedValue(new Error("response lost"));
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
+    render(<QueryClientProvider client={client}><GuidePage /></QueryClientProvider>);
+    fireEvent.change(screen.getByPlaceholderText(/Describe an operations task/), { target: { value: "install tools" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask Ava" }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("Guide failed: response lost"));
+    expect(draft).toHaveBeenCalledOnce();
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it("disables Ask until a non-blank request is entered", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
