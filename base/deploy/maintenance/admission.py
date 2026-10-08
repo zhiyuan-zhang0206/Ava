@@ -7,9 +7,7 @@ remain available while an already admitted model/action finishes; this gate only
 controls new work.
 """
 
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from contextvars import ContextVar  # noqa: TID251
+from collections.abc import Callable
 
 # An explicit CLI-only capability: nested start/unpause can restore dependencies
 # without giving child service processes permission to clear the durable hold.
@@ -18,10 +16,6 @@ from datetime import datetime
 
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import CERTIFIED_PHASES, MaintenanceHold, MaintenancePhase
-
-_authorized_start: ContextVar[tuple[str, datetime] | None] = ContextVar(
-    "maintenance_start", default=None
-)
 
 
 def snapshot() -> pause_owner.PauseOwnerSnapshot | None:
@@ -122,28 +116,33 @@ def in_stop_leg() -> bool:
     return current.maintenance.phase in _STOP_LEG_PHASES
 
 
-def start_authorized() -> bool:
+def start_authorized(operation: pause_owner.PauseOwnerSnapshot | None) -> bool:
     current = snapshot()
-    return current is not None and _authorized_start.get() == (current.holder, current.acquired_at)
+    return (
+        operation is not None
+        and operation.holder is not None
+        and operation.acquired_at is not None
+        and current is not None
+        and current.matches(operation.holder, operation.acquired_at)
+    )
 
 
-def require_start_allowed() -> None:
+def require_start_allowed(operation: pause_owner.PauseOwnerSnapshot | None) -> None:
     current = snapshot()
-    if current is not None and _authorized_start.get() != (current.holder, current.acquired_at):
+    if current is not None and (
+        operation is None
+        or operation.holder is None
+        or operation.acquired_at is None
+        or not current.matches(operation.holder, operation.acquired_at)
+    ):
         raise RuntimeError(
             "service startup cannot release maintenance without the authorized ava start boundary"
         )
 
 
-@contextmanager
-def authorized_start(holder: str, acquired_at: datetime) -> Generator[None]:
-    """An explicit local start restores dependencies while admission stays held."""
-    require_operation(holder, acquired_at)
-    token = _authorized_start.set((holder, acquired_at))
-    try:
-        yield
-    finally:
-        _authorized_start.reset(token)
+def authorized_start(holder: str, acquired_at: datetime) -> pause_owner.PauseOwnerSnapshot:
+    """Return this exact local operation's authority; children receive no ambient permission."""
+    return require_operation(holder, acquired_at)
 
 
 def require_operation(holder: str, acquired_at: datetime) -> pause_owner.PauseOwnerSnapshot:
