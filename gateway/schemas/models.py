@@ -5,12 +5,11 @@ FastAPI generates the model-picker wire contract from these schemas and the
 canonical registry's vendor reference TPS metadata.
 """
 
-from typing import Literal
-
 from pydantic import (
     BaseModel,
 )
 
+from base.agents.birth_config import DefaultModelSource
 from base.lm.registry import ReferenceTps
 
 
@@ -31,6 +30,7 @@ class ModelInfo(BaseModel):
     context_window: int
     pricing: ModelPricing | None = None
     reference_tps: ReferenceTps | None = None
+    fast_of: str | None = None
     reasoning_effort_options: list[str] | None = None
     # The model's concrete default reasoning effort — the level a spawn with no
     # explicit reasoning_effort runs at, and what the picker pre-selects.
@@ -62,7 +62,7 @@ class DefaultModelView(BaseModel):
     """
 
     model: str
-    source: Literal["cluster", "config"]
+    source: DefaultModelSource
 
 
 class DefaultModelWrite(BaseModel):

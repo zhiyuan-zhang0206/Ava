@@ -33,7 +33,8 @@ export function providerLabel(provider: string): string {
 
 /**
  * Models grouped in API provider order, with each provider's models ordered
- * by cache-miss input price descending (most expensive first). An optional
+ * by Standard model input price descending, with declared Fast services
+ * immediately after their visible Standard model. An optional
  * predicate filters individual models before sorting (e.g. the spawn picker
  * excludes user-hidden models); a provider left with no models after filtering
  * is dropped rather than rendered empty.
@@ -50,14 +51,28 @@ export function groupedModels(
   return Object.entries(modelsData.providers)
     .map(([provider, models]): [string, string[]] => {
       const filteredModels = filter ? models.filter(filter) : [...models];
-      filteredModels.sort((left, right) => {
+      const visibleModels = new Set(filteredModels);
+      const families = new Map<string, string[]>();
+      for (const model of filteredModels) {
+        const standard = modelInfoByName[model]?.fast_of;
+        const family = standard && visibleModels.has(standard) ? standard : model;
+        const members = families.get(family) ?? [];
+        members.push(model);
+        families.set(family, members);
+      }
+      const comparePrice = (left: string, right: string) => {
         const leftPrice = modelInfoByName[left]?.pricing?.input;
         const rightPrice = modelInfoByName[right]?.pricing?.input;
         if (leftPrice === undefined) return rightPrice === undefined ? 0 : 1;
         if (rightPrice === undefined) return -1;
         return rightPrice - leftPrice;
-      });
-      return [provider, filteredModels];
+      };
+      const orderedModels = [...families.entries()]
+        .sort(([left], [right]) => comparePrice(left, right))
+        .flatMap(([family, members]) => {
+          return [family, ...members.filter((m) => m !== family).sort(comparePrice)];
+        });
+      return [provider, orderedModels];
     })
     .filter(([, models]) => models.length > 0);
 }

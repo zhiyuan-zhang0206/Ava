@@ -60,7 +60,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   const { data: modelsData } = useQuery({
     queryKey: ["models"],
     queryFn: () => api.getModels(),
-    // Model facts, rates and vendor TPS references are static cluster config.
+    // Config writes invalidate this catalog, including its effective birth default.
     staleTime: Infinity,
   });
   const { data: presetsData } = useQuery({

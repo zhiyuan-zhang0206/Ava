@@ -34,8 +34,9 @@ mean what an operator expects: it governs agents born after it.
 ## The cluster default model
 
 `cluster_defaults` is a one-row table holding the cluster's chosen default
-model. It is consulted ONLY here, at the spawn-time resolution of the frozen
-`llm_model` — a running process still reads `settings.lm.llm_model` for its own
+model. Its resolution is shared by the default-model API, model picker and
+spawn validation through `resolve_default_model`. At birth, the resolved model
+is frozen as `llm_model` — a running process still reads `settings.lm.llm_model` for its own
 live purposes. When the row's value is NULL the resolution falls through to the
 ordinary config chain (`.env` `AVA_MODEL`, then the code default), so a cluster
 that never touched the control panel behaves exactly as before.
@@ -49,12 +50,40 @@ line from install.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import psycopg
 
 from base.config import current_field_values, frozen_field_names
+from base.lm.registry import resolve_available_model
+
+
+class DefaultModelSource(StrEnum):
+    CLUSTER = "cluster"
+    CONFIG = "config"
+
+
+class DefaultModelResolution(NamedTuple):
+    """The model a new agent inherits and the existing wire source label."""
+
+    model: str
+    source: DefaultModelSource
+
+
+def resolve_default_model(
+    cur: psycopg.Cursor, *, config_model: str | None = None
+) -> DefaultModelResolution:
+    """Resolve the DB choice over fresh configuration, including withdrawals."""
+    stored = cluster_default_model(cur)
+    if stored is not None:
+        return DefaultModelResolution(resolve_available_model(stored), DefaultModelSource.CLUSTER)
+    if config_model is None:
+        config_model = current_field_values()["llm_model"]
+    if not isinstance(config_model, str):
+        raise ValueError("default llm_model must be a string")  # noqa: TRY004
+    return DefaultModelResolution(resolve_available_model(config_model), DefaultModelSource.CONFIG)
 
 
 def cluster_default_model(cur: psycopg.Cursor) -> str | None:
@@ -122,10 +151,14 @@ def resolve_birth_config(
     # One .env read for the whole batch (current_field_values re-reads the file
     # so an edit since this process started is reflected).
     values = current_field_values()
-    db_model = cluster_default_model(cur) if "llm_model" in pending else None
+    default_model = (
+        resolve_default_model(cur, config_model=values["llm_model"]).model
+        if "llm_model" in pending
+        else None
+    )
     for name in sorted(pending):
-        if name == "llm_model" and db_model is not None:
-            stamped[name] = db_model
+        if name == "llm_model":
+            stamped[name] = default_model
             continue
         stamped[name] = _json_safe(values[name])
     return stamped
