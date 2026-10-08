@@ -19,8 +19,6 @@ Three families are kept, and only these (user ruling 2026-10-02):
    pure function, which is a cache of a constant rather than state
    (`PURE_CALLEES`, `PURE_REPO_CALLEES`, `ALLOWED`).
 
-`DEFERRED` is not an exemption: it annotates frozen baseline sites whose fix waits
-on a separate redesign.
 """
 
 from __future__ import annotations
@@ -223,10 +221,3 @@ BUS_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "bus")
 # `clock = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root that no longer
 # exists fails as stale.
 CLOCK_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "clock")
-
-# ── deferred: frozen in the baseline, fix waits on another redesign ────────
-
-DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"
-# Deferred sites remain measured baseline debt, never exemptions. Warning-only
-# process-wide caches have been removed; no warning redesign is needed for them.
-DEFERRED: dict[str, str] = {}

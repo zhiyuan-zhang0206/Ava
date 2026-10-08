@@ -332,23 +332,6 @@ def test_a_list_entry_whose_site_is_gone_fails_the_gate(
     )
 
 
-def test_a_deferred_site_stays_in_the_baseline_and_goes_stale_with_its_fix(
-    _repo: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    key = "base/warn.py::ambient-container:_warned"
-    monkeypatch.setattr(
-        ambient_state.allow, "DEFERRED", {key: ambient_state.allow.DEFERRED_WARNING_REDESIGN}
-    )
-    _write(_repo, "base/warn.py", "_warned = set()\n")
-    _baseline(_repo, {key: 1})
-    assert lcs.main([]) == 0
-
-    _write(_repo, "base/warn.py", "VALUE = 1\n")
-    _baseline(_repo)
-    assert lcs.main([]) == 1
-    assert "stale ambient_state list entry" in capsys.readouterr().out
-
-
 def test_a_list_entry_for_a_deleted_file_fails_the_gate(
     _repo: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
