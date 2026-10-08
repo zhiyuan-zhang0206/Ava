@@ -1,5 +1,7 @@
 "use client";
 
+import { writeConfigOwners } from "./_owner_writes";
+
 // /control#config — runtime config management, per-machine.
 //
 // Selector: a machine dropdown sits above the group sections. Default is
@@ -216,10 +218,10 @@ export default function ConfigPage() {
 
   // A write reported per-field verdicts. Mark any !ok field with its reason;
   // the query invalidate (onSettled) restores authoritative pre-write values
-  // (the server write is atomic, so a rejected field persisted nothing).
+  // (each owner reports its own successful or rejected write).
   const applyWriteResult = useCallback((names: string[], result: ConfigWriteResult) => {
     const failures: Record<string, string> = {};
-    for (const name of names) {
+    for (const name of new Set([...names, ...Object.keys(result.results)])) {
       // `results` only carries the fields the host actually evaluated; a
       // passed field may be absent. Optional-chain through the lookup.
       const r = result.results[name] as
@@ -227,14 +229,15 @@ export default function ConfigPage() {
         | undefined;
       if (r?.ok === false) failures[name] = r.reason ?? "rejected";
     }
-    const written = new Set(names);
+    const written = new Set([...names, ...Object.keys(result.results)]);
     setFieldErrors((prev) => ({
       // Clear any prior error on the just-written fields, then overlay the
       // fresh failures (an unrelated field's error is left untouched).
       ...Object.fromEntries(Object.entries(prev).filter(([k]) => !written.has(k))),
       ...failures,
     }));
-    setRestartTargets(result.applied ? result.restart_required : []);
+    setRestartTargets(result.restart_required);
+    setSaveError(result.applied ? null : `Save failed for: ${Object.keys(failures).join(", ")}`);
   }, []);
 
   // No optimistic writes. The toggle / input shows a spinner while the PUT
@@ -256,9 +259,9 @@ export default function ConfigPage() {
     }) => {
       const current = qc.getQueryData<ConfigView>(configQueryKey(machine));
       if (!current) throw new Error("config data not loaded");
-      const result = await api.putConfig(
-        applyDelta(current.raw_overrides, name, value),
-        machine ?? undefined,
+      const result = await writeConfigOwners(
+        applyDelta(current.raw_overrides, name, value), current.fields,
+        (patch) => api.putConfig(patch, machine ?? undefined),
       );
       return { name, result };
     },
@@ -289,9 +292,9 @@ export default function ConfigPage() {
       let parsed: unknown = value;
       if (field.field_type === "int") parsed = parseInt(value, 10);
       else if (field.field_type === "float") parsed = parseFloat(value);
-      const result = await api.putConfig(
-        applyDelta(current.raw_overrides, name, parsed),
-        machine ?? undefined,
+      const result = await writeConfigOwners(
+        applyDelta(current.raw_overrides, name, parsed), current.fields,
+        (patch) => api.putConfig(patch, machine ?? undefined),
       );
       return { name, result };
     },

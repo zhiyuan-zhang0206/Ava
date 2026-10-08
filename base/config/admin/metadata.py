@@ -49,7 +49,9 @@ class ConfigFieldMeta:
         remote_writable: bool,
         per_agent: bool,
         choices: list[str] | None = None,
+        owner: str | None = None,
     ) -> None:
+        self.owner = owner
         self.name = name
         self.field_type = field_type
         self.current_value = current_value
@@ -118,7 +120,9 @@ def get_config_metadata() -> list[ConfigFieldMeta]:
                 choices=choices,
             )
         )
-    return result
+    from base.config.admin.plugin_config import plugin_metadata
+
+    return result + plugin_metadata()
 
 
 def env_override_values(*, local: bool = False) -> dict[str, Any]:
@@ -134,10 +138,12 @@ def env_override_values(*, local: bool = False) -> dict[str, Any]:
     the whole set round-trips back through a PUT without rejection.
     """
     from base.config import current_field_values
+    from base.config.admin.plugin_config import plugin_overrides
     from base.host.env import runtime_config
 
-    set_fields = runtime_config.env_set_field_names()
-    values = current_field_values()
+    plugin_values = plugin_overrides()
+    set_fields = runtime_config.env_set_field_names() | plugin_values.keys()
+    values = {**current_field_values(), **plugin_values}
     out: dict[str, Any] = {}
     for meta in get_config_metadata():
         if meta.name not in set_fields or not meta.writable:

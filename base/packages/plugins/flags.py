@@ -147,3 +147,21 @@ def validate_flag_key(key: str) -> str:
     if _field_is_sensitive(ref.info.json_schema_extra):
         raise UnknownFlag(f"unknown plugin flag {key!r}: secrets are not flags.")
     return key
+
+
+def read_declared_flag(key: str, flags: tuple[str, ...]) -> Any:
+    """Read a service's explicit pure-face Core dependency without an SDK registry.
+
+    Secrets remain resources. Unavailable profile domains fail rather than
+    constructing a second full Settings image on a plugin's behalf.
+    """
+    for declared in flags:
+        validate_flag_key(declared)
+    if key not in flags:
+        raise UndeclaredFlag(f"core flag {key!r} is absent from the pure config declaration")
+    domain, field = key.split(".")
+    from base.config import settings
+
+    if not settings.has_domain(domain):
+        raise FlagDomainUnavailable(f"declared core flag {key!r} is unavailable in this profile")
+    return getattr(getattr(settings, domain), field)

@@ -391,11 +391,15 @@ def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
         cls = declared_config_class(name, plugin_dir)
         if cls is None:
             return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
+        from base.config.admin.plugin_config import PluginConfigOwner, import_legacy_config
+        from base.packages.plugins.config_registration import disk_image_path
+
+        imported = import_legacy_config(PluginConfigOwner(name, cls, disk_image_path(name)))
         added, removed = merge_disk_image_schema(name, cls)
     except Exception as e:
         return PluginUpdateEntry(name=name, status="error", detail=str(e))
 
-    if not added and not removed:
+    if not added and not removed and not imported:
         return PluginUpdateEntry(name=name, status="no_diff")
     return PluginUpdateEntry(
         name=name, status="updated", added=sorted(added), removed=sorted(removed)

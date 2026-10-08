@@ -322,7 +322,42 @@ def bootstrap_config_values() -> dict[str, str]:
     for binding in model_catalog().bindings.values():
         if binding.key_env in aliases and binding.key_env not in out:
             out[binding.key_env] = aliases[binding.key_env]
+    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
+
+    out[PLUGIN_CLUSTER_CONFIG_ENV] = plugin_bootstrap_config()
     return out
+
+
+def plugin_bootstrap_config() -> str:
+    """Serialize only declared, non-secret cluster policy from plugin authority images."""
+    import json
+
+    from base.config import schema_extra
+    from base.packages.plugins.config_face import declared_config_class
+    from base.packages.plugins.config_registration import disk_image_path, read_authority_config
+    from base.packages.plugins.enable_config import discover_plugins
+
+    payload: dict[str, dict[str, object]] = {}
+    for plugin, plugin_dir in sorted(discover_plugins().items()):
+        cls = declared_config_class(plugin, plugin_dir)
+        if cls is None:
+            continue
+        fields: list[str] = []
+        for name, info in cls.model_fields.items():
+            extra = schema_extra(info)
+            if extra.get("scope") not in {
+                "cluster-pinned",
+                "cluster-default",
+            }:
+                continue
+            if extra.get("sensitive"):
+                raise ValueError(f"plugin cluster config {plugin}.{name} may not carry secrets")
+            fields.append(name)
+        if fields:
+            config = read_authority_config(plugin, cls, disk_image_path(plugin))
+            values = config.model_dump(mode="json")
+            payload[plugin] = {name: values[name] for name in fields}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def served_db_endpoint(aliases: dict[str, str] | None = None) -> str:

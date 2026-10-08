@@ -57,22 +57,6 @@ def test_delivery_outbox_backoff_accepts_json_or_comma_list(raw: str) -> None:
     assert configured.delivery_outbox_retry_backoff_steps_s == [1.0, 2.5]
 
 
-def test_reduce_context_switch_defaults_ship_as_current_behavior() -> None:
-    """Task #4137: the platform switch and its policy keys land with
-    behavior-preserving defaults — the off-fallback, the wiring points, and the
-    night-silence window are follow-ups."""
-    from base.config.domains.agent.prompt import AgentPromptSettings
-
-    assert AgentPromptSettings().reduce_context_switch is True
-
-
-def test_reduce_context_switch_env_aliases() -> None:
-    from base.config.domains.agent.prompt import AgentPromptSettings
-
-    configured = AgentPromptSettings.model_validate({"AVA_REDUCE_CONTEXT_SWITCH": "false"})
-    assert configured.reduce_context_switch is False
-
-
 @pytest.mark.parametrize("raw", ["", "[0]", "[-1, 2]"])
 def test_delivery_outbox_backoff_rejects_empty_or_nonpositive_steps(raw: str) -> None:
     import pydantic

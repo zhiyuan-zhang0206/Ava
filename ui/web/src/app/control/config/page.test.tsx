@@ -727,8 +727,23 @@ describe("ConfigPage bool toggle (putConfig + write result)", () => {
     );
     fireEvent.click(btn);
     await waitFor(() => screen.getByText(/Save failed/));
-    expect(screen.getByText(/server 500/)).toBeTruthy();
+    expect(screen.getAllByText(/server 500/).length).toBeGreaterThan(0);
   });
+  it("splits owners and retains a committed restart when another owner fails", async () => {
+    vi.spyOn(api, "getConfig").mockResolvedValue({
+      ...VIEW,
+      fields: VIEW.fields.map((field) => ({ ...field, owner: field.name === "enable_compact" ? "ava_fleet" : null })),
+    });
+    const put = vi.spyOn(api, "putConfig").mockResolvedValueOnce(OK_RESULT(["log_level"], ["all"])).mockRejectedValueOnce(new Error("Fleet image changed"));
+    await renderSettled();
+    fireEvent.click(screen.getByTestId("toggle-enable_compact"));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(2));
+    expect(put.mock.calls).toEqual([[{ log_level: "INFO" }, undefined], [{ enable_compact: false }, undefined]]);
+    expect(await screen.findByText(/Save failed/)).toBeTruthy();
+    expect(screen.getByText(/Fleet image changed/)).toBeTruthy();
+    expect(screen.getByText(/restart the following processes/i).textContent).toMatch(/All processes/);
+  });
+
 });
 
 describe("ConfigPage enum select", () => {

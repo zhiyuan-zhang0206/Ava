@@ -61,3 +61,7 @@ shape — and where each is validated: [[okf/plugins/package-manifest.ava.okf.md
 - Plugins can carry **skills** (`ava_builtins/plugins/<p>/skills/`, converge syncs them with the plugin name as the top-level directory; nodes hang under each plugin subtree) and **MCP server definitions** (`.mcp.json`), and can also register **ops services** (`services.py` declaring `ServiceSpec`, e.g., ava_fleet's task-maintenance).
 - All hooks share a single global HOOKS list—`make_hook_runner` snapshots the reference, not a copy.
 - Config files are per-machine, supporting different plugin combinations on different machines.
+
+Config metadata records its nullable plugin owner (Core is `None`). A flat config PUT must address one owner; mixed patches reject without writing. The panel splits requests by owner, retains every verdict and successful restart target, and displays partial failures. Each image uses schema validation and its own CAS/atomic writer; no cross-file transaction is promised. Fleet keeps stable field names while moving its five fields out of Core.
+
+Initial image creation rejects an image created concurrently or already present; it cannot reset explicit configuration. Schema updates preserve retained fields and use the same owned CAS/atomic writer as config edits.

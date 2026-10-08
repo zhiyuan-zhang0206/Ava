@@ -2328,8 +2328,11 @@ export interface paths {
         /**
          * Put Config
          * @description Merge a config patch for `machine` (default = this gateway) into `.env`,
-         *     scope-routed. Persist only — no restart (restart_required says which process
+         *     scope-routed, with one declaration owner per request. Persist only — no restart (restart_required says which process
          *     to restart).
+         *
+         *     Plugin fields commit one whole config image; mixed Core/plugin or multi-plugin
+         *     bodies fail before any write. Core fields retain their env writer.
          *
          *     The body is parsed by `ConfigPatchPlan.parse` (shared with the host-side
          *     config_write_op): the editability gate, scope routing, the merge-patch
@@ -5441,6 +5444,8 @@ export interface components {
         ConfigFieldView: {
             /** Name */
             name: string;
+            /** Owner */
+            owner?: string | null;
             /** Field Type */
             field_type: string;
             /** Current Value */
@@ -5507,7 +5512,7 @@ export interface components {
          * ConfigView
          * @description GET /api/config response — grouped field list + raw_overrides (PUT body source).
          *
-         *     raw_overrides is config.json's current content — the frontend deltas
+         *     raw_overrides combines owned persisted inputs — the frontend deltas
          *     against this and returns the result via PUT.
          *
          *     machine_capabilities is the target machine's capability set (`gateway` and/or
@@ -5534,7 +5539,7 @@ export interface components {
          * @description PUT /api/config response — per-field results + whether anything was applied.
          *
          *     `applied` is True iff every field passed and the write committed (atomic:
-         *     one bad field -> nothing written). `restart_required` is the union of the
+         *     one bad field -> nothing written for that owner). `restart_required` is the union of the
          *     written fields' restart targets ("agent" | "ops" | "gateway" | "all"), for
          *     the per-machine "needs restart" banner.
          */

@@ -229,15 +229,29 @@ def test_merge_disk_image_writes_default_when_missing(isolated_registry, unit_ho
     assert disk_image_path("test_plugin").exists()
 
 
-def test_write_default_disk_image_overwrites(isolated_registry, unit_home):
-    """write_default_disk_image always overwrites with cls() default; existing values are not preserved."""
-    tmp_path = unit_home
-    img = tmp_path / "configs" / "test_plugin" / "config.json"
-    img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
-    img.write_text(json.dumps({"flag": False, "marker": ".old"}))  # pyright: ignore[reportUnknownMemberType]
+def test_write_default_disk_image_preserves_existing(
+    isolated_registry: None, unit_home: Path
+) -> None:
+    """Initialization rejects an existing authority instead of resetting explicit values."""
+    image = unit_home / "configs" / "test_plugin" / "config.json"
+    image.parent.mkdir(parents=True)
+    content = json.dumps({"flag": False, "marker": ".old"})
+    image.write_text(content)
+    with pytest.raises(RuntimeError, match="changed before owned image write"):
+        write_default_disk_image("test_plugin", _FixtureConfig)
+    assert image.read_text() == content
 
-    write_default_disk_image("test_plugin", _FixtureConfig)
-    assert json.loads(img.read_text()) == {"flag": True, "marker": ".git"}  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+def test_default_initialization_rejects_file_created_after_missing_check(
+    isolated_registry: None, unit_home: Path
+) -> None:
+    image = unit_home / "configs" / "test_plugin" / "config.json"
+    assert not image.exists()
+    image.parent.mkdir(parents=True)
+    image.write_text(_FixtureConfig(flag=False, marker="concurrent").model_dump_json())
+    with pytest.raises(RuntimeError, match="changed before owned image write"):
+        write_default_disk_image("test_plugin", _FixtureConfig)
+    assert read_config_image(_FixtureConfig, image).marker == "concurrent"
 
 
 def test_is_per_agent_field_metadata(isolated_registry, unit_home):
