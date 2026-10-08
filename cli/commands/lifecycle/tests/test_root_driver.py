@@ -668,3 +668,40 @@ def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
         retained = driver._direct_root_child
         if retained is not None:
             retained.wait(timeout=5)
+
+
+def test_plugin_birth_config_is_part_of_the_existing_unit_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    from pydantic import BaseModel, ConfigDict
+
+    from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
+    from services.supervision.ava_root.manifest import UnitManifest
+
+    class Config(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        interval: float = 300
+
+    def no_api_delivery(_cls: str) -> dict[str, str]:
+        return {}
+
+    monkeypatch.setattr("cli.commands.data_plane.bringup.api_delivery", no_api_delivery)
+    base = replace(spec(), plugin_config=("probe", Config(interval=40)))
+    same = replace(base, plugin_config=("probe", Config(interval=40)))
+    changed = replace(base, plugin_config=("probe", Config(interval=41)))
+    manifests = [
+        driver.tree_manifest((row,), tmp_path, roles=frozenset({"gateway"}))
+        for row in (base, same, changed)
+    ]
+    units = [
+        UnitManifest.from_mapping(
+            cast("list[dict[str, object]]", manifest["units"])[0], origin="test"
+        )
+        for manifest in manifests
+    ]
+    assert SERVICE_PLUGIN_CONFIG_ENV in dict(units[0].env)
+    assert units[0].digest() == units[1].digest()
+    assert units[0].digest() != units[2].digest()
