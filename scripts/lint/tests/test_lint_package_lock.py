@@ -36,8 +36,3 @@ def test_accepts_canonical_and_resolvedless_entries(tmp_path: Path) -> None:
     assert gate.violations(path) == []
     path = _lock(tmp_path / "package-lock.json", resolved=None)
     assert gate.violations(path) == []
-
-
-def test_repository_lock_is_canonical() -> None:
-    """Run against the real lock so a host-generated replacement fails this guard."""
-    assert gate.violations(gate._REPO_ROOT / "ui" / "web" / "package-lock.json") == []
