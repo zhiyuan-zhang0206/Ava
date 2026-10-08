@@ -67,7 +67,7 @@ def declare_flags(plugin: str, keys: tuple[str, ...]) -> Callable[[], None]:
     Raises:
         UnknownFlag: a key is malformed, does not name a core field, or is sensitive.
     """
-    declared = {_validate_flag_key(key) for key in keys}
+    declared = {validate_flag_key(key) for key in keys}
     _PLUGIN_FLAGS.setdefault(plugin, set()).update(declared)
 
     def undo() -> None:
@@ -128,7 +128,7 @@ def declared_flags(plugin: str) -> frozenset[str]:
     return frozenset(_PLUGIN_FLAGS[plugin])
 
 
-def _validate_flag_key(key: str) -> str:
+def validate_flag_key(key: str) -> str:
     """Validate one fully qualified, non-sensitive Settings key and return it."""
     if not isinstance(key, str) or key.count(".") != 1:
         raise UnknownFlag(f"unknown plugin flag {key!r}: flags must use exactly <domain>.<field>.")

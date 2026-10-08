@@ -1,8 +1,9 @@
 """A plugin's config face: `default_config.py`, a pure declaration of its config class.
 
 The file holds the plugin's `BaseModel` and exports `contribute()` returning
-`PluginContributions(config=Cls)` — nothing else. It imports no plugin code and no agent runtime, so
-every reader can load it on its own:
+`PluginContributions(config=Cls, flags=(...))`. Config is optional; flags declare
+non-sensitive Core dependencies. Other contribution faces remain separate.
+It imports no plugin code or agent runtime, so every reader can load it on its own:
 
 - the agent-side loader (`agent.extensions`) adds it to the registry and the SDK install binds the class;
 - `ava plugins update` merges each plugin's disk image against the declared class;
@@ -32,16 +33,25 @@ def declared_config_class(name: str, plugin_dir: Path) -> type[BaseModel] | None
     """The config class `plugin_dir/default_config.py` declares; None when the plugin ships no face.
 
     Raises:
-        Exception: the face does not load, has no `contribute()`, declares something other than a config
-            class, or declares a class that is not a `BaseModel`.
+        Exception: the face fails to load, has no `contribute()`, declares another
+            contribution surface, an invalid config class or an invalid Core flag.
+    """
+    return configuration_declaration(name, plugin_dir).config
+
+
+def configuration_declaration(name: str, plugin_dir: Path) -> PluginContributions:
+    """Read the pure config schema and Core dependencies without installing the plugin.
+
+    A missing face contributes neither. Invalid or sensitive Core dependencies
+    fail at declaration admission, independently of an agent SDK installation.
     """
     face_py = plugin_dir / f"{CONFIG_FACE}.py"
     if not face_py.is_file():
-        return None
+        return PluginContributions()
     return _read(name, face_py)
 
 
-def _read(name: str, face_py: Path) -> type[BaseModel]:
+def _read(name: str, face_py: Path) -> PluginContributions:
     dotted = f"plugins.{name}.{CONFIG_FACE}"
     spec = importlib.util.spec_from_file_location(dotted, face_py)
     if spec is None or spec.loader is None:
@@ -64,11 +74,15 @@ def _read(name: str, face_py: Path) -> type[BaseModel]:
     if not isinstance(contributions, PluginContributions):
         raise TypeError(f"{face_py} contribute() returned {type(contributions).__name__}")
     cls = contributions.config
-    if cls is None or dataclasses.replace(contributions, config=None) != PluginContributions():
-        raise ValueError(f"{face_py} must declare a config class and nothing else")
-    if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
+    if dataclasses.replace(contributions, config=None, flags=()) != PluginContributions():
+        raise ValueError(f"{face_py} may declare only config and Core flags")
+    if cls is not None and not (isinstance(cls, type) and issubclass(cls, BaseModel)):
         raise TypeError(f"{face_py} declared {cls!r}, which is not a BaseModel subclass")
-    return cls
+    from base.packages.plugins.flags import validate_flag_key
+
+    for key in contributions.flags:
+        validate_flag_key(key)
+    return contributions
 
 
 def enabled_config_classes(plugin_dirs: dict[str, Path]) -> dict[str, type[BaseModel]]:
