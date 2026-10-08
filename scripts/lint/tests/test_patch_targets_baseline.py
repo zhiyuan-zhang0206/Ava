@@ -129,7 +129,7 @@ def test_a_new_lint_cannot_freeze_new_exemptions(
     _freeze(root, {_KEY: 1})
     monkeypatch.setattr(lcs, "_REPO_ROOT", root)
     monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
-    (error,) = lcs._baseline_guard(_sections(root, None))
+    (error,) = lcs._baseline_guard(_sections(root, None), base=lcs._baseline_base())
     assert f"added patch_targets entry {_KEY}" in error
 
 
@@ -171,7 +171,7 @@ _NEW_KEY = "tests/components/cli/test_e.py::cli.commands._util._helper"
 def gate(repo: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     """`repo` with three frozen keys committed at rule version 1, as the structure gate's root."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", repo)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _freeze(repo, _OLD)
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", "Three frozen keys")

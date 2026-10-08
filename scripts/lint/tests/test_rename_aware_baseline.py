@@ -71,7 +71,7 @@ def _freeze(tmp_path: pathlib.Path, path: str, *, cc: int = 16) -> None:
 @pytest.fixture(autouse=True)
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
 
 
 def test_rename_map_follows_detected_moves(tmp_path: pathlib.Path) -> None:
