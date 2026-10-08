@@ -166,3 +166,49 @@ describe("RunTimelineRows context rows", () => {
     expect(added[1].style.left).toBe(absolute[1].style.left);
   });
 });
+
+describe("RunTimelineRows keyboard and request bars", () => {
+  const request = (idx: number, ms: number) => ({
+    idx,
+    ts: at(ms),
+    session: 0,
+    input_tokens: 100,
+    output_tokens: 1,
+    added_tokens: 10,
+    added_estimated: false,
+  });
+  const units = [unit("inbound", 0, 0, 100), unit("thinking", 1, 100, 500), unit("thinking", 2, 600, 900)];
+
+  it("selects the request's own block when a bar is clicked, and drills on double click", () => {
+    const onSelect = renderRows({ units, requests: [request(1, 100), request(2, 600)] });
+    fireEvent.click(screen.getAllByTestId("run-timeline-request")[1]);
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 2, i1: 2, unitKind: "thinking" });
+    fireEvent.click(screen.getAllByTestId("run-timeline-added")[0]);
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
+  });
+
+  it("widens the bars to the space between requests", () => {
+    renderRows({ units, requests: [request(1, 100), request(2, 600)] });
+    const [bar] = screen.getAllByTestId("run-timeline-request");
+    // 500 px apart on a 1000 px track: capped at the maximum width.
+    expect(parseFloat(bar.style.width)).toBeGreaterThan(20);
+  });
+
+  it("moves the selection with the arrow keys and ignores them in an input", () => {
+    const onSelect = renderRows({ units }, { kind: "unit", i0: 0, i1: 0, unitKind: "inbound" });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 1, i1: 1, unitKind: "thinking" });
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    onSelect.mockClear();
+    fireEvent.keyDown(input, { key: "ArrowRight" });
+    expect(onSelect).not.toHaveBeenCalled();
+    input.remove();
+  });
+
+  it("starts at the leftmost item in view when nothing is selected", () => {
+    const onSelect = renderRows({ units });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "unit", i0: 0, i1: 0, unitKind: "inbound" });
+  });
+});
