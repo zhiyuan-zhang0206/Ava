@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,6 +19,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from psycopg import sql
 
 from base.agents.history.checkpoint import CheckpointReadError, FullHistory
+from base.agents.history.hierarchy import build as build_domain
 from base.config import settings
 from gateway.agents import understanding as module
 from gateway.app import app
@@ -91,6 +93,8 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "list_compact_boundary_checkpoint_ids",
         lambda *_a: list(reversed(state["boundaries"])),
     )
+    # Keep real catalog/tier pricing while isolating its recurring UTC price windows.
+    monkeypatch.setattr(build_domain, "quote", partial(build_domain.quote, at=_T0))
     monkeypatch.setattr(module, "build_model", lambda *_a: _MODEL)
     monkeypatch.setattr(module, "chunk_size", lambda *_a: 1000)
     return state
