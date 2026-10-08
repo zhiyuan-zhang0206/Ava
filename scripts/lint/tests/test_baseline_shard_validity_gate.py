@@ -24,7 +24,7 @@ def _clear_baseline_dir(root: pathlib.Path) -> pathlib.Path:
     absent) and carrying its README.md."""
     directory = root / baseline_shards.SHARD_DIR
     if directory.is_dir():
-        for path in directory.glob("*.json"):
+        for path in directory.rglob("*.json"):
             path.unlink()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
