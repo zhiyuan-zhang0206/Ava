@@ -234,20 +234,21 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
 async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
     events: list[dict[str, object]],
 ) -> None:
-    health = _Health()
-    rounds = RootHealthRounds(health, DiagnosticMonitor([]))
-    await rounds.start()
-    assert events[0]["event"] == "root_health_expected"
-    since = events[0]["expected_since_timestamp_seconds"]
-    assert isinstance(since, float) and since > 0
-    home_id = events[0]["home_id"]
-    assert isinstance(home_id, str) and len(home_id) == 64
-    assert _entry(rounds.health_snapshot(), "observer:root-health")["last_completed_at"] is None
-    await rounds.stop()
-    assert events[-1]["event"] == "root_health_expected"
-    assert events[-1]["expected_since_timestamp_seconds"] == 0
-    assert events[-1]["home_id"] == events[0]["home_id"]
-    assert not any(event["event"] == "root_health_tick" for event in events)
+    async with asyncio.TaskGroup() as tasks:
+        health = _Health()
+        rounds = RootHealthRounds(health, DiagnosticMonitor([]), tasks=tasks)
+        await rounds.start()
+        assert events[0]["event"] == "root_health_expected"
+        since = events[0]["expected_since_timestamp_seconds"]
+        assert isinstance(since, float) and since > 0
+        home_id = events[0]["home_id"]
+        assert isinstance(home_id, str) and len(home_id) == 64
+        assert _entry(rounds.health_snapshot(), "observer:root-health")["last_completed_at"] is None
+        await rounds.stop()
+        assert events[-1]["event"] == "root_health_expected"
+        assert events[-1]["expected_since_timestamp_seconds"] == 0
+        assert events[-1]["home_id"] == events[0]["home_id"]
+        assert not any(event["event"] == "root_health_tick" for event in events)
 
 
 def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> None:
