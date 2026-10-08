@@ -48,7 +48,7 @@ class RecordingAdapter(IMAdapter):
         self.started: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
 
-    async def start(self) -> None:
+    async def start(self, tasks: asyncio.TaskGroup) -> None:
         pass
 
     async def stop(self) -> None:

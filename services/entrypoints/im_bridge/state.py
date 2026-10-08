@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from base.paths import ava_home
 
@@ -26,11 +27,7 @@ def _load_switch_state() -> dict[str, int]:
     path = _switch_state_path()
     if not path.exists():
         return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {k: int(v) for k, v in data.items() if isinstance(v, int) or str(v).isdigit()}
+    return TypeAdapter(dict[str, int]).validate_json(path.read_text(encoding="utf-8"), strict=True)
 
 
 def _save_switch_state(state: dict[str, int]) -> None:
@@ -52,9 +49,10 @@ def _save_switch_state(state: dict[str, int]) -> None:
 # gateway response cannot duplicate the message server-side.
 
 
-@dataclass
-class _OutboxEntry:
+class _OutboxEntry(BaseModel):
     """One pending user message awaiting gateway delivery."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     id: str
     channel: str
@@ -74,8 +72,7 @@ def _outbox_path() -> Path:
 
 
 def _load_outbox() -> list[_OutboxEntry]:
-    """Restore pending entries; malformed trailing lines (crash during an
-    append) are skipped, never fatal."""
+    """Restore pending entries; an existing invalid journal fails without rewriting it."""
 
     path = _outbox_path()
     if not path.exists():
@@ -89,21 +86,8 @@ def _load_outbox() -> list[_OutboxEntry]:
         stripped = line.strip()
         if not stripped:
             continue
-        try:
-            data = json.loads(line)
-            entries.append(
-                _OutboxEntry(
-                    id=data["id"],
-                    channel=data["channel"],
-                    chat_id=data["chat_id"],
-                    agent_id=int(data["agent_id"]),
-                    text=data["text"],
-                    idempotency_key=data["idempotency_key"],
-                    enqueued_at=float(data["enqueued_at"]),
-                )
-            )
-        except (KeyError, TypeError, ValueError):
-            _log.warning("im_bridge: skipping malformed outbox line: %.120s", line)
+        data = json.loads(line)
+        entries.append(_OutboxEntry.model_validate(data))
     return entries
 
 
@@ -114,7 +98,7 @@ def _save_outbox(entries: list[_OutboxEntry]) -> None:
     path = _outbox_path()
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(
-        "".join(json.dumps(e.__dict__, ensure_ascii=False) + "\n" for e in entries),
+        "".join(json.dumps(e.model_dump(mode="json"), ensure_ascii=False) + "\n" for e in entries),
         encoding="utf-8",
     )
     tmp.replace(path)
