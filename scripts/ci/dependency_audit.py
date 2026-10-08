@@ -156,8 +156,7 @@ def npm_vulnerabilities(audit_json: dict[str, Any]) -> list[Vulnerability]:
 
 
 def _run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
-    """Run an audit tool that exits non-zero when it finds something: only unparsable
-    output is a failure of the tool itself."""
+    """Accept findings (exit 1), but reject tool/registry errors as incomplete audits."""
     result = subprocess.run(  # noqa: S603 — fixed audit tool argv
         argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False
     )
@@ -169,6 +168,8 @@ def _run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
         ) from exc
     if not isinstance(parsed, dict):
         raise TypeError(f"{argv[0]} JSON is not an object")
+    if "error" in parsed or result.returncode not in (0, 1):
+        raise RuntimeError(f"{argv[0]} reported an audit error (rc={result.returncode})")
     return cast("dict[str, Any]", parsed)
 
 
@@ -392,7 +393,10 @@ def main(argv: list[str]) -> int:
         ],
         _REPO_ROOT,
     )
-    npm_json = _run_json(["npm", "audit", "--json"], _REPO_ROOT / "ui/web")
+    npm_json = _run_json(
+        ["npm", "audit", "--json", "--registry=https://registry.npmjs.org"],
+        _REPO_ROOT / "ui/web",
+    )
     vulnerabilities = [
         *python_vulnerabilities(uv_json, _fetch_json),
         *npm_vulnerabilities(npm_json),
