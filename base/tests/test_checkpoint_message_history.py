@@ -209,6 +209,27 @@ def _history_events(records: list[Any], thread: str) -> dict[str, Any]:
     }
 
 
+def _assert_suffix_transfer(
+    suffix: dict[str, Any],
+    bodies: list[list[bytes]],
+    expected_counts: tuple[int, int, int],
+    reset: bool,
+) -> None:
+    """Compare the independent suffix event to bodies actually transferred by Postgres."""
+    fetched_bytes = sum(len(blob) for batch in bodies for blob in batch)
+    assert suffix["fetched_bytes"] == sum(map(len, bodies[0]))
+    assert (
+        suffix["fetched_rows"],
+        sum(len(batch) for batch in bodies),
+        suffix["retained_writes"],
+    ) == expected_counts
+    if reset:
+        assert fetched_bytes == suffix["fetched_bytes"]
+    else:
+        assert fetched_bytes > suffix["fetched_bytes"] + 900_000
+    assert suffix["body_batches"] == 1 and suffix["reset_found"] is reset
+
+
 @pytest.mark.parametrize(
     "reset,expected_ids,expected_counts",
     [(False, ["seed", "discarded", "summary"], (2, 3, 2)), (True, ["summary"], (2, 2, 1))],
@@ -245,19 +266,10 @@ def test_transfer_event_and_reconstruction_span_include_overfetch(
         assert [m.id for m in restored.checkpoint["channel_values"]["messages"]] == expected_ids
         events = _history_events(loguru_records, thread)
         suffix, span = events["delta_message_suffix"], events["delta_read_compat"]
-        fetched_bytes = sum(len(blob) for batch in bodies for blob in batch)
-        assert (span["stage2_blob_bytes"], suffix["fetched_bytes"]) == (
-            fetched_bytes,
-            sum(map(len, bodies[0])),
-        )
-        assert (
-            suffix["fetched_rows"],
-            span["stage2_rows"],
-            suffix["retained_writes"],
-        ) == expected_counts
-        assert (span["stage1_pages"], span["stage1_rows"]) == (1, 3)
-        assert span["reset_decode_ms"] > 0
-        assert 0 < span["decode_ms"] <= span["history_build_ms"]
+        _assert_suffix_transfer(suffix, bodies, expected_counts, reset)
+        assert span["elapsed_ms"] >= span["history_read_ms"] > 0
+        assert span["fold_ms"] > 0
+        assert "decode_ms" not in span and "reset_decode_ms" not in span
         assert suffix["checkpoint_id"] == restored.checkpoint["id"]
         assert set(payload_keys("delta_message_suffix")) <= suffix.keys()
 
@@ -278,7 +290,7 @@ def test_message_suffix_event_contract() -> None:
     }
 
 
-def test_reset_decode_failure_reports_its_phase_and_transferred_rows(
+def test_reset_decode_failure_reports_history_read_error(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, loguru_records: list[Any]
 ) -> None:
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
@@ -295,6 +307,7 @@ def test_reset_decode_failure_reports_its_phase_and_transferred_rows(
         with pytest.raises(ValueError, match="reset probe cannot decode"):
             saver.get_tuple(target)
         span = _history_events(loguru_records, thread)["delta_read_compat"]
-        assert span["outcome"] == "error" and span["failed_phase"] == "reset_decode"
-        assert span["stage2_rows"] == 1 and span["stage2_blob_bytes"] > 0
-        assert span["reset_decode_ms"] > 0 and span["decode_ms"] == 0
+        assert span["outcome"] == "error" and span["failed_phase"] == "history_read"
+        assert span["error_type"] == "ValueError"
+        assert span["elapsed_ms"] >= span["history_read_ms"] > 0
+        assert "decode_ms" not in span and "reset_decode_ms" not in span
