@@ -1,6 +1,6 @@
 ---
 name: falsifiability
-description: "Makes research claims falsifiable by naming the observation and experiment that could refute them. Use when formulating a question or hypothesis and before designing experiments, even when the claim already sounds testable."
+description: "Makes research hypotheses refutable. Use when defining the observation or experiment that could disprove a claim."
 ---
 
 # Falsifiability

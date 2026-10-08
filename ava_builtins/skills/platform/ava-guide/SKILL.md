@@ -1,6 +1,6 @@
 ---
 name: ava-guide
-description: Guides humans, external agents, and Ava agents in understanding, deploying, operating, and extending Ava. Use for Ava CLI or SDK operations, cluster health, packages, plugins, schedules, agent configuration, page publishing and user input, or external-agent delegation and takeover.
+description: "Routes Ava setup, operation, and extension requests. Use when the task needs Ava CLI/SDK guidance or a platform-specific procedure."
 ---
 
 # Ava Guide

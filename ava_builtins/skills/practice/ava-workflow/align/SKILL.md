@@ -1,6 +1,6 @@
 ---
 name: align
-description: "Aligns agents and humans on the real goal, constraints, priorities, decisions, and definition of done. Use when a task states what but not why, leaves meaningful choices open, or the user asks to be questioned or grilled."
+description: "Clarifies purpose, constraints, and decisions with the user. Use when material task choices remain unresolved or the user requests goal alignment."
 ---
 
 # Align — Sync Intent Between Agents and Human

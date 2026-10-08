@@ -1,6 +1,6 @@
 ---
 name: install
-description: Finds, installs, verifies, and judges skills, plugins, or MCP servers for a requested capability. Use when the user says "I want a capability like X," asks to install an integration, or wants candidate packages compared.
+description: "Finds and verifies skills, plugins, or MCPs for a capability. Use when comparing candidate packages or installing an integration."
 ---
 
 # Package Installer

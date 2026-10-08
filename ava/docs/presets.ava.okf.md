@@ -31,6 +31,13 @@ MCP connections remain machine-level prerequisites. A preset neither installs
 servers nor stores their definitions or credentials. The maker verifies the
 intended machines and records those dependencies when handing over the preset.
 
+Preset Maker uses `skill-creator`'s authoring evaluation contract: saved cases,
+metrics, acceptance criteria, a baseline, and output/trace evidence assess the
+complete composition before it is called validated. Evaluation files live with
+the role card or in deployment storage, outside the preset config. Incomplete
+or failing candidates remain drafts; the stored preset has no evaluation-status
+field. Saving and resolving a preset do not prove task quality.
+
 ## Data Types
 - `Preset`: id, name, label, description, config (dict), created_at, updated_at
 - `PresetNotFoundError` — specified name does not exist

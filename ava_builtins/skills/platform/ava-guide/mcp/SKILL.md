@@ -1,6 +1,6 @@
 ---
 name: mcp
-description: Adds, lists, enables, disables, removes, and wraps MCP servers in Ava. Use when the user mentions MCP, external tool servers, browser or vendor integrations, server configuration, or fixing MCP behavior.
+description: "Manages Ava MCP connections and wrappers. Use when adding, configuring, inspecting, removing, or troubleshooting an MCP server."
 ---
 
 # MCP — External Tool Integration

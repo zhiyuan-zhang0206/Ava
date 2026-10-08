@@ -1,6 +1,6 @@
 ---
 name: implementation
-description: Produces obvious, domain-aligned implementation code through precise naming, safe refactoring, and intentional comments. Use when writing or refactoring code, even if tests pass and the requested change appears mechanical.
+description: "Guides code implementation and refactoring. Use when naming domain behavior, simplifying control flow, or deciding how comments should explain a change."
 ---
 
 # Implementation Practice
@@ -33,107 +33,14 @@ description: Produces obvious, domain-aligned implementation code through precis
 - [ ] **SHOULD** Are bad smells (duplication, long method, feature envy, shotgun surgery, primitive obsession) flagged for cleanup?
 - [ ] **MUST** When a pattern already exists in the codebase, is it followed — or is a second way being introduced?
 
-## Anti-Patterns
-
-- **Vague Naming**: `process()`, `handle()`, `DataManager` → alternative: name for what the function *does* (`calculateMonthlyRevenue`) and what the class *is* (`Invoice`).
-- **Refactoring Without Tests**: diving into a restructuring with no safety net → alternative: ensure the test suite is green; refactor in small steps, running tests after each; if tests do not exist, write characterization tests first.
-- **Coincidence Programming**: "it works now, ship it" — without understanding why → alternative: for every changed line, write one sentence explaining why it has the observed effect; if you cannot, investigate until you can.
-- **Domain-Oblivious Code**: generic terms (`Entity`, `Item`, `Data`) where domain terms (`Policy`, `Claim`, `Premium`) belong → alternative: build the domain glossary first; use its terms in code; review with a domain expert.
-- **Comment Redundancy**: `# increment counter` next to `counter += 1` → alternative: delete restatements; keep only intent, trade-offs, assumptions.
-- **Introducing a Second Pattern**: adding a new error-handling style or naming convention when one already exists → alternative: follow the existing pattern; consistency is more valuable than a marginal improvement in one location.
-
-## Examples
-
-### Bad → Good: Naming
-
-**Bad** (vague — forces the reader to open the implementation):
-```python
-def process(d):
-    # ... 40 lines ...
-    return result
-```
-
-**Good** (signal at the call site):
-```python
-def calculateOverdueFees(
-    account: Account, as_of: Date
-) -> Money:
-    """Sum of all unpaid invoice fees past their
-    grace period as of the given date."""
-    # ... implementation ...
-```
-
-### Bad → Good: Commenting
-
-**Bad** (restates the code):
-```python
-# Loop through items
-for item in items:
-    # If item is active
-    if item.status == "active":
-        # Add to result
-        result.append(item)
-```
-
-**Good** (explains what code cannot):
-```python
-# Only active items are billable. Inactive items
-# include cancelled and expired — both have $0
-# value and must be excluded from revenue reports.
-# See ADR-012 for the billing-cycle assumption.
-for item in items:
-    if item.status == "active":
-        result.append(item)
-```
-
-### Bad → Good: Domain Proximity
-
-**Bad** (generic — nobody knows what this does without reading every line):
-```python
-def process_entity(e: dict) -> dict:
-    if e["type"] == 1 and e["status"] == 3:
-        e["flag"] = True
-    return e
-```
-
-**Good** (domain language — an insurance expert can read this):
-```python
-def markLapsedPolicies(policy: Policy) -> Policy:
-    """A policy lapses when premium is unpaid
-    30 days past the grace period."""
-    if policy.isPastDue( days=30 ):
-        policy.markLapsed()
-    return policy
-```
-
-### Bad → Good: Coincidence Programming
-
-**Bad** (works but nobody knows why):
-```python
-# Not sure why this fixes the timeout, but it does
-time.sleep(0.5)
-response = api.fetch()
-```
-
-**Good** (understood and explained):
-```python
-# The upstream API rate-limits to 2 req/s.
-# Without this guard we hit 429s under load.
-# After we move to a token-bucket limiter (TODO #341),
-# this sleep can be removed.
-rate_limiter.acquire()
-response = api.fetch()
-```
-
 ## Relationships
 
 - **Principles**: `principles/complexity-management` — every refactoring step should reduce complexity; bad smells are the implementation-level symptoms of the complexity formula (change amplification = shotgun surgery, cognitive load = long method, unknown unknowns = conjoined methods). `principles/ubiquitous-language` — naming and domain proximity are the implementation-side enforcement of ubiquitous language.
 - **Practices**: `practices/design` — the interface comments and ADRs written during design become the contracts implementation must honor; `practices/testing` — tests are the safety net that makes refactoring safe; `practices/review` — bad-smell identification is the core of code review.
-- **References**: `references/01-philosophy-of-software-design.md` §5.1–5.3 (comments, obviousness, consistency), §1.4 (complexity accumulates incrementally); `references/03-pragmatic-programmer.md` Tips 22, 62, 65, 74.
+- **References**: `../../references/01-philosophy-of-software-design.md` §5.1–5.3 (comments, obviousness, consistency), §1.4 (complexity accumulates incrementally); `../../references/03-pragmatic-programmer.md` Tips 22, 62, 65, 74.
 
-## Sources
+## Examples and sources
 
-- Thomas & Hunt, *The Pragmatic Programmer* — naming (Tip 74), refactoring (Tip 65), domain proximity (Tip 22), coincidence programming (Tip 62), DRY and orthogonality (Tips 15–17), "don't outrun your headlights" (Tips 42–43)
-- Ousterhout, *A Philosophy of Software Design* — comment philosophy (§5.1), write comments first (§5.2), obviousness and consistency (§5.3), complexity accumulates incrementally — "death by a thousand cuts" (§1.4)
-- Evans, *Domain-Driven Design* — ubiquitous language as the bridge between domain and code (ch. 2)
-- Fowler, *Refactoring* — bad-smell catalog and the "refactor in small steps with tests" discipline
+Read [examples and sources](references/examples-and-sources.md) when a concrete
+counterexample, worked example, or source context would clarify these decisions.
+Use the core guidance above directly for routine work.
