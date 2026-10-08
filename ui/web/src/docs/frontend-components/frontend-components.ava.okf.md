@@ -48,4 +48,4 @@ The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) 
 - Control page routing see [[ui/web/src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md|Data Flow]] hooks (`useUserSettings`, etc.); `/control/display` goes through the server-side `user_settings` table; the Insights Metrics section is retired (2026-08-04) — `/insights/metrics` now redirects to the Grafana dashboard link.
 - **AuthGuard** (`components/auth/`) wraps all pages, showing a login page when unauthenticated; `auth-context` shared via React Context.
 
-The run timeline page (`/insights/run/{id}`) is its own node: [[ui/web/src/docs/frontend-components/run-timeline/run-timeline.ava.okf.md|Run Timeline]].
+The run timeline page (`/insights/run/{id}`) is its own node: [[ui/web/src/docs/frontend-components/run-timeline/run-timeline.ava.okf.md|Run Timeline]]. The multi-agent page (`/insights/cluster`) is another: [[ui/web/src/docs/frontend-components/cluster-view/cluster-view.ava.okf.md|Cluster View]].

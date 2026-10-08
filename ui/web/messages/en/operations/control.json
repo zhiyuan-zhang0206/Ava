@@ -55,6 +55,7 @@
     "status": "Status",
     "ops": "Ops",
     "run-timeline": "Run timeline",
+    "cluster-view": "Cluster view",
     "language": "Language",
     "status-services": "Services",
     "status-gateway": "Gateway",

@@ -3,6 +3,7 @@
 
 import agentRow from "./agents/agentRow.json";
 import alerts from "./operations/alerts.json";
+import clusterView from "./agents/clusterView.json";
 import common from "./interface/common.json";
 import config from "./operations/config.json";
 import contentToggle from "./interface/contentToggle.json";
@@ -35,6 +36,7 @@ import timeline from "./agents/timeline.json";
 const messages = {
   agentRow,
   alerts,
+  clusterView,
   common,
   config,
   contentToggle,

@@ -190,6 +190,17 @@ export type ContextBreakdownResponse = Schemas["ContextBreakdownResponse"];
 export type ContextCategory = Schemas["ContextCategory"];
 export type ContextSection = Schemas["ContextSection"];
 
+// --- Cluster view (GET /api/insights/cluster/{curves,lanes,messages}) ---
+
+export type ClusterCurves = Schemas["ClusterCurves"];
+export type CurveBucket = Schemas["CurveBucket"];
+export type ClusterLanes = Schemas["ClusterLanes"];
+export type AgentLane = Schemas["AgentLane"];
+export type LaneNode = Schemas["LaneNode"];
+export type LaneBar = Schemas["LaneBar"];
+export type ClusterMessages = Schemas["ClusterMessages"];
+export type MessageEdge = Schemas["MessageEdge"];
+
 // --- Run timeline (GET /api/agents/{id}/run-timeline) ---
 
 export type RunTimelineResponse = Schemas["RunTimelineResponse"];

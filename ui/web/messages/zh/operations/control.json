@@ -55,6 +55,7 @@
     "status": "状态",
     "ops": "Ops",
     "run-timeline": "运行时间线",
+    "cluster-view": "集群视图",
     "language": "语言",
     "status-services": "服务",
     "status-gateway": "网关",

@@ -36,6 +36,7 @@ import { cn } from "@/lib/format/utils";
 export default function InsightsPage() {
   const t = useTranslations("insights");
   const runTimelineT = useTranslations("runTimeline");
+  const clusterT = useTranslations("clusterView");
   // Honor a #anchor on first load / direct link: resolve the target once,
   // from the URL hash at mount (later hash changes come from nav clicks,
   // which scroll themselves). The scroll itself is re-applied by
@@ -95,6 +96,19 @@ export default function InsightsPage() {
               description={runTimelineT("insightsEntryDescription")}
             >
               <RunTimelineEntry />
+            </ControlSection>
+
+            <ControlSection
+              id="cluster-view"
+              label={clusterT("insightsEntry")}
+              description={clusterT("insightsEntryDescription")}
+            >
+              <Link
+                href="/insights/cluster"
+                className="inline-block rounded bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90"
+              >
+                {clusterT("open")}
+              </Link>
             </ControlSection>
 
             <ControlSection

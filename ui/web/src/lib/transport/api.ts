@@ -58,6 +58,9 @@ import type { NoticesFeed,
   RestartAgentResponse,
   ResurrectAgentResponse,
   BuildProgressResponse,
+  ClusterCurves,
+  ClusterLanes,
+  ClusterMessages,
   BuildRequest,
   BuildResponse,
   RunTimelineContext,
@@ -90,6 +93,20 @@ import { projectAgentStatus } from "../contracts/types";
 import { sendMessageWithReconciliation } from "../agents/message-delivery";
 import { submitUploadedFiles } from "./upload-delivery";
 import { newOperationKey } from "./operation-key";
+
+/** The selection and window every cluster-view read takes: a root agent, its lineage edges, `from`/`to` ISO times. */
+export interface ClusterQuery {
+  root: number;
+  from: string;
+  to: string;
+  lineage?: "self" | "spawn" | "fork" | "all";
+}
+
+function clusterParams(query: ClusterQuery): URLSearchParams {
+  const params = new URLSearchParams({ root: String(query.root), from: query.from, to: query.to });
+  if (query.lineage != null) params.set("lineage", query.lineage);
+  return params;
+}
 
 export { MessageDeliveryUnknownError } from "../agents/message-delivery";
 export { API_BASE } from "./api-base";
@@ -286,6 +303,26 @@ export const api = {
     const query = params.toString();
     return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
       ok<RunTimelineResponse>,
+    );
+  },
+
+  // The multi-agent view over one agent tree (`root` and its lineage) and a window:
+  // cluster curves per time bucket, one lane per agent, and the messages between agents.
+  getClusterCurves: (query: ClusterQuery, buckets?: number): Promise<ClusterCurves> => {
+    const params = clusterParams(query);
+    if (buckets != null) params.set("buckets", String(buckets));
+    return f(`/api/insights/cluster/curves?${params.toString()}`).then(ok<ClusterCurves>);
+  },
+
+  getClusterLanes: (query: ClusterQuery, level?: number | null): Promise<ClusterLanes> => {
+    const params = clusterParams(query);
+    if (level != null) params.set("level", String(level));
+    return f(`/api/insights/cluster/lanes?${params.toString()}`).then(ok<ClusterLanes>);
+  },
+
+  getClusterMessages: (query: ClusterQuery): Promise<ClusterMessages> => {
+    return f(`/api/insights/cluster/messages?${clusterParams(query).toString()}`).then(
+      ok<ClusterMessages>,
     );
   },
 
