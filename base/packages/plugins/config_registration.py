@@ -46,8 +46,8 @@ from typing import Any, Literal, cast, overload
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
-from base import paths
 from base.host.env.agent_slices import AgentSlices
+from base.host.env.dotenv_boot import resolve_ava_home
 
 
 class PluginConfigError(Exception):
@@ -176,7 +176,7 @@ def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Pat
 
 def disk_image_path(plugin: str) -> Path:
     """Disk image path — `~/.ava/configs/<plugin>/config.json`. Does not pre-create directory."""
-    return paths.ava_home() / "configs" / plugin / "config.json"
+    return resolve_ava_home() / "configs" / plugin / "config.json"
 
 
 def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
