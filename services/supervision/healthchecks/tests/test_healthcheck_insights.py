@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -46,6 +47,11 @@ def _serve(root: Path, app: FastAPI) -> tuple[uvicorn.Server, threading.Thread]:
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning", log_config=None))
     thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
     thread.start()
+    # The probe must not race the server's startup: the socket answers only once it is serving.
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert server.started
     return server, thread
 
 
