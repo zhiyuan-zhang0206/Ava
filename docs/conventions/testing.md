@@ -21,7 +21,7 @@ env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync --frozen
 ```
 
-Pytest isolates its home and uses throwaway native Postgres/Redis. Other development
+Pytest isolates its home and defaults to throwaway native Postgres/Redis. Other development
 tools that import application code must set a temporary `AVA_HOME` before doing
 so; unset `AVA_HOME` selects `~/.ava`, which can be a running deployment.
 See [development setup](dev-setup.md#development-in-a-worktree).
@@ -33,6 +33,12 @@ Run explicit files or node IDs, including relevant consumer tests:
 ```bash
 .venv/bin/pytest -n 2 <selected-test-files-or-node-ids>
 ```
+
+For the explicitly owned logging lint contracts, run
+`.venv/bin/pytest --test-environment=static`. This scoped process refuses native
+Postgres/Redis and accepts only its owned files; other tests keep the native
+default. CI runs it in the required structure job and excludes the same files
+from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.ava.okf.md).
 
 Check changed Python files with pyright:
 

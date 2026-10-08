@@ -20,6 +20,7 @@ _JOBS = cast(
 )
 _ACTION = yaml.safe_load((_REPO_ROOT / ".github/actions/require-test-gate/action.yml").read_text())
 _SHAPES = {
+    "backend-structure": [("Run static pytest contracts", "pytest-static")],
     "backend-shard": [("Run pytest shard", "pytest-shard")],
     "backend-selected": [("Run selected pytest subset", "run-subset")],
     "backend-serial": [("Run flaky pytest bucket serially", "pytest-serial")],
@@ -49,7 +50,10 @@ def test_native_tests_and_evidence_have_no_secret_or_quarantine_bypass(job: str)
         ]
         assert len(guards) == 1
         guard = guards[0]
-        assert guard["if"] == "${{ !cancelled() }}"
+        conditions = {
+            "backend-structure": "${{ !cancelled() && needs.classify.outputs.backend == 'true' }}"
+        }
+        assert guard["if"] == conditions.get(job, "${{ !cancelled() }}")
         assert "continue-on-error" not in guard
         assert steps.index(native) < steps.index(guard)
     assert "TRUNK" not in json.dumps(_JOBS[job])

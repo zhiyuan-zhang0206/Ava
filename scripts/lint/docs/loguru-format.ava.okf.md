@@ -30,5 +30,7 @@ The required CI `backend-structure` job runs `lint-loguru-format` and
 FULL backend test paths. These hooks own repository-wide logging compliance.
 Tests in `scripts/lint/tests/logging/` exercise the AST rules and explicit-target
 CLI contracts without repeating the whole-repository scans inside pytest.
+The same required job runs these contracts in the static process environment,
+with Postgres/Redis refused and the suite's home and host-effect guards retained.
 
 Parent: [[scripts/lint/docs/lint.ava.okf.md|lint]].

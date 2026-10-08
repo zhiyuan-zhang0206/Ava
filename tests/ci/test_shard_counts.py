@@ -315,7 +315,12 @@ def _index(steps: list[dict[str, Any]], name: str) -> int:
 
 
 @pytest.mark.parametrize(
-    ("job", "group"), [("backend-shard", "${{ matrix.group }}"), ("backend-serial", "serial")]
+    ("job", "group"),
+    [
+        ("backend-shard", "${{ matrix.group }}"),
+        ("backend-serial", "serial"),
+        ("backend-structure", "static"),
+    ],
 )
 def test_every_test_running_job_reports_and_uploads_its_counts(job: str, group: str) -> None:
     steps = _steps(job)
@@ -329,9 +334,15 @@ def test_every_test_running_job_reports_and_uploads_its_counts(job: str, group: 
     assert upload["with"]["name"] == f"shard-counts-{group}"
     # After the test step, ahead of the native JUnit validator, for every outcome.
     run_step = next(i for i, step in enumerate(steps) if "pytest" in str(step.get("run", "")))
-    gate = _index(steps, "Validate native test results")
+    gate_name = (
+        "Validate static test results" if group == "static" else "Validate native test results"
+    )
+    gate = _index(steps, gate_name)
     assert run_step < _index(steps, "Report executed test counts") < gate
-    assert report["if"] == upload["if"] == "${{ !cancelled() }}"
+    condition = "${{ !cancelled() }}"
+    if group == "static":
+        condition = "${{ !cancelled() && needs.classify.outputs.backend == 'true' }}"
+    assert report["if"] == upload["if"] == condition
 
 
 def test_the_shard_report_reads_the_junit_file_the_shard_writes() -> None:
@@ -352,17 +363,23 @@ def test_the_shard_report_reads_the_junit_file_the_shard_writes() -> None:
     )
 
 
-def test_the_total_job_expects_exactly_the_shards_and_the_serial_bucket() -> None:
+def test_the_total_job_expects_every_native_and_static_bucket() -> None:
     job = _JOBS["backend-test-counts"]
     shard_groups = _JOBS["backend-shard"]["strategy"]["matrix"]["group"]
-    assert job["env"]["COUNT_GROUPS"] == " ".join([*map(str, shard_groups), "serial"])
+    assert job["env"]["COUNT_GROUPS"] == " ".join([*map(str, shard_groups), "serial", "static"])
 
 
 def test_the_total_job_is_informational_and_needs_only_read_access() -> None:
     job = _JOBS["backend-test-counts"]
     assert job["continue-on-error"] is True
     assert job["permissions"] == {"contents": "read", "actions": "read"}
-    assert set(job["needs"]) == {"classify", "test-select", "backend-shard", "backend-serial"}
+    assert set(job["needs"]) == {
+        "classify",
+        "test-select",
+        "backend-structure",
+        "backend-shard",
+        "backend-serial",
+    }
     # The fan-out condition of backend-shard, without the always(): a cancelled run stops.
     assert job["if"] == _JOBS["backend-shard"]["if"].replace("always()", "!cancelled()")
     # Nothing waits on it: the required aggregator does not list it.
