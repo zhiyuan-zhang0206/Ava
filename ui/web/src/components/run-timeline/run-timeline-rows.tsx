@@ -28,6 +28,13 @@ import {
   layoutSpans,
   levelsTopFirst,
   matchesHighlight,
+  ADDED_ROW,
+  INPUT_ROW,
+  UNITS_ROW,
+  levelRowId,
+  navigate,
+  revealView,
+  type NavKey,
   MARKER_HIT_PX,
   MARKER_LINE_PX,
   type RowPlacement,
@@ -140,6 +147,12 @@ export function RunTimelineRows({
   const lit = hoverLit(hover, data.nodes, data.units);
   const levels = levelsTopFirst(data.nodes);
   const [mode, setMode] = useState<AxisMode>("time");
+  // The row the selection was made in: a request's bar and its message block select the same thing.
+  const [navRow, setNavRow] = useState<string | null>(null);
+  const choose = (row: string, target: Selection) => {
+    setNavRow(row);
+    onSelect(target);
+  };
   const baseFrom = base.from;
   const baseTo = base.to;
   const axis = useMemo(
@@ -178,6 +191,30 @@ export function RunTimelineRows({
     const observer = new ResizeObserver(measure);
     observer.observe(track);
     return () => observer.disconnect();
+  }, []);
+  const nav = useRef({ data, view, base, axis, selection, navRow, onSelect, onView });
+  useEffect(() => {
+    nav.current = { data, view, base, axis, selection, navRow, onSelect, onView };
+  });
+  // Arrow keys move the selection (see `navigate`) and pan the view to it; editable and resizing controls keep their own arrows.
+  useEffect(() => {
+    const keys: Partial<Record<string, NavKey>> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+    const onKey = (event: KeyboardEvent) => {
+      const key = keys[event.key];
+      if (event.defaultPrevented || key === undefined || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const el = event.target instanceof Element ? event.target : null;
+      if (el?.closest("input, textarea, select, [contenteditable], [role=textbox], [role=separator], [role=slider], [role=combobox]")) return;
+      const s = nav.current;
+      const next = navigate(key, s.selection === null ? null : { row: s.navRow, selection: s.selection }, s.data, s.view);
+      event.preventDefault();
+      if (next === null) return;
+      setNavRow(next.row);
+      s.onSelect(next.item.selection);
+      const shown = revealView(s.axis, s.view, s.base, next.item.start, next.item.end);
+      if (shown !== s.view) s.onView(shown);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
   const drag = useRef<{ x: number; view: Viewport; panning: boolean; id: number } | null>(null);
   const suppressClick = useRef(false);
@@ -377,7 +414,7 @@ export function RunTimelineRows({
                   data-hover={hovered ? "self" : lit.nodeIds.has(node.id) ? "lit" : undefined}
                   data-faded={faded ? "" : undefined}
                   data-marker={place.marker ? "" : undefined}
-                  onClick={() => onSelect({ kind: "node", id: node.id })}
+                  onClick={() => choose(levelRowId(level), { kind: "node", id: node.id })}
                   onDoubleClick={() => onDrill({ kind: "node", id: node.id })}
                   {...hoverProps({ kind: "node", id: node.id })}
                   className={cn(
@@ -452,7 +489,7 @@ export function RunTimelineRows({
                 data-faded={faded ? "" : undefined}
                 data-matched={matched ? "" : undefined}
                 data-marker={place.marker ? "" : undefined}
-                onClick={() => onSelect(candidate)}
+                onClick={() => choose(UNITS_ROW, candidate)}
                 onDoubleClick={() => onDrill(candidate)}
                 {...hoverProps(candidate)}
                 className={cn(
@@ -486,6 +523,11 @@ export function RunTimelineRows({
               metric={metric}
               axis={axis}
               viewU={viewU}
+              trackPx={trackPx}
+              units={data.units}
+              selection={selection}
+              onSelect={(target) => choose(metric === "input" ? INPUT_ROW : ADDED_ROW, target)}
+              onDrill={onDrill}
               hover={hover}
               hoverProps={hoverProps}
               describe={(request) => requestReadout(t, request)}

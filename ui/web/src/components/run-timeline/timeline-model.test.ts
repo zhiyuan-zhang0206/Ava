@@ -5,6 +5,17 @@ import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineRequest, RunTi
 
 import {
   axisBox,
+  barWidths,
+  BAR_FILL,
+  BAR_MAX_PX,
+  BAR_MIN_PX,
+  navigate,
+  requestLit,
+  requestSelection,
+  revealView,
+  ADDED_ROW,
+  INPUT_ROW,
+  UNITS_ROW,
   axisMapTicks,
   axisTicks,
   buildAxisMap,
@@ -544,5 +555,108 @@ describe("hybrid axis", () => {
       expect(tick.left).toBeLessThanOrEqual(100);
     }
     expect(axisMapTicks(buildAxisMap(sample, BASE, "time"), BASE, 1000)).toEqual(axisTicks(BASE));
+  });
+});
+
+describe("request bars", () => {
+  it("fills a share of the space to the nearest neighbour, within a min and max width", () => {
+    const [a, b, c] = barWidths([100, 200, 210]);
+    expect(b).toBeCloseTo(10 * BAR_FILL);
+    expect(c).toBeCloseTo(10 * BAR_FILL);
+    expect(a).toBe(BAR_MAX_PX);
+    expect(barWidths([0, 0.5])).toEqual([BAR_MIN_PX, BAR_MIN_PX]);
+    expect(barWidths([0, 1000])).toEqual([BAR_MAX_PX, BAR_MAX_PX]);
+    expect(barWidths([5])).toEqual([BAR_MAX_PX * BAR_FILL]);
+  });
+
+  const T = Date.parse("2026-10-04T12:00:00Z");
+  const iso = (sec: number) => new Date(T + sec * 1000).toISOString();
+  const u = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: number, parent: string | null = null): RunTimelineUnit =>
+    unit({ kind, i0, i1: i0, start: iso(from), end: iso(to), parent, preview: `${kind}${i0}` });
+  const req = (idx: number, sec: number): RunTimelineRequest => ({
+    idx,
+    ts: iso(sec),
+    session: 0,
+    input_tokens: 10,
+    output_tokens: 1,
+    added_tokens: 1,
+    added_estimated: false,
+  });
+  const nd = (id: string, level: number, parent: string | null, from: number, to: number, s0: number, s1: number): RunTimelineNode => ({
+    ...node(level, id),
+    parent,
+    start: iso(from),
+    end: iso(to),
+    span_start: s0,
+    span_end: s1,
+  });
+  // Level 2: P over everything; level 1: A (messages 0-1), B (2-3); blocks 0..3; AIMessage 1 and 3 made requests.
+  const data = {
+    nodes: [nd("P", 2, null, 0, 40, 0, 3), nd("A", 1, "P", 0, 20, 0, 1), nd("B", 1, "P", 20, 40, 2, 3)],
+    units: [u("inbound", 0, 0, 10, "A"), u("thinking", 1, 10, 20, "A"), u("inbound", 2, 20, 30, "B"), u("thinking", 3, 30, 40, "B")],
+    requests: [req(1, 10), req(3, 30)],
+  };
+  const whole = { from: T, to: T + 40_000 };
+  const unitSel = (i0: number, kind: RunTimelineUnit["kind"]) => ({ kind: "unit" as const, i0, i1: i0, unitKind: kind });
+  const go = (key: "left" | "right" | "up" | "down", row: string | null, selection: Parameters<typeof navigate>[1] extends infer C ? (C extends { selection: infer S } ? S : never) : never) =>
+    navigate(key, { row, selection }, data, whole);
+
+  it("selects the block of the AIMessage that made the request", () => {
+    expect(requestSelection({ idx: 1 }, data.units)).toEqual(unitSel(1, "thinking"));
+    expect(requestSelection({ idx: 99 }, data.units)).toBeNull();
+    expect(requestLit({ idx: 1 }, unitSel(1, "thinking"), null).selected).toBe(true);
+    expect(requestLit({ idx: 1 }, unitSel(2, "inbound"), null).selected).toBe(false);
+    expect(requestLit({ idx: 3 }, null, { kind: "unit", i0: 3, i1: 3, unitKind: "thinking" }).hovered).toBe(true);
+    expect(requestLit({ idx: 3 }, null, { kind: "request", idx: 3 }).hovered).toBe(true);
+  });
+
+  it("moves left and right within a row and stops at the ends", () => {
+    expect(go("right", UNITS_ROW, unitSel(0, "inbound"))?.item.selection).toEqual(unitSel(1, "thinking"));
+    expect(go("left", UNITS_ROW, unitSel(0, "inbound"))).toBeNull();
+    expect(go("right", "level-1", { kind: "node", id: "A" })?.item.selection).toEqual({ kind: "node", id: "B" });
+    expect(go("right", "level-1", { kind: "node", id: "B" })).toBeNull();
+    expect(go("right", INPUT_ROW, unitSel(1, "thinking"))?.item.selection).toEqual(unitSel(3, "thinking"));
+  });
+
+  it("goes up to the parent and down to the first child", () => {
+    expect(go("up", UNITS_ROW, unitSel(2, "inbound"))).toMatchObject({ row: "level-1", item: { selection: { id: "B" } } });
+    expect(go("up", "level-1", { kind: "node", id: "B" })).toMatchObject({ row: "level-2", item: { selection: { id: "P" } } });
+    expect(go("up", "level-2", { kind: "node", id: "P" })).toBeNull();
+    expect(go("down", "level-2", { kind: "node", id: "P" })).toMatchObject({ row: "level-1", item: { selection: { id: "A" } } });
+    expect(go("down", "level-1", { kind: "node", id: "B" })).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(2, "inbound") } });
+  });
+
+  it("falls back to the item covering, else nearest to, the time when there is no parent or child", () => {
+    // Messages down to the request rows: the block's own request, else the nearest one in time.
+    expect(go("down", UNITS_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { request: { idx: 1 } } });
+    expect(go("down", UNITS_ROW, unitSel(2, "inbound"))?.item.request?.idx).toBe(3);
+    // Request rows up: the request's own block; between the two request rows: the same request.
+    expect(go("up", INPUT_ROW, unitSel(3, "thinking"))).toMatchObject({ row: UNITS_ROW, item: { selection: unitSel(3, "thinking") } });
+    expect(go("down", INPUT_ROW, unitSel(3, "thinking"))).toMatchObject({ row: ADDED_ROW, item: { request: { idx: 3 } } });
+    expect(go("up", ADDED_ROW, unitSel(1, "thinking"))).toMatchObject({ row: INPUT_ROW, item: { request: { idx: 1 } } });
+    expect(go("down", ADDED_ROW, unitSel(1, "thinking"))).toBeNull();
+    // A unit without a parent goes to the level-1 node covering its time.
+    const orphan = { ...data, units: data.units.map((x) => (x.i0 === 2 ? { ...x, parent: null } : x)) };
+    expect(navigate("up", { row: UNITS_ROW, selection: unitSel(2, "inbound") }, orphan, whole)?.item.selection).toEqual({ kind: "node", id: "B" });
+  });
+
+  it("reads the row from the selection when the remembered row does not hold it, and starts at the leftmost item in view", () => {
+    expect(go("right", "level-2", unitSel(0, "inbound"))?.item.selection).toEqual(unitSel(1, "thinking"));
+    const inView = { from: T + 25_000, to: T + 40_000 };
+    expect(navigate("right", null, data, inView)?.item.selection).toEqual(unitSel(2, "inbound"));
+    expect(navigate("left", null, { nodes: [], units: [], requests: [] }, whole)).toBeNull();
+  });
+
+  it("pans to an item outside the view without changing the zoom, and leaves a visible one alone", () => {
+    const axis = buildAxisMap(data.units, { from: T, to: T + 400_000 }, "time");
+    const base = { from: T, to: T + 400_000 };
+    const view = { from: T, to: T + 40_000 };
+    expect(revealView(axis, view, base, T + 10_000, T + 20_000)).toBe(view);
+    const moved = revealView(axis, view, base, T + 200_000, T + 210_000);
+    expect(moved.to - moved.from).toBe(40_000);
+    expect(moved.from).toBeLessThanOrEqual(T + 200_000);
+    expect(moved.to).toBeGreaterThanOrEqual(T + 210_000);
+    const edge = revealView(axis, view, base, T + 399_000, T + 400_000);
+    expect(edge.to).toBe(base.to);
   });
 });

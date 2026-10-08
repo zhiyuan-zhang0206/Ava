@@ -723,3 +723,221 @@ export function axisMapTicks(axis: AxisMap, view: Viewport, trackPx: number): Ax
     return { ...tick, left: ((u - viewU.from) / span) * 100 };
   });
 }
+
+/** A request bar fills this share of the space to its nearest neighbour... */
+export const BAR_FILL = 0.78;
+/** ...but is never thinner than this, nor wider than `BAR_MAX_PX` (also the width of a lone bar's slot), in pixels. */
+export const BAR_MIN_PX = 2;
+export const BAR_MAX_PX = 48;
+
+/** Bar widths for bars centred at `centersPx` (ascending): each fills `BAR_FILL` of the distance to its nearest neighbour. */
+export function barWidths(centersPx: readonly number[]): number[] {
+  return centersPx.map((at, i) => {
+    const gaps: number[] = [];
+    if (i > 0) gaps.push(at - centersPx[i - 1]);
+    if (i + 1 < centersPx.length) gaps.push(centersPx[i + 1] - at);
+    const gap = gaps.length > 0 ? Math.min(...gaps) : BAR_MAX_PX;
+    return Math.min(Math.max(gap * BAR_FILL, BAR_MIN_PX), BAR_MAX_PX);
+  });
+}
+
+const REQUEST_UNIT_ORDER: readonly RunTimelineUnit["kind"][] = ["thinking", "text", "call"];
+
+/**
+ * What clicking a request's bar selects: the block of the AIMessage that made the request (its
+ * thinking, else its text, else its call block), so the details and the context breakdown follow
+ * that request exactly as they do for a clicked message block. Null when that message has no block.
+ */
+export function requestSelection(request: Pick<RunTimelineRequest, "idx">, units: readonly RunTimelineUnit[]): Selection | null {
+  const own = units.filter((unit) => unit.i0 === request.idx);
+  const pick =
+    REQUEST_UNIT_ORDER.map((kind) => own.find((unit) => unit.kind === kind)).find((unit) => unit !== undefined) ??
+    units.find((unit) => unit.i0 <= request.idx && request.idx <= unit.i1);
+  return pick === undefined ? null : { kind: "unit", i0: pick.i0, i1: pick.i1, unitKind: pick.kind };
+}
+
+/** Whether a request's bar is the selected one (a selected block of its AIMessage), and whether a hover lights it. */
+export function requestLit(
+  request: Pick<RunTimelineRequest, "idx">,
+  selection: Selection | null,
+  hover: Hover | null,
+): { selected: boolean; hovered: boolean } {
+  return {
+    selected: selection?.kind === "unit" && selection.i0 === request.idx,
+    hovered:
+      (hover?.kind === "request" && hover.idx === request.idx) || (hover?.kind === "unit" && hover.i0 === request.idx),
+  };
+}
+
+/** What keyboard navigation moves over. */
+export interface NavData {
+  nodes: readonly RunTimelineNode[];
+  units: readonly RunTimelineUnit[];
+  requests: readonly RunTimelineRequest[];
+}
+
+export type NavKey = "left" | "right" | "up" | "down";
+
+/** One selectable thing of a row: a node, a block, or a request's bar (which selects its AIMessage's block). */
+export interface NavItem {
+  row: string;
+  selection: Selection;
+  /** Its extent and middle in epoch milliseconds (a request is one instant). */
+  start: number;
+  end: number;
+  at: number;
+  node?: RunTimelineNode;
+  unit?: RunTimelineUnit;
+  request?: RunTimelineRequest;
+}
+
+export const UNITS_ROW = "units";
+export const INPUT_ROW = "input";
+export const ADDED_ROW = "added";
+export const levelRowId = (level: number) => `level-${level}`;
+
+/** The rows top to bottom, as the page draws them. */
+export function navRowIds(data: NavData): string[] {
+  const rows = levelsTopFirst(data.nodes).map(levelRowId);
+  rows.push(UNITS_ROW);
+  if (data.requests.length > 0) rows.push(INPUT_ROW, ADDED_ROW);
+  return rows;
+}
+
+function span(startIso: string, endIso: string) {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  return { start, end, at: (start + end) / 2 };
+}
+
+/** The items of one row, left to right. */
+export function navItems(row: string, data: NavData): NavItem[] {
+  if (row === UNITS_ROW) {
+    return [...data.units]
+      .sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || a.i0 - b.i0 || a.i1 - b.i1)
+      .map((unit) => ({
+        row,
+        unit,
+        selection: { kind: "unit", i0: unit.i0, i1: unit.i1, unitKind: unit.kind },
+        ...span(unit.start, unit.end),
+      }));
+  }
+  if (row === INPUT_ROW || row === ADDED_ROW) {
+    const items: NavItem[] = [];
+    for (const request of [...data.requests].sort((a, b) => a.idx - b.idx)) {
+      const selection = requestSelection(request, data.units);
+      if (selection === null) continue;
+      const at = Date.parse(request.ts);
+      items.push({ row, request, selection, start: at, end: at, at });
+    }
+    return items;
+  }
+  return data.nodes
+    .filter((node) => levelRowId(node.level) === row)
+    .sort((a, b) => a.span_start - b.span_start || Date.parse(a.start) - Date.parse(b.start))
+    .map((node) => ({ row, node, selection: { kind: "node", id: node.id }, ...span(node.start, node.end) }));
+}
+
+function indexOfSelection(items: readonly NavItem[], selection: Selection): number {
+  return items.findIndex((item) =>
+    item.request !== undefined
+      ? selection.kind === "unit" && selection.i0 === item.request.idx
+      : isSelected(selection, item.selection),
+  );
+}
+
+/** The item covering the instant `at`, else the closest one; of several, the one whose middle is nearest. */
+function nearest(items: readonly NavItem[], at: number): NavItem | undefined {
+  const covering = items.filter((item) => item.start <= at && at <= item.end);
+  const pool = covering.length > 0 ? covering : items;
+  return pool.reduce<NavItem | undefined>(
+    (best, item) => (best === undefined || Math.abs(item.at - at) < Math.abs(best.at - at) ? item : best),
+    undefined,
+  );
+}
+
+/** The row a selection lives in when no row is remembered for it. */
+function rowOfSelection(selection: Selection, data: NavData): string | null {
+  if (selection.kind === "unit") return UNITS_ROW;
+  const node = data.nodes.find((candidate) => candidate.id === selection.id);
+  return node === undefined ? null : levelRowId(node.level);
+}
+
+/**
+ * The next selection of an arrow key. `row` is the row the current selection was made in (a request's
+ * bar and its message block share one selection, so the row cannot be read off it).
+ *
+ * left / right: the previous / next item of the row (none past either end).
+ * up: the parent when the item has one in the row above (a node's, a block's level-1 node); otherwise
+ *   the item of the row above that covers, else is closest to, the item's time. From a request's bar
+ *   to the Messages row it is the request's own block, and between the two context rows the same request.
+ * down: the node's first child when it has one in the row below (a level-1 node's first block);
+ *   otherwise covering / closest in time; Messages down to the request of that block when it is one.
+ * No current selection: the leftmost item in the viewport (Messages first), else the row's first.
+ * Returns null when there is nowhere to go.
+ */
+export function navigate(
+  key: NavKey,
+  current: { row: string | null; selection: Selection } | null,
+  data: NavData,
+  view: Viewport,
+): { row: string; item: NavItem } | null {
+  const rows = navRowIds(data);
+  if (current === null) {
+    const order = [UNITS_ROW, ...rows.filter((row) => row !== UNITS_ROW).reverse()];
+    for (const row of order) {
+      const items = navItems(row, data);
+      const inView = items.find((item) => item.end >= view.from && item.start <= view.to);
+      if (inView !== undefined) return { row, item: inView };
+    }
+    return null;
+  }
+  let row = current.row !== null && rows.includes(current.row) ? current.row : null;
+  let items = row === null ? [] : navItems(row, data);
+  let at = row === null ? -1 : indexOfSelection(items, current.selection);
+  if (at < 0) {
+    row = rowOfSelection(current.selection, data);
+    items = row === null ? [] : navItems(row, data);
+    at = indexOfSelection(items, current.selection);
+  }
+  if (row === null || at < 0) return navigate(key, null, data, view);
+  const here = items[at];
+  if (key === "left" || key === "right") {
+    const to = at + (key === "left" ? -1 : 1);
+    const next = to < 0 ? undefined : items.at(to);
+    return next === undefined ? null : { row, item: next };
+  }
+  const to = rows.indexOf(row) + (key === "up" ? -1 : 1);
+  const targetRow = to < 0 ? undefined : rows.at(to);
+  if (targetRow === undefined) return null;
+  const targets = navItems(targetRow, data);
+  const sameRequest = (item: NavItem) => item.request !== undefined && item.request.idx === here.request?.idx;
+  let found: NavItem | undefined;
+  if (here.request !== undefined && targetRow === UNITS_ROW) {
+    found = targets[indexOfSelection(targets, here.selection)];
+  } else if (here.request !== undefined) {
+    found = targets.find(sameRequest);
+  } else if (here.unit !== undefined && targetRow !== UNITS_ROW && !targetRow.startsWith("level-")) {
+    found = targets[indexOfSelection(targets, here.selection)];
+  } else if (key === "up") {
+    const parent = here.node?.parent ?? here.unit?.parent ?? null;
+    found = parent === null ? undefined : targets.find((item) => item.node?.id === parent);
+  } else if (here.node !== undefined) {
+    const id = here.node.id;
+    found = targets.find((item) => (item.node ?? item.unit)?.parent === id);
+  }
+  found ??= nearest(targets, here.at);
+  return found === undefined ? null : { row: targetRow, item: found };
+}
+
+/** The viewport that shows [startMs, endMs] when `view` does not: the same width, centred on it, inside the base extent; `view` itself when it already shows some of it. */
+export function revealView(axis: AxisMap, view: Viewport, base: Viewport, startMs: number, endMs: number): Viewport {
+  const u0 = axis.toU(startMs, "lo");
+  const u1 = axis.toU(endMs, "hi");
+  const shown = axis.viewU(view);
+  if (u1 >= shown.from && u0 <= shown.to) return view;
+  const width = shown.to - shown.from;
+  const baseU = axis.viewU(base);
+  const from = Math.min(Math.max((u0 + u1) / 2 - width / 2, baseU.from), baseU.to - width);
+  return axis.viewFromU({ from, to: from + width });
+}
