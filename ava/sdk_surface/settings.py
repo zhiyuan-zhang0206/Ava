@@ -93,9 +93,9 @@ def page_host() -> "PageHost":  # noqa: F821  # pyright: ignore[reportUndefinedV
 def _attached() -> tuple[Mapping[str, Any], Any] | None:
     """The pins and plugin-config view of the agent this process attached to (`ava.external`:
     one attachment per process), if any: the lease its context carries."""
-    from ava.sdk_surface import process_context
+    import ava
 
-    context = process_context.peek()
+    context = getattr(ava, "context", None)
     lease = None if context is None or context.identity is None else context.identity.lease
     return None if lease is None else lease.config()
 

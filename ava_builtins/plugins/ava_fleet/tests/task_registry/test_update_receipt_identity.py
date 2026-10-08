@@ -7,7 +7,6 @@ from threading import Event
 import psycopg
 import pytest
 
-from ava.sdk_surface import process_context
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.test_update_receipts import _setup
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
@@ -85,8 +84,8 @@ def test_lease_expiring_during_operation_lock_wait_cannot_write(
             identity = AgentIdentity(
                 owner, False, lease=ExternalLease(actor, validate, lambda: None)
             )
-            with process_context.scoped(AvaContext(identity=identity, clients=clients)):
-                task_registry.log(tid, "stale", operation_key="wait")
+            context = AvaContext(identity=identity, clients=clients)
+            task_registry._update(context, tid, note="stale", operation_key="wait")
         finally:
             clients.close()
 

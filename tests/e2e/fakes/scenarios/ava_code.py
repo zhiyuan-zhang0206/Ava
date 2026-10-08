@@ -25,7 +25,6 @@ from pathlib import Path
 
 import psycopg
 
-import ava
 from base.config import settings
 from tests.e2e.fakes._recording import (
     RecordingModel,
@@ -105,20 +104,22 @@ def _read(path: Path) -> str:
 # -- scenarios -----------------------------------------------------------------
 
 
-def build_cwd_notes(model: str) -> RecordingModel:
+def build_cwd_notes(model: str, *, agent_id: int | None) -> RecordingModel:
     """Switch cwd inside the project, then run one more exec so a re-injection would show."""
     return RecordingModel(
+        agent_id=agent_id,
         script=(
             exec_call(1, f"import ava\nava.cwd.set({str(project())!r})\nprint('set-done')"),
             exec_call(2, "import ava\nprint('probe', ava.cwd.get())"),
             say(FINAL),
-        )
+        ),
     )
 
 
-def build_context_files(model: str) -> RecordingModel:
+def build_context_files(model: str, *, agent_id: int | None) -> RecordingModel:
     """Read files in repos with AGENTS.md / CLAUDE.md; every read is one script step."""
     return RecordingModel(
+        agent_id=agent_id,
         script=(
             exec_call(1, _read(project() / "sub" / "foo.py")),
             exec_call(2, _read(project() / "sub" / "bar.py")),
@@ -129,11 +130,11 @@ def build_context_files(model: str) -> RecordingModel:
             exec_call(5, _read(project("twin") / "x.py")),
             exec_call(6, _read(project("big") / "y.py")),
             say(FINAL),
-        )
+        ),
     )
 
 
-def build_cwd_tools(model: str) -> RecordingModel:
+def build_cwd_tools(model: str, *, agent_id: int | None) -> RecordingModel:
     """Relative-path SDK calls follow the logical cwd, not the process cwd."""
     code = f"""
 import os
@@ -157,42 +158,44 @@ ava.files.write('gone.txt', 'x')
 ava.files.delete('gone.txt')
 print('shell-pwd', ava.shell.run('pwd').strip())
 """
-    return RecordingModel(script=(exec_call(1, code), say(FINAL)))
+    return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
 
 
-def _restart_applied() -> bool:
+def _restart_applied(agent_id: int | None) -> bool:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages WHERE agent_id = %s AND kind = 'restart' "
             "AND applied_at IS NOT NULL LIMIT 1",
-            (ava.self.AGENT_ID,),
+            (agent_id,),
         )
         return cur.fetchone() is not None
 
 
-def build_cwd_restart(model: str) -> RecordingModel:
+def build_cwd_restart(model: str, *, agent_id: int | None) -> RecordingModel:
     """Before a restart: move cwd into proj/sub. After: report the cwd the new process sees."""
-    if _restart_applied():
+    if _restart_applied(agent_id):
         return RecordingModel(
+            agent_id=agent_id,
             script=(
                 exec_call(1, "import ava\nprint('cwd-after-restart', ava.cwd.get())"),
                 say(FINAL),
-            )
+            ),
         )
     sub = project() / "sub"
     return RecordingModel(
+        agent_id=agent_id,
         script=(
             exec_call(1, f"import ava\nava.cwd.set({str(sub)!r})\nprint('set-done')"),
             say(FINAL),
-        )
+        ),
     )
 
 
-def build_system_prompt(model: str) -> RecordingModel:
-    return RecordingModel(script=(say(FINAL),))
+def build_system_prompt(model: str, *, agent_id: int | None) -> RecordingModel:
+    return RecordingModel(agent_id=agent_id, script=(say(FINAL),))
 
 
-def build_after_compact(model: str) -> RecordingModel:
+def build_after_compact(model: str, *, agent_id: int | None) -> RecordingModel:
     """Surface notes, compact, then read again: the compact must make them resurface.
 
     Script positions: 1-2 first turn; 3 the compaction summary call; 4 the
@@ -203,6 +206,7 @@ def build_after_compact(model: str) -> RecordingModel:
         f"print('read-ok', len(ava.files.read({str(project() / 'sub' / 'foo.py')!r})))"
     )
     return RecordingModel(
+        agent_id=agent_id,
         script=(
             exec_call(1, first),
             say("ready."),
@@ -210,5 +214,5 @@ def build_after_compact(model: str) -> RecordingModel:
             say("context compacted, continuing."),
             exec_call(2, _read(project() / "sub" / "bar.py")),
             say(FINAL),
-        )
+        ),
     )

@@ -9,7 +9,6 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from ava.sdk_surface import process_context
 from ava_builtins.plugins.ava_fleet import _task_creation_receipts, _task_update, task_registry
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
@@ -38,17 +37,16 @@ def test_concurrent_creation_returns_same_original_task(
     def create(_index: int) -> task_registry.Task:
         clients = ClientSet(database=Database.from_settings)
         try:
-            with process_context.scoped(
-                AvaContext(identity=AgentIdentity(actor, True), clients=clients)
-            ):
-                barrier.wait()
-                return task_registry.create(
-                    "concurrent creation",
-                    "work",
-                    parent=root_task_id,
-                    owner=owner,
-                    operation_key="same",
-                )
+            context = AvaContext(identity=AgentIdentity(actor, True), clients=clients)
+            barrier.wait()
+            return task_registry._create(
+                context,
+                "concurrent creation",
+                "work",
+                parent=root_task_id,
+                owner=owner,
+                operation_key="same",
+            )
         finally:
             clients.close()
 

@@ -6,11 +6,17 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from ava.sdk_surface import agent_identity
+from base.agents.context import AvaContext
 from base.agents.tasks.model import validate_task_snapshot as validate_snapshot
 
 
 def replay_creation(
-    cur: psycopg.Cursor[Any], actor: int, key: str | None, request: dict[str, object]
+    cur: psycopg.Cursor[Any],
+    actor: int,
+    key: str | None,
+    request: dict[str, object],
+    *,
+    context: AvaContext,
 ) -> dict[str, Any] | None:
     """Serialize admission, then return the frozen original result if accepted."""
     if key is None:
@@ -19,7 +25,7 @@ def replay_creation(
         "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
         (f"task-create:{actor}:{key}",),
     )
-    if agent_identity.require_agent_id() != actor:
+    if agent_identity.require_agent_id(context) != actor:
         raise RuntimeError("task creation actor changed while waiting for operation admission")
     cur.execute(
         "SELECT request, result FROM task_creation_receipts "

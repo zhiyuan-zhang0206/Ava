@@ -68,7 +68,7 @@ def _fake_notes(monkeypatch: pytest.MonkeyPatch, *tags: str) -> list[HumanMessag
     depend on which layers happen to be enabled in the test environment."""
     notes = [_note(t) for t in tags]
 
-    def fake_notes(_extensions: ExtensionRegistry, _slices: AgentSlices) -> list[HumanMessage]:
+    def fake_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
         return list(notes)
 
     monkeypatch.setattr("agent.graph._init_context.context_notes", fake_notes)
@@ -113,7 +113,7 @@ async def test_a_plugin_declaration_reaches_the_head_through_the_context_registr
     def plugin_section(_slices: AgentSlices) -> str:
         return "## Declared by a plugin"
 
-    def plugin_note(_slices: AgentSlices) -> HumanMessage:
+    def plugin_note(_ctx: AvaContext) -> HumanMessage:
         return _note("declared")
 
     registry = ExtensionRegistry(

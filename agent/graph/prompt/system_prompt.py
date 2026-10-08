@@ -558,7 +558,7 @@ def _invest_in_the_future_section(slices: AgentSlices) -> str:
     return _INVEST_IN_THE_FUTURE_SECTION
 
 
-def _workspace_section(slices: AgentSlices) -> str:
+def _workspace_section(slices: AgentSlices, *, agent_id: int | None) -> str:
     """One-paragraph pointer to the per-agent workspace dir. Empty before a
     process identity is established (snapshot test / dev REPL renders) — the
     note that carries the concrete path is injected beside this prompt, so
@@ -574,13 +574,10 @@ def _workspace_section(slices: AgentSlices) -> str:
     the ``agent_id_note`` context note instead — injected after each compact
     and at cold start, and regrafted by a fork, so it is always the reader's
     own path."""
-    import ava
-
-    aid = ava.sdk_surface.agent_identity.agent_id()
-    if aid is None or not settings.agent.workspace_in_system_prompt:
+    if agent_id is None or not settings.agent.workspace_in_system_prompt:
         return ""
     # Ensure the workspace directory exists (mkdir side effect).
-    workspace_dir(aid)
+    workspace_dir(agent_id)
     return (
         "# Workspace\n\n"
         "Your workspace is your per-agent folder — it is named with your agent "
@@ -650,12 +647,12 @@ FRAMEWORK_SECTIONS: tuple[SectionFn, ...] = (
     _long_running_operation_section,
     _temporal_awareness_section,
     _invest_in_the_future_section,
-    _workspace_section,
-    capabilities_section,
 )
 
 
-def build_system_prompt(extensions: ExtensionRegistry, slices: AgentSlices) -> str:
+def build_system_prompt(
+    extensions: ExtensionRegistry, slices: AgentSlices, *, agent_id: int | None
+) -> str:
     """Build the full system prompt: base + SDK overview + plugin contributions.
 
     `_claim` node calls once when `state.messages` is empty; afterward
@@ -682,8 +679,17 @@ You are Ava, an agent that acts by writing Python code — call the
 tool calls. Before using any `ava.*` function, you must explicitly `import ava` in your code.
 """
         ]
+
+    def workspace_section(agent: AgentSlices) -> str:
+        return _workspace_section(agent, agent_id=agent_id)
+
+    framework_sections: tuple[SectionFn, ...] = (
+        *FRAMEWORK_SECTIONS,
+        workspace_section,
+        capabilities_section,
+    )
     plugin_sections = tuple(extensions.system_prompt_sections())
-    for plugin, section_fn in (*((None, fn) for fn in FRAMEWORK_SECTIONS), *plugin_sections):
+    for plugin, section_fn in (*((None, fn) for fn in framework_sections), *plugin_sections):
         contribution = section_fn(slices)
         if contribution:
             parts.append(contribution)

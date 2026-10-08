@@ -29,7 +29,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
-from tests.fixtures.pin_agent import exec_context
+from tests.fixtures.pin_agent import exec_context, pin_agent
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -187,6 +187,7 @@ def test_accept_stops_exec_and_uses_captured_incarnation(
 
     accepted = Mock()
     monkeypatch.setattr("base.agents.impersonation.accept", accepted)
+    pin_agent(incarnation.agent_id)
     with pytest.raises(AgentImpersonation):
         accept("lease-1", "Hand the task to the external session.")
     accepted.assert_called_once_with(

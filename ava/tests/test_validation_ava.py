@@ -14,6 +14,7 @@ from ava import files as _files
 from ava import ui as _ui
 from ava import watcher as _watcher
 from ava.sdk_surface import agent_identity
+from tests.fixtures.pin_agent import pin_agent
 
 
 class TestFilesEntries:
@@ -290,7 +291,7 @@ class TestSelfEntries:
             def __exit__(self, *exc: object) -> None:
                 return None
 
-        monkeypatch.setattr(ava.sdk_surface.agent_identity, "agent_id", lambda: 900001)
+        pin_agent(900001)
         monkeypatch.setattr(ava.DB, "cursor", _FakeCursor)
         monkeypatch.setattr(ava.DB, "transaction", contextlib.nullcontext)
         monkeypatch.setattr(self_mod, "_publish_self_inbound_wake", lambda: None)

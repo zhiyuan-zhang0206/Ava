@@ -31,7 +31,7 @@ def _freeze_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_wrap_code_output_structured():
     """code_output envelope contains output, **does not** contain exit code."""
-    out = wrap_code_output("hello\nwarn\n")
+    out = wrap_code_output("hello\nwarn\n", agent_id=7)
     assert "Code execution output" in out
     assert _TS in out
     assert "hello" in out and "warn" in out
@@ -40,7 +40,7 @@ def test_wrap_code_output_structured():
 
 def test_wrap_code_output_cancelled_marker():
     """When cancelled, carries [cancelled by user] marker."""
-    out = wrap_code_output("part\n", cancelled=True)
+    out = wrap_code_output("part\n", agent_id=7, cancelled=True)
     assert "[cancelled by user]" in out
     assert _TS in out
     assert "part" in out
@@ -48,20 +48,20 @@ def test_wrap_code_output_cancelled_marker():
 
 def test_wrap_code_output_appends_trailing_newline_when_missing():
     """When output lacks trailing \\n, envelope still normalizes to single line — nothing to join afterwards, mainly for more stable frontend rendering."""
-    out = wrap_code_output("partial output")
+    out = wrap_code_output("partial output", agent_id=7)
     assert "partial output" in out
     assert _TS in out
 
 
 def test_wrap_code_output_no_stderr_marker_in_envelope():
     """stdout/stderr already merged, envelope should not have '--- stderr ---' separator marker — keeping it directly contradicts 'merged stream' design."""
-    out = wrap_code_output("hello\nTraceback (most recent call last):\n  ...\n")
+    out = wrap_code_output("hello\nTraceback (most recent call last):\n  ...\n", agent_id=7)
     assert "--- stderr ---" not in out
 
 
 def test_wrap_code_output_no_output_marker_when_empty():
     """When output is empty, show '(no output)' — explicitly tell agent code ran but produced no output (avoid empty envelope making LLM mistakenly think exec failed/didn't run)."""
-    out = wrap_code_output("")
+    out = wrap_code_output("", agent_id=7)
     assert "Code execution output" in out
     assert "(no output)" in out
     assert _TS in out
@@ -69,13 +69,13 @@ def test_wrap_code_output_no_output_marker_when_empty():
 
 def test_wrap_code_output_no_output_marker_omitted_when_output_present():
     """When output present, don't add '(no output)' marker — marker is only fallback for empty envelope."""
-    out = wrap_code_output("real output\n")
+    out = wrap_code_output("real output\n", agent_id=7)
     assert "(no output)" not in out
 
 
 def test_wrap_code_output_no_output_marker_with_cancelled():
     """Under cancel path, even if output empty, add '(no output)' marker — agent sees [cancelled by user] + (no output) knows it was interrupted and produced nothing."""
-    out = wrap_code_output("", cancelled=True)
+    out = wrap_code_output("", agent_id=7, cancelled=True)
     assert "[cancelled by user]" in out
     assert "(no output)" in out
     assert _TS in out
@@ -83,7 +83,7 @@ def test_wrap_code_output_no_output_marker_with_cancelled():
 
 def test_wrap_code_output_header_body_double_newline_split():
     """Between header and body use \\n\\n separator (same contract as wrap_inbound, frontend splitEnvelope splits header/body by this)."""
-    out = wrap_code_output("body line\n")
+    out = wrap_code_output("body line\n", agent_id=7)
     # header must be followed by double \n
     assert f"Code execution output {_TS}:\n\nbody line" in out
 
@@ -96,13 +96,17 @@ def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
     from agent.graph.exec import output
 
     pin_agent(7)
-    monkeypatch.setattr(output, "_overflow_dir", lambda: tmp_path / "overflow")
+
+    def overflow_dir(_agent_id: int) -> Path:
+        return tmp_path / "overflow"
+
+    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
 
     limit = 1000
     head_marker = "HEAD_START"
     tail_marker = "TAIL_END"
     big = head_marker + ("X" * 5000) + ("M" * (limit * 3)) + ("Y" * 5000) + tail_marker
-    out = wrap_code_output(big, max_chars=limit)
+    out = wrap_code_output(big, agent_id=7, max_chars=limit)
 
     assert head_marker in out, "head must be preserved (help overview at start)"
     assert tail_marker in out, "tail must be preserved (error / result usually at end)"
@@ -125,11 +129,15 @@ def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
     from agent.graph.exec import output
 
     pin_agent(7)
-    monkeypatch.setattr(output, "_overflow_dir", lambda: tmp_path / "overflow")
+
+    def overflow_dir(_agent_id: int) -> Path:
+        return tmp_path / "overflow"
+
+    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
     monkeypatch.setattr(output, "_OVERFLOW_KEEP", 3)
 
     for _ in range(5):
-        wrap_code_output("Z" * 2000, max_chars=100)
+        wrap_code_output("Z" * 2000, agent_id=7, max_chars=100)
     files = list((tmp_path / "overflow").glob("exec_*.txt"))
     assert len(files) == 3, "only keep recent 3"
 
@@ -139,14 +147,14 @@ def test_wrap_code_output_no_truncation_when_under_limit():
     from base.config import settings
 
     just_under = "y" * (settings.sandbox.exec_output_max_chars - 100)
-    out = wrap_code_output(just_under)
+    out = wrap_code_output(just_under, agent_id=7)
     assert "output truncated" not in out
     assert just_under in out
 
 
 def test_wrap_code_output_timed_out_marker():
     """When timed out, carries [timeout after Ns] marker (N from settings.sandbox.exec_timeout_seconds), no cancel marker."""
-    out = wrap_code_output("part\n", timed_out=True, timeout_seconds=60)
+    out = wrap_code_output("part\n", agent_id=7, timed_out=True, timeout_seconds=60)
     assert "[timeout after 60s]" in out
     assert "[cancelled by user]" not in out
     assert "part" in out
@@ -154,16 +162,16 @@ def test_wrap_code_output_timed_out_marker():
 
 def test_wrap_code_output_timed_out_carries_strategy_hint():
     """timeout envelope is agent's only clue to change strategy — hint must name long-task primitive; non-timeout path no hint."""
-    out = wrap_code_output("part\n", timed_out=True, timeout_seconds=60)
+    out = wrap_code_output("part\n", agent_id=7, timed_out=True, timeout_seconds=60)
     assert "run_background" in out
     assert "ava.watcher.launch" in out
-    assert "run_background" not in wrap_code_output("part\n")
-    assert "run_background" not in wrap_code_output("part\n", cancelled=True)
+    assert "run_background" not in wrap_code_output("part\n", agent_id=7)
+    assert "run_background" not in wrap_code_output("part\n", agent_id=7, cancelled=True)
 
 
 def test_wrap_code_output_timed_out_empty():
     """Under timeout path, even output empty, adds '(no output)' marker, hint still present."""
-    out = wrap_code_output("", timed_out=True, timeout_seconds=60)
+    out = wrap_code_output("", agent_id=7, timed_out=True, timeout_seconds=60)
     assert "[timeout after 60s]" in out
     assert "(no output)" in out
     assert "run_background" in out
@@ -174,7 +182,7 @@ def test_wrap_code_output_cancelled_wins_over_timed_out_marker():
     """When both cancel and timed_out True, cancel marker shows (priority).
     However wrap_code_output only receives one bool — caller (exec_node) guarantees mutual exclusion.
     Here verify when cancelled=True, no timeout marker appears."""
-    out = wrap_code_output("data\n", cancelled=True, timeout_seconds=60)
+    out = wrap_code_output("data\n", agent_id=7, cancelled=True, timeout_seconds=60)
     assert "[cancelled by user]" in out
     assert "[timeout after 60s]" not in out
 
@@ -185,10 +193,10 @@ def test_wrap_code_output_no_timestamp_when_disabled(monkeypatch: pytest.MonkeyP
     from base.config import settings
 
     monkeypatch.setattr(settings.general, "message_timestamps", False)
-    assert wrap_code_output("hello\n").startswith("Code execution output:\n\n")
-    assert _TS not in wrap_code_output("hello\n")
+    assert wrap_code_output("hello\n", agent_id=7).startswith("Code execution output:\n\n")
+    assert _TS not in wrap_code_output("hello\n", agent_id=7)
     # marker survives, still no timestamp / stray space
-    out = wrap_code_output("part\n", cancelled=True)
+    out = wrap_code_output("part\n", agent_id=7, cancelled=True)
     assert "Code execution output [cancelled by user]:\n\n" in out
     assert _TS not in out
 
@@ -297,3 +305,16 @@ def test_crashed_no_output_body_forms() -> None:
     assert "X: y" in body
     body2 = crashed_no_output_body(ValueError("plain"), code_reached=None)
     assert "ValueError: plain" in body2
+
+
+def test_overflow_archive_uses_explicit_host_identity(unit_home: Path) -> None:
+    """The native output path belongs to the host argument, not the child SDK slot."""
+    pin_agent(999)
+    body = "archive " * 100
+    wrapped = wrap_code_output(body, max_chars=100, agent_id=11)
+    directory = unit_home / "workspaces" / "11" / ".exec_output"
+    files = list(directory.glob("exec_*.txt"))
+    assert len(files) == 1
+    assert files[0].read_text() == body
+    assert str(files[0]) in wrapped
+    assert not (unit_home / "workspaces" / "999").exists()

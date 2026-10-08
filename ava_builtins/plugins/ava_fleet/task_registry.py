@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import ava
 import ava.sdk_surface.agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
+from base.agents.context import AvaContext
 
 # Kept as compatibility aliases for existing SDK readers and tooling.
 from base.agents.tasks.model import TASK_COLUMNS as _COLS
@@ -89,6 +90,30 @@ def create(
     operation_key: reuse the same key and inputs to return the original Task.
         The returned snapshot may be outdated; use get(task.id) for current state.
     """
+    return _create(
+        ava.context,
+        title,
+        description,
+        parent=parent,
+        remind_interval_seconds=remind_interval_seconds,
+        owner=owner,
+        priority=priority,
+        operation_key=operation_key,
+    )
+
+
+def _create(
+    context: AvaContext,
+    title: str,
+    description: str,
+    *,
+    parent: int,
+    remind_interval_seconds: int | None = None,
+    owner: int | None = None,
+    priority: str = _DEFAULT_PRIORITY,
+    operation_key: str | None = None,
+) -> Task:
+    """Apply create with one explicit context, including admission revalidation."""
     from base.agents.tasks.creation import create_task_in_transaction
     from base.api_contracts.idempotency import validate_idempotency_key
 
@@ -104,7 +129,7 @@ def create(
     )
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     priority = coerce_str(priority, "priority")
-    actor = ava.sdk_surface.agent_identity.require_agent_id()
+    actor = ava.sdk_surface.agent_identity.require_agent_id(context)
     effective_owner = owner if owner is not None else actor
     request: dict[str, object] = {
         "title": title,
@@ -114,8 +139,8 @@ def create(
         "priority": priority,
         "remind_interval_seconds": remind_interval_seconds,
     }
-    with ava.DB.transaction(), ava.DB.cursor() as cur:
-        snapshot = replay_creation(cur, actor, operation_key, request)
+    with context.sql.transaction(), context.sql.cursor() as cur:
+        snapshot = replay_creation(cur, actor, operation_key, request, context=context)
         if snapshot is not None:
             return Task(**snapshot)
         task, created_event, note_events = create_task_in_transaction(
@@ -227,6 +252,43 @@ def update(
             replay a committed update without another note or notification.
             Different effective fields with the same key raise ValueError.
     """
+    _update(
+        ava.context,
+        task_id,
+        status=status,
+        title=title,
+        description=description,
+        results=results,
+        owner=owner,
+        remind_interval_seconds=remind_interval_seconds,
+        priority=priority,
+        parent_id=parent_id,
+        note=note,
+        operation_key=operation_key,
+    )
+
+
+def _update_value(value: int | _Unset | None) -> int | None:
+    """Normalize the two unchanged spellings at typed business-call boundaries."""
+    return None if isinstance(value, _Unset) else value
+
+
+def _update(
+    context: AvaContext,
+    task_id: int,
+    *,
+    status: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    results: str | None = None,
+    owner: int | _Unset | None = _UNSET,
+    remind_interval_seconds: int | _Unset | None = _UNSET,
+    priority: str | None = None,
+    parent_id: int | _Unset | None = _UNSET,
+    note: str | None = None,
+    operation_key: str | None = None,
+) -> None:
+    """Apply update with one explicit context, including admission revalidation."""
     task_id = coerce_typed(task_id, "task_id", int)
     status = coerce_str(status, "status", allow_none=True)
     title = coerce_str(title, "title", allow_none=True)
@@ -245,7 +307,14 @@ def update(
     _validate_status(status)
 
     sets, params, payload, owner_changing, changes = _collect_update_fields(
-        task_id, status, title, description, results, owner, remind_interval_seconds, priority
+        task_id,
+        status,
+        title,
+        description,
+        results,
+        _update_value(owner),
+        _update_value(remind_interval_seconds),
+        priority,
     )
     if _nothing_to_update(sets, note) and parent_id is _UNSET:
         raise ValueError(
@@ -268,7 +337,7 @@ def update(
 
     from ._task_receipts import record_update, replay_update, update_identity, update_request
 
-    actor, operation_key = update_identity(operation_key)
+    actor, operation_key = update_identity(operation_key, context=context)
     request_body = update_request(
         {
             "status": status,
@@ -282,12 +351,12 @@ def update(
             "note": note,
         }
     )
-    with ava.DB.transaction(), ava.DB.cursor() as cur:
-        if replay_update(cur, actor, task_id, operation_key, request_body):
+    with context.sql.transaction(), context.sql.cursor() as cur:
+        if replay_update(cur, actor, task_id, operation_key, request_body, context=context):
             return
         if parent_id is not _UNSET:
             sets.append("parent_id = %s")
-            params.append(resolve_reparent(cur, task_id, parent_id))
+            params.append(resolve_reparent(cur, task_id, cast(int | None, parent_id)))
         old_owner, current_title, new_owner, updated_event = _write_task_update(
             cur,
             task_id,
@@ -298,7 +367,7 @@ def update(
             changes,
             title,
             note,
-            owner,
+            _update_value(owner),
             owner_changing,
             actor,
         )
@@ -356,7 +425,7 @@ def _queue_after_update(
         return _queue_owner_change(
             cur, task_id, title, old_owner, new_owner, actor, changes=changes
         )
-    if new_owner is not None and actor != new_owner and not _is_terminated(new_owner):
+    if new_owner is not None and actor != new_owner and not _is_terminated(cur, new_owner):
         return _queue_owner_updated(cur, task_id, title, new_owner, actor, changes)
     return []
 
@@ -380,7 +449,7 @@ def _queue_owner_change(
         old_owner,
         new_owner,
         actor=actor,
-        previous_owner_terminated=old_owner is None or _is_terminated(old_owner),
+        previous_owner_terminated=old_owner is None or _is_terminated(cur, old_owner),
         description=description,
         changes=changes,
     )
@@ -410,14 +479,13 @@ def _queue_owner_updated(
     return [receipt.event for receipt in receipts if receipt.event is not None]
 
 
-def _is_terminated(agent_id: int) -> bool:
+def _is_terminated(cur: psycopg.Cursor, agent_id: int) -> bool:
     """True when an agent is gone -- terminated, or absent from agents_meta.
 
     Gates only the previous-owner notification: a terminated former owner is
     left asleep rather than resurrected just to be told a task left it."""
-    with ava.DB.cursor() as cur:
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-        meta = cur.fetchone()
+    cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+    meta = cur.fetchone()
     return meta is None or meta[0] == "terminated"
 
 

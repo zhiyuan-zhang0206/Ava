@@ -33,7 +33,7 @@ tags:
 - [[base/lm/docs/model-configuration.ava.okf.md]] — effective agent model validation.
 - Gateway lifespan loads providers; zero bindings raises before the once flag, so a corrected config is retryable.
 - [[media-capabilities.ava.okf.md]] — per-model media resolution and attachment packing.
-- `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped.
+- `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped. Factories receive `factory(model, *, agent_id)`; None means a non-agent caller. Use the argument, not a host SDK binding.
 - `thinking: ThinkingConfig | None` — `TypedDict` for Anthropic extended-thinking (`{"type":"disabled"}`/`{"type":"enabled","budget_tokens":N}`); gemini-*/gpt-* read only `type`, mirroring on/off to reasoning toggles.
 
 ### content block shapes (`content.py`)

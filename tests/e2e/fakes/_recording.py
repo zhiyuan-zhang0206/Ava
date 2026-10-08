@@ -21,7 +21,6 @@ from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 
-import ava
 from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
@@ -69,9 +68,11 @@ def _text(content: Any) -> str:
 class RecordingModel(ScriptedFakeChatModel):
     """Scripted turns; before each one, append the messages it was handed to the record."""
 
+    agent_id: int | None
+
     def _record(self, messages: list[BaseMessage]) -> None:
         entry = {
-            "agent_id": ava.self.AGENT_ID,
+            "agent_id": self.agent_id,
             "pid": os.getpid(),
             "messages": [
                 {

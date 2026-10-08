@@ -52,6 +52,7 @@ from pathlib import Path
 
 import ava
 import ava.files as _ava_files_mod
+from ava.sdk_surface.agent_identity import require_agent_id
 from ava.sdk_surface.validation import coerce_str
 from base.config import settings
 from base.log import logger
@@ -192,7 +193,9 @@ def _process_context_file(
     # content); the archive path rides in the injected note.
     note_body = content
     if len(note_body) > settings.sandbox.exec_output_max_chars:
-        note_body = truncate_both_ends(note_body, settings.sandbox.exec_output_max_chars)
+        note_body = truncate_both_ends(
+            note_body, settings.sandbox.exec_output_max_chars, agent_id=require_agent_id()
+        )
     update_state(
         {
             "messages": [

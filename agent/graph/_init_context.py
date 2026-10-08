@@ -93,7 +93,7 @@ async def init_context_node(
         notes = (
             []
             if runtime.context.ops_pool is None
-            else context_notes(runtime.context.plugin_registry(), runtime.context.require_agent())
+            else context_notes(runtime.context.plugin_registry(), runtime.context)
         )
         if state.impersonation_introduced:
             notes.append(introduction_note())
@@ -117,7 +117,11 @@ async def init_context_node(
                 "messages": [
                     SystemMessage(
                         content=build_system_prompt(
-                            runtime.context.plugin_registry(), runtime.context.require_agent()
+                            runtime.context.plugin_registry(),
+                            runtime.context.require_agent(),
+                            agent_id=runtime.context.identity.agent_id
+                            if runtime.context.identity is not None
+                            else None,
                         )
                     ),
                     *notes,
