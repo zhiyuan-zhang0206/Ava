@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent Router Surfaces
-description: Agent lifecycle, list-projection, state, and per-agent observability HTTP surfaces served by the gateway.
+description: Lifecycle, list, state and per-agent observability HTTP surfaces.
 tags:
 - gateway
 - agents
@@ -113,7 +113,7 @@ of lifecycle `status` and `liveness_state`.
 `POST /api/agents/{id}/impersonation/force-expire` accepts the session number
 the caller observed. It performs a gateway-local DB transition and wake with
 standard gateway authentication, returns `expired` or `not_open`, and returns
-404 for an unknown agent. It does not forward to the home runner.
+404 for an unknown agent; no home-runner forwarding.
 
 ## Per-agent observability
 
@@ -129,4 +129,5 @@ standard gateway authentication, returns `expired` or `not_open`, and returns
   (`base/agents/history/message_tokens.py`) of the latest request into kind
   buckets, each with `estimated` / `exact_fraction`; `context_breakdown.py`.
 
-Receipt and retry contracts: [[system-note.ava.okf.md]], [[launch-retry.ava.okf.md]].
+Receipts: [[system-note.ava.okf.md]], [[launch-retry.ava.okf.md]],
+[[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md|guarded compact]].

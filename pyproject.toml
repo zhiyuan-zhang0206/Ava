@@ -249,6 +249,20 @@ ignore_imports = [
     "services.agent_runner.agent_host.native_work -> agent.ownership.native_cancel",
     "services.agent_runner.agent_host.* -> agent.startup",
     "services.agent_runner.agent_host.* -> agent.state",
+    # Guarded compact invocation reuses native summary/transition/init owners;
+    # these exact dependencies do not expose the kernel to other services.
+    "services.agent_runner.agent_host.invocation.compact.apply -> agent.hooks.compact",
+    "services.agent_runner.agent_host.invocation.compact.apply -> agent.impersonation",
+    "services.agent_runner.agent_host.invocation.compact.apply -> agent.nodes",
+    "services.agent_runner.agent_host.invocation.compact.apply -> agent.state",
+    "services.agent_runner.agent_host.invocation.compact.checkpoint -> agent.hooks.compact",
+    "services.agent_runner.agent_host.invocation.compact.checkpoint -> agent.state",
+    "services.agent_runner.agent_host.invocation.compact.execute -> agent.graph.interrupt",
+    "services.agent_runner.agent_host.invocation.compact.execute -> agent.hooks.compact",
+    "services.agent_runner.agent_host.invocation.compact.execute -> agent.hooks.compact_anchor",
+    "services.agent_runner.agent_host.invocation.compact.execute -> agent.state",
+    "services.agent_runner.agent_host.invocation.compact.recovery -> agent.impersonation",
+    "services.agent_runner.agent_host.invocation.compact.source -> agent.state",
 ]
 
 # The one reverse edge base must never grow: `base` is the bottom layer,
@@ -763,6 +777,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "ava_builtins/skills/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/compaction/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

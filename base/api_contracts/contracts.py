@@ -96,6 +96,13 @@ class RouteContract:
 # start needs. Everything else is data-plane.
 # ─────────────────────────────────────────────────────────────────────
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
+    ("GET", "/api/keyed/v1/agents/{agent_id}/compact-target"): RouteContract(),
+    ("GET", "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}"): RouteContract(),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/compact-history"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        transactional_idempotency=True,
+        note="original source receipt; durable prepared result and cold application proof are separate",
+    ),
     # Native work commands have their own durable domain owner, never generic inbound.
     ("GET", "/api/keyed/v1/agents/{agent_id}/native-work"): RouteContract(),
     ("GET", "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}"): RouteContract(),

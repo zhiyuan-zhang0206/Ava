@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.ownership.inbound import lock_inbound_owner
 from agent.ownership.native_cancel import bound_native_cancel
+from base.agents.compaction.models import CompactHeldError
 from base.agents.incarnation.native_work_models import NativeCancelPendingError
 from base.agents.messages.inbound import InterruptReason
 from base.config import settings
@@ -327,6 +328,14 @@ async def claim_inbound_batch(
         native_cancel = await bound_native_cancel(conn, agent_id)
         if native_cancel is not None:
             raise NativeCancelPendingError(native_cancel)
+        compact = await (
+            await conn.execute(
+                "SELECT 1 FROM native_compact_commands WHERE agent_id=%s AND released_at IS NULL",
+                (agent_id,),
+            )
+        ).fetchone()
+        if compact is not None:
+            raise CompactHeldError("guarded compact must settle before generic inbound claim")
         await cur.execute("SELECT runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
         runtime = await cur.fetchone()
         runtime_owned = runtime in (("process",), ("hosted",))

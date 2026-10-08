@@ -1157,6 +1157,152 @@
         }
       }
     },
+    "/api/keyed/v1/agents/{agent_id}/compact-target": {
+      "get": {
+        "summary": "Guarded Compact Target",
+        "description": "Observe only actual new-host quiescent, closed-resource source evidence.",
+        "operationId": "guarded_compact_target_api_keyed_v1_agents__agent_id__compact_target_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactTarget"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/compact-history": {
+      "post": {
+        "summary": "Guarded Compact History",
+        "description": "Accept the original observed history; 202 is not summary/application success.",
+        "operationId": "guarded_compact_history_api_keyed_v1_agents__agent_id__compact_history_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompactTarget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactAcceptance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}": {
+      "get": {
+        "summary": "Guarded Compact Command",
+        "description": "Inspect current execution evidence independently of immutable acceptance.",
+        "operationId": "guarded_compact_command_api_keyed_v1_agents__agent_id__compact_commands__command_id__get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "command_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Command Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/sessions": {
       "get": {
         "summary": "Get Agent Sessions",
@@ -10672,6 +10818,26 @@
         "title": "CommandItem",
         "description": "One composer command, as surfaced in the `/`-autocomplete: name +\ndescription + `instruction_hint` (placeholder for the single natural-language\ninstruction typed after the name). The body is intentionally absent —\nexpansion happens server-side in the agent's claim node, so the template\nnever reaches the browser."
       },
+      "CompactAcceptance": {
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Command Id"
+          },
+          "target": {
+            "$ref": "#/components/schemas/CompactTarget"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "command_id",
+          "target"
+        ],
+        "title": "CompactAcceptance",
+        "description": "Original business acceptance, never proof of application or provider completion."
+      },
       "CompactEnqueued": {
         "properties": {
           "agent_id": {
@@ -10702,6 +10868,185 @@
         ],
         "title": "CompactEnqueued",
         "description": "POST /api/agents/{id}/compact response — returns immediately after\npending insert, does not wait for the kernel loop to finish."
+      },
+      "CompactOutcome": {
+        "type": "string",
+        "enum": [
+          "accepted",
+          "prepared",
+          "applying",
+          "applied",
+          "noop",
+          "rejected",
+          "uncertain"
+        ],
+        "title": "CompactOutcome"
+      },
+      "CompactStatus": {
+        "properties": {
+          "acceptance": {
+            "$ref": "#/components/schemas/CompactAcceptance"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/CompactOutcome"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Id"
+          },
+          "recovery_checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Checkpoint Id"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
+          "attempt_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Provider"
+          },
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NativeWorkTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_available": {
+            "type": "boolean",
+            "title": "Result Available"
+          },
+          "continuation_released": {
+            "type": "boolean",
+            "title": "Continuation Released"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "acceptance",
+          "outcome",
+          "reason",
+          "checkpoint_id",
+          "recovery_checkpoint_id",
+          "attempt_id",
+          "attempt_provider",
+          "execution",
+          "result_available",
+          "continuation_released"
+        ],
+        "title": "CompactStatus"
+      },
+      "CompactTarget": {
+        "properties": {
+          "protocol": {
+            "type": "integer",
+            "title": "Protocol"
+          },
+          "observation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Observation Id"
+          },
+          "source": {
+            "$ref": "#/components/schemas/NativeWorkTarget"
+          },
+          "checkpoint_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Checkpoint Id"
+          },
+          "checkpoint_ns": {
+            "type": "string",
+            "maxLength": 0,
+            "title": "Checkpoint Ns"
+          },
+          "messages_version": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Messages Version"
+          },
+          "compact_channel_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compact Channel Version"
+          },
+          "segment_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Segment Version"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Model"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "protocol",
+          "observation_id",
+          "source",
+          "checkpoint_id",
+          "checkpoint_ns",
+          "messages_version",
+          "compact_channel_version",
+          "segment_version",
+          "model"
+        ],
+        "title": "CompactTarget",
+        "description": "A new host's retained observation of actual ended, resource-closed work."
       },
       "ConfigAuditView": {
         "properties": {

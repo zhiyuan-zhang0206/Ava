@@ -79,3 +79,20 @@ both literal rate tables without executing plugin code.
   endpoints, vision checks, the compact gate's `resolve_context_budget`,
   and the config-overlay validation (`validate_config_overlay`) ensure the
   loader has run before they consult registration state.
+
+## Explicit single-attempt construction
+
+`BuildContext.max_retries` is additive and defaults to `None`; ordinary builders
+retain their existing retry policy. `ProviderBinding.build_single_attempt` is
+an optional explicit provider-owned construction contract. A binding that does
+not declare it cannot support `build_chat_model(single_attempt=True)`. Custom
+model overrides are likewise unsupported rather than inferred from a client
+class or mutating a cached model.
+
+The OpenAI and Anthropic owners construct fresh clients with `max_retries=0` for
+this path. Guarded generation freezes the original available model and rejects
+unavailable-model fallback. Callers must also suppress their own cache/retry
+loops; this construction contract cannot prove exactly-once external vendor
+execution or recover a response that was lost before durable storage.
+The manual compact consumer and its proof boundary are documented in
+[[base/agents/compaction/docs/manual-compact.ava.okf.md]].

@@ -14,7 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 from base.log import logger
 from services.agent_runner.agent_host.runtime import _StoredConfig
 
-__all__ = ["_is_runnable", "_read_stored_config"]
+__all__ = ["_is_runnable", "_read_stored_config", "read_stored_config"]
 
 
 def _is_runnable(machine: str, agent_id: int, stored: _StoredConfig) -> bool:
@@ -67,3 +67,7 @@ async def _read_stored_config(
         )
         return None
     return _StoredConfig(machine=row[0], status=row[1], config_overlay=row[2], birth_config=row[3])
+
+
+# Public hosted-protocol seam; the private name remains the existing patch target.
+read_stored_config = _read_stored_config

@@ -53,6 +53,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any, NamedTuple
 
+import psycopg
+from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
@@ -430,3 +432,43 @@ def trim_checkpoints_sync(
         ),
     )
     return counts
+
+
+async def stamp_compact_checkpoint(
+    conn: psycopg.AsyncConnection,
+    thread_id: str,
+    checkpoint_id: str,
+    *,
+    closing: ClosingRequest | None = None,
+) -> bool:
+    """Stamp an exact retained source in the caller's application-permit transaction.
+
+    Guarded replacement binds this historical checkpoint before graph writes;
+    it must not stamp the subsequently materialized replacement as its source.
+    Existing provider anchor evidence is immutable under a conflicting call.
+    """
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise RuntimeError("compact source stamping requires a caller-owned transaction")
+    if not checkpoint_id:
+        raise ValueError("compact source checkpoint ID must contain text")
+    stamp: dict[str, Any] = {"compact_boundary": True}
+    if closing is not None:
+        stamp[CLOSING_METADATA_KEY] = closing.to_metadata()
+    row = await (
+        await conn.execute(
+            "UPDATE checkpoints SET metadata=metadata || %s::jsonb "
+            "WHERE thread_id=%s AND checkpoint_ns='' AND checkpoint_id=%s "
+            "AND (%s::jsonb IS NULL OR NOT metadata ? %s OR metadata->%s=%s::jsonb) "
+            "RETURNING checkpoint_id",
+            (
+                Jsonb(stamp),
+                thread_id,
+                checkpoint_id,
+                None if closing is None else Jsonb(closing.to_metadata()),
+                CLOSING_METADATA_KEY,
+                CLOSING_METADATA_KEY,
+                None if closing is None else Jsonb(closing.to_metadata()),
+            ),
+        )
+    ).fetchone()
+    return row is not None

@@ -706,6 +706,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/agents/{agent_id}/compact-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Guarded Compact Target
+         * @description Observe only actual new-host quiescent, closed-resource source evidence.
+         */
+        get: operations["guarded_compact_target_api_keyed_v1_agents__agent_id__compact_target_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/compact-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guarded Compact History
+         * @description Accept the original observed history; 202 is not summary/application success.
+         */
+        post: operations["guarded_compact_history_api_keyed_v1_agents__agent_id__compact_history_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Guarded Compact Command
+         * @description Inspect current execution evidence independently of immutable acceptance.
+         */
+        get: operations["guarded_compact_command_api_keyed_v1_agents__agent_id__compact_commands__command_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/sessions": {
         parameters: {
             query?: never;
@@ -5270,6 +5330,18 @@ export interface components {
             instruction_hint: string;
         };
         /**
+         * CompactAcceptance
+         * @description Original business acceptance, never proof of application or provider completion.
+         */
+        CompactAcceptance: {
+            /**
+             * Command Id
+             * Format: uuid
+             */
+            command_id: string;
+            target: components["schemas"]["CompactTarget"];
+        };
+        /**
          * CompactEnqueued
          * @description POST /api/agents/{id}/compact response — returns immediately after
          *     pending insert, does not wait for the kernel loop to finish.
@@ -5284,6 +5356,57 @@ export interface components {
             status: "enqueued";
             /** Inbound Id */
             inbound_id?: number | null;
+        };
+        /**
+         * CompactOutcome
+         * @enum {string}
+         */
+        CompactOutcome: "accepted" | "prepared" | "applying" | "applied" | "noop" | "rejected" | "uncertain";
+        /** CompactStatus */
+        CompactStatus: {
+            acceptance: components["schemas"]["CompactAcceptance"];
+            outcome: components["schemas"]["CompactOutcome"];
+            /** Reason */
+            reason: string | null;
+            /** Checkpoint Id */
+            checkpoint_id: string | null;
+            /** Recovery Checkpoint Id */
+            recovery_checkpoint_id: string | null;
+            /** Attempt Id */
+            attempt_id: string | null;
+            /** Attempt Provider */
+            attempt_provider: string | null;
+            execution: components["schemas"]["NativeWorkTarget"] | null;
+            /** Result Available */
+            result_available: boolean;
+            /** Continuation Released */
+            continuation_released: boolean;
+        };
+        /**
+         * CompactTarget
+         * @description A new host's retained observation of actual ended, resource-closed work.
+         */
+        CompactTarget: {
+            /** Protocol */
+            protocol: number;
+            /**
+             * Observation Id
+             * Format: uuid
+             */
+            observation_id: string;
+            source: components["schemas"]["NativeWorkTarget"];
+            /** Checkpoint Id */
+            checkpoint_id: string;
+            /** Checkpoint Ns */
+            checkpoint_ns: string;
+            /** Messages Version */
+            messages_version: string;
+            /** Compact Channel Version */
+            compact_channel_version: string | null;
+            /** Segment Version */
+            segment_version: number;
+            /** Model */
+            model: string;
         };
         /**
          * ConfigAuditView
@@ -10214,6 +10337,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NativeRestartProgress"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guarded_compact_target_api_keyed_v1_agents__agent_id__compact_target_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompactTarget"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guarded_compact_history_api_keyed_v1_agents__agent_id__compact_history_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompactTarget"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompactAcceptance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guarded_compact_command_api_keyed_v1_agents__agent_id__compact_commands__command_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+                command_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompactStatus"];
                 };
             };
             /** @description Validation Error */

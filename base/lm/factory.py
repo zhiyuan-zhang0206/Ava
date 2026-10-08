@@ -312,6 +312,7 @@ def build_chat_model(
     media_thinking_level: str | None = None,
     base_url: str | None = None,
     overrides: ModelOverrides | None = None,
+    single_attempt: bool = False,
 ) -> BaseChatModel:
     """Pick the provider by model name prefix and return the corresponding ChatModel.
 
@@ -384,8 +385,12 @@ def build_chat_model(
     # e2e tests inject fake chat model via AVA_LLM_OVERRIDE (tests/e2e/README.md);
     # if set, warn loudly — a dev accidentally leaving it in .env would route
     # all agents through a fake LLM, and production observability must be fail-loud.
+    if type(single_attempt) is not bool:
+        raise ValueError("single_attempt must be a boolean")
     override = settings.lm.llm_override
     if override:
+        if single_attempt:
+            raise ValueError("LLM overrides do not declare single-attempt construction")
         logger.warning(
             f"AVA_LLM_OVERRIDE active: model={model!r} does not go through real LLM, routed via {override!r}"
         )
@@ -399,6 +404,8 @@ def build_chat_model(
     requested_model = model
     model = resolve_available_model(model)
     if model != requested_model:
+        if single_attempt:
+            raise ValueError("single-attempt generation cannot change its frozen model")
         logger.warning(
             f"{requested_model} is temporarily unavailable; using its registered fallback {model}"
         )
@@ -420,7 +427,10 @@ def build_chat_model(
     # cross-provider context defined in provider_api.py.
     for prefix, binding in catalog.bindings.items():
         if model.startswith(prefix):
-            return binding.build(
+            builder = binding.build_single_attempt if single_attempt else binding.build
+            if builder is None:
+                raise ValueError("provider does not declare single-attempt construction")
+            return builder(
                 provider_api.BuildContext(
                     model=model,
                     spec=spec,

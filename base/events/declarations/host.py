@@ -54,6 +54,12 @@ class ImpersonationEventLogIncomplete(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
+    "native_compact_proof_gap": telemetry_event(
+        "native_compact_proof_gap",
+        "the actual serialized host could not establish compact source or uncertainty closure; "
+        "pending intent remains held, carrying agent_id and bounded error_type without payload",
+        tier="anomaly",
+    ),
     "impersonation_event_log_incomplete": telemetry_event(
         "impersonation_event_log_incomplete",
         "an impersonation event log cannot complete on its own (ended lease with an "

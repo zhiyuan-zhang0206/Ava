@@ -7,10 +7,15 @@ from uuid import UUID
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from services.agent_runner.agent_host import maintenance as maintenance_receipts
+from services.agent_runner.agent_host.dispatcher import PendingInboundWake
+
 _WORK_EXISTS_SQL = (
     "EXISTS (SELECT 1 FROM inbound_messages work "
     "WHERE work.agent_id=m.id AND work.status='pending' "
     "AND work.kind NOT IN ('restart','terminate')) "
+    "OR EXISTS (SELECT 1 FROM native_compact_commands compact "
+    "WHERE compact.agent_id=m.id AND compact.released_at IS NULL) "
     "OR EXISTS (SELECT 1 FROM agent_impersonations work_lease "
     "WHERE work_lease.agent_id=m.id "
     "AND (work_lease.status IN ('requested','accepted','active') "
@@ -65,6 +70,8 @@ async def scan_rows(
                 "  AND (m.lifecycle_command_id IS NOT NULL OR EXISTS ("
                 "    SELECT 1 FROM inbound_messages pending "
                 "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
+                "  ) OR EXISTS (SELECT 1 FROM native_compact_commands compact "
+                "    WHERE compact.agent_id=m.id AND compact.released_at IS NULL"
                 "  ) OR EXISTS (SELECT 1 FROM agent_impersonations lease "
                 "    WHERE lease.agent_id=m.id AND (lease.status IN "
                 "    ('requested','accepted','active') OR lease.delta_version>lease.applied_version "
@@ -87,3 +94,24 @@ async def scan_rows(
             )
         ).fetchall()
     return [(row[0], row[1], row[2]) for row in rows]
+
+
+async def scan_candidates(
+    pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    owner: UUID,
+    machine: str,
+    stale_after_s: float,
+    failure_fences: maintenance_receipts.FailureFences,
+) -> list[PendingInboundWake]:
+    """Retain work, expired predecessors and held maintenance on existing wake lanes.
+
+    Database age identifies backlog; the dispatcher additionally requires its
+    monotonic turn progress to be stale before cancellation. Held maintenance
+    owns its restart cohort; otherwise retained commands share the work scan.
+    Empty halted recovery claims consume no model call.
+    """
+    held = maintenance_receipts.pending_wakes(failure_fences)
+    if held is not None:
+        return held
+    rows = await scan_rows(pool, owner, machine, stale_after_s)
+    return [PendingInboundWake(agent_id=row[0], stale=row[1], recovery=row[2]) for row in rows]
