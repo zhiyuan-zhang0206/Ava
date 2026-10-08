@@ -21,7 +21,7 @@ from base.agents.upload_delivery.models import (
 )
 from base.config import settings
 from gateway.app import app
-from gateway.tests.test_notices_endpoint import _seed_agent
+from gateway.tests.events.test_notices_endpoint import _seed_agent
 from gateway.upload_delivery.worker import UploadRecovery
 from ops import upload_delivery as receiver
 

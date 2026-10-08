@@ -12,7 +12,7 @@ import pytest
 from base.config import settings
 from base.db import Database
 from ops.cluster.rpc import dispatch_to_machine
-from tests.base.poll_until import poll_until
+from tests.components.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 

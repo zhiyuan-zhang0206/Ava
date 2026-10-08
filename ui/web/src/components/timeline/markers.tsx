@@ -35,7 +35,7 @@ export function isLifecycleTag(s: string): s is LifecycleTag {
 // Card-rendered marker families. Exported so the marker-contract test can
 // iterate the exact dispatch sets the renderer uses — the backend NoteTag
 // enum (base/agents/messages/kwargs.py) is asserted to be a subset of
-// LIFECYCLE_TAGS ∪ MEMORY_SOURCES ∪ NOTE_SOURCES by tests/test_lint_marker_contract.py.
+// LIFECYCLE_TAGS ∪ MEMORY_SOURCES ∪ NOTE_SOURCES by tests/contracts/test_lint_marker_contract.py.
 export const MEMORY_SOURCES = new Set(["memory", "agent_memory", "inherited_memory"]);
 
 // The three card-rendered marker families + the bare-rendered ephemeral catch-all.

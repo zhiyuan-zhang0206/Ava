@@ -1,4 +1,4 @@
-"""Cluster roster, status transport, resume checklist, and hold banners; split from tests/cli/test_commands.py (task #4554)."""
+"""Cluster roster, status transport, resume checklist, and hold banners; split from tests/components/cli/test_commands.py (task #4554)."""
 
 from __future__ import annotations
 

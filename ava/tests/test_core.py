@@ -1,6 +1,6 @@
 """SDK ↔ Gateway integration tests.
 
-These tests were originally in agent/graph/claim/tests/test_core.py and tests/ava/test_user.py,
+These tests were originally in agent/graph/claim/tests/test_core.py and tests/components/ava/test_user.py,
 requiring the Gateway process to be running — local `pytest tests/` would not pass.
 After migrating to integration/, they use FastAPI TestClient for in-process communication.
 """

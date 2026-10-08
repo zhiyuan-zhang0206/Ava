@@ -10,7 +10,7 @@ flight, no starvation across agents.
 
 The queue primitive stays ``asyncio.Semaphore``, whose waiters wake in FIFO
 order (CPython 3.12 wakes the oldest live waiter; locked by the wake-order test
-in services/agent_runner/agent_host/tests/test_turn_admission.py). This class adds what the bare
+in services/agent_runner/agent_host/tests/dispatch/test_turn_admission.py). This class adds what the bare
 semaphore cannot express:
 
 - **The waiting state.** A waiter is registered in this gate

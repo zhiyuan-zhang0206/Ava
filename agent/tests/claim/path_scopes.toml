@@ -1,0 +1,4 @@
+"tests.path_scoped.agent_tests" = [
+    "test_claim.py",
+    "test_checkpoint_interval.py",
+]

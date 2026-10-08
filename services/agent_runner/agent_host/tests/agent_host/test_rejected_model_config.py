@@ -19,7 +19,7 @@ from services.agent_runner.agent_host.tests.test_agent_host import (
 from services.agent_runner.agent_host.tests.test_agent_host import (
     wired as wired,
 )
-from tests.base.poll_until import poll_until_async
+from tests.components.base.poll_until import poll_until_async
 from tests.fixtures.model_catalog import AddModels
 
 

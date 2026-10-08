@@ -31,8 +31,10 @@ from base.native_process.turn_identity import (
     bind_turn_identity,
 )
 from services.agent_runner.agent_host.native_work import settle_native_invocation
+from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
+    _prepare_graph,
+)
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
-from services.agent_runner.agent_host.tests.test_hosted_compact_failure import _prepare_graph
 from tests.fixtures.pin_agent import exec_context
 
 

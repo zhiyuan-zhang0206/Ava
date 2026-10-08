@@ -126,8 +126,8 @@ _ALLOWED_FILES = frozenset(
         "cli/main.py",  # CLI bootstrap sets config/profile/log routing before importing Settings or command modules.
         "cli/commands/cluster/home.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
         "cli/start_intent.py",  # Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports.
-        "cli/tests/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
-        "tests/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
+        "cli/tests/bootstrap/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
+        "tests/components/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
         "base/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
         "base/config/domains/storage/data_plane.py",  # self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
         "base/host/env/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import

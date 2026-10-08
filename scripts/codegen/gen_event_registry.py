@@ -262,12 +262,12 @@ event_name and category; `_TELEMETRY_KINDS` in
 2. **Code-literal cross-check**: `python base/events/scan_kinds.py` — scans
    production Python code (excluding tests/worktrees/node_modules) for `event=`,
    `label=`, `event_type=`, SSE roles, emits four inventories, and cross-checks them
-   bidirectionally against the registry (`tests/test_lint_event_kinds.py`).
+   bidirectionally against the registry (`tests/contracts/test_lint_event_kinds.py`).
 3. **Coverage statement**: this document covers every registered event_name (audit +
    telemetry + log + destination=file + SSE role). Not covered: test-fixture
    self-made names like `evt`/`my_event`/`some_warning` (non-production events).
 
-**CI wiring**: `tests/test_lint_event_kinds.py` is a three-way guard — every static
+**CI wiring**: `tests/contracts/test_lint_event_kinds.py` is a three-way guard — every static
 `event=` literal in code must be registered (in `EVENTS`), every registry entry must
 have a producer (event=/label=/SQL/dynamic inventories), and this document must match
 the generator output (drift = red). Emit-side fail-fast additionally raises

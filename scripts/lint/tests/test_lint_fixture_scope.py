@@ -264,7 +264,7 @@ def test_the_repo_is_clean() -> None:
 def test_setup_env_keys_ignores_the_teardown_restore_loop() -> None:
     # Writes after the `yield` ARE the restore. Counting them would report the loop
     # variable as an unresolvable key and make the guard in
-    # tests/test_home_isolation.py pass vacuously.
+    # tests/harness/test_home_isolation.py pass vacuously.
     src = (
         '@pytest.fixture(scope="package")\n'
         "def _env():\n"

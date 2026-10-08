@@ -1,7 +1,7 @@
 """Deadlock-retried TRUNCATE for the e2e per-test isolation fixture.
 
 Split out of `tests/e2e/conftest.py` (`truncated_db`) so the retry semantics
-are unit-testable (`tests/test_e2e_truncate_retry.py`) without importing the
+are unit-testable (`tests/harness/test_e2e_truncate_retry.py`) without importing the
 conftest module.
 """
 

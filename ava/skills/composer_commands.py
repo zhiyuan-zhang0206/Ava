@@ -95,7 +95,7 @@ def _commands_enabled() -> bool:
 
     The `settings.has_domain` guard is the sanctioned cross-profile pattern:
     the consumption-matrix guard test treats a read under such a guard as
-    legitimate (see cli/commands/lifecycle/tests/test_gateway_consumer_guard.py).
+    legitimate (see cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py).
     """
     if settings.has_domain("agent"):
         return settings.agent.commands_enabled

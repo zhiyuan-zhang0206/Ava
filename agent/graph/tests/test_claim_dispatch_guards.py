@@ -8,7 +8,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
 from agent.state import AgentState
-from agent.tests.claim_support import (
+from agent.tests.claim.claim_support import (
     _await_inbound_visible,
     _config,
     _insert_inbound_kind,

@@ -30,7 +30,8 @@ lines (read it with `gh api repos/R/check-runs/<job id>/annotations`; the job su
 that API), and the full list as `--leak-report`. A fault in this reporting is one annotation,
 never the job's result.
 
-A directory is a bucket: `tests/<area>` for the top-level tests, and the outermost `<pkg>/tests`
+A directory is a bucket: `tests/<area>` or `tests/components/<area>` for the top-level
+tests, and the outermost `<pkg>/tests`
 for a package's own tests, the same directories `scripts/codegen/gen_pyright_test_environments.py`
 lists.
 """
@@ -53,6 +54,8 @@ def bucket_of(test_file: str) -> str:
         raise SystemExit(f"a test outside every tests/ directory: {test_file}")
     index = parts.index("tests")
     if index == 0:
+        if len(parts) > 3 and parts[1] == "components":
+            return "/".join(parts[:3])
         return "tests" if len(parts) == 2 else f"tests/{parts[1]}"
     return "/".join(parts[: index + 1])
 

@@ -18,8 +18,8 @@ from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 from services.wake.delivery_watchdog.resurrect_retry import select_terminated_owners_with_pending
+from tests.components.ops.test_resurrection_admission import _status, _terminated
 from tests.fixtures.pin_agent import pin_agent
-from tests.ops.test_resurrection_admission import _status, _terminated
 
 
 def test_reassigned_task_refuses_delayed_home_wake(

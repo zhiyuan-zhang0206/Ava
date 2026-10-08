@@ -1,0 +1,4 @@
+"tests.path_scoped.agent_tests" = [
+    "test_provider_errors.py",
+    "test_provider_stop.py",
+]

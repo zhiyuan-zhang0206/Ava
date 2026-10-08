@@ -16,7 +16,7 @@ plugin binding is their declaration:
   (`base/host/env/config_lite_table.py`) instead of the live registry — building the
   registry there would pull pydantic + all 15 sub-models into every boot
   (#3621); the index is generated from the same declarations and locked
-  equal to the registry by tests/base/test_config_lite_table.py.
+  equal to the registry by tests/components/base/test_config_lite_table.py.
 - **Non-Settings keys** (ambient display vars,
   overlay/birth JSON carriers, temp-dir vars, ...) are registered as
   `EnvField` passthrough rows below — one row per key (A1: exactly one
@@ -259,7 +259,7 @@ def _scope_aliases(*scopes: str) -> frozenset[str]:
     Reads the boot-lite static index, not the live registry: `load_ava_env`
     runs these projections before Settings exists, and the registry build would
     drag pydantic + all sub-models into every boot (#3621; index-vs-registry
-    equality locked by tests/base/test_config_lite_table.py)."""
+    equality locked by tests/components/base/test_config_lite_table.py)."""
     return frozenset(FIELD_ALIASES[name] for name, scope in FIELD_SCOPES.items() if scope in scopes)
 
 
@@ -280,7 +280,7 @@ def agent_runner_cluster_aliases() -> frozenset[str]:
     are deliberately NOT here: the gateway machine may also run agent daemons
     (single box), and host-scope keys have no bootstrap fetch source. Derived:
     capability=agent-runner AND cluster scope (validated against the gateway
-    consumption matrix by cli/commands/lifecycle/tests/test_gateway_consumer_guard.py)."""
+    consumption matrix by cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py)."""
     return frozenset(
         FIELD_ALIASES[name]
         for name, scope in FIELD_SCOPES.items()

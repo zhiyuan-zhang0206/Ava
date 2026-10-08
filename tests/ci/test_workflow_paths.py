@@ -197,8 +197,16 @@ def tracked_files() -> list[str]:
     [
         ("tests/ui/**", "tests/ui/a/b.py", True),
         ("tests/ui/**", "tests/uix/b.py", False),
-        ("tests/agent/test_resources*.py", "tests/agent/test_resources_x.py", True),
-        ("tests/agent/test_resources*.py", "tests/agent/sub/test_resources.py", False),
+        (
+            "tests/components/agent/test_resources*.py",
+            "tests/components/agent/test_resources_x.py",
+            True,
+        ),
+        (
+            "tests/components/agent/test_resources*.py",
+            "tests/components/agent/sub/test_resources.py",
+            False,
+        ),
         ("**/tests/**", "base/packages/tests/test_x.py", True),
         ("tests/_*.py", "tests/_containers.py", True),
         ("tests/_*.py", "tests/x/_containers.py", False),
@@ -226,7 +234,9 @@ def test_every_paths_filter_entry_matches_a_tracked_file() -> None:
 def test_a_dead_filter_entry_is_detected(tmp_path: Path) -> None:
     workflow = tmp_path / "proof.yml"
     workflow.write_text(
-        "on:\n  push:\n    paths:\n      - 'tests/base/test_gone.py'\n      - '!docs/**'\n"
+        "on:\n  push:\n    paths:\n      - 'tests/components/base/test_gone.py'\n      - '!docs/**'\n"
     )
-    assert filter_entries(workflow) == ["tests/base/test_gone.py"]
-    assert not any(glob_regex("tests/base/test_gone.py").match(path) for path in tracked_files())
+    assert filter_entries(workflow) == ["tests/components/base/test_gone.py"]
+    assert not any(
+        glob_regex("tests/components/base/test_gone.py").match(path) for path in tracked_files()
+    )

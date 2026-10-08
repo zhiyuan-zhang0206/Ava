@@ -4,7 +4,7 @@ Package door — no imports, no re-exports; callers use `agent.graph.exec.node`
 (re-exported as `agent.graph.exec_node` via the parent package's lazy
 `__getattr__`). The door stays import-free on purpose: the exec child imports
 `protocol.py` before user code runs and must not drag the node set in with it
-(agent/tests/test_lazy_child_imports.py). Modules:
+(agent/tests/execution/test_lazy_child_imports.py). Modules:
 
   - `node.py`        — exec node: run one pending call, dispatch the result sum type
   - `output.py`      — output envelope fed back to the LLM: format / truncate / overflow-to-file

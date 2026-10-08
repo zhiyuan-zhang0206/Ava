@@ -287,7 +287,7 @@ def test_health_port_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     # Settings is a one-shot BaseSettings loaded at module import; monkeypatch.setenv
     # cannot change the already-imported settings.services.agent_host_health_port — use
     # monkeypatch.setattr directly on the Settings instance field, consistent with other
-    # tests that migrated to Settings (see ava/tests/test_web.py, test_vision.py for the same pattern).
+    # tests that migrated to Settings (see ava/tests/web/test_web.py, test_vision.py for the same pattern).
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "agent_host_health_port", 9999)

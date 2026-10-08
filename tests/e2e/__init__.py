@@ -9,7 +9,7 @@ the leak silently — no error, no warning, and the `scope="package"` keyword in
 teardown. It is `scope="package"` so that
 teardown fires when pytest *leaves this directory* rather than at end-of-session —
 otherwise every test collected after `tests/e2e/` in the same process keeps running
-with the e2e values installed, which is what broke `tests/test_home_isolation.py` on
+with the e2e values installed, which is what broke `tests/harness/test_home_isolation.py` on
 every serial run (on `main`, while CI stayed green because its backend job passes
 `--ignore=tests/e2e`).
 
@@ -20,5 +20,5 @@ directory containing `__init__.py`. No other test directory in this repo has one
 without this file `tests/e2e/` is a `Dir`, the lookup falls through, and
 `scope="package"` becomes an exact synonym for `scope="session"`.
 
-`tests/test_home_isolation.py` asserts this file exists, for that reason.
+`tests/harness/test_home_isolation.py` asserts this file exists, for that reason.
 """

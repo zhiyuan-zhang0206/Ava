@@ -19,7 +19,9 @@ from scripts.structure import (
 from scripts.structure import tests_location as tl
 
 _ROOT = pathlib.Path(__file__).resolve().parents[3]
-_REGISTERED = {"tests/base/test_x.py": ("contract", "a registered test the fixtures start from")}
+_REGISTERED = {
+    "tests/components/base/test_x.py": ("contract", "a registered test the fixtures start from")
+}
 _PYPROJECT = """\
 [tool.importlinter]
 root_packages = ["agent", "ops", "base"]
@@ -40,7 +42,7 @@ _SOURCES = {
     "ops/__init__.py": "",
     "ops/wake/__init__.py": "",
     "ops/wake/spawn.py": "def spawn():\n    return 1\n",
-    "tests/base/test_x.py": "def test_x():\n    pass\n",
+    "tests/components/base/test_x.py": "def test_x():\n    pass\n",
 }
 
 
@@ -110,11 +112,13 @@ def test_a_registered_tree_is_clean(repo: pathlib.Path, capsys: pytest.CaptureFi
 def test_a_new_top_level_test_is_refused_with_the_fix(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _track(repo, "tests/base/test_new.py")
+    _track(repo, "tests/components/base/test_new.py")
     status, out, err = _run(repo, capsys)
     assert status == 1
-    assert out.splitlines()[0].startswith("tests/base/test_new.py:1: a top-level test that is not")
-    assert "scripts/structure/tests_location.py --suggest tests/base/test_new.py" in out
+    assert out.splitlines()[0].startswith(
+        "tests/components/base/test_new.py:1: a top-level test that is not"
+    )
+    assert "scripts/structure/tests_location.py --suggest tests/components/base/test_new.py" in out
     assert "git mv" in err
     assert "path_scopes.toml" in err  # the autouse fixtures do not follow a move
     assert "scripts/structure/tests_location_allowed.py" in err  # the way out
@@ -126,8 +130,8 @@ def test_the_same_test_inside_a_package_is_not_this_lints_business(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _track(repo, "base/net/tests/test_new.py")
-    _track(repo, "tests/base/helpers.py")  # not a test_*.py
-    _track(repo, "tests/base/conftest.py")
+    _track(repo, "tests/components/base/helpers.py")  # not a test_*.py
+    _track(repo, "tests/components/base/conftest.py")
     assert _run(repo, capsys) == (0, "", "")
     assert _run(repo, capsys, ["base/net/tests/test_new.py"]) == (0, "", "")
 
@@ -200,13 +204,19 @@ def test_an_entry_that_needs_none_is_refused(
 def test_explicit_paths_judge_exactly_those_tests(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _track(repo, "tests/base/test_a.py")
-    _track(repo, "tests/base/test_b.py")
-    status, out, _ = _run(repo, capsys, ["tests/base/test_a.py"])
+    _track(repo, "tests/components/base/test_a.py")
+    _track(repo, "tests/components/base/test_b.py")
+    status, out, _ = _run(repo, capsys, ["tests/components/base/test_a.py"])
     assert status == 1
-    assert _flagged(out) == ["tests/base/test_a.py"]
-    assert _run(repo, capsys, ["tests/base/test_x.py"]) == (0, "", "")  # registered: fine
-    assert _run(repo, capsys, [str(repo / "tests/base/test_a.py")])[0] == 1  # absolute path
+    assert _flagged(out) == ["tests/components/base/test_a.py"]
+    assert _run(repo, capsys, ["tests/components/base/test_x.py"]) == (
+        0,
+        "",
+        "",
+    )  # registered: fine
+    assert (
+        _run(repo, capsys, [str(repo / "tests/components/base/test_a.py")])[0] == 1
+    )  # absolute path
 
 
 def _flagged(out: str) -> list[str]:
@@ -216,22 +226,26 @@ def _flagged(out: str) -> list[str]:
 def test_only_judges_the_changed_top_level_tests_and_nothing_else(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _track(repo, "tests/base/test_a.py")
-    _track(repo, "tests/base/test_b.py")
+    _track(repo, "tests/components/base/test_a.py")
+    _track(repo, "tests/components/base/test_b.py")
     _track(repo, "base/net/tests/test_p.py")
     status, out, _ = _run(
-        repo, capsys, ["--only", "tests/base/test_a.py", "base/net/tests/test_p.py"]
+        repo, capsys, ["--only", "tests/components/base/test_a.py", "base/net/tests/test_p.py"]
     )
     assert status == 1
-    assert _flagged(out) == ["tests/base/test_a.py"]  # test_b did not change
-    assert _run(repo, capsys, ["--only", "tests/base/test_x.py"]) == (0, "", "")  # registered
-    assert _run(repo, capsys, ["--only", str(repo / "tests/base/test_a.py")])[0] == 1
+    assert _flagged(out) == ["tests/components/base/test_a.py"]  # test_b did not change
+    assert _run(repo, capsys, ["--only", "tests/components/base/test_x.py"]) == (
+        0,
+        "",
+        "",
+    )  # registered
+    assert _run(repo, capsys, ["--only", str(repo / "tests/components/base/test_a.py")])[0] == 1
 
 
 def test_only_with_nothing_changed_has_nothing_to_judge(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _track(repo, "tests/base/test_a.py")
+    _track(repo, "tests/components/base/test_a.py")
     assert _run(repo, capsys, ["--only"]) == (0, "", "")
 
 
@@ -246,17 +260,17 @@ def test_only_with_nothing_changed_has_nothing_to_judge(
 def test_a_changed_rule_input_widens_only_to_every_test(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str], rule_input: str
 ) -> None:
-    _track(repo, "tests/base/test_a.py")
+    _track(repo, "tests/components/base/test_a.py")
     _track(repo, rule_input, "# a rule input\n")
     status, out, _ = _run(repo, capsys, ["--only", rule_input])
     assert status == 1
-    assert _flagged(out) == ["tests/base/test_a.py"]
+    assert _flagged(out) == ["tests/components/base/test_a.py"]
 
 
 def test_a_changed_test_of_the_lint_itself_does_not_widen(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _track(repo, "tests/base/test_a.py")
+    _track(repo, "tests/components/base/test_a.py")
     _track(repo, "scripts/structure/tests/test_tests_location.py")
     assert _run(repo, capsys, ["--only", "scripts/structure/tests/test_tests_location.py"]) == (
         0,
@@ -268,26 +282,28 @@ def test_a_changed_test_of_the_lint_itself_does_not_widen(
 def test_a_registry_entry_gone_stale_is_found_whichever_file_the_commit_names(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _track(repo, "tests/base/test_other.py")
-    _git(repo, "rm", "-q", "-f", "tests/base/test_x.py")
+    _track(repo, "tests/components/base/test_other.py")
+    _git(repo, "rm", "-q", "-f", "tests/components/base/test_x.py")
     _track(repo, "base/net/tests/test_p.py")
-    for argv in (["tests/base/test_other.py"], ["--only", "base/net/tests/test_p.py"]):
+    for argv in (["tests/components/base/test_other.py"], ["--only", "base/net/tests/test_p.py"]):
         status, out, _ = _run(repo, capsys, argv)
         assert status == 1
-        assert "stale entry `tests/base/test_x.py`" in out
+        assert "stale entry `tests/components/base/test_x.py`" in out
 
 
 def test_a_missing_explicit_path_is_an_error(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    status, out, err = _run(repo, capsys, ["tests/base/test_nope.py"])
+    status, out, err = _run(repo, capsys, ["tests/components/base/test_nope.py"])
     assert (status, out) == (1, "")
-    assert "target path(s) not found: tests/base/test_nope.py" in err
+    assert "target path(s) not found: tests/components/base/test_nope.py" in err
 
 
 def test_a_missing_only_path_is_an_error(repo: pathlib.Path) -> None:
-    with pytest.raises(SystemExit, match=r"target path\(s\) not found: tests/base/test_nope.py"):
-        tl.main(["--only", "tests/base/test_nope.py"], repo_root=repo, allowed={})
+    with pytest.raises(
+        SystemExit, match=r"target path\(s\) not found: tests/components/base/test_nope.py"
+    ):
+        tl.main(["--only", "tests/components/base/test_nope.py"], repo_root=repo, allowed={})
 
 
 # ------------------------------------------------------------------ where the checkout sits
@@ -304,11 +320,11 @@ def test_the_verdicts_do_not_depend_on_where_the_checkout_sits(
         tmp_path / "tests" / "e2e" / "tmp" / "build" / "ui" / "fixtures" / "repo",
     ):
         _make_repo(root)
-        _track(root, "tests/base/test_new.py")
+        _track(root, "tests/components/base/test_new.py")
         _track(root, "tests/e2e/test_flow.py")
         _track(root, "tests/ui/test_app.py")
         _track(root, "base/net/tests/test_p.py")
-        for argv in ([], ["--only", "tests/base/test_new.py", "tests/e2e/test_flow.py"]):
+        for argv in ([], ["--only", "tests/components/base/test_new.py", "tests/e2e/test_flow.py"]):
             status, out, _ = _run(root, capsys, argv)
             verdicts.append((status, _flagged(out)))
         status, out, _ = _run(
@@ -316,7 +332,7 @@ def test_the_verdicts_do_not_depend_on_where_the_checkout_sits(
         )
         verdicts.append((status, _flagged(out)))
     assert verdicts[:3] == verdicts[3:]
-    assert verdicts[:3] == [(1, ["tests/base/test_new.py"])] * 2 + [(0, [])]
+    assert verdicts[:3] == [(1, ["tests/components/base/test_new.py"])] * 2 + [(0, [])]
 
 
 # ------------------------------------------------------------------ the checks never read the code
@@ -324,7 +340,7 @@ def test_the_verdicts_do_not_depend_on_where_the_checkout_sits(
 
 def test_the_checks_do_not_load_the_placement_rule(repo: pathlib.Path) -> None:
     """A hook run is a path lookup: no module index, no import graph, no `place()`."""
-    _track(repo, "tests/base/test_new.py")
+    _track(repo, "tests/components/base/test_new.py")
     code = textwrap.dedent(
         f"""
         import sys
@@ -368,8 +384,8 @@ def test_every_shipped_entry_has_a_known_category_and_a_reason() -> None:
 
 
 def _suggest_repo(root: pathlib.Path, text: str) -> str:
-    _track(root, "tests/agent/test_probe.py", text)
-    return tests_location_suggest.suggest("tests/agent/test_probe.py", root)
+    _track(root, "tests/components/agent/test_probe.py", text)
+    return tests_location_suggest.suggest("tests/components/agent/test_probe.py", root)
 
 
 def test_suggest_names_the_lowest_package_that_may_hold_the_test(repo: pathlib.Path) -> None:

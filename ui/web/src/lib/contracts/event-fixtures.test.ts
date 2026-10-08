@@ -1,5 +1,5 @@
 // Wire-format equivalence test (TS side) — shares fixtures with
-// `tests/test_event_fixtures.py`; both sides parsing successfully ==
+// `tests/harness/test_event_fixtures.py`; both sides parsing successfully ==
 // Python ↔ TS alignment.
 //
 // Every SystemEvent role gets one case here: read fixture JSON, narrow

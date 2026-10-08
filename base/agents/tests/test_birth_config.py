@@ -3,7 +3,7 @@
 The resolution chain proper (`config_overlay > birth_config > current config`) is
 enforced in two halves that meet nowhere else: this module decides WHAT gets
 stamped, and `agent/loop.py` decides in what ORDER the two stored maps are applied
-at boot. Both halves are covered here and in `tests/agent/test_loop_main.py`.
+at boot. Both halves are covered here and in `tests/components/agent/test_loop_main.py`.
 
 `cluster_defaults` is a seeded singleton outside the per-test TRUNCATE, so the
 shared `cluster_defaults_unset` fixture snapshots and restores it.

@@ -126,7 +126,7 @@ class LabelOnlyCall:
     `label` is the literal value when the keyword argument is a plain string
     constant; None marks a non-literal (dynamic) expression whose registeredness
     cannot be proven statically — the label-only gate in
-    tests/test_lint_event_kinds.py fails that closed.
+    tests/contracts/test_lint_event_kinds.py fails that closed.
     """
 
     path: str

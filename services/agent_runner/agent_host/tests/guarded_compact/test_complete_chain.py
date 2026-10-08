@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.test_inbound_ownership import _agent, _insert
+from agent.tests.claim.test_inbound_ownership import _agent, _insert
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
 from base.lm.plugin_providers import model_catalog

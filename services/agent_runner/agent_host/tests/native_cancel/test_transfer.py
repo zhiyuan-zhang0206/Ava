@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.ownership import hosted as hosted_owner
 from agent.ownership.hosted import admit_hosted_runtime
-from agent.tests.test_inbound_ownership import _agent, _insert
+from agent.tests.claim.test_inbound_ownership import _agent, _insert
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.incarnation.native_work_models import NativeWorkTarget
@@ -29,8 +29,10 @@ from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.native_work import recover_native_cancel
+from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
+    _prepare_graph,
+)
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
-from services.agent_runner.agent_host.tests.test_hosted_compact_failure import _prepare_graph
 
 _CHILD = """
 import asyncio, json, os, sys

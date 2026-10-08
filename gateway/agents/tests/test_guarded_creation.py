@@ -14,7 +14,7 @@ from gateway.agents import router as agent_router
 from gateway.agents.creation import scoped_creation_key
 from gateway.app import app
 from gateway.auth.request_principal import AuthPrincipal, principal_key
-from gateway.tests.test_mcp_endpoint import _tool_call, _tool_result
+from gateway.tests.extensions.test_mcp_endpoint import _tool_call, _tool_result
 from ops.agents.creation_identity import creation_request_hash
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process

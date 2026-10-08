@@ -25,7 +25,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.config import settings
-from tests.base.poll_until import poll_until
+from tests.components.base.poll_until import poll_until
 from tests.e2e._ports import GATEWAY_URL
 
 

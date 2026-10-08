@@ -12,7 +12,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
-from agent.tests.test_inbound_ownership import _agent
+from agent.tests.claim.test_inbound_ownership import _agent
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.incarnation.resources import ResourceBirth

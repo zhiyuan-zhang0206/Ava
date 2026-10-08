@@ -14,7 +14,7 @@ lattice vocabulary may live here and only here.
 Deliberately separate from `base/deploy/timing.py`: the schedule manager runs under
 the gateway process profile, and importing the lattice module would drag its
 agent/sandbox-domain settings reads into the gateway closure
-(cli/commands/lifecycle/tests/test_gateway_consumer_guard.py enforces the matrix).
+(cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py enforces the matrix).
 """
 
 from __future__ import annotations
