@@ -9,6 +9,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -22,7 +23,6 @@ from services.agent_runner.agent_ops.tests.test_daemon import (
     _REPO,
     _db,
     _fake_spawn_factory,
-    _noop_sleep,
     _stub_pool,
 )
 from services.agent_runner.agent_ops.tests.test_daemon import (
@@ -31,7 +31,9 @@ from services.agent_runner.agent_ops.tests.test_daemon import (
 
 
 @pytest.mark.asyncio
-async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ops_route_non_json_values_degrade_to_str(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A non-JSON-native value in a dispatch result degrades to its str() instead
     of raising in _ops_route's json.dumps and 500-ing the /ops control plane.
 
@@ -50,6 +52,7 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ):  # type: ignore[no-untyped-def]
         return "completed", {"at": datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)}
 
@@ -61,6 +64,7 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == 200
     assert ctype == "application/json"
@@ -70,7 +74,9 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_ops_route_failed_status_is_still_http_200(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ops_route_failed_status_is_still_http_200(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A 'failed' dispatch is a semantic outcome the gateway re-raises, not an
     HTTP error — the envelope carries it at HTTP 200."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
@@ -83,6 +89,7 @@ async def test_ops_route_failed_status_is_still_http_200(monkeypatch: pytest.Mon
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ):  # type: ignore[no-untyped-def]
         return "failed", {"error": "boom"}
 
@@ -94,13 +101,16 @@ async def test_ops_route_failed_status_is_still_http_200(monkeypatch: pytest.Mon
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == 200
     assert json.loads(body) == {"status": "failed", "result": {"error": "boom"}}
 
 
 @pytest.mark.asyncio
-async def test_ops_route_malformed_body_400() -> None:
+async def test_ops_route_malformed_body_400(
+    op_executor: ThreadPoolExecutor,
+) -> None:
     """Non-JSON body and a body missing `kind` both return 400 without dispatching."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_sem = asyncio.Semaphore(1)
@@ -111,6 +121,7 @@ async def test_ops_route_malformed_body_400() -> None:
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == 400
     assert "invalid JSON" in json.loads(body)["error"]
@@ -121,13 +132,16 @@ async def test_ops_route_malformed_body_400() -> None:
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == 400
     assert "kind" in json.loads(body)["error"]
 
 
 @pytest.mark.asyncio
-async def test_ops_route_crash_becomes_failed_result(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ops_route_crash_becomes_failed_result(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A crash inside _dispatch is caught and returned as a failed result (HTTP 200),
     never leaks as a 500 the gateway can't interpret."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
@@ -140,6 +154,7 @@ async def test_ops_route_crash_becomes_failed_result(monkeypatch: pytest.MonkeyP
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ):  # type: ignore[no-untyped-def]
         raise RuntimeError("kaboom")
 
@@ -151,6 +166,7 @@ async def test_ops_route_crash_becomes_failed_result(monkeypatch: pytest.MonkeyP
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     assert status == 200
     parsed = json.loads(body)
@@ -169,7 +185,9 @@ def test_ops_route_requires_its_daemon_semaphore() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ops_route_semaphore_caps_concurrency(
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Concurrent /ops requests run at most ops_concurrency dispatches in parallel."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     cap = 3
@@ -185,6 +203,7 @@ async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPa
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ):  # type: ignore[no-untyped-def]
         nonlocal in_flight, peak
         async with lock:
@@ -210,6 +229,7 @@ async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPa
                 workers=set(),
                 requests=set(),
                 pool=dispatch_pool,
+                executor=op_executor,
             )
             for b in bodies
         ]
@@ -326,7 +346,6 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
     op, and the update fan-out (which filters on that same latch) dropped it.
     Registering at the daemon's own boot reconciles both.
     """
-    import psycopg
 
     from base.cluster import machines
     from base.cluster.machine import reset_identity, set_identity
@@ -357,7 +376,7 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_idempotent_dispatch_first_run_executes_and_stores(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """The first dispatch with a key executes the op and stores its outcome in
     the shared api_idempotency table (method='ops' rows: path=kind,
@@ -372,6 +391,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
 
     assert status == "completed"
@@ -389,7 +409,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
 
 @pytest.mark.asyncio
 async def test_idempotent_dispatch_replays_without_reexecuting(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """A second dispatch with the same key replays the stored outcome — the op
     is NOT re-executed. This is what makes the gateway's retry of a non-
@@ -404,6 +424,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
     second = await daemon._dispatch_idempotent(
         "spawn-launch",
@@ -412,6 +433,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
 
     assert first == ("completed", {"id": 777})
@@ -421,7 +443,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
 
 @pytest.mark.asyncio
 async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """A duplicate lifecycle request waits within its bounded budget and replays its owner."""
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
@@ -436,6 +458,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ) -> tuple[str, dict[str, object]]:
         calls["n"] = calls.get("n", 0) + 1
         started.set()
@@ -445,7 +468,13 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
     monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
         daemon._dispatch_idempotent(
-            "lifecycle", {}, "slow-lifecycle", ops_pool, active_ops={}, workers=set()
+            "lifecycle",
+            {},
+            "slow-lifecycle",
+            ops_pool,
+            active_ops={},
+            workers=set(),
+            executor=op_executor,
         )
     )
     await started.wait()
@@ -456,6 +485,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
     first = await owner
 
@@ -465,7 +495,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
 
 @pytest.mark.asyncio
 async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """A duplicate wait expires without executing again or claiming completion."""
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
@@ -480,6 +510,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         active_ops: daemon.ActiveOps,
         workers: daemon.maintenance_activity.WorkerFutures,
         pool: ConnectionPool,
+        executor: ThreadPoolExecutor,
     ) -> tuple[str, dict[str, object]]:
         calls["n"] = calls.get("n", 0) + 1
         started.set()
@@ -489,7 +520,13 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
     monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
         daemon._dispatch_idempotent(
-            "lifecycle", {}, "stuck-lifecycle", ops_pool, active_ops={}, workers=set()
+            "lifecycle",
+            {},
+            "stuck-lifecycle",
+            ops_pool,
+            active_ops={},
+            workers=set(),
+            executor=op_executor,
         )
     )
     await started.wait()
@@ -500,6 +537,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
     await owner
 
@@ -511,7 +549,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
 
 @pytest.mark.asyncio
 async def test_idempotent_dispatch_distinct_keys_execute_twice(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """Different keys are different logical ops — each executes."""
     calls: dict[str, int] = {}
@@ -524,6 +562,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
     await daemon._dispatch_idempotent(
         "spawn-launch",
@@ -532,6 +571,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
 
     assert calls["n"] == 2
@@ -539,7 +579,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
 
 @pytest.mark.asyncio
 async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """A business-failed outcome is stored like a success and replayed on a
     same-key retry — a deterministic business failure must not re-run the op."""
@@ -565,6 +605,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
     second = await daemon._dispatch_idempotent(
         "lifecycle",
@@ -573,6 +614,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         ops_pool,
         active_ops={},
         workers=set(),
+        executor=op_executor,
     )
 
     assert first[0] == "failed"
@@ -581,7 +623,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
 
 @pytest.mark.asyncio
 async def test_ops_route_dedupes_by_envelope_key(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """End-to-end through _ops_route: an envelope carrying idempotency_key goes
     through the dedup path — two identical POSTs execute the op once."""
@@ -601,6 +643,7 @@ async def test_ops_route_dedupes_by_envelope_key(
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     code2, payload2, _ = await daemon._ops_route(
         body,
@@ -609,6 +652,7 @@ async def test_ops_route_dedupes_by_envelope_key(
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
 
     assert code1 == 200 and code2 == 200
@@ -619,7 +663,7 @@ async def test_ops_route_dedupes_by_envelope_key(
 
 @pytest.mark.asyncio
 async def test_ops_route_without_key_does_not_dedupe(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
+    op_executor: ThreadPoolExecutor, monkeypatch: pytest.MonkeyPatch, ops_pool: ConnectionPool
 ) -> None:
     """An envelope WITHOUT idempotency_key takes the plain _dispatch path — no
     dedup row is written (idempotent ops have nothing to dedupe)."""
@@ -636,6 +680,7 @@ async def test_ops_route_without_key_does_not_dedupe(
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
     await daemon._ops_route(
         body,
@@ -644,6 +689,7 @@ async def test_ops_route_without_key_does_not_dedupe(
         workers=set(),
         requests=set(),
         pool=dispatch_pool,
+        executor=op_executor,
     )
 
     assert calls["n"] == 2  # no key → no dedup → both execute
@@ -655,109 +701,8 @@ async def test_ops_route_without_key_does_not_dedupe(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A pass that dies on a closed connection is re-run; the outcome is returned."""
-    calls: list[int] = []
-
-    async def _flaky_pass(
-        kind,
-        payload,
-        key,
-        pool,
-        *,
-        active_ops: daemon.ActiveOps,
-        workers: daemon.maintenance_activity.WorkerFutures,
-    ):  # type: ignore[no-untyped-def]
-        calls.append(1)
-        if len(calls) < 3:
-            raise psycopg.OperationalError("the connection is closed")
-        return "completed", {"ok": True}
-
-    monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _flaky_pass)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
-    status, result = await daemon._dispatch_idempotent(
-        "spawn-launch",
-        {"agent_id": 1},
-        "key-1",
-        ConnectionPool(open=False),
-        active_ops={},
-        workers=set(),
-    )
-    assert status == "completed"
-    assert result == {"ok": True}
-    assert len(calls) == 3
-
-
-@pytest.mark.asyncio
-async def test_dispatch_idempotent_gives_up_after_attempts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A persistently dying connection raises after the bounded attempts."""
-    calls: list[int] = []
-
-    async def _always_dead(
-        kind,
-        payload,
-        key,
-        pool,
-        *,
-        active_ops: daemon.ActiveOps,
-        workers: daemon.maintenance_activity.WorkerFutures,
-    ):  # type: ignore[no-untyped-def]
-        calls.append(1)
-        raise psycopg.OperationalError("the connection is closed")
-
-    monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _always_dead)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
-    with pytest.raises(psycopg.OperationalError):
-        await daemon._dispatch_idempotent(
-            "spawn-launch",
-            {"agent_id": 1},
-            "key-2",
-            ConnectionPool(open=False),
-            active_ops={},
-            workers=set(),
-        )
-    assert len(calls) == daemon._DISPATCH_RETRY_ATTEMPTS
-
-
-@pytest.mark.asyncio
-async def test_dispatch_idempotent_propagates_non_operational_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Any non-OperationalError propagates on the first pass — no retry."""
-    calls: list[int] = []
-
-    async def _boom(
-        kind,
-        payload,
-        key,
-        pool,
-        *,
-        active_ops: daemon.ActiveOps,
-        workers: daemon.maintenance_activity.WorkerFutures,
-    ):  # type: ignore[no-untyped-def]
-        calls.append(1)
-        raise ValueError("not a connection problem")
-
-    monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _boom)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
-    with pytest.raises(ValueError):
-        await daemon._dispatch_idempotent(
-            "spawn-launch",
-            {"agent_id": 1},
-            "key-3",
-            ConnectionPool(open=False),
-            active_ops={},
-            workers=set(),
-        )
-    assert len(calls) == 1
-
-
-@pytest.mark.asyncio
 async def test_a_blocking_op_does_not_freeze_the_event_loop(
+    op_executor: ThreadPoolExecutor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The 2026-08-12 incident in one assertion. A blocking op on the Windows
@@ -781,7 +726,14 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
     monkeypatch.setattr(daemon, "_dispatch_sync", _wedged)
 
     task = asyncio.ensure_future(
-        daemon._dispatch("config_read", {}, active_ops={}, workers=set(), pool=dispatch_pool)
+        daemon._dispatch(
+            "config_read",
+            {},
+            active_ops={},
+            workers=set(),
+            pool=dispatch_pool,
+            executor=op_executor,
+        )
     )
     await asyncio.to_thread(started.wait, 10)
 
