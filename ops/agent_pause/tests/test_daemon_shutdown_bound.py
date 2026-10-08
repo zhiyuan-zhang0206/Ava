@@ -1,4 +1,4 @@
-"""Real child-process regressions: eight daemons exit within a small bound of
+"""Real child-process regressions: nine daemons exit within a small bound of
 SIGTERM even with a default-executor job in flight.
 
 2026-09-18 (task #3940): a daemon's smooth stop SIGTERM'd it while a routine
@@ -100,6 +100,10 @@ _CASES: dict[str, _DaemonCase] = {
     "schedule_manager": _DaemonCase(
         module="services.wake.schedule_manager.daemon",
         interrupt_line="[schedule-manager] interrupted, shutting down",
+    ),
+    "insights": _DaemonCase(
+        module="services.derived.insights.daemon",
+        interrupt_line="[insights] interrupted, shutting down",
     ),
 }
 

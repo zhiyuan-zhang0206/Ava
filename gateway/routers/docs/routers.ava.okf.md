@@ -20,7 +20,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 | `gateway/events/` | `router` (events), `agent_events`, `computer_traces`, `resolutions`, `metrics`, `system` |
 | `gateway/cluster/` | `router` (cluster), `machine_pause`, `bootstrap`, `status`, `ops_monitor` |
 | `gateway/extensions/` | `inventory`, `skills`, `plugin_ui`, `ui_contributions`, `packages` |
-| `gateway/alerts/`, `gateway/http/auth/`, `gateway/mcp_server/`, `gateway/schedules/`, `gateway/run_timeline/`, `gateway/inspect/` | `router` |
+| `gateway/alerts/`, `gateway/http/auth/`, `gateway/mcp_server/`, `gateway/schedules/`, `gateway/inspect/` | `router` |
 
 ## Router categories
 

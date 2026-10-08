@@ -21,9 +21,16 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages,
     load_checkpoint_messages_by_trace,
 )
+from base.agents.history.context_breakdown import latest_request_breakdown
+from base.agents.history.context_response import (
+    ContextBreakdownResponse,
+    context_breakdown_response,
+    resolve_agent_model,
+)
 from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls
+from base.agents.model_overrides import agent_overrides
 from base.agents.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 from base.config import settings
 from base.daemon.schedules.completion_notices import (
@@ -34,15 +41,10 @@ from base.daemon.schedules.completion_notices import (
 from base.db import agent_exists, list_pending_inbounds
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.agents.eval_guard import caller_eval_isolation, deny_isolated_result_read
-from gateway.agents.history.context_breakdown import RequestBreakdown
 from gateway.agents.inbound_provenance import request_inbound_provenance
-from gateway.agents.model_overrides import agent_overrides, read_agent_overrides
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,
-    ContextBreakdownResponse,
-    ContextCategory,
-    ContextSection,
     LastMessageResponse,
     PendingInbound,
     SystemNoteIn,
@@ -66,22 +68,6 @@ _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
 # Compatibility re-export for callers and tests that used this lookup before
 # result-read enforcement was centralized.
 __all__ = ["caller_eval_isolation"]
-
-
-def _resolve_agent_model(request: Request, agent_id: int) -> str:
-    """The agent's effective LLM model — its per-agent overlay, else the cluster
-    default (`settings.lm.llm_model`), resolved through any withdrawal fallback
-    so callers judge the model that will actually run. Same lookup as the
-    token-usage endpoint; capability gates (image input) must use this resolved
-    id, never the raw configured one."""
-    from base.lm.registry import resolve_available_model
-
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-    overlay = row[0] if row and row[0] else None
-    model = overlay.get("llm_model") if overlay else None
-    return resolve_available_model(model or settings.lm.llm_model)
 
 
 def _validate_image_ref(agent_id: int, url: str) -> None:
@@ -123,7 +109,7 @@ def _prepare_message_content(
 
     blocks = content
     if any(isinstance(b, ImageUrlContentBlock) for b in blocks):
-        model = _resolve_agent_model(request, agent_id)
+        model = resolve_agent_model(request.app.state.db_pool, agent_id)
         if not model_supports_vision(model):
             raise HTTPException(
                 422,
@@ -684,12 +670,10 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
 
     The breakdown of the latest LLM request's input: each message's tokens anchored to the
     provider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed
-    from them, only the inside of a message split by an estimator. Pure gateway-side view logic
-    (`gateway/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
+    from them, only the inside of a message split by an estimator. Pure view logic
+    (`base/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
     A checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown
     with zeroed totals (same tolerance as token-usage: the panel re-opens fine later)."""
-    from gateway.agents.history.context_breakdown import latest_request_breakdown
-
     try:
         messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
@@ -699,51 +683,6 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
             exc,
         )
         messages = []
-    return context_breakdown_response(request, agent_id, latest_request_breakdown(messages))
-
-
-def context_breakdown_response(
-    request: Request, agent_id: int, breakdown: RequestBreakdown
-) -> ContextBreakdownResponse:
-    """`breakdown` (one LLM request's input) with the agent's resolved window and compaction
-    thresholds."""
-    from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
-    from gateway.agents.history.context_breakdown import SectionNode
-
-    def _to_context_section(node: SectionNode) -> ContextSection:
-        return ContextSection(
-            name=node.name,
-            tokens=node.tokens,
-            estimated=node.estimated,
-            children=[_to_context_section(child) for child in node.children],
-        )
-
-    model = _resolve_agent_model(request, agent_id)
-    overrides = read_agent_overrides(request, agent_id)
-    max_input_tokens = soft_compact_tokens = hard_compact_tokens = 0
-    try:
-        budget = resolve_context_budget(model, overrides)
-        max_input_tokens = budget.max_context_tokens
-        soft_compact_tokens = budget.soft_compact_tokens
-        hard_compact_tokens = budget.hard_compact_tokens
-    except UnknownModelWindowError as exc:
-        _log.warning("context-breakdown: %s", exc)
-
-    return ContextBreakdownResponse(
-        total_input_tokens=breakdown.total.tokens,
-        estimated=breakdown.total.estimated,
-        exact_fraction=breakdown.total.exact_fraction,
-        max_input_tokens=max_input_tokens,
-        soft_compact_tokens=soft_compact_tokens,
-        hard_compact_tokens=hard_compact_tokens,
-        sections=[_to_context_section(node) for node in breakdown.sections],
-        categories=[
-            ContextCategory(
-                kind=c.kind,
-                tokens=c.total.tokens,
-                estimated=c.total.estimated,
-                exact_fraction=c.total.exact_fraction,
-            )
-            for c in breakdown.categories
-        ],
+    return context_breakdown_response(
+        request.app.state.db_pool, agent_id, latest_request_breakdown(messages)
     )
