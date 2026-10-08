@@ -40,7 +40,7 @@ def dispatch(args):
 
 parser = argparse.ArgumentParser()
 parser.set_defaults(func=dispatch)
-main._build_parser = lambda: parser
+main._build_parser = lambda *, retained_children: parser
 try:
     result = main.main([])
 except RuntimeError as exc:

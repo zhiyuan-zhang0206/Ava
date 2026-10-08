@@ -15,6 +15,7 @@ See docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure
 from __future__ import annotations
 
 import math
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -325,6 +326,7 @@ def stop_data_plane(
     save: bool = True,
     notes: list[str] | None = None,
     clients: list[str] | None = None,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> list[str]:
     """Stop this home's native data plane; never stop a remote-managed plane.
 
@@ -334,4 +336,6 @@ def stop_data_plane(
     """
     from cli.commands.data_plane.maintenance_stop import stop
 
-    return stop(timeout, save=save, notes=notes, clients=clients)
+    return stop(
+        timeout, save=save, notes=notes, clients=clients, retained_children=retained_children
+    )

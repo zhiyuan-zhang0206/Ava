@@ -58,13 +58,15 @@ def test_foreign_redis_keeps_acl_and_config(
 
 
 def test_foreign_postgres_listener_refuses_before_hba_or_initdb(
-    pg_data: Path, monkeypatch: pytest.MonkeyPatch
+    pg_data: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     monkeypatch.setattr(instance, "_pg_data_dir", lambda: pg_data)
     monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(instance, "_ensure_pg_data", lambda: pytest.fail("must not initialize"))
     with pytest.raises(RuntimeError, match="no owned data-plane process"):
-        instance._start_pg(15433, "")
+        instance._start_pg(15433, "", retained_children=retained_children)
     assert not (pg_data / "pg_hba.conf").exists()
 
 
@@ -196,8 +198,14 @@ def _forbid_new_pg_admission(patch: pytest.MonkeyPatch) -> None:
     patch.setattr(subprocess, "Popen", Mock(wraps=subprocess.Popen, side_effect=retained_process))
 
 
-def _assert_warm_pg_repeat(data: Path, port: int, first: OwnedProcess, persisted: bytes) -> None:
-    assert instance._start_pg(port, "") == 0
+def _assert_warm_pg_repeat(
+    data: Path,
+    port: int,
+    first: OwnedProcess,
+    persisted: bytes,
+    retained_children: list[subprocess.Popen[bytes]],
+) -> None:
+    assert instance._start_pg(port, "", retained_children=retained_children) == 0
     repeated = ownership.postgres(data)
     assert repeated is not None and first.same_birth(repeated)
     assert pg.receipt_path(data).read_bytes() == persisted
@@ -207,6 +215,7 @@ def _assert_warm_pg_repeat(data: Path, port: int, first: OwnedProcess, persisted
 def test_real_owned_postgres_resume_and_fast_stop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """The ordinary producer supplies all custody; no test-only receipt adoption."""
     import psycopg
@@ -215,21 +224,21 @@ def test_real_owned_postgres_resume_and_fast_stop(
 
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     try:
-        assert instance._start_pg(port, "") == 0
+        assert instance._start_pg(port, "", retained_children=retained_children) == 0
         first, persisted = _assert_pg_birth(data, port)
         with psycopg.connect(instance.pg_admin_url(port), autocommit=True) as conn:
             ownership.require_postgres_connection(conn, data)
             row = conn.execute("SELECT system_identifier FROM pg_control_system()").fetchone()
             assert row is not None
             system_id = row[0]
-            _assert_warm_pg_repeat(data, port, first, persisted)
-            assert plane.stop(10) == ["postgres"]
+            _assert_warm_pg_repeat(data, port, first, persisted, retained_children)
+            assert plane.stop(10, retained_children=retained_children) == ["postgres"]
             assert not first.live() and ownership.postgres(data) is None
             assert pg.receipt_path(data).read_bytes() == persisted
             with pytest.raises(psycopg.OperationalError):
                 conn.execute("SELECT 1")
-        assert plane.stop(2) == []
-        assert instance._start_pg(port, "") == 0
+        assert plane.stop(2, retained_children=retained_children) == []
+        assert instance._start_pg(port, "", retained_children=retained_children) == 0
         second, _receipt = _assert_pg_birth(data, port)
         assert not first.same_birth(second)
         with psycopg.connect(instance.pg_admin_url(port), autocommit=True) as conn:
@@ -238,10 +247,10 @@ def test_real_owned_postgres_resume_and_fast_stop(
                 system_id,
             )
         with pytest.raises(RuntimeError, match="replacement"):
-            pg.stop(data, expected=first)
+            pg.stop(data, expected=first, retained_children=retained_children)
         assert second.live()
     finally:
-        pg.stop(data, timeout=10)
+        pg.stop(data, timeout=10, retained_children=retained_children)
     assert ownership.postgres(data) is None
     ownership.require_listener(None, port, required=False)
 
@@ -265,6 +274,7 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
         timeout: float,
         immediate_wait: float,
         kill_wait: float,
+        retained_children: list[subprocess.Popen[bytes]] | None,
     ) -> None:
         assert timeout > 0 and immediate_wait > 0 and kill_wait > 0
         seen.append(expected)
@@ -282,6 +292,7 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
 def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     foreign = tmp_path / "foreign/pg"
     foreign.mkdir(parents=True)
@@ -298,7 +309,7 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
         instance, "_ensure_pg_data", Mock(side_effect=AssertionError("initdb effect"))
     )
     with pytest.raises(RuntimeError, match="symlink"):
-        instance._start_pg(15433, "")
+        instance._start_pg(15433, "", retained_children=retained_children)
     assert hba.read_text() == "foreign authority\n"
 
 
@@ -306,10 +317,11 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
 def test_real_stopped_postmaster_cannot_pass_warm_readiness(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     try:
-        assert instance._start_pg(port, "") == 0
+        assert instance._start_pg(port, "", retained_children=retained_children) == 0
         owner, before = _assert_pg_birth(data, port)
         assert owner.send_signal(signal.SIGSTOP)
         try:
@@ -318,19 +330,20 @@ def test_real_stopped_postmaster_cannot_pass_warm_readiness(
                 context.setattr(instance, "_PG_PROBE_TIMEOUT_S", 0.1)
                 _forbid_new_pg_admission(context)
                 with pytest.raises(RuntimeError, match="did not become ready"):
-                    instance._start_pg(port, "")
+                    instance._start_pg(port, "", retained_children=retained_children)
             assert owner.live() and pg.receipt_path(data).read_bytes() == before
         finally:
             owner.send_signal(signal.SIGCONT)
-        _assert_warm_pg_repeat(data, port, owner, before)
+        _assert_warm_pg_repeat(data, port, owner, before, retained_children)
     finally:
-        pg.stop(data, timeout=10)
+        pg.stop(data, timeout=10, retained_children=retained_children)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="owned POSIX PostgreSQL")
 def test_real_interrupted_admission_completes_same_postmaster(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     protocol = instance._pg_running
@@ -344,15 +357,20 @@ def test_real_interrupted_admission_completes_same_postmaster(
         with monkeypatch.context() as context:
             context.setattr(instance, "_pg_running", interrupted)
             with pytest.raises(KeyboardInterrupt, match="before admission"):
-                instance._start_pg(port, "")
+                instance._start_pg(port, "", retained_children=retained_children)
         captured = pg._read(data)
         assert captured is not None and captured.state == "captured"
         owner = captured.process()
         with monkeypatch.context() as context:
             _forbid_new_pg_admission(context)
-            assert instance._start_pg(port, "") == 0
+            assert instance._start_pg(port, "", retained_children=retained_children) == 0
         admitted, persisted = _assert_pg_birth(data, port)
         assert owner.same_birth(admitted)
-        _assert_warm_pg_repeat(data, port, owner, persisted)
+        _assert_warm_pg_repeat(data, port, owner, persisted, retained_children)
     finally:
-        pg.stop(data, timeout=10)
+        pg.stop(data, timeout=10, retained_children=retained_children)
+
+
+@pytest.fixture
+def retained_children() -> list[subprocess.Popen[bytes]]:
+    return []

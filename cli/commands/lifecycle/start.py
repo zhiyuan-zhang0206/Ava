@@ -6,6 +6,7 @@ can remain unavailable without preventing the host from serving.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,7 +29,10 @@ from cli.start_runtime import StartRuntime
 from ops.roster.service_spec import ServiceSpec
 
 
-def _ensure_gateway_data_plane() -> int:
+def _ensure_gateway_data_plane(
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> int:
     """Bring up this cluster's data plane — local instance or remote probe.
 
     The implementation lives in `cli/commands/data_plane/bringup.py` (this module's
@@ -36,7 +40,7 @@ def _ensure_gateway_data_plane() -> int:
     """
     from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 
-    return ensure_gateway_data_plane()
+    return ensure_gateway_data_plane(retained_children=retained_children)
 
 
 def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
@@ -80,6 +84,8 @@ def _prepare_cold_start(
     repo: Path,
     roles: MachineRoles,
     roster: tuple[ServiceSpec, ...],
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Prepare storage/configuration only with no prior live application root."""
     import cli.commands._repo as _repo_commands
@@ -100,7 +106,7 @@ def _prepare_cold_start(
     #    central node's DB/Redis). macOS: brew binaries via pg_ctl + redis-server;
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
     if "gateway" in roles:
-        rc = _ensure_gateway_data_plane()
+        rc = _ensure_gateway_data_plane(retained_children=retained_children)
         if rc != 0:
             return rc
         from cli.commands.data_plane.bringup import prepare_gateway_schema
@@ -151,6 +157,7 @@ class _StartState:
     resolved: SetupValues
     roles: MachineRoles
     live: bool
+    retained_children: list[subprocess.Popen[bytes]]
 
 
 @dataclass(frozen=True)
@@ -264,7 +271,9 @@ def _admit_start(state: _StartState, selection: _Selection) -> int | None:
             roster, state.repo, state.roles, reconcile=selection.persist_services
         )
         if not state.live:
-            rc = _prepare_cold_start(state.repo, state.roles, roster)
+            rc = _prepare_cold_start(
+                state.repo, state.roles, roster, retained_children=state.retained_children
+            )
             if rc:
                 return rc
     except (RuntimeError, OSError, ValueError) as exc:
@@ -380,12 +389,15 @@ def _cmd_start_body(
     all_services: bool = False,
     persist_services: bool = True,
     runtime: StartRuntime | None = None,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int | StartDelegation:
     """Core start logic, shared by cmd_start and cmd_restart.
 
     Explicit selection is durable when ``persist_services`` is true; omission
     retains prior intent. Internal restarts may add transient exclusions only.
     """
+    if retained_children is None:
+        raise ValueError("start requires its caller-owned PostgreSQL child retention")
     # Resolve the defining modules at the lifecycle operation boundary.
     import cli.commands.lifecycle.root_driver as _root_driver_commands
     from base.deploy.maintenance import admission
@@ -398,7 +410,9 @@ def _cmd_start_body(
     if isinstance(identity, int):
         return identity
     resolved, roles = identity
-    state = _StartState(runtime, repo, resolved, roles, live=False)
+    state = _StartState(
+        runtime, repo, resolved, roles, live=False, retained_children=retained_children
+    )
     selection = _Selection(only_services, disabled_services, all_services, persist_services)
     rc = _admit_start(state, selection)
     if rc is not None:
@@ -476,6 +490,7 @@ def cmd_start(
     persist_services: bool = True,
     runtime: StartRuntime | None = None,
     operation: PauseOwnerSnapshot | None = None,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Converge one configured unit through storage, schema, root and readiness.
 
@@ -483,6 +498,8 @@ def cmd_start(
     entry. Internal restart callers reuse that identity and its durable service
     selection.
     """
+    if retained_children is None:
+        raise ValueError("start requires its caller-owned PostgreSQL child retention")
     return _cmd_start_body(
         operation,
         disabled_services=disabled_services,
@@ -490,4 +507,5 @@ def cmd_start(
         all_services=all_services,
         persist_services=persist_services,
         runtime=runtime,
+        retained_children=retained_children,
     )

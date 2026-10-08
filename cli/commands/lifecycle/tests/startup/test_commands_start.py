@@ -31,7 +31,7 @@ def test_cmd_start_needs_no_tty(monkeypatch: pytest.MonkeyPatch) -> None:
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _start_commands.cmd_start() == 0
+    assert _start_commands.cmd_start(retained_children=[]) == 0
 
 
 def test_cmd_start_aborts_when_schema_mismatched(
@@ -47,7 +47,7 @@ def test_cmd_start_aborts_when_schema_mismatched(
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 1)
 
-    rc = _start_commands.cmd_start()
+    rc = _start_commands.cmd_start(retained_children=[])
     assert rc == 1
     launch.assert_not_called()
     _ = capsys.readouterr()  # pyright: ignore[reportUnknownMemberType]
@@ -71,7 +71,7 @@ def test_start_missing_capability_reports_serve_flags_only(
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
 
-    rc = _start_commands.cmd_start()
+    rc = _start_commands.cmd_start(retained_children=[])
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "recorded setup is incomplete" in err
@@ -97,7 +97,7 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
 
-    rc = _start_commands.cmd_start()
+    rc = _start_commands.cmd_start(retained_children=[])
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "AVA_MACHINE_NAME" in err
@@ -120,7 +120,7 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
 
-    rc = _start_commands.cmd_start()
+    rc = _start_commands.cmd_start(retained_children=[])
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "AVA_MACHINE_NAME" in err
@@ -178,7 +178,17 @@ def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
 
     # The hermetic start resolves a gateway-only unit; the intent says agent-runner.
-    assert _start_commands.cmd_start() == 1
+    assert _start_commands.cmd_start(retained_children=[]) == 1
     err = capsys.readouterr().err
     assert "differ from the ones `ava init` recorded" in err
     launch.assert_not_called()
+
+
+def test_start_requires_child_owner_before_entering_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = MagicMock(side_effect=AssertionError("lifecycle must not be entered"))
+    monkeypatch.setattr(_start_commands, "_cmd_start_body", body)
+    with pytest.raises(ValueError, match="caller-owned PostgreSQL child retention"):
+        _start_commands.cmd_start()
+    body.assert_not_called()

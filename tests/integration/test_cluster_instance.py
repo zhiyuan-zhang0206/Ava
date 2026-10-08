@@ -105,7 +105,11 @@ def _free_port() -> int:
 
 
 @pytest.fixture()
-def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[int, int]]:
+def isolated_cluster(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
+) -> Iterator[tuple[int, int]]:
     """A temp $AVA_HOME + cluster identity, yielding (pg_port,
     redis_port). Tears the instance down on exit."""
     home = tmp_path / "home"
@@ -131,6 +135,8 @@ def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
             check=False,
             capture_output=True,
         )
+        for child in retained_children:
+            child.wait(timeout=1)
         subprocess.run(  # noqa: S603
             [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
             env=ci._redis_cli_env(_REDIS_ADMIN),  # never `-a` — argv is public
@@ -146,7 +152,10 @@ def _admin(pg_port: int, database: str) -> psycopg.Connection[tuple[object, ...]
     )
 
 
-def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None:
+def test_per_cluster_instance_bringup(
+    isolated_cluster: tuple[int, int],
+    retained_children: list[subprocess.Popen[bytes]],
+) -> None:
     pg_port, redis_port = isolated_cluster
     bearer = settings.data_plane.cluster_secret
 
@@ -157,6 +166,7 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
         redis_admin_password=_REDIS_ADMIN,
         redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
+        retained_children=retained_children,
     )
     assert rc == 0
 
@@ -217,7 +227,10 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
         wrong_bearer.ping()  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_bringup_is_idempotent(isolated_cluster: tuple[int, int]) -> None:
+def test_bringup_is_idempotent(
+    isolated_cluster: tuple[int, int],
+    retained_children: list[subprocess.Popen[bytes]],
+) -> None:
     """A second ensure on an already-running instance is a no-op success (the warm
     `ava start` path)."""
     pg_port, redis_port = isolated_cluster
@@ -231,19 +244,22 @@ def test_bringup_is_idempotent(isolated_cluster: tuple[int, int]) -> None:
                 redis_admin_password=_REDIS_ADMIN,
                 redis_password=_REDIS_RUNTIME,
                 redis_user="ava_tinst",
+                retained_children=retained_children,
             )
             == 0
         )
 
 
 def test_gateway_cold_start_restores_redis_url_identity(
-    isolated_cluster: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+    isolated_cluster: tuple[int, int],
+    monkeypatch: pytest.MonkeyPatch,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """Official start restores Redis's own ACL after a real RDB-only shutdown."""
     pg_port, redis_port = isolated_cluster
     home = _gateway_config(monkeypatch, isolated_cluster)
     _born_intent(home)
-    assert ensure_gateway_data_plane() == 0
+    assert ensure_gateway_data_plane(retained_children=retained_children) == 0
     provision_database("ava_main", base_admin_url=ci.pg_admin_url(pg_port))
     with _admin(pg_port, "ava_main") as conn:
         assert conn.execute("SELECT current_database()").fetchone() == ("ava_main",)
@@ -257,7 +273,7 @@ def test_gateway_cold_start_restores_redis_url_identity(
         capture_output=True,
     )
     assert (home / "redis" / "dump.rdb").is_file()
-    assert ensure_gateway_data_plane() == 0
+    assert ensure_gateway_data_plane(retained_children=retained_children) == 0
     with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
         assert client.get("continuation") == b"pending"  # pyright: ignore[reportUnknownMemberType]
     with redis.Redis(port=redis_port, password=_REDIS_ADMIN) as admin:
@@ -266,7 +282,10 @@ def test_gateway_cold_start_restores_redis_url_identity(
 
 
 def test_fresh_single_box_redis_refuses_unauthenticated_connections(
-    isolated_cluster: tuple[int, int], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    isolated_cluster: tuple[int, int],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """A fresh single-box home (empty bearer) is born with generated Redis
     credentials, and the official bring-up serves a Redis that refuses an
@@ -302,7 +321,7 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
     monkeypatch.setattr(cluster, "get_record", _record)
     _born_intent(home)
     try:
-        assert ensure_gateway_data_plane() == 0
+        assert ensure_gateway_data_plane(retained_children=retained_children) == 0
         with (
             redis.Redis(port=redis_port, retry=Retry(NoBackoff(), 0)) as anonymous,
             pytest.raises(redis.AuthenticationError),
@@ -324,10 +343,11 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
 
 def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
     isolated_cluster: tuple[int, int],
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """TCP ownership does not make another directory's equal Unix port ours."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, "") == 0
+    assert ci._start_pg(pg_port, "", retained_children=retained_children) == 0
     owned_data = resolve_ava_home() / "pg"
     with tempfile.TemporaryDirectory(prefix="ava-pg-foreign-", dir="/tmp") as temporary:
         directory = Path(temporary)
@@ -414,6 +434,7 @@ def _active_hba(pg_port: int) -> list[tuple[str, str]]:
 
 def test_birth_hba_follows_passed_secret_not_ambient_settings(
     isolated_cluster: tuple[int, int],
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """First-start birth of a no-secret cluster while the ambient settings carry
     a sibling cluster's secret: the hba has loopback SCRAM lines only (no
@@ -427,6 +448,7 @@ def test_birth_hba_follows_passed_secret_not_ambient_settings(
         redis_admin_password=_REDIS_ADMIN,
         redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
+        retained_children=retained_children,
     )
     assert rc == 0
     assert _active_hba(pg_port) == [("127.0.0.1", "scram-sha-256"), ("::1", "scram-sha-256")]
@@ -438,13 +460,14 @@ def test_birth_hba_follows_passed_secret_not_ambient_settings(
 
 def test_rewritten_hba_is_reloaded_into_running_server(
     isolated_cluster: tuple[int, int],
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """A running server keeps its last-loaded hba until reloaded. A postmaster
     that still serves a legacy trust hba must, after `_start_pg` rewrites the
     file, enforce passwords before start proceeds — the loaded proof, not the
     file on disk."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, "") == 0
+    assert ci._start_pg(pg_port, "", retained_children=retained_children) == 0
     data = resolve_ava_home() / "pg"
     # A legacy postmaster: trust everywhere, reloaded into the running server.
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
@@ -461,7 +484,7 @@ def test_rewritten_hba_is_reloaded_into_running_server(
             assert time.monotonic() < deadline, "legacy trust hba never loaded"
             time.sleep(0.05)
 
-    assert ci._start_pg(pg_port, "") == 0
+    assert ci._start_pg(pg_port, "", retained_children=retained_children) == 0
     with pytest.raises(psycopg.OperationalError, match="password"):
         psycopg.connect(
             host="127.0.0.1", port=pg_port, user=getpass.getuser(), password="", dbname="postgres"
@@ -470,12 +493,13 @@ def test_rewritten_hba_is_reloaded_into_running_server(
 
 def test_hba_proof_refuses_a_postmaster_still_serving_trust(
     isolated_cluster: tuple[int, int],
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
     """The loaded-hba proof is behavioral: a postmaster that still admits a
     password-less dial (a trust line loaded) fails the proof, whatever file is
     on disk."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, "") == 0
+    assert ci._start_pg(pg_port, "", retained_children=retained_children) == 0
     ci.require_authenticated_hba(pg_port, "127.0.0.1")
     data = resolve_ava_home() / "pg"
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
@@ -483,3 +507,8 @@ def test_hba_proof_refuses_a_postmaster_still_serving_trust(
         conn.execute("SELECT pg_reload_conf()")
     with pytest.raises(RuntimeError, match="does not enforce password authentication"):
         ci.require_authenticated_hba(pg_port, "127.0.0.1")
+
+
+@pytest.fixture
+def retained_children() -> list[subprocess.Popen[bytes]]:
+    return []
