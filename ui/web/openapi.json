@@ -16877,6 +16877,18 @@
           "output": {
             "type": "integer",
             "title": "Output"
+          },
+          "cache_write": {
+            "type": "integer",
+            "title": "Cache Write"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "cost_calls": {
+            "type": "integer",
+            "title": "Cost Calls"
           }
         },
         "type": "object",
@@ -16884,10 +16896,13 @@
           "calls",
           "input",
           "cache_read",
-          "output"
+          "output",
+          "cache_write",
+          "cost_usd",
+          "cost_calls"
         ],
         "title": "RunTimelineUsage",
-        "description": "The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.\n\n`input` is the provider's total input tokens (cache reads included)."
+        "description": "The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.\n\n`input` is the provider's total input tokens (cache reads and writes included).\n`cost_usd` sums the usage-time cost recorded on the AIMessages (`ava_usage`); `cost_calls` is\nhow many of `calls` carry one, the rest (older messages, unpriced models) being unknown, not\nestimated."
       },
       "RunTimelineWindow": {
         "properties": {

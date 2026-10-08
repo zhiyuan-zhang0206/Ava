@@ -8,9 +8,12 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from base.agents.history.hierarchy.usage import MessageUsage
 
 
-def ai(input_tokens: int, cache_read: int, output_tokens: int) -> AIMessage:
+def ai(
+    input_tokens: int, cache_read: int, output_tokens: int, cost: float | None = None
+) -> AIMessage:
     return AIMessage(
         content="x",
+        additional_kwargs={} if cost is None else {"ava_usage": {"cost_usd": cost}},
         usage_metadata={
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -46,3 +49,27 @@ def test_a_span_without_ai_usage_is_zero_and_one_message_is_its_own_span() -> No
 def test_a_span_outside_the_history_is_refused() -> None:
     with pytest.raises(IndexError):
         MessageUsage(MESSAGES).span(0, 6)
+
+
+def test_cost_sums_only_recorded_calls_and_counts_them() -> None:
+    messages: list[BaseMessage] = [ai(100, 0, 10, 0.25), ai(100, 0, 10), ai(100, 0, 10, 0.5)]
+    whole = MessageUsage(messages).span(0, 2)
+    assert (whole.calls, whole.cost_calls, whole.cost_usd) == (3, 2, 0.75)
+    old = MessageUsage(messages).span(1, 1)
+    assert (old.calls, old.cost_calls, old.cost_usd) == (1, 0, 0.0)
+
+
+def test_cache_write_comes_from_the_providers_token_details() -> None:
+    msg = AIMessage(
+        content="x",
+        usage_metadata={
+            "input_tokens": 100,
+            "output_tokens": 1,
+            "total_tokens": 101,
+            "input_token_details": {
+                "ephemeral_5m_input_tokens": 30,
+                "ephemeral_1h_input_tokens": 20,
+            },
+        },
+    )
+    assert MessageUsage([msg]).span(0, 0).cache_write == 50

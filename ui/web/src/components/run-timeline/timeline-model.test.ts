@@ -71,7 +71,7 @@ function node(level: number, id = "1"): RunTimelineNode {
     span_start: 0,
     span_end: 3,
     summary: "s",
-    usage: { calls: 0, input: 0, cache_read: 0, output: 0 },
+    usage: { calls: 0, input: 0, cache_read: 0, output: 0, cache_write: 0, cost_usd: 0, cost_calls: 0 },
     generation: null,
     context_tokens: null,
     estimated: null,
