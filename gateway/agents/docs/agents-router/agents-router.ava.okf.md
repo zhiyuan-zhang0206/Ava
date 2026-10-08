@@ -77,7 +77,7 @@ standard gateway authentication, returns `expired` or `not_open`, and returns
   thresholds for the ContextMeter gauge.
 - `/api/agents/{id}/context-breakdown` sums per-message token counts
   (`base/agents/history/message_tokens.py`) of the latest request into kind
-  buckets, each with `estimated` / `exact_fraction`; `context_breakdown.py`.
+  buckets, each with `estimated` / `exact_fraction`; `base/agents/history/context_breakdown.py`.
 
 Receipts: [[system-note.ava.okf.md]], [[launch-retry.ava.okf.md]],
 [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md|guarded compact]].

@@ -8,7 +8,7 @@ dispatches on, and `read_ava_kwargs` is the single convergence point that gives
 a message's kwargs the typed view.
 
 Writers live in `agent/messages/__init__.py` (+ `agent/graph/claim/node.py`, `agent/graph/llm/node.py`);
-readers in `base/agents/history/timeline.py`, `gateway/agents/history/context_breakdown.py`,
+readers in `base/agents/history/timeline.py`, `base/agents/history/context_breakdown.py`,
 `agent/graph/recall/memory_recall.py`. It sits in `base/` (leaf) so both the agent
 and the gateway import it without an agent <-> gateway package cycle.
 
@@ -161,6 +161,29 @@ def message_read_time(msg: BaseMessage) -> str | None:
     `ava_created_at` directly.
     """
     return kwargs_read_time(read_ava_kwargs(msg))
+
+
+# The header prepended to every replacement compact summary (forced / command /
+# spontaneous) — written by `agent.hooks.compact.compose_summary_message`, and
+# the one invariant the read side (base/agents/history/context_breakdown.py) classifies the
+# untagged summary HumanMessage by. It lives here, in the leaf message-contract
+# module, so the gateway and the insights service can import it without pulling in
+# agent.hooks.compact (whose agent.graph imports do not resolve outside the agent).
+# Two jobs:
+#   1. "just compacted" — the compaction is the one event the post-compact context
+#      has no surviving record of: REMOVE_ALL wipes the turn that ran it, including
+#      the `[system halt] You just called ava.self.compact` ack that announced it.
+#      Without this line the agent re-reads a /compact still sitting in the
+#      summary's verbatim tail as a pending order and runs it again, every turn
+#      (the agent-17 self-compact loop). Stating it happened is the standing signal
+#      the wiped ack cannot be.
+#   2. "your own prior context" — frames the first-person "I" in the body as the
+#      agent's own memory, not the user speaking (the summary lands as a user-role
+#      message).
+COMPACT_SUMMARY_HEADER = (
+    "[system] Your context was just compacted. The following is the summary of "
+    "your own prior context:"
+)
 
 
 # ── Typed accessors for the loosely-typed LangChain message members ──
