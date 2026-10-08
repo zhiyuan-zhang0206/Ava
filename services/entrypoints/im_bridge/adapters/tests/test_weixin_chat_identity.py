@@ -24,6 +24,7 @@ from services.entrypoints.im_bridge.ingress.identity import source_chat_key
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.ingress.types import IngressStatus, ProviderSource
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 
 
 def set_account(
@@ -169,62 +170,71 @@ async def test_real_gateway_response_loss_then_bridge_restart_recovers_one_inbou
     database: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    agent_id = create_agent(db_conn)
-    keys: list[str] = []
-    lost = False
+    async with owned_tasks() as _owned_tasks:
+        agent_id = create_agent(db_conn)
+        keys: list[str] = []
+        lost = False
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal lost
-        keys.append(request.headers["Idempotency-Key"])
-        response = await asyncio.to_thread(
-            gateway_unit.post,
-            request.url.path,
-            json=json.loads(request.content),
-            headers=dict(request.headers),
-        )
-        assert response.status_code == 201
-        if not lost:
-            lost = True
-            # Remove the HTTP cache: the committed inbound itself must recover identity.
-            db_conn.execute("DELETE FROM api_idempotency WHERE key=%s", (keys[-1],))
-            db_conn.commit()
-            raise httpx.ReadError("injected lost committed response", request=request)
-        return httpx.Response(response.status_code, json=response.json())
-
-    with database.pool(min_size=1, max_size=2) as pool:
-        async with httpx.AsyncClient(
-            base_url="http://test-gateway", transport=httpx.MockTransport(handler)
-        ) as transport:
-            client = GatewayClient(
-                im_bridge_config(im_send_retry_delays=(0.0,)),
-                gateway_url="http://test-gateway",
-                auth_headers={},
+        async def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal lost
+            keys.append(request.headers["Idempotency-Key"])
+            response = await asyncio.to_thread(
+                gateway_unit.post,
+                request.url.path,
+                json=json.loads(request.content),
+                headers=dict(request.headers),
             )
-            client._client = transport
-            key = await inbound_key("123")
-            with pytest.raises(RuntimeError, match="after 1 attempts"):
-                await client.send_message(agent_id, "same", idempotency_key=key)
-            assert lost
-            # Legacy HTTP admission exists even though its first response was lost.
-            # Cutover adopts that original target without issuing another HTTP call.
-            core = IMBridgeCore(im_bridge_config(im_send_retry_delays=(0.0,)), client, db_pool=pool)
-            adapter = WeixinAdapter(core)
-            core.register(adapter)
-            store = WeixinIngressStore(pool)
-            held = store.initialize("https://ilinkai.weixin.qq.com", "bot-id", None)
-            store.begin_cutover(held, expected_cursor="")
-            receipt = await adapter._handle_message(_message(text="same", message_id="123"))
-            assert receipt.status == IngressStatus.ACCEPTED
-            assert receipt.route.agent_id == agent_id
-            count = len(keys)
-            assert await adapter._handle_message(_message(text="same", message_id="123")) == receipt
-            assert len(keys) == count
-            _ingress, current = await adapter._ensure_ingress()
-            store.checkpoint(current, "", "cutover-empty", provider_empty=True)
-    assert all(item == keys[0] for item in keys)
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)
-    ).fetchone() == (1,)
+            assert response.status_code == 201
+            if not lost:
+                lost = True
+                # Remove the HTTP cache: the committed inbound itself must recover identity.
+                db_conn.execute("DELETE FROM api_idempotency WHERE key=%s", (keys[-1],))
+                db_conn.commit()
+                raise httpx.ReadError("injected lost committed response", request=request)
+            return httpx.Response(response.status_code, json=response.json())
+
+        with database.pool(min_size=1, max_size=2) as pool:
+            async with httpx.AsyncClient(
+                base_url="http://test-gateway", transport=httpx.MockTransport(handler)
+            ) as transport:
+                client = GatewayClient(
+                    im_bridge_config(im_send_retry_delays=(0.0,)),
+                    gateway_url="http://test-gateway",
+                    auth_headers={},
+                )
+                client._client = transport
+                key = await inbound_key("123")
+                with pytest.raises(RuntimeError, match="after 1 attempts"):
+                    await client.send_message(agent_id, "same", idempotency_key=key)
+                assert lost
+                # Legacy HTTP admission exists even though its first response was lost.
+                # Cutover adopts that original target without issuing another HTTP call.
+                core = IMBridgeCore(
+                    im_bridge_config(im_send_retry_delays=(0.0,)),
+                    client,
+                    db_pool=pool,
+                    tasks=_owned_tasks,
+                )
+                adapter = WeixinAdapter(core)
+                core.register(adapter)
+                store = WeixinIngressStore(pool)
+                held = store.initialize("https://ilinkai.weixin.qq.com", "bot-id", None)
+                store.begin_cutover(held, expected_cursor="")
+                receipt = await adapter._handle_message(_message(text="same", message_id="123"))
+                assert receipt.status == IngressStatus.ACCEPTED
+                assert receipt.route.agent_id == agent_id
+                count = len(keys)
+                assert (
+                    await adapter._handle_message(_message(text="same", message_id="123"))
+                    == receipt
+                )
+                assert len(keys) == count
+                _ingress, current = await adapter._ensure_ingress()
+                store.checkpoint(current, "", "cutover-empty", provider_empty=True)
+        assert all(item == keys[0] for item in keys)
+        assert db_conn.execute(
+            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)
+        ).fetchone() == (1,)
 
 
 async def test_same_event_changed_body_or_selection_does_not_claim_recovery(
