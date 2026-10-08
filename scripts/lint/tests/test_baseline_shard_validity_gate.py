@@ -10,8 +10,11 @@ the rest of the gate."""
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -31,8 +34,23 @@ def _clear_baseline_dir(root: pathlib.Path) -> pathlib.Path:
     return directory
 
 
-def _git(root: pathlib.Path, *args: str) -> None:
-    subprocess.run(  # noqa: S603 — fixed test commands, never external input.
+def _run(
+    command: list[str],
+    *,
+    cwd: pathlib.Path,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+    input: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 — fixed test commands, never external input.
+        command, cwd=cwd, env=env, check=check, capture_output=True, text=True, input=input
+    )
+
+
+def _git(
+    root: pathlib.Path, *args: str, input: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    return _run(
         [
             "git",
             "-C",
@@ -45,9 +63,8 @@ def _git(root: pathlib.Path, *args: str) -> None:
             "commit.gpgsign=false",
             *args,
         ],
-        check=True,
-        capture_output=True,
-        text=True,
+        cwd=root,
+        input=input,
     )
 
 
@@ -133,3 +150,66 @@ def test_an_empty_committed_baseline_still_enforces_the_guard(
     captured = capsys.readouterr()
     assert "guard skipped" not in captured.err
     assert "added patch_targets entry base/new.py::base.db._pool" in captured.out
+
+
+@pytest.mark.parametrize("command", ["ls-tree", "cat-file", "show"])
+def test_cli_fails_when_baseline_history_cannot_be_read(
+    tmp_path: pathlib.Path, command: str
+) -> None:
+    real_git = shutil.which("git")
+    assert real_git is not None
+    binary = tmp_path / "bin/git"
+    binary.parent.mkdir()
+    binary.write_text(
+        f"#!{sys.executable}\nimport os, sys\n"
+        f"if {command!r} in sys.argv[1:]:\n"
+        "    sys.stderr.write('injected Git read failure')\n    sys.exit(71)\n"
+        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    binary.chmod(0o755)
+    repo = pathlib.Path(lcs.__file__).resolve().parents[2]
+    env = dict(
+        os.environ,
+        PATH=f"{binary.parent}{os.pathsep}{os.environ['PATH']}",
+        LINT_STRUCTURE_BASELINE_BASE="HEAD",
+    )
+    result = _run(
+        [
+            sys.executable,
+            str(repo / "scripts/lint/code_structure.py"),
+            str(repo / "scripts/structure/baseline_shards.py"),
+        ],
+        cwd=repo,
+        env=env,
+        check=False,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "guard skipped" not in result.stderr
+
+
+def test_actual_cli_compares_an_explicit_empty_git_tree(tmp_path: pathlib.Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    tree = _git(tmp_path, "mktree", input="").stdout.strip()
+    for component in reversed(baseline_shards.SHARD_DIR.split("/")):
+        tree = _git(tmp_path, "mktree", input=f"040000 tree {tree}\t{component}\n").stdout.strip()
+    revision = _git(tmp_path, "commit-tree", tree, input="Empty baseline tree\n").stdout.strip()
+    repo = pathlib.Path(lcs.__file__).resolve().parents[2]
+    env = dict(
+        os.environ,
+        GIT_ALTERNATE_OBJECT_DIRECTORIES=str(tmp_path / ".git/objects"),
+        LINT_STRUCTURE_BASELINE_BASE=revision,
+    )
+    result = _run(
+        [
+            sys.executable,
+            str(repo / "scripts/lint/code_structure.py"),
+            str(repo / "scripts/structure/baseline_shards.py"),
+        ],
+        cwd=repo,
+        env=env,
+        check=False,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "guard skipped" not in result.stderr
+    assert "added ambient_state entry" in result.stdout
