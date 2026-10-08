@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
+from typing import Any
 
 from langchain_core.messages import AIMessage
 
+from base.agents.messages.kwargs import message_addl_kwargs
 from base.lm.plugin_providers import model_catalog
 from base.lm.pricing import CostQuote
 from base.lm.pricing.cache_writes import cache_write_tokens
@@ -55,8 +57,13 @@ def log_usage_from_message(
     for_agent_id: int | None = None,
     cache_mechanism: str | None = None,
     cache_scope: str | None = None,
+    stamp_message: bool = False,
 ) -> tuple[int, float] | None:
-    """Log one completed LangChain message's token usage and price snapshot."""
+    """Log one completed LangChain message's token usage and price snapshot.
+
+    `stamp_message` also writes the logged figures onto `msg.additional_kwargs["ava_usage"]`
+    (`AvaUsage`): the one `quote` result feeds the event and the message alike.
+    """
     from base.lm.pricing import tally_tokens
 
     if not isinstance(msg, AIMessage):
@@ -78,7 +85,8 @@ def log_usage_from_message(
 
     reasoning = extract_reasoning_tokens(msg.usage_metadata, content=msg.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     write_5m, write_1h = cache_write_tokens(usage_metadata.get("input_token_details") or {})
-    return _log_usage(
+    record: dict[str, Any] = {}
+    logged = _log_usage(
         usage_model(msg, model),
         in_total=in_total,
         out_total=out_total,
@@ -96,7 +104,11 @@ def log_usage_from_message(
         cache_scope=cache_scope,
         emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
         requested_model=model,
+        record_out=record,
     )
+    if stamp_message:
+        message_addl_kwargs(msg)["ava_usage"] = record
+    return logged
 
 
 def log_usage_fields(
@@ -167,6 +179,7 @@ def _log_usage(
     requested_model: str | None = None,
     cache_write_5m: int = 0,
     cache_write_1h: int = 0,
+    record_out: dict[str, Any] | None = None,
 ) -> tuple[int, float]:
     """Emit one priced or explicitly unpriced usage event and billing span."""
     from base.lm.billing import emit_billing_event, vendor_of_model
@@ -192,6 +205,19 @@ def _log_usage(
             model=model,
         )
         snapshot = {"unpriced": 1}
+    # The one figure set both the event and (via `record_out`) the message carry.
+    record: dict[str, Any] = {
+        "model": model,
+        "in_total": in_total,
+        "out_total": out_total,
+        "cache_read": cache_read,
+        "cache_write_5m": cache_write_5m,
+        "cache_write_1h": cache_write_1h,
+        "reasoning": reasoning,
+        **snapshot,
+    }
+    if record_out is not None:
+        record_out.update(record)
 
     vendor = vendor_of_model(model)
     if vendor is not None and emit_billing:
@@ -217,15 +243,8 @@ def _log_usage(
         "out={out_total} reason={reasoning}{reason_pct}",
         event="llm_usage",
         calls=1,
-        in_total=in_total,
-        cache_read=cache_read,
-        cache_write_5m=cache_write_5m,
-        cache_write_1h=cache_write_1h,
         cache_pct=cache_pct,
-        out_total=out_total,
-        reasoning=reasoning,
         reason_pct=reason_pct,
-        model=model,
         **({"requested_model": requested_model} if requested_model is not None else {}),
         latency_ms=latency_ms,
         decode_ms=decode_ms,
@@ -236,6 +255,6 @@ def _log_usage(
             if cache_mechanism is not None
             else {}
         ),
-        **snapshot,
+        **record,
     )
     return in_total + out_total, priced.cost_usd if priced is not None else 0.0
