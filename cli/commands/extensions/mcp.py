@@ -244,7 +244,7 @@ def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
         f"[ava mcp {'enable' if enabled else 'disable'}] {verb} MCP server '{name}' "
         f"in {local_config_path()}"
     )
-    print("  takes effect on the next connect; no restart needed.")
+    print("  takes effect on the next tool request; no restart needed.")
     if name not in load_mcp_config(include_disabled=True):
         print(
             f"  (note: no server named '{name}' is currently defined; "
