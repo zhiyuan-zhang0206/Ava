@@ -72,7 +72,7 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda _operation, **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _stop_commands.cmd_restart()
     assert rc != 0

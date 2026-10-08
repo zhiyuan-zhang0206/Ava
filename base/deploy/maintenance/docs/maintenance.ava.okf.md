@@ -67,9 +67,9 @@ classification and the quiesced admission gate. `ava stop` / `ava restart` walk 
 `starting` or `ready` any more (they remain in the journal vocabulary so an
 older journal still decodes). A failed prepare/drain/stop keeps the hold. Ordinary
 `ava start` authorizes the existing operation for bring-up and resumes after
-readiness. The internal
-`authorized_start` ContextVar is exact-operation authority for nested calls,
-not a service-process credential. Stranded-pause recovery cannot abandon a
+readiness. `authorized_start` returns the operation snapshot; nested calls pass
+it explicitly and verify the journal holder and acquisition time. It grants
+no service-process credential. Stranded-pause recovery cannot abandon a
 maintenance hold. A recorded blocking continuation/flush failure blocks the
 drain, the phase transitions and every bare resume path; `ava start` is the exit.
 Once the unit serves, `cli/commands/lifecycle/_failed_receipts.py` settles each
