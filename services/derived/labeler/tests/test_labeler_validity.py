@@ -174,7 +174,8 @@ def _no_publish(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     without a live events channel."""
     published: list[str] = []
 
-    async def _capture(_self: Any, _channel: str, payload: str) -> int:
+    async def _capture(_self: Any, _channel: str, payload: str, *, auth_retry: bool) -> int:
+        assert auth_retry is False
         published.append(payload)
         return 1
 

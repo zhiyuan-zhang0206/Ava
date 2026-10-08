@@ -192,7 +192,8 @@ class TestGenerateLabelAsync:
         )
         published: list[str] = []
 
-        async def _capture(_self: Any, channel: str, payload: str) -> int:
+        async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             assert channel == settings.data_plane.events_channel
             published.append(payload)
             return 1
@@ -234,7 +235,8 @@ class TestGenerateLabelAsync:
         )
         published: list[str] = []
 
-        async def _capture(_self: Any, channel: str, payload: str) -> int:
+        async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             published.append(payload)
             return 1
 
@@ -273,7 +275,8 @@ class TestGenerateLabelAsync:
         )
         published: list[str] = []
 
-        async def _capture(_self: Any, channel: str, payload: str) -> int:
+        async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             published.append(payload)
             return 1
 
@@ -302,7 +305,8 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ExplodingLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
-        async def _capture(_self: Any, channel: str, payload: str) -> int:
+        async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             published.append(payload)
             return 1
 
@@ -324,7 +328,8 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _FakeLLM('"   "'))  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
-        async def _capture(_self: Any, channel: str, payload: str) -> int:
+        async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             published.append(payload)
             return 1
 
@@ -349,7 +354,8 @@ class TestGenerateLabelAsync:
         )
         published: list[str] = []
 
-        async def _capture(_self: Any, _channel: str, payload: str) -> int:
+        async def _capture(_self: Any, _channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             published.append(payload)
             return 1
 
@@ -392,7 +398,8 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ThinkingOnlyLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
-        async def _capture(_self: Any, _channel: str, payload: str) -> int:
+        async def _capture(_self: Any, _channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             published.append(payload)
             return 1
 
@@ -428,7 +435,8 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _MultiTextLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
-        async def _capture(_self: Any, _channel: str, payload: str) -> int:
+        async def _capture(_self: Any, _channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             published.append(payload)
             return 1
 
@@ -561,7 +569,8 @@ class TestSpawnAgentSchedulesLabelGeneration:
             lambda _m, **_: _FakeLLM("\u8fc1\u79fb\u6570\u636e"),  # pyright: ignore[reportUnknownArgumentType]
         )
 
-        async def _noop_publish(_self: Any, channel: str, payload: str) -> int:
+        async def _noop_publish(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             return 1
 
         monkeypatch.setattr(aredis.Redis, "publish", _noop_publish, raising=False)
@@ -600,7 +609,8 @@ class TestPublishLabelUpdated:
     ) -> None:
         captured: dict[str, str] = {}
 
-        async def _capture(_self: Any, channel: str, payload: str) -> int:
+        async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
+            assert auth_retry is False
             captured["channel"] = channel
             captured["payload"] = payload
             return 1
