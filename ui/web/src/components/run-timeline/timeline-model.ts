@@ -23,10 +23,13 @@ export interface Crumb extends TimelineWindow {
 
 export type Selection =
   | { kind: "node"; id: string }
-  | { kind: "unit"; i0: number; i1: number; unitKind: RunTimelineUnit["kind"] };
+  | { kind: "unit"; i0: number; i1: number; unitKind: RunTimelineUnit["kind"] }
+  /** An LLM request: its bar, and every block it read for the first time (`added_from`..`added_to`). */
+  | { kind: "request"; idx: number };
 
 export function isSelected(selection: Selection | null, candidate: Selection): boolean {
   if (selection?.kind === "node" && candidate.kind === "node") return selection.id === candidate.id;
+  if (selection?.kind === "request" && candidate.kind === "request") return selection.idx === candidate.idx;
   if (selection?.kind === "unit" && candidate.kind === "unit") {
     return (
       selection.i0 === candidate.i0 &&
@@ -37,7 +40,7 @@ export function isSelected(selection: Selection | null, candidate: Selection): b
   return false;
 }
 
-export type Hover = Selection | { kind: "request"; idx: number };
+export type Hover = Selection;
 
 export function unitKey(unit: Pick<RunTimelineUnit, "kind" | "i0" | "i1">): string {
   return `${unit.kind}-${unit.i0}-${unit.i1}`;
@@ -426,8 +429,14 @@ export function hoverLit(
   hover: Hover | null,
   nodes: readonly RunTimelineNode[],
   units: readonly RunTimelineUnit[],
+  requests: readonly RunTimelineRequest[] = [],
 ): { nodeIds: Set<string>; unitKeys: Set<string> } {
-  if (hover === null || hover.kind === "request") return { nodeIds: new Set(), unitKeys: new Set() };
+  if (hover === null) return { nodeIds: new Set(), unitKeys: new Set() };
+  if (hover.kind === "request") {
+    const request = requests.find((candidate) => candidate.idx === hover.idx);
+    const covered = request === undefined ? [] : requestUnits(request, units);
+    return { nodeIds: new Set(), unitKeys: new Set(covered.map(unitKey)) };
+  }
   const nodeIds = chainIds(hover, nodes, units);
   const node = hover.kind === "node" ? nodes.find((candidate) => candidate.id === hover.id) : undefined;
   const covered =
@@ -462,6 +471,7 @@ export function contextPoint(
   requests: readonly RunTimelineRequest[],
   view: Viewport,
 ): number | null {
+  if (selection?.kind === "request") return selection.idx;
   if (selection?.kind === "unit") return selection.i0;
   if (selection?.kind === "node") return nodes.find((node) => node.id === selection.id)?.span_start ?? null;
   const sent = requests.map((request) => ({ request, at: Date.parse(request.ts) }));
@@ -724,29 +734,56 @@ export function axisMapTicks(axis: AxisMap, view: Viewport, trackPx: number): Ax
   });
 }
 
-/** A request bar fills this share of the space to its nearest neighbour... */
-export const BAR_FILL = 0.78;
-/** ...but is never thinner than this, nor wider than `BAR_MAX_PX` (also the width of a lone bar's slot), in pixels. */
+/** A request bar is never thinner than this, and keeps this gap to each side of the blocks it spans, in pixels. */
 export const BAR_MIN_PX = 2;
-export const BAR_MAX_PX = 48;
+export const BAR_GAP_PX = 1;
 
-/** Bar widths for bars centred at `centersPx` (ascending): each fills `BAR_FILL` of the distance to its nearest neighbour. */
-export function barWidths(centersPx: readonly number[]): number[] {
-  return centersPx.map((at, i) => {
-    const gaps: number[] = [];
-    if (i > 0) gaps.push(at - centersPx[i - 1]);
-    if (i + 1 < centersPx.length) gaps.push(centersPx[i + 1] - at);
-    const gap = gaps.length > 0 ? Math.min(...gaps) : BAR_MAX_PX;
-    return Math.min(Math.max(gap * BAR_FILL, BAR_MIN_PX), BAR_MAX_PX);
-  });
+/** Whether a request first read the block: the block starts inside its added message range. */
+export function requestCovers(request: Pick<RunTimelineRequest, "added_from" | "added_to">, unit: Pick<RunTimelineUnit, "i0">): boolean {
+  return request.added_from <= unit.i0 && unit.i0 < request.added_to;
+}
+
+/** The blocks a request read for the first time, in message order. */
+export function requestUnits(request: Pick<RunTimelineRequest, "added_from" | "added_to">, units: readonly RunTimelineUnit[]): RunTimelineUnit[] {
+  return units.filter((unit) => requestCovers(request, unit)).sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
+}
+
+/** The request that first read a block, if it is among `requests`. */
+export function requestReading(unit: Pick<RunTimelineUnit, "i0">, requests: readonly RunTimelineRequest[]): RunTimelineRequest | undefined {
+  return requests.find((request) => requestCovers(request, unit));
+}
+
+/**
+ * Where a request's bar sits in axis coordinates: from the start of the first block it read to the end of
+ * the last, on either axis. A request with no block of its own in the data sits at its send time.
+ */
+export function requestSpan(
+  request: RunTimelineRequest,
+  units: readonly RunTimelineUnit[],
+  axis: Pick<AxisMap, "toU" | "unitSpan">,
+): AxisSpan {
+  const covered = requestUnits(request, units);
+  if (covered.length === 0) {
+    const u = axis.toU(Date.parse(request.ts), "lo");
+    return { u0: u, u1: u };
+  }
+  const spans = covered.map((unit) => axis.unitSpan(unit));
+  return { u0: Math.min(...spans.map((span) => span.u0)), u1: Math.max(...spans.map((span) => span.u1)) };
+}
+
+/** A bar's left edge and width in pixels on a track `trackPx` wide showing `viewU`: the span less the gap each side, at least `BAR_MIN_PX`. */
+export function barBox(span: AxisSpan, viewU: { from: number; to: number }, trackPx: number): { left: number; width: number } {
+  const scale = trackPx / (viewU.to - viewU.from);
+  const left = (span.u0 - viewU.from) * scale;
+  const right = (span.u1 - viewU.from) * scale;
+  return { left: left + BAR_GAP_PX, width: Math.max(right - left - 2 * BAR_GAP_PX, BAR_MIN_PX) };
 }
 
 const REQUEST_UNIT_ORDER: readonly RunTimelineUnit["kind"][] = ["thinking", "text", "call"];
 
 /**
- * What clicking a request's bar selects: the block of the AIMessage that made the request (its
- * thinking, else its text, else its call block), so the details and the context breakdown follow
- * that request exactly as they do for a clicked message block. Null when that message has no block.
+ * The block of the AIMessage that made a request (its thinking, else its text, else its call block):
+ * what the details pane shows while the request is selected. Null when that message has no block.
  */
 export function requestSelection(request: Pick<RunTimelineRequest, "idx">, units: readonly RunTimelineUnit[]): Selection | null {
   const own = units.filter((unit) => unit.i0 === request.idx);
@@ -756,17 +793,16 @@ export function requestSelection(request: Pick<RunTimelineRequest, "idx">, units
   return pick === undefined ? null : { kind: "unit", i0: pick.i0, i1: pick.i1, unitKind: pick.kind };
 }
 
-/** Whether a request's bar is the selected one (a selected block of its AIMessage), and whether a hover lights it. */
+/** Whether a request's bar is lit: selected (itself, or a block it read) or hovered (the same). */
 export function requestLit(
-  request: Pick<RunTimelineRequest, "idx">,
+  request: Pick<RunTimelineRequest, "idx" | "added_from" | "added_to">,
   selection: Selection | null,
   hover: Hover | null,
 ): { selected: boolean; hovered: boolean } {
-  return {
-    selected: selection?.kind === "unit" && selection.i0 === request.idx,
-    hovered:
-      (hover?.kind === "request" && hover.idx === request.idx) || (hover?.kind === "unit" && hover.i0 === request.idx),
-  };
+  const lit = (target: Selection | null) =>
+    (target?.kind === "request" && target.idx === request.idx) ||
+    (target?.kind === "unit" && requestCovers(request, { i0: target.i0 }));
+  return { selected: lit(selection), hovered: lit(hover) };
 }
 
 /** What keyboard navigation moves over. */
@@ -778,7 +814,7 @@ export interface NavData {
 
 export type NavKey = "left" | "right" | "up" | "down";
 
-/** One selectable thing of a row: a node, a block, or a request's bar (which selects its AIMessage's block). */
+/** One selectable thing of a row: a node, a block, or a request (its bar, spanning the blocks it read). */
 export interface NavItem {
   row: string;
   selection: Selection;
@@ -825,10 +861,11 @@ export function navItems(row: string, data: NavData): NavItem[] {
   if (row === INPUT_ROW || row === ADDED_ROW) {
     const items: NavItem[] = [];
     for (const request of [...data.requests].sort((a, b) => a.idx - b.idx)) {
-      const selection = requestSelection(request, data.units);
-      if (selection === null) continue;
-      const at = Date.parse(request.ts);
-      items.push({ row, request, selection, start: at, end: at, at });
+      const covered = requestUnits(request, data.units);
+      const sent = Date.parse(request.ts);
+      const start = covered.length > 0 ? Math.min(...covered.map((unit) => Date.parse(unit.start))) : sent;
+      const end = covered.length > 0 ? Math.max(...covered.map((unit) => Date.parse(unit.end))) : sent;
+      items.push({ row, request, selection: { kind: "request", idx: request.idx }, start, end, at: (start + end) / 2 });
     }
     return items;
   }
@@ -839,11 +876,7 @@ export function navItems(row: string, data: NavData): NavItem[] {
 }
 
 function indexOfSelection(items: readonly NavItem[], selection: Selection): number {
-  return items.findIndex((item) =>
-    item.request !== undefined
-      ? selection.kind === "unit" && selection.i0 === item.request.idx
-      : isSelected(selection, item.selection),
-  );
+  return items.findIndex((item) => isSelected(selection, item.selection));
 }
 
 /** The item covering the instant `at`, else the closest one; of several, the one whose middle is nearest. */
@@ -859,20 +892,21 @@ function nearest(items: readonly NavItem[], at: number): NavItem | undefined {
 /** The row a selection lives in when no row is remembered for it. */
 function rowOfSelection(selection: Selection, data: NavData): string | null {
   if (selection.kind === "unit") return UNITS_ROW;
+  if (selection.kind === "request") return INPUT_ROW;
   const node = data.nodes.find((candidate) => candidate.id === selection.id);
   return node === undefined ? null : levelRowId(node.level);
 }
 
 /**
- * The next selection of an arrow key. `row` is the row the current selection was made in (a request's
- * bar and its message block share one selection, so the row cannot be read off it).
+ * The next selection of an arrow key. `row` is the row the current selection was made in (the
+ * two context rows select the same request, so the row cannot be read off it).
  *
  * left / right: the previous / next item of the row (none past either end).
  * up: the parent when the item has one in the row above (a node's, a block's level-1 node); otherwise
  *   the item of the row above that covers, else is closest to, the item's time. From a request's bar
- *   to the Messages row it is the request's own block, and between the two context rows the same request.
+ *   to the Messages row it is the last block the request read, and between the two context rows the same request.
  * down: the node's first child when it has one in the row below (a level-1 node's first block);
- *   otherwise covering / closest in time; Messages down to the request of that block when it is one.
+ *   otherwise covering / closest in time; Messages down to the request that read the block.
  * No current selection: the leftmost item in the viewport (Messages first), else the row's first.
  * Returns null when there is nowhere to go.
  */
@@ -914,11 +948,15 @@ export function navigate(
   const sameRequest = (item: NavItem) => item.request !== undefined && item.request.idx === here.request?.idx;
   let found: NavItem | undefined;
   if (here.request !== undefined && targetRow === UNITS_ROW) {
-    found = targets[indexOfSelection(targets, here.selection)];
+    // From a bar up to Messages: the last block it read.
+    const last = requestUnits(here.request, data.units).at(-1);
+    found = targets.find((item) => item.unit === last);
   } else if (here.request !== undefined) {
     found = targets.find(sameRequest);
   } else if (here.unit !== undefined && targetRow !== UNITS_ROW && !targetRow.startsWith("level-")) {
-    found = targets[indexOfSelection(targets, here.selection)];
+    // From a block down to the context rows: the request that read it.
+    const reader = requestReading(here.unit, data.requests);
+    found = targets.find((item) => item.request === reader);
   } else if (key === "up") {
     const parent = here.node?.parent ?? here.unit?.parent ?? null;
     found = parent === null ? undefined : targets.find((item) => item.node?.id === parent);

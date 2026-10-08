@@ -192,3 +192,11 @@ def test_an_agent_with_no_request_has_no_context(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(HTTPException) as caught:
         call(view, 0, monkeypatch)
     assert caught.value.status_code == 404
+
+
+def test_a_request_reports_the_message_range_its_addition_covers() -> None:
+    view = three_requests_then_a_session()
+    requests = context.llm_requests(view)
+    # Half-open, ending at the request's own AIMessage; later requests start at the previous reply (re-sent).
+    assert [(r.added_from, r.added_to) for r in requests] == [(1, 2), (2, 5), (5, 7), (8, 9)]
+    assert all(r.added_to == r.idx for r in requests)
