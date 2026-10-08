@@ -10,7 +10,7 @@ the ~20% shard skew measured
 in the 2026-08-30 CI investigation. This script re-measures BOTH suites the
 same way CI runs them and rewrites the file:
 
-* backend: `pytest --ignore=tests/e2e -m "not flaky" -n 4` (no positional path:
+* backend: `pytest --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4` (no positional path:
   pyproject's `testpaths` collect the top-level tests/ and every package's own
   `<pkg>/**/tests/`, exactly as the CI shards do) plus CI's
   `--cov=agent --cov=ava ...` module list (coverage tracing is part of the
@@ -18,7 +18,9 @@ same way CI runs them and rewrites the file:
   faster and the split under-estimates);
 * e2e: `pytest tests/e2e/ -v -n 2` (CI's e2e job carries no --cov).
 
-The nightly workflow invokes `measure` once per CI-shaped shard (16 backend,
+Successful main CI records timings during its existing runs. The refresh
+workflow reuses a complete run after 20 main changes; nightly fallback invokes
+`measure` once per CI-shaped shard (16 backend,
 four e2e), each on its own runner. A measurement retries its isolated shard
 three times, reseeding its temporary duration input before every attempt, so a
 failed attempt cannot affect selection or leak partial measurements into its
@@ -41,9 +43,8 @@ isolated `measure` + `merge` path. A missing or corrupt `.test_durations`
 reads as empty (and is healed by a successful merge); an unexpected JSON shape
 is an error, not silently rebuilt.
 
-Note: the first refresh after this feature lands rewrites the whole file
-(the committed one was last written by a one-off script), after which each
-refresh only touches the values that changed.
+Cadence and measured-versus-applied provenance are owned by
+`duration_refresh_policy.py`; see `scripts/ci/docs/duration-refresh.md`.
 """
 
 from __future__ import annotations
@@ -147,6 +148,7 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
         groups = _BACKEND_SHARDS
         pytest_args = [
             "-q",
+            "--omit-static-tests",
             "--ignore=tests/e2e",
             "-m",
             "not flaky",
