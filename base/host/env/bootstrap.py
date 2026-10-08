@@ -45,6 +45,17 @@ _FETCH_ATTEMPTS = 2
 _FETCH_TIMEOUT_S = 10.0
 
 
+def service_plugin_config_packet() -> str | None:
+    """The launcher's fixed plugin config snapshot for this service generation.
+
+    Separate from cluster bootstrap: a later bootstrap fetch must not replace
+    the values captured by this unit's manifest and gate.
+    """
+    from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
+
+    return os.environ.get(SERVICE_PLUGIN_CONFIG_ENV)
+
+
 def _fetch_backoff(attempt: int) -> float:
     return 0.5 * (attempt + 1)
 

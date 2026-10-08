@@ -80,6 +80,11 @@ def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     elif marker == "agent":
         extra["AVA_DB_URL"] = runner_db_url_projection()
     extra.update(api_delivery(api) if (api := api_access(spec)) is not None else {})
+    if spec.plugin_config is not None:
+        from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
+        from base.packages.plugins.config_registration import service_config_packet
+
+        extra[SERVICE_PLUGIN_CONFIG_ENV] = service_config_packet(*spec.plugin_config)
     return extra
 
 
