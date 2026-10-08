@@ -12,6 +12,7 @@ the repo), so no allowlist `per-file-ignores` pattern can match it; the repo
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -24,7 +25,15 @@ def _ruff_check(path: Path) -> subprocess.CompletedProcess[str]:
     # S603: the command is internally derived (venv ruff binary + repo
     # pyproject.toml + pytest tmp path) — never external input.
     return subprocess.run(  # noqa: S603
-        [_RUFF, "check", "--config", str(_REPO_ROOT / "pyproject.toml"), str(path)],
+        [
+            _RUFF,
+            "check",
+            "--output-format",
+            "json",
+            "--config",
+            str(_REPO_ROOT / "pyproject.toml"),
+            str(path),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -38,5 +47,6 @@ def test_contextvars_import_outside_allowlist_is_rejected(tmp_path: Path) -> Non
     result = _ruff_check(probe)
 
     assert result.returncode == 1
-    assert "TID251" in result.stdout
-    assert "contextvars is allowlisted only" in result.stdout
+    violation = next(item for item in json.loads(result.stdout) if item["code"] == "TID251")
+    assert "LangGraph Runtime[AvaContext]" in violation["message"]
+    assert "explicit parameters outside a graph run" in violation["message"]
