@@ -412,7 +412,9 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
     started, settled = asyncio.Event(), asyncio.Event()
 
-    async def summarizing(_messages: object, _llm: object, _model: str) -> str:
+    async def summarizing(
+        _messages: object, _llm: object, _model: str, *, binding: object = None
+    ) -> str:
         started.set()
         try:
             await asyncio.Future()

@@ -17,7 +17,6 @@ clock inside the stream keeps the recorded timestamps exact and stable.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,17 +24,9 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_with_cache_retry
-from agent.llm.cache import CacheRef, LlmInvocation
-from ava_builtins.plugins.lm_google import gemini_cache
 from base.agents.observation.turn_progress import TurnProgress
 from base.host.env.agent_slices import AgentSlices
-
-
-@dataclass
-class _NamedCacheRef:
-    """The agent's opaque cache contract; provider TTL and memo keys are not consumed here."""
-
-    name: str
+from base.lm.call import LlmInvocation
 
 
 class _FakeClock:
@@ -68,11 +59,13 @@ class _FakeHandler(RedisStreamHandler):
 
 
 def _plain_invocation(llm: MagicMock) -> LlmInvocation:
-    return LlmInvocation(runnable=llm, messages=[HumanMessage(content="hi")], cache_ref=None)
+    return LlmInvocation(
+        runnable=llm, messages=[HumanMessage(content="hi")], used_explicit_cache=False
+    )
 
 
 def _patch_prepare(monkeypatch: pytest.MonkeyPatch, invocation_factory):
-    async def _fake_prepare(llm, messages, _policy):
+    async def _fake_prepare(llm, messages, _policy, _binding=None):
         return invocation_factory(llm)
 
     monkeypatch.setattr("agent.graph.llm._stream.prepare_invocation", _fake_prepare)  # pyright: ignore[reportUnknownArgumentType]
@@ -151,6 +144,7 @@ async def test_stream_with_cache_retry_stamps_decode_ms(monkeypatch: pytest.Monk
     assert handler.llm_decode_ms == 8000.0  # (1013 - 1005) * 1000
     assert handler.llm_latency_ms == 13000.0  # (1013 - 1000) * 1000
     assert len(chunks) == 2
+    assert "discarded partial" not in [chunk.content for chunk in chunks]
 
 
 async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -222,6 +216,8 @@ async def test_stale_cache_retry_uses_second_attempt_window(
     async def _flaky_stream() -> AsyncIterator[AIMessageChunk]:
         attempts["n"] += 1
         if attempts["n"] == 1:
+            clock.t = 1001.0
+            yield AIMessageChunk(content="discarded partial")
             raise _StaleCacheError("CachedContent not found")
         clock.t = 1005.0
         yield AIMessageChunk(content="a")
@@ -234,26 +230,23 @@ async def test_stale_cache_retry_uses_second_attempt_window(
     fake_llm.astream.side_effect = lambda _messages: _flaky_stream()
     invocations = {"n": 0}
 
-    cache_ref: CacheRef = _NamedCacheRef(name="cache-1")
+    recovered: list[Exception] = []
 
-    def _invocation_factory(llm):
+    def recover(exc: BaseException) -> LlmInvocation:
+        assert isinstance(exc, _StaleCacheError)
+        recovered.append(exc)
+        return _plain_invocation(fake_llm)
+
+    def _invocation_factory(llm: MagicMock):
         invocations["n"] += 1
-        if invocations["n"] == 1:
-            return LlmInvocation(
-                runnable=llm,  # pyright: ignore[reportUnknownArgumentType]
-                messages=[HumanMessage(content="hi")],
-                cache_ref=cache_ref,
-            )
-        return _plain_invocation(llm)  # pyright: ignore[reportUnknownArgumentType]
+        return LlmInvocation(
+            runnable=llm,
+            messages=[HumanMessage(content="hi")],
+            used_explicit_cache=True,
+            recover=recover,
+        )
 
     _patch_prepare(monkeypatch, _invocation_factory)
-    monkeypatch.setattr(gemini_cache, "is_stale_cache_error", lambda _exc: True)  # pyright: ignore[reportUnknownArgumentType]
-    invalidated: list[CacheRef] = []
-
-    def invalidate(ref: CacheRef) -> None:
-        invalidated.append(ref)
-
-    monkeypatch.setattr(gemini_cache, "invalidate", invalidate)
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
@@ -261,8 +254,11 @@ async def test_stale_cache_retry_uses_second_attempt_window(
         fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
     )
 
-    assert len(invalidated) == 1 and invalidated[0] is cache_ref
+    assert len(recovered) == 1
+    assert invocations["n"] == 1
+    assert handler.used_explicit_cache is False
     assert handler.reset_calls == 1
     assert handler.llm_decode_ms == 3000.0  # (1008 - 1005) * 1000 — 2nd attempt only
     assert handler.llm_latency_ms == 8000.0  # (1008 - 1000) * 1000 — whole call
     assert len(chunks) == 2
+    assert "discarded partial" not in [chunk.content for chunk in chunks]
