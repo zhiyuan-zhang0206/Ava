@@ -72,7 +72,7 @@ def _git(
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every main() call scans only its own temporary root."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
 
 
 @pytest.mark.parametrize(
@@ -152,7 +152,7 @@ def test_an_empty_committed_baseline_still_enforces_the_guard(
     assert "added patch_targets entry base/new.py::base.db._pool" in captured.out
 
 
-@pytest.mark.parametrize("command", ["ls-tree", "cat-file", "show"])
+@pytest.mark.parametrize("command", ["ls-tree", "cat-file", "show", "diff", "merge-base"])
 def test_cli_fails_when_baseline_history_cannot_be_read(
     tmp_path: pathlib.Path, command: str
 ) -> None:
@@ -174,6 +174,8 @@ def test_cli_fails_when_baseline_history_cannot_be_read(
         PATH=f"{binary.parent}{os.pathsep}{os.environ['PATH']}",
         LINT_STRUCTURE_BASELINE_BASE="HEAD",
     )
+    if command == "merge-base":
+        env.pop("LINT_STRUCTURE_BASELINE_BASE")
     result = _run(
         [
             sys.executable,

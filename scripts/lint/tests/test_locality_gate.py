@@ -56,7 +56,7 @@ def _git(root: pathlib.Path, *args: str) -> None:
 def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     """A repo root wired to lcs._REPO_ROOT, with an all-empty baseline already in place."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
     _commit_baseline(tmp_path, "Empty baseline")
     return tmp_path
