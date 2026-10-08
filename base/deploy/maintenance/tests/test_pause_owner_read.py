@@ -12,5 +12,5 @@ def test_admission_read_does_not_create_an_uninstalled_home(
     home = tmp_path / "uninstalled"
     monkeypatch.setattr(paths, "ava_home", lambda: home)
     assert pause_owner.read().status == "inactive"
-    admission.require_start_allowed()
+    admission.require_start_allowed(None)
     assert not home.exists()

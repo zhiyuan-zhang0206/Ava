@@ -15,6 +15,7 @@ from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster import session_name
 from base.cluster.machine import MachineRoles
 from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from base.paths import prod_service_checkout_error
 from cli.commands._repo import _repo_root
@@ -162,11 +163,13 @@ class _Selection:
     persist_services: bool
 
 
-def _guard_start(runtime: StartRuntime | None) -> tuple[StartRuntime, Path] | int:
+def _guard_start(
+    runtime: StartRuntime | None, operation: PauseOwnerSnapshot | None
+) -> tuple[StartRuntime, Path] | int:
     """Refuse a start admission, a destroyed home or a disposable prod checkout."""
     from base.deploy.maintenance import admission
 
-    admission.require_start_allowed()
+    admission.require_start_allowed(operation)
     from base.paths import ava_home
 
     if (ava_home() / "destroy-intent.json").exists():
@@ -370,6 +373,7 @@ def _readiness_verdict(launch: Any, wait: Any) -> int | None:
 
 @resume_after_start
 def _cmd_start_body(
+    operation: PauseOwnerSnapshot | None,
     disabled_services: tuple[str, ...] = (),
     only_services: tuple[str, ...] = (),
     *,
@@ -386,7 +390,7 @@ def _cmd_start_body(
     import cli.commands.lifecycle.root_driver as _root_driver_commands
     from base.deploy.maintenance import admission
 
-    guarded = _guard_start(runtime)
+    guarded = _guard_start(runtime, operation)
     if isinstance(guarded, int):
         return guarded
     runtime, repo = guarded
@@ -471,6 +475,7 @@ def cmd_start(
     all_services: bool = False,
     persist_services: bool = True,
     runtime: StartRuntime | None = None,
+    operation: PauseOwnerSnapshot | None = None,
 ) -> int:
     """Converge one configured unit through storage, schema, root and readiness.
 
@@ -479,6 +484,7 @@ def cmd_start(
     selection.
     """
     return _cmd_start_body(
+        operation,
         disabled_services=disabled_services,
         only_services=only_services,
         all_services=all_services,
