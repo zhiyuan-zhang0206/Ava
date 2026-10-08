@@ -88,6 +88,7 @@ import type { NoticesFeed,
 } from "../contracts/types";
 import { projectAgentStatus } from "../contracts/types";
 import { sendMessageWithReconciliation } from "../agents/message-delivery";
+import { submitUploadedFiles } from "./upload-delivery";
 
 export { MessageDeliveryUnknownError } from "../agents/message-delivery";
 export { API_BASE } from "./api-base";
@@ -742,6 +743,8 @@ export const api = {
   },
 
   // --- File Upload ---
+
+  submitUploadedFiles,
 
   // `deliver=false` saves the files silently and returns their reference urls
   // without notifying the agent — the native-image-attachment path, where the

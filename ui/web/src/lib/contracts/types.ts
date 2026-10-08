@@ -638,6 +638,7 @@ export type UiContributionsResponse = Schemas["UiContributionsResponse"];
 
 export type UploadedFile = Schemas["UploadedFile"];
 export type UploadedBatch = Schemas["UploadedBatch"];
+export type DeliveredUploadAcceptance = Schemas["Acceptance"];
 
 // --- Multimodal message content (POST /api/agents/{id}/messages) ---
 

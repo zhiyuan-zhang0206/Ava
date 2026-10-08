@@ -173,6 +173,7 @@ vi.mock("@/lib/transport/api", () => ({
     sendMessage: vi.fn().mockResolvedValue(undefined),
     cancel: vi.fn().mockResolvedValue(undefined),
     uploadFiles: vi.fn().mockResolvedValue(undefined),
+    submitUploadedFiles: vi.fn().mockResolvedValue(undefined),
     listPages: vi.fn().mockResolvedValue([]),
   },
 }));
@@ -784,7 +785,6 @@ describe("pasted image routing", () => {
   it("uses file delivery without a native thumbnail for a text-only agent", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
-    vi.mocked(api.uploadFiles).mockResolvedValueOnce(uploadResult);
     const image = new File(["png"], "paste.png", { type: "image/png" });
 
     wrap(<HomePage />);
@@ -792,13 +792,14 @@ describe("pasted image routing", () => {
       clipboardData: { files: [image], types: ["Files"] },
     });
 
-    await waitFor(() => expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(
+    await waitFor(() => expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledWith(
       5,
       [image],
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
       expect.any(Function),
     );
-    expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalledWith(5, [image], undefined, false);
+    expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalled();
     expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
   });
 
