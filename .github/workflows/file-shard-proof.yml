@@ -26,7 +26,9 @@ jobs:
         with:
           version: 0.10.2
           enable-cache: true
+      - uses: ./.github/actions/install-pg-redis
       - uses: ./.github/actions/uv-sync
+      - uses: ./.github/actions/vendor-pg-runtime
       - name: Snapshot the complete eligible population
         run: |
           mkdir -p tmp

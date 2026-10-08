@@ -106,7 +106,9 @@ class RuntimeNode(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     fixtures: dict[str, str] = Field(default_factory=dict)
-    outcomes: dict[Phase, str] = Field(default_factory=dict[Phase, str])
+    outcomes: dict[Phase, Literal["passed", "failed", "skipped"]] = Field(
+        default_factory=dict[Phase, Literal["passed", "failed", "skipped"]]
+    )
     seconds: dict[Phase, Seconds] = Field(default_factory=dict[Phase, Seconds])
 
 
@@ -378,6 +380,8 @@ def pytest_runtest_makereport(
         return report
     node = item.config.stash[_RUNTIME].setdefault(item.nodeid, RuntimeNode())
     phase = report.when
+    if phase in node.outcomes:
+        raise pytest.UsageError(f"Repeated runtime phase for {item.nodeid}: {phase}")
     node.outcomes[phase] = report.outcome
     node.seconds[phase] = report.duration
     if phase == "call" and isinstance(item, pytest.Function):

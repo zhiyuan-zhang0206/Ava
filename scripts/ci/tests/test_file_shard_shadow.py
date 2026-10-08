@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -338,7 +339,9 @@ def test_configuration_drift_is_rejected_before_collecting_a_group(tmp_path: Pat
     assert not output.exists()
 
 
-def runtime_proof(root: Path) -> tuple[Plan, Path]:
+@pytest.fixture(scope="module")
+def runtime_proof(tmp_path_factory: pytest.TempPathFactory) -> tuple[Plan, Path]:
+    root = tmp_path_factory.mktemp("runtime-proof")
     manifest, data = plan(root)
     evidence = root / "evidence"
     for mode in ("baseline", "candidate"):
@@ -378,8 +381,10 @@ def runtime_proof(root: Path) -> tuple[Plan, Path]:
     return Plan.model_validate(data), evidence
 
 
-def test_runtime_proof_captures_dynamic_bindings_and_each_execution_once(tmp_path: Path) -> None:
-    snapshot, evidence = runtime_proof(tmp_path)
+def test_runtime_proof_captures_dynamic_bindings_and_each_execution_once(
+    runtime_proof: tuple[Plan, Path],
+) -> None:
+    snapshot, evidence = runtime_proof
     result = compare(snapshot, evidence, 2)
     assert result["matched"] and result["node_count"] == 10
     records = [
@@ -395,8 +400,12 @@ def test_runtime_proof_captures_dynamic_bindings_and_each_execution_once(tmp_pat
     "defect",
     ["dynamic-binding", "missing-worker", "duplicate-node", "failed-generation", "lost-coverage"],
 )
-def test_runtime_proof_refuses_false_equivalence(tmp_path: Path, defect: str) -> None:
-    snapshot, evidence = runtime_proof(tmp_path)
+def test_runtime_proof_refuses_false_equivalence(
+    runtime_proof: tuple[Plan, Path], tmp_path: Path, defect: str
+) -> None:
+    snapshot, source = runtime_proof
+    evidence = tmp_path / "evidence"
+    shutil.copytree(source, evidence)
     path = next(
         path
         for path in evidence.glob("candidate/*/runtime-gw*.json")
@@ -427,3 +436,27 @@ def test_runtime_proof_refuses_false_equivalence(tmp_path: Path, defect: str) ->
         path.write_text(json.dumps(data))
     with pytest.raises(ValueError):
         compare(snapshot, evidence, 2)
+
+
+def test_runtime_proof_rejects_repeated_execution_inside_one_worker(tmp_path: Path) -> None:
+    project(tmp_path)
+    conftest = tmp_path / "tests/conftest.py"
+    conftest.write_text(
+        conftest.read_text() + "from _pytest.runner import runtestprotocol\n"
+        "def pytest_runtest_protocol(item, nextitem):\n"
+        "    if item.nodeid == 'tests/a/test_first.py::test_contract[1]':\n"
+        "        runtestprotocol(item, nextitem=nextitem)\n"
+    )
+    result = run(
+        tmp_path,
+        "-m",
+        "not flaky",
+        "--splits",
+        "1",
+        "--group",
+        "1",
+        "--file-shard-runtime-report",
+        str(tmp_path / "runtime.json"),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Repeated runtime phase" in result.stdout + result.stderr
