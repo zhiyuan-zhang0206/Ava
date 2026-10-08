@@ -4,8 +4,17 @@ import { categoryColor } from "@/lib/context-colors";
 import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineRequest, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
+  axisBox,
+  axisMapTicks,
   axisTicks,
+  buildAxisMap,
   chainIds,
+  GAP_SHARE,
+  layoutSpans,
+  MIN_BLOCK_SHARE,
+  panView,
+  projectBox,
+  zoomView,
   pendingSpans,
   cacheHitRate,
   clampViewport,
@@ -402,5 +411,132 @@ describe("highlight and hover model", () => {
   it("scales the context row to the largest input", () => {
     expect(maxInput(requests)).toBe(50);
     expect(maxInput([])).toBe(0);
+  });
+});
+
+describe("hybrid axis", () => {
+  const T0 = Date.parse("2026-10-04T12:00:00Z");
+  const at = (sec: number) => new Date(T0 + sec * 1000).toISOString();
+  const BASE = { from: T0, to: T0 + 1000 * 1000 };
+  const block = (i0: number, from: number, to: number, tokens: number | null): RunTimelineUnit =>
+    unit({ kind: "text", i0, i1: i0, start: at(from), end: at(to), context_tokens: tokens });
+  const sample = [block(0, 10, 20, 1000), block(1, 20, 30, 3000), block(2, 500, 510, null), block(3, 510, 520, 1000)];
+
+  it("sizes a block by its tokens and a gap by the log of its idle seconds", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    const [a, b, none, d] = sample.map((u) => axis.unitSpan(u));
+    const width = (s: { u0: number; u1: number }) => s.u1 - s.u0;
+    expect(width(b) / width(a)).toBeCloseTo(3);
+    expect(width(d) / width(a)).toBeCloseTo(1);
+    // No token count gets the minimum share of the block weight.
+    expect(width(none)).toBeCloseTo(MIN_BLOCK_SHARE * 5000);
+    // Touching blocks leave no gap; the gaps are the leading, the 470 s and the trailing idle.
+    expect(b.u0).toBeCloseTo(a.u1);
+    const k = (GAP_SHARE * (5000 + MIN_BLOCK_SHARE * 5000)) / (Math.log1p(10) + Math.log1p(470) + Math.log1p(480));
+    expect(a.u0).toBeCloseTo(k * Math.log1p(10));
+    expect(none.u0 - b.u1).toBeCloseTo(k * Math.log1p(470));
+    expect(axis.total).toBeCloseTo(5000 + MIN_BLOCK_SHARE * 5000 + GAP_SHARE * (5000 + MIN_BLOCK_SHARE * 5000));
+  });
+
+  it("is a monotone, invertible map through the blocks and gaps", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    let last = -1;
+    for (let sec = 0; sec <= 1000; sec += 7) {
+      const u = axis.toU(T0 + sec * 1000);
+      expect(u).toBeGreaterThanOrEqual(last);
+      last = u;
+      expect(axis.fromU(u)).toBeCloseTo(T0 + sec * 1000, 3);
+    }
+    expect(axis.toU(BASE.from)).toBe(0);
+    expect(axis.toU(BASE.to)).toBeCloseTo(axis.total);
+    // Half-way through a block is half-way through its width.
+    const a = axis.unitSpan(sample[0]);
+    expect(axis.toU(T0 + 15_000)).toBeCloseTo((a.u0 + a.u1) / 2);
+  });
+
+  it("keeps blocks of no duration visible and in order", () => {
+    const point = unit({ kind: "call", i0: 1, i1: 1, start: at(100), end: at(100), context_tokens: 500 });
+    const after = block(2, 100, 110, 500);
+    const axis = buildAxisMap([after, point], BASE, "hybrid");
+    const p = axis.unitSpan(point);
+    expect(p.u1 - p.u0).toBeGreaterThan(0);
+    expect(axis.unitSpan(after).u0).toBeCloseTo(p.u1);
+    expect(axis.toU(T0 + 100_000, "lo")).toBeCloseTo(p.u0);
+    expect(axis.toU(T0 + 100_000, "hi")).toBeCloseTo(p.u1);
+  });
+
+  it("makes a node span the blocks its message range covers, and its own times when none are loaded", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    const covered = axis.nodeSpan({ start: at(0), end: at(1000), span_start: 1, span_end: 3 });
+    expect(covered.u0).toBeCloseTo(axis.unitSpan(sample[1]).u0);
+    expect(covered.u1).toBeCloseTo(axis.unitSpan(sample[3]).u1);
+    const loose = axis.nodeSpan({ start: at(20), end: at(30), span_start: 40, span_end: 41 });
+    expect(loose.u0).toBeCloseTo(axis.toU(T0 + 20_000, "lo"));
+    expect(loose.u1).toBeCloseTo(axis.toU(T0 + 30_000, "hi"));
+  });
+
+  it("falls back to the linear time map without blocks, and in time mode", () => {
+    const empty = buildAxisMap([], BASE, "hybrid");
+    expect(empty.mode).toBe("time");
+    const time = buildAxisMap(sample, BASE, "time");
+    expect(time.toU(T0 + 250_000)).toBe(250_000);
+    expect(time.unitSpan(sample[0])).toEqual({ u0: 10_000, u1: 20_000 });
+    expect(time.nodeSpan({ start: at(5), end: at(8), span_start: 0, span_end: 3 })).toEqual({ u0: 5000, u1: 8000 });
+  });
+
+  it("gives a view the same boxes in time mode as the plain window math", () => {
+    const time = buildAxisMap(sample, BASE, "time");
+    const view = { from: T0 + 100_000, to: T0 + 600_000 };
+    const box = axisBox(time, at(200), at(300), time.viewU(view));
+    expect(box).toEqual(spanBox(at(200), at(300), { from: new Date(view.from).toISOString(), to: new Date(view.to).toISOString() }));
+    expect(projectBox(0, 1, { from: 2, to: 3 })).toBeNull();
+  });
+
+  it("zooms and pans in axis coordinates and stays inside the extent", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    const base = BASE;
+    const zoomed = zoomView(axis, base, base, 0.5, 0.25);
+    const vu = axis.viewU(zoomed);
+    expect(vu.to - vu.from).toBeCloseTo(axis.total * 0.25, 0);
+    const panned = panView(axis, zoomed, base, 1);
+    expect(axis.viewU(panned).from).toBeGreaterThan(vu.from);
+    expect(panned.to).toBeLessThanOrEqual(base.to);
+    let view = base;
+    for (let i = 0; i < 60; i++) view = zoomView(axis, view, base, 0.5, 0.5);
+    expect(view.to).toBeGreaterThan(view.from);
+    expect(zoomView(axis, base, base, 0.5, 4)).toEqual(base);
+  });
+
+  it("zooming in time mode matches the plain viewport zoom", () => {
+    const time = buildAxisMap(sample, BASE, "time");
+    expect(zoomView(time, BASE, BASE, 0.25, 0.5)).toEqual(zoomViewport(BASE, BASE, 0.25, 0.5));
+    expect(panView(time, BASE, BASE, 0.1)).toEqual(panViewport(BASE, BASE, 0.1));
+  });
+
+  it("lays blocks out on axis coordinates like on time", () => {
+    const places = layoutSpans([{ key: "a", u0: 10, u1: 20 }, { key: "b", u0: 20, u1: 40 }], { from: 0, to: 100 }, 1000);
+    expect(places.map((p) => [p.left, p.width])).toEqual([[100, 100], [200, 200]]);
+  });
+
+  it("labels block starts with their times, keeps them apart, and falls back inside one block", () => {
+    const axis = buildAxisMap(sample, BASE, "hybrid");
+    const ticks = axisMapTicks(axis, BASE, 1000);
+    expect(ticks.length).toBeGreaterThan(0);
+    const lefts = ticks.map((tick) => tick.left);
+    expect([...lefts].sort((x, y) => x - y)).toEqual(lefts);
+    for (let i = 1; i < lefts.length; i++) expect((lefts[i] - lefts[i - 1]) * 10).toBeGreaterThanOrEqual(70);
+    const edge = axis.boundaries.find((b) => b.ms === T0 + 500_000);
+    expect(edge).toBeDefined();
+    const label = new Date(T0 + 500_000);
+    const hh = String(label.getHours()).padStart(2, "0");
+    expect(ticks.map((tick) => tick.label).some((text) => text.startsWith(hh))).toBe(true);
+    // A view inside one block has no block edge: round times are placed through the map.
+    const inside = axisMapTicks(axis, { from: T0 + 21_000, to: T0 + 29_000 }, 1000);
+    expect(inside.length).toBeGreaterThan(0);
+    for (const tick of inside) {
+      expect(tick.left).toBeGreaterThanOrEqual(0);
+      expect(tick.left).toBeLessThanOrEqual(100);
+    }
+    expect(axisMapTicks(buildAxisMap(sample, BASE, "time"), BASE, 1000)).toEqual(axisTicks(BASE));
   });
 });
