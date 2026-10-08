@@ -24,7 +24,7 @@ from services.entrypoints.im_bridge.adapters.feishu import (
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.types import InboundMessage
-from tests.base.poll_until import poll_until_async
+from tests.components.base.poll_until import poll_until_async
 
 
 class FakeCore:

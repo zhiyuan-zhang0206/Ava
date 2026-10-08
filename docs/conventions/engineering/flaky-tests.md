@@ -99,7 +99,7 @@ cron, or Telegram, or the operator's live cluster.
 
 **Evidence.** `tests/e2e/conftest.py:_e2e_process_env` was session-scoped, so
 its environment keys leaked to later tests in the same process. That made
-`tests/test_home_isolation.py` fail in serial runs while parallel CI hid the
+`tests/harness/test_home_isolation.py` fail in serial runs while parallel CI hid the
 leak. The fix narrowed scope and added
 `test_the_e2e_fixture_restores_every_env_key_it_assigns`. On 2026-08-31,
 `tests/cli` calls using `--disable-service restarter` durably wrote
@@ -139,7 +139,7 @@ failure disappears when the test runs alone.
 at 1 in every worker database, so workers collided. Socket tests now bind
 `port=0` and read back the assigned port; timeout tests use a silent listener so
 another worker's stub cannot answer `/health`. The e2e environment leak above
-also depended on `tests/e2e/` collecting before `tests/test_home_isolation.py`,
+also depended on `tests/e2e/` collecting before `tests/harness/test_home_isolation.py`,
 so their guard now runs in one serial worker. The 2026-08-31 marker poisoning
 in PRs #1172 and #1173 was another order dependency.
 
@@ -190,7 +190,7 @@ state and gets `UNREADABLE` or `None` only on a busy runner. In frontend tests,
 a fixed number of `runOnlyPendingTimersAsync` cycles precedes `getByRole`, and
 CI randomly reports that no accessible element was found.
 
-**Evidence.** In the `tests/ops/test_agent_identity.py` family, `stranger_pid`
+**Evidence.** In the `tests/components/ops/test_agent_identity.py` family, `stranger_pid`
 spawned `sleep 60` and yielded immediately. The child's argv was sometimes not
 readable: `test_foreign_for_a_real_live_stranger` saw `UNREADABLE` and
 `test_reads_a_live_processes_argv` saw `cmdline is None`, documented on

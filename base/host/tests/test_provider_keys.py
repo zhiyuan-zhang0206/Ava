@@ -11,7 +11,7 @@ import pytest
 from base import paths
 from base.host.env.dotenv_file import upsert_env
 
-pytest_plugins = ("base.lm.tests.test_provider_plugins",)
+pytest_plugins = ("base.lm.tests.providers.test_provider_plugins",)
 
 
 @pytest.fixture

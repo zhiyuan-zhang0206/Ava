@@ -194,7 +194,9 @@ def test_path_import_rule_skips_test_files_at_any_depth() -> None:
         )
         == {}
     )
-    assert path_imports.measure(tree, "ava_builtins/tests/test_goal_watch_filter.py") == {}
+    assert (
+        path_imports.measure(tree, "ava_builtins/tests/schedules/test_goal_watch_filter.py") == {}
+    )
     assert path_imports.measure(tree, "ava_builtins/skills/integrations/gmail/scripts/run.py") == {
         "ava_builtins/skills/integrations/gmail/scripts/run.py::sys.path": [2]
     }
@@ -203,7 +205,7 @@ def test_path_import_rule_skips_test_files_at_any_depth() -> None:
 def test_test_module_move_still_enforces_file_and_function_budgets(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    old, new = "tests/agent/test_big.py", "agent/graph/tests/test_big.py"
+    old, new = "tests/components/agent/test_big.py", "agent/graph/tests/test_big.py"
     body = "def f(x):\n" + "    if x: pass\n" * 15 + "    return x\n" + "y = 1\n" * 800
     _module(tmp_path / old, body)
     _git(tmp_path, "init", "--quiet")

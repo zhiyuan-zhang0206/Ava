@@ -22,7 +22,7 @@ from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.cursor_store import CursorStore
 from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.types import InboundMessage
-from tests.base.poll_until import poll_until_async
+from tests.components.base.poll_until import poll_until_async
 
 _CHAT = "oc_p2p_1"
 _H = 3600 * 1000

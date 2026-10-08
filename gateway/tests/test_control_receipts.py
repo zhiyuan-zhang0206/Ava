@@ -12,7 +12,7 @@ from base.agents.messages.inbound import InboundKind
 from gateway.agents import lifecycle
 from gateway.app import app
 from gateway.auth.request_principal import AuthPrincipal, principal_key
-from gateway.tests.test_compact_endpoint import _seed_agent
+from gateway.tests.agents.test_compact_endpoint import _seed_agent
 from ops import lifecycle as ops_lifecycle
 
 

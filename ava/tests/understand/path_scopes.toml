@@ -1,0 +1,6 @@
+"tests.path_scoped.ava_tests" = [
+    "test_understand.py",
+    "test_understand_autosave.py",
+    "test_understand_batch.py",
+    "test_understand_injection.py",
+]

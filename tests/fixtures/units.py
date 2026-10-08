@@ -293,7 +293,7 @@ def seed_write_generation() -> Callable[[Path], Any]:
 
     For code that only READS the ledger (launch delivery, bootstrap projection,
     operator consumption): the catalog side is proven on real PostgreSQL in
-    tests/lifecycle/db_authority/. Returns the generation's secret record.
+    tests/components/lifecycle/db_authority/. Returns the generation's secret record.
     """
     from base.cluster.authority import (
         GATEWAY_GROUP,

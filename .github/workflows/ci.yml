@@ -1988,7 +1988,7 @@ jobs:
     # and (b) one AVA_LLM_OVERRIDE scenario fixture (scenario_env) having run —
     # one representative scenario-marked test provides both. The alerts-desktop
     # test is the chosen representative: fast, process-shaped, drives gateway +
-    # agent + scenario env on the real e2e net. tests/test_env_guard_canary.py
+    # agent + scenario env on the real e2e net. tests/harness/test_env_guard_canary.py
     # proves this trimmed shape still catches a simulated leak. The historical
     # full-suite serial shape ran beside it as the non-gating e2e-env-guard-full
     # shadow for its comparison window (2026-09-03 - 2026-09-18); the window's
@@ -2058,12 +2058,12 @@ jobs:
         # warmup minimum (package fixture + AVA_LLM_OVERRIDE scenario fixture);
         # the canary test plus the detectors ride the same serial worker.
         # -n 1 keeps it in-process; the sharded jobs never collect
-        # tests/test_home_isolation.py.
+        # tests/harness/test_home_isolation.py.
         run: >
           uv run pytest
           tests/e2e/visual/test_alerts_no_horizontal_overflow.py::test_alerts_table_no_horizontal_scroll_desktop
-          tests/test_env_guard_canary.py
-          tests/test_home_isolation.py -v -n 1
+          tests/harness/test_env_guard_canary.py
+          tests/harness/test_home_isolation.py -v -n 1
           --junit-xml=tmp/junit-e2e-env-guard.xml -o junit_family=xunit1
 
       - name: Validate native test results

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
-from tests.services.daemon_shutdown_test_support import (
+from tests.components.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
     spawn_child,

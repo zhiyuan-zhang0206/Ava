@@ -1,0 +1,5 @@
+"tests.path_scoped.ava_tests" = [
+    "test_skills.py",
+    "test_skills_attribution.py",
+    "test_skills_mount.py",
+]

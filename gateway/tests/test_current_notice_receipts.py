@@ -11,7 +11,7 @@ from base.config import settings
 from gateway.agents.notice_operations import current as current_notice_receipts
 from gateway.agents.notice_operations import router as guarded_notices
 from gateway.app import app
-from gateway.tests.test_notices_endpoint import _insert_notice, _seed_agent
+from gateway.tests.events.test_notices_endpoint import _insert_notice, _seed_agent
 
 SECRET = "guarded-notice-test-secret"  # noqa: S105 -- isolated credential
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}

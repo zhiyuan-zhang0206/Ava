@@ -17,7 +17,7 @@ its directory, in the same process, runs with the mutated value still installed.
 
 That is not hypothetical. `tests/e2e/conftest.py:_e2e_process_env` reassigns
 `AVA_HOME`, `AVA_GATEWAY_URL` and eight more, restores them in a `finally`, and was
-declared `scope="session"`. `tests/test_home_isolation.py` — the file whose whole job
+declared `scope="session"`. `tests/harness/test_home_isolation.py` — the file whose whole job
 is to notice the operator's real home leaking into the test process — sorts after
 `tests/e2e/` and failed two of its four assertions on every serial run, on `main`,
 for as long as the keyword said `session`. It stayed invisible because CI's backend
@@ -392,7 +392,7 @@ def setup_env_keys(src: str, fixture_name: str) -> tuple[frozenset[str], frozens
     keys-that-need-restoring would report the restore loop's loop variable as an
     unresolvable key and make the guard vacuous.
 
-    Used by `tests/test_home_isolation.py` to check that
+    Used by `tests/harness/test_home_isolation.py` to check that
     `tests/e2e/conftest.py:_e2e_process_env`'s save/restore tuple covers every key
     its body actually assigns, so the tuple cannot drift behind the body. A
     non-literal key lands in `dynamic_exprs` so the caller fails loudly rather than

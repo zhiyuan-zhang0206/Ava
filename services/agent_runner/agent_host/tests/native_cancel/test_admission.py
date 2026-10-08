@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from pydantic import ValidationError
 
 from agent.db import claim_inbound_batch
-from agent.tests.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_work_models import NativeCancelPendingError, NativeWorkTarget
 from base.agents.messages.native_cancel import (
     NativeCancelConflictError,

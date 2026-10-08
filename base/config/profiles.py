@@ -15,7 +15,7 @@ the gateway-hosted schedule runner) constructs every domain exactly as before.
 
 The sets ARE the consumption matrix — which process kinds' code actually
 reads `settings.<domain>` — verified 2026-08-06 by AST scan (PR-A) and kept
-honest by the bidirectional guard in cli/commands/lifecycle/tests/test_gateway_consumer_guard.py
+honest by the bidirectional guard in cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py
 (profile domains == domains the kind's code + import closure consumes). They
 are NOT the capability axis (config-panel grouping only): deriving process env
 sets from capability was the 2026-08-06 #1570 P0 (im_bridge's telegram/feishu
@@ -127,7 +127,7 @@ def profile_domain_error(profile: str, domain: str) -> AttributeError:
         f"domain (per-process config, Task #856) — nothing in this process "
         f"kind reads settings.{domain}. If this read is legitimate, add the "
         f"domain to the '{profile}' profile in PROCESS_PROFILES AND to the "
-        f"consumption-matrix guard (cli/commands/lifecycle/tests/test_gateway_consumer_guard.py); "
+        f"consumption-matrix guard (cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py); "
         f"otherwise move the read to the process kind that owns the domain. "
         f"Dynamic code can check settings.has_domain({domain!r}) first."
     )

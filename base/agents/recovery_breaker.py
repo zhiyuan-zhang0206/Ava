@@ -47,14 +47,14 @@ HALT_SUPPRESSION_WINDOW_S = 3650 * 24 * 3600.0
 # `agent.turn.runloop._circuit_reason` maps 402 to (CIRCUIT_REASON_BILLING). The
 # billing batch-recovery whitelist (task #3919) filters on exactly this
 # value; keep it in sync with CIRCUIT_REASON_BILLING (asserted by
-# tests/base/test_recovery_breaker.py, same pattern as RECOVERY_BREAKER_CLEAR).
+# tests/components/base/test_recovery_breaker.py, same pattern as RECOVERY_BREAKER_CLEAR).
 PERMANENT_REJECT_REASON_BILLING: Final = "billing"
 
 # Correlated against the unaliased agents_meta row (same shape as
 # `base.agents.incarnation.lifecycle_acceptance.FAILED_RESTART_FOR_CURRENT_TARGET`). This is the
 # SQL half of the breaker the automatic-recovery gates embed; keep the literal
 # in sync with HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS (asserted by
-# tests/base/test_recovery_breaker.py).
+# tests/components/base/test_recovery_breaker.py).
 RECOVERY_BREAKER_CLEAR: LiteralString = "permanent_reject_streak < 2"
 
 

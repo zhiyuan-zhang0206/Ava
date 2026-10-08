@@ -152,4 +152,4 @@ patched and the test homes that patch them. This is the injection-seam work list
 
 ## Files placed by the patch-evidence fallback
 
-Every strong first-party reference of these files is patch evidence, so they keep it (see `scripts/structure/placement.py`): `base/config/tests/test_seed_guard.py`, `tests/ava/test_self_evolution_schedules.py`, `tests/schedules/test_c9_daily_report.py`, `ava/tests/test_self_evolution_evaluate.py`.
+Every strong first-party reference of these files is patch evidence, so they keep it (see `scripts/structure/placement.py`): `base/config/tests/test_seed_guard.py`, `tests/components/ava/test_self_evolution_schedules.py`, `tests/components/schedules/test_c9_daily_report.py`, `ava/tests/test_self_evolution_evaluate.py`.

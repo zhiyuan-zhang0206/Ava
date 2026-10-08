@@ -15,7 +15,7 @@ tree. It does not execute tests, import application code, modify the checkout,
 or infer dynamic imports.
 
 The existing e2e-env-guard job is outside this selection path. It continues to
-run its complete tests/e2e/ package plus tests/test_home_isolation.py in one
+run its complete tests/e2e/ package plus tests/harness/test_home_isolation.py in one
 serial process whenever either side changes; no selector output feeds it.
 
 ## Decision rules
@@ -43,7 +43,7 @@ CI/governance checks pinned in `scripts/ci/test_selector.py`
 (`_TREE_SCAN_TESTS`). The direct-import map cannot reach a repo-wide scan
 test from a changed source file, and a green subset must not miss a
 tree-wide gate (task #4183: PR #3020's subset passed while the full
-population was red on tests/test_lint_event_kinds.py). Name a new scan test
+population was red on tests/contracts/test_lint_event_kinds.py). Name a new scan test
 `test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
 scripts/tests/test_test_selector.py guards completeness and staleness.
 
@@ -158,7 +158,7 @@ report is a no-op. Decisions: FULL 680 (forced roots and unmapped paths
 dominated), SELECTED 31 runs / 25 PRs, empty 267 (262 push runs plus a handful
 of concurrency-cancelled runs). One run recorded FALSE GREEN (PR #1842,
 2026-09-06): triage attributed it to a time-dependent assertion in
-a daemon test in `tests/services/` — unrelated to that PR's diff, and
+a daemon test in `tests/components/services/` — unrelated to that PR's diff, and
 fixed the same morning by #1840 (merged five minutes after this run's decision
 was recorded). Its decision payload had no changed blind file, so no static-map
 gap was involved. No other false green was observed, and no informational

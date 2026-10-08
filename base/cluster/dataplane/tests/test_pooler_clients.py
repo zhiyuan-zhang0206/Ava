@@ -9,7 +9,11 @@ from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster.dataplane import pooler
 from tests._containers import postgres
-from tests.cli.test_pgbouncer_wire import _SECRET, _pgbouncer_available, _pgbouncer_in_front
+from tests.components.cli.test_pgbouncer_wire import (
+    _SECRET,
+    _pgbouncer_available,
+    _pgbouncer_in_front,
+)
 
 pytestmark = pytest.mark.skipif(
     not _pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"

@@ -13,7 +13,7 @@ from agent.ownership.hosted_completion import (
 )
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, observe_hosted_admission
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation

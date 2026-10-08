@@ -1,4 +1,4 @@
-"""Gateway probe and machine registration commands; split from tests/cli/test_commands.py (task #4554)."""
+"""Gateway probe and machine registration commands; split from tests/components/cli/test_commands.py (task #4554)."""
 
 from __future__ import annotations
 

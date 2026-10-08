@@ -81,9 +81,15 @@ def test_interleaved_paths_keep_every_test_under_its_conftest(tmp_path: Path) ->
 
 
 def test_positional_paths_are_grouped_by_directory() -> None:
-    config = SimpleNamespace(args=["tests/agent/a.py", "tests/b.py", "tests/agent/c.py::test_x"])
+    config = SimpleNamespace(
+        args=["tests/components/agent/a.py", "tests/b.py", "tests/components/agent/c.py::test_x"]
+    )
     pytest_configure(cast(pytest.Config, config))
-    assert config.args == ["tests/agent/a.py", "tests/agent/c.py::test_x", "tests/b.py"]
+    assert config.args == [
+        "tests/b.py",
+        "tests/components/agent/a.py",
+        "tests/components/agent/c.py::test_x",
+    ]
 
 
 def test_a_directory_split_across_two_nodes_stops_the_run(

@@ -22,8 +22,10 @@ from services.agent_runner.agent_host.native_work import (
     recover_native_cancel,
     settle_native_invocation,
 )
+from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
+    _prepare_graph,
+)
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
-from services.agent_runner.agent_host.tests.test_hosted_compact_failure import _prepare_graph
 
 
 async def test_force_observation_waits_for_actual_projection_continuation(

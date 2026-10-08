@@ -62,13 +62,13 @@ marks the log version applied. Recovery skips checkpoint-receipted versions,
 so a crash between checkpoint and acknowledgement cannot apply an additive
 reducer twice. Core lifecycle fields cannot be changed by plugin deltas.
 
-Tests: `agent/tests/test_impersonation.py` covers gates, receipt recovery, the
+Tests: `agent/tests/impersonation/test_impersonation.py` covers gates, receipt recovery, the
 executor-death judgments and fenced delivery recovery;
-`agent/tests/test_impersonation_integration.py` exercises PostgreSQL, buffered
+`agent/tests/impersonation/test_impersonation_integration.py` exercises PostgreSQL, buffered
 checkpoints, the compiled graph, a real exec child, peer inbox acknowledgement,
 release summary, native resumption with plugin state, and the abort→resume
 chain including the death-caused end note.
-`agent/tests/test_impersonation_transport_integration.py` combines real
+`agent/tests/impersonation/test_impersonation_transport_integration.py` combines real
 PostgreSQL and a compiled graph with controlled process-query failures and
 stubbed relay establishment. Repeated unknown/permission-denied executor
 probes preserve the active lease, original expiry, pending input and delivery

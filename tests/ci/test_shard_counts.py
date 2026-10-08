@@ -48,8 +48,8 @@ def _case(file: str, name: str = "test_it", outcome: str = "") -> str:
     ("test_file", "bucket"),
     [
         ("tests/test_top.py", "tests"),
-        ("tests/agent/test_loop.py", "tests/agent"),
-        ("tests/agent/sub/deeper/test_x.py", "tests/agent"),
+        ("tests/components/agent/test_loop.py", "tests/components/agent"),
+        ("tests/components/agent/sub/deeper/test_x.py", "tests/components/agent"),
         ("base/packages/tests/test_a.py", "base/packages/tests"),
         ("base/packages/tests/area/test_b.py", "base/packages/tests"),
         (
@@ -71,16 +71,16 @@ def test_a_test_outside_every_tests_directory_stops_the_count() -> None:
 def test_junit_counts_tests_skips_and_failures_per_directory(tmp_path: Path) -> None:
     report = _junit(
         tmp_path / "r.xml",
-        _case("tests/agent/test_a.py", "test_1"),
-        _case("tests/agent/test_a.py", "test_2[x]", "<skipped/>"),
-        _case("tests/agent/test_b.py", "test_3", "<failure/>"),
+        _case("tests/components/agent/test_a.py", "test_1"),
+        _case("tests/components/agent/test_a.py", "test_2[x]", "<skipped/>"),
+        _case("tests/components/agent/test_b.py", "test_3", "<failure/>"),
         _case("base/packages/tests/test_c.py", "test_4", "<error/>"),
     )
     assert shard_counts.count_junit(report) == {
         "tests": 4,
         "skipped": 1,
         "failed": 2,
-        "buckets": {"tests/agent": 3, "base/packages/tests": 1},
+        "buckets": {"tests/components/agent": 3, "base/packages/tests": 1},
     }
 
 
@@ -104,7 +104,7 @@ def test_real_pytest_writes_the_rootdir_relative_file_the_count_relies_on(tmp_pa
             pass
         """
     )
-    for rel in ("tests/agent/test_a.py", "base/pkg/tests/area/test_b.py"):
+    for rel in ("tests/components/agent/test_a.py", "base/pkg/tests/area/test_b.py"):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text(body, encoding="utf-8")
     report = tmp_path / "tmp" / "junit-x.xml"
@@ -126,7 +126,10 @@ def test_real_pytest_writes_the_rootdir_relative_file_the_count_relies_on(tmp_pa
         capture_output=True,
         check=True,
     )
-    assert shard_counts.count_junit(report)["buckets"] == {"tests/agent": 3, "base/pkg/tests": 3}
+    assert shard_counts.count_junit(report)["buckets"] == {
+        "tests/components/agent": 3,
+        "base/pkg/tests": 3,
+    }
 
 
 # ── the shard step ──────────────────────────────────────────────────────────
@@ -136,11 +139,11 @@ def test_the_shard_step_counts_the_last_attempt_and_writes_log_summary_and_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     summary = tmp_path / "summary.md"
-    _junit(tmp_path / "tmp/junit-backend-shard-3-a1.xml", _case("tests/agent/test_a.py"))
+    _junit(tmp_path / "tmp/junit-backend-shard-3-a1.xml", _case("tests/components/agent/test_a.py"))
     _junit(
         tmp_path / "tmp/junit-backend-shard-3-a2.xml",
-        _case("tests/agent/test_a.py", "test_1"),
-        _case("tests/agent/test_a.py", "test_2"),
+        _case("tests/components/agent/test_a.py", "test_1"),
+        _case("tests/components/agent/test_a.py", "test_2"),
         _case("base/packages/tests/test_c.py"),
     )
     out = tmp_path / "tmp/shard-counts-3.json"
@@ -157,12 +160,12 @@ def test_the_shard_step_counts_the_last_attempt_and_writes_log_summary_and_json(
         "tests": 3,
         "skipped": 0,
         "failed": 0,
-        "buckets": {"tests/agent": 2, "base/packages/tests": 1},
+        "buckets": {"tests/components/agent": 2, "base/packages/tests": 1},
     }
     log = capsys.readouterr().out
     assert "shard 3: 3 tests executed" in log
     assert "junit-backend-shard-3-a2.xml" in log
-    assert "| tests/agent | 2 |" in summary.read_text()
+    assert "| tests/components/agent | 2 |" in summary.read_text()
 
 
 def test_a_shard_that_executed_too_few_tests_fails_after_writing_its_counts(
@@ -178,7 +181,7 @@ def test_a_shard_that_executed_too_few_tests_fails_after_writing_its_counts(
     assert json.loads(out.read_text())["tests"] == 0  # the counts are still there to read
     assert "shard 1: 0 tests executed" in capsys.readouterr().out
     assert shard_counts.main(argv) == 0  # no floor: an empty bucket is fine
-    _junit(tmp_path / "junit-1-a2.xml", _case("tests/agent/test_a.py"))
+    _junit(tmp_path / "junit-1-a2.xml", _case("tests/components/agent/test_a.py"))
     assert shard_counts.main([*argv, "--min-tests", "1"]) == 0
 
 
@@ -223,9 +226,11 @@ def test_the_total_adds_the_shards_up_and_shows_what_moved_against_the_baseline(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     counts = tmp_path / "counts"
-    _counts(counts, "1", {"tests/base": 100, "tests/agent": 50}, skipped=2)
-    _counts(counts, "serial", {"tests/base": 10})
-    baseline = _baseline(tmp_path / "b.json", {"tests/base": 210, "tests/agent": 50})
+    _counts(counts, "1", {"tests/components/base": 100, "tests/components/agent": 50}, skipped=2)
+    _counts(counts, "serial", {"tests/components/base": 10})
+    baseline = _baseline(
+        tmp_path / "b.json", {"tests/components/base": 210, "tests/components/agent": 50}
+    )
     out = tmp_path / "out.json"
     argv = ["total", "--dir", str(counts), "--expected", "1 serial", "--baseline", str(baseline)]
     summary = tmp_path / "summary.md"
@@ -234,22 +239,24 @@ def test_the_total_adds_the_shards_up_and_shows_what_moved_against_the_baseline(
     log = capsys.readouterr().out
     assert "CI executed 160 backend tests (2 skipped), from 2/2 count files" in log
     assert "against main aaaaaaaaa (run 77): 260 -> 160 (-100)" in log
-    assert "tests/base" in log
+    assert "tests/components/base" in log
     assert "-100" in log
-    assert "tests/agent" not in log.split("against main")[1]  # unchanged directories are silent
+    assert (
+        "tests/components/agent" not in log.split("against main")[1]
+    )  # unchanged directories are silent
     recorded = json.loads(out.read_text())
-    assert recorded["buckets"] == {"tests/base": 110, "tests/agent": 50}
+    assert recorded["buckets"] == {"tests/components/base": 110, "tests/components/agent": 50}
     assert (recorded["sha"], recorded["run_id"]) == ("b" * 40, "88")
     assert "against main aaaaaaaaa" in summary.read_text()
-    assert "| tests/base | 110 |" in summary.read_text()
+    assert "| tests/components/base | 110 |" in summary.read_text()
 
 
 def test_a_moved_test_shows_as_one_directory_down_and_another_up(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     counts = tmp_path / "counts"
-    _counts(counts, "1", {"tests/base": 88, "base/packages/tests": 12})
-    baseline = _baseline(tmp_path / "b.json", {"tests/base": 100})
+    _counts(counts, "1", {"tests/components/base": 88, "base/packages/tests": 12})
+    baseline = _baseline(tmp_path / "b.json", {"tests/components/base": 100})
     argv = ["total", "--dir", str(counts), "--expected", "1", "--baseline", str(baseline)]
     shard_counts.main(argv)
     log = capsys.readouterr().out
@@ -263,7 +270,7 @@ def test_no_baseline_is_not_an_error_and_the_run_becomes_the_baseline(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     counts = tmp_path / "counts"
-    _counts(counts, "1", {"tests/base": 5})
+    _counts(counts, "1", {"tests/components/base": 5})
     out = tmp_path / "out.json"
     argv = [
         "total",
@@ -283,8 +290,8 @@ def test_a_missing_count_file_marks_the_total_incomplete_and_records_no_baseline
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     counts = tmp_path / "counts"
-    _counts(counts, "1", {"tests/base": 5})
-    baseline = _baseline(tmp_path / "b.json", {"tests/base": 5})
+    _counts(counts, "1", {"tests/components/base": 5})
+    baseline = _baseline(tmp_path / "b.json", {"tests/components/base": 5})
     out = tmp_path / "out.json"
     argv = ["total", "--dir", str(counts), "--expected", "1 2", "--baseline", str(baseline)]
     assert shard_counts.main([*argv, "--out", str(out)]) == 0  # informational: never a failure
@@ -460,7 +467,7 @@ def test_a_clean_total_says_so_and_raises_no_annotation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     counts = tmp_path / "counts"
-    _counts(counts, "1", {"tests/base": 5})
+    _counts(counts, "1", {"tests/components/base": 5})
     report = tmp_path / "leaks.json"
     argv = ["total", "--dir", str(counts), "--expected", "1", "--leak-report", str(report)]
     assert shard_counts.main([*argv, "--sha", "c" * 40, "--run-id", "9"]) == 0
@@ -492,7 +499,7 @@ def test_the_total_raises_one_annotation_with_a_line_per_file_kind_and_thing(
         _guarded("tests/z/test_z.py", "test_4", ("leak_guard", "cwd: /a -> /b")),
     )
     _leaks_in(counts, "2", _guarded("tests/a/test_x.py", "test_5", env))
-    _counts(counts, "3", {"tests/base": 1})
+    _counts(counts, "3", {"tests/components/base": 1})
     summary = tmp_path / "summary.md"
     report = tmp_path / "leaks.json"
     argv = ["total", "--dir", str(counts), "--expected", "1 2 3 4"]
@@ -560,7 +567,7 @@ def test_a_fault_in_the_leak_report_is_one_annotation_and_never_the_jobs_result(
 ) -> None:
     """Whatever the count files hold, the total (and the baseline it writes first) succeeds."""
     counts = tmp_path / "counts"
-    _counts(counts, "1", {"tests/base": 5})
+    _counts(counts, "1", {"tests/components/base": 5})
     broken = json.loads((counts / "shard-counts-1.json").read_text())
     broken["leaks"] = [{"detail": "a leak without a test or a kind"}]
     (counts / "shard-counts-1.json").write_text(json.dumps(broken), encoding="utf-8")

@@ -103,7 +103,7 @@ def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     calls `build_chat_model` and really hits the DeepSeek API — polluting network,
     slowing the suite, making it unstable. The autouse stub returns a fake that
     raises RuntimeError; a triggered BackgroundTask just writes the error into
-    loguru (label stays NULL, spawn unaffected). `tests/gateway/test_labels.py`
+    loguru (label stays NULL, spawn unaffected). `tests/components/gateway/test_labels.py`
     monkeypatches a new fake LLM, overriding this default.
     """
 
@@ -228,7 +228,7 @@ def _guard_service_readiness(
     readiness code.
 
     Opt out with `@pytest.mark.real_service_readiness_gate` when the wait or the exit
-    code it produces is the subject (cli/commands/lifecycle/tests/test_start_readiness_gate.py)."""
+    code it produces is the subject (cli/commands/lifecycle/tests/startup/test_start_readiness_gate.py)."""
     if request.node.get_closest_marker("real_service_readiness_gate"):
         return
     from cli.commands._probe import ReadinessWait
@@ -260,7 +260,7 @@ def _guard_health_port_gate(
     stub costs one line and removes the flake source entirely.
 
     Opt out with `@pytest.mark.real_health_port_gate` when the gate itself is the
-    subject (cli/commands/lifecycle/tests/test_start_health_port_gate.py)."""
+    subject (cli/commands/lifecycle/tests/startup/test_start_health_port_gate.py)."""
     if request.node.get_closest_marker("real_health_port_gate"):
         return
     monkeypatch.setattr("cli.commands._probe._occupied_health_ports", lambda *_a, **_kw: ())

@@ -38,7 +38,7 @@ def _write(root: Path, rel: str, body: str) -> Path:
 @pytest.mark.parametrize(
     ("rel", "expected"),
     [
-        ("tests/agent/test_x.py", True),
+        ("tests/components/agent/test_x.py", True),
         ("base/packages/tests/test_x.py", True),
         ("ava_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py", True),
         ("base/db/test_db_guard.py", False),
@@ -297,7 +297,7 @@ def _hook_selects(hook_id: str, path: str) -> bool:
             True,
         ),
         ("lint-pyright-test-environments", "pyproject.toml", True),
-        ("lint-pyright-test-environments", "tests/agent/test_x.py", False),
+        ("lint-pyright-test-environments", "tests/components/agent/test_x.py", False),
         ("lint-pyright-test-environments", "base/packages/plugins.py", False),
     ],
 )

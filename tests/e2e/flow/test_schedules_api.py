@@ -16,7 +16,7 @@ import pytest
 from base.cluster import session_name
 from base.config import settings
 from base.sessions.backend import get_shell_backend
-from tests.base.poll_until import poll_until
+from tests.components.base.poll_until import poll_until
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes._recording import model_inputs, reset_record
 

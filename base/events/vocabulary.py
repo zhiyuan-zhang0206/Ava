@@ -55,7 +55,7 @@ class EventSpec:
 
     ``site``: where a producer the static ``event=`` literal scan cannot see
     (positional emit, dynamic name, SQL write) emits this name. A non-empty
-    ``site`` is the producer evidence ``tests/test_lint_event_kinds.py`` accepts
+    ``site`` is the producer evidence ``tests/contracts/test_lint_event_kinds.py`` accepts
     for the name, so the exemption lives with the declaration. ``retired``: a
     historical name kept readable for existing rows; it must have no producer.
 

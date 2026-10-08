@@ -1,4 +1,4 @@
-"""Shared helpers and fixtures for the test_commands_* split files; split from tests/cli/test_commands.py (task #4554)."""
+"""Shared helpers and fixtures for the test_commands_* split files; split from tests/components/cli/test_commands.py (task #4554)."""
 
 from __future__ import annotations
 

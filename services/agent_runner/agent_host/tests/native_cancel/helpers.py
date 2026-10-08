@@ -6,7 +6,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, _agent
 from base.agents.incarnation.native_work import activate_work
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.incarnation.resources import ResourceBirth

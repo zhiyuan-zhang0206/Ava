@@ -33,7 +33,7 @@ from cli.commands.lifecycle.tests.stop_support import (
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop_support import written as written
-from tests.agent.test_maintenance import WHEN
+from tests.components.agent.test_maintenance import WHEN
 
 pytestmark = [
     pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract"),

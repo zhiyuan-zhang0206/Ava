@@ -11,20 +11,20 @@ from fastapi.testclient import TestClient
 from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.app import app
-from tests.gateway.test_cluster_endpoints import _pin_session_names as _pin_session_names
-from tests.gateway.test_cluster_endpoints import (
+from tests.components.gateway.test_cluster_endpoints import _pin_session_names as _pin_session_names
+from tests.components.gateway.test_cluster_endpoints import (
     _seed_agent_on_machine,
     _seed_away_machine,
     _seed_drain_owner,
     _seed_in_progress_task,
 )
-from tests.gateway.test_cluster_endpoints import (
+from tests.components.gateway.test_cluster_endpoints import (
     fake_admin_events as fake_admin_events,
 )
-from tests.gateway.test_cluster_endpoints import (
+from tests.components.gateway.test_cluster_endpoints import (
     fake_flag as fake_flag,
 )
-from tests.gateway.test_cluster_endpoints import (
+from tests.components.gateway.test_cluster_endpoints import (
     pause_backend as pause_backend,
 )
 
