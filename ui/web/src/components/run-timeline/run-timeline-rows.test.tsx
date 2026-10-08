@@ -37,7 +37,7 @@ const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: numbe
   context_tokens: null, generation_tokens: null, estimated: null,
 });
 
-function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null) {
+function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null, time = true) {
   const onSelect = vi.fn();
   render(
     <RunTimelineRows
@@ -52,6 +52,8 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
       onHighlight={vi.fn()}
     />,
   );
+  // These cases are about positions on the plain time axis.
+  if (time) fireEvent.click(screen.getByTestId("run-timeline-axis-mode"));
   return onSelect;
 }
 
@@ -106,5 +108,32 @@ describe("RunTimelineRows instant blocks", () => {
     expect(markers).toHaveLength(3);
     all.forEach((el) => fireEvent.click(el));
     expect(onSelect).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("RunTimelineRows hybrid axis", () => {
+  const tokens = (u: RunTimelineUnit, n: number): RunTimelineUnit => ({ ...u, context_tokens: n });
+
+  it("is the default and sizes blocks by tokens until switched to time", () => {
+    const units = [tokens(unit("text", 0, 0, 100), 1000), tokens(unit("text", 1, 100, 110), 3000)];
+    renderRows({ units }, null, false);
+    const toggle = screen.getByTestId("run-timeline-axis-mode");
+    expect(toggle.dataset.mode).toBe("hybrid");
+    const [a, b] = screen.getAllByTestId("run-timeline-unit");
+    expect(parseFloat(b.style.width) / parseFloat(a.style.width)).toBeCloseTo(3, 0);
+    fireEvent.click(toggle);
+    expect(toggle.dataset.mode).toBe("time");
+    const [ta, tb] = screen.getAllByTestId("run-timeline-unit");
+    expect(span(ta)).toEqual({ left: 0, right: 100 });
+    expect(span(tb)).toEqual({ left: 100, right: 110 });
+  });
+
+  it("puts a node over the blocks it covers", () => {
+    const units = [tokens(unit("text", 0, 0, 100), 1000), tokens(unit("text", 1, 600, 700), 1000), tokens(unit("text", 2, 900, 950), 1000)];
+    renderRows({ units, nodes: [{ ...node("n", 0, 1000), span_start: 1, span_end: 2 }] }, null, false);
+    const [, second, third] = screen.getAllByTestId("run-timeline-unit");
+    const [covering] = screen.getAllByTestId("run-timeline-node");
+    expect(parseFloat(covering.style.left)).toBeCloseTo(parseFloat(second.style.left));
+    expect(span(covering).right).toBeCloseTo(span(third).right);
   });
 });

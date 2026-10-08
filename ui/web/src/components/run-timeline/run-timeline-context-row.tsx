@@ -11,19 +11,22 @@ import type { RunTimelineRequest } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
 import { RowShell } from "./run-timeline-row-shell";
-import { maxInput, spanBox, type Hover, type TimelineWindow } from "./timeline-model";
+import { axisBox, maxInput, type AxisMap, type Hover, type Viewport } from "./timeline-model";
 
 const BAR_AREA_PX = 38;
 
 export function ContextSizeRow({
   requests,
-  visible,
+  axis,
+  viewU,
   hover,
   hoverProps,
   describe,
 }: {
   requests: readonly RunTimelineRequest[];
-  visible: TimelineWindow;
+  axis: AxisMap;
+  /** The viewport in the axis's coordinates. */
+  viewU: Viewport;
   hover: Hover | null;
   hoverProps: (target: Hover) => {
     onMouseEnter: MouseEventHandler;
@@ -39,7 +42,7 @@ export function ContextSizeRow({
   return (
     <RowShell label={t("contextRow")} height="h-10" testId="run-timeline-row-context">
       {requests.map((request) => {
-        const box = spanBox(request.ts, request.ts, visible);
+        const box = axisBox(axis, request.ts, request.ts, viewU);
         if (box === null || top <= 0) return null;
         const hovered = hover?.kind === "request" && hover.idx === request.idx;
         return (
