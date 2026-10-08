@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 
@@ -12,6 +13,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from base.agents.history.checkpoint import single_segment_history
 from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
 from base.agents.history.hierarchy.usage import MessageUsage
+from base.agents.history.message_tokens import MessageTokens
 from base.db import Database
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import messages as route
@@ -117,3 +119,22 @@ def test_ai_parts_carry_their_kinds() -> None:
         request(messages), 1, start=0, end=0, limit=50, full=True
     )
     assert [p.kind for p in result.messages[0].parts] == ["think", "text", "call"]
+
+
+def test_a_message_carries_the_tokens_it_occupies_and_whether_they_are_estimated() -> None:
+    req = request(history(3))
+    views = cast(Views, req.app.state.run_timeline_views)
+    views.built = replace(
+        views.built,
+        tokens=[
+            MessageTokens(40, None, "exact"),
+            MessageTokens(7, None, "estimated"),
+            MessageTokens(None, None, None),
+        ],
+    )
+    result = route.get_run_timeline_messages(req, 1, start=0, end=2, limit=50, full=True)
+    assert [(m.context_tokens, m.estimated) for m in result.messages] == [
+        (40, False),
+        (7, True),
+        (None, None),
+    ]
