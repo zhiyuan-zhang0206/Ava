@@ -21,7 +21,6 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 import base.host.env.config_registry as _config_registry
-from base.config._lite import _plant_placeholders
 from base.config.domains.agent.settings import AgentSettings
 from base.config.domains.channels.feishu import FeishuSettings
 from base.config.domains.channels.telegram import TelegramSettings
@@ -36,9 +35,6 @@ from base.config.domains.packages import PackagesSettings
 from base.config.domains.sandbox import SandboxSettings
 from base.config.domains.services.settings import ServiceSettings
 from base.config.domains.storage.data_plane import DataPlaneSettings
-from base.config.domains.storage.data_plane import (
-    self_machine_host as _self_machine_host,  # service_read resolves it through base.config (as `_self_machine_host`) so tests can monkeypatch it
-)
 from base.config.domains.storage.walg import WalgSettings
 from base.config.domains.web import WebSettings
 from base.config.profiles import (
@@ -179,10 +175,6 @@ def _facade_exports() -> dict[str, Any]:
         "BOOTSTRAP_FIELDS": _bootstrap_fields(),
         "flat_dump": flat_dump,
         "refresh_data_plane_settings": refresh_data_plane_settings,
-        # The legacy facade-private helper (task #3621 R-1): kept resolvable
-        # through the latch; its lite-era home is base.config._lite.
-        "_plant_lite_placeholders": _plant_placeholders,
-        "_self_machine_host": _self_machine_host,
         "get_config_metadata": _metadata.get_config_metadata,
         "env_override_values": _metadata.env_override_values,
         "ConfigFieldMeta": _metadata.ConfigFieldMeta,

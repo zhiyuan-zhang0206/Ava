@@ -72,7 +72,7 @@ def _explicit_caller(source: str | None, *, field: str = "source") -> dict[str, 
 
     User ruling 2026-09-20: CLI parameters are explicit; the opt-in
     AVA_CALLER_IDENTITY profile (still consumed by SDK-side stamping, see
-    ``ava.sdk_surface.agent_identity.default_actor``) no longer compensates an omitted ``--source``.
+    ``ava.sdk_surface.agent_identity.require_actor``) no longer compensates an omitted ``--source``.
     """
     if source is None:
         return {}
